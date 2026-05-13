@@ -69,10 +69,6 @@ type PushResult struct {
 }
 
 // Push packages a bundle directory as an OCI artifact and pushes it.
-// The OCI tag is taken from the supplied reference; when the reference
-// has no tag, the digest of the local store is read after Package and
-// used as both the tag and the manifest reference returned in
-// PushResult.Reference.
 func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 	if opts.SourceDir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "SourceDir is required")
@@ -128,17 +124,10 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 	}, nil
 }
 
-// AttachSigstoreBundleAsReferrer pushes a Sigstore Bundle blob as an
-// OCI Referrer of the main artifact, so cosign's OCI 1.1 Referrers
-// discovery (/v2/<name>/referrers/<artifactDigest>) finds it. The
-// referrer manifest's Subject points at mainArtifact.{digest, mediaType,
-// size}; the artifactType for both the manifest and its single layer
-// is the Sigstore Bundle media type so the referrer is self-describing.
-//
-// reference is the same OCI reference used for the main push (e.g.,
-// "ghcr.io/foo/aicr-evidence:1h"); the registry/repository components
-// are extracted from it. The tag is irrelevant — Referrers are
-// addressed by digest, not by tag.
+// AttachSigstoreBundleAsReferrer pushes a Sigstore Bundle blob as an OCI
+// Referrer of the main artifact so cosign's /v2/<name>/referrers/<digest>
+// discovery finds it. Referrers are addressed by digest, not by tag, so
+// the tag in opts.Reference is ignored.
 func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOptions) (*PushResult, error) {
 	if opts.Reference == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "Reference is required")
@@ -222,8 +211,7 @@ type MainArtifactDescriptor struct {
 }
 
 // CleanOCIRef returns the registry/repository:tag form (no oci:// scheme,
-// no leading slash). Used by pointer file population so the on-disk YAML
-// matches the conventions cosign tooling expects.
+// no leading slash) that cosign tooling expects.
 func CleanOCIRef(ref string) string {
 	return oci.TrimScheme(ref)
 }

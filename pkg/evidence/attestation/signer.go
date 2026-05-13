@@ -23,11 +23,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// Sigstore public-good instance URLs. Re-stated here so callers that
-// only depend on pkg/evidence/attestation do not need to import the
-// bundler package to construct a KeylessSigner; the values are
-// identical to bundler/attestation.DefaultFulcioURL/DefaultRekorURL,
-// which is the single signing primitive both packages call into.
+// Sigstore public-good instance URLs. Re-exported so callers that only
+// import pkg/evidence/attestation don't need to pull in the bundler
+// package to construct a KeylessSigner.
 const (
 	DefaultFulcioURL = bundleattest.DefaultFulcioURL
 	DefaultRekorURL  = bundleattest.DefaultRekorURL
@@ -53,25 +51,14 @@ type SignResult struct {
 }
 
 // Signer signs the in-toto Statement carrying the v1 recipe-evidence
-// predicate. Implementations:
-//
-//   - KeylessSigner — Sigstore public-good keyless OIDC.
-//   - NoOpSigner    — no-op; returns BundleJSON=nil for tests.
-//
-// The statementJSON parameter is the unsigned bytes from
-// attestation.BuildStatement; the signer DSSE-wraps it and produces
-// a Sigstore bundle.
+// predicate. statementJSON is the unsigned bytes from BuildStatement; the
+// signer DSSE-wraps it and produces a Sigstore bundle.
 type Signer interface {
 	Sign(ctx context.Context, statementJSON []byte) (*SignResult, error)
 }
 
 // KeylessSigner signs via Fulcio + Rekor with the supplied OIDC token.
-// Token discovery is the caller's responsibility (env, ambient, etc.).
-//
-// The actual DSSE/Fulcio/Rekor plumbing lives in
-// pkg/bundler/attestation.SignStatement — the predicate-agnostic
-// signing primitive that this package and `aicr bundle --attest`
-// both delegate to.
+// Token discovery is the caller's responsibility.
 type KeylessSigner struct {
 	OIDCToken string
 	FulcioURL string
@@ -110,28 +97,18 @@ func (k *KeylessSigner) Sign(ctx context.Context, statementJSON []byte) (*SignRe
 	}, nil
 }
 
-// NoOpSigner returns BundleJSON=nil with no signing performed. Used
-// in tests and when the operator runs `aicr validate --emit-attestation`
-// without `--push`: the unsigned statement is left in the bundle
-// directory so a follow-up `cosign attest` invocation can sign it.
+// NoOpSigner returns BundleJSON=nil. Leaves the bundle's unsigned
+// Statement on disk so a follow-up `cosign attest` can sign it.
 type NoOpSigner struct{}
 
-// Sign returns an empty SignResult. The caller is responsible for
-// writing or skipping attestation.intoto.jsonl appropriately.
+// Sign returns an empty SignResult; WriteSignedAttestation no-ops on it.
 func (NoOpSigner) Sign(_ context.Context, _ []byte) (*SignResult, error) {
 	return &SignResult{}, nil
 }
 
-// SignBundle signs the bundle's StatementJSON (recipe-subject form)
-// and writes attestation.intoto.jsonl into the summary directory.
-// Used for the local-only path where the in-bundle Statement is the
-// portable form; the --push path uses BuildArtifactStatement +
-// KeylessSigner.Sign + WriteSignedAttestation directly so the signed
-// subject matches the pushed artifact's digest.
-//
-// When the signer is a NoOpSigner, the attestation file is not
-// written; the bundle ships with the unsigned statement available as
-// Bundle.StatementJSON only.
+// SignBundle signs the bundle's StatementJSON (recipe-subject form) and
+// writes attestation.intoto.jsonl into the summary directory. A
+// NoOpSigner skips the write.
 //
 //nolint:unparam // *SignResult feeds the pointer file's signer block; tests exercise only error paths.
 func SignBundle(ctx context.Context, b *Bundle, s Signer) (*SignResult, error) {
@@ -153,8 +130,7 @@ func SignBundle(ctx context.Context, b *Bundle, s Signer) (*SignResult, error) {
 }
 
 // WriteSignedAttestation writes the Sigstore Bundle bytes into the
-// summary directory as attestation.intoto.jsonl. A no-op for empty
-// input (which is what NoOpSigner produces).
+// summary directory as attestation.intoto.jsonl. No-op for empty input.
 func WriteSignedAttestation(b *Bundle, bundleJSON []byte) error {
 	if b == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "bundle is required")

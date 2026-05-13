@@ -190,23 +190,17 @@ const (
 	// EvidenceRenderTimeout is the timeout for rendering conformance evidence.
 	EvidenceRenderTimeout = 30 * time.Second
 
-	// EvidenceBundleBuildTimeout bounds the local recipe-evidence bundle
-	// assembly: canonicalize the recipe, hash inputs, write manifest +
-	// blobs into the summary directory. Local I/O only, no network; 60s
-	// is generous headroom over the typical few-second pipeline for
-	// even multi-megabyte recipes with logs included.
+	// EvidenceBundleBuildTimeout bounds local bundle assembly. Local I/O
+	// only; 60s is headroom over the typical few-second pipeline.
 	EvidenceBundleBuildTimeout = 60 * time.Second
 
-	// EvidenceBundleSignTimeout bounds the Sigstore signing leg of the
-	// recipe-evidence pipeline. Equal to SigstoreSignTimeout — kept as
-	// a distinct constant so the validate-time pipeline can adjust
-	// independently of the bundle-attest path if their workload
-	// characteristics diverge later.
+	// EvidenceBundleSignTimeout bounds Sigstore signing. Aliased to
+	// SigstoreSignTimeout but kept distinct so the validate-time pipeline
+	// can adjust independently of the bundle-attest path.
 	EvidenceBundleSignTimeout = SigstoreSignTimeout
 
-	// EvidenceBundlePushTimeout bounds OCI push of the evidence bundle
-	// (summary + optional logs sibling). Multi-blob ORAS upload; 2
-	// minutes covers Helm/oras typical p99 against ghcr / Quay.
+	// EvidenceBundlePushTimeout: multi-blob ORAS upload; 2 minutes covers
+	// typical p99 against ghcr / Quay.
 	EvidenceBundlePushTimeout = 2 * time.Minute
 )
 

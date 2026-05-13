@@ -28,7 +28,6 @@ func TestCanonicalizeRecipeYAML_SortsKeys(t *testing.T) {
 	if !strings.HasPrefix(string(got), "apple:") {
 		t.Errorf("expected canonical form to start with apple:, got %q", got)
 	}
-	// "zoo:" must appear after "apple:"
 	idxApple := strings.Index(string(got), "apple:")
 	idxZoo := strings.Index(string(got), "zoo:")
 	if idxApple > idxZoo {

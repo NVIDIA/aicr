@@ -27,9 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
-// PredicateInputs is the data available to BuildPredicate at the
-// moment of bundle construction. The Builder fills these in from a
-// validate run's outputs; tests populate them directly.
+// PredicateInputs is the data BuildPredicate needs.
 type PredicateInputs struct {
 	AttestedAt              time.Time
 	AICRVersion             string
@@ -126,19 +124,11 @@ func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]
 	return out, nil
 }
 
-// BuildArtifactStatement constructs the in-toto Statement carrying our
-// v1 predicate against an OCI artifact subject. Used for the --push
-// path: cosign's Referrers-API discovery anchors on the artifact's
-// digest, so the signed Statement's subject must match. The recipe
-// identity is preserved in predicate.recipe.{name, digest} so the
-// chain back to the recipe content is still verifiable from the
-// signed payload alone.
-//
-//   - ociRef: the canonical "registry/repository" form without scheme
-//     or tag (e.g., "ghcr.io/example/aicr-evidence"). Used as
-//     subject[0].name.
-//   - artifactDigest: hex sha256 of the OCI artifact manifest (64 chars).
-//   - pred: must have Recipe.Name and Recipe.Digest populated.
+// BuildArtifactStatement constructs an in-toto Statement whose subject is
+// an OCI artifact (ociRef + artifactDigest). cosign's Referrers-API
+// discovery anchors on the artifact digest, so the signed subject must
+// match. Recipe identity is preserved via predicate.recipe.{name,digest},
+// which BuildArtifactStatement requires to be populated.
 func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]byte, error) {
 	if ociRef == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "OCI reference is required")

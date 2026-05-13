@@ -171,49 +171,31 @@ type EvidenceSpec struct {
 // EvidenceCNCFSpec configures the CNCF AI Conformance evidence path
 // (--evidence-dir / --cncf-submission / --feature).
 type EvidenceCNCFSpec struct {
-	// Dir is the output directory for conformance evidence (--evidence-dir).
 	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
 
-	// CNCFSubmission, when true, switches into the detailed CNCF
-	// submission collector (--cncf-submission). Requires Dir.
+	// Requires Dir.
 	CNCFSubmission bool `yaml:"cncfSubmission,omitempty" json:"cncfSubmission,omitempty"`
 
-	// Features narrows which CNCF feature areas to collect (--feature,
-	// repeatable). Empty = all features. Only honored when
-	// CNCFSubmission is true.
+	// Empty = all features. Only honored when CNCFSubmission is true.
 	Features []string `yaml:"features,omitempty" json:"features,omitempty"`
 }
 
 // EvidenceAttestationSpec configures the recipe-evidence v1 bundle path
 // (--emit-attestation / --bom / --push / --plain-http / --insecure-tls).
-// Bundle format is documented in ADR-007
-// (docs/design/007-recipe-evidence.md).
+// Bundle format is documented in ADR-007.
 //
-// The OIDC identity token used by --push is intentionally absent: the
-// CLI resolves it at sign time through the same precedence chain
-// `aicr bundle --attest` uses. Tokens are short-lived secrets and must
-// not be embedded in version-controlled configuration.
+// The OIDC identity token used by --push is intentionally absent: tokens
+// are short-lived secrets and must not be embedded in version-controlled
+// configuration. The CLI resolves it at sign time.
 type EvidenceAttestationSpec struct {
-	// Out is the output directory for the bundle (--emit-attestation).
-	// Setting this enables the attestation path; an empty value leaves it
-	// off even if other fields are populated.
+	// Setting Out enables the attestation path; empty leaves it off
+	// even if other fields are populated.
 	Out string `yaml:"out,omitempty" json:"out,omitempty"`
 
-	// BOM is the path to a CycloneDX BOM (--bom). Optional; when empty,
-	// aicr auto-generates a recipe-bound BOM at evidence-build time.
-	BOM string `yaml:"bom,omitempty" json:"bom,omitempty"`
-
-	// Push is the OCI reference to publish the signed bundle to
-	// (--push). Triggers Sigstore keyless signing.
-	Push string `yaml:"push,omitempty" json:"push,omitempty"`
-
-	// PlainHTTP uses HTTP instead of HTTPS on push (--plain-http,
-	// local registry tests).
-	PlainHTTP bool `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
-
-	// InsecureTLS skips TLS verification on push (--insecure-tls,
-	// self-signed registries).
-	InsecureTLS bool `yaml:"insecureTLS,omitempty" json:"insecureTLS,omitempty"`
+	BOM         string `yaml:"bom,omitempty" json:"bom,omitempty"`
+	Push        string `yaml:"push,omitempty" json:"push,omitempty"`
+	PlainHTTP   bool   `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
+	InsecureTLS bool   `yaml:"insecureTLS,omitempty" json:"insecureTLS,omitempty"`
 }
 
 // ValidateInputSpec captures the recipe + snapshot inputs to validation.

@@ -389,9 +389,7 @@ func runValidation(
 		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
 	}
 
-	// A failed validate is still useful evidence for a contributor
-	// documenting hardware-specific limitations, so emit even when
-	// phases failed.
+	// Emit even on failure: failed runs document hardware-specific limits.
 	if cfg.evidence != nil {
 		if err := emitRecipeEvidence(ctx, rec, snap, results, cfg.evidence); err != nil {
 			return err

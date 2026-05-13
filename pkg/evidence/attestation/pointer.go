@@ -24,11 +24,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// PointerInputs carries everything the pointer file needs that is not
-// already in the Bundle. Push results (when available) populate the
-// bundle and signer fields; tests can pass empties to capture the
-// pre-push form. Leave Signer nil for unsigned bundles — BuildPointer
-// emits the attestation entry without a signer block in that case.
+// PointerInputs carries the pointer-file fields that are not derived
+// from the Bundle itself. Leave Signer nil for unsigned bundles.
 type PointerInputs struct {
 	Bundle     *Bundle
 	BundleOCI  string
@@ -36,11 +33,9 @@ type PointerInputs struct {
 	Signer     *PointerSigner
 }
 
-// BuildPointer assembles the pointer YAML schema 1.0 from a built
-// bundle plus the OCI/signer claims gathered after push and sign.
-// When the bundle has not been pushed (BundleOCI/BundleHash empty),
-// those fields are emitted as empty strings; consumers know "not yet
-// published."
+// BuildPointer assembles the pointer YAML schema 1.0 from a built bundle
+// plus optional post-push/sign claims. Empty BundleOCI/BundleHash signal
+// "not yet published".
 func BuildPointer(in PointerInputs) (*Pointer, error) {
 	if in.Bundle == nil || in.Bundle.Predicate == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle and predicate are required")
@@ -77,8 +72,6 @@ func MarshalPointer(p *Pointer) ([]byte, error) {
 }
 
 // WritePointer writes the pointer file to outputDir/pointer.yaml.
-// The expected workflow: contributor copies this file into
-// recipes/evidence/<recipe>.yaml in their PR.
 func WritePointer(outputDir string, p *Pointer) (string, error) {
 	body, err := MarshalPointer(p)
 	if err != nil {

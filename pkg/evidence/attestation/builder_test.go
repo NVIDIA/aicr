@@ -87,18 +87,15 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	// Recipe name composed from criteria.
 	if bundle.RecipeName != "h100-eks-ubuntu-training" {
 		t.Errorf("RecipeName = %q, want h100-eks-ubuntu-training", bundle.RecipeName)
 	}
 
-	// Expected files exist with correct contents.
 	mustReadFile(t, filepath.Join(bundle.SummaryDir, RecipeFilename))
 	mustReadFile(t, filepath.Join(bundle.SummaryDir, SnapshotFilename))
 	mustReadFile(t, filepath.Join(bundle.SummaryDir, BOMFilename))
 	mustReadFile(t, filepath.Join(bundle.SummaryDir, "ctrf", "deployment.json"))
 
-	// Manifest binds every file by hash.
 	manifestBytes := mustReadFile(t, filepath.Join(bundle.SummaryDir, ManifestFilename))
 	var m Manifest
 	if err := json.Unmarshal(manifestBytes, &m); err != nil {
@@ -115,7 +112,6 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 		}
 	}
 
-	// Manifest digest in predicate matches the file on disk.
 	wantDigest := "sha256:" + hex.EncodeToString(sha256OfFile(t, filepath.Join(bundle.SummaryDir, ManifestFilename)))
 	if bundle.Predicate.Manifest.Digest != wantDigest {
 		t.Errorf("predicate manifest digest mismatch: got %s want %s", bundle.Predicate.Manifest.Digest, wantDigest)
@@ -124,9 +120,8 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 		t.Errorf("predicate manifest fileCount = %d, want %d", bundle.Predicate.Manifest.FileCount, len(m.Files))
 	}
 
-	// CriteriaMatch enumerates every dimension. An empty fingerprint
-	// against a strict criteria yields "unknown" per fingerprint.Match
-	// semantics — not mismatched — so the overall Matched flag stays true.
+	// fingerprint.Match treats empty fingerprint slots as "unknown" rather
+	// than "mismatch", so Matched stays true here.
 	if !bundle.Predicate.CriteriaMatch.Matched {
 		t.Errorf("expected matched=true when fingerprint is empty (unknowns are tolerated)")
 	}
@@ -137,12 +132,10 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 		t.Errorf("accelerator without fingerprint should be unknown; got %v", accel.Match)
 	}
 
-	// Subject digest is sha256 of canonicalized recipe.
 	if len(bundle.SubjectDigest) != 64 {
 		t.Errorf("subject digest length = %d, want 64", len(bundle.SubjectDigest))
 	}
 
-	// In-toto Statement is well-formed.
 	var stmt map[string]any
 	if err := json.Unmarshal(bundle.StatementJSON, &stmt); err != nil {
 		t.Fatalf("statement unmarshal: %v", err)
@@ -151,7 +144,6 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 		t.Errorf("statement predicateType = %v", stmt["predicateType"])
 	}
 
-	// BOM imageCount derived from components[].
 	if bundle.Predicate.BOM.ImageCount != 2 {
 		t.Errorf("BOM imageCount = %d, want 2", bundle.Predicate.BOM.ImageCount)
 	}
@@ -159,7 +151,6 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 		t.Errorf("BOM format = %q", bundle.Predicate.BOM.Format)
 	}
 
-	// LogsDir is empty when IncludeLogs is false.
 	if bundle.LogsDir != "" {
 		t.Errorf("LogsDir should be empty when IncludeLogs=false, got %q", bundle.LogsDir)
 	}
@@ -195,7 +186,6 @@ func TestBuild_IncludeLogsWritesLogsBundle(t *testing.T) {
 	}
 	mustReadFile(t, filepath.Join(bundle.LogsDir, "phases", "deployment", "logs", "src.log"))
 
-	// Manifest must pre-commit the log file's hash.
 	manifest := mustReadFile(t, filepath.Join(bundle.SummaryDir, ManifestFilename))
 	if !contains(manifest, "phases/deployment/logs/src.log") {
 		t.Errorf("manifest did not pre-commit log file hash")

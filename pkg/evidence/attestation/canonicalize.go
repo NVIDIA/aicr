@@ -25,20 +25,11 @@ import (
 )
 
 // CanonicalizeRecipeYAML applies the V1 canonicalizer to a recipe YAML
-// document and returns the canonical bytes. The transform is:
-//
-//  1. Parse YAML into a generic node tree.
-//  2. Recursively sort mapping keys.
-//  3. Strip comments at every node level.
-//  4. Re-marshal with line endings normalized to \n.
-//
-// The result is deterministic for any input that round-trips through
-// yaml.v3 — equal recipes produce equal bytes regardless of key order
-// or comment placement. UTF-8 encoding is implicit in yaml.v3 output.
+// document. The transform: parse, recursively sort mapping keys, strip
+// comments, re-marshal with \n line endings.
 //
 // V1 is intentionally simple: any recipe edit (including non-material
-// edits like reformatting) changes the canonical bytes and invalidates
-// the bundle. A material-slice canonicalizer is reserved for V2.
+// reformatting) changes the canonical bytes and invalidates the bundle.
 func CanonicalizeRecipeYAML(input []byte) ([]byte, error) {
 	if len(input) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "cannot canonicalize empty recipe")
@@ -60,9 +51,7 @@ func CanonicalizeRecipeYAML(input []byte) ([]byte, error) {
 }
 
 // SubjectDigest returns the V1 subject digest for a recipe: the
-// hex-encoded sha256 of the canonical YAML bytes. The returned digest
-// is the lowercase 64-character hex string used in the in-toto
-// Statement's subject[0].digest.sha256 field.
+// lowercase hex sha256 of the canonical YAML bytes.
 func SubjectDigest(recipeYAML []byte) (string, error) {
 	canon, err := CanonicalizeRecipeYAML(recipeYAML)
 	if err != nil {
@@ -71,9 +60,8 @@ func SubjectDigest(recipeYAML []byte) (string, error) {
 	return DigestOfCanonical(canon), nil
 }
 
-// DigestOfCanonical hashes already-canonicalized recipe bytes. Callers
-// that already hold the canonical form (e.g., the Builder, which writes
-// recipe.yaml first) use this to avoid re-running the canonicalizer.
+// DigestOfCanonical hashes already-canonicalized recipe bytes — for
+// callers that hold the canonical form and want to skip re-canonicalizing.
 func DigestOfCanonical(canon []byte) string {
 	sum := sha256.Sum256(canon)
 	return hex.EncodeToString(sum[:])
@@ -114,7 +102,6 @@ func canonicalize(n *yaml.Node) {
 			n.Content = append(n.Content, p.key, p.value)
 		}
 	case yaml.ScalarNode, yaml.AliasNode:
-		// Nothing to recurse into.
 	}
 }
 

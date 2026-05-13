@@ -33,118 +33,71 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
-// BuildOptions controls bundle construction. The zero value is not
-// usable; callers must populate at minimum OutputDir, Recipe,
-// RecipeYAML, Snapshot, SnapshotYAML, BOM, and PhaseResults.
+// BuildOptions controls bundle construction. The zero value is not usable.
 type BuildOptions struct {
-	// OutputDir is the parent directory under which summary-bundle/
-	// (and optionally logs-bundle/) and pointer.yaml are written.
 	OutputDir string
 
-	// Recipe is the resolved recipe being attested. Used for the
-	// pointer's recipe-name field, fingerprint matching, and the
-	// metadata recorded in the predicate's CriteriaMatch.
 	Recipe *recipe.RecipeResult
 
-	// RecipeYAML is the canonical post-resolution recipe YAML bytes.
-	// The builder canonicalizes once (CanonicalizeRecipeYAML) and
-	// uses the result for both the bundle's recipe.yaml file and the
-	// in-toto subject digest.
+	// RecipeYAML must be the canonical post-resolution bytes; the builder
+	// canonicalizes once and reuses the result for both the bundle's
+	// recipe.yaml and the in-toto subject digest.
 	RecipeYAML []byte
 
-	// Snapshot is the validate-time cluster snapshot. Used to derive
-	// the fingerprint stub.
-	Snapshot *snapshotter.Snapshot
-
-	// SnapshotYAML is the snapshot serialized as YAML, written to the
-	// bundle as snapshot.yaml.
+	Snapshot     *snapshotter.Snapshot
 	SnapshotYAML []byte
 
-	// BOM is the CycloneDX BOM body and metadata.
 	BOM BOMInputs
 
-	// PhaseResults is the validator engine's per-phase output. Each
-	// entry's CTRF report is written to ctrf/<phase>.json.
 	PhaseResults []*validator.PhaseResult
 
-	// PhaseLogs maps phase to a list of log files. Populated only
-	// when --include-logs is set; ignored otherwise. The builder
-	// always pre-commits each log file's sha256 in the manifest;
-	// IncludeLogs controls whether the logs bundle directory is
-	// produced as a sibling to the summary bundle.
-	PhaseLogs map[Phase][]LogFile
-
-	// IncludeLogs controls whether logs are physically embedded in a
-	// logs-bundle/ directory. When false, the per-file hashes are
-	// still pre-committed in the manifest if PhaseLogs is non-empty
-	// — the contributor can publish the files later and the binding
-	// holds.
+	// Per-file sha256s are always pre-committed in the manifest;
+	// IncludeLogs only controls whether the logs bundle directory is
+	// emitted alongside the summary bundle.
+	PhaseLogs   map[Phase][]LogFile
 	IncludeLogs bool
 
-	// AICRVersion identifies the aicr binary that emitted the bundle.
-	AICRVersion string
-
-	// ValidatorCatalogVersion identifies the validator catalog version
-	// used. Sourced from CatalogMetadata.Version when the catalog
-	// carries metadata; legacy catalogs without metadata produce an
-	// empty string here.
+	AICRVersion             string
 	ValidatorCatalogVersion string
 
-	// ValidatorImages enumerates the validator container images that
-	// shipped with the catalog used this session. The builder sorts
-	// the slice by image for determinism. Digest fields are blank
-	// today — the catalog tracks refs by tag, not digest; resolving
-	// each tag to a digest would require a registry round-trip per
-	// image, which validate's hot path deliberately avoids.
+	// Digest fields stay blank: the catalog tracks refs by tag and
+	// resolving to digest would require a registry round-trip per image.
 	ValidatorImages []ValidatorImage
 
-	// AttestedAt overrides the wall-clock for tests. When zero, the
-	// builder uses time.Now() truncated to a second.
+	// AttestedAt overrides the wall-clock for tests.
 	AttestedAt time.Time
 }
 
 // BOMInputs carries the CycloneDX BOM the validate run produced.
-// CycloneDXVersion (e.g., "1.5") is required so the predicate can
-// faithfully record the spec version the BOM was produced against.
 type BOMInputs struct {
-	// Body is the CycloneDX BOM JSON bytes (`bom.cdx.json` in the bundle).
 	Body []byte
 
-	// CycloneDXVersion is the CycloneDX spec version (e.g., "1.5").
+	// CycloneDXVersion is the spec version (e.g., "1.5").
 	CycloneDXVersion string
 }
 
-// LogFile describes one log file under a phase. Path is the source
-// path on disk; the builder copies it into logs-bundle/phases/<phase>/logs/<basename>.
+// LogFile describes one log file under a phase. The builder copies it
+// into logs-bundle/phases/<phase>/logs/<basename>.
 type LogFile struct {
-	// SourcePath is the absolute or working-dir-relative path to the
-	// log on disk.
 	SourcePath string
 
-	// Basename is the filename used inside the logs bundle. When
-	// empty the builder uses filepath.Base(SourcePath).
+	// Basename defaults to filepath.Base(SourcePath) when empty.
 	Basename string
 }
 
 // Bundle is what the builder returns: a description of the on-disk
 // artifacts and the in-memory predicate ready to be signed.
 type Bundle struct {
-	// SummaryDir is the absolute path of the summary-bundle directory.
 	SummaryDir string
 
-	// LogsDir is the absolute path of the logs-bundle directory, or
-	// "" when IncludeLogs is false or no logs were supplied.
+	// LogsDir is "" when IncludeLogs is false or no logs were supplied.
 	LogsDir string
 
-	// RecipeName is the recipe identifier; mirrors RecipeResult metadata.
 	RecipeName string
 
-	// SubjectDigest is sha256(canonicalize(recipe.yaml)) — the
-	// in-toto subject[0].digest.sha256 hex string.
+	// SubjectDigest is sha256(canonicalize(recipe.yaml)) as hex.
 	SubjectDigest string
 
-	// Predicate is the v1 predicate body, ready to wrap in an
-	// in-toto Statement.
 	Predicate *Predicate
 
 	// StatementJSON is the protobuf-canonical JSON of the unsigned
@@ -156,11 +109,10 @@ type Bundle struct {
 // Signing is a separate step (see signer.go) so test code can exercise
 // builder behavior without sigstore credentials.
 //
-// The resulting summary-bundle directory contains every file referenced
-// by the manifest *except* attestation.intoto.jsonl, which is added by
-// the signer because it is the signature itself. The manifest digest
-// recorded in the predicate is therefore stable: signing does not alter
-// the predicate.
+// The summary-bundle directory contains every file referenced by the
+// manifest *except* attestation.intoto.jsonl, which is the signature
+// itself. The manifest digest recorded in the predicate is therefore
+// stable: signing does not alter the predicate.
 func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 	if err := validateOpts(opts); err != nil {
 		return nil, err
@@ -284,10 +236,8 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		return nil, err
 	}
 
-	// Always persist the unsigned Statement so the bundle directory is
-	// self-contained: a caller can sign it later with cosign or any
-	// DSSE signer without re-running aicr validate. The signed bundle
-	// (attestation.intoto.jsonl) is added by SignBundle when --push runs.
+	// Persist the unsigned Statement so the bundle is self-contained: a
+	// caller can sign it later with cosign or any DSSE signer.
 	if writeErr := os.WriteFile(filepath.Join(summaryDir, StatementFilename), stmt, 0o600); writeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write unsigned statement", writeErr)
 	}
@@ -337,10 +287,8 @@ const defaultRecipeName = "recipe"
 const criteriaWildcard = "any"
 
 // RecipeNameFor derives the bundle's recipe identifier from the resolved
-// criteria. Hyphen-joins the non-wildcard accelerator/service/os/intent/
-// platform values; returns "recipe" when every slot is empty or wildcard.
-// Exported so callers building artifacts that need the same name (e.g.,
-// the auto-generated CycloneDX BOM) don't have to reimplement.
+// criteria: hyphen-joined non-wildcard accelerator/service/os/intent/
+// platform values, or "recipe" when every slot is empty or wildcard.
 func RecipeNameFor(r *recipe.RecipeResult) string {
 	if r == nil || r.Criteria == nil {
 		return ""
@@ -423,9 +371,7 @@ func writeLogsBundle(logsDir string, phaseLogs map[Phase][]LogFile) error {
 	return nil
 }
 
-// streamCopy copies src→dst with an io.Copy so neither file body is
-// held in RAM. The destination is created with the same 0o600 mode the
-// rest of the bundle uses.
+// streamCopy copies src→dst via io.Copy so neither body is held in RAM.
 func streamCopy(src, dst string) (retErr error) {
 	in, err := os.Open(filepath.Clean(src)) //nolint:gosec // src is operator-supplied validator output
 	if err != nil {

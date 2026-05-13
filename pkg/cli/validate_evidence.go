@@ -40,10 +40,6 @@ import (
 )
 
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
-// Flag values + spec.validate.evidence.attestation supply every field;
-// recipe + snapshot YAML are marshaled lazily inside emitRecipeEvidence
-// so a misconfigured run (e.g., invalid --push reference) fails before
-// paying the cost of marshaling a multi-MB snapshot.
 type recipeEvidenceConfig struct {
 	OutDir      string
 	BOMPath     string
@@ -51,21 +47,13 @@ type recipeEvidenceConfig struct {
 	PlainHTTP   bool
 	InsecureTLS bool
 
-	// OIDCResolve carries the resolve-time inputs (flag values and
-	// ambient env captures) needed to obtain a Sigstore identity token
-	// at sign time. The token itself is resolved adjacent to SignBundle
-	// — not up front — because Fulcio binds the token to a fresh nonce
-	// at issue, and a 3+ minute validation run between resolve and sign
-	// invalidates a pre-resolved token. The CI fail-fast story is
-	// preserved by validating Push reachability up front in
-	// emitRecipeEvidence; only the OIDC handshake is deferred.
+	// OIDC token resolution is deferred until adjacent to SignBundle:
+	// Fulcio binds the token to a fresh nonce at issue, and a multi-minute
+	// validation run between resolve and sign invalidates it.
 	OIDCResolve OIDCResolveInputs
 }
 
 // OIDCResolveInputs is the resolve-time slice of recipeEvidenceConfig.
-// Captured into cfg by buildRecipeEvidenceConfig from the urfave/cli
-// command + the process env so the deferred resolution at sign time
-// doesn't need to re-touch the cli object.
 type OIDCResolveInputs struct {
 	IdentityToken string
 	AmbientURL    string
@@ -109,13 +97,12 @@ type signPushOutcome struct {
 }
 
 // emitRecipeEvidence builds, optionally signs, and optionally pushes a
-// recipe-evidence v1 bundle. The pointer file is always written so the
-// contributor can copy it into recipes/evidence/<recipe>.yaml.
+// recipe-evidence v1 bundle. The pointer file is always written.
 //
 // Behavior matrix:
 //
 //	--push absent          → unsigned bundle on disk; pointer carries empty bundle.{oci,digest}.
-//	--push set, no OIDC    → error: keyless signing requires an OIDC token (see bundleattest.ResolveOIDCToken precedence).
+//	--push set, no OIDC    → error: keyless signing requires an OIDC token.
 //	--push set, OIDC       → sign with cosign keyless, push summary to OCI, populate pointer.
 func emitRecipeEvidence(
 	ctx context.Context,
@@ -125,19 +112,15 @@ func emitRecipeEvidence(
 	cfg *recipeEvidenceConfig,
 ) error {
 
-	// Validate the push reference up front so a malformed --push doesn't
-	// waste a Fulcio cert + Rekor inclusion proof on a sign that the push
-	// will reject seconds later.
+	// Validate --push up front so a malformed ref doesn't waste a Fulcio
+	// cert + Rekor inclusion proof on a sign the push would reject anyway.
 	if cfg.Push != "" {
 		if _, err := oci.ParseOutputTarget(cfg.Push); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --push reference", err)
 		}
 	}
 
-	// Load the catalog once and feed it to both the BOM (when --bom is
-	// absent and the auto-generator runs) and the predicate's
-	// ValidatorCatalogVersion + ValidatorImages fields. The catalog is
-	// compiled in via go:embed, so Load is a parse, not I/O.
+	// Catalog is compiled in via go:embed, so Load is a parse, not I/O.
 	cat, err := catalog.Load(version, commit)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog for evidence", err)
@@ -148,10 +131,8 @@ func emitRecipeEvidence(
 		return err
 	}
 
-	// Marshal rec/snap only after the cheap precondition checks pass —
-	// the snapshot is typically the largest in-memory object in a
-	// validate run and a misconfigured --emit-attestation should fail
-	// before we pay that cost.
+	// Marshal after the cheap precondition checks; snapshot is the
+	// largest in-memory object in a validate run.
 	recipeYAML, err := yaml.Marshal(rec)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for evidence", err)
@@ -214,28 +195,17 @@ func emitRecipeEvidence(
 	return nil
 }
 
-// signAndPushBundle handles the optional sign+push pipeline. When --push
-// is absent, returns a zero-valued outcome so the caller writes a
-// pre-publish pointer.
+// signAndPushBundle handles the optional sign+push pipeline. Returns a
+// zero-valued outcome when --push is absent.
 //
 // Sequence (--push set):
 //  1. Push the bundle directory as an OCI artifact → artifactDigest.
-//  2. Build an artifact-subject in-toto Statement
-//     (subject.digest = artifactDigest) carrying the same predicate
-//     body; recipe identity stays verifiable via predicate.recipe.
-//  3. Resolve the OIDC token adjacent to signing — Fulcio binds the
-//     token to a fresh nonce at issue and a multi-minute validation
-//     run before sign invalidates a pre-resolved token.
-//  4. Sign the artifact-subject Statement → Sigstore Bundle JSON.
-//  5. Attach the Sigstore Bundle as an OCI Referrer of the main
-//     artifact so cosign's /v2/<name>/referrers/<digest> discovery
-//     finds the signature without a separate pull.
-//
-// The signed bytes are also written into the local summary-bundle as
-// attestation.intoto.jsonl so the on-disk directory remains
-// inspectable; the pushed artifact never contained the file (it was
-// signed after push), but locally it's the standard place to find
-// the signature.
+//  2. Build an artifact-subject Statement (subject.digest = artifactDigest)
+//     carrying the same predicate body.
+//  3. Resolve the OIDC token (deferred until here — see recipeEvidenceConfig).
+//  4. Sign the Statement → Sigstore Bundle JSON.
+//  5. Attach the Sigstore Bundle as an OCI Referrer so cosign's
+//     /v2/<name>/referrers/<digest> discovery finds the signature.
 func signAndPushBundle(
 	ctx context.Context,
 	bundle *attestation.Bundle,
@@ -263,10 +233,8 @@ func signAndPushBundle(
 		return signPushOutcome{}, err
 	}
 
-	// Log at Info only when an interactive prompt is about to fire;
-	// CI/programmatic paths (identity-token, ambient OIDC) stay quiet
-	// at Info so they don't pollute build logs with a misleading
-	// "may prompt" line that never actually prompts.
+	// Info only when an interactive prompt is about to fire; non-interactive
+	// paths log at Debug so build logs don't carry a misleading "may prompt" line.
 	switch {
 	case cfg.OIDCResolve.IdentityToken != "":
 		slog.Debug("resolving OIDC token", "mode", "identity-token")
@@ -295,11 +263,9 @@ func signAndPushBundle(
 		return signPushOutcome{}, err
 	}
 
-	// Write the signed bytes into the local bundle dir for inspection.
-	// The pushed OCI artifact does not carry attestation.intoto.jsonl —
-	// it was already pushed before signing — so the canonical signature
-	// reference is the OCI Referrer attached below, addressable via the
-	// pointer file's bundle.{oci,digest}.
+	// Write signed bytes locally for inspection; the pushed artifact
+	// itself doesn't carry them — the canonical signature reference is
+	// the OCI Referrer attached below.
 	if err := attestation.WriteSignedAttestation(bundle, signRes.BundleJSON); err != nil {
 		return signPushOutcome{}, err
 	}
@@ -337,19 +303,11 @@ func pushArtifact(ctx context.Context, sourceDir, ref string, cfg *recipeEvidenc
 	})
 }
 
-// loadOrGenerateBOM returns the CycloneDX BOM bytes to embed in the
-// evidence bundle. When the operator passes --bom, the path wins (so
-// `make bom`-produced exhaustive BOMs continue to be authoritative).
-// When --bom is empty, aicr synthesizes a recipe-bound BOM enumerating
-// the recipe's component refs, the validator catalog images that ran
-// this session, and any container images observed running on the
-// snapshot's cluster (pkg/collector/k8s/image.go captures these).
-//
-// Helm charts are not rendered at validate time — that would require
-// the helm binary and a 60s+ rendering budget. Observed snapshot
-// images give the same information for the typical post-deployment
-// validate flow; when the snapshot is empty or pre-deployment, the
-// BOM falls back to chart refs + validator images only.
+// loadOrGenerateBOM returns the CycloneDX BOM bytes to embed. When --bom
+// is set the path wins; otherwise aicr synthesizes a recipe-bound BOM.
+// Helm charts are not rendered at validate time (would require the helm
+// binary and a 60s+ budget); observed snapshot images cover the same
+// information for the typical post-deployment flow.
 func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
 	if bomPath != "" {
 		body, err := os.ReadFile(bomPath)
@@ -361,22 +319,11 @@ func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshott
 	return buildAutoBOM(rec, snap, cat, version)
 }
 
-// buildAutoBOM synthesizes a CycloneDX 1.6 BOM from:
-//   - The recipe's enabled component refs (chart-level metadata: repo,
-//     chart, version, namespace).
-//   - The validator catalog images, surfaced as a synthetic "validators"
-//     component holding every container the catalog ships for the
-//     session's compiled-in version/commit.
-//   - Container images observed running on the cluster snapshot, when
-//     present, as a synthetic "observed-images" component. These come
-//     from the K8s.image.* measurements pkg/collector/k8s populates;
-//     refs are registry-stripped (`gpu-operator:v25.10.1` rather than
-//     `nvcr.io/nvidia/cloud-native/gpu-operator:v25.10.1`) because the
-//     constraint-evaluation collector deliberately strips for
-//     registry-mirror stability. A more authoritative full-ref BOM
-//     still requires `make bom` via --bom.
-//
-// Returns the JSON bytes ready to embed in BOMInputs.Body.
+// buildAutoBOM synthesizes a CycloneDX 1.6 BOM from the recipe's enabled
+// component refs, validator catalog images, and cluster-observed images.
+// Observed images are registry-stripped because the constraint-evaluation
+// collector strips them for mirror stability; a full-ref BOM still requires
+// --bom.
 func buildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
 	results := make([]bom.ComponentResult, 0, len(rec.ComponentRefs)+1)
 	for _, c := range rec.ComponentRefs {
@@ -434,14 +381,9 @@ func buildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *cat
 	return buf.Bytes(), nil
 }
 
-// dedupValidatorImages returns the validator catalog's container image
-// refs deduplicated by image string, preserving discovery order. The
-// catalog lists one entry per validator-check, and the deployment
-// phase's expected-resources + chainsaw checks frequently share an
-// image, so this collapse is required to keep both the BOM and the
-// predicate's ValidatorImages list from repeating the same `img:` ref.
-//
-// Returns nil for a catalog with no validators.
+// dedupValidatorImages returns validator catalog image refs deduplicated
+// by image string, preserving discovery order. Multiple checks share an
+// image; collapsing keeps the BOM and predicate from duplicating refs.
 func dedupValidatorImages(cat *catalog.ValidatorCatalog) []string {
 	if cat == nil || len(cat.Validators) == 0 {
 		return nil
@@ -461,9 +403,8 @@ func dedupValidatorImages(cat *catalog.ValidatorCatalog) []string {
 	return out
 }
 
-// catalogVersion returns the catalog's metadata version, or "" when
-// the catalog has no metadata block (legacy catalogs predating the
-// metadata field). Acts as the predicate.ValidatorCatalogVersion source.
+// catalogVersion returns the catalog metadata version, or "" when the
+// catalog has no metadata block (legacy catalogs predate the field).
 func catalogVersion(cat *catalog.ValidatorCatalog) string {
 	if cat == nil || cat.Metadata == nil {
 		return ""
@@ -471,13 +412,10 @@ func catalogVersion(cat *catalog.ValidatorCatalog) string {
 	return cat.Metadata.Version
 }
 
-// validatorImagesForPredicate adapts the dedup'd image list to the
-// attestation.ValidatorImage slice the predicate carries. The Digest
-// field stays empty — the catalog records image refs by tag, not by
-// digest; resolving image refs to digests would require a registry
-// round-trip per image, which validate's hot path deliberately avoids.
-// Operators wanting digest pinning can supply an exhaustive BOM via
-// --bom; see audit item #10 for the longer-term resolver path.
+// validatorImagesForPredicate adapts the dedup'd list to predicate form.
+// Digest stays empty: the catalog records refs by tag, and resolving to
+// digest would require a registry round-trip per image. Operators wanting
+// digest pinning ship an exhaustive BOM via --bom.
 func validatorImagesForPredicate(cat *catalog.ValidatorCatalog) []attestation.ValidatorImage {
 	images := dedupValidatorImages(cat)
 	if len(images) == 0 {
@@ -490,15 +428,9 @@ func validatorImagesForPredicate(cat *catalog.ValidatorCatalog) []attestation.Va
 	return out
 }
 
-// observedImagesFromSnapshot returns the cluster-observed image refs
-// in "<name>:<tag>" form, drawn from the K8s/image measurement that
-// pkg/collector/k8s populates. Returns nil when no such measurement is
-// present (e.g., --no-cluster runs or pre-deployment snapshots).
-//
-// The collector registry-strips refs for measurement-key stability
-// across registry mirrors (a constraint-evaluation requirement), so
-// the output here also lacks registries. An operator wanting fully
-// qualified refs ships their own BOM via --bom.
+// observedImagesFromSnapshot returns cluster-observed image refs in
+// "<name>:<tag>" form. Refs lack a registry because the collector
+// strips registries for measurement-key stability across mirrors.
 func observedImagesFromSnapshot(snap *snapshotter.Snapshot) []string {
 	if snap == nil {
 		return nil
@@ -542,13 +474,8 @@ func buildPointerInputs(bundle *attestation.Bundle, out signPushOutcome) attesta
 			Identity: out.Sign.Identity,
 			Issuer:   out.Sign.Issuer,
 		}
-		// --no-rekor signing returns RekorLogIndex == 0 with no Rekor
-		// entry actually created; the SignResult struct has no separate
-		// "did we hit Rekor?" boolean. Treat zero as "no Rekor entry"
-		// at the pointer-emit boundary. (Rekor index 0 is a legitimate
-		// position, but the signer call path that produces it always
-		// also sets a non-empty UUID — when we wire UUID through we can
-		// distinguish; today, zero from a SignResult means absent.)
+		// --no-rekor signing returns RekorLogIndex == 0 with no entry
+		// created; treat zero as "no Rekor entry" at this boundary.
 		if out.Sign.RekorLogIndex > 0 {
 			idx := out.Sign.RekorLogIndex
 			signer.RekorLogIndex = &idx

@@ -29,13 +29,9 @@ import (
 )
 
 // BuildManifest walks bundleDir and computes a deterministic manifest
-// inventorying every regular file in the tree. The manifest's own
-// sha256 is what binds the unsigned files to the signed predicate via
-// Predicate.Manifest.Digest.
-//
-// Excluded: the manifest file itself (excludePath), and the
-// attestation file if already present (since it is written after the
-// manifest).
+// inventorying every regular file. The manifest's own sha256 binds the
+// unsigned files to the signed predicate via Predicate.Manifest.Digest.
+// Paths in excludePaths are skipped (e.g., the manifest itself).
 func BuildManifest(bundleDir string, excludePaths ...string) (*Manifest, error) {
 	exclude := make(map[string]struct{}, len(excludePaths))
 	for _, p := range excludePaths {
@@ -132,8 +128,7 @@ func HashFileSHA256(path string) (string, error) {
 }
 
 // HashBytesSHA256 returns the prefixed lowercase hex sha256 of a byte
-// slice (e.g., "sha256:abc123..."). Used by predicate construction
-// where the file is held in memory.
+// slice (e.g., "sha256:abc123...").
 func HashBytesSHA256(b []byte) string {
 	sum := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(sum[:])

@@ -867,13 +867,10 @@ func TestPreparePushDir(t *testing.T) {
 		if result == srcDir {
 			t.Fatalf("preparePushDir must not return sourceDir directly; got %q == srcDir", result)
 		}
-		// Source dir file set must be unchanged — this is the
-		// invariant the bug violated.
 		after := snapshotDir(t, srcDir)
 		if !reflect.DeepEqual(before, after) {
 			t.Errorf("source directory was modified by preparePushDir; before=%v after=%v", before, after)
 		}
-		// Temp dir must carry the hard-linked content.
 		for _, name := range []string{"a.yaml", "b.json"} {
 			if _, statErr := os.Stat(filepath.Join(result, name)); statErr != nil {
 				t.Errorf("expected %q hard-linked into temp dir, got: %v", name, statErr)

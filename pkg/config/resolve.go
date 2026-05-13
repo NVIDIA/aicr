@@ -294,21 +294,17 @@ type ValidateResolved struct {
 	// "0s" / disabled-timeout value distinct from absence.
 	Timeout *time.Duration
 
-	// EvidenceCNCF is the typed-domain projection of
-	// spec.validate.evidence.cncf. Nil when the section is unset; non-nil
-	// pointers preserve "field absent" vs. "field explicitly false" for
-	// the bool option.
+	// Nil when spec.validate.evidence.cncf is unset.
 	EvidenceCNCF *EvidenceCNCFResolved
 
-	// EvidenceAttestation is the typed-domain projection of
-	// spec.validate.evidence.attestation. Nil when the section is unset.
+	// Nil when spec.validate.evidence.attestation is unset.
 	EvidenceAttestation *EvidenceAttestationResolved
 }
 
 // EvidenceCNCFResolved is the typed view of spec.validate.evidence.cncf.
-// Bool fields are plain bool because the wire-form spec uses bool with
-// omitempty — YAML/JSON cannot distinguish "absent" from "explicit false"
-// upstream, so a *bool here would have no extra signal to carry.
+// Bool fields are plain bool because the wire-form uses `bool,omitempty`
+// — YAML/JSON cannot distinguish "absent" from "explicit false" upstream,
+// so a *bool here would carry no extra signal.
 type EvidenceCNCFResolved struct {
 	Dir            string
 	CNCFSubmission bool
@@ -316,8 +312,8 @@ type EvidenceCNCFResolved struct {
 }
 
 // EvidenceAttestationResolved is the typed view of
-// spec.validate.evidence.attestation. Same wire-form rationale as
-// EvidenceCNCFResolved for the plain bool fields.
+// spec.validate.evidence.attestation. See EvidenceCNCFResolved for the
+// plain-bool rationale.
 type EvidenceAttestationResolved struct {
 	Out         string
 	BOM         string

@@ -54,9 +54,9 @@ type ResolveOptions struct {
 }
 
 // ResolveOIDCToken walks the OIDC source precedence chain and returns the
-// resulting identity token string. Suitable for callers (such as the
-// recipe-evidence pipeline) that build their own signer around a raw token
-// and do not want the bundler's Attester abstraction.
+// resulting identity token string. Suitable for callers that build their
+// own signer around a raw token and do not want the bundler's Attester
+// abstraction.
 //
 // Precedence (highest first):
 //  1. IdentityToken — explicit pre-fetched token.

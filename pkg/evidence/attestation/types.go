@@ -104,8 +104,7 @@ const (
 	PhaseConformance Phase = "conformance"
 )
 
-// AllPhases lists every phase in the canonical order. Used by manifest
-// builders to iterate deterministically.
+// AllPhases is the canonical iteration order for deterministic output.
 var AllPhases = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
 
 // Predicate is the body of the signed in-toto Statement. It serializes
@@ -200,23 +199,14 @@ type Pointer struct {
 }
 
 // PointerAttestation is one entry in the pointer's attestations list.
-// V1 always emits exactly one entry; schema 2.0 will support multiple.
-//
-// The pointer is a *locator*, not a denormalized cache of the signed
-// predicate body. Everything needed to find, fetch, and identify the
-// signed bundle lives here; everything else (fingerprint, criteria
-// match, per-phase counts) is reachable by pulling the bundle from
-// PointerBundle.OCI and reading predicate.json — duplicating those
-// fields here would create two sources of truth, and reviewers would
-// have no good answer for which one to trust on mismatch.
+// V1 always emits exactly one entry. The pointer is a locator, not a
+// denormalized cache of the signed predicate body — everything else
+// (fingerprint, per-phase counts, etc.) is reachable by pulling the
+// bundle from PointerBundle.OCI.
 type PointerAttestation struct {
 	Bundle PointerBundle `json:"bundle" yaml:"bundle"`
 
-	// Signer is nil for unsigned bundles. When set, Identity and Issuer
-	// are always populated; RekorLogIndex remains nil when the bundle
-	// was signed with --no-rekor so a consumer can distinguish "no
-	// Rekor entry" from "Rekor entry at index 0" (which is a legitimate
-	// log position the first-ever entry occupies).
+	// Signer is nil for unsigned bundles.
 	Signer *PointerSigner `json:"signer,omitempty" yaml:"signer,omitempty"`
 
 	AttestedAt time.Time `json:"attestedAt" yaml:"attestedAt"`

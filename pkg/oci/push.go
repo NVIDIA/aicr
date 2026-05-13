@@ -432,10 +432,7 @@ func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error
 
 // packReferrer builds the referrer manifest in a local file store and
 // returns the store, temp dir path, manifest descriptor, and the
-// digest-derived tag. Split from PushReferrer so unit tests can
-// inspect the packed manifest's Subject field without a registry.
-//
-// The caller owns lifecycle: defer closing fs and removing tmpDir.
+// digest-derived tag. The caller defers closing fs and removing tmpDir.
 func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, string, ociv1.Descriptor, string, error) {
 	if opts.ArtifactType == "" {
 		return nil, "", ociv1.Descriptor{}, "", apperrors.New(apperrors.ErrCodeInvalidRequest, "ArtifactType is required")
