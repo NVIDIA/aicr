@@ -537,7 +537,9 @@ func validateCmdFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name: "push",
 			Usage: `OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to.
-	Requires SIGSTORE_ID_TOKEN env var for cosign keyless OIDC signing.`,
+	Sigstore keyless OIDC signing uses the same precedence chain as ` + "`aicr bundle --attest`" + `:
+	--identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
+	--oidc-device-flow > interactive browser flow.`,
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
@@ -729,14 +731,6 @@ Run validation without failing on check errors (informational mode):
 			}
 
 			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
-			// The OIDC identity token is *not* resolved here. Fulcio binds
-			// the token to a fresh nonce at issue time and a multi-minute
-			// validation run between resolve and sign invalidates it
-			// (manifests as Fulcio 400 'error processing the identity
-			// token'). The token is fetched adjacent to SignBundle in
-			// signAndPushBundle instead; evidenceCfg.OIDCResolve captures
-			// the resolve-time *inputs* (flag values, ambient env) so the
-			// deferred call has everything it needs.
 
 			return runValidation(ctx, rec, snap, validationConfig{
 				phases:              phases,

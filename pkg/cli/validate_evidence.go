@@ -115,7 +115,7 @@ type signPushOutcome struct {
 // Behavior matrix:
 //
 //	--push absent          → unsigned bundle on disk; pointer carries empty bundle.{oci,digest}.
-//	--push set, no OIDC    → error: keyless signing requires SIGSTORE_ID_TOKEN.
+//	--push set, no OIDC    → error: keyless signing requires an OIDC token (see bundleattest.ResolveOIDCToken precedence).
 //	--push set, OIDC       → sign with cosign keyless, push summary to OCI, populate pointer.
 func emitRecipeEvidence(
 	ctx context.Context,
