@@ -39,7 +39,8 @@ Not every component appears in every recipe. The recipe engine selects component
 
 - **Base components** (cert-manager, kube-prometheus-stack) appear in most recipes.
 - **Cloud-specific components** (aws-efa, aws-ebs-csi-driver) are added when the service matches.
-- **Intent-specific components** (kubeflow-trainer, dynamo-platform, kai-scheduler) are added based on workload intent.
+- **Intent-specific components** (kgateway, kgateway-crds) are added based on workload intent (e.g., inference recipes include the inference gateway).
+- **Platform-specific components** (kubeflow-trainer, dynamo-platform) are added when the recipe selects a matching `--platform`.
 - **Accelerator/OS-specific tuning** (nodewright-customizations, nvidia-dra-driver-gpu) varies by hardware and OS combination.
 
 ### NFD Topology Updater
