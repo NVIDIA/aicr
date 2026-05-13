@@ -149,7 +149,7 @@ func ToValidationInput(r *recipe.RecipeResult) *ValidationInput {
 	validation := NewValidationInput()
 
 	// Populate optional resource fields for standalone usage
-	validation.APIVersion = "validator.nvidia.com/v1alpha1"
+	validation.APIVersion = CatalogAPIVersion
 	validation.Kind = KindValidationInput
 	if r.Metadata.Version != "" {
 		validation.Metadata = &ValidationMetadata{

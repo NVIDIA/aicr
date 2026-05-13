@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -95,7 +96,7 @@ type clusterState struct {
 // The caller must close stopCh and handle cleanup deferrals.
 func (v *Validator) prepareCluster(
 	ctx context.Context,
-	validation *recipe.Validation,
+	rec *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*clusterState, error) {
 
@@ -112,7 +113,7 @@ func (v *Validator) prepareCluster(
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
 	}
 
-	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, validation); cmErr != nil {
+	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, rec); cmErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
 	}
 
@@ -151,7 +152,7 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
 func (v *Validator) ValidatePhases(
 	ctx context.Context,
 	phases []Phase,
-	validation *recipe.Validation,
+	rec *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) ([]*PhaseResult, error) {
 
@@ -160,6 +161,8 @@ func (v *Validator) ValidatePhases(
 	}
 
 	slog.Info("running validation phases", "runID", v.RunID, "phases", phases)
+
+	validation := recipe.ToValidation(rec)
 
 	// Pre-flight: evaluate top-level validation constraints against snapshot.
 	// Fails fast before deploying any Jobs if prerequisites aren't met.
@@ -177,7 +180,7 @@ func (v *Validator) ValidatePhases(
 		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
 	}
 
-	cs, err := v.prepareCluster(ctx, validation, snap)
+	cs, err := v.prepareCluster(ctx, rec, snap)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +224,7 @@ func (v *Validator) ValidatePhases(
 func (v *Validator) ValidatePhase(
 	ctx context.Context,
 	phase Phase,
-	validation *recipe.Validation,
+	rec *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
@@ -234,14 +237,14 @@ func (v *Validator) ValidatePhase(
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
 	}
 
-	cs, err := v.prepareCluster(ctx, validation, snap)
+	cs, err := v.prepareCluster(ctx, rec, snap)
 	if err != nil {
 		return nil, err
 	}
 	defer close(cs.stopCh)
 	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
-	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validation)
+	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, recipe.ToValidation(rec))
 }
 
 // filterEntriesByValidation returns only catalog entries that the validation declares
@@ -469,11 +472,16 @@ func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, rea
 }
 
 // ensureDataConfigMaps creates snapshot and validation ConfigMaps for this run.
+// The validation payload is written in the v1.ValidationInput wire shape that
+// validator containers consume — converting from RecipeResult here, rather
+// than marshaling recipe.Validation directly, ensures the inlined phase
+// configs (deployment/performance/etc.) land under the nested `config:` field
+// the validators read.
 func (v *Validator) ensureDataConfigMaps(
 	ctx context.Context,
 	clientset kubernetes.Interface,
 	snap *snapshotter.Snapshot,
-	validation *recipe.Validation,
+	rec *recipe.RecipeResult,
 ) error {
 
 	snapshotYAML, err := yaml.Marshal(snap)
@@ -481,7 +489,7 @@ func (v *Validator) ensureDataConfigMaps(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot", err)
 	}
 
-	validationYAML, err := yaml.Marshal(validation)
+	validationYAML, err := yaml.Marshal(v1.ToValidationInput(rec))
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize validation", err)
 	}
