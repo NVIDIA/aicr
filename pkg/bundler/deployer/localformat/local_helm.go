@@ -62,12 +62,22 @@ var (
 // parent is the originating component name (== name for primary). manifests
 // is the per-path rendered bytes map for this folder; may be empty (a
 // manifest-only component with no manifests still yields a valid empty
-// templates/ directory). Returns the Folder manifest with Files listed in
-// deterministic order.
+// templates/ directory).
+//
+// createNamespace controls whether the rendered install.sh passes
+// --create-namespace to helm. Set false when this folder's chart contains
+// a Namespace template targeting c.Namespace — Helm 3 refuses to import
+// an existing namespace lacking app.kubernetes.io/managed-by=Helm and
+// meta.helm.sh/release-name annotations, so --create-namespace creating
+// the namespace ahead of the chart's own Namespace template collides.
+// Pre-injection folders carry the privileged-Namespace manifest by
+// design and therefore pass false; primary and post folders pass true.
+//
+// Returns the Folder manifest with Files listed in deterministic order.
 func writeLocalHelmFolder(
 	outputDir, dir string, idx int, c Component,
 	manifests map[string][]byte, renderInput manifest.RenderInput,
-	name, parent string,
+	name, parent string, createNamespace bool,
 ) (Folder, error) {
 
 	folderDir, err := deployer.SafeJoin(outputDir, dir)
@@ -158,9 +168,10 @@ func writeLocalHelmFolder(
 
 	// install.sh
 	installData := struct {
-		Name      string
-		Namespace string
-	}{name, c.Namespace}
+		Name            string
+		Namespace       string
+		CreateNamespace bool
+	}{name, c.Namespace, createNamespace}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}

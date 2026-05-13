@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -86,7 +87,7 @@ func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 			Namespace:  "skyhook",
 			Repository: "", // empty: manifest-only
 		}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"skyhook-customizations": {
 				// Realistic input: project recipe manifests carry a license header
 				// (see recipes/components/gpu-operator/manifests/dcgm-exporter.yaml).
@@ -147,7 +148,7 @@ func TestWrite_Mixed(t *testing.T) {
 			ChartName:  "nvidia/gpu-operator",
 			Version:    "v24.9.1",
 		}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				// Realistic: real project manifests carry a license header.
 				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
@@ -211,6 +212,193 @@ metadata:
 	}
 }
 
+// TestWrite_PreFolderInstallOmitsCreateNamespace asserts that a
+// pre-injection folder's install.sh does NOT pass --create-namespace
+// to helm, while the primary and post folders still do. Helm 3 refuses
+// to import a pre-existing namespace lacking
+// app.kubernetes.io/managed-by=Helm + meta.helm.sh/release-name
+// annotations, so pre folders (which carry the Namespace manifest by
+// design) must let the chart's own Namespace template create it. See
+// pkg/bundler/deployer/localformat/local_helm.go writeLocalHelmFolder
+// docstring for the full rationale.
+func TestWrite_PreFolderInstallOmitsCreateNamespace(t *testing.T) {
+	outDir := t.TempDir()
+	const licenseHeader = `# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+`
+
+	if _, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: outDir,
+		Components: []localformat.Component{{
+			Name:       "foo",
+			Namespace:  "privileged-foo",
+			Repository: "https://example.invalid/charts",
+			ChartName:  "example/foo",
+			Version:    "v1.0.0",
+		}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {
+				"foo/manifests/talos-namespace.yaml": []byte(licenseHeader +
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: privileged-foo\n"),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"foo": {
+				"foo/manifests/cm.yaml": []byte(licenseHeader +
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	tests := []struct {
+		name                 string
+		installPath          string
+		wantCreateNamespace  bool
+		wantNamespaceLiteral string
+	}{
+		{
+			name:                 "pre folder omits --create-namespace",
+			installPath:          "001-foo-pre/install.sh",
+			wantCreateNamespace:  false,
+			wantNamespaceLiteral: "--namespace privileged-foo \\",
+		},
+		{
+			name:                 "primary folder keeps --create-namespace",
+			installPath:          "002-foo/install.sh",
+			wantCreateNamespace:  true,
+			wantNamespaceLiteral: "--namespace privileged-foo --create-namespace \\",
+		},
+		{
+			name:                 "post folder keeps --create-namespace",
+			installPath:          "003-foo-post/install.sh",
+			wantCreateNamespace:  true,
+			wantNamespaceLiteral: "--namespace privileged-foo --create-namespace \\",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := os.ReadFile(filepath.Join(outDir, tc.installPath))
+			if err != nil {
+				t.Fatalf("read install.sh: %v", err)
+			}
+			s := string(b)
+			if got := strings.Contains(s, "--create-namespace"); got != tc.wantCreateNamespace {
+				t.Errorf("--create-namespace present = %v, want %v\n%s", got, tc.wantCreateNamespace, s)
+			}
+			if !strings.Contains(s, tc.wantNamespaceLiteral) {
+				t.Errorf("install.sh missing literal %q; got:\n%s", tc.wantNamespaceLiteral, s)
+			}
+		})
+	}
+}
+
+// TestWrite_FolderLimit_CountsEmissionsNotComponents pins the
+// folder-prefix-exhaustion guard. The check budgets against the actual
+// number of NNN-* directories the bundle will emit (pre + primary +
+// post, per the same conditions the main loop applies) instead of a
+// worst-case 3*len(Components) multiplier. Without this, a recipe of
+// 400 pure upstream-Helm components — which produce 400 directories —
+// would be rejected before any work happens. The deploy/undeploy
+// templates only glob three-digit prefixes, so the cap remains 999.
+func TestWrite_FolderLimit_CountsEmissionsNotComponents(t *testing.T) {
+	// Helper: build n primary-only upstream-Helm components.
+	makeComponents := func(n int) []localformat.Component {
+		out := make([]localformat.Component, n)
+		for i := 0; i < n; i++ {
+			name := fmt.Sprintf("c%04d", i)
+			out[i] = localformat.Component{
+				Name:       name,
+				Namespace:  name,
+				Repository: "https://example.invalid/charts",
+				ChartName:  name,
+				Version:    "v1.0.0",
+			}
+		}
+		return out
+	}
+
+	t.Run("400 primary-only components stay under the cap", func(t *testing.T) {
+		// Under the old 3x multiplier, 400 components would be rejected
+		// (3*400 = 1200 > 999). With per-emission counting, 400 primary
+		// folders is well under the limit.
+		_, err := localformat.Write(context.Background(), localformat.Options{
+			OutputDir:  t.TempDir(),
+			Components: makeComponents(400),
+		})
+		if err != nil {
+			t.Fatalf("400 primary-only components should fit under cap, got: %v", err)
+		}
+	})
+
+	t.Run("1000 primary-only components exceed the cap", func(t *testing.T) {
+		_, err := localformat.Write(context.Background(), localformat.Options{
+			OutputDir:  t.TempDir(),
+			Components: makeComponents(1000),
+		})
+		if err == nil {
+			t.Fatal("1000 primary folders must exceed the 999-prefix cap")
+		}
+		if !strings.Contains(err.Error(), "too many emitted folders") {
+			t.Errorf("error should mention emitted folder count; got: %v", err)
+		}
+	})
+}
+
+// TestWrite_PreManifestNamespaceDrift asserts that the writer rejects
+// a pre-manifest whose Namespace metadata.name disagrees with the
+// component's release namespace. Without this guard, the bundle would
+// pass type checks but blow up at `helm install` time with an opaque
+// "namespace not found" error because the chart creates one namespace
+// while the release targets another.
+func TestWrite_PreManifestNamespaceDrift(t *testing.T) {
+	_, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: t.TempDir(),
+		Components: []localformat.Component{{
+			Name:       "foo",
+			Namespace:  "privileged-foo",
+			Repository: "https://example.invalid/charts",
+			ChartName:  "example/foo",
+			Version:    "v1.0.0",
+		}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {
+				"foo/manifests/typo-namespace.yaml": []byte(
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: privileged-foobar\n",
+				),
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Write must reject pre-manifest Namespace name that drifts from ComponentRef.Namespace")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is %T, want *errors.StructuredError: %v", err, err)
+	}
+	if se.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", se.Code)
+	}
+	for _, want := range []string{"privileged-foo", "privileged-foobar", "typo-namespace.yaml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error message missing %q; got: %v", want, err)
+		}
+	}
+}
+
 func TestWrite_Ordering(t *testing.T) {
 	outDir := t.TempDir()
 	mk := func(name, repo string) localformat.Component {
@@ -231,7 +419,7 @@ func TestWrite_Ordering(t *testing.T) {
 			mk("b", "https://b.example"),
 			mk("c", "https://c.example"),
 		},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"b": {
 				"b/manifests/x.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
@@ -360,7 +548,7 @@ func TestWrite_Deterministic(t *testing.T) {
 				},
 			},
 			// b is mixed — exercise the -post injection path in the determinism check
-			ComponentManifests: map[string]map[string][]byte{
+			ComponentPostManifests: map[string]map[string][]byte{
 				"b": {
 					// Two manifests with distinct basenames to exercise sorted iteration
 					"b/manifests/m1.yaml": []byte("---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: m1\n"),
@@ -395,7 +583,7 @@ func TestWrite_KustomizeWithManifestsRejected(t *testing.T) {
 			Tag:       "v1.0.0",
 			Path:      kustomizePath,
 		}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"busted-component": {
 				"extra/m.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n"),
 			},

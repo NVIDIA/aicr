@@ -513,6 +513,64 @@ func TestMergeComponentRef_AdvancedFields(t *testing.T) {
 		}
 	})
 
+	t.Run("preManifestFiles overlay-only preserved", func(t *testing.T) {
+		base := ComponentRef{Name: "test"}
+		overlay := ComponentRef{
+			Name:             "test",
+			PreManifestFiles: []string{"ns.yaml"},
+		}
+		result := mergeComponentRef(base, overlay)
+		want := []string{"ns.yaml"}
+		if !reflect.DeepEqual(result.PreManifestFiles, want) {
+			t.Errorf("preManifestFiles = %v, want %v", result.PreManifestFiles, want)
+		}
+	})
+
+	t.Run("preManifestFiles base-only preserved", func(t *testing.T) {
+		base := ComponentRef{
+			Name:             "test",
+			PreManifestFiles: []string{"ns.yaml"},
+		}
+		overlay := ComponentRef{Name: "test"}
+		result := mergeComponentRef(base, overlay)
+		want := []string{"ns.yaml"}
+		if !reflect.DeepEqual(result.PreManifestFiles, want) {
+			t.Errorf("preManifestFiles = %v, want %v", result.PreManifestFiles, want)
+		}
+	})
+
+	t.Run("preManifestFiles additive dedup merge", func(t *testing.T) {
+		base := ComponentRef{
+			Name:             "test",
+			PreManifestFiles: []string{"a.yaml", "b.yaml"},
+		}
+		overlay := ComponentRef{
+			Name:             "test",
+			PreManifestFiles: []string{"b.yaml", "c.yaml"},
+		}
+		result := mergeComponentRef(base, overlay)
+		want := []string{"a.yaml", "b.yaml", "c.yaml"}
+		if !reflect.DeepEqual(result.PreManifestFiles, want) {
+			t.Errorf("preManifestFiles = %v, want %v", result.PreManifestFiles, want)
+		}
+	})
+
+	t.Run("preManifestFiles dedup within overlay", func(t *testing.T) {
+		base := ComponentRef{
+			Name:             "test",
+			PreManifestFiles: []string{"a.yaml"},
+		}
+		overlay := ComponentRef{
+			Name:             "test",
+			PreManifestFiles: []string{"b.yaml", "b.yaml"},
+		}
+		result := mergeComponentRef(base, overlay)
+		want := []string{"a.yaml", "b.yaml"}
+		if !reflect.DeepEqual(result.PreManifestFiles, want) {
+			t.Errorf("preManifestFiles = %v, want %v", result.PreManifestFiles, want)
+		}
+	})
+
 	t.Run("tag from overlay", func(t *testing.T) {
 		base := ComponentRef{Name: "test", Tag: "v1.0"}
 		overlay := ComponentRef{Name: "test", Tag: "v2.0"}

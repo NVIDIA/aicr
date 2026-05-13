@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,11 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}"
-
-helm upgrade --install gpu-operator-post ./ \
-  --namespace gpu-operator --create-namespace \
-  -f values.yaml -f cluster-values.yaml \
-  ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
+apiVersion: v2
+name: gpu-operator-pre
+description: Generated wrapper chart for gpu-operator local content.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

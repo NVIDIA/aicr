@@ -18,6 +18,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
 helm upgrade --install {{ .Name }} ./ \
-  --namespace {{ .Namespace }} --create-namespace \
+  --namespace {{ .Namespace }}{{ if .CreateNamespace }} --create-namespace{{ end }} \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
