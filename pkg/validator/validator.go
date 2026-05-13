@@ -54,8 +54,10 @@ func checkReadiness(validation *recipe.Validation, snap *snapshotter.Snapshot) e
 	for _, c := range validation.Constraints {
 		result := constraints.Evaluate(c, snap)
 		if result.Error != nil {
-			slog.Warn("readiness constraint skipped", "name", c.Name, "error", result.Error)
-			continue
+			return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("readiness check could not evaluate: %s", c.Name),
+				result.Error,
+				map[string]any{"constraint": c.Name, "expected": c.Value})
 		}
 		if !result.Passed {
 			return errors.New(errors.ErrCodeInvalidRequest,
@@ -312,6 +314,11 @@ func (v *Validator) runPhase(
 
 	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
 
+	// TODO(perf): entries within a phase are independent Jobs and can be
+	// fan-out with errgroup + a small worker pool. Deferred from the
+	// principal-review sweep because parallelism interacts with shared-
+	// namespace ConfigMap writes, RBAC cleanup ordering, and GPU resource
+	// contention; the change needs its own PR with e2e validation.
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
@@ -542,22 +549,49 @@ func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kuberne
 	}
 }
 
-// ensureNamespace creates the namespace if it does not exist.
-// Uses create-or-ignore since namespaces are immutable.
+// ensureNamespace creates the namespace if it does not exist, or updates its
+// labels to the current schema if it does. Namespace names are immutable but
+// labels and annotations are not, so a stale namespace from a prior AICR
+// version would otherwise keep outdated labels.
 func ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	desired := map[string]string{
+		labels.Name:      labels.ValueAICR,
+		labels.Component: labels.ValueValidation,
+		labels.ManagedBy: labels.ValueAICR,
+	}
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: namespace,
-			Labels: map[string]string{
-				labels.Name:      labels.ValueAICR,
-				labels.Component: labels.ValueValidation,
-				labels.ManagedBy: labels.ValueAICR,
-			},
+			Name:   namespace,
+			Labels: desired,
 		},
 	}
 	_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+	// Already exists — fetch and reconcile labels if they have drifted.
+	existing, getErr := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if getErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to get existing namespace", getErr)
+	}
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	changed := false
+	for k, v := range desired {
+		if existing.Labels[k] != v {
+			existing.Labels[k] = v
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if _, err := clientset.CoreV1().Namespaces().Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to update namespace labels", err)
 	}
 	return nil
 }

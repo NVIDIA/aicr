@@ -393,7 +393,7 @@ func TestMarshalYAMLWithHeader(t *testing.T) {
 				RecipeVersion:  "",
 			},
 			verify: func(t *testing.T, result string) {
-				if !strings.Contains(result, "# Generated from Cloud Native Stack Recipe") {
+				if !strings.Contains(result, "# Generated from AICR Recipe") {
 					t.Error("missing standard header line")
 				}
 				if !strings.Contains(result, "test: data") {

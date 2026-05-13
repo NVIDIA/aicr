@@ -39,12 +39,12 @@ spec:
               measurements:
                 - type: K8s
                   subtypes:
-                    - name: server
+                    - subtype: server
                       data:
                         version: v1.33.0
                 - type: OS
                   subtypes:
-                    - name: release
+                    - subtype: release
                       data:
                         ID: ubuntu
                         VERSION_ID: "24.04"

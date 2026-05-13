@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 // TestSnapshotTemplateFlagCombinations tests all combinations of --template, --format, and --output flags.
@@ -309,7 +310,7 @@ func TestParseResourceList(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseResourceList(tt.input)
+			got, err := snapshotter.ParseResourceList(tt.input)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")

@@ -1,9 +1,9 @@
-# Cloud Native Stack Deployment
+# AI Cluster Runtime Deployment
 
 Recipe Version: v0.1.0
 Bundler Version: v1.0.0
 
-Per-component bundle for deploying NVIDIA Cloud Native Stack components
+Per-component bundle for deploying NVIDIA AI Cluster Runtime components
 for GPU-accelerated Kubernetes workloads.
 
 ## Configuration

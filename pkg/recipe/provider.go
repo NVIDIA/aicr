@@ -197,10 +197,14 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to get relative path", relErr)
 		}
 
-		// Check for path traversal
-		if strings.Contains(relPath, "..") {
+		// Reject any path that escapes the external root or contains
+		// reserved segments. filepath.IsLocal is the canonical check (rejects
+		// absolute paths, drive letters, ".." segments, and reserved names)
+		// and avoids the false positives a substring scan for ".." produces
+		// on benign names like "foo..bak".
+		if !filepath.IsLocal(relPath) {
 			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-				fmt.Sprintf("path traversal detected: %s", relPath))
+				fmt.Sprintf("path traversal or non-local path detected: %s", relPath))
 		}
 
 		// Check for symlinks

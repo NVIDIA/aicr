@@ -69,6 +69,20 @@ type Reader struct {
 	format Format
 	input  io.Reader
 	closer io.Closer
+	strict bool
+}
+
+// ReaderOption configures a Reader.
+type ReaderOption func(*Reader)
+
+// WithStrict enables strict decoding so unknown fields are rejected. JSON
+// uses DisallowUnknownFields; YAML uses KnownFields(true). Use this for
+// user-supplied recipe / snapshot / config files where a typo silently
+// dropped to a zero-value is a footgun.
+func WithStrict() ReaderOption {
+	return func(r *Reader) {
+		r.strict = true
+	}
 }
 
 // NewReader creates a new Reader for deserializing data from an io.Reader source.
@@ -139,7 +153,12 @@ func NewReader(format Format, input io.Reader) (*Reader, error) {
 //	if err != nil { panic(err) }
 //	defer reader.Close()
 func NewFileReader(format Format, filePath string) (*Reader, error) {
-	return NewFileReaderWithContext(context.Background(), format, filePath)
+	// Bound the read with FileReadTimeout so a hung filesystem (network
+	// mount, FUSE, /proc anomaly) cannot stall the caller indefinitely.
+	// Callers that need a different bound should use NewFileReaderWithContext.
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return NewFileReaderWithContext(ctx, format, filePath)
 }
 
 // NewFileReaderWithContext is the context-aware variant of NewFileReader.
@@ -188,10 +207,14 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open file", err)
 	}
 
-	// Create Reader
+	// Bound the read against MaxSpecFileBytes so an attacker-influenced
+	// file path (e.g., a multi-GB local file passed via --recipe) cannot
+	// OOM the process by streaming unbounded bytes into the decoder.
+	// The limit matches the body cap used elsewhere for spec-like inputs.
+	limited := io.LimitReader(file, defaults.MaxSpecFileBytes+1)
 	return &Reader{
 		format: format,
-		input:  file,
+		input:  limited,
 		closer: file,
 	}, nil
 }
@@ -237,6 +260,9 @@ func (r *Reader) Deserialize(v any) error {
 	switch r.format {
 	case FormatJSON:
 		decoder := json.NewDecoder(r.input)
+		if r.strict {
+			decoder.DisallowUnknownFields()
+		}
 		if err := decoder.Decode(v); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode JSON", err)
 		}
@@ -244,6 +270,9 @@ func (r *Reader) Deserialize(v any) error {
 
 	case FormatYAML:
 		decoder := yaml.NewDecoder(r.input)
+		if r.strict {
+			decoder.KnownFields(true)
+		}
 		if err := decoder.Decode(v); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode YAML", err)
 		}

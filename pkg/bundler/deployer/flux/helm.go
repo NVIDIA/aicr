@@ -22,13 +22,12 @@ import (
 	"sort"
 	"strings"
 
-	k8syaml "sigs.k8s.io/yaml"
-
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // HelmReleaseData carries per-component data for the helmrelease.yaml template.
@@ -121,7 +120,7 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 	// Marshal values to YAML (2-space indent) and indent 4 spaces for embedding under spec.values.
 	var valuesYAML string
 	if len(values) > 0 {
-		yamlBytes, marshalErr := k8syaml.Marshal(values)
+		yamlBytes, marshalErr := serializer.MarshalYAMLDeterministic(values)
 		if marshalErr != nil {
 			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to marshal values for %s", ref.Name), marshalErr)
@@ -244,7 +243,7 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	var valuesYAML string
 	if len(values) > 0 {
 		wrapped := map[string]any{compName: values}
-		yamlBytes, marshalErr := k8syaml.Marshal(wrapped)
+		yamlBytes, marshalErr := serializer.MarshalYAMLDeterministic(wrapped)
 		if marshalErr != nil {
 			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to marshal values for %s", compName), marshalErr)
@@ -370,7 +369,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	var valuesYAML string
 	nestedValues := localformat.NestUnderSubchart(values, chartName)
 	if len(nestedValues) > 0 {
-		yamlBytes, marshalErr := k8syaml.Marshal(nestedValues)
+		yamlBytes, marshalErr := serializer.MarshalYAMLDeterministic(nestedValues)
 		if marshalErr != nil {
 			return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to marshal values for %s", ref.Name), marshalErr)
@@ -406,7 +405,7 @@ func writeConfigMap(compName string, dynamicValues map[string]any, compDir strin
 
 	var valuesYAML string
 	if len(dynamicValues) > 0 {
-		yamlBytes, err := k8syaml.Marshal(dynamicValues)
+		yamlBytes, err := serializer.MarshalYAMLDeterministic(dynamicValues)
 		if err != nil {
 			return "", errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to marshal dynamic values for %s", compName), err)

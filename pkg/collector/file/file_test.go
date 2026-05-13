@@ -348,8 +348,8 @@ func TestGetLines_NonExistentFile(t *testing.T) {
 	if err == nil {
 		t.Error("GetLines() with nonexistent file expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "failed to read file") {
-		t.Errorf("GetLines() error = %q, want error containing 'failed to read file'", err.Error())
+	if !strings.Contains(err.Error(), "failed to open file") {
+		t.Errorf("GetLines() error = %q, want error containing 'failed to open file'", err.Error())
 	}
 }
 

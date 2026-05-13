@@ -542,10 +542,14 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				overrides = filtered
 			}
 			if applyErr := component.ApplyMapOverrides(values, overrides); applyErr != nil {
-				slog.Warn("failed to apply some value overrides",
-					"component", ref.Name,
-					"error", applyErr,
-				)
+				// User-supplied --set overrides must produce the values the
+				// user asked for; silently dropping them ships a bundle
+				// that doesn't reflect the CLI inputs. Fail loudly so the
+				// user can correct the typo or invalid path.
+				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+					"failed to apply --set value overrides",
+					applyErr,
+					map[string]any{"component": ref.Name})
 			}
 		}
 
@@ -749,13 +753,13 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 		return nil
 	}
 
-	// Get component registry
+	// Get component registry — required to know which validations to run.
+	// A registry-load failure produces an unvalidated bundle, which is the
+	// opposite of what this tool promises; surface the failure to the user.
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
-		slog.Debug("failed to load component registry for validations",
-			"error", err,
-		)
-		return nil // Non-fatal, continue without validations
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to load component registry for validations", err)
 	}
 
 	// Iterate through components in recipe

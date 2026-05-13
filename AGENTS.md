@@ -579,9 +579,24 @@ net. When renaming or removing a heading:
 | Ignore `Close()` error on writable file handles | Capture and check `closeErr := f.Close()` |
 | Hardcode resource names from templates | Extract to named constants to keep code and templates in sync |
 | Unbounded `io.ReadAll(resp.Body)` on outbound HTTP | Wrap with `io.LimitReader` against `defaults.HTTPResponseBodyLimit` |
+| Unbounded `io.ReadAll` on request bodies in HTTP handlers / public parsers | Wrap with `io.LimitReader` against `defaults.MaxRecipePOSTBytes` (or matching cap). Production callers use `http.MaxBytesReader`, but public APIs are reachable from CLI/library callers — bound defense-in-depth |
+| Unbounded `os.ReadFile(path)` before a size check | `os.Open` + `io.LimitReader(f, maxSize+1)` — `os.ReadFile` allocates the full file first, so attacker-influenced paths (`/proc` symlinks, network mounts) can OOM the process |
 | Embed `Cause.Error()` in 5xx response details | Use `server.WriteErrorFromErr` (4xx-only cause leak) |
 | Use unprefixed `LOG_LEVEL` | Use `AICR_LOG_LEVEL` (only the prefixed name is read) |
 | `fmt.Println`/`fmt.Printf` to stdout in CLI commands | Write to `cmd.Root().Writer` (or `io.Writer` parameter) |
+| `yaml.Marshal` on `map[string]any` for output that feeds a digest/signature/OCI manifest/fingerprint | Use `serializer.MarshalYAMLDeterministic` — `yaml.v3` walks randomized Go map order, so two runs produce different bytes |
+| Deep-copy helper that recurses into maps but copies `[]any` by reference | Recurse into both `map[string]any` and `[]any`; scalars fall through the default branch by value. Slice aliasing leaks mutations across overlay merges |
+| Substring scan for `..` to defend against path traversal | Use `filepath.IsLocal(relPath)` — the substring check has false positives (`foo..bak`) and false negatives (after `filepath.Rel` cleans `..` segments) |
+| `sync.Once` caching state that depends on a settable global (e.g., a registry tied to a DataProvider) | Key the cache by a generation counter the setter increments; recompute on miss so late-bound configuration takes effect |
+| Returning a Go map from a function that releases its lock before the caller reads | Hold the lock for the full read (iterate inside the locked section), or return a defensive copy under lock |
+| Pre-flight / readiness gate that does `slog.Warn; continue` on evaluator errors | Fail closed — propagate the evaluator error. A malformed validation YAML must not masquerade as a passing constraint |
+| `slog.Warn` and continue on user `--set` / config-override parse or apply failure | Return `ErrCodeInvalidRequest` — a CLI flag typo must not ship a misconfigured artifact |
+| Type switch on `reading.Any()` that handles `int`/`int64` but not `float64` | Add a `case float64` branch (JSON decoders deliver integers as `float64`); reject when `float64(int64(v)) != v` to catch truncation |
+| Watch loop that returns "failed" when `watcher.ResultChan()` closes without context cancellation | Re-Get the resource (`Jobs().Get(...)`) before declaring failure — apiserver hiccups, LB drops, and rolling restarts commonly close watch channels |
+| Sequential calls to N independent read-only K8s APIs (e.g., `SelfSubjectAccessReview`) | Fan-out with `errgroup.WithContext`; preserve order via an indexed result slice. N×RTT → one RTT |
+| `pods.Items[0]` after a label-selector List | Filter `DeletionTimestamp != nil` and `PodFailed`; pick by youngest `CreationTimestamp`. An orphan pod from a prior run is the trap |
+| Background goroutine that swallows non-context errors silently (log streaming, watchers) | When `ctx.Err() == nil`, emit `slog.Warn` with the error — silent failures leave operators wondering why output is missing |
+| Artifact generators (BOM, SBOM, attestations) that bake `time.Now()` and a random UUID into output | Make both injectable via Metadata fields; provide a `Deterministic` mode that derives a UUIDv5 from input identity and omits the timestamp. Required for SLSA-reproducible builds |
 
 ## Pull Request Requirements
 

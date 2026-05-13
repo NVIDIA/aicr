@@ -766,15 +766,28 @@ func deepMergeMap(dst, src map[string]any) {
 	}
 }
 
-// deepCopyAnyMap returns a deep copy of a map[string]any tree.
+// deepCopyAnyMap returns a deep copy of a map[string]any tree, recursing into
+// both nested maps and slices so callers may safely mutate the returned tree
+// without leaking writes back to the source.
 func deepCopyAnyMap(m map[string]any) map[string]any {
 	cp := make(map[string]any, len(m))
 	for k, v := range m {
-		if nested, ok := v.(map[string]any); ok {
-			cp[k] = deepCopyAnyMap(nested)
-		} else {
-			cp[k] = v
-		}
+		cp[k] = deepCopyAny(v)
 	}
 	return cp
+}
+
+func deepCopyAny(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return deepCopyAnyMap(val)
+	case []any:
+		cp := make([]any, len(val))
+		for i, item := range val {
+			cp[i] = deepCopyAny(item)
+		}
+		return cp
+	default:
+		return v
+	}
 }

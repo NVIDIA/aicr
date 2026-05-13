@@ -68,3 +68,6 @@ measurements:
         data:
           ID: ubuntu
           VERSION_ID: "24.04"
+      - subtype: sysctl
+        data:
+          /proc/sys/kernel/osrelease: "6.8.0-1015-aws"
