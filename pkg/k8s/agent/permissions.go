@@ -18,8 +18,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"golang.org/x/sync/errgroup"
 	authv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -37,8 +39,6 @@ type permissionCheck struct {
 // to deploy the agent. Returns a list of permission checks and an error if any
 // required permissions are missing.
 func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, error) {
-	checks := []permissionCheck{}
-
 	type permCheck struct {
 		resource  string
 		verb      string
@@ -63,34 +63,58 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, err
 		{"jobs", "delete", d.config.Namespace},
 	}
 
-	var missingPermissions []string
-
-	for _, check := range requiredChecks {
-		allowed, reason, err := d.checkPermission(ctx, check.resource, check.verb, check.namespace)
-		if err != nil {
-			code := errors.ErrCodeInternal
-			if errors.IsNetworkError(err) {
-				code = errors.ErrCodeUnavailable
+	// SelfSubjectAccessReview is a read-only query; running the N required
+	// checks in parallel cuts wall-clock from N×RTT to one RTT against the
+	// apiserver. Each iteration's index is preserved so the response slice
+	// keeps a deterministic order regardless of completion timing.
+	results := make([]permissionCheck, len(requiredChecks))
+	g, gctx := errgroup.WithContext(ctx)
+	var mu sync.Mutex
+	var firstErr error
+	for i := range requiredChecks {
+		check := requiredChecks[i]
+		g.Go(func() error {
+			allowed, reason, err := d.checkPermission(gctx, check.resource, check.verb, check.namespace)
+			if err != nil {
+				code := errors.ErrCodeInternal
+				if errors.IsNetworkError(err) {
+					code = errors.ErrCodeUnavailable
+				}
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = errors.Wrap(code, fmt.Sprintf("failed to check permission for %s %s", check.verb, check.resource), err)
+				}
+				mu.Unlock()
+				return err
 			}
-			return checks, errors.Wrap(code, fmt.Sprintf("failed to check permission for %s %s", check.verb, check.resource), err)
+			results[i] = permissionCheck{
+				Resource:  check.resource,
+				Verb:      check.verb,
+				Namespace: check.namespace,
+				Allowed:   allowed,
+				Reason:    reason,
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		if firstErr != nil {
+			return nil, firstErr
 		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "permission check failed", err)
+	}
+	checks := make([]permissionCheck, 0, len(results))
+	checks = append(checks, results...)
 
-		result := permissionCheck{
-			Resource:  check.resource,
-			Verb:      check.verb,
-			Namespace: check.namespace,
-			Allowed:   allowed,
-			Reason:    reason,
-		}
-		checks = append(checks, result)
-
-		if !allowed {
+	var missingPermissions []string
+	for _, result := range results {
+		if !result.Allowed {
 			scope := "cluster-scoped"
-			if check.namespace != "" {
-				scope = fmt.Sprintf("namespace %q", check.namespace)
+			if result.Namespace != "" {
+				scope = fmt.Sprintf("namespace %q", result.Namespace)
 			}
 			missingPermissions = append(missingPermissions,
-				fmt.Sprintf("%s %s (%s)", check.verb, check.resource, scope))
+				fmt.Sprintf("%s %s (%s)", result.Verb, result.Resource, scope))
 		}
 	}
 

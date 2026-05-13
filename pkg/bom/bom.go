@@ -38,12 +38,26 @@ type Metadata struct {
 	ToolName    string // tool that generated the BOM; defaults to "aicr"
 	ToolVersion string // version of the generating tool
 
-	// Deterministic suppresses run-specific metadata in human-readable
-	// outputs so the artifact can be diffed across runs. Today this only
-	// affects WriteMarkdown (the "_Generated <timestamp> for <name>
-	// <version>_" line is omitted). Use for committed doc artifacts and
-	// any other bit-for-bit reproducible output path.
+	// Deterministic suppresses run-specific metadata so the artifact can
+	// be diffed across runs. Affects both WriteMarkdown (the "_Generated
+	// <timestamp>..._" line is omitted) and BuildBOM (a deterministic
+	// SerialNumber is derived from Name+Version and Timestamp is omitted).
+	// Use for committed doc artifacts, SLSA-style reproducible builds,
+	// and any other bit-for-bit reproducible output path.
 	Deterministic bool
+
+	// SerialNumber, if non-empty, overrides the BOM serial number. When
+	// empty and Deterministic is false, BuildBOM generates a random UUID.
+	// When empty and Deterministic is true, BuildBOM derives a serial
+	// from Name+Version. Use to inject a caller-supplied identifier
+	// (e.g., commit SHA) without forcing the Deterministic mode.
+	SerialNumber string
+
+	// Timestamp, if non-empty, overrides the BOM metadata timestamp
+	// (RFC3339). When empty and Deterministic is false, BuildBOM uses
+	// time.Now().UTC(). When empty and Deterministic is true, the
+	// timestamp is omitted entirely.
+	Timestamp string
 
 	// NoTitle suppresses the H1 title line in WriteMarkdown so the body
 	// can be embedded as a section of a larger document (e.g., the
@@ -88,9 +102,9 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 	}
 
 	bom := cdx.NewBOM()
-	bom.SerialNumber = "urn:uuid:" + uuid.NewString()
+	bom.SerialNumber = bomSerialNumber(meta)
 	bom.Metadata = &cdx.Metadata{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Timestamp: bomTimestamp(meta),
 		Tools: &cdx.ToolsChoice{
 			Components: &[]cdx.Component{{
 				Type:    cdx.ComponentTypeApplication,
@@ -194,6 +208,33 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 	bom.Components = &comps
 	bom.Dependencies = &deps
 	return bom
+}
+
+// bomSerialNumber picks a SerialNumber for the BOM based on Metadata. The
+// precedence is: explicit override > deterministic derivation > random UUID.
+func bomSerialNumber(meta Metadata) string {
+	if meta.SerialNumber != "" {
+		return meta.SerialNumber
+	}
+	if meta.Deterministic {
+		// Derive a stable UUIDv5 in the URL namespace from Name+Version
+		// so two runs of the same inputs produce identical bytes.
+		seed := meta.Name + "@" + meta.Version
+		return "urn:uuid:" + uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String()
+	}
+	return "urn:uuid:" + uuid.NewString()
+}
+
+// bomTimestamp picks a Timestamp for the BOM metadata. Returns empty string
+// in deterministic mode (CycloneDX permits omitting the timestamp).
+func bomTimestamp(meta Metadata) string {
+	if meta.Timestamp != "" {
+		return meta.Timestamp
+	}
+	if meta.Deterministic {
+		return ""
+	}
+	return time.Now().UTC().Format(time.RFC3339)
 }
 
 func versionOrTag(r ImageRef) string {

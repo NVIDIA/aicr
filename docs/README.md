@@ -13,7 +13,7 @@ NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the 
 | **Mixin** | A composable recipe fragment (`kind: RecipeMixin`) that carries only `constraints` and `componentRefs`. Mixins live in `recipes/mixins/`, are excluded from overlay discovery, and are referenced by leaf overlays via `spec.mixins` to share orthogonal content (e.g., OS constraints, platform components) without duplication. See [ADR-005](design/005-overlay-refactoring.md). |
 | **Bundle** | Deployment artifacts generated from a recipe: Helm values files, Kubernetes manifests, installation scripts, and checksums. |
 | **Bundler** | A plugin that generates bundle artifacts for a specific component (e.g., GPU Operator bundler, Network Operator bundler). |
-| **Deployer** | A plugin that transforms bundle artifacts into deployment-specific formats: `helm` (Helm per-component bundles, default), `argocd` (Applications with sync-waves). |
+| **Deployer** | A plugin that transforms bundle artifacts into deployment-specific formats: `helm` (Helm per-component bundles, default), `argocd` (Applications with sync-waves), `flux` (HelmReleases with dependsOn ordering). |
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator, cert-manager). Components have versions, Helm sources, and configuration values. |
 | **ComponentRef** | A reference to a component in a recipe, including version, source repository, values file, and dependency references. |
 | **Constraint** | A validation rule in a recipe specifying required system conditions (e.g., `K8s.server.version >= 1.31`, `OS.release.ID == ubuntu`). Constraints can have severity (error/warning), remediation guidance, and units. |
@@ -83,7 +83,7 @@ Before deploying, AICR can validate that a target cluster meets the recipe requi
 
 Finally, AICR converts the abstract Recipe into concrete deployment files.
 *   **What it does:** It generates a "Bundle" containing Helm values, Kubernetes manifests, installation scripts, and a custom README.
-*   **Deployer Options:** Supports multiple deployment methods: `helm` (Helm per-component bundle, default), `argocd` (Applications with sync-wave ordering).
+*   **Deployer Options:** Supports multiple deployment methods: `helm` (Helm per-component bundle, default), `argocd` (Applications with sync-wave ordering), `flux` (HelmReleases with dependsOn ordering).
 *   **How it helps:** Users receive ready-to-run scripts and manifests. For example, it generates a custom `install.sh` script that pre-validates the environment before running Helm commands.
 *   **Parallel Execution:** Multiple "Bundlers" (e.g., GPU Operator, Network Operator) can run simultaneously to generate a full stack configuration in seconds.
 

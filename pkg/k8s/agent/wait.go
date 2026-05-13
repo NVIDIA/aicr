@@ -110,6 +110,8 @@ func (d *Deployer) WaitForPodReady(ctx context.Context, timeout time.Duration) e
 
 // findPodName finds the pod name by label selector for this Job.
 // One-shot: returns ErrCodeNotFound if no pod is currently labeled.
+// Skips pods that are being deleted or have already failed so an
+// orphaned pod from a prior run is not selected.
 func (d *Deployer) findPodName(ctx context.Context) (string, error) {
 	pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: agentLabelSelector,
@@ -118,11 +120,33 @@ func (d *Deployer) findPodName(ctx context.Context) (string, error) {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
 	}
 
-	if len(pods.Items) == 0 {
+	name := pickLivePod(pods.Items)
+	if name == "" {
 		return "", errors.New(errors.ErrCodeNotFound, fmt.Sprintf("no Pods found for Job %s", d.config.JobName))
 	}
+	return name, nil
+}
 
-	return pods.Items[0].Name, nil
+// pickLivePod returns the name of the youngest pod that is neither being
+// deleted nor in a Failed phase. Returns "" if no usable pod exists.
+func pickLivePod(pods []corev1.Pod) string {
+	var best *corev1.Pod
+	for i := range pods {
+		p := &pods[i]
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+		if p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = p
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.Name
 }
 
 // findOrWatchPodName returns the agent pod's name. If the pod already exists
@@ -135,8 +159,8 @@ func (d *Deployer) findOrWatchPodName(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
 	}
-	if len(pods.Items) > 0 {
-		return pods.Items[0].Name, nil
+	if name := pickLivePod(pods.Items); name != "" {
+		return name, nil
 	}
 
 	watcher, err := d.clientset.CoreV1().Pods(d.config.Namespace).Watch(ctx, metav1.ListOptions{

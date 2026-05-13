@@ -813,8 +813,8 @@ func TestWriter_SerializeYAML_WriterError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from broken writer")
 	}
-	if !strings.Contains(err.Error(), "failed to serialize to YAML") {
-		t.Errorf("error = %v, want error containing 'failed to serialize to YAML'", err)
+	if !strings.Contains(err.Error(), "failed to write YAML") {
+		t.Errorf("error = %v, want error containing 'failed to write YAML'", err)
 	}
 }
 

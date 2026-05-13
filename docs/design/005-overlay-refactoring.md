@@ -266,11 +266,25 @@ are truly orthogonal and reused enough to justify the indirection.
    - `platform-kubeflow.yaml` — kubeflow-trainer component
    - `platform-dynamo.yaml` — dynamo-crds, dynamo-platform base components
 6. Migrate leaf overlays to use `spec.mixins` for OS and platform content.
-7. Enforce mixin conflict policy: no duplicate constraint names or component
-   names between a mixin and the inheritance chain, or between mixins
-   composed into the same leaf. Implement as either a CI lint rule over
-   `recipes/` or loader-time validation in `mergeMixins()` that returns an
-   error on conflict.
+7. Enforce mixin conflict policy:
+   - **Constraint names:** no duplicates between a mixin and the inheritance
+     chain, or between mixins composed into the same leaf. Constraints don't
+     compose, so a name collision is unambiguously a conflict.
+   - **Component names:** name collisions are allowed only when the mixin
+     entry sets nothing beyond the additive set
+     `{Namespace, ManifestFiles, PreManifestFiles}`. Identity / sourcing
+     fields (`Chart`, `Type`, `Source`, `Version`, `Tag`, `Path`,
+     `ValuesFile`, `Overrides`, `Patches`, `DependencyRefs`, `Cleanup`,
+     `ExpectedResources`, `HealthCheckAsserts`) still produce a hard error
+     — those are exactly the fields the original "Silent constraint override"
+     risk row (see Risk Table) was protecting. The carve-out keeps that
+     mitigation intact while letting OS-conditional mixins (e.g.
+     `os-talos`) contribute namespace and pre/post manifest overrides to
+     components already declared upstream without forcing every Talos leaf
+     overlay to re-author those fields by hand.
+   Implemented as loader-time validation in `mergeMixins()` plus a field-set
+   helper `mixinComponentRefSafeForMerge()` that returns the first offending
+   identity field so error messages are precise.
 
 **Exit criteria:**
 - `make test` passes with `-race`
@@ -283,9 +297,12 @@ are truly orthogonal and reused enough to justify the indirection.
 - Constraint evaluation in `BuildRecipeResultWithEvaluator` runs on the
   fully composed candidate (including mixin constraints), not per-overlay
   before composition
-- Mixin conflict policy is enforced: duplicate constraint or component names
-  between a mixin and the inheritance chain, or between mixins in the same
-  leaf, produce an error (CI lint or loader-time validation)
+- Mixin conflict policy is enforced via loader-time validation:
+  - Duplicate constraint names between a mixin and the inheritance chain
+    or between mixins in the same leaf produce a hard error.
+  - Duplicate component names are allowed when the mixin's entry sets only
+    fields in the additive set `{Namespace, ManifestFiles, PreManifestFiles}`;
+    setting any identity/sourcing field on a colliding name still errors.
 
 ### Deferred A: Intermediates + Reparenting
 
@@ -312,7 +329,7 @@ verified safe via regression tests.
 | Specificity fix changes overlay merge order | Silent recipe regression | Golden-file tests for all leaf overlays; regression test for zero-value criteria | 1 |
 | Candidate selection changes recipe output | Unexpected constraint or component changes | Characterization tests through both build paths | 2 |
 | Mixin loaded as normal overlay by resolver | Double-application of constraints/components | Distinct `kind: RecipeMixin` schema; loader excludes `recipes/mixins/` | 3 |
-| Mixin-vs-inheritance constraint conflict | Silent constraint override | CI lint: no duplicate constraint/component names between mixin and chain | 3 |
+| Mixin-vs-inheritance constraint conflict | Silent constraint override | Loader-time validation in `mergeMixins()`: constraint name collisions always error; component name collisions error only when the mixin sets identity/sourcing fields (additive-only fields are explicitly allowed for OS-conditional namespace + pre/post manifest overrides) | 3 |
 | Constraint evaluator misses mixin constraints | Mixin OS/platform constraints not validated against snapshot | Move constraint evaluation to run on fully composed candidate (post-merge) | 3 |
 | `spec.mixins` leaks into recipe output | Downstream consumer confusion | Strip `Mixins` field after merge, before materialization | 3 |
 

@@ -116,12 +116,19 @@ type Generator struct {
 	// in checksum generation. Used for external data files copied into the bundle.
 	DataFiles []string
 
-	// ComponentManifests maps component name → manifest path → rendered bytes.
+	// ComponentPreManifests maps component name → manifest path → rendered
+	// bytes for manifests that apply BEFORE each component's primary chart.
+	// Forwarded to the delegated argocd.Generator. Populated from
+	// ComponentRef.PreManifestFiles.
+	ComponentPreManifests map[string]map[string][]byte
+
+	// ComponentPostManifests maps component name → manifest path → rendered
+	// bytes for manifests that apply AFTER each component's primary chart.
 	// Forwarded to the delegated argocd.Generator so manifest-only and mixed
 	// components are wrapped as local Helm charts in the underlying NNN-folder
 	// layout. Without this, the delegated argocd output would silently skip
 	// manifestFiles (today's broken behavior for manifest-only components).
-	ComponentManifests map[string]map[string][]byte
+	ComponentPostManifests map[string]map[string][]byte
 
 	// VendorCharts pulls upstream Helm chart bytes into the bundle at
 	// bundle time so the resulting artifact is air-gap deployable.
@@ -159,14 +166,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	argocdGen := &argocd.Generator{
-		RecipeResult:       g.RecipeResult,
-		ComponentValues:    g.ComponentValues,
-		Version:            g.Version,
-		RepoURL:            g.RepoURL,
-		TargetRevision:     targetRevision,
-		IncludeChecksums:   false, // we generate our own checksums
-		ComponentManifests: g.ComponentManifests,
-		DynamicValues:      g.DynamicValues,
+		RecipeResult:           g.RecipeResult,
+		ComponentValues:        g.ComponentValues,
+		Version:                g.Version,
+		RepoURL:                g.RepoURL,
+		TargetRevision:         targetRevision,
+		IncludeChecksums:       false, // we generate our own checksums
+		ComponentPreManifests:  g.ComponentPreManifests,
+		ComponentPostManifests: g.ComponentPostManifests,
+		DynamicValues:          g.DynamicValues,
 		// Opt into the DynamicValues split: per-component values.yaml has
 		// dynamic paths removed; argocdhelm surfaces those paths at the
 		// parent chart level via writeStaticValuesAndBuildStubs.

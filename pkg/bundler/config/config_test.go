@@ -804,9 +804,14 @@ func TestParseDeployerType(t *testing.T) {
 		{"argocd uppercase", "ARGOCD", DeployerArgoCD, false},
 		{"argocd mixed case", "ArgoCD", DeployerArgoCD, false},
 		{"helm with spaces", "  helm  ", DeployerHelm, false},
+		{"argocd-helm lowercase", "argocd-helm", DeployerArgoCDHelm, false},
+		{"argocd-helm uppercase", "ARGOCD-HELM", DeployerArgoCDHelm, false},
+		{"flux lowercase", "flux", DeployerFlux, false},
+		{"flux uppercase", "FLUX", DeployerFlux, false},
+		{"flux mixed case", "Flux", DeployerFlux, false},
+		{"flux with spaces", "  flux  ", DeployerFlux, false},
 		{"invalid type", "invalid", "", true},
 		{"empty string", "", "", true},
-		{"flux not supported", "flux", "", true},
 	}
 
 	for _, tt := range tests {
@@ -826,9 +831,9 @@ func TestParseDeployerType(t *testing.T) {
 func TestGetDeployerTypes(t *testing.T) {
 	types := GetDeployerTypes()
 
-	// Verify we get the expected types (helm, argocd, argocd-helm)
-	if len(types) != 3 {
-		t.Errorf("GetDeployerTypes() returned %d types, want 3", len(types))
+	// Verify we get the expected types (argocd, argocd-helm, flux, helm)
+	if len(types) != 4 {
+		t.Errorf("GetDeployerTypes() returned %d types, want 4", len(types))
 	}
 
 	// Verify types are sorted alphabetically
@@ -850,6 +855,12 @@ func TestGetDeployerTypes(t *testing.T) {
 	if !found[string(DeployerHelm)] {
 		t.Error("GetDeployerTypes() missing 'helm'")
 	}
+	if !found[string(DeployerFlux)] {
+		t.Error("GetDeployerTypes() missing 'flux'")
+	}
+	if !found[string(DeployerArgoCDHelm)] {
+		t.Error("GetDeployerTypes() missing 'argocd-helm'")
+	}
 }
 
 func TestDeployerTypeString(t *testing.T) {
@@ -859,6 +870,8 @@ func TestDeployerTypeString(t *testing.T) {
 	}{
 		{DeployerHelm, "helm"},
 		{DeployerArgoCD, "argocd"},
+		{DeployerArgoCDHelm, "argocd-helm"},
+		{DeployerFlux, "flux"},
 	}
 
 	for _, tt := range tests {

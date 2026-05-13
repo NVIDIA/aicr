@@ -23,10 +23,9 @@ import (
 	"strings"
 	"text/template"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // RenderInput provides the data needed to render a manifest template.
@@ -99,7 +98,7 @@ func Render(content []byte, input RenderInput) ([]byte, error) {
 func helmFuncMap() template.FuncMap {
 	return template.FuncMap{
 		"toYaml": func(v any) string {
-			out, err := yaml.Marshal(v)
+			out, err := serializer.MarshalYAMLDeterministic(v)
 			if err != nil {
 				// Surface marshal failures to operators; silently returning
 				// "" produces a blank manifest field that is hard to debug.

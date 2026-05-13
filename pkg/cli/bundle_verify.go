@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
@@ -145,13 +144,16 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return policyErr
 	}
 
-	// Output results with final verdict
+	// Output results with final verdict. Route through cmd.Root().Writer
+	// so tests can capture output via cmd.SetWriter (the convention used
+	// everywhere else in pkg/cli).
+	out := cmd.Root().Writer
 	if format == verifyFormatJSON {
-		if jsonErr := outputJSON(os.Stdout, result); jsonErr != nil {
+		if jsonErr := outputJSON(out, result); jsonErr != nil {
 			return jsonErr
 		}
 	} else {
-		outputText(os.Stdout, result, policyFailure)
+		outputText(out, result, policyFailure)
 	}
 
 	if policyFailure != "" {

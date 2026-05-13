@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package k8s provides Kubernetes integration for Cloud Native Stack.
+// Package k8s provides Kubernetes integration for AI Cluster Runtime.
 //
 // This package contains sub-packages for Kubernetes cluster interaction:
 //

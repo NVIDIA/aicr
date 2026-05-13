@@ -1975,7 +1975,7 @@ func TestBundleGolden_ManifestOnly(t *testing.T) {
 			DeploymentOrder: []string{"skyhook-customizations"},
 		},
 		ComponentValues: map[string]map[string]any{"skyhook-customizations": {}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"skyhook-customizations": {
 				"components/skyhook-customizations/manifests/customization.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 
@@ -1994,16 +1994,34 @@ metadata:
 	assertBundleGolden(t, outDir, "testdata/manifest_only")
 }
 
+// TestBundleGolden_MixedGPUOperator exercises the full three-phase
+// emission: pre (Namespace manifest) + primary (upstream gpu-operator
+// chart) + post (dcgm-exporter manifest). Locks in the lexicographic
+// ordering 001-gpu-operator-pre/, 002-gpu-operator/, 003-gpu-operator-post/
+// the deploy.sh glob iterates in install order.
 func TestBundleGolden_MixedGPUOperator(t *testing.T) {
 	outDir := t.TempDir()
 	g := &Generator{
 		RecipeResult: singleComponentRecipe(
-			"gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
+			"gpu-operator", "privileged-gpu-operator", "gpu-operator", "v25.3.3",
 			"https://helm.ngc.nvidia.com/nvidia"),
 		ComponentValues: map[string]map[string]any{
 			"gpu-operator": {"driver": map[string]any{"enabled": true}},
 		},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/talos-namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: privileged-gpu-operator
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+`),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 
@@ -2072,6 +2090,42 @@ func TestBundleGolden_NodewrightPresent(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	assertBundleGolden(t, outDir, "testdata/nodewright_present")
+}
+
+// TestBundleGolden_MixedWithPre exercises the pre-injection path:
+// a component with ComponentPreManifests (no post manifests) and an
+// upstream Helm chart emits exactly two folders in order:
+//
+//	001-foo-pre/   (local-helm wrapping the namespace manifest)
+//	002-foo/       (upstream Helm primary)
+//
+// Install ordering: pre runs before primary, the opposite of post.
+func TestBundleGolden_MixedWithPre(t *testing.T) {
+	outDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: singleComponentRecipe(
+			"foo", "privileged-foo", "foo", "v1.0.0",
+			"https://example.com/charts"),
+		ComponentValues: map[string]map[string]any{"foo": {}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {
+				"components/foo/manifests/talos-namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: privileged-foo
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+`),
+			},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(context.Background(), outDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	assertBundleGolden(t, outDir, "testdata/mixed_with_pre")
 }
 
 // ---------------------------------------------------------------------------

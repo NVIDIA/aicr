@@ -1,0 +1,347 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-flux
+spec:
+  description: |
+    Tests Flux deployer bundle generation.
+    Covers output structure (sources/, per-component dirs, root kustomization.yaml,
+    README.md), HelmRelease CRs with correct API versions, source deduplication,
+    dependsOn ordering, value overrides (--set), and YAML validity.
+    No cluster needed.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: setup
+      description: Generate recipe used by all flux bundle tests.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-flux"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+
+    - name: basic-flux-bundle
+      description: --deployer flux produces Flux directory structure.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-flux"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/basic" \
+                --deployer flux
+              # Root files must exist.
+              test -f "${WORK}/basic/kustomization.yaml"
+              test -f "${WORK}/basic/README.md"
+              # Sources directory must exist with at least one HelmRepository.
+              test -d "${WORK}/basic/sources"
+              ls "${WORK}"/basic/sources/helmrepo-*.yaml >/dev/null 2>&1 \
+                || { echo "no HelmRepository source CRs found" >&2; exit 1; }
+              # At least one component directory with helmrelease.yaml (values are inlined).
+              found=false
+              for dir in "${WORK}"/basic/*/; do
+                [ "$(basename "$dir")" = "sources" ] && continue
+                [ "$(basename "$dir")" = "namespaces" ] && continue
+                if [ -f "${dir}helmrelease.yaml" ]; then
+                  found=true; break
+                fi
+              done
+              [ "$found" = "true" ] \
+                || { echo "no component with helmrelease.yaml found" >&2; exit 1; }
+              # Flat Helm deployer artifacts must NOT exist.
+              ! test -f "${WORK}/basic/deploy.sh"
+              ! test -f "${WORK}/basic/app-of-apps.yaml"
+            check:
+              ($error == null): true
+
+    - name: helmrelease-api-version
+      description: HelmRelease CRs use the correct Flux v2 API group.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              for hr in "${WORK}"/basic/*/helmrelease.yaml; do
+                [ -f "$hr" ] || continue
+                grep -q "apiVersion: helm.toolkit.fluxcd.io/v2" "$hr" \
+                  || { echo "wrong apiVersion in $(dirname "$hr")" >&2; exit 1; }
+                grep -q "kind: HelmRelease" "$hr" \
+                  || { echo "wrong kind in $(dirname "$hr")" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: helmrepo-source-api-version
+      description: HelmRepository source CRs use source.toolkit.fluxcd.io/v1.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              for src in "${WORK}"/basic/sources/helmrepo-*.yaml; do
+                [ -f "$src" ] || continue
+                grep -q "apiVersion: source.toolkit.fluxcd.io/v1" "$src" \
+                  || { echo "wrong apiVersion in $src" >&2; exit 1; }
+                grep -q "kind: HelmRepository" "$src" \
+                  || { echo "wrong kind in $src" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: root-kustomization-structure
+      description: Root kustomization.yaml references sources and component dirs.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              KUST="${WORK}/basic/kustomization.yaml"
+              grep -q "apiVersion: kustomize.config.k8s.io/v1beta1" "${KUST}" \
+                || { echo "wrong apiVersion in root kustomization.yaml" >&2; exit 1; }
+              grep -q "kind: Kustomization" "${KUST}" \
+                || { echo "wrong kind in root kustomization.yaml" >&2; exit 1; }
+              # Must reference at least one source.
+              grep -q "sources/" "${KUST}" \
+                || { echo "no sources/ reference in root kustomization.yaml" >&2; exit 1; }
+              # Namespaces are handled by HelmRelease createNamespace; no separate dir expected.
+              # Values are inlined in HelmRelease; no configMapGenerator expected.
+              ! grep -q "configMapGenerator:" "${KUST}" \
+                || { echo "unexpected configMapGenerator in root kustomization.yaml" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: depends-on-ordering
+      description: >
+        First component has no dependsOn; every other component has dependsOn
+        referencing exactly its immediate predecessor in the deployment chain.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              # Build a file mapping each component to its dependsOn target.
+              # Format: "component:dep" (dep is empty for the chain root).
+              MAP=$(mktemp)
+              trap 'rm -f "$MAP"' EXIT
+              no_dep_count=0
+              first_comp=""
+              count=0
+              for dir in "${WORK}"/basic/*/; do
+                comp="$(basename "$dir")"
+                [ "$comp" = "sources" ] && continue
+                hr="${dir}helmrelease.yaml"
+                [ -f "$hr" ] || continue
+                count=$((count + 1))
+                dep=$(grep -A1 "dependsOn:" "$hr" 2>/dev/null \
+                  | grep "name:" | awk '{print $NF}' | head -1)
+                echo "${comp}:${dep}" >> "$MAP"
+                if [ -z "$dep" ]; then
+                  no_dep_count=$((no_dep_count + 1))
+                  first_comp="$comp"
+                fi
+              done
+              [ "$count" -ge 2 ] \
+                || { echo "need at least 2 components, got $count" >&2; exit 1; }
+
+              # Exactly one component must have no dependsOn (the chain root).
+              [ "$no_dep_count" -eq 1 ] \
+                || { echo "expected 1 root component, got $no_dep_count" >&2; exit 1; }
+
+              # Every non-root component must depend on an existing component.
+              while IFS=: read -r comp dep; do
+                [ -z "$dep" ] && continue
+                grep -q "^${dep}:" "$MAP" \
+                  || { echo "$comp depends on '$dep' which is not a component" >&2; exit 1; }
+              done < "$MAP"
+
+              # Walk each component back to root — verifies no cycles, no orphans.
+              while IFS=: read -r comp _; do
+                cur="$comp"
+                steps=0
+                while [ "$cur" != "$first_comp" ]; do
+                  dep=$(grep "^${cur}:" "$MAP" | cut -d: -f2)
+                  [ -n "$dep" ] \
+                    || { echo "$cur has no dep and is not root ($first_comp)" >&2; exit 1; }
+                  cur="$dep"
+                  steps=$((steps + 1))
+                  [ "$steps" -le "$count" ] \
+                    || { echo "cycle at $cur" >&2; exit 1; }
+                done
+              done < "$MAP"
+
+              echo "dependsOn chain valid: $count components, root=$first_comp"
+            check:
+              ($error == null): true
+
+    - name: source-deduplication
+      description: Components sharing a Helm repo URL produce a single HelmRepository CR.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              # Count unique HelmRepository source CRs.
+              source_count=$(ls "${WORK}"/basic/sources/helmrepo-*.yaml 2>/dev/null | wc -l | tr -d ' ')
+              # Count unique repo URLs across all HelmRelease sourceRef names.
+              source_refs=$(grep -h "name:" "${WORK}"/basic/*/helmrelease.yaml 2>/dev/null \
+                | grep -v "kind:" | sort -u | wc -l | tr -d ' ')
+              # There should be fewer (or equal) source CRs than component references.
+              comp_count=0
+              for dir in "${WORK}"/basic/*/; do
+                [ "$(basename "$dir")" = "sources" ] && continue
+                [ -f "${dir}helmrelease.yaml" ] && comp_count=$((comp_count + 1))
+              done
+              [ "$source_count" -le "$comp_count" ] \
+                || { echo "source CRs ($source_count) > components ($comp_count) — dedup failed" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: inline-values
+      description: Each HelmRelease has inline spec.values (no valuesFrom ConfigMap).
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              for dir in "${WORK}"/basic/*/; do
+                [ "$(basename "$dir")" = "sources" ] && continue
+                [ "$(basename "$dir")" = "namespaces" ] && continue
+                hr="${dir}helmrelease.yaml"
+                [ -f "$hr" ] || continue
+                # Must have inline values, not valuesFrom.
+                grep -q "  values:" "$hr" \
+                  || { echo "$(basename "$dir") HelmRelease missing inline values" >&2; exit 1; }
+                ! grep -q "valuesFrom:" "$hr" \
+                  || { echo "$(basename "$dir") HelmRelease should not use valuesFrom" >&2; exit 1; }
+                # Must have install.createNamespace.
+                grep -q "createNamespace: true" "$hr" \
+                  || { echo "$(basename "$dir") HelmRelease missing createNamespace" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: value-override-flux
+      description: --set flag injects custom value into HelmRelease inline values.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-flux"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/value-override" \
+                --deployer flux \
+                --set gpu-operator:driver.version=999.99.99
+              found=false
+              for hr in "${WORK}"/value-override/*/helmrelease.yaml; do
+                grep -q "999.99.99" "$hr" 2>/dev/null && { found=true; break; }
+              done
+              [ "$found" = "true" ] || { echo "999.99.99 not found in any helmrelease.yaml" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: yaml-validity
+      description: All generated YAML files pass yamllint structural validation.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              for yamlfile in "${WORK}"/basic/*.yaml "${WORK}"/basic/*/*.yaml; do
+                [ -f "$yamlfile" ] || continue
+                yamllint -d '{extends: relaxed, rules: {trailing-spaces: disable}}' "$yamlfile" \
+                  || { echo "yamllint failed on $yamlfile" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: dynamic-values-configmap
+      description: --dynamic flag generates ConfigMap and valuesFrom in HelmRelease.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-flux"
+              rm -rf "${WORK}/dynamic-out"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/dynamic-out" \
+                --deployer flux --dynamic gpuoperator:driver.version
+
+              # Verify ConfigMap file exists for gpu-operator.
+              [ -f "${WORK}/dynamic-out/gpu-operator/configmap-values.yaml" ] \
+                || { echo "missing gpu-operator/configmap-values.yaml" >&2; exit 1; }
+
+              # Verify ConfigMap is valid YAML with correct kind.
+              grep -q "kind: ConfigMap" "${WORK}/dynamic-out/gpu-operator/configmap-values.yaml" \
+                || { echo "configmap-values.yaml missing 'kind: ConfigMap'" >&2; exit 1; }
+
+              # Verify HelmRelease references the ConfigMap via valuesFrom.
+              grep -q "valuesFrom" "${WORK}/dynamic-out/gpu-operator/helmrelease.yaml" \
+                || { echo "HelmRelease missing valuesFrom" >&2; exit 1; }
+              grep -q "gpu-operator-values" "${WORK}/dynamic-out/gpu-operator/helmrelease.yaml" \
+                || { echo "HelmRelease missing ConfigMap reference" >&2; exit 1; }
+
+              # Verify kustomization.yaml includes the ConfigMap resource.
+              grep -q "gpu-operator/configmap-values.yaml" "${WORK}/dynamic-out/kustomization.yaml" \
+                || { echo "kustomization.yaml missing configmap-values.yaml resource" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: readme-content
+      description: README.md contains component table and deployment instructions.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              README="${WORK}/basic/README.md"
+              grep -q "Flux Bundle" "${README}" \
+                || { echo "README missing title" >&2; exit 1; }
+              grep -q "flux" "${README}" \
+                || { echo "README missing flux reference" >&2; exit 1; }
+              grep -q "HelmRelease" "${README}" \
+                || { echo "README missing HelmRelease in component table" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: reproducible-output
+      description: Two runs with identical input produce identical output.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-flux"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/repro-a" --deployer flux
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/repro-b" --deployer flux
+              diff -r "${WORK}/repro-a" "${WORK}/repro-b" \
+                || { echo "outputs differ between two identical runs" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: gitrepo-source-present
+      description: A GitRepository source CR is generated for manifest/kustomize support.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-flux"
+              ls "${WORK}"/basic/sources/gitrepo-*.yaml >/dev/null 2>&1 \
+                || { echo "no GitRepository source CRs found" >&2; exit 1; }
+              for src in "${WORK}"/basic/sources/gitrepo-*.yaml; do
+                [ -f "$src" ] || continue
+                grep -q "apiVersion: source.toolkit.fluxcd.io/v1" "$src" \
+                  || { echo "wrong apiVersion in $src" >&2; exit 1; }
+                grep -q "kind: GitRepository" "$src" \
+                  || { echo "wrong kind in $src" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-flux

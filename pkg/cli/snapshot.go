@@ -16,14 +16,10 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/urfave/cli/v3"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -38,67 +34,6 @@ type snapshotTemplateOptions struct {
 	templatePath string
 	outputPath   string
 	format       serializer.Format
-}
-
-// parseResourceList converts a comma-separated "name=quantity" list
-// (e.g. "cpu=500m,memory=1Gi,ephemeral-storage=1Gi") into a
-// corev1.ResourceList for use as a per-container request or limit
-// override. An empty string returns a nil ResourceList so the caller
-// can distinguish "no override supplied" (defaults apply) from
-// "override supplied" (replace per-key); a sentinel error would force
-// every call site to special-case the empty-flag path. Each quantity
-// is parsed via resource.ParseQuantity, so the same suffixes accepted
-// everywhere else in Kubernetes work here (m, Ki, Mi, Gi, Ti, ...).
-//
-//nolint:nilnil // (nil, nil) on empty input is the intended contract.
-func parseResourceList(spec string) (corev1.ResourceList, error) {
-	spec = strings.TrimSpace(spec)
-	if spec == "" {
-		return nil, nil
-	}
-	result := corev1.ResourceList{}
-	for _, raw := range strings.Split(spec, ",") {
-		entry := strings.TrimSpace(raw)
-		if entry == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("entry %q is not in name=quantity form", entry))
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" || value == "" {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("entry %q has empty name or quantity", entry))
-		}
-		q, err := resource.ParseQuantity(value)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("entry %q has invalid quantity", entry), err)
-		}
-		// Reject negative quantities at parse time so the user gets a
-		// clear CLI-layer error instead of an obscure failure when the
-		// Job is later created (Kubernetes resources cannot be negative).
-		if q.Sign() < 0 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("entry %q has negative quantity", entry))
-		}
-		// Reject duplicate keys explicitly. Last-write-wins is too easy
-		// to misuse silently from a shell-templated invocation
-		// (e.g. accidentally appending the same key from two
-		// AICR_REQUESTS sources).
-		if _, dup := result[corev1.ResourceName(key)]; dup {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("duplicate key %q", key))
-		}
-		result[corev1.ResourceName(key)] = q
-	}
-	if len(result) == 0 {
-		return nil, nil
-	}
-	return result, nil
 }
 
 func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format) (*snapshotTemplateOptions, error) {
@@ -392,11 +327,11 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 
 			// Parse resource overrides (CLI takes the same comma-separated
 			// 'name=quantity' shape as kubectl run --requests / --limits).
-			resourceRequests, err := parseResourceList(cmd.String("requests"))
+			resourceRequests, err := snapshotter.ParseResourceList(cmd.String("requests"))
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --requests")
 			}
-			resourceLimits, err := parseResourceList(cmd.String("limits"))
+			resourceLimits, err := snapshotter.ParseResourceList(cmd.String("limits"))
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
 			}

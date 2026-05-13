@@ -171,9 +171,13 @@ func parseQueryRequestFromBody(body io.Reader, contentType string) (*QueryReques
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "request body cannot be nil")
 	}
 
-	data, err := io.ReadAll(body)
+	limited := io.LimitReader(body, defaults.MaxRecipePOSTBytes+1)
+	data, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read request body", err)
+	}
+	if int64(len(data)) > defaults.MaxRecipePOSTBytes {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("request body exceeds %d bytes", defaults.MaxRecipePOSTBytes))
 	}
 
 	if len(data) == 0 {

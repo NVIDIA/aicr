@@ -36,30 +36,36 @@ const (
 	// All values are overridable at install time via helm --set.
 	// Use --dynamic to pre-populate specific paths in root values.yaml.
 	DeployerArgoCDHelm DeployerType = "argocd-helm"
+	// DeployerFlux generates Flux HelmRelease manifests.
+	DeployerFlux DeployerType = "flux"
 )
+
+// allDeployerTypes is the single source of truth for supported deployer types.
+var allDeployerTypes = []DeployerType{
+	DeployerHelm,
+	DeployerArgoCD,
+	DeployerArgoCDHelm,
+	DeployerFlux,
+}
 
 // ParseDeployerType parses a string into a DeployerType.
 // Returns an error if the string is not a valid deployer type.
 func ParseDeployerType(s string) (DeployerType, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case string(DeployerHelm):
-		return DeployerHelm, nil
-	case string(DeployerArgoCD):
-		return DeployerArgoCD, nil
-	case string(DeployerArgoCDHelm):
-		return DeployerArgoCDHelm, nil
-	default:
-		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid deployer type %q: must be one of %v", s, GetDeployerTypes()))
+	normalized := strings.ToLower(strings.TrimSpace(s))
+	for _, dt := range allDeployerTypes {
+		if string(dt) == normalized {
+			return dt, nil
+		}
 	}
+	return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid deployer type %q: must be one of %v", s, GetDeployerTypes()))
 }
 
 // GetDeployerTypes returns a sorted slice of all supported deployer types.
 // This is useful for CLI flag validation and usage messages.
 func GetDeployerTypes() []string {
-	types := []string{
-		string(DeployerHelm),
-		string(DeployerArgoCD),
-		string(DeployerArgoCDHelm),
+	types := make([]string, len(allDeployerTypes))
+	for i, dt := range allDeployerTypes {
+		types[i] = string(dt)
 	}
 	sort.Strings(types)
 	return types

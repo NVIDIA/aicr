@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gpu-operator-post
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/example/aicr-bundles.git'
+    targetRevision: main
+    path: 003-gpu-operator-post
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: privileged-gpu-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # ServerSideApply: enabled uniformly across all generated
+      # Applications. Required for charts whose CRDs exceed kubectl's
+      # 262144-byte client-side annotation cap (e.g.,
+      # kube-prometheus-stack, kai-scheduler) — otherwise Argo's sync
+      # retries forever with "metadata.annotations: Too long". The
+      # apiserver's structured-merge path has no such cap. Benign on
+      # Applications that don't need it (pre-folder Namespaces,
+      # post-folder ConfigMaps) — keeping it on every Application avoids
+      # per-Application template branching and a confusing mix of sync
+      # strategies in a single bundle.
+      - ServerSideApply=true

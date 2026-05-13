@@ -103,6 +103,19 @@ type ComponentRef struct {
 	// Example: ["components/gpu-operator/manifests/dcgm-exporter.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`
 
+	// PreManifestFiles lists manifest files that must be bundled and applied
+	// BEFORE the component's primary chart. Paths are relative to the data
+	// directory; ".." segments are rejected at load time (external data
+	// directories enforce a path-traversal check during file registration,
+	// and embed.FS refuses any read that resolves outside its root), so a
+	// recipe cannot read arbitrary files outside the embedded/external data
+	// root. Used for resources the chart depends on (e.g. a Namespace with
+	// PSS labels that the chart's pods need to land in). Bundler emits
+	// these as a "<name>-pre" local-helm folder at sync-wave N-1 (Argo) or
+	// install step N-1 (Helm); the primary chart lands at wave N; existing
+	// ManifestFiles still land at wave N+1 as before.
+	PreManifestFiles []string `json:"preManifestFiles,omitempty" yaml:"preManifestFiles,omitempty"`
+
 	// Path is the path within the repository to the kustomization (for Kustomize).
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 
@@ -562,6 +575,20 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 		}
 	}
 
+	// PreManifestFiles: additive merge (base + overlay, deduplicated)
+	if len(overlay.PreManifestFiles) > 0 {
+		seen := make(map[string]bool)
+		for _, f := range result.PreManifestFiles {
+			seen[f] = true
+		}
+		for _, f := range overlay.PreManifestFiles {
+			if !seen[f] {
+				result.PreManifestFiles = append(result.PreManifestFiles, f)
+				seen[f] = true
+			}
+		}
+	}
+
 	// Path: overlay takes precedence if set (for Kustomize)
 	if overlay.Path != "" {
 		result.Path = overlay.Path
@@ -739,15 +766,28 @@ func deepMergeMap(dst, src map[string]any) {
 	}
 }
 
-// deepCopyAnyMap returns a deep copy of a map[string]any tree.
+// deepCopyAnyMap returns a deep copy of a map[string]any tree, recursing into
+// both nested maps and slices so callers may safely mutate the returned tree
+// without leaking writes back to the source.
 func deepCopyAnyMap(m map[string]any) map[string]any {
 	cp := make(map[string]any, len(m))
 	for k, v := range m {
-		if nested, ok := v.(map[string]any); ok {
-			cp[k] = deepCopyAnyMap(nested)
-		} else {
-			cp[k] = v
-		}
+		cp[k] = deepCopyAny(v)
 	}
 	return cp
+}
+
+func deepCopyAny(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return deepCopyAnyMap(val)
+	case []any:
+		cp := make([]any, len(val))
+		for i, item := range val {
+			cp[i] = deepCopyAny(item)
+		}
+		return cp
+	default:
+		return v
+	}
 }

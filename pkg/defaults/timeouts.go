@@ -105,6 +105,16 @@ const (
 	K8sPodTerminationWaitTimeout = 60 * time.Second
 )
 
+// Local filesystem timeouts.
+const (
+	// FileReadTimeout bounds blocking reads against the local filesystem,
+	// including paths that may resolve through symlinks, FUSE mounts, or
+	// network filesystems (NFS, SMB). Generous because legitimate local
+	// reads are sub-second; the timeout exists to protect against pathological
+	// mounts and attacker-influenced paths.
+	FileReadTimeout = 30 * time.Second
+)
+
 // HTTP client timeouts for outbound requests.
 const (
 	// HTTPClientTimeout is the default total timeout for HTTP requests.

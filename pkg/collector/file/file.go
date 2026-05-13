@@ -16,6 +16,7 @@ package file
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -179,20 +180,17 @@ func (p *Parser) GetLines(path string) ([]string, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "file path cannot be empty")
 	}
 
-	// Read file content
-	b, err := os.ReadFile(path)
+	// Read file content with a size cap enforced during read so attacker-
+	// influenced paths (e.g., /proc/self symlinks pointing at /dev/zero)
+	// cannot OOM the process by allocating the full file first.
+	b, err := readBounded(path, p.maxSize)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read file %q", path), err)
+		return nil, err
 	}
 
 	// Validate UTF-8
 	if !utf8.Valid(b) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("content of file %q is not valid UTF-8", path))
-	}
-
-	// Check file size
-	if len(b) > p.maxSize {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("file %q exceeds maximum size of %d bytes", path, p.maxSize))
 	}
 
 	// Split content by delimiter
@@ -216,4 +214,28 @@ func (p *Parser) GetLines(path string) ([]string, error) {
 	}
 
 	return result, nil
+}
+
+// readBounded opens path and reads at most maxSize+1 bytes. A read that
+// returns exactly maxSize+1 bytes indicates the file exceeds the limit and
+// the call fails before the full content is allocated. This bounds memory
+// for attacker-influenced paths and matches the project's unbounded-read
+// rule (CLAUDE.md) for outbound HTTP applied to local filesystem inputs.
+func readBounded(path string, maxSize int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to open file %q", path), err)
+	}
+	defer func() { _ = f.Close() }()
+
+	limited := io.LimitReader(f, int64(maxSize)+1)
+	b, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read file %q", path), err)
+	}
+	if len(b) > maxSize {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("file %q exceeds maximum size of %d bytes", path, maxSize))
+	}
+	return b, nil
 }

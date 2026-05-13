@@ -256,10 +256,11 @@ func TestCheckReadinessEmptyConstraints(t *testing.T) {
 	}
 }
 
-func TestCheckReadinessPassingConstraint(t *testing.T) {
-	// Use a constraint path that Evaluate can resolve.
-	// When the path cannot be parsed or value not found, Evaluate returns Error (skipped).
-	// A constraint with an unparseable name results in Error != nil -> skipped (not failure).
+func TestCheckReadinessUnparseableConstraintFailsClosed(t *testing.T) {
+	// A pre-flight gate must fail closed on evaluator errors so a malformed
+	// validation YAML cannot masquerade as a passing constraint. An
+	// unparseable constraint name surfaces as an error from Evaluate; the
+	// caller propagates it as ErrCodeInvalidRequest.
 	rec := &recipe.RecipeResult{
 		Constraints: []recipe.Constraint{
 			{Name: "invalid-path-that-will-be-skipped", Value: "anything"},
@@ -267,9 +268,8 @@ func TestCheckReadinessPassingConstraint(t *testing.T) {
 	}
 	snap := &snapshotter.Snapshot{}
 	validation := recipe.ToValidation(rec)
-	// Unparseable constraint path => skipped (warn), not failure.
-	if err := checkReadiness(validation, snap); err != nil {
-		t.Errorf("checkReadiness() = %v, want nil for skipped constraint", err)
+	if err := checkReadiness(validation, snap); err == nil {
+		t.Errorf("checkReadiness() = nil, want error for unevaluable constraint")
 	}
 }
 

@@ -32,6 +32,7 @@ import (
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // logWriter returns an io.Writer for streaming agent logs.
@@ -194,11 +195,20 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	go func() {
 		defer logWG.Done()
 		if podErr := deployer.WaitForPodReady(logCtx, defaults.K8sPodReadyTimeout); podErr != nil {
+			// Only suppress logging when the parent context has been
+			// canceled (expected during cleanup). Genuine failures
+			// (pod stuck, image pull errors) must surface so operators
+			// understand why agent logs are missing from their output.
+			if logCtx.Err() == nil {
+				slog.Warn("agent log streaming skipped: pod did not become ready",
+					"error", podErr)
+			}
 			return
 		}
 		if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
 			if logCtx.Err() == nil {
-				slog.Debug("log streaming ended", slog.String("reason", streamErr.Error()))
+				slog.Warn("agent log streaming ended early",
+					"error", streamErr)
 			}
 		}
 	}()
@@ -267,6 +277,65 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 	}
 
 	return &snap, nil
+}
+
+// ParseResourceList converts a comma-separated "name=quantity" list
+// (e.g. "cpu=500m,memory=1Gi,ephemeral-storage=1Gi") into a
+// corev1.ResourceList for use as a per-container request or limit
+// override. An empty string returns a nil ResourceList so the caller
+// can distinguish "no override supplied" (defaults apply) from
+// "override supplied" (replace per-key); a sentinel error would force
+// every call site to special-case the empty-flag path. Each quantity
+// is parsed via resource.ParseQuantity, so the same suffixes accepted
+// everywhere else in Kubernetes work here (m, Ki, Mi, Gi, Ti, ...).
+//
+//nolint:nilnil // (nil, nil) on empty input is the intended contract.
+func ParseResourceList(spec string) (corev1.ResourceList, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil, nil
+	}
+	result := corev1.ResourceList{}
+	for _, raw := range strings.Split(spec, ",") {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q is not in name=quantity form", entry))
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q has empty name or quantity", entry))
+		}
+		q, err := resource.ParseQuantity(value)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q has invalid quantity", entry), err)
+		}
+		// Reject negative quantities at parse time so the user gets a
+		// clear error instead of an obscure failure when the Job is
+		// later created (Kubernetes resources cannot be negative).
+		if q.Sign() < 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q has negative quantity", entry))
+		}
+		// Reject duplicate keys explicitly. Last-write-wins is too easy
+		// to misuse silently from a shell-templated invocation.
+		if _, dup := result[corev1.ResourceName(key)]; dup {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("duplicate key %q", key))
+		}
+		result[corev1.ResourceName(key)] = q
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
 }
 
 // ParseNodeSelectors parses node selector strings in format "key=value".

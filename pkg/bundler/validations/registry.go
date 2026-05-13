@@ -40,14 +40,6 @@ func initRegistry() {
 	// This ensures automatic discovery when new validation functions are added
 }
 
-// getRegistry returns the validation function registry, initializing it if needed.
-func getRegistry() map[string]ValidationFunc {
-	registryOnce.Do(initRegistry)
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	return registry
-}
-
 // Register adds a validation function to the registry.
 // This allows components to register custom validation functions.
 // It's also called from init() functions in check files for auto-registration.
@@ -66,15 +58,19 @@ func Register(name string, fn ValidationFunc) {
 // Get returns a validation function by name.
 // Returns nil if the function is not found.
 func Get(name string) ValidationFunc {
-	reg := getRegistry()
-	return reg[name]
+	registryOnce.Do(initRegistry)
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	return registry[name]
 }
 
 // GetAll returns all registered validation function names.
 func GetAll() []string {
-	reg := getRegistry()
-	names := make([]string, 0, len(reg))
-	for name := range reg {
+	registryOnce.Do(initRegistry)
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	names := make([]string, 0, len(registry))
+	for name := range registry {
 		names = append(names, name)
 	}
 	return names

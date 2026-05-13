@@ -415,16 +415,22 @@ func (st *Subtype) GetString(key string) (string, error) {
 }
 
 // GetInt64 attempts to retrieve an int64 value, returning an error if not found or wrong type.
+// Accepts int, int64, and float64 (JSON decoders deliver integers as float64);
+// a float64 must be representable as an int64 without truncation.
 func (st *Subtype) GetInt64(key string) (int64, error) {
 	reading := st.Data[key]
 	if reading == nil {
 		return 0, aicrerrors.New(aicrerrors.ErrCodeNotFound, fmt.Sprintf("key %q not found", key))
 	}
-	// Handle both int64 and int
 	switch v := reading.Any().(type) {
 	case int64:
 		return v, nil
 	case int:
+		return int64(v), nil
+	case float64:
+		if v != float64(int64(v)) {
+			return 0, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("key %q is not an integer (float %v)", key, v))
+		}
 		return int64(v), nil
 	default:
 		return 0, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("key %q is not an integer", key))

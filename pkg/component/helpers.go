@@ -21,9 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // computeChecksum computes the SHA256 checksum of the given content.
@@ -32,17 +30,11 @@ func computeChecksum(content []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// MarshalYAML serializes a value to YAML format.
+// MarshalYAML serializes a value to YAML format with mapping keys sorted
+// so the output is byte-stable across runs (matters for OCI manifest
+// digests, fingerprints, and attestations).
 func MarshalYAML(v any) ([]byte, error) {
-	// Import yaml package inline to avoid adding it as a top-level dependency
-	// for packages that don't need it
-	var buf bytes.Buffer
-	encoder := yaml.NewEncoder(&buf)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(v); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal YAML", err)
-	}
-	return buf.Bytes(), nil
+	return serializer.MarshalYAMLDeterministic(v)
 }
 
 // ValuesHeader contains metadata for values.yaml file headers.
@@ -53,22 +45,22 @@ type ValuesHeader struct {
 }
 
 // MarshalYAMLWithHeader serializes a value to YAML format with a metadata header.
+// Mapping keys are sorted so the output is byte-stable across runs.
 func MarshalYAMLWithHeader(v any, header ValuesHeader) ([]byte, error) {
 	var buf bytes.Buffer
 
 	// Write header comments
 	fmt.Fprintf(&buf, "# %s Helm Values\n", header.ComponentName)
-	buf.WriteString("# Generated from Cloud Native Stack Recipe\n")
+	buf.WriteString("# Generated from AICR Recipe\n")
 	fmt.Fprintf(&buf, "# Bundler Version: %s\n", header.BundlerVersion)
 	fmt.Fprintf(&buf, "# Recipe Version: %s\n", header.RecipeVersion)
 	buf.WriteString("\n")
 
-	// Serialize the values
-	encoder := yaml.NewEncoder(&buf)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(v); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal YAML", err)
+	body, err := serializer.MarshalYAMLDeterministic(v)
+	if err != nil {
+		return nil, err
 	}
+	buf.Write(body)
 	return buf.Bytes(), nil
 }
 

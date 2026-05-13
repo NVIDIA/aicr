@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /*
-Package argocd provides Argo CD Application generation for Cloud Native Stack recipes.
+Package argocd provides Argo CD Application generation for AI Cluster Runtime recipes.
 
 The argocd package generates Argo CD Application manifests from RecipeResult objects,
 enabling GitOps-based deployment of GPU-accelerated infrastructure components.

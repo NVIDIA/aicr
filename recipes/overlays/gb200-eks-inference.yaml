@@ -41,7 +41,9 @@ spec:
     # declared in the inheritance chain, so this lives per-leaf for now.
     - name: gpu-operator
       type: Helm
-      manifestFiles:
+      preManifestFiles:
+        # Pre-install: ClusterPolicy reconcile reads this ConfigMap during
+        # `helm install --wait`. See gb200-eks-training.yaml for full context (#859).
         - components/gpu-operator/manifests/kernel-module-params.yaml
       dependencyRefs:
         - nfd

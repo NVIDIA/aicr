@@ -162,30 +162,41 @@ type ComponentValidationConfig struct {
 	Message string `yaml:"message,omitempty"`
 }
 
-// Global component registry (loaded once, thread-safe access)
+// Global component registry, keyed by the DataProvider generation that
+// produced it. SetDataProvider increments the generation; the next call to
+// GetComponentRegistry observes the change and rebuilds the cache so a
+// late-bound external data source actually takes effect.
 var (
-	globalRegistry     *ComponentRegistry
-	globalRegistryOnce sync.Once
-	globalRegistryErr  error
+	registryCacheMu  sync.Mutex
+	registryCache    *ComponentRegistry
+	registryCacheErr error
+	registryCacheGen = -1
 )
 
-// GetComponentRegistry returns the global component registry.
-// The registry is loaded once from embedded data and cached.
-// Returns an error if the registry file cannot be loaded or parsed.
+// GetComponentRegistry returns the global component registry. The registry is
+// cached, but the cache is invalidated whenever SetDataProvider is called so
+// callers that swap in an external data source see the new content.
 func GetComponentRegistry() (*ComponentRegistry, error) {
-	globalRegistryOnce.Do(func() {
-		globalRegistry, globalRegistryErr = loadComponentRegistry()
-	})
-	return globalRegistry, globalRegistryErr
+	gen := getDataProviderGeneration()
+	registryCacheMu.Lock()
+	defer registryCacheMu.Unlock()
+	if registryCacheGen == gen && (registryCache != nil || registryCacheErr != nil) {
+		return registryCache, registryCacheErr
+	}
+	registryCache, registryCacheErr = loadComponentRegistry()
+	registryCacheGen = gen
+	return registryCache, registryCacheErr
 }
 
-// ResetComponentRegistryForTesting resets the singleton registry so it will be
-// reloaded from the current DataProvider on the next call to GetComponentRegistry.
-// This must only be called from tests.
+// ResetComponentRegistryForTesting resets the cached registry so it will be
+// reloaded from the current DataProvider on the next call to
+// GetComponentRegistry. This must only be called from tests.
 func ResetComponentRegistryForTesting() {
-	globalRegistry = nil
-	globalRegistryErr = nil
-	globalRegistryOnce = sync.Once{}
+	registryCacheMu.Lock()
+	defer registryCacheMu.Unlock()
+	registryCache = nil
+	registryCacheErr = nil
+	registryCacheGen = -1
 }
 
 // loadComponentRegistry loads the component registry from the data provider.

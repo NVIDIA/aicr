@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -859,9 +860,13 @@ func ParseCriteriaFromBody(body io.Reader, contentType string) (*Criteria, error
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "request body cannot be nil")
 	}
 
-	data, err := io.ReadAll(body)
+	limited := io.LimitReader(body, defaults.MaxRecipePOSTBytes+1)
+	data, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read request body", err)
+	}
+	if int64(len(data)) > defaults.MaxRecipePOSTBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("request body exceeds %d bytes", defaults.MaxRecipePOSTBytes))
 	}
 
 	if len(data) == 0 {

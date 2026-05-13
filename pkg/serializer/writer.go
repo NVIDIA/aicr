@@ -28,7 +28,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
-	"gopkg.in/yaml.v3"
 )
 
 // Format represents the output format type
@@ -181,10 +180,12 @@ func (w *Writer) serializeJSON(config any) error {
 }
 
 func (w *Writer) serializeYAML(config any) error {
-	encoder := yaml.NewEncoder(w.output)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(config); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize to YAML", err)
+	out, err := MarshalYAMLDeterministic(config)
+	if err != nil {
+		return err
+	}
+	if _, err := w.output.Write(out); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write YAML", err)
 	}
 	return nil
 }
@@ -280,11 +281,7 @@ func serializeJSON(data any) ([]byte, error) {
 // serializeYAML serializes data to YAML format and returns the bytes.
 // This is used by ConfigMapWriter to serialize data without needing an io.Writer.
 func serializeYAML(data any) ([]byte, error) {
-	content, err := yaml.Marshal(data)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to serialize to YAML", err)
-	}
-	return content, nil
+	return MarshalYAMLDeterministic(data)
 }
 
 // serializeTable serializes data to table format and returns the bytes.

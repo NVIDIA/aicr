@@ -39,12 +39,16 @@ spec:
     # eks-training / eks-inference), so this lives per-leaf for now.
     - name: gpu-operator
       type: Helm
-      manifestFiles:
+      preManifestFiles:
         # Ships a ConfigMap with options nvidia NVreg_GrdmaPciTopoCheckOverride=1.
         # driver.kernelModuleConfig.name (below) points the ClusterPolicy at it,
         # so the driver DaemonSet mounts nvidia.conf and the kernel loads with
         # the flag set — required on GB200+EFA for EFA dma-buf attach to the
         # Grace PCI topology. Without it, NCCL silently falls back to Socket.
+        #
+        # Must be preManifestFiles (applied before the chart): the chart's
+        # ClusterPolicy reconcile reads this ConfigMap during `helm install --wait`,
+        # so a post-install pass would deadlock until the chart times out (#859).
         - components/gpu-operator/manifests/kernel-module-params.yaml
       dependencyRefs:
         - nfd

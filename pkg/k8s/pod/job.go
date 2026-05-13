@@ -64,7 +64,23 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
 					return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
 				}
-				return errors.New(errors.ErrCodeInternal, "watch channel closed unexpectedly")
+				// Watch channel closed without context cancellation —
+				// apiserver hiccups (rolling restart, LB drop) commonly
+				// cause this. Re-Get the Job directly to see whether it
+				// raced to a terminal state during the closure window.
+				recheck, recheckErr := client.BatchV1().Jobs(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
+				if recheckErr != nil {
+					if ctxErr := timeoutCtx.Err(); ctxErr != nil {
+						return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
+					}
+					return errors.Wrap(errors.ErrCodeInternal,
+						"watch closed and Job re-check failed", recheckErr)
+				}
+				if done, checkErr := checkJobStatus(recheck); done {
+					return checkErr
+				}
+				return errors.New(errors.ErrCodeUnavailable,
+					"watch channel closed before Job reached terminal state")
 			}
 			if event.Type == watch.Error {
 				if statusErr, isErr := event.Object.(error); isErr {

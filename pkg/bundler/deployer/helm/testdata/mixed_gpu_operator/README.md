@@ -1,9 +1,9 @@
-# Cloud Native Stack Deployment
+# AI Cluster Runtime Deployment
 
 Recipe Version: v0.1.0
 Bundler Version: v1.0.0
 
-Per-component bundle for deploying NVIDIA Cloud Native Stack components
+Per-component bundle for deploying NVIDIA AI Cluster Runtime components
 for GPU-accelerated Kubernetes workloads.
 
 ## Configuration
@@ -18,7 +18,7 @@ via its own `install.sh`:
 
 | Component | Version | Namespace | Source |
 |-----------|---------|-----------|--------|
-| gpu-operator | v25.3.3 | gpu-operator | gpu-operator (https://helm.ngc.nvidia.com/nvidia) |
+| gpu-operator | v25.3.3 | privileged-gpu-operator | gpu-operator (https://helm.ngc.nvidia.com/nvidia) |
 
 
 
@@ -80,7 +80,7 @@ To remove components (reverse order):
 Or remove a single release manually:
 
 ```bash
-helm uninstall gpu-operator -n gpu-operator
+helm uninstall gpu-operator -n privileged-gpu-operator
 ```
 
 

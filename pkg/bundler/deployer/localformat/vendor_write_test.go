@@ -140,9 +140,9 @@ func TestWrite_VendorCharts_Mixed(t *testing.T) {
 			ChartName:  "alloy",
 			Version:    "1.2.3",
 		}},
-		ComponentManifests: manifests,
-		VendorCharts:       true,
-		Puller:             &fakePuller{},
+		ComponentPostManifests: manifests,
+		VendorCharts:           true,
+		Puller:                 &fakePuller{},
 	})
 	folders := res.Folders
 	recs := res.VendoredCharts
@@ -236,6 +236,83 @@ func TestWrite_VendorCharts_OCIPrefixedVersion(t *testing.T) {
 	tarballPath := filepath.Join(outDir, folders[0].Dir, "charts", recs[0].TarballName)
 	if _, statErr := os.Stat(tarballPath); statErr != nil {
 		t.Errorf("expected tarball at %s: %v", tarballPath, statErr)
+	}
+}
+
+// TestWrite_VendorCharts_PreManifests pins the contract that pre
+// injection runs even when --vendor-charts is on. Vendored mode
+// collapses post manifests into the primary folder (no -post split),
+// but the pre folder is independent of the primary's chart shape and
+// must always be emitted ahead of it — the os-talos mixin's
+// privileged-Namespace manifest needs to exist before any vendored
+// chart's pods schedule.
+//
+// Asserts: two folders (pre + primary), pre is a local-helm wrapper,
+// primary is the vendored Helm folder with the chart tarball; the
+// VendorRecord count covers the primary only (pre folders are
+// always-local and never recorded).
+func TestWrite_VendorCharts_PreManifests(t *testing.T) {
+	outDir := t.TempDir()
+
+	preManifests := map[string]map[string][]byte{
+		"gpu-operator": {
+			"components/gpu-operator/manifests/talos-namespace.yaml": []byte(
+				"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: privileged-gpu-operator\n",
+			),
+		},
+	}
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: outDir,
+		Components: []localformat.Component{{
+			Name:       "gpu-operator",
+			Namespace:  "privileged-gpu-operator",
+			Repository: "https://nvidia.github.io/gpu-operator",
+			ChartName:  "gpu-operator",
+			Version:    "v24.9.1",
+		}},
+		ComponentPreManifests: preManifests,
+		VendorCharts:          true,
+		Puller:                &fakePuller{},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got, want := len(res.Folders), 2; got != want {
+		t.Fatalf("folder count = %d, want %d (pre + vendored primary)", got, want)
+	}
+	if got, want := res.Folders[0].Dir, "001-gpu-operator-pre"; got != want {
+		t.Errorf("Folders[0].Dir = %q, want %q", got, want)
+	}
+	if got, want := res.Folders[0].Kind, localformat.KindLocalHelm; got != want {
+		t.Errorf("Folders[0].Kind = %v, want %v (pre folders are always local)", got, want)
+	}
+	if got, want := res.Folders[1].Dir, "002-gpu-operator"; got != want {
+		t.Errorf("Folders[1].Dir = %q, want %q", got, want)
+	}
+
+	// Pre folder install.sh must omit --create-namespace.
+	preInstall, err := os.ReadFile(filepath.Join(outDir, "001-gpu-operator-pre", "install.sh"))
+	if err != nil {
+		t.Fatalf("read pre install.sh: %v", err)
+	}
+	if strings.Contains(string(preInstall), "--create-namespace") {
+		t.Errorf("pre folder install.sh must not pass --create-namespace:\n%s", preInstall)
+	}
+
+	// Pre folder must carry the Namespace manifest template.
+	if _, err := os.Stat(filepath.Join(outDir, "001-gpu-operator-pre", "templates", "talos-namespace.yaml")); err != nil {
+		t.Errorf("pre folder missing templates/talos-namespace.yaml: %v", err)
+	}
+
+	// Primary folder must be the vendored shape: chart tarball + values nested under subchart name.
+	if _, err := os.Stat(filepath.Join(outDir, "002-gpu-operator", "charts", "gpu-operator-v24.9.1.tgz")); err != nil {
+		t.Errorf("primary folder missing vendored tarball: %v", err)
+	}
+
+	// VendorRecord covers the primary only; pre folders are always-local
+	// wrappers and have no upstream provenance to record.
+	if got, want := len(res.VendoredCharts), 1; got != want {
+		t.Errorf("vendor record count = %d, want %d (pre folders not recorded)", got, want)
 	}
 }
 

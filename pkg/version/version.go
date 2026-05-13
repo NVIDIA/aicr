@@ -157,71 +157,18 @@ func MustParseVersion(s string) Version {
 	return v
 }
 
-// EqualsOrNewer returns true if v is equal to or newer than other.
-// Comparison is performed up to the precision of v.
-// For example, Version{Major:1, Minor:2, Precision:2} matches any 1.2.x version.
+// EqualsOrNewer returns true if v is equal to or newer than other. Comparison
+// is performed up to min(v.Precision, other.Precision) so the function is
+// symmetric with Compare — a Major.Minor (precision=2) version compares
+// equal to any Major.Minor.x (precision=3) sharing the same Major.Minor.
 func (v Version) EqualsOrNewer(other Version) bool {
-	// Always compare Major
-	if v.Major > other.Major {
-		return true
-	}
-	if v.Major < other.Major {
-		return false
-	}
-
-	// If precision is 1 (Major only), we're equal
-	if v.Precision == 1 {
-		return true
-	}
-
-	// Major versions are equal, compare Minor
-	if v.Minor > other.Minor {
-		return true
-	}
-	if v.Minor < other.Minor {
-		return false
-	}
-
-	// If precision is 2 (Major.Minor), we're equal
-	if v.Precision == 2 {
-		return true
-	}
-
-	// Minor versions are equal, compare Patch
-	return v.Patch >= other.Patch
+	return v.Compare(other) >= 0
 }
 
 // isNewer returns true if v is strictly newer than other (not equal).
-// Respects precision like EqualsOrNewer.
+// Uses the same min-precision semantics as Compare/EqualsOrNewer.
 func (v Version) isNewer(other Version) bool {
-	// Always compare Major
-	if v.Major > other.Major {
-		return true
-	}
-	if v.Major < other.Major {
-		return false
-	}
-
-	// If precision is 1 (Major only), they're equal
-	if v.Precision == 1 {
-		return false
-	}
-
-	// Major versions are equal, compare Minor
-	if v.Minor > other.Minor {
-		return true
-	}
-	if v.Minor < other.Minor {
-		return false
-	}
-
-	// If precision is 2 (Major.Minor), they're equal
-	if v.Precision == 2 {
-		return false
-	}
-
-	// Minor versions are equal, compare Patch
-	return v.Patch > other.Patch
+	return v.Compare(other) > 0
 }
 
 // Equals returns true if v exactly equals other (all components match).
