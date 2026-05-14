@@ -17,6 +17,7 @@ package verifier
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -191,6 +192,12 @@ func findExtras(ctx context.Context, bundleDir string, manifestFiles []attestati
 		return nil
 	})
 	if walkErr != nil {
+		// A canceled ctx surfaces here as context.Canceled / DeadlineExceeded
+		// from the callback. Translate to ErrCodeUnavailable so cancellation
+		// reads the same way it does in the per-file loop above.
+		if stderrors.Is(walkErr, context.Canceled) || stderrors.Is(walkErr, context.DeadlineExceeded) {
+			return nil, errors.Wrap(errors.ErrCodeUnavailable, "bundle walk canceled", walkErr)
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to walk bundle dir", walkErr)
 	}
 	return extras, nil
