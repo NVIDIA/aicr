@@ -24,6 +24,20 @@ const (
 	CatalogKind = "ValidatorCatalog"
 )
 
+// Phase represents a validation phase.
+type Phase string
+
+const (
+	// PhaseDeployment is the deployment validation phase.
+	PhaseDeployment Phase = "deployment"
+
+	// PhasePerformance is the performance validation phase.
+	PhasePerformance Phase = "performance"
+
+	// PhaseConformance is the conformance validation phase.
+	PhaseConformance Phase = "conformance"
+)
+
 // ValidatorCatalog is the top-level catalog document.
 // Supports both standalone file usage (with full metadata) and embedded usage in CRs (metadata omitted).
 //
@@ -102,13 +116,57 @@ type EnvVar struct {
 	Value string `json:"value" yaml:"value"`
 }
 
-// ForPhase returns validators filtered by phase name.
-func (c *ValidatorCatalog) ForPhase(phase string) []ValidatorEntry {
+// ForPhase returns validators filtered by phase.
+func (c *ValidatorCatalog) ForPhase(phase Phase) []ValidatorEntry {
 	var result []ValidatorEntry
 	for _, v := range c.Validators {
-		if v.Phase == phase {
+		if v.Phase == string(phase) {
 			result = append(result, v)
 		}
 	}
 	return result
+}
+
+// FilterEntriesByValidation filters catalog entries based on the validation's declared checks for the given phase.
+// Returns nil if the validation has no phase configuration or no checks declared.
+func FilterEntriesByValidation(entries []ValidatorEntry, phase Phase, validationInput *ValidationInput) []ValidatorEntry {
+	if validationInput == nil {
+		return nil
+	}
+
+	var phaseChecks []string
+	switch phase {
+	case PhaseDeployment:
+		if validationInput.Config.Deployment != nil {
+			phaseChecks = validationInput.Config.Deployment.Checks
+		}
+	case PhasePerformance:
+		if validationInput.Config.Performance != nil {
+			phaseChecks = validationInput.Config.Performance.Checks
+		}
+	case PhaseConformance:
+		if validationInput.Config.Conformance != nil {
+			phaseChecks = validationInput.Config.Conformance.Checks
+		}
+	}
+
+	// No checks declared for this phase → skip it.
+	if len(phaseChecks) == 0 {
+		return nil
+	}
+
+	// Build set for O(1) lookup.
+	allowed := make(map[string]bool, len(phaseChecks))
+	for _, name := range phaseChecks {
+		allowed[name] = true
+	}
+
+	filtered := make([]ValidatorEntry, 0, len(phaseChecks))
+	for _, entry := range entries {
+		if allowed[entry.Name] {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	return filtered
 }

@@ -26,9 +26,23 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// ExtractResult reads the exit code, termination message, and stdout from a
-// completed validator pod. Returns a ValidatorResult regardless of how the
-// container terminated — the caller maps the result to a CTRF status.
+const (
+	// ValidatorContainerName is the required name for the validator container.
+	// This is part of the validator package contract to ensure sidecar-safety.
+	ValidatorContainerName = "validator"
+)
+
+// ExtractResult reads the exit code, termination message, and stdout from the
+// "validator" container in a completed validator pod.
+//
+// CONTRACT: The container name MUST be "validator". This is a frozen public
+// contract of the validator package to ensure sidecar-safety — ExtractResult
+// will only read from the "validator" container, ignoring any sidecar containers
+// that may be injected by external controllers (e.g., log streaming, result
+// processing).
+//
+// Returns a ValidatorResult regardless of how the container terminated — the
+// caller maps the result to a CTRF status.
 //
 // This method must be called after WaitForCompletion returns, when the Job is
 // in a terminal state (Complete or Failed).
@@ -47,14 +61,13 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		return result
 	}
 
-	// Extract container status
-	if len(jobPod.Status.ContainerStatuses) == 0 {
+	// Extract container status from "validator" container
+	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
+	if !found {
 		result.ExitCode = -1
-		result.TerminationMsg = "no container status available"
+		result.TerminationMsg = fmt.Sprintf("container %q not found (validator package contract)", ValidatorContainerName)
 		return result
 	}
-
-	cs := jobPod.Status.ContainerStatuses[0]
 	switch {
 	case cs.State.Terminated != nil:
 		result.ExitCode = cs.State.Terminated.ExitCode
@@ -78,8 +91,8 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		result.TerminationMsg = "container still running after wait completed"
 	}
 
-	// Capture stdout from pod logs
-	logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, "")
+	// Capture stdout from pod logs (explicit container name)
+	logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ValidatorContainerName)
 	if logErr != nil {
 		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
 		// Not fatal — we still have exit code and termination message
@@ -109,27 +122,28 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 		return result
 	}
 
-	// Try to get logs
-	if logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ""); logErr == nil && logs != "" {
+	// Check container status from "validator" container first (before fetching logs)
+	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
+	if !found {
+		result.ExitCode = -1
+		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container %q not found - validator package contract)", d.entry.Timeout, ValidatorContainerName)
+		return result
+	}
+
+	// Try to get logs from "validator" container
+	if logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ValidatorContainerName); logErr == nil && logs != "" {
 		result.Stdout = filterStdoutLines(
 			truncateLogLines(logs, defaults.ValidatorMaxStdoutLines),
 			defaults.ValidatorMaxStdoutLineLength,
 		)
 	}
 
-	// Try to get container status
-	if len(jobPod.Status.ContainerStatuses) > 0 {
-		cs := jobPod.Status.ContainerStatuses[0]
-		if cs.State.Terminated != nil {
-			result.ExitCode = cs.State.Terminated.ExitCode
-			result.TerminationMsg = cs.State.Terminated.Message
-			result.StartTime = cs.State.Terminated.StartedAt.Time
-			result.CompletionTime = cs.State.Terminated.FinishedAt.Time
-			result.Duration = result.CompletionTime.Sub(result.StartTime)
-		} else {
-			result.ExitCode = -1
-			result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s", d.entry.Timeout)
-		}
+	if cs.State.Terminated != nil {
+		result.ExitCode = cs.State.Terminated.ExitCode
+		result.TerminationMsg = cs.State.Terminated.Message
+		result.StartTime = cs.State.Terminated.StartedAt.Time
+		result.CompletionTime = cs.State.Terminated.FinishedAt.Time
+		result.Duration = result.CompletionTime.Sub(result.StartTime)
 	} else {
 		result.ExitCode = -1
 		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s", d.entry.Timeout)
@@ -171,4 +185,19 @@ func filterStdoutLines(lines []string, maxLineLen int) []string {
 // inside this file remain readable.
 func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
 	return pod.GetPodForJob(ctx, d.clientset, d.namespace, d.jobName)
+}
+
+// findContainerStatus finds a container status by name in the pod's container
+// status list. Returns the container status and true if found, or a zero value
+// and false if not found.
+//
+// This helper ensures sidecar-safety by allowing explicit container name lookup
+// instead of assuming index 0 is the validator container.
+func findContainerStatus(statuses []corev1.ContainerStatus, name string) (corev1.ContainerStatus, bool) {
+	for _, cs := range statuses {
+		if cs.Name == name {
+			return cs, true
+		}
+	}
+	return corev1.ContainerStatus{}, false
 }

@@ -172,7 +172,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 				}).
 				WithSpec(d.buildPodSpecApply().
 					WithContainers(applycorev1.Container().
-						WithName("validator").
+						WithName(ValidatorContainerName).
 						WithImage(d.entry.Image).
 						WithImagePullPolicy(d.imagePullPolicy()).
 						WithArgs(d.entry.Args...).

@@ -89,7 +89,7 @@ Output as JSON:
 	Must contain "NVIDIA/aicr". Default pins to the release workflow on tag refs.`,
 			},
 			withCompletions(&cli.StringFlag{
-				Name:  "format",
+				Name:  flagFormat,
 				Value: verifyFormatText,
 				Usage: "Output format: text, json",
 			}, func() []string { return []string{verifyFormatJSON, verifyFormatText} }),
@@ -110,7 +110,7 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to resolve bundle path", err)
 	}
 
-	format := cmd.String("format")
+	format := cmd.String(flagFormat)
 	if format != verifyFormatText && format != verifyFormatJSON {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}

@@ -144,16 +144,17 @@ validators:
 	}
 
 	tests := []struct {
-		phase    string
+		name     string
+		phase    v1.Phase
 		expected int
 	}{
-		{"deployment", 2},
-		{"performance", 1},
-		{"conformance", 1},
-		{"nonexistent", 0},
+		{"deployment", v1.PhaseDeployment, 2},
+		{"performance", v1.PhasePerformance, 1},
+		{"conformance", v1.PhaseConformance, 1},
+		{"nonexistent", v1.Phase("nonexistent"), 0},
 	}
 	for _, tt := range tests {
-		t.Run(tt.phase, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			got := catalog.ForPhase(tt.phase)
 			if len(got) != tt.expected {
 				t.Errorf("ForPhase(%q) returned %d entries, want %d", tt.phase, len(got), tt.expected)

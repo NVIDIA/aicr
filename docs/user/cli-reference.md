@@ -1890,6 +1890,42 @@ aicr verify ./my-bundle --format json
 
 ---
 
+### aicr evidence verify
+
+Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. Recomputes every file's sha256 against the bundle's `manifest.json` (which is bound to the predicate's `manifest.digest`) and surfaces the predicate's fingerprint, phase counts, and BOM info.
+
+Only directory input is supported today. Cryptographic signature verification, inline constraint replay, OCI pull, and pointer-file support are not yet implemented.
+
+**Synopsis:**
+```shell
+aicr evidence verify <directory> [flags]
+```
+
+**Flags:**
+| Flag | Alias | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--output` | `-o` | string | | Write output to this file. When empty, output goes to stdout. |
+| `--format` | `-t` | string | `text` | Output format: `text` (Markdown) or `json`. Applies regardless of destination. |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Bundle valid; every check passed. |
+| 2 | Bundle invalid (manifest hash mismatch or predicate malformed), OR recorded validator results show failures. |
+
+The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the library API) still distinguishes the two non-zero cases as `1` (recorded phase failures) vs `2` (bundle invalid).
+
+**Examples:**
+```shell
+aicr evidence verify ./out/summary-bundle                  # Markdown to stdout
+aicr evidence verify ./out/summary-bundle -o summary.md    # Markdown to file
+aicr evidence verify ./out/summary-bundle -t json          # JSON to stdout
+aicr evidence verify ./out/summary-bundle -o r.json -t json   # JSON to file
+```
+
+---
+
 ### aicr trust update
 
 Fetch the latest Sigstore trusted root from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year).
