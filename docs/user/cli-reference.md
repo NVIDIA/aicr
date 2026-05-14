@@ -1890,6 +1890,40 @@ aicr verify ./my-bundle --format json
 
 ---
 
+### aicr evidence verify
+
+Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. Recomputes every file's sha256 against the bundle's `manifest.json` (which is bound to the predicate's `manifest.digest`) and surfaces the predicate's fingerprint, phase counts, and BOM info.
+
+This is the first slice of the verifier (directory input only). Cryptographic signature verification, inline constraint replay, OCI pull, and pointer-file support ship in follow-up PRs.
+
+**Synopsis:**
+```shell
+aicr evidence verify <directory> [flags]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--output-markdown` | string | | Write the Markdown summary to this path in addition to stdout. |
+| `--format` | string | `text` | Output format: `text` (Markdown) or `json`. |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Bundle valid; every check passed. |
+| 1 | Bundle valid; recorded validator results show failures (informational). |
+| 2 | Bundle invalid (manifest hash mismatch or predicate malformed). |
+
+**Examples:**
+```shell
+aicr evidence verify ./out/summary-bundle
+aicr evidence verify ./out/summary-bundle --output-markdown ./summary.md
+aicr evidence verify ./out/summary-bundle --format json
+```
+
+---
+
 ### aicr trust update
 
 Fetch the latest Sigstore trusted root from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year).
