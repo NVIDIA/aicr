@@ -28,14 +28,29 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// rbacNamePrefix is the shared prefix for the validator ServiceAccount and
+// ClusterRoleBinding. ServiceAccountName and ClusterRoleBindingName suffix
+// this with the runID so concurrent validation runs against the same cluster
+// (or, for the ClusterRoleBinding, against any cluster they share at all) do
+// not delete each other's RBAC during end-of-run cleanup.
+const rbacNamePrefix = "aicr-validator"
+
+// ServiceAccountName returns the per-run ServiceAccount name used by the
+// validator Jobs deployed for runID. Each `aicr validate` invocation generates
+// a unique runID, so the SA created at run start is the same one deleted at
+// run end — overlapping runs cannot clobber each other.
+func ServiceAccountName(runID string) string {
+	return rbacNamePrefix + "-" + runID
+}
+
+// ClusterRoleBindingName returns the per-run ClusterRoleBinding name. The CRB
+// is cluster-scoped, so name uniqueness across concurrent runs (even on
+// different namespaces) is what prevents cross-run cleanup races.
+func ClusterRoleBindingName(runID string) string {
+	return rbacNamePrefix + "-" + runID
+}
+
 const (
-	// ServiceAccountName is the name of the ServiceAccount used by all validator Jobs.
-	ServiceAccountName = "aicr-validator"
-
-	// ClusterRoleBindingName is the name of the ClusterRoleBinding that grants
-	// cluster-admin to the validator ServiceAccount.
-	ClusterRoleBindingName = "aicr-validator"
-
 	// clusterAdminRole is the built-in Kubernetes ClusterRole bound to validators.
 	//
 	// Why cluster-admin is safe here:
@@ -73,40 +88,47 @@ const (
 
 // EnsureRBAC applies the ServiceAccount and ClusterRoleBinding for validator
 // Jobs using server-side apply. Call once per validation run before deploying
-// any Jobs.
-func EnsureRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
-	if err := applyServiceAccount(ctx, clientset, namespace); err != nil {
+// any Jobs. The runID scopes the resource names so overlapping runs do not
+// clobber each other.
+func EnsureRBAC(ctx context.Context, clientset kubernetes.Interface, namespace, runID string) error {
+	saName := ServiceAccountName(runID)
+	crbName := ClusterRoleBindingName(runID)
+
+	if err := applyServiceAccount(ctx, clientset, namespace, saName); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to ensure ServiceAccount", err)
 	}
 
-	if err := applyClusterRoleBinding(ctx, clientset, namespace); err != nil {
+	if err := applyClusterRoleBinding(ctx, clientset, namespace, saName, crbName); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to ensure ClusterRoleBinding", err)
 	}
 
 	slog.Debug("RBAC resources applied",
-		"serviceAccount", ServiceAccountName,
+		"serviceAccount", saName,
 		"namespace", namespace,
 		"clusterRole", clusterAdminRole)
 
 	return nil
 }
 
-// CleanupRBAC removes the ServiceAccount and ClusterRoleBinding.
+// CleanupRBAC removes the per-run ServiceAccount and ClusterRoleBinding.
 // Ignores NotFound errors (idempotent). Call once at end of validation run.
 //
 // When both deletes fail, the returned StructuredError wraps the joined
 // underlying errors via stderrors.Join so callers can inspect individual
 // failures with errors.Is / errors.As.
-func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace, runID string) error {
+	saName := ServiceAccountName(runID)
+	crbName := ClusterRoleBindingName(runID)
+
 	var errs []error
 
-	if err := clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, ServiceAccountName, metav1.DeleteOptions{}); err != nil {
+	if err := clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, saName, metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			errs = append(errs, errors.Wrap(errors.ErrCodeInternal, "failed to delete ServiceAccount", err))
 		}
 	}
 
-	if err := clientset.RbacV1().ClusterRoleBindings().Delete(ctx, ClusterRoleBindingName, metav1.DeleteOptions{}); err != nil {
+	if err := clientset.RbacV1().ClusterRoleBindings().Delete(ctx, crbName, metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			errs = append(errs, errors.Wrap(errors.ErrCodeInternal, "failed to delete ClusterRoleBinding", err))
 		}
@@ -117,20 +139,20 @@ func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace 
 			stderrors.Join(errs...),
 			map[string]any{
 				"namespace":          namespace,
-				"serviceAccount":     ServiceAccountName,
-				"clusterRoleBinding": ClusterRoleBindingName,
+				"serviceAccount":     saName,
+				"clusterRoleBinding": crbName,
 			})
 	}
 
 	slog.Debug("RBAC resources cleaned up",
-		"serviceAccount", ServiceAccountName,
+		"serviceAccount", saName,
 		"namespace", namespace)
 
 	return nil
 }
 
-func applyServiceAccount(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
-	sa := applycorev1.ServiceAccount(ServiceAccountName, namespace).
+func applyServiceAccount(ctx context.Context, clientset kubernetes.Interface, namespace, saName string) error {
+	sa := applycorev1.ServiceAccount(saName, namespace).
 		WithLabels(map[string]string{
 			labels.Name:      labels.ValueValidator,
 			labels.ManagedBy: labels.ValueAICR,
@@ -145,8 +167,8 @@ func applyServiceAccount(ctx context.Context, clientset kubernetes.Interface, na
 	return nil
 }
 
-func applyClusterRoleBinding(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
-	crb := applyrbacv1.ClusterRoleBinding(ClusterRoleBindingName).
+func applyClusterRoleBinding(ctx context.Context, clientset kubernetes.Interface, namespace, saName, crbName string) error {
+	crb := applyrbacv1.ClusterRoleBinding(crbName).
 		WithLabels(map[string]string{
 			labels.Name:      labels.ValueValidator,
 			labels.ManagedBy: labels.ValueAICR,
@@ -154,7 +176,7 @@ func applyClusterRoleBinding(ctx context.Context, clientset kubernetes.Interface
 		WithSubjects(
 			applyrbacv1.Subject().
 				WithKind("ServiceAccount").
-				WithName(ServiceAccountName).
+				WithName(saName).
 				WithNamespace(namespace),
 		).
 		WithRoleRef(

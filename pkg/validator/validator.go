@@ -108,7 +108,7 @@ func (v *Validator) prepareCluster(
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
 	}
 
-	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
+	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace, v.RunID); rbacErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
 	}
 
@@ -135,7 +135,7 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
 		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cancel()
-		if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace); cleanupErr != nil {
+		if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
 			slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
 		}
 		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup

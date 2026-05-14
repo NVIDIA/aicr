@@ -115,11 +115,20 @@ Job naming: `aicr-{validatorName}-{hash}`
 
 Three resources, using a purpose-built ClusterRole with minimum required permissions:
 
-1. **ServiceAccount** `aicr-validator` in validation namespace
+1. **ServiceAccount** `aicr-validator-<runID>` in validation namespace
 2. **ClusterRole** `aicr-validator` with scoped read/write rules per resource type
-3. **ClusterRoleBinding** `aicr-validator` binding the SA to the ClusterRole
+3. **ClusterRoleBinding** `aicr-validator-<runID>` binding the SA to the ClusterRole
 
 Created once per run via Server-Side Apply, cleaned up at end.
+
+> **Implementation note (2026-05-14):** The ServiceAccount and ClusterRoleBinding
+> names are suffixed with the per-run `runID` to prevent concurrent `aicr
+> validate` invocations from clobbering each other's RBAC during end-of-run
+> cleanup. The original design used fixed names (`aicr-validator`); operators
+> ran into a race where run A's cleanup deleted the SA while run B was still
+> deploying validator Jobs, causing `FailedCreate: serviceaccount … not found`.
+> Resource discovery in tests and tooling should match by the stable
+> `app.kubernetes.io/name=aicr-validator` label rather than the literal name.
 
 ### Timeout and Termination
 
