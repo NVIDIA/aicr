@@ -108,7 +108,7 @@ func (v *Validator) prepareCluster(
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
 	}
 
-	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
+	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace, v.RunID); rbacErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
 	}
 
@@ -135,7 +135,7 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
 		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cancel()
-		if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace); cleanupErr != nil {
+		if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
 			slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
 		}
 		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
@@ -244,52 +244,6 @@ func (v *Validator) ValidatePhase(
 	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
 }
 
-// filterEntriesByValidation returns only catalog entries that the validation declares
-// for the given phase. If the validation has no phase configuration or the phase
-// has no checks declared, no entries are returned (skip the phase).
-// The validation is the source of truth — only explicitly declared checks run.
-func filterEntriesByValidation(entries []catalog.ValidatorEntry, phase Phase, validationInput *v1.ValidationInput) []catalog.ValidatorEntry {
-	if validationInput == nil {
-		return nil
-	}
-
-	var phaseChecks []string
-	switch phase {
-	case PhaseDeployment:
-		if validationInput.Config.Deployment != nil {
-			phaseChecks = validationInput.Config.Deployment.Checks
-		}
-	case PhasePerformance:
-		if validationInput.Config.Performance != nil {
-			phaseChecks = validationInput.Config.Performance.Checks
-		}
-	case PhaseConformance:
-		if validationInput.Config.Conformance != nil {
-			phaseChecks = validationInput.Config.Conformance.Checks
-		}
-	}
-
-	// No checks declared for this phase → skip it.
-	if len(phaseChecks) == 0 {
-		return nil
-	}
-
-	// Build set for O(1) lookup.
-	allowed := make(map[string]bool, len(phaseChecks))
-	for _, name := range phaseChecks {
-		allowed[name] = true
-	}
-
-	filtered := make([]catalog.ValidatorEntry, 0, len(phaseChecks))
-	for _, entry := range entries {
-		if allowed[entry.Name] {
-			filtered = append(filtered, entry)
-		}
-	}
-
-	return filtered
-}
-
 // runPhase executes all validators for a single phase sequentially.
 //
 //nolint:funlen // Orchestration function with sequential lifecycle steps
@@ -303,12 +257,11 @@ func (v *Validator) runPhase(
 ) (*PhaseResult, error) {
 
 	start := time.Now()
-	allEntries := cat.ForPhase(string(phase))
+	allEntries := cat.ForPhase(phase)
 
-	// Filter catalog entries by what the validation declares.
-	// If the validation has checks for this phase, only run those.
-	// If no checks are declared, run all catalog entries for the phase.
-	entries := filterEntriesByValidation(allEntries, phase, validationInput)
+	// Filter catalog entries by checks declared in the validation for this phase.
+	// Returns an empty set if no checks are declared for the phase.
+	entries := v1.FilterEntriesByValidation(allEntries, phase, validationInput)
 	slog.Info("running validation phase", "phase", phase,
 		"catalog", len(allEntries), "selected", len(entries))
 
@@ -456,7 +409,7 @@ func (v *Validator) phasesSkipped(cat *catalog.ValidatorCatalog, phases []Phase,
 
 func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, reason string) *PhaseResult {
 	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
-	for _, entry := range cat.ForPhase(string(phase)) {
+	for _, entry := range cat.ForPhase(phase) {
 		builder.AddSkipped(entry.Name, entry.Phase, reason)
 	}
 	report := builder.Build()

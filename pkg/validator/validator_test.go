@@ -274,134 +274,6 @@ func TestCheckReadinessUnparseableConstraintFailsClosed(t *testing.T) {
 	}
 }
 
-func TestFilterEntriesByValidationNilValidation(t *testing.T) {
-	entries := []catalog.ValidatorEntry{
-		{Name: "v1", Phase: "deployment"},
-		{Name: "v2", Phase: "deployment"},
-	}
-	got := filterEntriesByValidation(entries, PhaseDeployment, nil)
-	if len(got) != 0 {
-		t.Errorf("filterEntriesByValidation(nil validation) returned %d entries, want 0 (skip)", len(got))
-	}
-}
-
-func TestFilterEntriesByValidationNilPhaseConfig(t *testing.T) {
-	entries := []catalog.ValidatorEntry{
-		{Name: "v1", Phase: "deployment"},
-	}
-	rec := &recipe.RecipeResult{Validation: nil}
-	validationInput := v1.ToValidationInput(rec)
-	got := filterEntriesByValidation(entries, PhaseDeployment, validationInput)
-	if len(got) != 0 {
-		t.Errorf("filterEntriesByValidation(nil phase config) returned %d entries, want 0 (skip)", len(got))
-	}
-}
-
-func TestFilterEntriesByValidationNoChecks(t *testing.T) {
-	entries := []catalog.ValidatorEntry{
-		{Name: "v1", Phase: "deployment"},
-		{Name: "v2", Phase: "deployment"},
-	}
-	rec := &recipe.RecipeResult{
-		Validation: &recipe.ValidationConfig{
-			Deployment: &recipe.ValidationPhase{},
-		},
-	}
-	validationInput := v1.ToValidationInput(rec)
-	got := filterEntriesByValidation(entries, PhaseDeployment, validationInput)
-	if len(got) != 0 {
-		t.Errorf("filterEntriesByValidation(empty checks) returned %d entries, want 0 (skip)", len(got))
-	}
-}
-
-func TestFilterEntriesByValidationWithChecks(t *testing.T) {
-	entries := []catalog.ValidatorEntry{
-		{Name: "v1", Phase: "deployment"},
-		{Name: "v2", Phase: "deployment"},
-		{Name: "v3", Phase: "deployment"},
-	}
-
-	tests := []struct {
-		name     string
-		phase    Phase
-		rec      *recipe.RecipeResult
-		expected int
-		names    []string
-	}{
-		{
-			name:  "deployment filters to declared checks",
-			phase: PhaseDeployment,
-			rec: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Deployment: &recipe.ValidationPhase{
-						Checks: []string{"v1", "v3"},
-					},
-				},
-			},
-			expected: 2,
-			names:    []string{"v1", "v3"},
-		},
-		{
-			name:  "performance phase with no matching entries",
-			phase: PhasePerformance,
-			rec: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Performance: &recipe.ValidationPhase{
-						Checks: []string{"perf-only"},
-					},
-				},
-			},
-			expected: 0,
-		},
-		{
-			name:  "conformance phase returns none when nil phase config",
-			phase: PhaseConformance,
-			rec: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Deployment: &recipe.ValidationPhase{
-						Checks: []string{"v1"},
-					},
-				},
-			},
-			expected: 0,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			validationInput := v1.ToValidationInput(tt.rec)
-			got := filterEntriesByValidation(entries, tt.phase, validationInput)
-			if len(got) != tt.expected {
-				t.Errorf("filterEntriesByValidation() returned %d entries, want %d", len(got), tt.expected)
-			}
-			if tt.names != nil {
-				for i, name := range tt.names {
-					if i < len(got) && got[i].Name != name {
-						t.Errorf("got[%d].Name = %q, want %q", i, got[i].Name, name)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestFilterEntriesByValidationEmptyChecksList(t *testing.T) {
-	entries := []catalog.ValidatorEntry{
-		{Name: "v1", Phase: "deployment"},
-	}
-	rec := &recipe.RecipeResult{
-		Validation: &recipe.ValidationConfig{
-			Deployment: &recipe.ValidationPhase{
-				Checks: []string{},
-			},
-		},
-	}
-	validationInput := v1.ToValidationInput(rec)
-	got := filterEntriesByValidation(entries, PhaseDeployment, validationInput)
-	if len(got) != 0 {
-		t.Errorf("filterEntriesByValidation(empty checks list) returned %d entries, want 0 (skip)", len(got))
-	}
-}
-
 func TestPhaseOrder(t *testing.T) {
 	expected := []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
 	if len(PhaseOrder) != len(expected) {
@@ -484,7 +356,7 @@ func TestRecipeCheckNamesMatchCatalog(t *testing.T) {
 }
 
 func catalogNames(cat *catalog.ValidatorCatalog, phase string) []string {
-	entries := cat.ForPhase(phase)
+	entries := cat.ForPhase(Phase(phase))
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
 		names = append(names, e.Name)

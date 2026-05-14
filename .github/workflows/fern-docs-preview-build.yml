@@ -53,6 +53,25 @@ jobs:
           echo "$HEAD_REF" > preview-metadata/head_ref
           git diff --name-only "origin/${BASE_REF}...HEAD" -- '*.md' > preview-metadata/changed_md_files 2>/dev/null || true
 
+      - name: Checkout frozen version content
+        run: |
+          set -eo pipefail
+          for version_file in fern/versions/v*.yml; do
+            [ -f "$version_file" ] || continue
+            version=$(basename "$version_file" .yml)
+            if git show-ref --verify --quiet "refs/tags/${version}"; then
+              mkdir -p "fern/versions/${version}-content"
+              git archive "refs/tags/${version}" -- docs/ | tar -x --strip-components=1 -C "fern/versions/${version}-content"
+              find "fern/versions/${version}-content" -name '*.md' -print0 | xargs -0 sed -i \
+                -e 's/{/\\{/g' \
+                -e 's/}/\\}/g' \
+                -e 's/</\&lt;/g'
+              echo "Extracted docs from $version"
+            else
+              echo "::warning::Tag $version not found — skipping content checkout"
+            fi
+          done
+
       - name: Upload fern sources and metadata
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

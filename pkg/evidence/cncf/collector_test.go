@@ -430,3 +430,60 @@ func pathHasBinaries(t *testing.T) bool {
 	}
 	return true
 }
+
+// TestResolveFeaturesExpandsAll guards a regression: the "all" wildcard and
+// the empty-input default must both expand to the full ValidFeatures list
+// so each feature runs as its own runSection invocation under its own
+// EvidenceSectionTimeout. Collapsing back to a single {"all"} section would
+// reintroduce the 5-minute SIGKILL bug where one shell-out tries to run
+// every feature inside a single section budget.
+func TestResolveFeaturesExpandsAll(t *testing.T) {
+	tests := []struct {
+		name     string
+		features []string
+		want     []string
+	}{
+		{"empty defaults to all features", nil, ValidFeatures},
+		{"empty slice defaults to all features", []string{}, ValidFeatures},
+		{"literal all expands", []string{featureAll}, ValidFeatures},
+		{"all with other entries still expands", []string{featureDRASupport, featureAll, featureGangScheduling}, ValidFeatures},
+		{"alias passthrough preserved", []string{"dra", "gang"}, []string{featureDRASupport, featureGangScheduling}},
+		{"explicit subset is not expanded", []string{featureDRASupport, featurePodAutoscaling}, []string{featureDRASupport, featurePodAutoscaling}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewCollector("/tmp", WithFeatures(tt.features))
+			got := c.resolveFeatures()
+			if len(got) != len(tt.want) {
+				t.Fatalf("resolveFeatures() = %v (len %d), want %v (len %d)", got, len(got), tt.want, len(tt.want))
+			}
+			for i, f := range tt.want {
+				if got[i] != f {
+					t.Errorf("resolveFeatures()[%d] = %q, want %q", i, got[i], f)
+				}
+			}
+			for _, f := range got {
+				if f == featureAll {
+					t.Errorf("resolveFeatures() returned literal %q; expected expansion to individual feature names", featureAll)
+				}
+			}
+		})
+	}
+}
+
+// TestResolveFeaturesReturnsIndependentSlice ensures callers cannot mutate
+// the package-level ValidFeatures slice via the returned value, which would
+// corrupt future resolutions.
+func TestResolveFeaturesReturnsIndependentSlice(t *testing.T) {
+	c := NewCollector("/tmp")
+	got := c.resolveFeatures()
+	if len(got) == 0 {
+		t.Fatal("resolveFeatures() returned empty slice for default input")
+	}
+	original := ValidFeatures[0]
+	got[0] = "tampered"
+	if ValidFeatures[0] != original {
+		t.Errorf("ValidFeatures[0] = %q after mutating resolveFeatures() output; want %q — slice must be cloned", ValidFeatures[0], original)
+	}
+}

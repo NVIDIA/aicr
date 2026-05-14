@@ -14,18 +14,16 @@
 
 package validator
 
-// Phase represents a validation phase.
-type Phase string
+import v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 
+// Re-exported type from pkg/api/validator/v1 for backward compatibility.
+type Phase = v1.Phase
+
+// Re-exported constants from pkg/api/validator/v1 for backward compatibility.
 const (
-	// PhaseDeployment validates that components are deployed and healthy.
-	PhaseDeployment Phase = "deployment"
-
-	// PhasePerformance runs GPU performance benchmarks.
-	PhasePerformance Phase = "performance"
-
-	// PhaseConformance verifies Kubernetes API conformance requirements.
-	PhaseConformance Phase = "conformance"
+	PhaseDeployment  = v1.PhaseDeployment
+	PhasePerformance = v1.PhasePerformance
+	PhaseConformance = v1.PhaseConformance
 )
 
 // PhaseOrder defines the mandatory execution order.

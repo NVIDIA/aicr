@@ -172,7 +172,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 				}).
 				WithSpec(d.buildPodSpecApply().
 					WithContainers(applycorev1.Container().
-						WithName("validator").
+						WithName(ValidatorContainerName).
 						WithImage(d.entry.Image).
 						WithImagePullPolicy(d.imagePullPolicy()).
 						WithArgs(d.entry.Args...).
@@ -323,7 +323,7 @@ func (d *Deployer) buildPodSpecApply() *applycorev1.PodSpecApplyConfiguration {
 	// available CPU node. User-provided tolerations (--toleration flag) are forwarded
 	// to inner workloads via AICR_TOLERATIONS and do not affect orchestrator scheduling.
 	return applycorev1.PodSpec().
-		WithServiceAccountName(ServiceAccountName).
+		WithServiceAccountName(ServiceAccountName(d.runID)).
 		WithRestartPolicy(corev1.RestartPolicyNever).
 		WithTerminationGracePeriodSeconds(int64(defaults.ValidatorTerminationGracePeriod.Seconds())).
 		WithImagePullSecrets(d.buildImagePullSecretsApply()...).

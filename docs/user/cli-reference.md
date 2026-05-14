@@ -1892,37 +1892,65 @@ aicr verify ./my-bundle --format json
 
 ### aicr evidence verify
 
-Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. Recomputes every file's sha256 against the bundle's `manifest.json` (which is bound to the predicate's `manifest.digest`) and surfaces the predicate's fingerprint, phase counts, and BOM info.
+Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.
 
-Only directory input is supported today. Cryptographic signature verification, inline constraint replay, OCI pull, and pointer-file support are not yet implemented.
+Inline constraint replay is reserved for a follow-up PR.
 
 **Synopsis:**
 ```shell
-aicr evidence verify <directory> [flags]
+aicr evidence verify <input> [flags]
 ```
+
+The positional argument is auto-detected as one of:
+
+* `recipes/evidence/<recipe>.yaml` — pointer file (verifier fetches the OCI artifact named inside).
+* `ghcr.io/<owner>/aicr-evidence@sha256:...` or `oci://...` — OCI reference.
+* `./out/summary-bundle/` (or a parent containing it) — unpacked directory.
 
 **Flags:**
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | | Write output to this file. When empty, output goes to stdout. |
 | `--format` | `-t` | string | `text` | Output format: `text` (Markdown) or `json`. Applies regardless of destination. |
+| `--expected-issuer` | | string | | Pin the OIDC issuer URL on the signing certificate. Empty allows any issuer. |
+| `--expected-identity-regexp` | | string | | Pin the signer's `SubjectAlternativeName` via regex. Empty allows any identity. |
+| `--bundle` | | string | | OCI reference override when the pointer carries no `bundle.oci`. |
+| `--registry-plain-http` | | bool | `false` | Use HTTP for registry traffic (local-registry tests only). |
+| `--registry-insecure-tls` | | bool | `false` | Skip TLS verification for the registry (self-signed certificates). |
+| `--allow-unpinned-tag` | | bool | `false` | Accept tag-only OCI references. By default the verifier refuses unpinned refs because tags are registry-rewritable; opt in only for one-off debugging. Pointer-driven flows ignore this flag when the pointer carries a `sha256:` digest. |
 
 **Exit codes:**
 
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle valid; every check passed. |
-| 2 | Bundle invalid (manifest hash mismatch or predicate malformed), OR recorded validator results show failures. |
+| 2 | Bundle invalid (signature, integrity, or predicate failure), OR recorded validator results show failures. |
 
-The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the library API) still distinguishes the two non-zero cases as `1` (recorded phase failures) vs `2` (bundle invalid).
+The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the library API) still distinguishes the two non-zero cases as `1` (recorded phase failures) vs `2` (bundle invalid). Shell consumers can branch via `jq '.exit'` on `--format json` output.
 
 **Examples:**
 ```shell
-aicr evidence verify ./out/summary-bundle                  # Markdown to stdout
-aicr evidence verify ./out/summary-bundle -o summary.md    # Markdown to file
-aicr evidence verify ./out/summary-bundle -t json          # JSON to stdout
-aicr evidence verify ./out/summary-bundle -o r.json -t json   # JSON to file
+# Verify the pointer that a contributor committed alongside their recipe change.
+aicr evidence verify recipes/evidence/h100-eks-ubuntu-training.yaml
+
+# Verify a pushed OCI bundle directly (no repo checkout required).
+aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
+
+# Verify a local bundle directory (contributor self-debug before push).
+aicr evidence verify ./out/summary-bundle
+
+# Pin the expected OIDC signer.
+aicr evidence verify recipes/evidence/<recipe>.yaml \
+  --expected-issuer https://token.actions.githubusercontent.com \
+  --expected-identity-regexp '^https://github\.com/myorg/.*$'
+
+# CI pipelines: JSON output.
+aicr evidence verify recipes/evidence/<recipe>.yaml -o result.json -t json
 ```
+
+See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md) for a full producer-and-consumer walkthrough.
+
+> **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
 
 ---
 

@@ -25,8 +25,9 @@ import (
 
 // RenderMarkdown produces the PR-comment-shaped summary. Signed
 // predicate fields (fingerprint, phase counts, BOM info) are surfaced
-// here. The Signer line marks the bundle as unsigned until
-// cryptographic signature verification lands.
+// directly — when the signature step passed, the predicate body is
+// cryptographically anchored to the Fulcio cert claims shown on the
+// Signer line.
 func RenderMarkdown(r *VerifyResult) string {
 	if r == nil {
 		return "## Evidence verification — (no result)\n"
@@ -43,17 +44,76 @@ func RenderMarkdown(r *VerifyResult) string {
 	writePhases(&b, r.Predicate)
 	writeBOM(&b, r.Predicate)
 	writeSteps(&b, r)
+	writeFailedStepDetails(&b, r)
 	writeVerdict(&b, r)
 	return b.String()
 }
 
+// writeFailedStepDetails enumerates the sub-rows of any failed step so
+// the maintainer sees exactly which files / dimensions / constraints
+// caused the failure. Markdown tables can't render nested lists; this
+// section follows the steps table and breaks failures out as bullets.
+func writeFailedStepDetails(b *strings.Builder, r *VerifyResult) {
+	failedWithRows := 0
+	for _, s := range r.Steps {
+		if s.Status == StepFailed && len(s.SubRows) > 0 {
+			failedWithRows++
+		}
+	}
+	if failedWithRows == 0 {
+		return
+	}
+	b.WriteString("### Failed check details\n")
+	for _, s := range r.Steps {
+		if s.Status != StepFailed || len(s.SubRows) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "- **%s**\n", s.Name)
+		for _, row := range s.SubRows {
+			fmt.Fprintf(b, "  - `%s` — %s\n", row.Key, row.Value)
+		}
+	}
+	b.WriteString("\n")
+}
+
 func writeHeader(b *strings.Builder, r *VerifyResult) {
-	b.WriteString("**Signer:** _signature verification not yet implemented in this slice_\n")
+	switch {
+	case r.Signer != nil && r.Signer.Identity != "":
+		fmt.Fprintf(b, "**Signer:** %s", r.Signer.Identity)
+		if r.Signer.Issuer != "" {
+			fmt.Fprintf(b, " (issuer %s)", r.Signer.Issuer)
+		}
+		if r.Signer.RekorLogIndex != nil {
+			fmt.Fprintf(b, "  •  **Rekor:** index %d", *r.Signer.RekorLogIndex)
+		}
+		b.WriteString("\n")
+	case signatureStepStatus(r) == StepFailed:
+		// A signed bundle whose signature didn't verify is meaningfully
+		// different from a bundle that carries no signature at all —
+		// don't claim "unsigned" when verification actually failed.
+		b.WriteString("**Signer:** _signature verification failed (see Verification steps)_\n")
+	default:
+		b.WriteString("**Signer:** _unsigned bundle_\n")
+	}
 	if r.Predicate != nil {
 		fmt.Fprintf(b, "**AICR:** %s  •  **Schema:** %s",
 			r.Predicate.AICRVersion, r.Predicate.SchemaVersion)
 	}
+	if r.BundleDigest != "" {
+		fmt.Fprintf(b, "  •  **Bundle digest:** %s", r.BundleDigest)
+	}
 	b.WriteString("\n\n")
+}
+
+// signatureStepStatus returns the recorded status of the signature
+// step, or "" if no signature step was recorded.
+func signatureStepStatus(r *VerifyResult) StepStatus {
+	for _, s := range r.Steps {
+		if s.Step == stepSignature {
+			return s.Status
+		}
+	}
+	return ""
 }
 
 func writeFingerprint(b *strings.Builder, p *attestation.Predicate) {

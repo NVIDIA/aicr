@@ -46,12 +46,12 @@ jobs:
 
       - name: Checkout frozen version content
         run: |
-          set -o pipefail
+          set -eo pipefail
           for version_file in fern/versions/v*.yml; do
             version=$(basename "$version_file" .yml)
-            if git rev-parse "$version" >/dev/null 2>&1; then
+            if git show-ref --verify --quiet "refs/tags/${version}"; then
               mkdir -p "fern/versions/${version}-content"
-              git archive "$version" -- docs/ | tar -x --strip-components=1 -C "fern/versions/${version}-content"
+              git archive "refs/tags/${version}" -- docs/ | tar -x --strip-components=1 -C "fern/versions/${version}-content"
               # Sanitize frozen markdown for Fern's MDX parser.
               # Versioned content gets strict MDX parsing; escape all bare
               # { } and < so nothing is interpreted as JSX. Markdown renders

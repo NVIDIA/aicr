@@ -13,20 +13,43 @@
 // limitations under the License.
 
 // Package verifier implements `aicr evidence verify`: offline
-// verification of a recipe-evidence v1 bundle directory produced by
-// `aicr validate --emit-attestation`. Four steps run:
+// verification of a recipe-evidence v1 bundle produced by
+// `aicr validate --emit-attestation`. Five steps run:
 //
-//  1. Materialize — resolve the user-supplied directory to a bundle root.
-//  2. Predicate parse — read the in-toto Statement; reject unknown
-//     predicate types.
-//  3. Manifest hash check — sha256(manifest.json) must match
+//  1. Materialize — resolve the input (directory / pointer file / OCI
+//     reference) to a bundle root on disk. Pointer and OCI forms pull
+//     the artifact via ORAS, then discover the Sigstore Bundle attached
+//     as an OCI Referrer and stage it as attestation.intoto.jsonl so
+//     the signature step finds it on disk the same way it does for
+//     directory input.
+//  2. Signature verify — when attestation.intoto.jsonl is present,
+//     sigstore-go verifies the DSSE-wrapped in-toto Statement against
+//     the Sigstore trusted root (Fulcio cert chain, optional Rekor
+//     entry). The cryptographically anchored predicate body is
+//     extracted from the verified payload.
+//  3. Predicate parse — use the verified predicate when the signature
+//     step produced one; otherwise fall back to the unsigned
+//     statement.intoto.json (self-consistency only).
+//  4. Manifest hash check — sha256(manifest.json) must match
 //     predicate.Manifest.Digest, and every file the manifest names
 //     must match its recorded sha256. Together these transitively
-//     bind every bundled file to the predicate.
-//  4. Render — Markdown / JSON; surfaces fingerprint, phase counts,
-//     and BOM info from the bundled predicate.
+//     bind every bundled file to the (now signature-anchored)
+//     predicate.
+//  5. Render — Markdown / JSON; surfaces signer identity, fingerprint,
+//     phase counts, and BOM info.
 //
-// The predicate body is read but not yet cryptographically verified —
-// the rendered report surfaces this via an empty Signer line. See
-// docs/design/007-recipe-evidence.md for the trust model.
+// The trust chain when a signature is present:
+//
+//	Sigstore trusted root → Fulcio cert (Rekor-logged)
+//	  → DSSE-signed Statement
+//	    → predicate.Manifest.Digest
+//	      → manifest.json
+//	        → every bundled file's sha256
+//
+// Tampering anywhere below the signature breaks the chain. The OCI
+// input form adds a freshness check: the signed Statement's subject
+// digest is locked to the pulled artifact's OCI manifest digest, so a
+// substituted artifact paired with a stale signature fails too.
+//
+// See docs/design/007-recipe-evidence.md for the full trust model.
 package verifier

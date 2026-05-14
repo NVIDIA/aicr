@@ -48,7 +48,11 @@ func TestEvidenceCmd_RegistersVerifySubcommand(t *testing.T) {
 
 func TestEvidenceVerifyCmd_HasExpectedFlags(t *testing.T) {
 	cmd := evidenceVerifyCmd()
-	wanted := []string{"output", "format"}
+	wanted := []string{
+		"output", "format",
+		"expected-issuer", "expected-identity-regexp", "bundle",
+		"registry-plain-http", "registry-insecure-tls", "allow-unpinned-tag",
+	}
 	for _, name := range wanted {
 		found := false
 		for _, f := range cmd.Flags {
