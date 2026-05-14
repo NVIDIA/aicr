@@ -15,8 +15,10 @@
 package verifier
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
@@ -143,15 +145,24 @@ func TestMaterializeBundle_RejectsTagOnlyOCI(t *testing.T) {
 }
 
 func TestMaterializeBundle_TagOnlyWithAllowFlag(t *testing.T) {
-	// With AllowUnpinnedTag, we get past the pin check and fail at
-	// the OCI pull (no actual registry available in the test). The
-	// pin-error message must NOT appear.
-	form, _ := DetectInputForm("ghcr.io/owner/repo:v1")
-	_, err := MaterializeBundle(t.Context(),
-		VerifyOptions{Input: "ghcr.io/owner/repo:v1", AllowUnpinnedTag: true},
+	// With AllowUnpinnedTag, the pin check is bypassed and execution
+	// proceeds into oras.Copy. Use 127.0.0.1:1 (a port nothing should
+	// be listening on) so connection fails fast — never reaching the
+	// real internet — and a 250ms per-test context so flaky DNS or a
+	// slow stack can't pay the 2-minute pull timeout. The assertion
+	// is only that the pin-error message is NOT in the result.
+	const unreachable = "127.0.0.1:1/repo:v1"
+	form, err := DetectInputForm(unreachable)
+	if err != nil {
+		t.Fatalf("DetectInputForm: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	_, err = MaterializeBundle(ctx,
+		VerifyOptions{Input: unreachable, AllowUnpinnedTag: true},
 		form, nil)
 	if err == nil {
-		t.Fatalf("expected pull error (no registry), got nil")
+		t.Fatalf("expected pull error (unreachable registry), got nil")
 	}
 	if strings.Contains(err.Error(), "tag-only") {
 		t.Errorf("AllowUnpinnedTag should bypass tag-pin check; got %v", err)

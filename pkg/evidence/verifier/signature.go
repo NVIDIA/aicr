@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -148,6 +149,20 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 		i := idx
 		claims.RekorLogIndex = &i
 	}
+
+	// Surface the no-pin footgun: without --expected-issuer or
+	// --expected-identity-regexp, ANY Fulcio-issued cert from ANY OIDC
+	// provider passes the identity policy. The signature is still
+	// cryptographically valid, but the verifier hasn't said anything
+	// about *who* signed. Operators reviewing the report need to know
+	// that default verification accepts every signer.
+	if opts.ExpectedIssuer == "" && opts.ExpectedIdentityRegexp == "" {
+		slog.Warn("signature verified but no signer pinned — any Fulcio identity will pass",
+			"identity", claims.Identity,
+			"issuer", claims.Issuer,
+			"hint", "consider --expected-issuer / --expected-identity-regexp to fail on unexpected signers")
+	}
+
 	return &SignatureResult{Signer: claims, Predicate: predicate}, nil
 }
 

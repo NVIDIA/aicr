@@ -1917,6 +1917,7 @@ The positional argument is auto-detected as one of:
 | `--bundle` | | string | | OCI reference override when the pointer carries no `bundle.oci`. |
 | `--registry-plain-http` | | bool | `false` | Use HTTP for registry traffic (local-registry tests only). |
 | `--registry-insecure-tls` | | bool | `false` | Skip TLS verification for the registry (self-signed certificates). |
+| `--allow-unpinned-tag` | | bool | `false` | Accept tag-only OCI references. By default the verifier refuses unpinned refs because tags are registry-rewritable; opt in only for one-off debugging. Pointer-driven flows ignore this flag when the pointer carries a `sha256:` digest. |
 
 **Exit codes:**
 
@@ -1947,7 +1948,7 @@ aicr evidence verify recipes/evidence/<recipe>.yaml \
 aicr evidence verify recipes/evidence/<recipe>.yaml -o result.json -t json
 ```
 
-See [demos/evidence.md](../../demos/evidence.md) for a full producer-and-consumer walkthrough.
+See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md) for a full producer-and-consumer walkthrough.
 
 > **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
 

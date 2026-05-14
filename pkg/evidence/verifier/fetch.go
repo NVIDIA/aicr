@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	stderrors "errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -37,6 +38,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
+
+// errReferrerFound is an unexported sentinel used to unwind the
+// pagination callback in repo.Referrers after the first matching
+// Sigstore Bundle referrer has been consumed. Without this sentinel,
+// `return nil` from the callback only stops the current page; the
+// next page would re-enter and overwrite attestation.intoto.jsonl.
+var errReferrerFound = stderrors.New("referrer found")
 
 // maxReferrerManifestBytes caps the in-memory read of a referrer
 // manifest JSON. Manifests are small (KiB); anything past this is a
@@ -124,7 +132,9 @@ func hasBundleMarkers(dir string) bool {
 // first attestation, or falls back to opts.BundleRef when the pointer
 // has no OCI ref. The pointer's digest claim is cross-checked against
 // the actual pulled digest. A tag-only ref is allowed only when the
-// pointer carries a non-empty bundle.digest — that digest is the pin.
+// pointer carries a sha256-prefixed bundle.digest (the validator in
+// pointer.go rejects any other shape when bundle.oci is set) — that
+// digest is the pin.
 func materializeFromPointer(
 	ctx context.Context,
 	pointer *attestation.Pointer,
@@ -218,11 +228,22 @@ func materializeOCIRefRequireDigest(ctx context.Context, ref string, opts Verify
 	// artifact, not part of the artifact's own layers. Discover and
 	// stage it as attestation.intoto.jsonl so signature verification
 	// can read it from disk the same way it does for directory input.
-	// Best-effort: an unsigned bundle has no referrer and the signature
-	// step records Skipped (matches the unsigned-on-disk behavior).
+	//
+	// "No referrer at all" is a legitimate unsigned-bundle state →
+	// debug-log and let the signature step record Skipped. ANY other
+	// error (malformed manifest, oversized layer, registry returning
+	// junk) is fail-closed: a registry that mid-MITMs the Referrers
+	// response could otherwise silently downgrade a signed bundle to
+	// "unsigned."
 	if err := discoverAndWriteReferrer(pullCtx, remoteRepo, desc, resolved); err != nil {
-		slog.Debug("no Sigstore Bundle referrer discovered",
-			"reference", registry+"/"+repo, "error", err.Error())
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			slog.Debug("no Sigstore Bundle referrer discovered",
+				"reference", registry+"/"+repo)
+		} else {
+			cleanup()
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				"registry returned a malformed Sigstore Bundle referrer", err)
+		}
 	}
 
 	return &MaterializedBundle{
@@ -258,8 +279,11 @@ type referrerFetcher interface {
 //
 // Returns ErrCodeNotFound when no Sigstore Bundle referrer is present;
 // callers treat that as "unsigned bundle." Other errors propagate.
+//
+// "Take the first matching referrer" is enforced via an unexported
+// errReferrerFound sentinel — `return nil` from the callback would
+// only stop the current page, letting a later page overwrite the file.
 func discoverAndWriteReferrer(ctx context.Context, repo *remote.Repository, subject ociv1.Descriptor, bundleDir string) error {
-	found := false
 	cbErr := repo.Referrers(ctx, subject, attestation.SigstoreBundleMediaType,
 		func(refs []ociv1.Descriptor) error {
 			for _, r := range refs {
@@ -269,21 +293,20 @@ func discoverAndWriteReferrer(ctx context.Context, repo *remote.Repository, subj
 				if err := fetchAndWriteReferrerLayer(ctx, repo, r, bundleDir); err != nil {
 					return err
 				}
-				found = true
-				// Take the first matching referrer. Multi-signature
-				// bundles aren't a V1 case; if one ever lands, we'd
-				// need a selection policy.
-				return nil
+				// Multi-signature bundles aren't a V1 case; if one ever
+				// lands, we'd need a selection policy. For now: first
+				// match wins and stops pagination.
+				return errReferrerFound
 			}
 			return nil
 		})
+	if stderrors.Is(cbErr, errReferrerFound) {
+		return nil
+	}
 	if cbErr != nil {
 		return errors.Wrap(errors.ErrCodeUnavailable, "referrers query failed", cbErr)
 	}
-	if !found {
-		return errors.New(errors.ErrCodeNotFound, "no Sigstore Bundle referrer for artifact")
-	}
-	return nil
+	return errors.New(errors.ErrCodeNotFound, "no Sigstore Bundle referrer for artifact")
 }
 
 // fetchAndWriteReferrerLayer pulls the referrer's manifest, extracts
