@@ -28,6 +28,7 @@ const (
 // Flag names (urfave/cli flag.Name values).
 const (
 	flagOutput = "output"
+	flagFormat = "format"
 )
 
 // Category labels (urfave/cli flag.Category values, grouping flags in help output).

@@ -59,7 +59,7 @@ Exit codes (see Exit Codes section in cli-reference.md):
 				Category: catOutput,
 			},
 			withCompletions(&cli.StringFlag{
-				Name:     "format",
+				Name:     flagFormat,
 				Aliases:  []string{"t"},
 				Value:    evidenceVerifyFormatText,
 				Usage:    "Output format: text (Markdown summary), json.",
@@ -76,7 +76,7 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"input is required: aicr evidence verify <directory>")
 	}
-	format := cmd.String("format")
+	format := cmd.String(flagFormat)
 	if format != evidenceVerifyFormatText && format != evidenceVerifyFormatJSON {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}

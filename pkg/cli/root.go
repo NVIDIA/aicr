@@ -77,7 +77,7 @@ var (
 
 	formatFlag = func() cli.Flag {
 		return withCompletions(&cli.StringFlag{
-			Name:     "format",
+			Name:     flagFormat,
 			Aliases:  []string{"t"},
 			Value:    string(serializer.FormatYAML),
 			Usage:    fmt.Sprintf("output format (%s)", strings.Join(serializer.SupportedFormats(), ", ")),
