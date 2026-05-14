@@ -134,6 +134,44 @@ func TestVerify_EmptyInputErrors(t *testing.T) {
 	}
 }
 
+func TestCheckInventory_RejectsTraversal(t *testing.T) {
+	bundleDir := buildTestBundle(t)
+	summary := summaryDirOf(t, bundleDir)
+
+	// Replace manifest.json with one that names a path outside the bundle.
+	mfPath := filepath.Join(summary, "manifest.json")
+	body := []byte(`{
+  "schemaVersion": "1.0.0",
+  "files": [
+    {
+      "path": "../../../etc/passwd",
+      "size": 1,
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}
+`)
+	if err := os.WriteFile(mfPath, body, 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	rows, err := CheckInventory(context.Background(),
+		&MaterializedBundle{BundleDir: summary})
+	if err == nil {
+		t.Fatalf("expected error for traversal entry")
+	}
+	// One mismatch row with a clear "not a local path" message.
+	found := false
+	for _, r := range rows {
+		if strings.Contains(r.Value, "not a local path") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected sub-row to report rejected traversal; got %+v", rows)
+	}
+}
+
 func TestCheckInventory_RespectsCancellation(t *testing.T) {
 	bundleDir := buildTestBundle(t)
 	mat := &MaterializedBundle{BundleDir: summaryDirOf(t, bundleDir)}

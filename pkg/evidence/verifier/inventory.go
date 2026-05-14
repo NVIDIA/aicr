@@ -89,7 +89,15 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle) ([]KV, error) 
 }
 
 func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
-	full := filepath.Join(bundleDir, filepath.FromSlash(rel))
+	// Reject non-local manifest paths before touching the filesystem.
+	// A hostile manifest with rel="../../../etc/passwd" would otherwise
+	// let the verifier stat and hash files outside bundleDir.
+	localRel := filepath.FromSlash(rel)
+	if !filepath.IsLocal(localRel) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"manifest entry "+rel+" is not a local path (rejecting potential traversal)")
+	}
+	full := filepath.Join(bundleDir, localRel)
 	info, err := os.Stat(full)
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeNotFound, "file missing from bundle: "+rel, err)
