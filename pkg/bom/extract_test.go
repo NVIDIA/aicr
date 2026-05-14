@@ -286,10 +286,10 @@ func TestParseImageRef(t *testing.T) {
 			digest:   "sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830",
 		},
 		{
-			in:       "602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin:v0.5.3",
+			in:       "602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin:v0.5.18",
 			registry: "602401143452.dkr.ecr.us-west-2.amazonaws.com",
 			repo:     "eks/aws-efa-k8s-device-plugin",
-			tag:      "v0.5.3",
+			tag:      "v0.5.18",
 		},
 	}
 	for _, tt := range tests {
