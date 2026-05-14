@@ -26,6 +26,14 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// SubtypeImage is the measurement.Subtype.Name used for the
+// K8s image measurement (one entry per unique <image-name>:<tag>
+// observed across pods). Exported so downstream consumers — notably
+// the evidence-emission path in pkg/cli/validate_evidence.go — can
+// match on the same string the collector writes without inlining a
+// fragile magic literal.
+const SubtypeImage = "image"
+
 // collectContainerImages extracts unique container images from all pods.
 //
 // Pods are listed via paginated API calls (see defaults.K8sPodListPageSize)

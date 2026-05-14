@@ -291,7 +291,7 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	echo "Updated $(BOM_DOC_PATH) (prose preserved, auto-generated section refreshed)"
 
 .PHONY: bom-check
-bom-check: ## Verifies $(BOM_DOC_PATH) is up to date with the live registry (CI gate, opt-in locally)
+bom-check: ## Verifies $(BOM_DOC_PATH) is up to date with the live registry (opt-in; not wired into qualify/lint/merge gate)
 	@set -e; \
 	$(MAKE) bom-docs; \
 	if ! git diff --quiet -- $(BOM_DOC_PATH); then \

@@ -88,7 +88,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	})
 
 	g.Go(func() error {
-		images = collectSafe("image", func() (map[string]measurement.Reading, error) {
+		images = collectSafe(SubtypeImage, func() (map[string]measurement.Reading, error) {
 			return k.collectContainerImages(gctx)
 		})
 		return nil
@@ -117,7 +117,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 				Set("platform", versions["platform"]).
 				Set("goVersion", versions["goVersion"]),
 		).
-		WithSubtype(measurement.Subtype{Name: "image", Data: images}).
+		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: images}).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: policies}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: node}).
 		Build()
@@ -143,7 +143,7 @@ func emptyK8sMeasurement() *measurement.Measurement {
 	empty := make(map[string]measurement.Reading)
 	return measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtype(measurement.Subtype{Name: "server", Data: empty}).
-		WithSubtype(measurement.Subtype{Name: "image", Data: empty}).
+		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: empty}).
 		Build()

@@ -189,6 +189,19 @@ const (
 
 	// EvidenceRenderTimeout is the timeout for rendering conformance evidence.
 	EvidenceRenderTimeout = 30 * time.Second
+
+	// EvidenceBundleBuildTimeout bounds local bundle assembly. Local I/O
+	// only; 60s is headroom over the typical few-second pipeline.
+	EvidenceBundleBuildTimeout = 60 * time.Second
+
+	// EvidenceBundleSignTimeout bounds Sigstore signing. Aliased to
+	// SigstoreSignTimeout but kept distinct so the validate-time pipeline
+	// can adjust independently of the bundle-attest path.
+	EvidenceBundleSignTimeout = SigstoreSignTimeout
+
+	// EvidenceBundlePushTimeout: multi-blob ORAS upload; 2 minutes covers
+	// typical p99 against ghcr / Quay.
+	EvidenceBundlePushTimeout = 2 * time.Minute
 )
 
 // Chainsaw assertion configuration for component health checks.
@@ -413,6 +426,14 @@ const (
 	// Derived from MaxBundlePOSTBytes (the largest legitimate body) so the
 	// fallback cannot drift if the bundle limit is ever retuned.
 	ServerMaxBodyBytes = MaxBundlePOSTBytes
+
+	// MaxBOMBytes caps the size of an operator-supplied CycloneDX BOM file
+	// (the --bom path on `aicr validate --emit-attestation`). Real BOMs for
+	// the typical cluster are a few hundred KiB; 8 MiB covers the largest
+	// observed surfaces with headroom while bounding an attacker-influenced
+	// path (e.g., /proc symlink, NFS mount) before os.ReadFile would
+	// allocate the whole file into memory.
+	MaxBOMBytes int64 = 8 * 1024 * 1024 // 8 MiB
 )
 
 // Server-wide handler defaults.

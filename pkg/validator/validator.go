@@ -30,11 +30,11 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -44,14 +44,14 @@ import (
 
 // checkReadiness evaluates top-level validation constraints against the snapshot.
 // Returns an error if any constraint fails, nil if all pass or no constraints exist.
-func checkReadiness(validation *recipe.Validation, snap *snapshotter.Snapshot) error {
-	if validation == nil || snap == nil || len(validation.Constraints) == 0 {
+func checkReadiness(validationInput *v1.ValidationInput, snap *snapshotter.Snapshot) error {
+	if validationInput == nil || snap == nil || len(validationInput.Constraints) == 0 {
 		return nil
 	}
 
-	slog.Info("readiness pre-flight", "constraints", len(validation.Constraints))
+	slog.Info("readiness pre-flight", "constraints", len(validationInput.Constraints))
 
-	for _, c := range validation.Constraints {
+	for _, c := range validationInput.Constraints {
 		result := constraints.Evaluate(c, snap)
 		if result.Error != nil {
 			return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
@@ -95,7 +95,7 @@ type clusterState struct {
 // The caller must close stopCh and handle cleanup deferrals.
 func (v *Validator) prepareCluster(
 	ctx context.Context,
-	validation *recipe.Validation,
+	validationInput *v1.ValidationInput,
 	snap *snapshotter.Snapshot,
 ) (*clusterState, error) {
 
@@ -112,7 +112,7 @@ func (v *Validator) prepareCluster(
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
 	}
 
-	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, validation); cmErr != nil {
+	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, validationInput); cmErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
 	}
 
@@ -151,7 +151,7 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
 func (v *Validator) ValidatePhases(
 	ctx context.Context,
 	phases []Phase,
-	validation *recipe.Validation,
+	validationInput *v1.ValidationInput,
 	snap *snapshotter.Snapshot,
 ) ([]*PhaseResult, error) {
 
@@ -163,7 +163,7 @@ func (v *Validator) ValidatePhases(
 
 	// Pre-flight: evaluate top-level validation constraints against snapshot.
 	// Fails fast before deploying any Jobs if prerequisites aren't met.
-	if err := checkReadiness(validation, snap); err != nil {
+	if err := checkReadiness(validationInput, snap); err != nil {
 		return nil, err
 	}
 
@@ -177,7 +177,7 @@ func (v *Validator) ValidatePhases(
 		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
 	}
 
-	cs, err := v.prepareCluster(ctx, validation, snap)
+	cs, err := v.prepareCluster(ctx, validationInput, snap)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (v *Validator) ValidatePhases(
 			continue
 		}
 
-		pr, phaseErr := v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validation)
+		pr, phaseErr := v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
 		if phaseErr != nil {
 			return results, phaseErr
 		}
@@ -221,7 +221,7 @@ func (v *Validator) ValidatePhases(
 func (v *Validator) ValidatePhase(
 	ctx context.Context,
 	phase Phase,
-	validation *recipe.Validation,
+	validationInput *v1.ValidationInput,
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
@@ -234,38 +234,38 @@ func (v *Validator) ValidatePhase(
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
 	}
 
-	cs, err := v.prepareCluster(ctx, validation, snap)
+	cs, err := v.prepareCluster(ctx, validationInput, snap)
 	if err != nil {
 		return nil, err
 	}
 	defer close(cs.stopCh)
 	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
-	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validation)
+	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
 }
 
 // filterEntriesByValidation returns only catalog entries that the validation declares
 // for the given phase. If the validation has no phase configuration or the phase
 // has no checks declared, no entries are returned (skip the phase).
 // The validation is the source of truth — only explicitly declared checks run.
-func filterEntriesByValidation(entries []catalog.ValidatorEntry, phase Phase, validation *recipe.Validation) []catalog.ValidatorEntry {
-	if validation == nil {
+func filterEntriesByValidation(entries []catalog.ValidatorEntry, phase Phase, validationInput *v1.ValidationInput) []catalog.ValidatorEntry {
+	if validationInput == nil {
 		return nil
 	}
 
 	var phaseChecks []string
 	switch phase {
 	case PhaseDeployment:
-		if validation.Deployment != nil {
-			phaseChecks = validation.Deployment.Checks
+		if validationInput.Config.Deployment != nil {
+			phaseChecks = validationInput.Config.Deployment.Checks
 		}
 	case PhasePerformance:
-		if validation.Performance != nil {
-			phaseChecks = validation.Performance.Checks
+		if validationInput.Config.Performance != nil {
+			phaseChecks = validationInput.Config.Performance.Checks
 		}
 	case PhaseConformance:
-		if validation.Conformance != nil {
-			phaseChecks = validation.Conformance.Checks
+		if validationInput.Config.Conformance != nil {
+			phaseChecks = validationInput.Config.Conformance.Checks
 		}
 	}
 
@@ -299,7 +299,7 @@ func (v *Validator) runPhase(
 	factory informers.SharedInformerFactory,
 	cat *catalog.ValidatorCatalog,
 	phase Phase,
-	validation *recipe.Validation,
+	validationInput *v1.ValidationInput,
 ) (*PhaseResult, error) {
 
 	start := time.Now()
@@ -308,7 +308,7 @@ func (v *Validator) runPhase(
 	// Filter catalog entries by what the validation declares.
 	// If the validation has checks for this phase, only run those.
 	// If no checks are declared, run all catalog entries for the phase.
-	entries := filterEntriesByValidation(allEntries, phase, validation)
+	entries := filterEntriesByValidation(allEntries, phase, validationInput)
 	slog.Info("running validation phase", "phase", phase,
 		"catalog", len(allEntries), "selected", len(entries))
 
@@ -469,11 +469,13 @@ func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, rea
 }
 
 // ensureDataConfigMaps creates snapshot and validation ConfigMaps for this run.
+// The validation payload is marshaled as v1.ValidationInput (the wire shape
+// that validator containers consume) with phase configs nested under `config:`.
 func (v *Validator) ensureDataConfigMaps(
 	ctx context.Context,
 	clientset kubernetes.Interface,
 	snap *snapshotter.Snapshot,
-	validation *recipe.Validation,
+	validationInput *v1.ValidationInput,
 ) error {
 
 	snapshotYAML, err := yaml.Marshal(snap)
@@ -481,7 +483,7 @@ func (v *Validator) ensureDataConfigMaps(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot", err)
 	}
 
-	validationYAML, err := yaml.Marshal(validation)
+	validationYAML, err := yaml.Marshal(validationInput)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize validation", err)
 	}

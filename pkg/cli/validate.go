@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
@@ -297,6 +298,9 @@ type validationConfig struct {
 
 	// Evidence
 	evidenceDir string
+
+	// Recipe-evidence bundle config; nil disables --emit-attestation work.
+	evidence *recipeEvidenceConfig
 }
 
 // runValidation runs validation using the container-per-validator engine.
@@ -320,10 +324,8 @@ func runValidation(
 		validator.WithNodeSelector(cfg.nodeSelector),
 	)
 
-	// Convert recipe to validation for validators
-	validation := recipe.ToValidation(rec)
-
-	results, err := v.ValidatePhases(ctx, cfg.phases, validation, snap)
+	validationInput := v1.ToValidationInput(rec)
+	results, err := v.ValidatePhases(ctx, cfg.phases, validationInput, snap)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
 	}
@@ -384,6 +386,13 @@ func runValidation(
 			return errors.Wrap(errors.ErrCodeInternal, "evidence rendering failed", renderErr)
 		}
 		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
+	}
+
+	// Emit even on failure: failed runs document hardware-specific limits.
+	if cfg.evidence != nil {
+		if err := emitRecipeEvidence(ctx, rec, snap, results, cfg.evidence); err != nil {
+			return err
+		}
 	}
 
 	if cfg.failOnError && anyFailed {
@@ -506,6 +515,52 @@ func validateCmdFlags() []cli.Flag {
 				"Options: " + strings.Join(cncf.ValidFeatures, ", "),
 			Category: catEvidence,
 		},
+		&cli.StringFlag{
+			Name: "emit-attestation",
+			Usage: `Directory to write a recipe-evidence v1 attestation bundle (signed when --push is set).
+	Produces summary-bundle/, optionally logs-bundle/, and pointer.yaml suitable for copying to recipes/evidence/<recipe>.yaml.
+	See ADR-007 (docs/design/007-recipe-evidence.md).`,
+			Category: catEvidence,
+		},
+		&cli.StringFlag{
+			Name: "bom",
+			Usage: `Path to a CycloneDX BOM (bom.cdx.json) to embed in the evidence bundle.
+	Optional with --emit-attestation: when omitted, aicr synthesizes a
+	recipe-bound BOM from the recipe's component refs + the validator
+	catalog images that ran. Pass an explicit path for an exhaustive
+	BOM (e.g., produced by 'make bom').`,
+			Category: catEvidence,
+		},
+		&cli.StringFlag{
+			Name: "push",
+			Usage: `OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to.
+	Sigstore keyless OIDC signing uses the same precedence chain as ` + "`aicr bundle --attest`" + `:
+	--identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
+	--oidc-device-flow > interactive browser flow.`,
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name:     "plain-http",
+			Usage:    "Use HTTP instead of HTTPS when pushing the evidence OCI artifact (local registry tests).",
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name:     "insecure-tls",
+			Usage:    "Skip TLS verification when pushing the evidence OCI artifact (self-signed registries).",
+			Category: catEvidence,
+		},
+		&cli.StringFlag{
+			Name:     "identity-token",
+			Usage:    "Pre-fetched OIDC identity token for --push keyless signing. Skips ambient/browser/device-code flows. Prefer COSIGN_IDENTITY_TOKEN on shared hosts; flag values are visible in process listings (ps, /proc/<pid>/cmdline).",
+			Sources:  cli.EnvVars("COSIGN_IDENTITY_TOKEN"),
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name:     "oidc-device-flow",
+			Usage:    "Use the OAuth 2.0 device authorization grant for --push OIDC instead of opening a browser callback. Useful on headless hosts when --identity-token / COSIGN_IDENTITY_TOKEN and ambient GitHub Actions OIDC are both unavailable.",
+			Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
+			Category: catEvidence,
+		},
 		configFlag(),
 		dataFlag(),
 		outputFlag(),
@@ -548,7 +603,7 @@ Run validation without failing on check errors (informational mode):
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "push", "identity-token"); err != nil {
 				return err
 			}
 
@@ -565,12 +620,13 @@ Run validation without failing on check errors (informational mode):
 				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", initErr)
 			}
 
-			// Evidence flags (--evidence-dir, --cncf-submission, --feature) are
-			// not yet sourced from --config: the evidence schema lands as a
-			// single umbrella under #754 with both CNCF and attestation kinds.
-			evidenceDir := cmd.String("evidence-dir")
-			cncfSubmission := cmd.Bool("cncf-submission")
-			features := cmd.StringSlice("feature")
+			cncfCfg := resolved.EvidenceCNCF
+			if cncfCfg == nil {
+				cncfCfg = &config.EvidenceCNCFResolved{}
+			}
+			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", cncfCfg.Dir)
+			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", cncfCfg.CNCFSubmission)
+			features := stringSliceFlagOrConfig(cmd, "feature", cncfCfg.Features)
 
 			// Validate flag combinations.
 			if cncfSubmission && evidenceDir == "" {
@@ -671,6 +727,8 @@ Run validation without failing on check errors (informational mode):
 					"binding", "aicr-validator")
 			}
 
+			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
+
 			return runValidation(ctx, rec, snap, validationConfig{
 				phases:              phases,
 				output:              cmd.String("output"),
@@ -683,6 +741,7 @@ Run validation without failing on check errors (informational mode):
 				nodeSelector:        shared.nodeSelector,
 				tolerations:         shared.tolerations,
 				evidenceDir:         evidenceDir,
+				evidence:            evidenceCfg,
 			})
 		},
 	}

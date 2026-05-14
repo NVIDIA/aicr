@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **22**
-- Unique images: **69**
+- Components: **24**
+- Unique images: **71**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -51,6 +51,8 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | nvidia-dra-driver-gpu | helm | nvidia/nvidia-dra-driver-gpu | 25.12.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.3.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
+| slinky-slurm-operator | helm | slurm-operator | 1.1.0 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.1.0 | 0 |
 
 ## Images by component
 
@@ -189,6 +191,15 @@ _No images extracted._
 ### prometheus-adapter
 
 - `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
+
+### slinky-slurm-operator
+
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.1.0`
+- `ghcr.io/slinkyproject/slurm-operator:1.1.0`
+
+### slinky-slurm-operator-crds
+
+_No images extracted._
 
 <!-- END AICR-BOM -->
 

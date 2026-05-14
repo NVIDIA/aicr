@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -28,6 +29,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/distribution/reference"
@@ -89,6 +91,13 @@ type PackageOptions struct {
 type PackageResult struct {
 	// Digest is the SHA256 digest of the packaged artifact.
 	Digest string
+	// MediaType is the manifest media type
+	// (typically application/vnd.oci.image.manifest.v1+json).
+	MediaType string
+	// Size is the manifest's byte length. Surfaced so callers can
+	// construct an OCI subject descriptor for the Referrers API
+	// without re-fetching the manifest from the registry.
+	Size int64
 	// Reference is the full image reference (registry/repository:tag).
 	Reference string
 	// StorePath is the path to the OCI Image Layout directory.
@@ -115,6 +124,12 @@ type PushOptions struct {
 type PushResult struct {
 	// Digest is the SHA256 digest of the pushed artifact.
 	Digest string
+	// MediaType is the manifest media type.
+	MediaType string
+	// Size is the manifest's byte length. Surfaced so the caller can
+	// build a subject descriptor for OCI Referrers attachment without
+	// re-fetching the manifest.
+	Size int64
 	// Reference is the full image reference (registry/repository:tag).
 	Reference string
 }
@@ -157,7 +172,7 @@ func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult
 	}
 
 	// Determine the directory to package from
-	packageFromDir, cleanup, err := preparePushDir(opts.SourceDir, opts.SubDir)
+	packageFromDir, cleanup, err := preparePushDir(ctx, opts.SourceDir, opts.SubDir)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +281,8 @@ func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult
 
 	return &PackageResult{
 		Digest:    desc.Digest.String(),
+		MediaType: desc.MediaType,
+		Size:      desc.Size,
 		Reference: refString,
 		StorePath: ociStorePath,
 	}, nil
@@ -329,8 +346,160 @@ func PushFromStore(ctx context.Context, storePath string, opts PushOptions) (*Pu
 
 	return &PushResult{
 		Digest:    desc.Digest.String(),
+		MediaType: desc.MediaType,
+		Size:      desc.Size,
 		Reference: refString,
 	}, nil
+}
+
+// ReferrerOptions configures a single-blob OCI manifest attached via
+// the OCI 1.1 Referrers API. Used by Sigstore Bundle attachment and
+// similar "annotation manifest" patterns where the *referring* manifest
+// is the artifact and the subject points at what it refers to.
+type ReferrerOptions struct {
+	// Registry is the OCI registry host (e.g., "ghcr.io").
+	Registry string
+	// Repository is the same repository the subject artifact lives in.
+	Repository string
+	// PlainHTTP forces HTTP (used for local registry tests).
+	PlainHTTP bool
+	// InsecureTLS disables TLS verification for self-signed registries.
+	InsecureTLS bool
+
+	// ArtifactType identifies the referrer manifest's purpose, e.g.
+	// "application/vnd.dev.sigstore.bundle.v0.3+json". The same value
+	// is used as the layer media type so a referrer with one blob is
+	// self-describing.
+	ArtifactType string
+	// LayerContent is the single blob the referrer wraps.
+	LayerContent []byte
+
+	// Subject is the descriptor of the artifact this referrer points
+	// at. cosign's /v2/<name>/referrers/<digest> discovery uses
+	// Subject.Digest to match.
+	Subject ociv1.Descriptor
+
+	// Annotations apply to the referrer manifest.
+	Annotations map[string]string
+}
+
+// PushReferrer pushes a single-layer OCI manifest with a Subject set,
+// attaching it as a Referrer of the subject artifact. cosign discovers
+// signatures attached this way via the OCI Distribution 1.1 Referrers
+// API. The tag is derived from the referrer manifest digest so multiple
+// referrers can coexist without colliding on a fixed tag.
+func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error) {
+	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
+		return nil, err
+	}
+	fs, tmpDir, tag, err := packReferrer(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = fs.Close()
+		if rmErr := os.RemoveAll(tmpDir); rmErr != nil {
+			slog.Warn("failed to remove referrer temp dir", "path", tmpDir, "error", rmErr)
+		}
+	}()
+
+	registryHost := stripProtocol(opts.Registry)
+	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", registryHost, opts.Repository))
+	if err != nil {
+		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to initialize remote repository", err)
+	}
+	repo.PlainHTTP = opts.PlainHTTP
+
+	authClient, err := createAuthClientForHost(registryHost, opts.PlainHTTP, opts.InsecureTLS)
+	if err != nil {
+		slog.Warn("failed to initialize credential store; continuing without auth", "error", err)
+	}
+	repo.Client = authClient
+
+	copyOpts := oras.DefaultCopyOptions
+	copyOpts.Concurrency = defaults.OCIPushConcurrency
+	desc, err := copyWithRetry(ctx, fs, tag, repo, tag, copyOpts, oras.Copy)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PushResult{
+		Digest:    desc.Digest.String(),
+		MediaType: desc.MediaType,
+		Size:      desc.Size,
+		Reference: fmt.Sprintf("%s/%s@%s", registryHost, opts.Repository, desc.Digest.String()),
+	}, nil
+}
+
+// packReferrer builds the referrer manifest in a local file store and
+// returns the store, temp dir path, and the digest-derived tag. The
+// caller defers closing fs and removing tmpDir.
+func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, string, string, error) {
+	if opts.ArtifactType == "" {
+		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "ArtifactType is required")
+	}
+	if len(opts.LayerContent) == 0 {
+		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "LayerContent must be non-empty")
+	}
+	if opts.Subject.Digest == "" {
+		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "Subject.Digest is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "oras-referrer-*")
+	if err != nil {
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp dir", err)
+	}
+
+	const layerFilename = "payload"
+	layerPath := filepath.Join(tmpDir, layerFilename)
+	if writeErr := os.WriteFile(layerPath, opts.LayerContent, 0o600); writeErr != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stage referrer layer", writeErr)
+	}
+
+	fs, err := file.New(tmpDir)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create referrer file store", err)
+	}
+	fs.TarReproducible = true
+
+	layerDesc, err := fs.Add(ctx, layerFilename, opts.ArtifactType, layerPath)
+	if err != nil {
+		_ = fs.Close()
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add referrer layer", err)
+	}
+
+	subject := opts.Subject
+	packOpts := oras.PackManifestOptions{
+		Layers:  []ociv1.Descriptor{layerDesc},
+		Subject: &subject,
+	}
+	packOpts.ManifestAnnotations = make(map[string]string, len(opts.Annotations)+1)
+	for k, v := range opts.Annotations {
+		packOpts.ManifestAnnotations[k] = v
+	}
+	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
+
+	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, opts.ArtifactType, packOpts)
+	if err != nil {
+		_ = fs.Close()
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack referrer manifest", err)
+	}
+
+	tag := strings.TrimPrefix(manifestDesc.Digest.String(), "sha256:")
+	if tagErr := fs.Tag(ctx, manifestDesc, tag); tagErr != nil {
+		_ = fs.Close()
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag referrer manifest", tagErr)
+	}
+
+	return fs, tmpDir, tag, nil
 }
 
 // copyFunc matches the signature of oras.Copy and is injected into
@@ -460,30 +629,25 @@ func jitterDuration(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * jitter)
 }
 
-// preparePushDir prepares the directory for pushing.
-// If subDir is specified, creates a temp directory with hard links.
-// Returns the directory to push from and an optional cleanup function.
-func preparePushDir(sourceDir, subDir string) (string, func(), error) {
-	if subDir == "" {
-		return sourceDir, nil, nil
-	}
-
-	// When pushing a subdirectory, preserve its path structure in the image
-	// Create a temp dir and use hard links (fast, no extra disk space)
+// preparePushDir prepares the directory for pushing by hard-linking the
+// source tree into a temp directory. Always uses a temp dir — never the
+// caller's source directory directly — so the oras file store, which
+// can write manifest blobs into its root, never leaves stray files in
+// user space. (The org.opencontainers.image.title annotation has been
+// observed materializing as a literal filename inside the root the
+// file store is constructed against.)
+//
+// When subDir is set, the temp dir mirrors the subdir layout so the
+// resulting OCI artifact preserves the same path structure.
+//
+// Returns the directory to push from and a cleanup function (always
+// non-nil now that the no-temp-dir shortcut is gone). ctx cancels the
+// directory walk so a parent timeout (push timeout, server shutdown)
+// terminates staging work without orphaning the temp dir.
+func preparePushDir(ctx context.Context, sourceDir, subDir string) (string, func(), error) {
 	tempDir, err := os.MkdirTemp("", "oras-push-*")
 	if err != nil {
 		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp directory", err)
-	}
-
-	srcPath := filepath.Join(sourceDir, subDir)
-	dstPath := filepath.Join(tempDir, subDir)
-	if err := hardLinkDir(srcPath, dstPath); err != nil {
-		if removeErr := os.RemoveAll(tempDir); removeErr != nil {
-			slog.Warn("failed to cleanup temp directory after error",
-				"path", tempDir,
-				"error", removeErr)
-		}
-		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create hard links", err)
 	}
 
 	cleanup := func() {
@@ -493,6 +657,41 @@ func preparePushDir(sourceDir, subDir string) (string, func(), error) {
 				"error", err)
 		}
 	}
+
+	srcPath := sourceDir
+	dstPath := tempDir
+	if subDir != "" {
+		// Reject non-local paths (absolute, parent-traversing, or
+		// containing reserved Windows names) so filepath.Join can't
+		// produce a hardlink target outside the temp dir or a source
+		// outside the caller's sourceDir.
+		if !filepath.IsLocal(subDir) {
+			cleanup()
+			return "", nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
+				"subDir must be a local relative path: "+subDir)
+		}
+		srcPath = filepath.Join(sourceDir, subDir)
+		dstPath = filepath.Join(tempDir, subDir)
+	}
+	if err := hardLinkDir(ctx, srcPath, dstPath); err != nil {
+		// $TMPDIR is often on a different filesystem from sourceDir
+		// (tmpfs, overlayfs in containers, NFS-mounted workspaces),
+		// in which case os.Link returns EXDEV. Fall back to a full
+		// recursive copy so the push still succeeds — the temp dir
+		// still gives the oras file store its own root so the
+		// "annotation as filename" leak the no-shortcut refactor was
+		// meant to prevent is still avoided.
+		if stderrors.Is(err, syscall.EXDEV) {
+			if copyErr := copyDir(ctx, srcPath, dstPath); copyErr != nil {
+				cleanup()
+				return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy files across filesystems", copyErr)
+			}
+			return tempDir, cleanup, nil
+		}
+		cleanup()
+		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create hard links", err)
+	}
+
 	return tempDir, cleanup, nil
 }
 
@@ -545,8 +744,12 @@ func createAuthClientForHost(host string, plainHTTP, insecureTLS bool) (*auth.Cl
 //
 // Note: Hard links may not work on Windows for files on different volumes
 // or filesystems that don't support them. This function is primarily
-// intended for Linux/container environments.
-func hardLinkDir(src, dst string) error {
+// intended for Linux/container environments. ctx is checked on entry
+// and per directory entry so a large tree's walk respects cancellation.
+func hardLinkDir(ctx context.Context, src, dst string) error {
+	if err := ctx.Err(); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "hard link walk canceled", err)
+	}
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source directory", err)
@@ -562,11 +765,14 @@ func hardLinkDir(src, dst string) error {
 	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return apperrors.Wrap(apperrors.ErrCodeUnavailable, "hard link walk canceled", err)
+		}
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
 		if entry.IsDir() {
-			if err := hardLinkDir(srcPath, dstPath); err != nil {
+			if err := hardLinkDir(ctx, srcPath, dstPath); err != nil {
 				return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to hard link subdirectory", err)
 			}
 		} else {
@@ -576,5 +782,88 @@ func hardLinkDir(src, dst string) error {
 		}
 	}
 
+	return nil
+}
+
+// copyDir is the cross-filesystem fallback for hardLinkDir. Hard links
+// require src and dst to share an inode space (same filesystem); when
+// $TMPDIR is on a different mount (tmpfs, overlay, NFS), os.Link
+// returns EXDEV and we fall back to a full byte copy. Streams via
+// io.Copy so multi-GB bundles don't materialize in memory. ctx is
+// checked per directory entry; a canceled walk returns
+// ErrCodeUnavailable so a parent timeout can short-circuit a large
+// fallback copy.
+func copyDir(ctx context.Context, src, dst string) error {
+	if err := ctx.Err(); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy walk canceled", err)
+	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source directory", err)
+	}
+
+	if mkdirErr := os.MkdirAll(dst, srcInfo.Mode()); mkdirErr != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create destination directory", mkdirErr)
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to read source directory", err)
+	}
+
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy walk canceled", err)
+		}
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(ctx, srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := copyFile(ctx, srcPath, dstPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// copyFile streams src → dst, preserving the source mode and capturing
+// close errors on the writable handle so flush failures aren't lost.
+// ctx is checked on entry only; in-flight io.Copy does not poll the
+// context — a single file's copy is bounded by its own size, not by
+// the walk duration.
+func copyFile(ctx context.Context, src, dst string) (retErr error) {
+	if err := ctx.Err(); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy canceled", err)
+	}
+	info, err := os.Stat(src)
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source file", err)
+	}
+
+	in, err := os.Open(filepath.Clean(src)) //nolint:gosec // src is bundle content under the caller's directory
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to open source file", err)
+	}
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(filepath.Clean(dst), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode()) //nolint:gosec // dst is package-controlled tempdir
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create destination file", err)
+	}
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && retErr == nil {
+			retErr = apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close destination file", closeErr)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy file content", err)
+	}
 	return nil
 }

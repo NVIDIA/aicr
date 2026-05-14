@@ -25,7 +25,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -705,7 +707,7 @@ func TestHardLinkDir(t *testing.T) {
 		}
 
 		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(srcDir, dstPath); err != nil {
+		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
 			t.Fatalf("hardLinkDir() error = %v", err)
 		}
 
@@ -736,7 +738,7 @@ func TestHardLinkDir(t *testing.T) {
 		}
 
 		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(srcDir, dstPath); err != nil {
+		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
 			t.Fatalf("hardLinkDir() error = %v", err)
 		}
 
@@ -752,7 +754,7 @@ func TestHardLinkDir(t *testing.T) {
 
 	t.Run("source not exist", func(t *testing.T) {
 		dstDir := t.TempDir()
-		err := hardLinkDir("/nonexistent/path", filepath.Join(dstDir, "linked"))
+		err := hardLinkDir(context.Background(), "/nonexistent/path", filepath.Join(dstDir, "linked"))
 		if err == nil {
 			t.Error("hardLinkDir() expected error for nonexistent source, got nil")
 		}
@@ -766,7 +768,7 @@ func TestHardLinkDir(t *testing.T) {
 		dstDir := t.TempDir()
 
 		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(srcDir, dstPath); err != nil {
+		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
 			t.Fatalf("hardLinkDir() error = %v", err)
 		}
 
@@ -790,7 +792,7 @@ func TestHardLinkDir(t *testing.T) {
 		}
 
 		dstPath := filepath.Join(dstDir, "linked")
-		if err := hardLinkDir(srcDir, dstPath); err != nil {
+		if err := hardLinkDir(context.Background(), srcDir, dstPath); err != nil {
 			t.Fatalf("hardLinkDir() error = %v", err)
 		}
 
@@ -811,19 +813,68 @@ func TestHardLinkDir(t *testing.T) {
 	})
 }
 
+// snapshotDir returns a sorted list of "name=size" strings for every
+// regular file directly inside dir (non-recursive). Used to assert that
+// a directory's file set is unchanged across an operation.
+func snapshotDir(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir %q: %v", dir, err)
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		info, statErr := e.Info()
+		if statErr != nil {
+			t.Fatalf("Info %q: %v", e.Name(), statErr)
+		}
+		out = append(out, e.Name()+"="+strconv.FormatInt(info.Size(), 10))
+	}
+	sort.Strings(out)
+	return out
+}
+
 // TestPreparePushDir tests the preparePushDir function.
 func TestPreparePushDir(t *testing.T) {
-	t.Run("no subdir returns source", func(t *testing.T) {
+	t.Run("no subdir hardlinks to temp dir, leaves source untouched", func(t *testing.T) {
+		// Regression: the no-subdir path used to return sourceDir
+		// directly, letting the oras file store write manifest blobs
+		// (named after the OCI title annotation, e.g., "AICR Recipe
+		// Evidence" with spaces) into the caller's bundle directory.
+		// preparePushDir must always return a tempdir so the file
+		// store is never rooted in user space.
 		srcDir := t.TempDir()
-		result, cleanup, err := preparePushDir(srcDir, "")
+		if err := os.WriteFile(filepath.Join(srcDir, "a.yaml"), []byte("a"), 0o644); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(srcDir, "b.json"), []byte("b"), 0o644); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+		before := snapshotDir(t, srcDir)
+
+		result, cleanup, err := preparePushDir(context.Background(), srcDir, "")
 		if err != nil {
 			t.Fatalf("preparePushDir() error = %v", err)
 		}
-		if cleanup != nil {
-			t.Error("cleanup should be nil when no subdir specified")
+		if cleanup == nil {
+			t.Fatal("cleanup must always be non-nil (no shortcut return)")
 		}
-		if result != srcDir {
-			t.Errorf("preparePushDir() = %q, want %q", result, srcDir)
+		defer cleanup()
+
+		if result == srcDir {
+			t.Fatalf("preparePushDir must not return sourceDir directly; got %q == srcDir", result)
+		}
+		after := snapshotDir(t, srcDir)
+		if !reflect.DeepEqual(before, after) {
+			t.Errorf("source directory was modified by preparePushDir; before=%v after=%v", before, after)
+		}
+		for _, name := range []string{"a.yaml", "b.json"} {
+			if _, statErr := os.Stat(filepath.Join(result, name)); statErr != nil {
+				t.Errorf("expected %q hard-linked into temp dir, got: %v", name, statErr)
+			}
 		}
 	})
 
@@ -839,7 +890,7 @@ func TestPreparePushDir(t *testing.T) {
 			t.Fatalf("failed to create file: %v", err)
 		}
 
-		result, cleanup, err := preparePushDir(srcDir, "mysubdir")
+		result, cleanup, err := preparePushDir(context.Background(), srcDir, "mysubdir")
 		if err != nil {
 			t.Fatalf("preparePushDir() error = %v", err)
 		}
@@ -871,7 +922,7 @@ func TestPreparePushDir(t *testing.T) {
 			t.Fatalf("failed to create file: %v", err)
 		}
 
-		result, cleanup, err := preparePushDir(srcDir, "mysubdir")
+		result, cleanup, err := preparePushDir(context.Background(), srcDir, "mysubdir")
 		if err != nil {
 			t.Fatalf("preparePushDir() error = %v", err)
 		}
@@ -888,7 +939,7 @@ func TestPreparePushDir(t *testing.T) {
 	t.Run("nonexistent subdir fails", func(t *testing.T) {
 		srcDir := t.TempDir()
 
-		_, cleanup, err := preparePushDir(srcDir, "nonexistent")
+		_, cleanup, err := preparePushDir(context.Background(), srcDir, "nonexistent")
 		if err == nil {
 			if cleanup != nil {
 				cleanup()
@@ -1316,6 +1367,97 @@ func TestIsTransientPushError(t *testing.T) {
 				t.Errorf("isTransientPushError(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestCopyDir_RecursiveContentAndModes verifies the EXDEV fallback path.
+// preparePushDir uses copyDir when hard links fail (e.g., $TMPDIR is on a
+// different filesystem from sourceDir, common in containers with tmpfs
+// /tmp). The fallback must reproduce the directory tree, file content,
+// and mode bits — anything less leaves the oras push pointing at an
+// incomplete bundle.
+func TestCopyDir_RecursiveContentAndModes(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "out")
+
+	// Tree: src/{a.txt, sub/b.txt}
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("alpha"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sub", "b.txt"), []byte("beta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDir(context.Background(), src, dst); err != nil {
+		t.Fatalf("copyDir: %v", err)
+	}
+
+	for path, want := range map[string]string{
+		filepath.Join(dst, "a.txt"):        "alpha",
+		filepath.Join(dst, "sub", "b.txt"): "beta",
+	} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("read %s: %v", path, err)
+			continue
+		}
+		if string(body) != want {
+			t.Errorf("%s = %q, want %q", path, body, want)
+		}
+	}
+
+	// Modes must round-trip — the oras file store reads files via os.Open
+	// (mode-agnostic) but downstream consumers may rely on permission
+	// bits, so the EXDEV fallback must not silently downgrade them.
+	for path, want := range map[string]os.FileMode{
+		filepath.Join(dst, "a.txt"):        0o600,
+		filepath.Join(dst, "sub", "b.txt"): 0o644,
+		filepath.Join(dst, "sub"):          0o755,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("stat %s: %v", path, err)
+			continue
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s perm = %o, want %o", path, got, want)
+		}
+	}
+}
+
+// TestCopyDir_RespectsCanceledContext locks in the contract that the
+// EXDEV-fallback walk surfaces context cancellation rather than running
+// to completion. A pre-canceled ctx must fail fast before any file I/O.
+func TestCopyDir_RespectsCanceledContext(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := copyDir(ctx, src, filepath.Join(t.TempDir(), "out")); err == nil {
+		t.Fatalf("expected error for canceled context")
+	}
+}
+
+// TestHardLinkDir_RespectsCanceledContext mirrors the cancel test on the
+// hardlink path so both walks share the same cancellation guarantee.
+func TestHardLinkDir_RespectsCanceledContext(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := hardLinkDir(ctx, src, filepath.Join(t.TempDir(), "out")); err == nil {
+		t.Fatalf("expected error for canceled context")
 	}
 }
 

@@ -293,6 +293,34 @@ type ValidateResolved struct {
 	// to the CLI flag's default duration; non-nil preserves an explicit
 	// "0s" / disabled-timeout value distinct from absence.
 	Timeout *time.Duration
+
+	// Nil when spec.validate.evidence.cncf is unset.
+	EvidenceCNCF *EvidenceCNCFResolved
+
+	// Nil when spec.validate.evidence.attestation is unset.
+	EvidenceAttestation *EvidenceAttestationResolved
+}
+
+// EvidenceCNCFResolved is the typed view of spec.validate.evidence.cncf.
+// Bool fields flatten the spec layer's *bool to plain bool: nil
+// (absent in YAML/JSON) becomes false, and downstream consumers do
+// not need to distinguish nil from &false for these specific feature
+// toggles (default is false in both cases).
+type EvidenceCNCFResolved struct {
+	Dir            string
+	CNCFSubmission bool
+	Features       []string
+}
+
+// EvidenceAttestationResolved is the typed view of
+// spec.validate.evidence.attestation. See EvidenceCNCFResolved for the
+// nil-flatten rationale.
+type EvidenceAttestationResolved struct {
+	Out         string
+	BOM         string
+	Push        string
+	PlainHTTP   bool
+	InsecureTLS bool
 }
 
 // validPhasesSet derives the accepted spec.validate.execution.phases
@@ -383,6 +411,27 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		}
 	}
 
+	if v.Evidence != nil {
+		if v.Evidence.CNCF != nil {
+			c := v.Evidence.CNCF
+			out.EvidenceCNCF = &EvidenceCNCFResolved{
+				Dir:            c.Dir,
+				CNCFSubmission: boolPtrOrFalse(c.CNCFSubmission),
+				Features:       slices.Clone(c.Features),
+			}
+		}
+		if v.Evidence.Attestation != nil {
+			a := v.Evidence.Attestation
+			out.EvidenceAttestation = &EvidenceAttestationResolved{
+				Out:         a.Out,
+				BOM:         a.BOM,
+				Push:        a.Push,
+				PlainHTTP:   boolPtrOrFalse(a.PlainHTTP),
+				InsecureTLS: boolPtrOrFalse(a.InsecureTLS),
+			}
+		}
+	}
+
 	return out, nil
 }
 
@@ -446,4 +495,11 @@ func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
 	}
 	out.Nodes = c.Nodes
 	return out, nil
+}
+
+// boolPtrOrFalse dereferences a *bool, treating nil (absent in
+// YAML/JSON) as false. Used at the spec → resolved boundary so the
+// resolved layer can stay plain bool for downstream consumers.
+func boolPtrOrFalse(p *bool) bool {
+	return p != nil && *p
 }

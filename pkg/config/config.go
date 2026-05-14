@@ -144,18 +144,61 @@ type RegistrySpec struct {
 	PlainHTTP   bool `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
 }
 
-// ValidateSpec captures the inputs to `aicr validate`.
-//
-// Evidence-related flags (--evidence-dir, --cncf-submission, --feature) are
-// intentionally not in this schema yet: the recipe-test-attestation work
-// under #754 introduces an Evidence umbrella that rehomes CNCF alongside
-// the new attestation kind, and landing the umbrella with both members at
-// once avoids a churn window where a one-member umbrella would have to be
-// reshaped on the second member's arrival.
+// ValidateSpec captures the inputs to `aicr validate`. Evidence emission
+// (both CNCF AI Conformance markdown and the recipe-evidence v1 bundle)
+// is configured via the Evidence umbrella (EvidenceSpec) — see that type
+// for the per-kind shape and the corresponding `aicr validate --…` flag
+// surface.
 type ValidateSpec struct {
 	Input     *ValidateInputSpec     `yaml:"input,omitempty" json:"input,omitempty"`
 	Agent     *ValidateAgentSpec     `yaml:"agent,omitempty" json:"agent,omitempty"`
 	Execution *ValidateExecutionSpec `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Evidence  *EvidenceSpec          `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// EvidenceSpec is the umbrella for the two evidence kinds `aicr validate`
+// can emit: CNCF AI Conformance markdown (CNCF) and the recipe-evidence v1
+// bundle (Attestation). Either or both may be populated; an unset section
+// means the corresponding kind is CLI-only.
+type EvidenceSpec struct {
+	CNCF        *EvidenceCNCFSpec        `yaml:"cncf,omitempty" json:"cncf,omitempty"`
+	Attestation *EvidenceAttestationSpec `yaml:"attestation,omitempty" json:"attestation,omitempty"`
+}
+
+// EvidenceCNCFSpec configures the CNCF AI Conformance evidence path
+// (--evidence-dir / --cncf-submission / --feature).
+type EvidenceCNCFSpec struct {
+	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
+
+	// Requires Dir. Pointer so the spec layer can distinguish nil
+	// (absent in YAML/JSON) from &false (explicit opt-out); the
+	// resolved layer flattens to plain bool — see EvidenceCNCFResolved.
+	CNCFSubmission *bool `yaml:"cncfSubmission,omitempty" json:"cncfSubmission,omitempty"`
+
+	// Empty = all features. Only honored when CNCFSubmission is true.
+	Features []string `yaml:"features,omitempty" json:"features,omitempty"`
+}
+
+// EvidenceAttestationSpec configures the recipe-evidence v1 bundle path
+// (--emit-attestation / --bom / --push / --plain-http / --insecure-tls).
+// Bundle format is documented in ADR-007.
+//
+// The OIDC identity token used by --push is intentionally absent: tokens
+// are short-lived secrets and must not be embedded in version-controlled
+// configuration. The CLI resolves it at sign time.
+type EvidenceAttestationSpec struct {
+	// Setting Out enables the attestation path; empty leaves it off
+	// even if other fields are populated.
+	Out string `yaml:"out,omitempty" json:"out,omitempty"`
+
+	BOM  string `yaml:"bom,omitempty" json:"bom,omitempty"`
+	Push string `yaml:"push,omitempty" json:"push,omitempty"`
+
+	// Pointer fields so the spec layer can distinguish nil (absent in
+	// YAML/JSON) from &false (explicit opt-out). The resolved layer
+	// flattens to plain bool — see EvidenceAttestationResolved.
+	PlainHTTP   *bool `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
+	InsecureTLS *bool `yaml:"insecureTLS,omitempty" json:"insecureTLS,omitempty"`
 }
 
 // ValidateInputSpec captures the recipe + snapshot inputs to validation.
