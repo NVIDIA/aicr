@@ -46,6 +46,27 @@ func TestMaterializeBundle_DirRejectsNonBundle(t *testing.T) {
 	}
 }
 
+func TestFormatOCIReference(t *testing.T) {
+	tests := []struct {
+		name              string
+		registry, repo, t string
+		want              string
+	}{
+		{"tag", "ghcr.io", "owner/repo", "v1", "ghcr.io/owner/repo:v1"},
+		{"digest", "ghcr.io", "owner/repo", "sha256:" + strings.Repeat("a", 64),
+			"ghcr.io/owner/repo@sha256:" + strings.Repeat("a", 64)},
+		{"localhost tag", "localhost:5000", "repo", "latest", "localhost:5000/repo:latest"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatOCIReference(tt.registry, tt.repo, tt.t)
+			if got != tt.want {
+				t.Errorf("formatOCIReference = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseOCIReference(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -16,9 +16,11 @@ package verifier
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +31,7 @@ import (
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -224,10 +227,22 @@ func materializeOCIRefRequireDigest(ctx context.Context, ref string, opts Verify
 
 	return &MaterializedBundle{
 		BundleDir: resolved,
-		Reference: registry + "/" + repo + ":" + refTarget,
+		Reference: formatOCIReference(registry, repo, refTarget),
 		Digest:    desc.Digest.String(),
 		cleanup:   cleanup,
 	}, nil
+}
+
+// formatOCIReference assembles a canonical OCI reference from its
+// parts. Digest targets get separated by "@" per the OCI spec; tag
+// targets use ":". Joining with ":" unconditionally produces invalid
+// refs like "registry/repo:sha256:..." for digest pulls.
+func formatOCIReference(registry, repo, target string) string {
+	sep := ":"
+	if isDigestPinned(target) {
+		sep = "@"
+	}
+	return registry + "/" + repo + sep + target
 }
 
 // referrerFetcher is the minimal subset of *remote.Repository that
@@ -369,12 +384,41 @@ func parseOCIReference(ref string) (registry, repo, target string, err error) {
 	return registry, repo, target, nil
 }
 
-// newAuthClient returns nil for plainHTTP/insecureTLS so ORAS falls
-// back to its built-in default; otherwise returns the package-level
-// auth.DefaultClient which honors ambient docker credentials.
+// newAuthClient builds an oras-go auth.Client that honors ambient
+// docker credentials and the operator's TLS preferences. Mirrors the
+// producer-side pattern in pkg/oci.createAuthClientForHost so both
+// sides have consistent registry behavior.
+//
+// Docker credential store load is best-effort: if a developer has no
+// docker config, public-registry pulls still work (the client just
+// goes anonymous).
 func newAuthClient(plainHTTP, insecureTLS bool) *auth.Client {
-	if plainHTTP || insecureTLS {
-		return nil
+	transport := defaults.NewHTTPTransport()
+	if !plainHTTP && insecureTLS {
+		slog.Warn("TLS verification disabled for OCI registry")
+		// Clone any existing TLS config so hardening defaults from
+		// defaults.NewHTTPTransport (MinVersion, ciphers) survive.
+		var cfg *tls.Config
+		if transport.TLSClientConfig != nil {
+			cfg = transport.TLSClientConfig.Clone()
+		} else {
+			cfg = &tls.Config{} //nolint:gosec // InsecureSkipVerify set on next line
+		}
+		cfg.InsecureSkipVerify = true //nolint:gosec // explicit operator opt-in via --registry-insecure-tls
+		transport.TLSClientConfig = cfg
 	}
-	return auth.DefaultClient
+
+	client := &auth.Client{
+		Client: &http.Client{Timeout: defaults.HTTPClientTimeout, Transport: transport},
+		Cache:  auth.NewCache(),
+	}
+
+	if credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{}); err == nil && credStore != nil {
+		client.Credential = credentials.Credential(credStore)
+	} else if err != nil {
+		slog.Debug("docker credential store unavailable; continuing anonymously",
+			"error", err.Error())
+	}
+
+	return client
 }

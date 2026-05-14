@@ -21,8 +21,16 @@ This demo walks through the full producer-and-consumer loop:
 
 * `aicr` with `aicr evidence verify` available.
 * A Kubernetes cluster to validate against.
-* OCI registry write access for the producer (GHCR, GitLab Container
-  Registry, Harbor, ECR, Artifactory, ACR — any OCI-1.1 registry works).
+* OCI registry write access for the producer. The registry must
+  support storing image manifests AND referrers — either via the
+  OCI 1.1 Referrers API (`/v2/<name>/referrers/<digest>`) or via
+  fallback tag-schema referrers. ORAS handles either transparently.
+  Known-good: GHCR, GitLab Container Registry, Harbor (≥ 2.8),
+  AWS ECR, Google Artifact Registry, Azure Container Registry,
+  JFrog Artifactory. Registries without referrer support cannot
+  carry the Sigstore Bundle attached to the artifact; without that
+  the verifier records signature-verify as "skipped (unsigned)"
+  even though the bundle was signed at push-time.
 * For signing: a working OIDC source. GitHub Actions OIDC is detected
   automatically; otherwise the CLI opens a browser for keyless signing.
 * Bootstrap the Sigstore trusted root once on the verifier's machine:
@@ -115,11 +123,28 @@ The verifier pulls the OCI artifact and runs five checks:
 
 Exit codes:
 
-* `0` — bundle valid, all checks passed.
-* `1` — bundle valid, but recorded validator results show failures
-  (informational; cryptographic integrity intact). Surfaced in
-  `VerifyResult.Exit` for JSON consumers; OS exit collapses to `2`.
-* `2` — bundle invalid (signature, integrity, or constraint failure).
+| Surface | `0` | `2` |
+|---|---|---|
+| OS exit code | Bundle valid; every check passed. | Anything else — bundle invalid OR recorded validator results show failures. |
+
+The structured output's `exit` field (`VerifyResult.Exit` in the
+library, `.exit` in JSON output) carries a three-valued code so JSON
+consumers can distinguish the two non-zero cases:
+
+* `0` — bundle valid; every check passed.
+* `1` — bundle valid; recorded validator results show failures
+  (cryptographic integrity intact, informational).
+* `2` — bundle invalid (signature, integrity, or predicate failure).
+
+Today the CLI collapses `1` and `2` to OS exit `2` because
+`pkg/errors/exitcode.go` maps both `ErrCodeConflict` and
+`ErrCodeInvalidRequest` to the same OS code. Shell scripts that want
+to branch on the informational case should consume `--format json`
+and read `.exit` via `jq`:
+
+```shell
+aicr evidence verify recipes/evidence/<recipe>.yaml --format json | jq '.exit'
+```
 
 Pin the expected signer when only one identity should be accepted:
 

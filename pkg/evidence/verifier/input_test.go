@@ -46,6 +46,8 @@ func TestDetectInputForm(t *testing.T) {
 		{"bare oci with digest", "ghcr.io/owner/repo@sha256:abc", InputFormOCI, false},
 		{"bare oci with tag", "ghcr.io/owner/repo:v1", InputFormOCI, false},
 		{"localhost registry", "localhost:5000/repo:v1", InputFormOCI, false},
+		{"relative path rejected", "./out/summary-bundle", "", true},
+		{"parent path rejected", "../some-bundle", "", true},
 		{"nonsense rejected", "not-an-input", "", true},
 	}
 	for _, tt := range tests {

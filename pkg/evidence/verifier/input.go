@@ -62,6 +62,10 @@ func looksLikeOCIRef(s string) bool {
 	if !ok {
 		return false
 	}
+	// Relative-path tokens contain dots but aren't registries.
+	if first == "." || first == ".." {
+		return false
+	}
 	if !strings.ContainsAny(first, ".:") && first != "localhost" {
 		return false
 	}
