@@ -49,11 +49,20 @@ func TestVerify_DirectoryHappyPath(t *testing.T) {
 	if got := stepByNumber(t, res, stepMaterialize).Status; got != StepPassed {
 		t.Errorf("materialize = %v, want passed", got)
 	}
+	if got := stepByNumber(t, res, stepSignature).Status; got != StepSkipped {
+		t.Errorf("signature = %v, want skipped (unsigned bundle)", got)
+	}
+	if got := stepByNumber(t, res, stepPredicate).Status; got != StepPassed {
+		t.Errorf("predicate = %v, want passed", got)
+	}
 	if got := stepByNumber(t, res, stepInventory).Status; got != StepPassed {
 		t.Errorf("inventory = %v, want passed", got)
 	}
 	if res.Exit != ExitValidPassed {
 		t.Errorf("Exit = %d, want %d", res.Exit, ExitValidPassed)
+	}
+	if res.Signer != nil {
+		t.Errorf("Signer should be nil for unsigned bundle; got %+v", res.Signer)
 	}
 	if res.Predicate == nil {
 		t.Errorf("Predicate is nil; expected parsed predicate")

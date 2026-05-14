@@ -25,8 +25,9 @@ import (
 
 // RenderMarkdown produces the PR-comment-shaped summary. Signed
 // predicate fields (fingerprint, phase counts, BOM info) are surfaced
-// here. The Signer line marks the bundle as unsigned until
-// cryptographic signature verification lands.
+// directly — when the signature step passed, the predicate body is
+// cryptographically anchored to the Fulcio cert claims shown on the
+// Signer line.
 func RenderMarkdown(r *VerifyResult) string {
 	if r == nil {
 		return "## Evidence verification — (no result)\n"
@@ -48,10 +49,24 @@ func RenderMarkdown(r *VerifyResult) string {
 }
 
 func writeHeader(b *strings.Builder, r *VerifyResult) {
-	b.WriteString("**Signer:** _signature verification not yet implemented in this slice_\n")
+	if r.Signer != nil && r.Signer.Identity != "" {
+		fmt.Fprintf(b, "**Signer:** %s", r.Signer.Identity)
+		if r.Signer.Issuer != "" {
+			fmt.Fprintf(b, " (issuer %s)", r.Signer.Issuer)
+		}
+		if r.Signer.RekorLogIndex != nil {
+			fmt.Fprintf(b, "  •  **Rekor:** index %d", *r.Signer.RekorLogIndex)
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("**Signer:** _unsigned bundle_\n")
+	}
 	if r.Predicate != nil {
 		fmt.Fprintf(b, "**AICR:** %s  •  **Schema:** %s",
 			r.Predicate.AICRVersion, r.Predicate.SchemaVersion)
+	}
+	if r.BundleDigest != "" {
+		fmt.Fprintf(b, "  •  **Bundle digest:** %s", r.BundleDigest)
 	}
 	b.WriteString("\n\n")
 }

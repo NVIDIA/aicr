@@ -16,23 +16,46 @@ package verifier
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/distribution/reference"
+	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	oras "oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/file"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
+// maxReferrerManifestBytes caps the in-memory read of a referrer
+// manifest JSON. Manifests are small (KiB); anything past this is a
+// bug or hostile.
+const maxReferrerManifestBytes = 1 << 20 // 1 MiB
+
 // MaterializedBundle is the verifier's view of a bundle on local disk.
-// Only directory input is sourced today; OCI fetch and pointer-driven
-// pull would populate additional fields here.
 type MaterializedBundle struct {
+	// BundleDir is the local directory containing recipe.yaml,
+	// manifest.json, ctrf/*, etc. Always populated.
 	BundleDir string
+
+	// Reference and Digest are populated when the bundle came from an
+	// OCI source. Reference is the canonical registry/repo:tag string;
+	// Digest is the resolved OCI manifest digest ("sha256:...").
+	Reference string
+	Digest    string
 
 	cleanup func()
 }
 
-// Cleanup releases temp resources. No-op for directory input.
+// Cleanup releases any temporary directories the verifier created.
 func (m *MaterializedBundle) Cleanup() {
 	if m == nil || m.cleanup == nil {
 		return
@@ -41,19 +64,28 @@ func (m *MaterializedBundle) Cleanup() {
 	m.cleanup = nil
 }
 
-// MaterializeBundle dispatches on InputForm. Only InputFormDir is
-// handled today; OCI fetch and pointer-driven pull land in follow-up
-// slices. ctx is checked once up front so cancellation behaves the
-// same as the rest of the pipeline, even though directory resolution
-// itself is cheap.
-func MaterializeBundle(ctx context.Context, opts VerifyOptions, form InputForm) (*MaterializedBundle, error) {
+// MaterializeBundle dispatches on InputForm. Returns a directory the
+// rest of the verifier reads from, plus optional OCI provenance.
+func MaterializeBundle(
+	ctx context.Context,
+	opts VerifyOptions,
+	form InputForm,
+	pointer *attestation.Pointer,
+) (*MaterializedBundle, error) {
+
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, "materialize canceled", err)
 	}
-	if form != InputFormDir {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "unsupported input form: "+string(form))
+	switch form {
+	case InputFormDir:
+		return materializeDir(opts.Input)
+	case InputFormPointer:
+		return materializeFromPointer(ctx, pointer, opts)
+	case InputFormOCI:
+		return materializeOCIRef(ctx, opts.Input, opts)
+	default:
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "unknown input form "+string(form))
 	}
-	return materializeDir(opts.Input)
 }
 
 // materializeDir accepts either the summary-bundle root or a parent
@@ -80,4 +112,244 @@ func hasBundleMarkers(dir string) bool {
 		}
 	}
 	return true
+}
+
+// materializeFromPointer pulls the OCI artifact named in the pointer's
+// first attestation, or falls back to opts.BundleRef when the pointer
+// has no OCI ref. The pointer's digest claim is cross-checked against
+// the actual pulled digest.
+func materializeFromPointer(
+	ctx context.Context,
+	pointer *attestation.Pointer,
+	opts VerifyOptions,
+) (*MaterializedBundle, error) {
+
+	if pointer == nil || len(pointer.Attestations) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "pointer has no attestations")
+	}
+	att := pointer.Attestations[0]
+	ref := att.Bundle.OCI
+	if ref == "" {
+		ref = opts.BundleRef
+	}
+	if ref == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"pointer carries no bundle.oci — re-run with --bundle <oci-ref> or point at the unpacked directory")
+	}
+	mat, err := materializeOCIRef(ctx, ref, opts)
+	if err != nil {
+		return nil, err
+	}
+	if att.Bundle.Digest != "" && mat.Digest != "" && att.Bundle.Digest != mat.Digest {
+		mat.Cleanup()
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"pointer digest "+att.Bundle.Digest+" does not match pulled digest "+mat.Digest)
+	}
+	return mat, nil
+}
+
+// materializeOCIRef pulls an OCI artifact into a temp directory using
+// oras.Copy from a remote repository to a local file store. The file
+// store unpacks the gzip-tar layer the emitter writes, so the result
+// is the bundle tree on disk.
+func materializeOCIRef(ctx context.Context, ref string, opts VerifyOptions) (*MaterializedBundle, error) {
+	registry, repo, refTarget, err := parseOCIReference(ref)
+	if err != nil {
+		return nil, err
+	}
+
+	tmp, err := os.MkdirTemp("", "aicr-evidence-pull-")
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create temp dir for OCI pull", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+
+	fs, fsErr := file.New(tmp)
+	if fsErr != nil {
+		cleanup()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create file store for OCI pull", fsErr)
+	}
+	defer func() { _ = fs.Close() }()
+
+	remoteRepo, rErr := remote.NewRepository(registry + "/" + repo)
+	if rErr != nil {
+		cleanup()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize remote repository", rErr)
+	}
+	remoteRepo.PlainHTTP = opts.PlainHTTP
+	remoteRepo.Client = newAuthClient(opts.PlainHTTP, opts.InsecureTLS)
+
+	pullCtx, pullCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
+	defer pullCancel()
+	desc, copyErr := oras.Copy(pullCtx, remoteRepo, refTarget, fs, refTarget, oras.DefaultCopyOptions)
+	if copyErr != nil {
+		cleanup()
+		return nil, errors.Wrap(errors.ErrCodeUnavailable, "OCI pull failed", copyErr)
+	}
+
+	resolved, dErr := resolveBundleDir(tmp)
+	if dErr != nil {
+		cleanup()
+		return nil, dErr
+	}
+
+	// The Sigstore Bundle is attached as an OCI Referrer of the main
+	// artifact, not part of the artifact's own layers. Discover and
+	// stage it as attestation.intoto.jsonl so signature verification
+	// can read it from disk the same way it does for directory input.
+	// Best-effort: an unsigned bundle has no referrer and the signature
+	// step records Skipped (matches the unsigned-on-disk behavior).
+	if err := discoverAndWriteReferrer(pullCtx, remoteRepo, desc, resolved); err != nil {
+		slog.Debug("no Sigstore Bundle referrer discovered",
+			"reference", registry+"/"+repo, "error", err.Error())
+	}
+
+	return &MaterializedBundle{
+		BundleDir: resolved,
+		Reference: registry + "/" + repo + ":" + refTarget,
+		Digest:    desc.Digest.String(),
+		cleanup:   cleanup,
+	}, nil
+}
+
+// referrerFetcher is the minimal subset of *remote.Repository that
+// fetchAndWriteReferrerLayer uses. Exists so tests can substitute an
+// in-memory fake without spinning up a real registry.
+type referrerFetcher interface {
+	Fetch(ctx context.Context, target ociv1.Descriptor) (io.ReadCloser, error)
+}
+
+// discoverAndWriteReferrer queries the Referrers API for a Sigstore
+// Bundle attached to the subject artifact, fetches its single layer,
+// and writes it to bundleDir as attestation.intoto.jsonl.
+//
+// Returns ErrCodeNotFound when no Sigstore Bundle referrer is present;
+// callers treat that as "unsigned bundle." Other errors propagate.
+func discoverAndWriteReferrer(ctx context.Context, repo *remote.Repository, subject ociv1.Descriptor, bundleDir string) error {
+	found := false
+	cbErr := repo.Referrers(ctx, subject, attestation.SigstoreBundleMediaType,
+		func(refs []ociv1.Descriptor) error {
+			for _, r := range refs {
+				if r.ArtifactType != attestation.SigstoreBundleMediaType {
+					continue
+				}
+				if err := fetchAndWriteReferrerLayer(ctx, repo, r, bundleDir); err != nil {
+					return err
+				}
+				found = true
+				// Take the first matching referrer. Multi-signature
+				// bundles aren't a V1 case; if one ever lands, we'd
+				// need a selection policy.
+				return nil
+			}
+			return nil
+		})
+	if cbErr != nil {
+		return errors.Wrap(errors.ErrCodeUnavailable, "referrers query failed", cbErr)
+	}
+	if !found {
+		return errors.New(errors.ErrCodeNotFound, "no Sigstore Bundle referrer for artifact")
+	}
+	return nil
+}
+
+// fetchAndWriteReferrerLayer pulls the referrer's manifest, extracts
+// its single layer descriptor, fetches the layer blob (the Sigstore
+// Bundle bytes), and writes them to attestation.intoto.jsonl.
+func fetchAndWriteReferrerLayer(ctx context.Context, repo referrerFetcher, referrerDesc ociv1.Descriptor, bundleDir string) error {
+	manifestRdr, err := repo.Fetch(ctx, referrerDesc)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeUnavailable, "failed to fetch referrer manifest", err)
+	}
+	defer func() { _ = manifestRdr.Close() }()
+
+	manifestBytes, err := io.ReadAll(io.LimitReader(manifestRdr, maxReferrerManifestBytes+1))
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read referrer manifest", err)
+	}
+	if int64(len(manifestBytes)) > maxReferrerManifestBytes {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"referrer manifest exceeds size limit")
+	}
+
+	var manifest ociv1.Manifest
+	if uErr := json.Unmarshal(manifestBytes, &manifest); uErr != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			"referrer manifest is not valid JSON", uErr)
+	}
+	if len(manifest.Layers) != 1 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"expected single-layer Sigstore Bundle referrer manifest")
+	}
+	layerDesc := manifest.Layers[0]
+	if layerDesc.Size > defaults.MaxSigstoreBundleSize {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"referrer layer exceeds Sigstore Bundle size limit")
+	}
+
+	layerRdr, err := repo.Fetch(ctx, layerDesc)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeUnavailable, "failed to fetch referrer layer", err)
+	}
+	defer func() { _ = layerRdr.Close() }()
+
+	outPath := filepath.Join(bundleDir, attestation.AttestationFilename)
+	out, err := os.Create(outPath) //nolint:gosec // verifier-controlled temp dir
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create attestation file", err)
+	}
+	if _, copyErr := io.Copy(out, io.LimitReader(layerRdr, defaults.MaxSigstoreBundleSize)); copyErr != nil {
+		_ = out.Close()
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write attestation file", copyErr)
+	}
+	if closeErr := out.Close(); closeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to close attestation file", closeErr)
+	}
+	return nil
+}
+
+// resolveBundleDir picks the bundle root from a temp dir holding the
+// pulled or extracted layer contents.
+func resolveBundleDir(dir string) (string, error) {
+	if hasBundleMarkers(dir) {
+		return dir, nil
+	}
+	candidate := filepath.Join(dir, attestation.SummaryBundleDirName)
+	if hasBundleMarkers(candidate) {
+		return candidate, nil
+	}
+	return "", errors.New(errors.ErrCodeInvalidRequest,
+		"pulled artifact does not contain a recognizable summary bundle")
+}
+
+// parseOCIReference splits a reference into (registry, repository, target).
+// target is the tag or digest portion ORAS resolves against the remote.
+func parseOCIReference(ref string) (registry, repo, target string, err error) {
+	clean := strings.TrimPrefix(ref, "oci://")
+	named, parseErr := reference.ParseNormalizedNamed(clean)
+	if parseErr != nil {
+		return "", "", "", errors.Wrap(errors.ErrCodeInvalidRequest, "invalid OCI reference", parseErr)
+	}
+	registry = reference.Domain(named)
+	repo = reference.Path(named)
+	if digested, ok := named.(reference.Digested); ok {
+		target = digested.Digest().String()
+	} else if tagged, ok := named.(reference.Tagged); ok {
+		target = tagged.Tag()
+	}
+	if target == "" {
+		return "", "", "", errors.New(errors.ErrCodeInvalidRequest,
+			"OCI reference "+ref+" must include a tag or digest")
+	}
+	return registry, repo, target, nil
+}
+
+// newAuthClient returns nil for plainHTTP/insecureTLS so ORAS falls
+// back to its built-in default; otherwise returns the package-level
+// auth.DefaultClient which honors ambient docker credentials.
+func newAuthClient(plainHTTP, insecureTLS bool) *auth.Client {
+	if plainHTTP || insecureTLS {
+		return nil
+	}
+	return auth.DefaultClient
 }
