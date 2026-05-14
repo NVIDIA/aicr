@@ -455,6 +455,111 @@ func TestBuildHelmfile_SameNamespaceNeedsBare(t *testing.T) {
 	}
 }
 
+// TestBuildHelmfile_CreateNamespaceFromFolder asserts that buildHelmfile
+// emits a per-release `createNamespace: false` override when a folder's
+// CreateNamespace flag is false (the Talos privileged-namespace pattern),
+// and emits no override (relying on helmDefaults.createNamespace: true)
+// otherwise. The localformat writer already encodes the
+// chart-owns-Namespace decision; the helmfile deployer must honor it or
+// helm refuses to import the namespace it created out-of-band.
+func TestBuildHelmfile_CreateNamespaceFromFolder(t *testing.T) {
+	folders := []localformat.Folder{
+		// Pre-injection folder that ships its own Namespace (Talos pattern):
+		// localformat would set CreateNamespace=false; expect the override.
+		{Index: 1, Dir: "001-gpu-operator-pre", Kind: localformat.KindLocalHelm,
+			Name: "gpu-operator-pre", Parent: "gpu-operator", CreateNamespace: false},
+		// Primary upstream-helm folder: no Namespace conflict possible from
+		// AICR's perspective; expect no per-release override.
+		{Index: 2, Dir: "002-gpu-operator", Kind: localformat.KindUpstreamHelm,
+			Name: "gpu-operator", Parent: "gpu-operator", CreateNamespace: true,
+			Upstream: &localformat.Upstream{Chart: "gpu-operator", Repo: "https://helm.ngc.nvidia.com/nvidia", Version: "v25.3.3"}},
+	}
+	ns := map[string]string{"gpu-operator": "privileged-gpu-operator"}
+	doc, err := buildHelmfile(folders, ns, nil)
+	if err != nil {
+		t.Fatalf("buildHelmfile() error = %v", err)
+	}
+	if len(doc.Releases) != 2 {
+		t.Fatalf("expected 2 releases, got %d", len(doc.Releases))
+	}
+	if doc.Releases[0].CreateNamespace == nil || *doc.Releases[0].CreateNamespace {
+		t.Errorf("release[0] (gpu-operator-pre) CreateNamespace = %v, want pointer to false — "+
+			"the chart owns the Namespace and helm must not create it out-of-band",
+			doc.Releases[0].CreateNamespace)
+	}
+	if doc.Releases[1].CreateNamespace != nil {
+		t.Errorf("release[1] (gpu-operator) CreateNamespace = %v, want nil — "+
+			"helmDefaults.createNamespace: true covers the common case; no per-release override should be emitted",
+			doc.Releases[1].CreateNamespace)
+	}
+}
+
+// TestGenerate_NamespaceOwningPreManifest is the integration counterpart:
+// a pre-manifest containing a Namespace resource flows end-to-end through
+// localformat.Write → buildHelmfile and surfaces as `createNamespace: false`
+// on the pre-release in the rendered helmfile.yaml. This locks the
+// os-talos failure mode the helmfile deployer originally hit (release
+// creates namespace via --create-namespace, then the chart's Namespace
+// template can't claim it).
+func TestGenerate_NamespaceOwningPreManifest(t *testing.T) {
+	namespaceManifest := []byte("apiVersion: v1\n" +
+		"kind: Namespace\n" +
+		"metadata:\n" +
+		"  name: privileged-gpu-operator\n" +
+		"  labels:\n" +
+		"    pod-security.kubernetes.io/enforce: privileged\n")
+	g := &Generator{
+		RecipeResult: recipeWith(
+			recipe.ComponentRef{
+				Name:      "gpu-operator",
+				Namespace: "privileged-gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v25.3.3",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+				Type:      recipe.ComponentTypeHelm,
+			},
+		),
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {"talos-namespace.yaml": namespaceManifest},
+		},
+		Version: testBundlerVersion,
+	}
+	outputDir := t.TempDir()
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(outputDir, fileHelmfile))
+	if err != nil {
+		t.Fatalf("read helmfile.yaml: %v", err)
+	}
+	var doc Helmfile
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse helmfile.yaml: %v\n--- content ---\n%s", err, data)
+	}
+	if len(doc.Releases) != 2 {
+		t.Fatalf("expected 2 releases (gpu-operator-pre + gpu-operator), got %d", len(doc.Releases))
+	}
+	// release[0] is the injected -pre with the Namespace template.
+	if got := doc.Releases[0].Name; got != "gpu-operator-pre" {
+		t.Fatalf("release[0].name = %q, want %q", got, "gpu-operator-pre")
+	}
+	if doc.Releases[0].CreateNamespace == nil || *doc.Releases[0].CreateNamespace {
+		t.Errorf("release[0] (gpu-operator-pre) CreateNamespace = %v, want pointer to false — "+
+			"pre-manifest ships a kind: Namespace, so helm must not create it out-of-band",
+			doc.Releases[0].CreateNamespace)
+	}
+	// release[1] is the primary upstream-helm; no override expected.
+	if doc.Releases[1].CreateNamespace != nil {
+		t.Errorf("release[1] (gpu-operator) CreateNamespace = %v, want nil",
+			doc.Releases[1].CreateNamespace)
+	}
+	// Global default is unchanged — every other release still benefits.
+	if !doc.HelmDefaults.CreateNamespace {
+		t.Error("helmDefaults.createNamespace should remain true; only the affected release overrides it")
+	}
+}
+
 // TestComponentOverrides_ParityWithHelmDeployScript guards against silent
 // drift between componentOverrides in this package and the hardcoded
 // ASYNC_COMPONENTS / COMPONENT_HELM_TIMEOUT case block in

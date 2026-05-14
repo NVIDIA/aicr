@@ -185,6 +185,10 @@ func writeVendoredHelmFolder(
 		Name:   c.Name,
 		Parent: c.Name,
 		Files:  files,
+		// Vendored folders wrap an upstream chart that AICR does not
+		// render; the chart-owns-Namespace detection does not apply
+		// here. Default to true to match the upstream-helm path.
+		CreateNamespace: true,
 	}, rec, nil
 }
 

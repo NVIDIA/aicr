@@ -56,4 +56,14 @@ type Folder struct {
 	Parent   string    // component this folder belongs to (== Name for primary)
 	Upstream *Upstream // set iff Kind == KindUpstreamHelm
 	Files    []string  // relative paths (to OutputDir) of files written in this folder
+	// CreateNamespace is true when the orchestration layer should pass
+	// --create-namespace to helm for this folder's release, false when
+	// the folder's chart ships its own Namespace resource (the Talos
+	// privileged-namespace pre-injection pattern). install.sh already
+	// honors this internally; the field exposes the same decision to
+	// out-of-band deployers (e.g., helmfile) that bypass install.sh.
+	// Helm 3 refuses to import a namespace it created out-of-band via
+	// --create-namespace because that namespace lacks the release's
+	// ownership annotations.
+	CreateNamespace bool
 }
