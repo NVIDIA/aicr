@@ -15,6 +15,7 @@
 package verifier
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -31,9 +32,12 @@ import (
 // predicate.manifest.digest — there's no separate step needed for
 // recipe.yaml, bom.cdx.json, or the CTRF reports.
 //
+// ctx is honored between files (large bundles, hostile manifests with
+// many entries) and during the bundle walk for stray-file detection.
+//
 // Returns per-file mismatch rows and an error summarizing the failure;
 // both nil on success.
-func CheckInventory(mat *MaterializedBundle) ([]KV, error) {
+func CheckInventory(ctx context.Context, mat *MaterializedBundle) ([]KV, error) {
 	if mat == nil || mat.BundleDir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
 	}
@@ -51,6 +55,10 @@ func CheckInventory(mat *MaterializedBundle) ([]KV, error) {
 
 	var mismatches []KV
 	for _, e := range manifest.Files {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return mismatches, errors.Wrap(errors.ErrCodeUnavailable,
+				"inventory check canceled", ctxErr)
+		}
 		got, hashErr := hashFile(mat.BundleDir, e.Path, e.Size)
 		if hashErr != nil {
 			mismatches = append(mismatches, KV{Key: e.Path, Value: hashErr.Error()})
@@ -65,7 +73,7 @@ func CheckInventory(mat *MaterializedBundle) ([]KV, error) {
 		}
 	}
 
-	extras, walkErr := findExtras(mat.BundleDir, manifest.Files)
+	extras, walkErr := findExtras(ctx, mat.BundleDir, manifest.Files)
 	if walkErr != nil {
 		mismatches = append(mismatches, KV{Key: "walk", Value: walkErr.Error()})
 	}
@@ -100,8 +108,8 @@ func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
 
 // findExtras returns bundle-relative paths of files present on disk
 // but not in manifest.Files, exempting the manifest itself and the
-// in-toto Statement files.
-func findExtras(bundleDir string, manifestFiles []attestation.ManifestFile) ([]string, error) {
+// in-toto Statement files. Honors ctx cancellation between entries.
+func findExtras(ctx context.Context, bundleDir string, manifestFiles []attestation.ManifestFile) ([]string, error) {
 	want := make(map[string]struct{}, len(manifestFiles))
 	for _, f := range manifestFiles {
 		want[f.Path] = struct{}{}
@@ -115,6 +123,9 @@ func findExtras(bundleDir string, manifestFiles []attestation.ManifestFile) ([]s
 	walkErr := filepath.WalkDir(bundleDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 		if d.IsDir() {
 			return nil

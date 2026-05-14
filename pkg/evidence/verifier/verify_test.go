@@ -134,6 +134,17 @@ func TestVerify_EmptyInputErrors(t *testing.T) {
 	}
 }
 
+func TestCheckInventory_RespectsCancellation(t *testing.T) {
+	bundleDir := buildTestBundle(t)
+	mat := &MaterializedBundle{BundleDir: summaryDirOf(t, bundleDir)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := CheckInventory(ctx, mat)
+	if err == nil {
+		t.Errorf("CheckInventory(canceled ctx) = nil, want error")
+	}
+}
+
 func TestWriteMarkdown_WritesFile(t *testing.T) {
 	bundleDir := buildTestBundle(t)
 	res, err := Verify(context.Background(), VerifyOptions{Input: summaryDirOf(t, bundleDir)})

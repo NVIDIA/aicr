@@ -77,7 +77,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	r.RecipeName = pred.Recipe.Name
 
 	// Step 2 — manifest hash check (covers every file in the bundle).
-	mismatches, invErr := CheckInventory(mat)
+	mismatches, invErr := CheckInventory(ctx, mat)
 	if invErr != nil {
 		record(r, stepInventory, StepFailed, invErr.Error(), mismatches)
 		r.Exit = ExitInvalid
