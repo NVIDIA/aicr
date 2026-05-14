@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Renovate
 
-Self-hosted Renovate keeps the project's dependencies up to date across `go.mod`, GitHub Actions, Dockerfiles, Terraform, the docs site's `package.json`, Helm chart values, and — crucially — the tool versions pinned in [`.settings.yaml`](../.settings.yaml), which a vanilla Renovate setup cannot reach without the custom regex manager configured here.
+Self-hosted Renovate keeps the project's dependencies up to date across `go.mod`, Dockerfiles, Terraform, Helm chart values, and — crucially — the tool versions pinned in [`.settings.yaml`](../.settings.yaml), which a vanilla Renovate setup cannot reach without the custom regex manager configured here. GitHub Actions / composite-action digests are owned by Dependabot (Renovate's `github-actions` manager is disabled in `renovate.json5`).
 
 - Configuration: [`.github/renovate.json5`](renovate.json5)
 - Workflow: [`.github/workflows/renovate.yaml`](workflows/renovate.yaml)
@@ -18,10 +18,9 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | Source | Manager |
 |---|---|
 | `go.mod` | `gomod` (groups: `kubernetes`, `golang-x`, `opencontainers`) |
-| `.github/workflows/*.yaml`, `.github/actions/*/action.yml` | `github-actions` (digest-pinned, grouped into one PR/cycle) |
+| `.github/workflows/*.yaml`, `.github/actions/*/action.yml` | `github-actions` (**disabled** — Dependabot owns workflow / composite-action bumps; Renovate cannot push `.github/workflows/*` with the auto-issued `GITHUB_TOKEN`) |
 | `validators/*/Dockerfile` | `dockerfile` |
 | `infra/**/*.tf` | `terraform` (grouped) |
-| `site/package.json` | `npm` (bundled with `docs_tools` into the `docs` group) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
 | `.settings.yaml` (28 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |

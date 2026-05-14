@@ -134,14 +134,14 @@
   },
 
   packageRules: [
-    // ---- Auto-merge: workflow digests, Go module patches, npm site deps ----
+    // ---- Auto-merge: Go module patch/pin updates ----
     // Low-blast-radius managers where patch / digest bumps almost never break.
     // minimumReleaseAge raised from the 3-day global default to 7 days because
     // these bumps skip human review — the cooldown is the only line of defense
     // against a malicious release sneaking through.
     {
       matchUpdateTypes: ["patch", "pin", "digest"],
-      matchManagers: ["gomod", "npm"],
+      matchManagers: ["gomod"],
       minimumReleaseAge: "7 days",
       automerge: true,
       automergeType: "pr",
@@ -208,17 +208,6 @@
       groupName: "terraform",
       matchManagers: ["terraform"],
     },
-    // Docs build chain — bundles `.settings.yaml` docs_tools (hugo + the
-    // node runtime used for versioned-site builds) with everything in
-    // site/package.json (vitepress + vue + mermaid + esbuild + vite).
-    // Both halves are part of one docs pipeline and tend to be reviewed
-    // together. See the matching section group rule below for the regex
-    // manager half — both rules share groupName so deps from either
-    // manager land in the same `renovate/docs` PR.
-    {
-      groupName: "docs",
-      matchManagers: ["npm"],
-    },
     // .settings.yaml updates grouped by top-level YAML section (depType).
     // Each annotation declares `depType=<section>` so PRs bundle by section.
     // The `groupName` is the slug used in branch names — kept short and
@@ -249,8 +238,7 @@
       matchManagers: ["custom.regex"],
       matchDepTypes: ["testing_tools"],
     },
-    // docs_tools section bundles into the same `docs` group as site/package.json
-    // above — hugo, the docs node runtime, and the vitepress site live together.
+    // docs_tools section in .settings.yaml (hugo + the docs node runtime).
     {
       groupName: "docs",
       matchManagers: ["custom.regex"],
