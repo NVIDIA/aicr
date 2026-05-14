@@ -134,7 +134,7 @@
   },
 
   packageRules: [
-    // ---- Auto-merge: workflow digests, Go module patches ----
+    // ---- Auto-merge: Go module patch/pin updates ----
     // Low-blast-radius managers where patch / digest bumps almost never break.
     // minimumReleaseAge raised from the 3-day global default to 7 days because
     // these bumps skip human review — the cooldown is the only line of defense
