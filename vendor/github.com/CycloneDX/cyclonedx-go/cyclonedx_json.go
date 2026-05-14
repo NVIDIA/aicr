@@ -126,6 +126,8 @@ func (sv *SpecVersion) UnmarshalJSON(bytes []byte) error {
 		*sv = SpecVersion1_5
 	case SpecVersion1_6.String():
 		*sv = SpecVersion1_6
+	case SpecVersion1_7.String():
+		*sv = SpecVersion1_7
 	default:
 		return ErrInvalidSpecVersion
 	}
@@ -187,50 +189,263 @@ func (tc *ToolsChoice) UnmarshalJSON(bytes []byte) error {
 	return nil
 }
 
-func (ev *Evidence) UnmarshalJSON(bytes []byte) error {
-	type Alias Evidence
-	var aux = &struct {
-		Identity json.RawMessage `json:"identity"`
-		*Alias
-	}{
-		Alias: (*Alias)(ev),
+func (eic EvidenceIdentityChoice) MarshalJSON() ([]byte, error) {
+	if eic.Identity != nil && eic.Identities != nil {
+		return nil, fmt.Errorf("either a single identity or an array of identities can be used, but not both")
+	}
+	if eic.Identity != nil {
+		return json.Marshal(eic.Identity)
+	} else if eic.Identities != nil {
+		return json.Marshal(eic.Identities)
+	}
+	return []byte("null"), nil
+}
+
+func (eic *EvidenceIdentityChoice) UnmarshalJSON(data []byte) error {
+	// Discriminate based on whether data is an array or a single object.
+	if len(data) > 0 && data[0] == '[' {
+		var identities []EvidenceIdentity
+		if err := json.Unmarshal(data, &identities); err != nil {
+			return err
+		}
+		eic.Identities = &identities
+		return nil
+	}
+	var identity EvidenceIdentity
+	if err := json.Unmarshal(data, &identity); err != nil {
+		return err
+	}
+	eic.Identity = &identity
+	return nil
+}
+
+func (l License) MarshalJSON() ([]byte, error) {
+	if l.ID != "" && l.Name != "" {
+		return nil, fmt.Errorf("license must have either id or name, not both")
+	}
+	if l.ID == "" && l.Name == "" {
+		return nil, fmt.Errorf("license must have either id or name")
+	}
+	type Alias License
+	return json.Marshal(Alias(l))
+}
+
+func (cs CertificateState) MarshalJSON() ([]byte, error) {
+	if cs.Predefined != nil && cs.Custom != nil {
+		return nil, fmt.Errorf("either a predefined or custom certificate state can be used, but not both")
+	}
+	if cs.Predefined != nil {
+		return json.Marshal(cs.Predefined)
+	} else if cs.Custom != nil {
+		return json.Marshal(cs.Custom)
+	}
+	return []byte("{}"), nil
+}
+
+func (cs *CertificateState) UnmarshalJSON(data []byte) error {
+	var peek struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(data, &peek); err != nil {
+		return err
+	}
+	if peek.State != "" {
+		var p PredefinedCertificateState
+		if err := json.Unmarshal(data, &p); err != nil {
+			return err
+		}
+		cs.Predefined = &p
+		return nil
+	}
+	var c CustomCertificateState
+	if err := json.Unmarshal(data, &c); err != nil {
+		return err
+	}
+	cs.Custom = &c
+	return nil
+}
+
+func (ce CertificateExtension) MarshalJSON() ([]byte, error) {
+	if ce.Common != nil && ce.Custom != nil {
+		return nil, fmt.Errorf("either a common or custom certificate extension can be used, but not both")
+	}
+	if ce.Common != nil {
+		return json.Marshal(ce.Common)
+	} else if ce.Custom != nil {
+		return json.Marshal(ce.Custom)
+	}
+	return []byte("{}"), nil
+}
+
+func (ce *CertificateExtension) UnmarshalJSON(data []byte) error {
+	var peek struct {
+		CommonExtensionName string `json:"commonExtensionName"`
+	}
+	if err := json.Unmarshal(data, &peek); err != nil {
+		return err
+	}
+	if peek.CommonExtensionName != "" {
+		var c CommonCertificateExtension
+		if err := json.Unmarshal(data, &c); err != nil {
+			return err
+		}
+		ce.Common = &c
+		return nil
+	}
+	var c CustomCertificateExtension
+	if err := json.Unmarshal(data, &c); err != nil {
+		return err
+	}
+	ce.Custom = &c
+	return nil
+}
+
+func (ac AsserterChoice) MarshalJSON() ([]byte, error) {
+	if ac.Organization != nil {
+		return json.Marshal(struct {
+			Organization *OrganizationalEntity `json:"organization"`
+		}{Organization: ac.Organization})
+	} else if ac.Individual != nil {
+		return json.Marshal(struct {
+			Individual *OrganizationalContact `json:"individual"`
+		}{Individual: ac.Individual})
+	} else if ac.BOMRef != nil {
+		return json.Marshal(struct {
+			BOMRef *BOMReference `json:"ref"`
+		}{BOMRef: ac.BOMRef})
+	}
+	return []byte("{}"), nil
+}
+
+func (ac *AsserterChoice) UnmarshalJSON(data []byte) error {
+	var peek struct {
+		Organization *json.RawMessage `json:"organization"`
+		Individual   *json.RawMessage `json:"individual"`
+		BOMRef       *json.RawMessage `json:"ref"`
+	}
+	if err := json.Unmarshal(data, &peek); err != nil {
+		return err
+	}
+	if peek.Organization != nil {
+		var org OrganizationalEntity
+		if err := json.Unmarshal(*peek.Organization, &org); err != nil {
+			return err
+		}
+		ac.Organization = &org
+	} else if peek.Individual != nil {
+		var contact OrganizationalContact
+		if err := json.Unmarshal(*peek.Individual, &contact); err != nil {
+			return err
+		}
+		ac.Individual = &contact
+	} else if peek.BOMRef != nil {
+		var ref BOMReference
+		if err := json.Unmarshal(*peek.BOMRef, &ref); err != nil {
+			return err
+		}
+		ac.BOMRef = &ref
+	}
+	return nil
+}
+
+func ikev2MarshalJSON(bomRef BOMReference, structured interface{}) ([]byte, error) {
+	if bomRef != "" {
+		return json.Marshal(string(bomRef))
+	}
+	return json.Marshal(structured)
+}
+
+func ikev2UnmarshalJSON(data []byte, bomRef *BOMReference, structured interface{}) error {
+	if len(data) > 0 && data[0] == '"' {
+		return json.Unmarshal(data, bomRef)
+	}
+	return json.Unmarshal(data, structured)
+}
+
+func (v IKEv2Auth) MarshalJSON() ([]byte, error) {
+	type alias IKEv2Auth
+	return ikev2MarshalJSON(v.BOMRef, alias(v))
+}
+
+func (v *IKEv2Auth) UnmarshalJSON(data []byte) error {
+	type alias IKEv2Auth
+	return ikev2UnmarshalJSON(data, &v.BOMRef, (*alias)(v))
+}
+
+func (v IKEv2Enc) MarshalJSON() ([]byte, error) {
+	type alias IKEv2Enc
+	return ikev2MarshalJSON(v.BOMRef, alias(v))
+}
+
+func (v *IKEv2Enc) UnmarshalJSON(data []byte) error {
+	type alias IKEv2Enc
+	return ikev2UnmarshalJSON(data, &v.BOMRef, (*alias)(v))
+}
+
+func (v IKEv2Integ) MarshalJSON() ([]byte, error) {
+	type alias IKEv2Integ
+	return ikev2MarshalJSON(v.BOMRef, alias(v))
+}
+
+func (v *IKEv2Integ) UnmarshalJSON(data []byte) error {
+	type alias IKEv2Integ
+	return ikev2UnmarshalJSON(data, &v.BOMRef, (*alias)(v))
+}
+
+func (v IKEv2Ke) MarshalJSON() ([]byte, error) {
+	type alias IKEv2Ke
+	return ikev2MarshalJSON(v.BOMRef, alias(v))
+}
+
+func (v *IKEv2Ke) UnmarshalJSON(data []byte) error {
+	type alias IKEv2Ke
+	return ikev2UnmarshalJSON(data, &v.BOMRef, (*alias)(v))
+}
+
+func (v IKEv2Prf) MarshalJSON() ([]byte, error) {
+	type alias IKEv2Prf
+	return ikev2MarshalJSON(v.BOMRef, alias(v))
+}
+
+func (v *IKEv2Prf) UnmarshalJSON(data []byte) error {
+	type alias IKEv2Prf
+	return ikev2UnmarshalJSON(data, &v.BOMRef, (*alias)(v))
+}
+
+func (pc PatentChoice) MarshalJSON() ([]byte, error) {
+	if pc.Patent != nil {
+		return json.Marshal(pc.Patent)
+	} else if pc.PatentFamily != nil {
+		return json.Marshal(pc.PatentFamily)
 	}
 
-	if err := json.Unmarshal(bytes, &aux); err != nil {
+	return []byte("{}"), nil
+}
+
+func (pc *PatentChoice) UnmarshalJSON(data []byte) error {
+	// Distinguish patent from patentFamily by checking for the familyId field,
+	// which is the required field unique to patentFamily.
+	var peek struct {
+		FamilyID string `json:"familyId"`
+	}
+	if err := json.Unmarshal(data, &peek); err != nil {
 		return err
 	}
 
-	// Try to unmarshal Identity field as struct
-	if aux.Identity != nil {
-		var identity EvidenceIdentity
-		err := json.Unmarshal(aux.Identity, &identity)
-		if err != nil {
-			var typeErr *json.UnmarshalTypeError
-			if !errors.As(err, &typeErr) || typeErr.Value != "array" {
-				return err
-			}
-
-			// Try to unmarshal Identity field as array
-			var identities []EvidenceIdentity
-			err = json.Unmarshal(aux.Identity, &identities)
-			if err != nil {
-				return err
-			}
-
-			if len(identities) > 0 {
-				ev.Identity = &identities
-			}
-			return nil
+	if peek.FamilyID != "" {
+		var pf PatentFamily
+		if err := json.Unmarshal(data, &pf); err != nil {
+			return err
 		}
-
-		// The field is required, so we can check for emptiness using this field.
-		// cf. https://cyclonedx.org/docs/1.6/json/#metadata_component_evidence_identity_oneOf_i0_items_field
-		if identity.Field != "" {
-			ev.Identity = &[]EvidenceIdentity{
-				identity,
-			}
-		}
+		pc.PatentFamily = &pf
+		return nil
 	}
+
+	var p Patent
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	pc.Patent = &p
 	return nil
 }
 
@@ -242,4 +457,5 @@ var jsonSchemas = map[SpecVersion]string{
 	SpecVersion1_4: "http://cyclonedx.org/schema/bom-1.4.schema.json",
 	SpecVersion1_5: "http://cyclonedx.org/schema/bom-1.5.schema.json",
 	SpecVersion1_6: "http://cyclonedx.org/schema/bom-1.6.schema.json",
+	SpecVersion1_7: "http://cyclonedx.org/schema/bom-1.7.schema.json",
 }

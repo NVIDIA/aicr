@@ -424,7 +424,7 @@ notices: ## Generates THIRD_PARTY_NOTICES.md aggregating every dependency's lice
 	@bash tools/generate-notices
 
 .PHONY: release
-release: notices ## Runs the full release process with goreleaser (generates THIRD_PARTY_NOTICES.md first)
+release: ## Runs the full release process with goreleaser
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
