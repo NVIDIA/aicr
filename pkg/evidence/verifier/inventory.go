@@ -103,7 +103,12 @@ func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
 				" (got "+strconv.FormatInt(info.Size(), 10)+
 				", want "+strconv.FormatInt(expectedSize, 10)+")")
 	}
-	return attestation.HashFileSHA256(full)
+	got, hashErr := attestation.HashFileSHA256(full)
+	if hashErr != nil {
+		return "", errors.PropagateOrWrap(hashErr, errors.ErrCodeInternal,
+			"failed to hash bundle file: "+rel)
+	}
+	return got, nil
 }
 
 // findExtras returns bundle-relative paths of files present on disk
