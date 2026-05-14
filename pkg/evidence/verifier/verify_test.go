@@ -285,6 +285,46 @@ func TestRenderMarkdown_FailedStepDetailsListsFiles(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdown_HeaderDistinguishesFailedFromUnsigned(t *testing.T) {
+	tests := []struct {
+		name       string
+		steps      []StepResult
+		signer     *SignerClaims
+		wantSub    string
+		wantNotSub string
+	}{
+		{
+			name:    "passed signature shows identity",
+			steps:   []StepResult{{Step: stepSignature, Name: "signature-verify", Status: StepPassed}},
+			signer:  &SignerClaims{Identity: "alice@example.com", Issuer: "https://issuer"},
+			wantSub: "alice@example.com",
+		},
+		{
+			name:    "skipped signature shows unsigned bundle",
+			steps:   []StepResult{{Step: stepSignature, Name: "signature-verify", Status: StepSkipped}},
+			wantSub: "unsigned bundle",
+		},
+		{
+			name:       "failed signature does NOT claim unsigned",
+			steps:      []StepResult{{Step: stepSignature, Name: "signature-verify", Status: StepFailed, Detail: "x"}},
+			wantSub:    "signature verification failed",
+			wantNotSub: "unsigned",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &VerifyResult{Steps: tt.steps, Signer: tt.signer}
+			md := RenderMarkdown(r)
+			if !strings.Contains(md, tt.wantSub) {
+				t.Errorf("output should contain %q; got %q", tt.wantSub, md)
+			}
+			if tt.wantNotSub != "" && strings.Contains(md, tt.wantNotSub) {
+				t.Errorf("output should NOT contain %q; got %q", tt.wantNotSub, md)
+			}
+		})
+	}
+}
+
 func TestRenderMarkdown_NoFailedStepDetailsSectionWhenAllPass(t *testing.T) {
 	r := &VerifyResult{
 		Exit: ExitValidPassed,

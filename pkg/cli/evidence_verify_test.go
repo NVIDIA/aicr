@@ -50,7 +50,7 @@ func TestEvidenceVerifyCmd_HasExpectedFlags(t *testing.T) {
 	cmd := evidenceVerifyCmd()
 	wanted := []string{
 		"output", "format",
-		"no-rekor", "expected-issuer", "expected-identity-regexp", "bundle",
+		"expected-issuer", "expected-identity-regexp", "bundle",
 		"registry-plain-http", "registry-insecure-tls", "allow-unpinned-tag",
 	}
 	for _, name := range wanted {

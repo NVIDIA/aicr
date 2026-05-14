@@ -81,6 +81,44 @@ func TestVerifySignature_NilBundleErrors(t *testing.T) {
 	}
 }
 
+func TestSanitizeSigstoreError(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "tsa threshold artifact",
+			in:   "threshold not met for verified signed timestamps: 0 < 1; error: %!w(<nil>)",
+			want: "threshold not met for verified signed timestamps: 0 < 1",
+		},
+		{
+			name: "bare artifact",
+			in:   "some error: %!w(<nil>)",
+			want: "some error",
+		},
+		{
+			name: "no artifact",
+			in:   "ordinary error",
+			want: "ordinary error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeSigstoreError(errPlain{msg: tt.in})
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// errPlain is a tiny error wrapper that returns msg verbatim from
+// Error(). Used to feed exact strings to sanitizeSigstoreError.
+type errPlain struct{ msg string }
+
+func (e errPlain) Error() string { return e.msg }
+
 // TestParseStatement covers the JSON parsing path that runs after DSSE
 // decode — pure data-plumbing, no sigstore involvement.
 func TestParseStatement(t *testing.T) {

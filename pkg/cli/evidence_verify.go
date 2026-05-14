@@ -74,11 +74,6 @@ Exit codes:
 				Usage:    "Output format: text (Markdown summary), json.",
 				Category: catOutput,
 			}, func() []string { return []string{evidenceVerifyFormatText, evidenceVerifyFormatJSON} }),
-			&cli.BoolFlag{
-				Name:     "no-rekor",
-				Usage:    "Skip Rekor transparency-log cross-check; use the cert and signature in the Sigstore Bundle alone.",
-				Category: catEvidence,
-			},
 			&cli.StringFlag{
 				Name:     "expected-issuer",
 				Usage:    "Pin the OIDC issuer URL on the signing certificate (empty = any issuer).",
@@ -128,7 +123,6 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	result, err := verifier.Verify(ctx, verifier.VerifyOptions{
 		Input:                  input,
 		BundleRef:              cmd.String("bundle"),
-		NoRekor:                cmd.Bool("no-rekor"),
 		ExpectedIssuer:         cmd.String("expected-issuer"),
 		ExpectedIdentityRegexp: cmd.String("expected-identity-regexp"),
 		PlainHTTP:              cmd.Bool("registry-plain-http"),

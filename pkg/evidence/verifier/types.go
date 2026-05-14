@@ -56,11 +56,6 @@ type VerifyOptions struct {
 	// embed one — e.g., a pointer file whose bundle.oci is empty.
 	BundleRef string
 
-	// NoRekor skips the Rekor transparency-log cross-check and uses
-	// the cert + signature carried in the Sigstore Bundle alone.
-	// Useful in air-gapped environments.
-	NoRekor bool
-
 	// ExpectedIssuer pins the OIDC issuer URL recorded on the signing
 	// certificate. Empty allows any issuer.
 	ExpectedIssuer string

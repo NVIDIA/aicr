@@ -118,11 +118,10 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 		return nil, idErr
 	}
 
-	verifierOpts := []verify.VerifierOption{verify.WithObserverTimestamps(1)}
-	if !opts.NoRekor {
-		verifierOpts = append(verifierOpts, verify.WithTransparencyLog(1))
-	}
-	v, vErr := verify.NewVerifier(trustedMaterial, verifierOpts...)
+	v, vErr := verify.NewVerifier(trustedMaterial,
+		verify.WithObserverTimestamps(1),
+		verify.WithTransparencyLog(1),
+	)
 	if vErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create sigstore verifier", vErr)
 	}
@@ -136,7 +135,8 @@ func VerifySignature(ctx context.Context, mat *MaterializedBundle, opts VerifyOp
 			return nil, errors.New(errors.ErrCodeUnauthorized,
 				"sigstore verification failed — trusted root may be stale.\n\n  To fix: aicr trust update")
 		}
-		return nil, errors.Wrap(errors.ErrCodeUnauthorized, "sigstore verification failed", verifyErr)
+		return nil, errors.New(errors.ErrCodeUnauthorized,
+			"sigstore verification failed: "+sanitizeSigstoreError(verifyErr))
 	}
 
 	claims := &SignerClaims{}
@@ -306,6 +306,28 @@ func CrossCheckPointerSigner(claimed *attestation.PointerSigner, actual *SignerC
 		}
 	}
 	return nil
+}
+
+// sanitizeSigstoreError strips Go format-string artifacts that
+// sigstore-go produces when its threshold-not-met paths wrap an empty
+// errors.Join(...) chain with %w. The literal "%!w(<nil>)" leaks into
+// user-visible error messages; this helper removes it so the surface
+// reads as "threshold not met for verified signed timestamps: 0 < 1"
+// instead of "...: 0 < 1; error: %!w(<nil>)".
+//
+// Tracked upstream; safe to remove when sigstore-go's tsa.go and
+// similar wraps guard against nil joins.
+func sanitizeSigstoreError(err error) string {
+	msg := err.Error()
+	for _, suffix := range []string{
+		"; error: %!w(<nil>)",
+		": %!w(<nil>)",
+		" %!w(<nil>)",
+		"%!w(<nil>)",
+	} {
+		msg = strings.ReplaceAll(msg, suffix, "")
+	}
+	return msg
 }
 
 // isCertChainError reports whether the sigstore error string signals

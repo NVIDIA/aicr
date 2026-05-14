@@ -1912,7 +1912,6 @@ The positional argument is auto-detected as one of:
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | | Write output to this file. When empty, output goes to stdout. |
 | `--format` | `-t` | string | `text` | Output format: `text` (Markdown) or `json`. Applies regardless of destination. |
-| `--no-rekor` | | bool | `false` | Skip Rekor transparency-log cross-check; rely on the cert + signature in the Sigstore Bundle alone. Useful in air-gapped environments. |
 | `--expected-issuer` | | string | | Pin the OIDC issuer URL on the signing certificate. Empty allows any issuer. |
 | `--expected-identity-regexp` | | string | | Pin the signer's `SubjectAlternativeName` via regex. Empty allows any identity. |
 | `--bundle` | | string | | OCI reference override when the pointer carries no `bundle.oci`. |
@@ -1943,9 +1942,6 @@ aicr evidence verify ./out/summary-bundle
 aicr evidence verify recipes/evidence/<recipe>.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/.*$'
-
-# Air-gapped: skip Rekor cross-check, rely on the Sigstore Bundle alone.
-aicr evidence verify recipes/evidence/<recipe>.yaml --no-rekor
 
 # CI pipelines: JSON output.
 aicr evidence verify recipes/evidence/<recipe>.yaml -o result.json -t json

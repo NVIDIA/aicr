@@ -19,7 +19,7 @@ This demo walks through the full producer-and-consumer loop:
 
 ## Prerequisites
 
-* `aicr` with `aicr evidence verify` (PR-B onward).
+* `aicr` with `aicr evidence verify` available.
 * A Kubernetes cluster to validate against.
 * OCI registry write access for the producer (GHCR, GitLab Container
   Registry, Harbor, ECR, Artifactory, ACR — any OCI-1.1 registry works).
@@ -205,8 +205,3 @@ pulled. Someone substituted the bundle and re-pointed at a stale signature.
 **"OCI pull failed"** — registry auth. The verifier uses ambient Docker
 credentials (`docker login` / `DOCKER_CONFIG`); confirm `docker pull
 <oci-ref>` works from the same shell.
-
-**`--no-rekor`** — when the verifier cannot reach Rekor
-(`rekor.sigstore.dev`), this flag falls back to the cert and signature in
-the Sigstore Bundle alone. The attestation is still cryptographically
-verified; only the transparency-log cross-check is skipped.

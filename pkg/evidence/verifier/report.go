@@ -77,7 +77,8 @@ func writeFailedStepDetails(b *strings.Builder, r *VerifyResult) {
 }
 
 func writeHeader(b *strings.Builder, r *VerifyResult) {
-	if r.Signer != nil && r.Signer.Identity != "" {
+	switch {
+	case r.Signer != nil && r.Signer.Identity != "":
 		fmt.Fprintf(b, "**Signer:** %s", r.Signer.Identity)
 		if r.Signer.Issuer != "" {
 			fmt.Fprintf(b, " (issuer %s)", r.Signer.Issuer)
@@ -86,7 +87,12 @@ func writeHeader(b *strings.Builder, r *VerifyResult) {
 			fmt.Fprintf(b, "  •  **Rekor:** index %d", *r.Signer.RekorLogIndex)
 		}
 		b.WriteString("\n")
-	} else {
+	case signatureStepStatus(r) == StepFailed:
+		// A signed bundle whose signature didn't verify is meaningfully
+		// different from a bundle that carries no signature at all —
+		// don't claim "unsigned" when verification actually failed.
+		b.WriteString("**Signer:** _signature verification failed (see Verification steps)_\n")
+	default:
 		b.WriteString("**Signer:** _unsigned bundle_\n")
 	}
 	if r.Predicate != nil {
@@ -97,6 +103,17 @@ func writeHeader(b *strings.Builder, r *VerifyResult) {
 		fmt.Fprintf(b, "  •  **Bundle digest:** %s", r.BundleDigest)
 	}
 	b.WriteString("\n\n")
+}
+
+// signatureStepStatus returns the recorded status of the signature
+// step, or "" if no signature step was recorded.
+func signatureStepStatus(r *VerifyResult) StepStatus {
+	for _, s := range r.Steps {
+		if s.Step == stepSignature {
+			return s.Status
+		}
+	}
+	return ""
 }
 
 func writeFingerprint(b *strings.Builder, p *attestation.Predicate) {
