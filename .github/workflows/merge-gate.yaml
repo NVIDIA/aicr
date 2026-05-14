@@ -87,7 +87,6 @@ jobs:
             only:
               - '**.md'
               - 'docs/**'
-              - 'site/**'
               - 'LICENSE'
 
       # code = NOT docs-only (inverted because paths-filter can't negate)

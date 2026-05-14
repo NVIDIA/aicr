@@ -104,7 +104,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar check-docs-filenames check-docs-mdx bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 # Standalone target — NOT part of `make lint` because it requires Docker
@@ -131,10 +131,6 @@ lint-renovate: ## Validates .github/renovate.json5 with the official Renovate co
 .PHONY: check-agents-sync
 check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 	@./tools/check-agents-sync
-
-.PHONY: check-docs-sidebar
-check-docs-sidebar: ## Verifies all docs/ pages have sidebar entries in VitePress config
-	@./tools/check-docs-sidebar
 
 .PHONY: check-docs-filenames
 check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
@@ -178,9 +174,6 @@ LICENSE_IGNORES = \
 	-ignore 'dist/**' \
 	-ignore 'vendor/**' \
 	-ignore '**/testdata/**' \
-	-ignore 'site/public/**' \
-	-ignore 'site/resources/**' \
-	-ignore 'site/node_modules/**' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore '.licenses-cache/**'
 
@@ -327,28 +320,6 @@ docs: ## Serves Go documentation on http://localhost:6060
 	command -v pkgsite >/dev/null 2>&1 && pkgsite -http=:6060 || \
 	(command -v godoc >/dev/null 2>&1 && godoc -http=:6060 || \
 	(echo "Installing pkgsite..." && go install golang.org/x/pkgsite/cmd/pkgsite@latest && pkgsite -http=:6060))
-
-# =============================================================================
-# Documentation Site
-# =============================================================================
-
-.PHONY: site-serve
-site-serve: ## Serve documentation site locally
-	@set -e; \
-	echo "Starting documentation site on http://localhost:5173..."; \
-	cd site && npm install && npm run dev
-
-.PHONY: site-build
-site-build: ## Build documentation site
-	@set -e; \
-	echo "Building documentation site..."; \
-	cd site && npm install && npm run build; \
-	echo "Site built in site/.vitepress/dist/"
-
-.PHONY: site-clean
-site-clean: ## Clean documentation build artifacts
-	@rm -rf site/.vitepress/dist site/.vitepress/cache
-	@echo "Cleaned documentation build artifacts"
 
 .PHONY: build
 build: ## Builds binaries for the current OS and architecture
