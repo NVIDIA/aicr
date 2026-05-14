@@ -24,10 +24,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
-// Step numbers — first slice runs three steps. Subsequent PRs insert
-// signature verification (between materialize and inventory) and
-// inline constraint replay (after inventory); the render step stays
-// last. ADR-007 enumerates twelve steps; see doc.go for the mapping.
+// Step numbers recorded in StepResult.Step. Signature verification and
+// constraint replay are reserved for future inserts between materialize
+// and inventory; the render step stays last.
 const (
 	stepMaterialize = 1
 	stepInventory   = 2
@@ -65,9 +64,9 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	record(r, stepMaterialize, StepPassed, "bundle at "+mat.BundleDir, nil)
 
 	// Parse the predicate so display steps can surface signed fields.
-	// Signature verification ships in a later slice; for now the
-	// predicate is read but not cryptographically verified — callers
-	// see this via the empty Signer field in the rendered report.
+	// The predicate is read but not cryptographically verified —
+	// callers see this via the empty Signer field in the rendered
+	// report until signature verification lands.
 	pred, perr := loadPredicate(mat)
 	if perr != nil {
 		record(r, stepInventory, StepFailed, "could not parse predicate: "+perr.Error(), nil)
@@ -103,8 +102,8 @@ func record(r *VerifyResult, step int, status StepStatus, detail string, sub []K
 }
 
 // loadPredicate reads the bundle's unsigned in-toto Statement and
-// returns the predicate body. The signature slice (PR 3) will
-// cryptographically bind this content; for now we trust the file.
+// returns the predicate body. Signature binding is not yet enforced —
+// the file is trusted as-is.
 func loadPredicate(mat *MaterializedBundle) (*attestation.Predicate, error) {
 	path := filepath.Join(mat.BundleDir, attestation.StatementFilename)
 	body, err := os.ReadFile(path) //nolint:gosec // bundle-local path

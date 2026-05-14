@@ -25,8 +25,8 @@ import (
 
 // RenderMarkdown produces the PR-comment-shaped summary. Signed
 // predicate fields (fingerprint, phase counts, BOM info) are surfaced
-// here. Until the signature slice (PR 3) lands the rendered report
-// marks the bundle as unsigned via the Signer line.
+// here. The Signer line marks the bundle as unsigned until
+// cryptographic signature verification lands.
 func RenderMarkdown(r *VerifyResult) string {
 	if r == nil {
 		return "## Evidence verification — (no result)\n"

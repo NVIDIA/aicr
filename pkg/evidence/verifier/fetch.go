@@ -24,9 +24,8 @@ import (
 )
 
 // MaterializedBundle is the verifier's view of a bundle on local disk.
-// The first slice only sources from a local directory; OCI fetch and
-// pointer-driven pull ship in PR 4 and will populate the Reference /
-// Digest fields then.
+// Only directory input is sourced today; OCI fetch and pointer-driven
+// pull would populate additional fields here.
 type MaterializedBundle struct {
 	BundleDir string
 
@@ -42,7 +41,7 @@ func (m *MaterializedBundle) Cleanup() {
 	m.cleanup = nil
 }
 
-// MaterializeBundle dispatches on InputForm. First slice handles dir only.
+// MaterializeBundle dispatches on InputForm. Only InputFormDir is handled.
 func MaterializeBundle(_ context.Context, opts VerifyOptions, form InputForm) (*MaterializedBundle, error) {
 	if form != InputFormDir {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "unsupported input form: "+string(form))

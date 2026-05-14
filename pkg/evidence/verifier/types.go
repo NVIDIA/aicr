@@ -18,8 +18,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
-// InputForm enumerates supported bundle transport shapes. The first
-// slice supports only InputFormDir; pointer and OCI ship in PR 4.
+// InputForm enumerates supported bundle transport shapes. Only
+// InputFormDir is implemented; pointer and OCI forms are reserved.
 type InputForm string
 
 const (
@@ -36,25 +36,18 @@ const (
 	StepInformational StepStatus = "informational"
 )
 
-// Exit codes returned by Verify.
+// Exit codes returned by Verify in VerifyResult.Exit. These are the
+// library-API codes from ADR-007; the CLI maps them to OS exit codes
+// via pkg/errors error codes.
 const (
 	ExitValidPassed        = 0
 	ExitValidPhaseFailures = 1
 	ExitInvalid            = 2
 )
 
-// OutputFormat selects stdout rendering.
-type OutputFormat string
-
-const (
-	OutputFormatText OutputFormat = "text"
-	OutputFormatJSON OutputFormat = "json"
-)
-
 // VerifyOptions configures one Verify run.
 type VerifyOptions struct {
 	Input        string
-	OutputFormat OutputFormat
 	MarkdownPath string
 }
 

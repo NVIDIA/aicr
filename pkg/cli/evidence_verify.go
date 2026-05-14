@@ -30,9 +30,8 @@ const (
 	evidenceVerifyFormatJSON = "json"
 )
 
-// evidenceVerifyCmd implements `aicr evidence verify <input>` for the
-// first slice: directory input only. Pointer and OCI input forms,
-// plus signature verification, ship in follow-up slices.
+// evidenceVerifyCmd implements `aicr evidence verify <input>`. Only
+// directory input is supported today.
 func evidenceVerifyCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "verify",
@@ -41,18 +40,17 @@ func evidenceVerifyCmd() *cli.Command {
 		Description: `Verifies a recipe-evidence v1 bundle's manifest hash chain and
 surfaces the signed predicate's fingerprint, phase counts, and BOM info.
 
-This slice supports directory input only:
+Only directory input is supported today:
 
   aicr evidence verify ./out/summary-bundle
 
 Pointer files (recipes/evidence/<recipe>.yaml), OCI references, and
-cryptographic signature verification ship in follow-up PRs.
+cryptographic signature verification are not yet implemented.
 
-Exit codes:
+Exit codes (see Exit Codes section in cli-reference.md):
 
   0   bundle valid; every check passed.
-  1   bundle valid; recorded validator results show failures (informational).
-  2   bundle invalid (manifest hash mismatch or predicate malformed).
+  2   bundle invalid, OR recorded validator results show failures.
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -86,7 +84,6 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	opts := verifier.VerifyOptions{
 		Input:        input,
 		MarkdownPath: cmd.String("output-markdown"),
-		OutputFormat: verifier.OutputFormat(format),
 	}
 
 	result, err := verifier.Verify(ctx, opts)
@@ -109,7 +106,7 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeConflict,
 			"bundle valid; recorded validator results show failures")
 	default:
-		return errors.New(errors.ErrCodeUnauthorized,
+		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle verification failed; see the verifier output for details")
 	}
 }

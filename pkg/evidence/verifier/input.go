@@ -20,8 +20,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// DetectInputForm classifies a user-supplied input. The first slice
-// supports only directory input; pointer and OCI forms ship in PR 4.
+// DetectInputForm classifies a user-supplied input. Only directory
+// input is supported; pointer and OCI forms are rejected.
 func DetectInputForm(input string) (InputForm, error) {
 	if input == "" {
 		return "", errors.New(errors.ErrCodeInvalidRequest, "input is empty")

@@ -19,10 +19,7 @@ import (
 )
 
 // evidenceCmd is the parent verb-group for offline operations on
-// recipe-evidence bundles produced by `aicr validate
-// --emit-attestation`. The first slice ships `verify` (directory
-// input only); follow-up slices add signature verification, OCI pull,
-// and pointer-file support.
+// recipe-evidence bundles produced by `aicr validate --emit-attestation`.
 func evidenceCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "evidence",
@@ -38,7 +35,7 @@ Subcommands:
 
   verify  Verify a bundle's integrity claims.
 
-See ADR-007 (docs/design/007-recipe-evidence.md) for the trust model.`,
+See docs/design/007-recipe-evidence.md for the trust model.`,
 		Commands: []*cli.Command{
 			evidenceVerifyCmd(),
 		},

@@ -1894,7 +1894,7 @@ aicr verify ./my-bundle --format json
 
 Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. Recomputes every file's sha256 against the bundle's `manifest.json` (which is bound to the predicate's `manifest.digest`) and surfaces the predicate's fingerprint, phase counts, and BOM info.
 
-This is the first slice of the verifier (directory input only). Cryptographic signature verification, inline constraint replay, OCI pull, and pointer-file support ship in follow-up PRs.
+Only directory input is supported today. Cryptographic signature verification, inline constraint replay, OCI pull, and pointer-file support are not yet implemented.
 
 **Synopsis:**
 ```shell
@@ -1912,8 +1912,9 @@ aicr evidence verify <directory> [flags]
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle valid; every check passed. |
-| 1 | Bundle valid; recorded validator results show failures (informational). |
-| 2 | Bundle invalid (manifest hash mismatch or predicate malformed). |
+| 2 | Bundle invalid (manifest hash mismatch or predicate malformed), OR recorded validator results show failures. |
+
+The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the library API) still distinguishes the two non-zero cases as `1` (recorded phase failures) vs `2` (bundle invalid).
 
 **Examples:**
 ```shell

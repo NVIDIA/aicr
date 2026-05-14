@@ -15,10 +15,7 @@
 package verifier
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -98,16 +95,7 @@ func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
 				" (got "+strconv.FormatInt(info.Size(), 10)+
 				", want "+strconv.FormatInt(expectedSize, 10)+")")
 	}
-	f, oErr := os.Open(full) //nolint:gosec // bundle-local path
-	if oErr != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to open "+rel, oErr)
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, copyErr := io.Copy(h, f); copyErr != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to hash "+rel, copyErr)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return attestation.HashFileSHA256(full)
 }
 
 // findExtras returns bundle-relative paths of files present on disk
