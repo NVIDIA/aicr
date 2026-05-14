@@ -92,6 +92,18 @@ spec:
   # Validation checks for GB200 on EKS training workloads.
   # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
   validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # GB200 support stabilized in gpu-operator v25.10. The chart pin
+        # (resolved as v25.10.1 in the GB200/EKS recipes) sets the
+        # working version; this constraint is the supported floor.
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
     performance:
       # NET exercises EFA (the external interconnect) and NVLS exercises MNNVL
       # across the NVL72 IMEX domain — each variant asserts its transport
