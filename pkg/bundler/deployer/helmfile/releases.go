@@ -69,6 +69,12 @@ type Release struct {
 	// Timeout is rendered only when the release overrides
 	// helmDefaults.timeout (e.g., kai-scheduler 20m).
 	Timeout int `yaml:"timeout,omitempty"`
+	// CreateNamespace is rendered only when explicitly set to false —
+	// the chart ships its own Namespace template, so helm must not
+	// create the namespace out-of-band. helmDefaults.createNamespace
+	// (true) applies otherwise. Pointer so a deliberate false survives
+	// YAML marshaling and a nil value omits the field entirely.
+	CreateNamespace *bool `yaml:"createNamespace,omitempty"`
 }
 
 // overrides carries per-component helm flag overrides.
@@ -153,6 +159,20 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 			if ov.timeout > 0 {
 				rel.Timeout = ov.timeout
 			}
+		}
+
+		// Override the global helmDefaults.createNamespace when this
+		// folder's chart owns the target Namespace (Talos privileged-
+		// namespace pre-injection). Without this, helmfile passes
+		// --create-namespace and helm creates the namespace out-of-band;
+		// the chart's later Namespace template then collides because
+		// the existing namespace lacks the release's ownership labels.
+		// Only emit the override when false — the global default
+		// already covers the true case and we want helmfile.yaml
+		// minimal.
+		if !f.CreateNamespace {
+			falseVal := false
+			rel.CreateNamespace = &falseVal
 		}
 
 		releases = append(releases, rel)

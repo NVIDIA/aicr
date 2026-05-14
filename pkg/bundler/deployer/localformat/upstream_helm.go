@@ -109,5 +109,9 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 			filepath.Join(dir, "upstream.env"),
 			filepath.Join(dir, "install.sh"),
 		},
+		// Upstream Helm folders don't ship AICR-rendered templates, so
+		// the chart-owns-Namespace detection in local_helm doesn't apply
+		// here. Default to true to match install.sh's --create-namespace.
+		CreateNamespace: true,
 	}, nil
 }

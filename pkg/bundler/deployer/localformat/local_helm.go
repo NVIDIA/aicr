@@ -214,11 +214,12 @@ func writeLocalHelmFolder(
 	files = append(files, filepath.Join(dir, "install.sh"))
 
 	return Folder{
-		Index:  idx,
-		Dir:    dir,
-		Kind:   KindLocalHelm,
-		Name:   name,
-		Parent: parent,
-		Files:  files,
+		Index:           idx,
+		Dir:             dir,
+		Kind:            KindLocalHelm,
+		Name:            name,
+		Parent:          parent,
+		Files:           files,
+		CreateNamespace: effectiveCreateNamespace,
 	}, nil
 }
