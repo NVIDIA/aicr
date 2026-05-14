@@ -50,10 +50,13 @@ aicr bundle \
   --system-node-selector nodeGroup=system-worker \
   --system-node-toleration dedicated=system-workload:NoSchedule \
   --system-node-toleration dedicated=system-workload:NoExecute \
+  --storage-class <storage-class> \
   --output bundle
 ```
 
-> Both options allow for comma-separated values to supply multiple values. See the [bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
+> Selector / toleration flags accept comma-separated values. See the [bundle](../docs/user/cli-reference.md#aicr-bundle) section for the full flag set.
+>
+> Set `--storage-class` to the name of a StorageClass that exists on the target cluster (check with `kubectl get storageclass`). The EKS overlay configures `kube-prometheus-stack` with a `volumeClaimTemplate` but no `storageClassName`, so without this flag the PVC falls to the cluster's default StorageClass — and if no default is configured, the deploy hangs on a Pending PVC.
 
 ## Install Bundle into the Cluster
 

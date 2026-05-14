@@ -33,10 +33,13 @@ aicr bundle \
   --recipe recipe.yaml \
   --output bundle \
   --accelerated-node-selector [key]=[value] \
-  --accelerated-node-toleration [key]=[value]:[operation] 
+  --accelerated-node-toleration [key]=[value]:[operation] \
+  --storage-class [storage-class]
 ```
 
 Replace the values for `--accelerated-node-selector` and `--accelerated-node-toleration` with the appropriate ones to match your gpu pool(s). You do not want optimizations and inference workloads to run across all nodes. Both options allow for comma delimination to supply multiple values. See the [aicr bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
+
+Set `--storage-class` to a StorageClass that exists on the target cluster (check with `kubectl get storageclass`). Cloud overlays configure `kube-prometheus-stack` with a `volumeClaimTemplate` but no `storageClassName`; without this flag the PVC falls to the cluster's default StorageClass, and if no default is configured the deploy hangs on a Pending PVC.
 
 ## Install Bundle into the Cluster
 

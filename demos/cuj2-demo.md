@@ -32,6 +32,7 @@
   │      --system-node-selector nodeGroup=system-worker \                  │
   │      --system-node-toleration dedicated=system-workload:NoSchedule     │
   │      --system-node-toleration dedicated=system-workload:NoExecute      │
+  │      --storage-class <storage-class>                                   │
   │                                                                        │
   │  recipe.yaml ──▶ bundle/                                               │
   │    ├── deploy.sh                                                       │
@@ -167,6 +168,7 @@
     --system-node-selector nodeGroup=system-worker \
     --system-node-toleration dedicated=system-workload:NoSchedule \
     --system-node-toleration dedicated=system-workload:NoExecute \
+    --storage-class <storage-class> \
     --output bundle
 ```
 

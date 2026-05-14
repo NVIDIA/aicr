@@ -48,10 +48,13 @@ aicr bundle \
   --accelerated-node-selector nodeGroup=gpu-worker \
   --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
   --system-node-selector nodeGroup=system-worker \
+  --storage-class <storage-class> \
   --output bundle
 ```
 
 > Note: GKE system nodes should not have custom taints (breaks konnectivity-agent and other GKE managed pods). Only `--system-node-selector` is needed, no `--system-node-toleration`.
+>
+> Set `--storage-class` to the name of a StorageClass that exists on the target cluster (check with `kubectl get storageclass`). The GKE overlay configures `kube-prometheus-stack` with a `volumeClaimTemplate` but no `storageClassName`, so without this flag the PVC falls to the cluster's default StorageClass — and if no default is configured, the deploy hangs on a Pending PVC.
 
 ## Install Bundle into the Cluster
 
