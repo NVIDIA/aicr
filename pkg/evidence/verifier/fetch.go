@@ -425,7 +425,10 @@ func newAuthClient(plainHTTP, insecureTLS bool) *auth.Client {
 		if transport.TLSClientConfig != nil {
 			cfg = transport.TLSClientConfig.Clone()
 		} else {
-			cfg = &tls.Config{} //nolint:gosec // InsecureSkipVerify set on next line
+			// defaults.NewHTTPTransport currently leaves TLSClientConfig
+			// nil; set MinVersion explicitly so we don't fall through to
+			// Go's historical client default. TLS 1.2 is the project floor.
+			cfg = &tls.Config{MinVersion: tls.VersionTLS12} //nolint:gosec // InsecureSkipVerify set on next line
 		}
 		cfg.InsecureSkipVerify = true //nolint:gosec // explicit operator opt-in via --registry-insecure-tls
 		transport.TLSClientConfig = cfg
