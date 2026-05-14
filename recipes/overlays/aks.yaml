@@ -60,7 +60,7 @@ spec:
     - name: network-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
-      version: "v26.1.0"
+      version: "26.1.1"
       valuesFile: components/network-operator/values-aks.yaml
       manifestFiles:
         - components/network-operator/manifests/nfd-network-rule.yaml
