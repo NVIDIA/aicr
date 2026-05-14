@@ -17,25 +17,30 @@ package verifier
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
 // Step numbers recorded in StepResult.Step. Signature verification
-// and constraint replay are reserved for future inserts between
-// predicate-parse and inventory; the render step stays last.
+// runs between materialize and predicate-parse so the predicate body
+// downstream steps consume is the cryptographically anchored one when
+// available. Constraint replay is reserved for a follow-up slice.
 const (
 	stepMaterialize = 1
-	stepPredicate   = 2
-	stepInventory   = 3
-	stepRender      = 4
+	stepSignature   = 2
+	stepPredicate   = 3
+	stepInventory   = 4
+	stepRender      = 5
 )
 
 var stepNames = map[int]string{
 	stepMaterialize: "materialize-bundle",
+	stepSignature:   "signature-verify",
 	stepPredicate:   "predicate-parse",
 	stepInventory:   "manifest-hash-check",
 	stepRender:      "render-summary",
@@ -55,21 +60,42 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 
 	r := &VerifyResult{Input: form, Steps: make([]StepResult, 0, len(stepNames))}
 
+	// Pointer file is loaded up front for the pointer input form so
+	// materialization knows the OCI ref to pull from.
+	var pointer *attestation.Pointer
+	if form == InputFormPointer {
+		p, perr := LoadAndValidatePointer(opts.Input)
+		if perr != nil {
+			return nil, perr
+		}
+		pointer = p
+		r.Pointer = p
+	}
+
 	// Step 1 — materialize.
-	mat, err := MaterializeBundle(ctx, opts, form)
+	mat, err := MaterializeBundle(ctx, opts, form, pointer)
 	if err != nil {
 		record(r, stepMaterialize, StepFailed, err.Error(), nil)
 		r.Exit = ExitInvalid
 		return r, nil
 	}
 	defer mat.Cleanup()
+	if mat.Digest != "" {
+		r.BundleDigest = mat.Digest
+	}
 	record(r, stepMaterialize, StepPassed, "bundle at "+mat.BundleDir, nil)
 
-	// Step 2 — parse the predicate. Display steps need its content,
-	// and step 3 needs predicate.Manifest.Digest to bind the manifest
-	// to the (currently unsigned) statement. Signature verification
-	// lands in a follow-up slice.
-	pred, perr := loadPredicate(mat)
+	// Step 2 — signature verify. When attestation.intoto.jsonl is
+	// present, sigstore-go anchors the DSSE-wrapped Statement to a
+	// Fulcio cert + optional Rekor entry. The predicate inside that
+	// verified Statement is the cryptographically authoritative value.
+	verifiedPredicate := stepSignatureCheck(ctx, r, mat, opts)
+
+	// Step 3 — predicate parse. Prefer the predicate the signature
+	// step produced (cryptographically anchored); fall back to the
+	// bundle's unsigned statement.intoto.json when no signature was
+	// attached. Either way the manifest digest comes from this value.
+	pred, perr := resolvePredicate(verifiedPredicate, mat)
 	if perr != nil {
 		record(r, stepPredicate, StepFailed, perr.Error(), nil)
 		r.Exit = ExitInvalid
@@ -77,13 +103,17 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	}
 	r.Predicate = pred
 	r.RecipeName = pred.Recipe.Name
+	source := "unsigned statement.intoto.json"
+	if verifiedPredicate != nil {
+		source = "verified DSSE payload"
+	}
 	record(r, stepPredicate, StepPassed,
-		"predicate "+pred.SchemaVersion+" for recipe "+pred.Recipe.Name, nil)
+		"predicate "+pred.SchemaVersion+" for recipe "+pred.Recipe.Name+
+			" (from "+source+")", nil)
 
-	// Step 3 — manifest hash check. Binds manifest.json to
+	// Step 4 — manifest hash check. Binds manifest.json to
 	// predicate.Manifest.Digest, then every file in the manifest to its
-	// recorded sha256. Together these transitively bind every bundled
-	// file to the predicate.
+	// recorded sha256.
 	mismatches, invErr := CheckInventory(ctx, mat, pred.Manifest.Digest)
 	if invErr != nil {
 		record(r, stepInventory, StepFailed, invErr.Error(), mismatches)
@@ -102,16 +132,77 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	return r, nil
 }
 
+// stepSignatureCheck runs step 2 and returns the cryptographically
+// anchored predicate when the bundle is signed (nil otherwise). Side
+// effects: records the step row, sets r.Signer, may update r.Exit.
+//
+// When the input is a pointer file with a signer claim, this step also
+// cross-checks the pointer's claim against the actual cert. A
+// malicious pointer that names a different signer than the bundle
+// fails here.
+func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions) *attestation.Predicate {
+	sig, sigErr := VerifySignature(ctx, mat, opts)
+
+	var claimedSigner *attestation.PointerSigner
+	if r.Pointer != nil && len(r.Pointer.Attestations) > 0 {
+		claimedSigner = r.Pointer.Attestations[0].Signer
+	}
+
+	switch {
+	case stderrors.Is(sigErr, ErrUnsignedBundle):
+		// Pointer claims a signer but the bundle is unsigned → fail.
+		if claimedSigner != nil {
+			if ccErr := CrossCheckPointerSigner(claimedSigner, nil); ccErr != nil {
+				record(r, stepSignature, StepFailed, ccErr.Error(), nil)
+				r.Exit = ExitInvalid
+				return nil
+			}
+		}
+		record(r, stepSignature, StepSkipped, "no signature attached (unsigned bundle)", nil)
+		return nil
+	case sigErr != nil:
+		record(r, stepSignature, StepFailed, sigErr.Error(), nil)
+		r.Exit = ExitInvalid
+		return nil
+	default:
+		r.Signer = sig.Signer
+		if ccErr := CrossCheckPointerSigner(claimedSigner, sig.Signer); ccErr != nil {
+			record(r, stepSignature, StepFailed, ccErr.Error(), nil)
+			r.Exit = ExitInvalid
+			return nil
+		}
+		detail := "signer " + sig.Signer.Identity + " (issuer " + sig.Signer.Issuer + ")"
+		var sub []KV
+		if sig.Signer.RekorLogIndex != nil {
+			sub = []KV{{Key: "rekorLogIndex",
+				Value: strconv.FormatInt(*sig.Signer.RekorLogIndex, 10)}}
+		}
+		record(r, stepSignature, StepPassed, detail, sub)
+		return sig.Predicate
+	}
+}
+
+// resolvePredicate picks the predicate to use for downstream steps.
+// Verified payload takes precedence; otherwise we fall back to the
+// unsigned statement.intoto.json. Both shapes go through the same
+// PredicateTypeV1 check.
+func resolvePredicate(verified *attestation.Predicate, mat *MaterializedBundle) (*attestation.Predicate, error) {
+	if verified != nil {
+		return verified, nil
+	}
+	return loadUnsignedPredicate(mat)
+}
+
 func record(r *VerifyResult, step int, status StepStatus, detail string, sub []KV) {
 	r.Steps = append(r.Steps, StepResult{
 		Step: step, Name: stepNames[step], Status: status, Detail: detail, SubRows: sub,
 	})
 }
 
-// loadPredicate reads the bundle's unsigned in-toto Statement and
-// returns the predicate body. Signature binding is not yet enforced —
-// the file is trusted as-is.
-func loadPredicate(mat *MaterializedBundle) (*attestation.Predicate, error) {
+// loadUnsignedPredicate reads the bundle's unsigned in-toto Statement
+// and returns the predicate body. Used when no Sigstore Bundle was
+// emitted; the predicate is trusted as-is (self-consistency only).
+func loadUnsignedPredicate(mat *MaterializedBundle) (*attestation.Predicate, error) {
 	path := filepath.Join(mat.BundleDir, attestation.StatementFilename)
 	body, err := os.ReadFile(path) //nolint:gosec // bundle-local path
 	if err != nil {

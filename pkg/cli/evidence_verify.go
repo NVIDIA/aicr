@@ -31,30 +31,34 @@ const (
 	evidenceVerifyFormatJSON = "json"
 )
 
-// evidenceVerifyCmd implements `aicr evidence verify <input>`. Only
-// directory input is supported today.
+// evidenceVerifyCmd implements `aicr evidence verify <input>`.
+// Accepts three input forms (auto-detected): directory, pointer file,
+// or OCI reference. When the bundle is signed (attestation.intoto.jsonl
+// present), the signature is verified against the Sigstore trusted
+// root and the predicate body is extracted from the verified payload.
 func evidenceVerifyCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "verify",
 		Category: functionalCategoryName,
 		Usage:    "Verify a recipe evidence bundle (offline).",
-		Description: `Verifies a recipe-evidence v1 bundle's manifest hash chain and
-surfaces the signed predicate's fingerprint, phase counts, and BOM info.
+		Description: `Verifies a recipe-evidence v1 bundle's signature (when present)
+and manifest hash chain, then surfaces the predicate's fingerprint,
+phase counts, and BOM info.
 
-Only directory input is supported today:
+Input is auto-detected as one of:
 
-  aicr evidence verify ./out/summary-bundle
-
-Pointer files (recipes/evidence/<recipe>.yaml), OCI references, and
-cryptographic signature verification are not yet implemented.
+  pointer    recipes/evidence/<recipe>.yaml — pulls the OCI artifact named inside.
+  oci        ghcr.io/owner/aicr-evidence@sha256:abc... or oci://...
+  directory  ./out/summary-bundle/ (or a parent containing it).
 
 The rendered output goes to stdout by default; -o writes it to a file
 instead. -t selects the format (text = Markdown, json = structured).
 
-Exit codes (see Exit Codes section in cli-reference.md):
+Exit codes:
 
   0   bundle valid; every check passed.
-  2   bundle invalid, OR recorded validator results show failures.
+  1   bundle valid; recorded validator results show failures (informational).
+  2   bundle invalid (signature, schema, or integrity failure).
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -70,6 +74,36 @@ Exit codes (see Exit Codes section in cli-reference.md):
 				Usage:    "Output format: text (Markdown summary), json.",
 				Category: catOutput,
 			}, func() []string { return []string{evidenceVerifyFormatText, evidenceVerifyFormatJSON} }),
+			&cli.StringFlag{
+				Name:     "expected-issuer",
+				Usage:    "Pin the OIDC issuer URL on the signing certificate (empty = any issuer).",
+				Category: catEvidence,
+			},
+			&cli.StringFlag{
+				Name:     "expected-identity-regexp",
+				Usage:    "Pin the signer's SubjectAlternativeName via regex (empty = any identity).",
+				Category: catEvidence,
+			},
+			&cli.StringFlag{
+				Name:     "bundle",
+				Usage:    "OCI reference override when the pointer carries no bundle.oci.",
+				Category: catEvidence,
+			},
+			&cli.BoolFlag{
+				Name:     "registry-plain-http",
+				Usage:    "Use HTTP for registry traffic (local-registry tests only).",
+				Category: catEvidence,
+			},
+			&cli.BoolFlag{
+				Name:     "registry-insecure-tls",
+				Usage:    "Skip TLS verification for the registry (self-signed certificates).",
+				Category: catEvidence,
+			},
+			&cli.BoolFlag{
+				Name:     "allow-unpinned-tag",
+				Usage:    "Accept tag-only OCI references (default: refuse). Tags are not content-addressable; opt in only for one-off debugging.",
+				Category: catEvidence,
+			},
 		},
 		Action: runEvidenceVerifyCmd,
 	}
@@ -79,14 +113,22 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	input := cmd.Args().First()
 	if input == "" {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"input is required: aicr evidence verify <directory>")
+			"input is required: aicr evidence verify <pointer|oci-ref|directory>")
 	}
 	format := cmd.String(flagFormat)
 	if format != evidenceVerifyFormatText && format != evidenceVerifyFormatJSON {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}
 
-	result, err := verifier.Verify(ctx, verifier.VerifyOptions{Input: input})
+	result, err := verifier.Verify(ctx, verifier.VerifyOptions{
+		Input:                  input,
+		BundleRef:              cmd.String("bundle"),
+		ExpectedIssuer:         cmd.String("expected-issuer"),
+		ExpectedIdentityRegexp: cmd.String("expected-identity-regexp"),
+		PlainHTTP:              cmd.Bool("registry-plain-http"),
+		InsecureTLS:            cmd.Bool("registry-insecure-tls"),
+		AllowUnpinnedTag:       cmd.Bool("allow-unpinned-tag"),
+	})
 	if err != nil {
 		return err
 	}

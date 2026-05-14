@@ -38,10 +38,17 @@ func TestDetectInputForm(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty rejected", "", "", true},
+		{"https rejected", "https://example.com/x", "", true},
+		{"http rejected", "http://example.com/x", "", true},
 		{"directory accepted", dir, InputFormDir, false},
-		{"yaml rejected (pointer not yet supported)", yamlPath, "", true},
-		{"oci-scheme rejected (not yet supported)", "oci://ghcr.io/x/y:v1", "", true},
-		{"nonexistent path rejected", filepath.Join(tmp, "nope"), "", true},
+		{"yaml pointer accepted", yamlPath, InputFormPointer, false},
+		{"oci-scheme accepted", "oci://ghcr.io/x/y:v1", InputFormOCI, false},
+		{"bare oci with digest", "ghcr.io/owner/repo@sha256:abc", InputFormOCI, false},
+		{"bare oci with tag", "ghcr.io/owner/repo:v1", InputFormOCI, false},
+		{"localhost registry", "localhost:5000/repo:v1", InputFormOCI, false},
+		{"relative path rejected", "./out/summary-bundle", "", true},
+		{"parent path rejected", "../some-bundle", "", true},
+		{"nonsense rejected", "not-an-input", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

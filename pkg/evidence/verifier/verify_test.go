@@ -49,11 +49,20 @@ func TestVerify_DirectoryHappyPath(t *testing.T) {
 	if got := stepByNumber(t, res, stepMaterialize).Status; got != StepPassed {
 		t.Errorf("materialize = %v, want passed", got)
 	}
+	if got := stepByNumber(t, res, stepSignature).Status; got != StepSkipped {
+		t.Errorf("signature = %v, want skipped (unsigned bundle)", got)
+	}
+	if got := stepByNumber(t, res, stepPredicate).Status; got != StepPassed {
+		t.Errorf("predicate = %v, want passed", got)
+	}
 	if got := stepByNumber(t, res, stepInventory).Status; got != StepPassed {
 		t.Errorf("inventory = %v, want passed", got)
 	}
 	if res.Exit != ExitValidPassed {
 		t.Errorf("Exit = %d, want %d", res.Exit, ExitValidPassed)
+	}
+	if res.Signer != nil {
+		t.Errorf("Signer should be nil for unsigned bundle; got %+v", res.Signer)
 	}
 	if res.Predicate == nil {
 		t.Errorf("Predicate is nil; expected parsed predicate")
@@ -246,6 +255,86 @@ func TestCheckInventory_RespectsCancellation(t *testing.T) {
 	_, err := CheckInventory(ctx, mat, readManifestDigest(t, summary))
 	if err == nil {
 		t.Errorf("CheckInventory(canceled ctx) = nil, want error")
+	}
+}
+
+func TestRenderMarkdown_FailedStepDetailsListsFiles(t *testing.T) {
+	// Build a result with a failed inventory step that carries per-file
+	// sub-rows. The rendered Markdown must list the file names — not
+	// just count them — so the maintainer can see what failed.
+	r := &VerifyResult{
+		Exit: ExitInvalid,
+		Steps: []StepResult{
+			{Step: 4, Name: "manifest-hash-check", Status: StepFailed,
+				Detail: "manifest inventory check failed for 2 file(s)",
+				SubRows: []KV{
+					{Key: "ctrf/deployment.json", Value: "sha256 mismatch"},
+					{Key: "stray.txt", Value: "file not in manifest.json (unsigned)"},
+				}},
+		},
+	}
+	md := RenderMarkdown(r)
+	if !strings.Contains(md, "Failed check details") {
+		t.Errorf("missing Failed check details section; got %q", md)
+	}
+	if !strings.Contains(md, "ctrf/deployment.json") {
+		t.Errorf("rendered Markdown should name ctrf/deployment.json; got %q", md)
+	}
+	if !strings.Contains(md, "stray.txt") {
+		t.Errorf("rendered Markdown should name stray.txt; got %q", md)
+	}
+}
+
+func TestRenderMarkdown_HeaderDistinguishesFailedFromUnsigned(t *testing.T) {
+	tests := []struct {
+		name       string
+		steps      []StepResult
+		signer     *SignerClaims
+		wantSub    string
+		wantNotSub string
+	}{
+		{
+			name:    "passed signature shows identity",
+			steps:   []StepResult{{Step: stepSignature, Name: "signature-verify", Status: StepPassed}},
+			signer:  &SignerClaims{Identity: "alice@example.com", Issuer: "https://issuer"},
+			wantSub: "alice@example.com",
+		},
+		{
+			name:    "skipped signature shows unsigned bundle",
+			steps:   []StepResult{{Step: stepSignature, Name: "signature-verify", Status: StepSkipped}},
+			wantSub: "unsigned bundle",
+		},
+		{
+			name:       "failed signature does NOT claim unsigned",
+			steps:      []StepResult{{Step: stepSignature, Name: "signature-verify", Status: StepFailed, Detail: "x"}},
+			wantSub:    "signature verification failed",
+			wantNotSub: "unsigned",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &VerifyResult{Steps: tt.steps, Signer: tt.signer}
+			md := RenderMarkdown(r)
+			if !strings.Contains(md, tt.wantSub) {
+				t.Errorf("output should contain %q; got %q", tt.wantSub, md)
+			}
+			if tt.wantNotSub != "" && strings.Contains(md, tt.wantNotSub) {
+				t.Errorf("output should NOT contain %q; got %q", tt.wantNotSub, md)
+			}
+		})
+	}
+}
+
+func TestRenderMarkdown_NoFailedStepDetailsSectionWhenAllPass(t *testing.T) {
+	r := &VerifyResult{
+		Exit: ExitValidPassed,
+		Steps: []StepResult{
+			{Step: 1, Name: "materialize-bundle", Status: StepPassed},
+		},
+	}
+	md := RenderMarkdown(r)
+	if strings.Contains(md, "Failed check details") {
+		t.Errorf("should not render Failed check details when nothing failed; got %q", md)
 	}
 }
 
