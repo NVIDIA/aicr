@@ -51,7 +51,10 @@ aicr validate \
 ```
 
 `--push` opens a browser for OIDC sign-in (or uses ambient GitHub Actions
-OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). After it finishes:
+OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). The tag may be omitted as
+shown — the emitter applies `:v1` as a placeholder since the OCI digest
+is the canonical address; the pointer file (below) records both. After
+it finishes:
 
 ```text
 ./out
