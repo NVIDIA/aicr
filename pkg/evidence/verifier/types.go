@@ -47,8 +47,7 @@ const (
 
 // VerifyOptions configures one Verify run.
 type VerifyOptions struct {
-	Input        string
-	MarkdownPath string
+	Input string
 }
 
 // StepResult is the recorded outcome of one verification step.

@@ -48,7 +48,7 @@ func TestEvidenceCmd_RegistersVerifySubcommand(t *testing.T) {
 
 func TestEvidenceVerifyCmd_HasExpectedFlags(t *testing.T) {
 	cmd := evidenceVerifyCmd()
-	wanted := []string{"output-markdown", "format"}
+	wanted := []string{"output", "format"}
 	for _, name := range wanted {
 		found := false
 		for _, f := range cmd.Flags {
@@ -145,7 +145,7 @@ func TestEvidenceVerifyCmd_RejectsEmptyInput(t *testing.T) {
 	}
 }
 
-func TestEvidenceVerifyCmd_WritesMarkdownFile(t *testing.T) {
+func TestEvidenceVerifyCmd_OutputMarkdownToFile(t *testing.T) {
 	bundleDir := buildCLITestBundle(t)
 	out := filepath.Join(t.TempDir(), "summary.md")
 
@@ -154,7 +154,7 @@ func TestEvidenceVerifyCmd_WritesMarkdownFile(t *testing.T) {
 	root.Writer = &w
 
 	err := root.Run(context.Background(), []string{
-		"aicr", "evidence", "verify", "--output-markdown", out, bundleDir,
+		"aicr", "evidence", "verify", "-o", out, bundleDir,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -164,6 +164,33 @@ func TestEvidenceVerifyCmd_WritesMarkdownFile(t *testing.T) {
 		t.Fatalf("read markdown: %v", readErr)
 	}
 	if !strings.Contains(string(body), "Evidence verification") {
-		t.Errorf("output-markdown file missing header; got %q", body)
+		t.Errorf("--output file missing header; got %q", body)
+	}
+	// Stdout should be empty when -o is set (no double-rendering).
+	if w.Len() != 0 {
+		t.Errorf("stdout should be empty when -o is set; got %q", w.String())
+	}
+}
+
+func TestEvidenceVerifyCmd_OutputJSONToFile(t *testing.T) {
+	bundleDir := buildCLITestBundle(t)
+	out := filepath.Join(t.TempDir(), "result.json")
+
+	root := newRootCmd()
+	var w bytes.Buffer
+	root.Writer = &w
+
+	err := root.Run(context.Background(), []string{
+		"aicr", "evidence", "verify", "-o", out, "-t", "json", bundleDir,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	body, readErr := os.ReadFile(out)
+	if readErr != nil {
+		t.Fatalf("read json: %v", readErr)
+	}
+	if !strings.Contains(string(body), `"steps":`) {
+		t.Errorf("--output json file missing steps; got %q", body)
 	}
 }

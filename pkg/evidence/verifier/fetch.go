@@ -41,8 +41,15 @@ func (m *MaterializedBundle) Cleanup() {
 	m.cleanup = nil
 }
 
-// MaterializeBundle dispatches on InputForm. Only InputFormDir is handled.
-func MaterializeBundle(_ context.Context, opts VerifyOptions, form InputForm) (*MaterializedBundle, error) {
+// MaterializeBundle dispatches on InputForm. Only InputFormDir is
+// handled today; OCI fetch and pointer-driven pull land in follow-up
+// slices. ctx is checked once up front so cancellation behaves the
+// same as the rest of the pipeline, even though directory resolution
+// itself is cheap.
+func MaterializeBundle(ctx context.Context, opts VerifyOptions, form InputForm) (*MaterializedBundle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeUnavailable, "materialize canceled", err)
+	}
 	if form != InputFormDir {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "unsupported input form: "+string(form))
 	}

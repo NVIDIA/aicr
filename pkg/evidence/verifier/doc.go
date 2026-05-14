@@ -14,13 +14,17 @@
 
 // Package verifier implements `aicr evidence verify`: offline
 // verification of a recipe-evidence v1 bundle directory produced by
-// `aicr validate --emit-attestation`. Three steps run:
+// `aicr validate --emit-attestation`. Four steps run:
 //
-//  1. Materialize  — resolve the user-supplied directory to a bundle root.
-//  2. Inventory    — recompute sha256 of every file listed in
-//     manifest.json; transitively binds every file to the predicate.
-//  3. Render       — Markdown / JSON; surfaces fingerprint, phase
-//     counts, and BOM info from the bundled predicate.
+//  1. Materialize — resolve the user-supplied directory to a bundle root.
+//  2. Predicate parse — read the in-toto Statement; reject unknown
+//     predicate types.
+//  3. Manifest hash check — sha256(manifest.json) must match
+//     predicate.Manifest.Digest, and every file the manifest names
+//     must match its recorded sha256. Together these transitively
+//     bind every bundled file to the predicate.
+//  4. Render — Markdown / JSON; surfaces fingerprint, phase counts,
+//     and BOM info from the bundled predicate.
 //
 // The predicate body is read but not yet cryptographically verified —
 // the rendered report surfaces this via an empty Signer line. See

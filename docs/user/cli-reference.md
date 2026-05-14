@@ -1902,10 +1902,10 @@ aicr evidence verify <directory> [flags]
 ```
 
 **Flags:**
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--output-markdown` | string | | Write the Markdown summary to this path in addition to stdout. |
-| `--format` | string | `text` | Output format: `text` (Markdown) or `json`. |
+| Flag | Alias | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--output` | `-o` | string | | Write output to this file. When empty, output goes to stdout. |
+| `--format` | `-t` | string | `text` | Output format: `text` (Markdown) or `json`. Applies regardless of destination. |
 
 **Exit codes:**
 
@@ -1918,9 +1918,10 @@ The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the librar
 
 **Examples:**
 ```shell
-aicr evidence verify ./out/summary-bundle
-aicr evidence verify ./out/summary-bundle --output-markdown ./summary.md
-aicr evidence verify ./out/summary-bundle --format json
+aicr evidence verify ./out/summary-bundle                  # Markdown to stdout
+aicr evidence verify ./out/summary-bundle -o summary.md    # Markdown to file
+aicr evidence verify ./out/summary-bundle -t json          # JSON to stdout
+aicr evidence verify ./out/summary-bundle -o r.json -t json   # JSON to file
 ```
 
 ---

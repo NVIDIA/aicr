@@ -24,17 +24,19 @@ import (
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
-// Step numbers recorded in StepResult.Step. Signature verification and
-// constraint replay are reserved for future inserts between materialize
-// and inventory; the render step stays last.
+// Step numbers recorded in StepResult.Step. Signature verification
+// and constraint replay are reserved for future inserts between
+// predicate-parse and inventory; the render step stays last.
 const (
 	stepMaterialize = 1
-	stepInventory   = 2
-	stepRender      = 3
+	stepPredicate   = 2
+	stepInventory   = 3
+	stepRender      = 4
 )
 
 var stepNames = map[int]string{
 	stepMaterialize: "materialize-bundle",
+	stepPredicate:   "predicate-parse",
 	stepInventory:   "manifest-hash-check",
 	stepRender:      "render-summary",
 }
@@ -63,27 +65,32 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	defer mat.Cleanup()
 	record(r, stepMaterialize, StepPassed, "bundle at "+mat.BundleDir, nil)
 
-	// Parse the predicate so display steps can surface signed fields.
-	// The predicate is read but not cryptographically verified —
-	// callers see this via the empty Signer field in the rendered
-	// report until signature verification lands.
+	// Step 2 — parse the predicate. Display steps need its content,
+	// and step 3 needs predicate.Manifest.Digest to bind the manifest
+	// to the (currently unsigned) statement. Signature verification
+	// lands in a follow-up slice.
 	pred, perr := loadPredicate(mat)
 	if perr != nil {
-		record(r, stepInventory, StepFailed, "could not parse predicate: "+perr.Error(), nil)
+		record(r, stepPredicate, StepFailed, perr.Error(), nil)
 		r.Exit = ExitInvalid
 		return r, nil
 	}
 	r.Predicate = pred
 	r.RecipeName = pred.Recipe.Name
+	record(r, stepPredicate, StepPassed,
+		"predicate "+pred.SchemaVersion+" for recipe "+pred.Recipe.Name, nil)
 
-	// Step 2 — manifest hash check (covers every file in the bundle).
-	mismatches, invErr := CheckInventory(ctx, mat)
+	// Step 3 — manifest hash check. Binds manifest.json to
+	// predicate.Manifest.Digest, then every file in the manifest to its
+	// recorded sha256. Together these transitively bind every bundled
+	// file to the predicate.
+	mismatches, invErr := CheckInventory(ctx, mat, pred.Manifest.Digest)
 	if invErr != nil {
 		record(r, stepInventory, StepFailed, invErr.Error(), mismatches)
 		r.Exit = ExitInvalid
 	} else {
 		record(r, stepInventory, StepPassed,
-			"all bundle files verified against manifest.json", nil)
+			"manifest digest matches predicate; all bundle files verified", nil)
 	}
 
 	// Surface recorded phase failures as the informational exit-1 signal.
@@ -134,12 +141,4 @@ func hasPhaseFailures(pred *attestation.Predicate) bool {
 		}
 	}
 	return false
-}
-
-// WriteMarkdown is a convenience for the CLI's --output-markdown flag.
-func WriteMarkdown(path string, r *VerifyResult) error {
-	if err := os.WriteFile(path, []byte(RenderMarkdown(r)), 0o600); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to write markdown summary", err)
-	}
-	return nil
 }

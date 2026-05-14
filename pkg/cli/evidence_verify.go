@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/urfave/cli/v3"
 
@@ -47,6 +48,9 @@ Only directory input is supported today:
 Pointer files (recipes/evidence/<recipe>.yaml), OCI references, and
 cryptographic signature verification are not yet implemented.
 
+The rendered output goes to stdout by default; -o writes it to a file
+instead. -t selects the format (text = Markdown, json = structured).
+
 Exit codes (see Exit Codes section in cli-reference.md):
 
   0   bundle valid; every check passed.
@@ -54,8 +58,9 @@ Exit codes (see Exit Codes section in cli-reference.md):
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "output-markdown",
-				Usage:    "Write the Markdown summary to this path in addition to stdout.",
+				Name:     flagOutput,
+				Aliases:  []string{"o"},
+				Usage:    "Write output to this file (default: stdout).",
 				Category: catOutput,
 			},
 			withCompletions(&cli.StringFlag{
@@ -81,22 +86,18 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}
 
-	opts := verifier.VerifyOptions{
-		Input:        input,
-		MarkdownPath: cmd.String("output-markdown"),
-	}
-
-	result, err := verifier.Verify(ctx, opts)
+	result, err := verifier.Verify(ctx, verifier.VerifyOptions{Input: input})
 	if err != nil {
 		return err
 	}
-	if err := writeVerifyOutput(cmd.Root().Writer, format, result); err != nil {
+
+	w, closeFn, err := openVerifyOutput(cmd.String(flagOutput), cmd.Root().Writer)
+	if err != nil {
 		return err
 	}
-	if opts.MarkdownPath != "" {
-		if err := verifier.WriteMarkdown(opts.MarkdownPath, result); err != nil {
-			return err
-		}
+	defer closeFn()
+	if err := writeVerifyOutput(w, format, result); err != nil {
+		return err
 	}
 
 	switch result.Exit {
@@ -109,6 +110,21 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle verification failed; see the verifier output for details")
 	}
+}
+
+// openVerifyOutput resolves the --output flag. Empty path returns the
+// CLI's default writer (stdout); a path opens the file for writing and
+// returns a closer that the caller must invoke (typically via defer).
+func openVerifyOutput(path string, stdout io.Writer) (io.Writer, func(), error) {
+	if path == "" {
+		return stdout, func() {}, nil
+	}
+	f, err := os.Create(path) //nolint:gosec // operator-supplied destination
+	if err != nil {
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to open --output file for writing", err)
+	}
+	return f, func() { _ = f.Close() }, nil
 }
 
 func writeVerifyOutput(w io.Writer, format string, r *verifier.VerifyResult) error {

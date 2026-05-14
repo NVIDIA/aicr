@@ -26,28 +26,55 @@ import (
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
-// CheckInventory recomputes every sha256 named in manifest.json and
-// confirms no unmanaged files are present. This single check
-// transitively binds every bundled file to the predicate via
-// predicate.manifest.digest — there's no separate step needed for
-// recipe.yaml, bom.cdx.json, or the CTRF reports.
+// CheckInventory verifies the bundle's integrity chain:
+//
+//  1. sha256(manifest.json) matches expectedManifestDigest (the
+//     predicate's Manifest.Digest field). This is what binds the
+//     unsigned manifest to the predicate — without it, a tampered
+//     bundle could rewrite manifest.json to match its own contents and
+//     pass file-by-file hash checks.
+//  2. Every file the manifest names exists, has the expected size,
+//     and hashes to the recorded sha256.
+//  3. No file in the bundle is unmanaged (i.e., not in the manifest).
+//
+// expectedManifestDigest must be the "sha256:<hex>" form from
+// pred.Manifest.Digest. An empty value is rejected — the verifier
+// refuses to operate without a predicate-side digest to compare against.
 //
 // ctx is honored between files (large bundles, hostile manifests with
 // many entries) and during the bundle walk for stray-file detection.
 //
 // Returns per-file mismatch rows and an error summarizing the failure;
 // both nil on success.
-func CheckInventory(ctx context.Context, mat *MaterializedBundle) ([]KV, error) {
+func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManifestDigest string) ([]KV, error) {
 	if mat == nil || mat.BundleDir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
+	}
+	if expectedManifestDigest == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"expected manifest digest is required (from predicate.manifest.digest)")
 	}
 	body, err := os.ReadFile(filepath.Join(mat.BundleDir, attestation.ManifestFilename)) //nolint:gosec
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeNotFound, "failed to read manifest.json", err)
 	}
+	gotManifestDigest := attestation.HashBytesSHA256(body)
+	if gotManifestDigest != expectedManifestDigest {
+		return []KV{{Key: attestation.ManifestFilename,
+				Value: "sha256 mismatch (got " + gotManifestDigest +
+					", want " + expectedManifestDigest + ")"}},
+			errors.New(errors.ErrCodeInvalidRequest,
+				"manifest.json digest does not match predicate.manifest.digest — "+
+					"the manifest has been tampered or the predicate is wrong for this bundle")
+	}
+
 	var manifest attestation.Manifest
 	if uErr := json.Unmarshal(body, &manifest); uErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "manifest.json is not valid JSON", uErr)
+	}
+	if !isSupportedManifestSchema(manifest.SchemaVersion) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"unsupported manifest schemaVersion "+manifest.SchemaVersion+" (verifier supports 1.0.x)")
 	}
 	if len(manifest.Files) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "manifest.json has no files")
@@ -117,6 +144,12 @@ func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
 			"failed to hash bundle file: "+rel)
 	}
 	return got, nil
+}
+
+// isSupportedManifestSchema accepts the 1.0.x family — same shape, the
+// patch component is reserved for clarifying-only updates.
+func isSupportedManifestSchema(v string) bool {
+	return strings.HasPrefix(v, "1.0.") || v == "1.0"
 }
 
 // findExtras returns bundle-relative paths of files present on disk
