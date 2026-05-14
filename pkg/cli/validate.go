@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
@@ -323,7 +324,8 @@ func runValidation(
 		validator.WithNodeSelector(cfg.nodeSelector),
 	)
 
-	results, err := v.ValidatePhases(ctx, cfg.phases, rec, snap)
+	validationInput := v1.ToValidationInput(rec)
+	results, err := v.ValidatePhases(ctx, cfg.phases, validationInput, snap)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
 	}

@@ -23,6 +23,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
@@ -237,8 +238,8 @@ func TestCheckReadinessNilInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validation := recipe.ToValidation(tt.rec)
-			if err := checkReadiness(validation, tt.snap); err != nil {
+			validationInput := v1.ToValidationInput(tt.rec)
+			if err := checkReadiness(validationInput, tt.snap); err != nil {
 				t.Errorf("checkReadiness() = %v, want nil", err)
 			}
 		})
@@ -250,8 +251,8 @@ func TestCheckReadinessEmptyConstraints(t *testing.T) {
 		Constraints: []recipe.Constraint{},
 	}
 	snap := &snapshotter.Snapshot{}
-	validation := recipe.ToValidation(rec)
-	if err := checkReadiness(validation, snap); err != nil {
+	validationInput := v1.ToValidationInput(rec)
+	if err := checkReadiness(validationInput, snap); err != nil {
 		t.Errorf("checkReadiness() = %v, want nil for empty constraints", err)
 	}
 }
@@ -267,8 +268,8 @@ func TestCheckReadinessUnparseableConstraintFailsClosed(t *testing.T) {
 		},
 	}
 	snap := &snapshotter.Snapshot{}
-	validation := recipe.ToValidation(rec)
-	if err := checkReadiness(validation, snap); err == nil {
+	validationInput := v1.ToValidationInput(rec)
+	if err := checkReadiness(validationInput, snap); err == nil {
 		t.Errorf("checkReadiness() = nil, want error for unevaluable constraint")
 	}
 }
@@ -289,8 +290,8 @@ func TestFilterEntriesByValidationNilPhaseConfig(t *testing.T) {
 		{Name: "v1", Phase: "deployment"},
 	}
 	rec := &recipe.RecipeResult{Validation: nil}
-	validation := recipe.ToValidation(rec)
-	got := filterEntriesByValidation(entries, PhaseDeployment, validation)
+	validationInput := v1.ToValidationInput(rec)
+	got := filterEntriesByValidation(entries, PhaseDeployment, validationInput)
 	if len(got) != 0 {
 		t.Errorf("filterEntriesByValidation(nil phase config) returned %d entries, want 0 (skip)", len(got))
 	}
@@ -306,8 +307,8 @@ func TestFilterEntriesByValidationNoChecks(t *testing.T) {
 			Deployment: &recipe.ValidationPhase{},
 		},
 	}
-	validation := recipe.ToValidation(rec)
-	got := filterEntriesByValidation(entries, PhaseDeployment, validation)
+	validationInput := v1.ToValidationInput(rec)
+	got := filterEntriesByValidation(entries, PhaseDeployment, validationInput)
 	if len(got) != 0 {
 		t.Errorf("filterEntriesByValidation(empty checks) returned %d entries, want 0 (skip)", len(got))
 	}
@@ -367,8 +368,8 @@ func TestFilterEntriesByValidationWithChecks(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validation := recipe.ToValidation(tt.rec)
-			got := filterEntriesByValidation(entries, tt.phase, validation)
+			validationInput := v1.ToValidationInput(tt.rec)
+			got := filterEntriesByValidation(entries, tt.phase, validationInput)
 			if len(got) != tt.expected {
 				t.Errorf("filterEntriesByValidation() returned %d entries, want %d", len(got), tt.expected)
 			}
@@ -394,8 +395,8 @@ func TestFilterEntriesByValidationEmptyChecksList(t *testing.T) {
 			},
 		},
 	}
-	validation := recipe.ToValidation(rec)
-	got := filterEntriesByValidation(entries, PhaseDeployment, validation)
+	validationInput := v1.ToValidationInput(rec)
+	got := filterEntriesByValidation(entries, PhaseDeployment, validationInput)
 	if len(got) != 0 {
 		t.Errorf("filterEntriesByValidation(empty checks list) returned %d entries, want 0 (skip)", len(got))
 	}

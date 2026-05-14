@@ -105,9 +105,8 @@ func TestToValidationInputNil(t *testing.T) {
 // This test exercises the exact path: recipe.RecipeResult →
 // ToValidationInput → yaml.Marshal → yaml.Unmarshal → constraint lookup,
 // and asserts both a performance and a deployment constraint survive the
-// round trip. A regression to marshaling recipe.Validation directly (which
-// inlines ValidationConfig) would land the phase fields at the YAML root
-// and fail this test.
+// round trip. The phase configs must be nested under the `config:` field
+// (not inlined at the root) for validators to find them.
 func TestToValidationInputYAMLRoundTrip(t *testing.T) {
 	rec := &recipe.RecipeResult{
 		APIVersion: "aicr.nvidia.com/v1",

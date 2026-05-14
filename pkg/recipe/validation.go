@@ -14,11 +14,6 @@
 
 package recipe
 
-const (
-	// KindValidation is the Kubernetes kind for Validation resources.
-	KindValidation = "Validation"
-)
-
 // ValidationConfig defines validation phases and settings.
 type ValidationConfig struct {
 	// Readiness defines readiness validation phase settings.
@@ -63,106 +58,4 @@ type NodeSelection struct {
 
 	// ExcludeNodes lists node names to exclude from validation.
 	ExcludeNodes []string `json:"excludeNodes,omitempty" yaml:"excludeNodes,omitempty"`
-}
-
-// Validation is the complete validation specification.
-// Supports both standalone file usage (with full metadata) and embedded usage in CRs (metadata omitted).
-//
-// Standalone usage (validation.yaml):
-//
-//	apiVersion: aicr.nvidia.com/v1
-//	kind: Validation
-//	metadata:
-//	  name: my-validation
-//	  version: 1.0.0
-//	componentRefs: [...]
-//	criteria: {...}
-//
-// Embedded usage (in a CR):
-//
-//	spec:
-//	  validation:
-//	    componentRefs: [...]
-//	    criteria: {...}
-type Validation struct {
-	// APIVersion is the API version (optional, for standalone resource usage).
-	APIVersion string `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
-
-	// Kind is always "Validation" (optional, for standalone resource usage).
-	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
-
-	// Metadata contains validation metadata (optional, for standalone resource usage).
-	Metadata *ValidationMetadata `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-
-	ValidationConfig `json:",inline" yaml:",inline"`
-
-	// ComponentRefs lists the components to validate (optional).
-	ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
-
-	// Criteria specifies the cluster characteristics (optional).
-	Criteria Criteria `json:"criteria,omitempty" yaml:"criteria,omitempty"`
-
-	// Constraints are top-level readiness constraints evaluated before validation phases (optional).
-	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
-}
-
-// ValidationMetadata contains validation-level metadata.
-type ValidationMetadata struct {
-	// Name is a human-readable name for this validation.
-	Name string `json:"name,omitempty" yaml:"name,omitempty"`
-
-	// Version is the version of this validation specification.
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
-}
-
-// NewValidation creates a new empty Validation instance.
-func NewValidation() *Validation {
-	return &Validation{
-		ValidationConfig: ValidationConfig{},
-		ComponentRefs:    []ComponentRef{},
-		Criteria:         Criteria{},
-		Constraints:      []Constraint{},
-	}
-}
-
-// ToValidation converts RecipeResult to Validation for use with validators.
-// This extracts the validation-relevant fields (ValidationConfig, ComponentRefs, Criteria)
-// and discards recipe-specific metadata (AppliedOverlays, DeploymentOrder, etc.).
-// Returns nil if the input RecipeResult is nil.
-//
-// Populates optional APIVersion/Kind/Metadata fields to support standalone usage.
-// When embedding in CRs, these fields can be omitted via omitempty tags.
-func ToValidation(r *RecipeResult) *Validation {
-	if r == nil {
-		return nil
-	}
-
-	validation := NewValidation()
-
-	// Populate optional resource fields for standalone usage
-	validation.APIVersion = r.APIVersion
-	validation.Kind = KindValidation // Change from "RecipeResult" to "Validation"
-	if r.Metadata.Version != "" {
-		validation.Metadata = &ValidationMetadata{
-			Version: r.Metadata.Version,
-		}
-	}
-
-	// Copy ValidationConfig if present
-	if r.Validation != nil {
-		validation.ValidationConfig = *r.Validation
-	}
-
-	// Copy top-level Constraints
-	validation.Constraints = r.Constraints
-
-	// Copy ComponentRefs
-	validation.ComponentRefs = r.ComponentRefs
-
-	// Copy Criteria
-	if r.Criteria != nil {
-		validation.Criteria = *r.Criteria
-	}
-
-	return validation
 }
