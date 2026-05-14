@@ -38,6 +38,12 @@ const (
 	DeployerArgoCDHelm DeployerType = "argocd-helm"
 	// DeployerFlux generates Flux HelmRelease manifests.
 	DeployerFlux DeployerType = "flux"
+	// DeployerHelmfile generates a helmfile.yaml release graph for use with the
+	// upstream helmfile CLI (helmfile apply / diff / destroy). Per-component
+	// chart directories are emitted via the shared localformat writer, so the
+	// bundle is self-contained and air-gap deployable when combined with
+	// --vendor-charts.
+	DeployerHelmfile DeployerType = "helmfile"
 )
 
 // allDeployerTypes is the single source of truth for supported deployer types.
@@ -46,6 +52,7 @@ var allDeployerTypes = []DeployerType{
 	DeployerArgoCD,
 	DeployerArgoCDHelm,
 	DeployerFlux,
+	DeployerHelmfile,
 }
 
 // ParseDeployerType parses a string into a DeployerType.

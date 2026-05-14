@@ -10,7 +10,7 @@ The bundler system converts RecipeInput objects into deployment artifacts (Helm 
 
 ### Local Format (Shared Bundle Layout)
 
-`pkg/bundler/deployer/localformat` writes the uniform numbered `NNN-<component>/` bundle layout consumed by every deployer. It owns per-folder content (Chart.yaml, values.yaml, cluster-values.yaml, install.sh, templates/, upstream.env). Deployers (`helm`, future `helmfile` per [#632](https://github.com/NVIDIA/aicr/issues/632), `argocd`, `argocd-helm`) call `localformat.Write()` and then add their own top-level orchestration files (deploy.sh, helmfile.yaml, Application CRs, etc.) — they never re-classify components or duplicate the per-folder writer.
+`pkg/bundler/deployer/localformat` writes the uniform numbered `NNN-<component>/` bundle layout consumed by every deployer. It owns per-folder content (Chart.yaml, values.yaml, cluster-values.yaml, install.sh, templates/, upstream.env). Deployers (`helm`, `helmfile` per [#632](https://github.com/NVIDIA/aicr/issues/632), `argocd`, `argocd-helm`, `flux`) call `localformat.Write()` and then add their own top-level orchestration files (deploy.sh, helmfile.yaml, Application CRs, etc.) — they never re-classify components or duplicate the per-folder writer.
 
 **Classification rule** (single source of truth, in `localformat.classify`):
 

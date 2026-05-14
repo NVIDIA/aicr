@@ -29,6 +29,12 @@ inputs:
     description: 'Chainsaw SHA256 checksum for linux/amd64 (from .settings.yaml)'
     required: false
     default: 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e'
+  helmfile_version:
+    description: 'Helmfile version (e.g., v1.5.1) — required by tests/chainsaw/cli/bundle-helmfile'
+    required: true
+  helmfile_sha256:
+    description: 'Helmfile SHA256 checksum for linux/amd64 (from .settings.yaml)'
+    required: true
 
 runs:
   using: 'composite'
@@ -54,6 +60,13 @@ runs:
         install_chainsaw: 'true'
         chainsaw_version: '${{ inputs.chainsaw_version }}'
         chainsaw_sha256: '${{ inputs.chainsaw_sha256 }}'
+
+    - name: Install Helmfile
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_helmfile: 'true'
+        helmfile_version: '${{ inputs.helmfile_version }}'
+        helmfile_sha256: '${{ inputs.helmfile_sha256 }}'
 
     - name: Generate SLSA predicate
       if: github.event.pull_request.head.repo.fork == false

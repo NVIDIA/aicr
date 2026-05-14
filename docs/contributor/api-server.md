@@ -23,7 +23,7 @@ The API server provides HTTP REST access to **Steps 2 and 4 of the AICR workflow
 
 **API Server configuration:**
 - Criteria allowlists for accelerator, service, intent, OS via `AICR_ALLOWED_*` env vars
-- Value overrides on `/v1/bundle` via `?set=bundler:path=value` and `?dynamic=component:path` (helm, argocd-helm, and flux deployers)
+- Value overrides on `/v1/bundle` via `?set=bundler:path=value` (all deployers) and `?dynamic=component:path` (helm, argocd-helm, flux, and helmfile deployers; argocd rejects `?dynamic` — use argocd-helm)
 - Node scheduling via `?system-node-selector` and `?accelerated-node-selector`
 - Air-gap vendoring via `?vendor-charts=true` — the API server container must have `helm` on `$PATH` and credentials for any private upstream registries (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` env vars for HTTP(S); docker config for OCI). The bundle's `provenance.yaml` (at the bundle root) records each vendored chart with name, version, source URL, and SHA256 for air-gap auditing and CVE-yank cross-referencing
 

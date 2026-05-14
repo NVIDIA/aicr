@@ -1010,10 +1010,10 @@ aicr bundle [flags]
 | `--recipe` | `-r` | string | Path to recipe file (required, or via `spec.bundle.input.recipe` in `--config`) |
 | `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Bundle Config File Mode](#bundle-config-file-mode). |
 | `--output` | `-o` | string | Output directory (default: current dir) |
-| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, or `flux` |
+| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
-| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, and `flux` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -1151,6 +1151,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
 | `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
+| `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
@@ -1161,6 +1162,7 @@ All deployers respect the `deploymentOrder` field from the recipe, ensuring comp
 - **Helm**: Components listed in README in deployment order
 - **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
 - **Flux**: Uses `dependsOn` references in HelmRelease/Kustomization CRs (each component depends on its predecessor)
+- **Helmfile**: Uses `needs:` references in each release (each component depends on its predecessor)
 
 #### Value Overrides
 
@@ -1450,6 +1452,35 @@ vim bundles/gpu-operator/configmap-values.yaml
 
 # 3. Push to your Git repository and let Flux reconcile
 git add bundles/ && git commit -m "Add AICR bundle" && git push
+```
+
+**Bundle structure with `--dynamic`** (Helmfile deployer):
+
+The `--deployer helmfile` bundle references both `values.yaml` (static) and `cluster-values.yaml` (dynamic stubs) per release. `helmfile` merges value files in declaration order, so `cluster-values.yaml` overrides on top of the generated `values.yaml`. Edit `cluster-values.yaml` per component before `helmfile apply`:
+
+```text
+bundles/
+├── helmfile.yaml                    # Release graph; per-release values: [./NNN-<component>/values.yaml, ./NNN-<component>/cluster-values.yaml]
+├── 001-cert-manager/
+│   ├── values.yaml                  # Generated static values
+│   └── cluster-values.yaml          # Dynamic stubs (edit before apply)
+├── 002-gpu-operator/
+│   ├── values.yaml
+│   └── cluster-values.yaml
+└── README.md
+```
+
+```shell
+# 1. Generate the bundle
+aicr bundle -r recipe.yaml --deployer helmfile \
+  --dynamic gpuoperator:driver.version \
+  -o ./bundles
+
+# 2. Edit per-cluster overrides
+vim bundles/002-gpu-operator/cluster-values.yaml
+
+# 3. Preview and apply
+cd ./bundles && helmfile diff && helmfile apply
 ```
 
 **Argo CD Helm chart structure with `--dynamic`:**

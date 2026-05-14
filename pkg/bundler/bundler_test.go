@@ -759,6 +759,92 @@ func TestMake_ArgoCD(t *testing.T) {
 	}
 }
 
+func TestMake_Helmfile(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerHelmfile),
+		config.WithVersion("v1.0.0"),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Version: "v25.3.3",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:    "network-operator",
+				Version: "v25.4.0",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator", "network-operator"},
+	}
+
+	output, err := bundler.Make(ctx, recipeResult, tmpDir)
+	if err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+
+	if output == nil {
+		t.Fatal("Make() returned nil output")
+	}
+	if len(output.Results) == 0 {
+		t.Error("expected at least 1 result")
+	}
+	for _, r := range output.Results {
+		if r.Type != "helmfile-bundle" {
+			t.Errorf("result type = %q, want %q", r.Type, "helmfile-bundle")
+		}
+		if !r.Success {
+			t.Error("expected successful result")
+		}
+	}
+	if output.Deployment == nil {
+		t.Fatal("expected deployment info")
+	}
+	if output.Deployment.Type != "Helmfile release graph" {
+		t.Errorf("deployment type = %q, want %q",
+			output.Deployment.Type, "Helmfile release graph")
+	}
+	if output.TotalFiles == 0 {
+		t.Error("expected generated files")
+	}
+	// Sanity-check the deployer emitted helmfile.yaml at the bundle root.
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "helmfile.yaml")); statErr != nil {
+		t.Errorf("helmfile.yaml missing at bundle root: %v", statErr)
+	}
+	// Lock in helmfile non-goals (per issue #632): the helmfile deployer must
+	// NOT emit bash wrappers or peer-deployer orchestration artifacts. A
+	// regression that brings any of these back is a scope violation.
+	for _, leaked := range []string{
+		"deploy.sh",          // helm deployer
+		"undeploy.sh",        // helm deployer
+		"app-of-apps.yaml",   // argocd / argocd-helm deployer
+		"kustomization.yaml", // flux deployer
+	} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, leaked)); !stderrors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("%s should not be generated for deployer=helmfile", leaked)
+		}
+	}
+}
+
 func TestRemoveHyphens(t *testing.T) {
 	tests := []struct {
 		input    string

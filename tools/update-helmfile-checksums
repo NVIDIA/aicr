@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Refresh the per-arch SHA256 checksums in .settings.yaml after a helmfile
+# version bump. Invoked by Renovate via postUpgradeTasks (.github/renovate.json5)
+# whenever testing_tools.helmfile is updated.
+#
+# Usage: tools/update-helmfile-checksums <helmfile-version>
+#   e.g. tools/update-helmfile-checksums v1.5.1
+#
+# Idempotent: re-running with the currently-pinned version produces no diff.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <helmfile-version>" >&2
+  exit 64
+fi
+
+VERSION="$1"
+# Accept both "v1.5.1" and "1.5.1".
+VERSION_NO_V="${VERSION#v}"
+VERSION_WITH_V="v${VERSION_NO_V}"
+
+SETTINGS_FILE=".settings.yaml"
+if [[ ! -f "${SETTINGS_FILE}" ]]; then
+  echo "ERROR: ${SETTINGS_FILE} not found (run from repo root)" >&2
+  exit 1
+fi
+
+# Upstream release asset is named helmfile_<version>_checksums.txt — different
+# convention from chainsaw's plain checksums.txt. Embedding the version in the
+# filename means a release-asset rename would surface here as a 404 instead of
+# silently picking up the previous version's checksums.
+CHECKSUMS_URL="https://github.com/helmfile/helmfile/releases/download/${VERSION_WITH_V}/helmfile_${VERSION_NO_V}_checksums.txt"
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "${TMPDIR}"' EXIT
+
+echo "Fetching ${CHECKSUMS_URL}"
+# Retry on transient failures (5xx, 408/429, connection refused, network
+# blips). Up to 5 attempts; --retry-delay 0 means curl picks an exponential
+# backoff. Total retry window capped at 180s.
+if ! curl --fail --silent --show-error --location \
+      --connect-timeout 10 --max-time 60 \
+      --retry 5 --retry-delay 0 --retry-max-time 180 \
+      --retry-connrefused \
+      --output "${TMPDIR}/checksums.txt" \
+      "${CHECKSUMS_URL}"; then
+  echo "ERROR: failed to download ${CHECKSUMS_URL} after retries" >&2
+  exit 1
+fi
+
+# Each line in the upstream file is "<sha256>  helmfile_<version>_<os>_<arch>.tar.gz".
+# Map (os, arch) → SHA256 for the four platforms .settings.yaml tracks.
+extract_sha() {
+  local os="$1" arch="$2"
+  local pattern="helmfile_${VERSION_NO_V}_${os}_${arch}\\.tar\\.gz"
+  local line
+  line=$(grep -E "  ${pattern}\$" "${TMPDIR}/checksums.txt" || true)
+  if [[ -z "${line}" ]]; then
+    echo "ERROR: no checksum entry matching ${pattern} in ${CHECKSUMS_URL}" >&2
+    exit 1
+  fi
+  echo "${line%% *}"
+}
+
+LINUX_AMD64=$(extract_sha linux amd64)
+LINUX_ARM64=$(extract_sha linux arm64)
+DARWIN_AMD64=$(extract_sha darwin amd64)
+DARWIN_ARM64=$(extract_sha darwin arm64)
+
+echo "  linux_amd64:  ${LINUX_AMD64}"
+echo "  linux_arm64:  ${LINUX_ARM64}"
+echo "  darwin_amd64: ${DARWIN_AMD64}"
+echo "  darwin_arm64: ${DARWIN_ARM64}"
+
+# Rewrite the four checksum lines in-place inside the helmfile_checksums:
+# block via awk (avoids editing chainsaw_checksums, which uses the same
+# arch keys at the same indent). mikefarah/yq would also work but drops
+# blank lines between top-level mappings and would reformat the entire
+# file on every Renovate PR — see the failure-modes note in
+# .github/RENOVATE.md.
+NEW_FILE="${TMPDIR}/settings.new"
+awk -v amd64="${LINUX_AMD64}" -v arm64="${LINUX_ARM64}" \
+    -v damd64="${DARWIN_AMD64}" -v darm64="${DARWIN_ARM64}" '
+    BEGIN { in_block = 0 }
+    # Enter helmfile_checksums block.
+    /^  helmfile_checksums:[[:space:]]*$/ { in_block = 1; print; next }
+    # Leave the block when we hit any other top-level (2-space) key.
+    in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
+    in_block && /^    linux_amd64:[[:space:]]*'\''[0-9a-f]{64}'\''/  { print "    linux_amd64: \x27" amd64 "\x27"; next }
+    in_block && /^    linux_arm64:[[:space:]]*'\''[0-9a-f]{64}'\''/  { print "    linux_arm64: \x27" arm64 "\x27"; next }
+    in_block && /^    darwin_amd64:[[:space:]]*'\''[0-9a-f]{64}'\''/ { print "    darwin_amd64: \x27" damd64 "\x27"; next }
+    in_block && /^    darwin_arm64:[[:space:]]*'\''[0-9a-f]{64}'\''/ { print "    darwin_arm64: \x27" darm64 "\x27"; next }
+    { print }
+  ' "${SETTINGS_FILE}" > "${NEW_FILE}"
+
+# Verify the new file contains the expected new values inside
+# helmfile_checksums. Fail closed if anything came out wrong rather than
+# overwriting silently — this catches awk-engine quirks and unexpected
+# input shapes.
+verify_block() {
+  local key="$1" sha="$2"
+  if ! awk -v key="$key" -v sha="$sha" '
+        /^  helmfile_checksums:[[:space:]]*$/ { in_block = 1; next }
+        in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
+        in_block && $0 ~ "^    " key ":[[:space:]]*'\''" sha "'\''$" { found = 1 }
+        END { exit !found }
+      ' "${NEW_FILE}"; then
+    echo "ERROR: verify_block: ${key} did not update to '${sha}' under helmfile_checksums" >&2
+    exit 1
+  fi
+}
+verify_block linux_amd64  "${LINUX_AMD64}"
+verify_block linux_arm64  "${LINUX_ARM64}"
+verify_block darwin_amd64 "${DARWIN_AMD64}"
+verify_block darwin_arm64 "${DARWIN_ARM64}"
+
+# Sanity: chainsaw_checksums must NOT have any of the helmfile SHAs (cross-
+# block contamination check — the awk above scopes by `in_block`, but a
+# regression-by-copy-paste could break that, so verify before moving the file).
+for sha in "${LINUX_AMD64}" "${LINUX_ARM64}" "${DARWIN_AMD64}" "${DARWIN_ARM64}"; do
+  if awk -v sha="$sha" '
+        /^  chainsaw_checksums:[[:space:]]*$/ { in_block = 1; next }
+        in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
+        in_block && index($0, sha) > 0 { found = 1 }
+        END { exit !found }
+      ' "${NEW_FILE}"; then
+    echo "ERROR: helmfile SHA ${sha} leaked into chainsaw_checksums block" >&2
+    exit 1
+  fi
+done
+
+mv "${NEW_FILE}" "${SETTINGS_FILE}"
+echo "Updated ${SETTINGS_FILE} for helmfile ${VERSION_WITH_V}"

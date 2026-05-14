@@ -52,6 +52,15 @@ outputs:
   helm:
     description: 'Helm version'
     value: ${{ steps.versions.outputs.helm }}
+  helmfile:
+    description: 'Helmfile version'
+    value: ${{ steps.versions.outputs.helmfile }}
+  helmfile_sha256_linux_amd64:
+    description: 'Helmfile SHA256 checksum for linux/amd64'
+    value: ${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}
+  helmfile_sha256_linux_arm64:
+    description: 'Helmfile SHA256 checksum for linux/arm64'
+    value: ${{ steps.versions.outputs.helmfile_sha256_linux_arm64 }}
   grype:
     description: 'Grype version'
     value: ${{ steps.versions.outputs.grype }}
@@ -137,6 +146,9 @@ runs:
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "tilt=$(yq eval '.testing_tools.tilt' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helm=$(yq eval '.testing_tools.helm' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "helmfile=$(yq eval '.testing_tools.helmfile' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "helmfile_sha256_linux_amd64=$(yq eval '.testing_tools.helmfile_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "helmfile_sha256_linux_arm64=$(yq eval '.testing_tools.helmfile_checksums.linux_arm64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "kwok=$(yq eval '.testing_tools.kwok' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "chainsaw=$(yq eval '.testing_tools.chainsaw' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "chainsaw_sha256_linux_amd64=$(yq eval '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -178,6 +190,9 @@ runs:
         echo "  ctlptl: ${{ steps.versions.outputs.ctlptl }}"
         echo "  tilt: ${{ steps.versions.outputs.tilt }}"
         echo "  helm: ${{ steps.versions.outputs.helm }}"
+        echo "  helmfile: ${{ steps.versions.outputs.helmfile }}"
+        echo "  helmfile_sha256_linux_amd64: ${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}"
+        echo "  helmfile_sha256_linux_arm64: ${{ steps.versions.outputs.helmfile_sha256_linux_arm64 }}"
         echo "  kwok: ${{ steps.versions.outputs.kwok }}"
         echo "  chainsaw: ${{ steps.versions.outputs.chainsaw }}"
         echo "  chainsaw_sha256_linux_amd64: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}"

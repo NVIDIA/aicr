@@ -1,0 +1,402 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-helmfile
+spec:
+  description: |
+    Tests Helmfile deployer bundle generation.
+    Covers output structure (helmfile.yaml + NNN-<name>/ component dirs),
+    top-level shape (repositories / helmDefaults / releases), needs: ordering,
+    repository deduplication, value overrides (--set), dynamic-values wiring
+    via cluster-values.yaml, kai-scheduler async/timeout special case, YAML
+    validity, reproducibility, and `helmfile lint` (when the binary is
+    available).
+    No cluster needed.
+  timeouts:
+    exec: 60s
+  # Top-level catch runs when any step fails. The first step's `rm -rf`
+  # already keeps the test idempotent across reruns, but catching here too
+  # means /tmp/chainsaw-bundle-helmfile doesn't survive a partial-failure
+  # run on a shared developer or CI host.
+  catch:
+    - script:
+        content: |
+          rm -rf /tmp/chainsaw-bundle-helmfile
+  steps:
+    - name: setup
+      description: Generate recipe used by all helmfile bundle tests.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+
+    - name: basic-helmfile-bundle
+      description: --deployer helmfile produces helmfile.yaml + per-component dirs.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/basic" \
+                --deployer helmfile
+              # Required top-level files.
+              test -f "${WORK}/basic/helmfile.yaml" \
+                || { echo "missing helmfile.yaml" >&2; exit 1; }
+              test -f "${WORK}/basic/README.md" \
+                || { echo "missing README.md" >&2; exit 1; }
+              # Per-component NNN-<name>/ folders.
+              ls -d "${WORK}"/basic/[0-9][0-9][0-9]-*/ >/dev/null 2>&1 \
+                || { echo "no NNN-<name>/ component folders found" >&2; exit 1; }
+              # Each component folder carries a values.yaml.
+              for dir in "${WORK}"/basic/[0-9][0-9][0-9]-*/; do
+                test -f "${dir}values.yaml" \
+                  || { echo "missing values.yaml in $(basename "$dir")" >&2; exit 1; }
+              done
+              # Artifacts from other deployers must NOT exist.
+              ! test -f "${WORK}/basic/deploy.sh" \
+                || { echo "deploy.sh leaked into helmfile bundle" >&2; exit 1; }
+              ! test -f "${WORK}/basic/undeploy.sh" \
+                || { echo "undeploy.sh leaked into helmfile bundle" >&2; exit 1; }
+              ! test -f "${WORK}/basic/app-of-apps.yaml" \
+                || { echo "argocd app-of-apps leaked" >&2; exit 1; }
+              ! test -d "${WORK}/basic/sources" \
+                || { echo "flux sources/ leaked" >&2; exit 1; }
+              ! test -f "${WORK}/basic/kustomization.yaml" \
+                || { echo "flux root kustomization.yaml leaked" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: helmfile-top-level-shape
+      description: helmfile.yaml has the expected top-level keys and defaults.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              HF="${WORK}/basic/helmfile.yaml"
+              # Top-level keys we always emit.
+              grep -q "^repositories:" "${HF}" \
+                || { echo "missing repositories: block" >&2; exit 1; }
+              grep -q "^helmDefaults:" "${HF}" \
+                || { echo "missing helmDefaults: block" >&2; exit 1; }
+              grep -q "^releases:" "${HF}" \
+                || { echo "missing releases: block" >&2; exit 1; }
+              # Default wait/timeout/createNamespace settings.
+              grep -q "wait: true" "${HF}" \
+                || { echo "helmDefaults.wait should be true" >&2; exit 1; }
+              grep -q "timeout: 600" "${HF}" \
+                || { echo "helmDefaults.timeout should be 600 (10m)" >&2; exit 1; }
+              grep -q "createNamespace: true" "${HF}" \
+                || { echo "helmDefaults.createNamespace should be true" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: needs-ordering
+      description: >
+        First release has no needs entry; every subsequent release lists exactly
+        its immediate predecessor — verifies the linear deployment chain.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              HF="${WORK}/basic/helmfile.yaml"
+              # Extract every release name in declaration order.
+              names=$(awk '
+                /^releases:/ {in_releases=1; next}
+                in_releases && /^  - name: / {print $3}
+              ' "${HF}")
+              [ -n "$names" ] || { echo "no releases parsed" >&2; exit 1; }
+              count=$(printf "%s\n" "$names" | wc -l | tr -d ' ')
+              # At least one release must exist; the chain-walk below
+              # naturally skips when count==1 (only release[0] validation
+              # runs). Allowing count==1 keeps this test robust against
+              # recipe-content changes that pare down the test-shape recipe.
+              [ "$count" -ge 1 ] \
+                || { echo "need at least 1 release, got $count" >&2; exit 1; }
+              # Extract the immediate predecessor each release declares via needs:.
+              # The line after each "needs:" must equal the previous release name.
+              prev=""
+              idx=0
+              missing_needs_count=0
+              while IFS= read -r name; do
+                idx=$((idx + 1))
+                if [ "$idx" -eq 1 ]; then
+                  # Release[0] is the chain root and must NOT declare needs:.
+                  # Without this guard, a regression that adds `needs:` to the
+                  # first release would silently sneak through.
+                  root_dep=$(awk -v target="$name" '
+                    /^releases:/ {in_releases=1; next}
+                    in_releases && $0 ~ "^  - name: " target "$" {in_block=1; next}
+                    in_block && /^  - name:/ {in_block=0}
+                    in_block && /^    needs:/ {in_needs=1; next}
+                    in_needs && /^      - / {print substr($0, 9); exit}
+                    in_needs && /^    [a-z]/ {in_needs=0}
+                  ' "${HF}")
+                  if [ -n "$root_dep" ]; then
+                    echo "release[0] ${name} must not declare needs:, but has needs: ${root_dep}" >&2
+                    exit 1
+                  fi
+                  prev="$name"
+                  continue
+                fi
+                # Find the "needs:" block under this release: extract the line
+                # immediately following the "- name: <name>" line until the next
+                # release entry or end-of-block, then grep the first "    - "
+                # under "    needs:". The entry may be bare "<name>" (same
+                # namespace) or "<namespace>/<name>" (cross-namespace) — strip
+                # any "<ns>/" prefix before comparing to the predecessor name.
+                dep=$(awk -v target="$name" '
+                  /^releases:/ {in_releases=1; next}
+                  in_releases && $0 ~ "^  - name: " target "$" {in_block=1; next}
+                  in_block && /^  - name:/ {in_block=0}
+                  in_block && /^    needs:/ {in_needs=1; next}
+                  in_needs && /^      - / {print substr($0, 9); exit}
+                  in_needs && /^    [a-z]/ {in_needs=0}
+                ' "${HF}")
+                # Strip optional "<namespace>/" prefix for comparison.
+                dep_bare="${dep##*/}"
+                if [ -z "$dep" ]; then
+                  missing_needs_count=$((missing_needs_count + 1))
+                  echo "release $name has no needs:" >&2
+                elif [ "$dep_bare" != "$prev" ]; then
+                  echo "release $name needs: '$dep' (bare '$dep_bare'), expected '$prev'" >&2
+                  exit 1
+                fi
+                prev="$name"
+              done <<EOF
+              $names
+              EOF
+              [ "$missing_needs_count" -eq 0 ] \
+                || { echo "$missing_needs_count releases missing needs:" >&2; exit 1; }
+              echo "needs: chain valid across $count releases"
+            check:
+              ($error == null): true
+
+    - name: repository-deduplication
+      description: Components sharing a chart-repo URL produce a single repositories[] entry.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              HF="${WORK}/basic/helmfile.yaml"
+              # Repository entries — names are unique by construction.
+              repo_count=$(awk '
+                /^repositories:/ {in_repos=1; next}
+                in_repos && /^[a-z]/ {in_repos=0}
+                in_repos && /^  - name:/ {n++}
+                END {print n+0}
+              ' "${HF}")
+              # Distinct release.chart values of the form <alias>/<chart>.
+              release_repo_refs=$(awk '
+                /^releases:/ {in_releases=1; next}
+                in_releases && /^    chart: [^.]/ {
+                  split($2, parts, "/"); print parts[1]
+                }
+              ' "${HF}" | sort -u | wc -l | tr -d ' ')
+              # Dedup invariant: the number of repository entries equals the number
+              # of distinct alias prefixes referenced by upstream-helm releases.
+              [ "$repo_count" -eq "$release_repo_refs" ] \
+                || { echo "repo dedup mismatch: $repo_count repo entries vs $release_repo_refs distinct aliases" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: per-component-values-paths
+      description: Every release values list references real files under its NNN-<name>/ dir.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              HF="${WORK}/basic/helmfile.yaml"
+              # Extract every values: path (entries start with "./").
+              awk '
+                /^releases:/ {in_releases=1; next}
+                in_releases && /^    values:/ {in_values=1; next}
+                in_values && /^      - / {print substr($0, 9)}
+                in_values && /^    [a-z]/ {in_values=0}
+                in_values && /^  - name:/ {in_values=0}
+              ' "${HF}" | while IFS= read -r path; do
+                [ -z "$path" ] && continue
+                # Strip leading "./" for filesystem check.
+                file="${WORK}/basic/${path#./}"
+                test -f "$file" \
+                  || { echo "values path $path does not resolve to an existing file" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: kai-scheduler-async-override
+      description: >
+        kai-scheduler is hardcoded as async in the helm deployer; the helmfile
+        deployer mirrors this with wait: false + timeout: 1200 on the matching
+        release. Skipped when the recipe does not include kai-scheduler.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              HF="${WORK}/basic/helmfile.yaml"
+              if ! grep -q "name: kai-scheduler" "${HF}"; then
+                echo "kai-scheduler not in this recipe; skipping override assertion"
+                exit 0
+              fi
+              # Find the kai-scheduler release block and check its wait/timeout.
+              block=$(awk '
+                /^  - name: kai-scheduler$/ {in_block=1; print; next}
+                in_block && /^  - name:/ {exit}
+                in_block {print}
+              ' "${HF}")
+              echo "${block}" | grep -q "^    wait: false$" \
+                || { echo "kai-scheduler release missing wait: false override" >&2; exit 1; }
+              echo "${block}" | grep -q "^    timeout: 1200$" \
+                || { echo "kai-scheduler release missing timeout: 1200 override" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: value-override-helmfile
+      description: --set flag injects custom value into the component's values.yaml.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/value-override" \
+                --deployer helmfile \
+                --set gpu-operator:driver.version=999.99.99
+              found=false
+              for vf in "${WORK}"/value-override/[0-9][0-9][0-9]-*/values.yaml; do
+                grep -q "999.99.99" "$vf" 2>/dev/null && { found=true; break; }
+              done
+              [ "$found" = "true" ] \
+                || { echo "999.99.99 not found in any values.yaml" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: dynamic-values-cluster-file
+      description: >
+        --dynamic generates a cluster-values.yaml under the affected component's
+        folder and adds it to the release values list.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              rm -rf "${WORK}/dynamic-out"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/dynamic-out" \
+                --deployer helmfile --dynamic gpuoperator:driver.version
+
+              # Find the gpu-operator component folder (numbered prefix varies).
+              gpu_dir=$(find "${WORK}/dynamic-out" -maxdepth 1 -type d \
+                -name "[0-9][0-9][0-9]-gpu-operator" | head -1)
+              [ -n "$gpu_dir" ] \
+                || { echo "no gpu-operator component folder found" >&2; exit 1; }
+              test -f "${gpu_dir}/cluster-values.yaml" \
+                || { echo "missing cluster-values.yaml under $(basename "$gpu_dir")" >&2; exit 1; }
+
+              # The release's values: list must reference both values.yaml and
+              # cluster-values.yaml.
+              HF="${WORK}/dynamic-out/helmfile.yaml"
+              gpu_dir_name=$(basename "$gpu_dir")
+              grep -q "./${gpu_dir_name}/values.yaml" "${HF}" \
+                || { echo "helmfile.yaml missing values.yaml reference for gpu-operator" >&2; exit 1; }
+              grep -q "./${gpu_dir_name}/cluster-values.yaml" "${HF}" \
+                || { echo "helmfile.yaml missing cluster-values.yaml reference for gpu-operator" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: yaml-validity
+      description: helmfile.yaml and every component values file pass yamllint.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              for yamlfile in "${WORK}"/basic/helmfile.yaml \
+                              "${WORK}"/basic/[0-9][0-9][0-9]-*/values.yaml; do
+                [ -f "$yamlfile" ] || continue
+                yamllint -d '{extends: relaxed, rules: {trailing-spaces: disable}}' "$yamlfile" \
+                  || { echo "yamllint failed on $yamlfile" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: reproducible-output
+      description: Two runs with identical input produce identical output.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/repro-a" --deployer helmfile
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/repro-b" --deployer helmfile
+              diff -r "${WORK}/repro-a" "${WORK}/repro-b" \
+                || { echo "outputs differ between two identical runs" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: readme-content
+      description: README.md contains helmfile-specific apply/diff/destroy guidance.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              README="${WORK}/basic/README.md"
+              grep -q "Helmfile Bundle" "${README}" \
+                || { echo "README missing title" >&2; exit 1; }
+              grep -q "helmfile apply" "${README}" \
+                || { echo "README missing 'helmfile apply' guidance" >&2; exit 1; }
+              grep -q "helmfile diff" "${README}" \
+                || { echo "README missing 'helmfile diff' guidance" >&2; exit 1; }
+              grep -q "helmfile destroy" "${README}" \
+                || { echo "README missing 'helmfile destroy' guidance" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: helmfile-build-validates
+      description: >
+        Runs `helmfile build` against the generated bundle to parse the
+        document and resolve `needs:`. Non-zero exit means malformed YAML
+        or an unresolvable dependency graph. This is helmfile's pure
+        validator path — no network, no chart pulls, no cluster. The
+        helmfile binary is a hard prerequisite of this test; the failure
+        path tells the operator how to install it. (`helmfile lint` is a
+        different command — it runs `helm lint` per release and would
+        need every chart pulled first; not used here.)
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-helmfile"
+              if ! command -v helmfile >/dev/null 2>&1; then
+                echo "helmfile binary not found on \$PATH." >&2
+                echo "Install it with: make tools-setup" >&2
+                echo "(or directly from https://helmfile.readthedocs.io/en/latest/#installation)" >&2
+                exit 1
+              fi
+              cd "${WORK}/basic"
+              helmfile build >/dev/null \
+                || { echo "helmfile build failed" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    # Final teardown: always run on the happy path. The spec-level `catch:`
+    # above handles the failure path; this step handles the success path.
+    - name: teardown
+      try:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-helmfile

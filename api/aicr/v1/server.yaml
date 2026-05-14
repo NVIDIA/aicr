@@ -839,10 +839,10 @@ paths:
           required: false
           description: >
             Deployment method for generated components.
-            Supported values: helm (default), argocd, argocd-helm, flux.
+            Supported values: helm (default), argocd, argocd-helm, flux, helmfile.
           schema:
             type: string
-            enum: [helm, argocd, argocd-helm, flux]
+            enum: [helm, argocd, argocd-helm, flux, helmfile]
             default: helm
         - name: repo
           in: query

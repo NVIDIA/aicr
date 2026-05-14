@@ -269,6 +269,7 @@ func bundleCmd() *cli.Command {
 		Description: `Generates a deployment bundle from a given recipe.
 Use --deployer argocd to generate Argo CD Applications.
 Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
+Use --deployer helmfile to generate a helmfile.yaml release graph (apply/diff/destroy with the upstream helmfile CLI).
 
 Helm:
   - README.md: Root deployment guide with ordered steps
@@ -293,6 +294,12 @@ Flux:
   - README.md: Deployment instructions
   - checksums.txt: SHA256 checksums of generated files
 
+Helmfile:
+  - helmfile.yaml: Declarative release graph (repositories + releases + needs)
+  - NNN-<component>/: Per-component chart dirs (Chart.yaml, values.yaml)
+  - README.md: helmfile apply/diff/destroy walkthrough
+  - checksums.txt: SHA256 checksums of generated files
+
 Examples:
 
 Generate Helm per-component bundle (default):
@@ -303,6 +310,9 @@ Generate Argo CD App of Apps:
 
 Generate Flux manifests:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer flux
+
+Generate Helmfile release graph:
+  aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer helmfile
 
 Override values in generated bundle:
   aicr bundle --recipe recipe.yaml --set gpuoperator:driver.version=570.133.20
@@ -500,6 +510,8 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		outputType = "Argo CD Helm chart app-of-apps"
 	case config.DeployerFlux:
 		outputType = "Flux manifests"
+	case config.DeployerHelmfile:
+		outputType = "Helmfile release graph"
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),

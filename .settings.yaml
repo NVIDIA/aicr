@@ -61,6 +61,15 @@ testing_tools:
   tilt: '0.37.3'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.1.4'
+  # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
+  helmfile: 'v1.5.1'
+  # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
+  # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
+  helmfile_checksums:
+    linux_amd64: '4c0c92f711aaf95b953065a0a76c6adfd4f7fb9f8c7065db5c94d32a0caf288f'
+    linux_arm64: '580984c7c2785d6c7255dc49cc24d3a4c70dae5d7f25a80f58f93b08d91cf753'
+    darwin_amd64: 'f9b807a3f3e5c97f1c13877c17465ec3e1897acc0b7a3fc4a5ab745e3fae3fd3'
+    darwin_arm64: 'ff3c0b754906f60f3b191924de2bcc3f95100e61786653446294680846dd20b3'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.7.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools

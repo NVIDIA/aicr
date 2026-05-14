@@ -35,6 +35,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -407,6 +408,29 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
+	case config.DeployerHelmfile:
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
+		}
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
+		}
+		return &helmfile.Generator{
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			IncludeChecksums:       b.Config.IncludeChecksums(),
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			DataFiles:              dataFiles,
+			DynamicValues:          dynamicValues,
+			VendorCharts:           b.Config.VendorCharts(),
+		}, nil
+
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
@@ -503,6 +527,8 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 		return "argocd-helm-chart", "Argo CD Helm chart app-of-apps"
 	case config.DeployerFlux:
 		return "flux-manifests", "Flux manifests"
+	case config.DeployerHelmfile:
+		return "helmfile-bundle", "Helmfile release graph"
 	default:
 		return types.BundleType(dt), string(dt)
 	}

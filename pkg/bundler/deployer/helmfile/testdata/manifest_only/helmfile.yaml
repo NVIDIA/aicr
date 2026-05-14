@@ -1,0 +1,10 @@
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: true
+releases:
+  - name: node-prep
+    namespace: kube-system
+    chart: ./001-node-prep
+    values:
+      - ./001-node-prep/values.yaml

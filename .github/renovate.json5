@@ -308,6 +308,16 @@
         executionMode: "update",
       },
     },
+
+    // ---- helmfile bumps refresh per-arch SHA256 checksums via post-upgrade script ----
+    {
+      matchDepNames: ["helmfile/helmfile"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-helmfile-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
   ],
 
   // Vendor-curated GPU networking images that Renovate cannot crawl without

@@ -116,6 +116,9 @@ get_tool_metadata() {
         helm)
             echo "helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
             ;;
+        helmfile)
+            echo "helmfile:::helmfile --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+            ;;
         chainsaw)
             echo "chainsaw:::chainsaw version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
             ;;

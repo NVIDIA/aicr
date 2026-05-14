@@ -1035,6 +1035,94 @@ func TestBuildDependsOn(t *testing.T) {
 	}
 }
 
+// TestHelmReleaseNamespaceArchitecture locks the design assumption that
+// makes flux's bare-name dependsOn references safe: every HelmRelease CR
+// is emitted into the flux-system namespace, with targetNamespace pointing
+// at the component's actual namespace. Bare-name dependsOn resolves
+// within the dependent's own namespace, so as long as every HelmRelease
+// shares flux-system, cross-component edges resolve correctly without
+// needing the namespace field on DependsOnRef.
+//
+// If a future refactor changes HelmRelease metadata.namespace to follow
+// ref.Namespace (so different components land in different namespaces),
+// this test will start failing and force a parallel update to
+// DependsOnRef + the template so namespace gets emitted on edges that
+// cross namespaces. The helmfile deployer hit exactly this bug; see
+// pkg/bundler/deployer/helmfile/TestNeedsRef for the helmfile-side guard.
+func TestHelmReleaseNamespaceArchitecture(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		// Two components in DIFFERENT namespaces. If HelmRelease CRs ever
+		// move into ref.Namespace, this is the configuration that would
+		// expose the gap.
+		{
+			Name: "cert-manager", Namespace: "cert-manager",
+			Chart: "cert-manager", Version: "v1.17.2",
+			Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io",
+		},
+		{
+			Name: "kube-prometheus-stack", Namespace: "monitoring",
+			Chart: "kube-prometheus-stack", Version: "84.4.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://prometheus-community.github.io/helm-charts",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "kube-prometheus-stack"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager":          {},
+			"kube-prometheus-stack": {},
+		},
+		Version: "v0.9.0",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Both HelmRelease CRs must declare metadata.namespace: flux-system.
+	// targetNamespace is what carries the component's actual namespace.
+	for _, comp := range []struct{ name, targetNS string }{
+		{"cert-manager", "cert-manager"},
+		{"kube-prometheus-stack", "monitoring"},
+	} {
+		hr := readFile(t, filepath.Join(outputDir, comp.name, "helmrelease.yaml"))
+		if !strings.Contains(hr, "namespace: flux-system\n") {
+			t.Errorf("%s HelmRelease metadata.namespace must be flux-system "+
+				"(bare-name dependsOn depends on this); got:\n%s", comp.name, hr)
+		}
+		if !strings.Contains(hr, "targetNamespace: "+comp.targetNS+"\n") {
+			t.Errorf("%s HelmRelease targetNamespace = ?, want %q; got:\n%s",
+				comp.name, comp.targetNS, hr)
+		}
+	}
+
+	// The dependent HelmRelease must NOT carry a namespace under dependsOn.
+	// If it does, the template/struct grew a Namespace field — meaning the
+	// architecture changed and DependsOnRef needs same-treatment as helmfile's
+	// needsRef helper (qualify cross-namespace edges, leave same-namespace bare).
+	kpsHR := readFile(t, filepath.Join(outputDir, "kube-prometheus-stack", "helmrelease.yaml"))
+	depStart := strings.Index(kpsHR, "dependsOn:")
+	if depStart < 0 {
+		t.Fatalf("kube-prometheus-stack HelmRelease should declare dependsOn cert-manager; got:\n%s", kpsHR)
+	}
+	// Extract the dependsOn block and assert no `namespace:` line within it.
+	// The block runs from "dependsOn:" until the next top-level spec key.
+	depBlock := kpsHR[depStart:]
+	if end := strings.Index(depBlock, "\n  "); end > 0 && !strings.HasPrefix(depBlock[end+1:], "  - ") {
+		depBlock = depBlock[:end]
+	}
+	if strings.Contains(depBlock, "namespace:") {
+		t.Errorf("dependsOn block contains namespace: — flux architecture has changed; "+
+			"update DependsOnRef + helmrelease.yaml.tmpl + this test to handle cross-namespace edges. "+
+			"Block was:\n%s", depBlock)
+	}
+}
+
 func TestCollectHelmSources(t *testing.T) {
 	refs := []recipe.ComponentRef{
 		{Name: "a", Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io", Chart: "a", Version: "v1.0.0"},

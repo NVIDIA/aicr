@@ -1,0 +1,17 @@
+repositories:
+  - name: ghcr-io-kai-scheduler-kai-scheduler
+    url: ghcr.io/kai-scheduler/kai-scheduler
+    oci: true
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: true
+releases:
+  - name: kai-scheduler
+    namespace: kai-scheduler
+    chart: ghcr-io-kai-scheduler-kai-scheduler/kai-scheduler
+    version: v0.14.1
+    values:
+      - ./001-kai-scheduler/values.yaml
+    wait: false
+    timeout: 1200

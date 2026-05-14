@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Setup Build Tools'
-description: 'Install build, release, and testing tools (ko, syft, crane, goreleaser, chainsaw, helm, kubectl, kind, yq)'
+description: 'Install build, release, and testing tools (ko, syft, crane, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq)'
 
 inputs:
   install_ko:
@@ -64,6 +64,18 @@ inputs:
     description: 'Helm version (e.g. v4.1.1)'
     required: false
     default: 'v4.1.1'
+  install_helmfile:
+    description: 'Install helmfile (true/false)'
+    required: false
+    default: 'false'
+  helmfile_version:
+    description: 'Helmfile version (e.g. v1.5.1)'
+    required: false
+    default: 'v1.5.1'
+  helmfile_sha256:
+    description: 'Helmfile SHA256 checksum for linux/amd64 (from .settings.yaml, refreshed by tools/update-helmfile-checksums)'
+    required: false
+    default: ''
   install_kubectl:
     description: 'Install kubectl (true/false)'
     required: false
@@ -215,6 +227,34 @@ runs:
         sudo chmod +x /usr/local/bin/helm
         rm -rf "${HELM_TMP}"
         helm version
+
+    - name: Install Helmfile
+      if: inputs.install_helmfile == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/helmfile ]]; then echo "helmfile already installed"; helmfile --version; exit 0; fi
+        HELMFILE_VERSION="${{ inputs.helmfile_version }}"
+        HELMFILE_VERSION="${HELMFILE_VERSION#v}"
+        EXPECTED="${{ inputs.helmfile_sha256 }}"
+        if [[ -z "${EXPECTED}" ]]; then
+          echo "::error::helmfile_sha256 input is empty — must be pinned via .settings.yaml testing_tools.helmfile_checksums.linux_amd64 (refresh with tools/update-helmfile-checksums)"
+          exit 1
+        fi
+        HELMFILE_TAR="helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz"
+        HELMFILE_URL="https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/${HELMFILE_TAR}"
+        HELMFILE_TMP="$(mktemp -d)"
+        curl -fsSL -o "${HELMFILE_TMP}/${HELMFILE_TAR}" "${HELMFILE_URL}"
+        ACTUAL=$(sha256sum "${HELMFILE_TMP}/${HELMFILE_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::helmfile checksum mismatch: expected ${EXPECTED}, got ${ACTUAL} (if upstream rotated, refresh with tools/update-helmfile-checksums v${HELMFILE_VERSION})"
+          exit 1
+        fi
+        tar -xzf "${HELMFILE_TMP}/${HELMFILE_TAR}" -C "${HELMFILE_TMP}"
+        sudo mv "${HELMFILE_TMP}/helmfile" /usr/local/bin/helmfile
+        sudo chmod +x /usr/local/bin/helmfile
+        rm -rf "${HELMFILE_TMP}"
+        helmfile --version
 
     - name: Install kubectl
       if: inputs.install_kubectl == 'true'

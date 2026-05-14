@@ -1,0 +1,24 @@
+repositories:
+  - name: charts-jetstack-io
+    url: https://charts.jetstack.io
+  - name: helm-ngc-nvidia-com-nvidia
+    url: https://helm.ngc.nvidia.com/nvidia
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: true
+releases:
+  - name: cert-manager
+    namespace: cert-manager
+    chart: charts-jetstack-io/cert-manager
+    version: v1.17.2
+    values:
+      - ./001-cert-manager/values.yaml
+  - name: gpu-operator
+    namespace: gpu-operator
+    chart: helm-ngc-nvidia-com-nvidia/gpu-operator
+    version: v25.3.3
+    values:
+      - ./002-gpu-operator/values.yaml
+    needs:
+      - cert-manager/cert-manager

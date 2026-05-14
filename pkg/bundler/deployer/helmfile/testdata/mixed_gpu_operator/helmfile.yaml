@@ -1,0 +1,21 @@
+repositories:
+  - name: helm-ngc-nvidia-com-nvidia
+    url: https://helm.ngc.nvidia.com/nvidia
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: true
+releases:
+  - name: gpu-operator
+    namespace: gpu-operator
+    chart: helm-ngc-nvidia-com-nvidia/gpu-operator
+    version: v25.3.3
+    values:
+      - ./001-gpu-operator/values.yaml
+  - name: gpu-operator-post
+    namespace: gpu-operator
+    chart: ./002-gpu-operator-post
+    values:
+      - ./002-gpu-operator-post/values.yaml
+    needs:
+      - gpu-operator
