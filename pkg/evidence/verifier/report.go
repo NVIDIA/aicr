@@ -44,8 +44,36 @@ func RenderMarkdown(r *VerifyResult) string {
 	writePhases(&b, r.Predicate)
 	writeBOM(&b, r.Predicate)
 	writeSteps(&b, r)
+	writeFailedStepDetails(&b, r)
 	writeVerdict(&b, r)
 	return b.String()
+}
+
+// writeFailedStepDetails enumerates the sub-rows of any failed step so
+// the maintainer sees exactly which files / dimensions / constraints
+// caused the failure. Markdown tables can't render nested lists; this
+// section follows the steps table and breaks failures out as bullets.
+func writeFailedStepDetails(b *strings.Builder, r *VerifyResult) {
+	failedWithRows := 0
+	for _, s := range r.Steps {
+		if s.Status == StepFailed && len(s.SubRows) > 0 {
+			failedWithRows++
+		}
+	}
+	if failedWithRows == 0 {
+		return
+	}
+	b.WriteString("### Failed check details\n")
+	for _, s := range r.Steps {
+		if s.Status != StepFailed || len(s.SubRows) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "- **%s**\n", s.Name)
+		for _, row := range s.SubRows {
+			fmt.Fprintf(b, "  - `%s` — %s\n", row.Key, row.Value)
+		}
+	}
+	b.WriteString("\n")
 }
 
 func writeHeader(b *strings.Builder, r *VerifyResult) {

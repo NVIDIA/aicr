@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
@@ -263,6 +264,48 @@ func rekorLogIndex(b *bundle.Bundle) int64 {
 		return 0
 	}
 	return entries[0].GetLogIndex()
+}
+
+// CrossCheckPointerSigner compares the verified signer claims against
+// what the pointer file claimed. Returns nil when the pointer makes no
+// signer claim, when there's no actual signer to compare against, or
+// when every claimed field matches. A mismatch produces an error that
+// names the specific field and both sides — the verifier surfaces it
+// so a malicious pointer that names a different signer than the
+// actual bundle fails loudly.
+func CrossCheckPointerSigner(claimed *attestation.PointerSigner, actual *SignerClaims) error {
+	if claimed == nil {
+		return nil
+	}
+	if actual == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"pointer claims a signer ("+claimed.Identity+
+				", issuer "+claimed.Issuer+") but the bundle carries no signature")
+	}
+	if claimed.Identity != "" && claimed.Identity != actual.Identity {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"signer identity mismatch: pointer claims "+claimed.Identity+
+				", cert says "+actual.Identity)
+	}
+	if claimed.Issuer != "" && claimed.Issuer != actual.Issuer {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"signer issuer mismatch: pointer claims "+claimed.Issuer+
+				", cert says "+actual.Issuer)
+	}
+	if claimed.RekorLogIndex != nil {
+		if actual.RekorLogIndex == nil {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"pointer claims a Rekor log index but the bundle has no Rekor entry "+
+					"(was the bundle signed with --no-rekor, or is the pointer stale?)")
+		}
+		if *claimed.RekorLogIndex != *actual.RekorLogIndex {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"Rekor log index mismatch: pointer claims "+
+					strconv.FormatInt(*claimed.RekorLogIndex, 10)+
+					", actual entry "+strconv.FormatInt(*actual.RekorLogIndex, 10))
+		}
+	}
+	return nil
 }
 
 // isCertChainError reports whether the sigstore error string signals

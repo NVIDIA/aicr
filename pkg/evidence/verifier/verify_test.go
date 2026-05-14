@@ -258,6 +258,46 @@ func TestCheckInventory_RespectsCancellation(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdown_FailedStepDetailsListsFiles(t *testing.T) {
+	// Build a result with a failed inventory step that carries per-file
+	// sub-rows. The rendered Markdown must list the file names — not
+	// just count them — so the maintainer can see what failed.
+	r := &VerifyResult{
+		Exit: ExitInvalid,
+		Steps: []StepResult{
+			{Step: 4, Name: "manifest-hash-check", Status: StepFailed,
+				Detail: "manifest inventory check failed for 2 file(s)",
+				SubRows: []KV{
+					{Key: "ctrf/deployment.json", Value: "sha256 mismatch"},
+					{Key: "stray.txt", Value: "file not in manifest.json (unsigned)"},
+				}},
+		},
+	}
+	md := RenderMarkdown(r)
+	if !strings.Contains(md, "Failed check details") {
+		t.Errorf("missing Failed check details section; got %q", md)
+	}
+	if !strings.Contains(md, "ctrf/deployment.json") {
+		t.Errorf("rendered Markdown should name ctrf/deployment.json; got %q", md)
+	}
+	if !strings.Contains(md, "stray.txt") {
+		t.Errorf("rendered Markdown should name stray.txt; got %q", md)
+	}
+}
+
+func TestRenderMarkdown_NoFailedStepDetailsSectionWhenAllPass(t *testing.T) {
+	r := &VerifyResult{
+		Exit: ExitValidPassed,
+		Steps: []StepResult{
+			{Step: 1, Name: "materialize-bundle", Status: StepPassed},
+		},
+	}
+	md := RenderMarkdown(r)
+	if strings.Contains(md, "Failed check details") {
+		t.Errorf("should not render Failed check details when nothing failed; got %q", md)
+	}
+}
+
 func TestVerify_PredicateParseFailureRecordedAsPredicateStep(t *testing.T) {
 	bundleDir := buildTestBundle(t)
 	summary := summaryDirOf(t, bundleDir)

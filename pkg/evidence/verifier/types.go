@@ -76,6 +76,15 @@ type VerifyOptions struct {
 	// InsecureTLS disables TLS verification for the registry
 	// (self-signed certificates).
 	InsecureTLS bool
+
+	// AllowUnpinnedTag opts into accepting OCI references that resolve
+	// to a tag rather than a digest. By default the verifier refuses
+	// unpinned refs because tags can be rewritten by the registry, so
+	// "verify this artifact at this tag" is not content-addressable.
+	// Pointer-driven flows ignore this flag when the pointer carries a
+	// non-empty bundle.digest (the pointer's digest claim becomes the
+	// pin and is cross-checked against the actual pulled digest).
+	AllowUnpinnedTag bool
 }
 
 // SignerClaims records the OIDC identity from the signing certificate.

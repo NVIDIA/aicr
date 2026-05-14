@@ -82,7 +82,10 @@ func MaterializeBundle(
 	case InputFormPointer:
 		return materializeFromPointer(ctx, pointer, opts)
 	case InputFormOCI:
-		return materializeOCIRef(ctx, opts.Input, opts)
+		// Direct OCI input has no external digest pin; refuse tag-only
+		// refs unless the operator explicitly opted in. Pointer-driven
+		// pulls have their own check below using pointer.bundle.digest.
+		return materializeOCIRefRequireDigest(ctx, opts.Input, opts, !opts.AllowUnpinnedTag)
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "unknown input form "+string(form))
 	}
@@ -117,7 +120,8 @@ func hasBundleMarkers(dir string) bool {
 // materializeFromPointer pulls the OCI artifact named in the pointer's
 // first attestation, or falls back to opts.BundleRef when the pointer
 // has no OCI ref. The pointer's digest claim is cross-checked against
-// the actual pulled digest.
+// the actual pulled digest. A tag-only ref is allowed only when the
+// pointer carries a non-empty bundle.digest — that digest is the pin.
 func materializeFromPointer(
 	ctx context.Context,
 	pointer *attestation.Pointer,
@@ -136,7 +140,11 @@ func materializeFromPointer(
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"pointer carries no bundle.oci — re-run with --bundle <oci-ref> or point at the unpacked directory")
 	}
-	mat, err := materializeOCIRef(ctx, ref, opts)
+	// Pointer-driven path: pointer.bundle.digest is the pin. When it
+	// is empty (e.g., a local-only pointer plus --bundle override),
+	// fall through to the direct-OCI digest-pinning rule.
+	requirePin := !opts.AllowUnpinnedTag && att.Bundle.Digest == ""
+	mat, err := materializeOCIRefRequireDigest(ctx, ref, opts, requirePin)
 	if err != nil {
 		return nil, err
 	}
@@ -148,14 +156,24 @@ func materializeFromPointer(
 	return mat, nil
 }
 
-// materializeOCIRef pulls an OCI artifact into a temp directory using
-// oras.Copy from a remote repository to a local file store. The file
-// store unpacks the gzip-tar layer the emitter writes, so the result
-// is the bundle tree on disk.
-func materializeOCIRef(ctx context.Context, ref string, opts VerifyOptions) (*MaterializedBundle, error) {
+// materializeOCIRefRequireDigest pulls an OCI artifact into a temp
+// directory using oras.Copy. When requirePin is true the reference
+// must resolve to a digest (not a bare tag) — registry-rewritable
+// tags are not content-addressable and would let a registry compromise
+// substitute the artifact.
+//
+// The file store unpacks the gzip-tar layer the emitter writes, so the
+// result is the bundle tree on disk.
+func materializeOCIRefRequireDigest(ctx context.Context, ref string, opts VerifyOptions, requirePin bool) (*MaterializedBundle, error) {
 	registry, repo, refTarget, err := parseOCIReference(ref)
 	if err != nil {
 		return nil, err
+	}
+	if requirePin && !isDigestPinned(refTarget) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"OCI reference "+ref+" is tag-only — refusing to pull an unpinned reference. "+
+				"Use a digest-bound reference (registry/repo@sha256:<hex>), supply a pointer with "+
+				"bundle.digest set, or pass --allow-unpinned-tag for one-off debugging.")
 	}
 
 	tmp, err := os.MkdirTemp("", "aicr-evidence-pull-")
@@ -320,6 +338,13 @@ func resolveBundleDir(dir string) (string, error) {
 	}
 	return "", errors.New(errors.ErrCodeInvalidRequest,
 		"pulled artifact does not contain a recognizable summary bundle")
+}
+
+// isDigestPinned reports whether an OCI reference target (the tag-or-
+// digest portion ORAS uses) is content-addressed. Digest targets are
+// "sha256:<hex>"; tag targets are anything else.
+func isDigestPinned(target string) bool {
+	return strings.HasPrefix(target, "sha256:")
 }
 
 // parseOCIReference splits a reference into (registry, repository, target).

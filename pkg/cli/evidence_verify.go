@@ -104,6 +104,11 @@ Exit codes:
 				Usage:    "Skip TLS verification for the registry (self-signed certificates).",
 				Category: catEvidence,
 			},
+			&cli.BoolFlag{
+				Name:     "allow-unpinned-tag",
+				Usage:    "Accept tag-only OCI references (default: refuse). Tags are not content-addressable; opt in only for one-off debugging.",
+				Category: catEvidence,
+			},
 		},
 		Action: runEvidenceVerifyCmd,
 	}
@@ -128,6 +133,7 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		ExpectedIdentityRegexp: cmd.String("expected-identity-regexp"),
 		PlainHTTP:              cmd.Bool("registry-plain-http"),
 		InsecureTLS:            cmd.Bool("registry-insecure-tls"),
+		AllowUnpinnedTag:       cmd.Bool("allow-unpinned-tag"),
 	})
 	if err != nil {
 		return err

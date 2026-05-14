@@ -135,10 +135,29 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 // stepSignatureCheck runs step 2 and returns the cryptographically
 // anchored predicate when the bundle is signed (nil otherwise). Side
 // effects: records the step row, sets r.Signer, may update r.Exit.
+//
+// When the input is a pointer file with a signer claim, this step also
+// cross-checks the pointer's claim against the actual cert. A
+// malicious pointer that names a different signer than the bundle
+// fails here.
 func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions) *attestation.Predicate {
 	sig, sigErr := VerifySignature(ctx, mat, opts)
+
+	var claimedSigner *attestation.PointerSigner
+	if r.Pointer != nil && len(r.Pointer.Attestations) > 0 {
+		claimedSigner = r.Pointer.Attestations[0].Signer
+	}
+
 	switch {
 	case stderrors.Is(sigErr, ErrUnsignedBundle):
+		// Pointer claims a signer but the bundle is unsigned → fail.
+		if claimedSigner != nil {
+			if ccErr := CrossCheckPointerSigner(claimedSigner, nil); ccErr != nil {
+				record(r, stepSignature, StepFailed, ccErr.Error(), nil)
+				r.Exit = ExitInvalid
+				return nil
+			}
+		}
 		record(r, stepSignature, StepSkipped, "no signature attached (unsigned bundle)", nil)
 		return nil
 	case sigErr != nil:
@@ -147,6 +166,11 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 		return nil
 	default:
 		r.Signer = sig.Signer
+		if ccErr := CrossCheckPointerSigner(claimedSigner, sig.Signer); ccErr != nil {
+			record(r, stepSignature, StepFailed, ccErr.Error(), nil)
+			r.Exit = ExitInvalid
+			return nil
+		}
 		detail := "signer " + sig.Signer.Identity + " (issuer " + sig.Signer.Issuer + ")"
 		var sub []KV
 		if sig.Signer.RekorLogIndex != nil {
