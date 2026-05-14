@@ -724,7 +724,8 @@ Run validation without failing on check errors (informational mode):
 			if shared.noCleanup {
 				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
 					"namespace", shared.namespace,
-					"binding", "aicr-validator")
+					"bindingSelector", "app.kubernetes.io/name=aicr-validator",
+					"cleanupHint", "kubectl delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator")
 			}
 
 			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)

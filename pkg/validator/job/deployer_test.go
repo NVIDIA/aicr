@@ -534,8 +534,9 @@ func TestDeployJobPodSpec(t *testing.T) {
 	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil))
 
 	podSpec := job.Spec.Template.Spec
-	if podSpec.ServiceAccountName != ServiceAccountName {
-		t.Errorf("ServiceAccountName = %q, want %q", podSpec.ServiceAccountName, ServiceAccountName)
+	wantSA := ServiceAccountName("run1")
+	if podSpec.ServiceAccountName != wantSA {
+		t.Errorf("ServiceAccountName = %q, want %q", podSpec.ServiceAccountName, wantSA)
 	}
 	if podSpec.RestartPolicy != corev1.RestartPolicyNever {
 		t.Errorf("RestartPolicy = %q, want %q", podSpec.RestartPolicy, corev1.RestartPolicyNever)

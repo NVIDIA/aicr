@@ -20,7 +20,7 @@
 # This chart has no configurable values upstream — it only installs CRDs.
 # `enabled: true` below follows the AICR umbrella convention used by other
 # CRD-only components (see components/dynamo-crds/values.yaml,
-# components/kgateway-crds/values.yaml). It is consumed by the AICR
+# components/agentgateway-crds/values.yaml). It is consumed by the AICR
 # bundler to mark the component for inclusion; the upstream chart
 # itself ignores this value.
 enabled: true

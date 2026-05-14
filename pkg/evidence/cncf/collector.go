@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -308,20 +309,24 @@ func (c *Collector) Run(ctx context.Context) error {
 }
 
 // resolveFeatures returns the list of canonical features to collect,
-// expanding aliases and collapsing to {"all"} when "all" is present or
-// no features were requested.
+// expanding aliases and the "all" wildcard (or an empty input) to the
+// full ValidFeatures list. Expanding "all" Go-side — rather than passing
+// it through to the bash script — ensures every feature runs as its own
+// runSection invocation and therefore gets its own EvidenceSectionTimeout
+// budget. The pre-expansion behavior shipped one shell-out for nine
+// features under a single 5-minute timeout, which reliably SIGKILL'd
+// before completion on real clusters.
 func (c *Collector) resolveFeatures() []string {
+	if len(c.features) == 0 {
+		return slices.Clone(ValidFeatures)
+	}
 	features := make([]string, 0, len(c.features))
 	for _, f := range c.features {
-		features = append(features, ResolveFeature(f))
-	}
-	if len(features) == 0 {
-		return []string{featureAll}
-	}
-	for _, f := range features {
-		if f == featureAll {
-			return []string{featureAll}
+		canonical := ResolveFeature(f)
+		if canonical == featureAll {
+			return slices.Clone(ValidFeatures)
 		}
+		features = append(features, canonical)
 	}
 	return features
 }

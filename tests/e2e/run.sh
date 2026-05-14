@@ -1277,18 +1277,25 @@ RECIPE
     --output "$validation_result" \
     --no-cleanup 2>&1 || validation_exit=$?
 
-  # Check if RBAC resources were created
-  if kubectl get sa aicr-validator -n aicr-validation &>/dev/null; then
-    detail "ServiceAccount created: aicr-validator"
+  # Check if RBAC resources were created. The SA and CRB names are
+  # suffixed with the per-run runID, so look up by the stable
+  # `app.kubernetes.io/name=aicr-validator` label rather than the literal name.
+  local rbac_label_selector="app.kubernetes.io/name=aicr-validator"
+  local sa_name
+  sa_name=$(kubectl get sa -n aicr-validation -l "${rbac_label_selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [ -n "${sa_name}" ]; then
+    detail "ServiceAccount created: ${sa_name}"
     pass "validate/job-rbac-serviceaccount"
   else
     fail "validate/job-rbac-serviceaccount" "ServiceAccount not found after --no-cleanup"
   fi
 
-  if kubectl get clusterrolebinding aicr-validator &>/dev/null; then
+  local crb_name
+  crb_name=$(kubectl get clusterrolebinding -l "${rbac_label_selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [ -n "${crb_name}" ]; then
     local role_ref
-    role_ref=$(kubectl get clusterrolebinding aicr-validator -o jsonpath='{.roleRef.name}')
-    detail "ClusterRoleBinding created: aicr-validator → ${role_ref}"
+    role_ref=$(kubectl get clusterrolebinding "${crb_name}" -o jsonpath='{.roleRef.name}')
+    detail "ClusterRoleBinding created: ${crb_name} → ${role_ref}"
     pass "validate/job-rbac-role"
   else
     fail "validate/job-rbac-role" "ClusterRoleBinding not found after --no-cleanup"
@@ -1358,9 +1365,12 @@ RECIPE
     --output "$validation_custom" \
     2>&1 || true  # Keep || true here as this is just testing namespace config
 
-  # Check if RBAC was created in custom namespace
-  if kubectl get sa aicr-validator -n custom-validation &>/dev/null; then
-    detail "ServiceAccount created in custom-validation namespace"
+  # Check if RBAC was created in custom namespace. Match by label since the
+  # SA name carries the per-run runID suffix.
+  local custom_sa_name
+  custom_sa_name=$(kubectl get sa -n custom-validation -l "app.kubernetes.io/name=aicr-validator" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  if [ -n "${custom_sa_name}" ]; then
+    detail "ServiceAccount created in custom-validation namespace: ${custom_sa_name}"
     pass "validate/job-custom-namespace"
   else
     warn "ServiceAccount not found in custom namespace (may be expected if no checks defined)"
@@ -1413,9 +1423,14 @@ RECIPE
     pass "validate/job-result-format"
   fi
 
-  # Cleanup test namespaces
+  # Cleanup test namespaces, then any per-run validator ClusterRoleBindings.
+  # CRBs are cluster-scoped and survive namespace deletion, and the `--no-cleanup`
+  # run earlier in this test intentionally leaves its CRB behind. Label-based
+  # bulk delete also cleans up any stale CRBs from prior failed runs so they
+  # cannot be picked up by the label selector in the next invocation.
   kubectl delete namespace aicr-validation 2>&1 || true
   kubectl delete namespace custom-validation 2>&1 || true
+  kubectl delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator 2>&1 || true
   cleanup_fake_gpu_operator_fixture
 }
 
