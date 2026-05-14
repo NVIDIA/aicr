@@ -71,7 +71,7 @@ aicr bundle -r recipe.yaml \
   --set dradriver:resources.gpus.enabled=false
 ```
 
-### Device Plugin vs DRA (Important)
+### Device Plugin vs DRA
 
 Both device-plugin and DRA are enabled by default, but **only one should be used
 per node**. Using both concurrently causes GPU over-admission — both systems

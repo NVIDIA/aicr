@@ -31,7 +31,7 @@ aicr recipe --service eks --accelerator gb200 | yq .
 From criteria file:
 
 ```shell
-cat > /tmp/criteria.yaml << 'EOF'
+cat > "${TMPDIR:-/tmp}/criteria.yaml" << 'EOF'
 kind: RecipeCriteria
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
@@ -48,7 +48,7 @@ EOF
 Generate recipe from criteria file
 
 ```shell
-aicr recipe --criteria /tmp/criteria.yaml --output recipe.yaml
+aicr recipe --criteria "${TMPDIR:-/tmp}/criteria.yaml" --output recipe.yaml
 ```
 
 > Metadata overlays: `components=11 overlays=7`
@@ -56,7 +56,7 @@ aicr recipe --criteria /tmp/criteria.yaml --output recipe.yaml
 CLI flags override criteria file values
 
 ```shell
-aicr recipe --criteria /tmp/criteria.yaml --service gke | yq .
+aicr recipe --criteria "${TMPDIR:-/tmp}/criteria.yaml" --service gke | yq .
 ```
 
 > Metadata overlays: `components=7 overlays=2`
@@ -238,7 +238,7 @@ aicr recipe \
 ```
 
 Output shows:
-* `18` embedded + `1` external = `19` merged components
+* `<N>` embedded + `<M>` external = `<N+M>` merged components
 * `dgxc-teleport` appears as Kustomize component
 
 Now `dgxc-teleport` is included in `componentRefs` and `deploymentOrder`

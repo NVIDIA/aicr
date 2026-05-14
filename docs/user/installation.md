@@ -50,7 +50,7 @@ This script:
 
 1. **Download the latest release**
 
-Visit the [releases page](https://github.com/nvidia/aicr/releases/latest) and download the appropriate binary for your platform:
+Visit the [releases page](https://github.com/NVIDIA/aicr/releases/latest) and download the appropriate binary for your platform:
 
 - **macOS ARM64** (M1/M2/M3): `aicr_<version>_darwin_arm64.tar.gz`
 - **macOS Intel**: `aicr_<version>_darwin_amd64.tar.gz`

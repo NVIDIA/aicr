@@ -15,7 +15,7 @@
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  version: v0.26.7-next
+  version: dev
   appliedOverlays:
     - base
     - eks
@@ -61,6 +61,13 @@ componentRefs:
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
     version: v0.15.1
     valuesFile: components/nodewright-operator/values.yaml
+  - name: kube-prometheus-stack
+    namespace: monitoring
+    chart: kube-prometheus-stack
+    type: Helm
+    source: https://prometheus-community.github.io/helm-charts
+    version: 84.4.0
+    valuesFile: components/kube-prometheus-stack/values.yaml
 deploymentOrder:
   - cert-manager
   - kube-prometheus-stack

@@ -15,7 +15,7 @@
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  version: v0.26.7-next
+  version: dev
 criteria:
   service: kind
   accelerator: any

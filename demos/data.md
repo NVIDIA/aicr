@@ -188,7 +188,7 @@ Order in `dependencyRefs`:
 2. `gpu-operator` (depends on cert-manager)
 3. Other components...
 
-> Asymmetric rule matching based on [Kahn's algorithm](https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/).
+> Dependency-driven ordering based on [Kahn's algorithm](https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/) for topological sort.
 
 ## API Access
 

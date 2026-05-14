@@ -9,7 +9,9 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [cuj1-eks.md](cuj1-eks.md) | CUJ1 - EKS cluster setup |
 | [cuj1-gke.md](cuj1-gke.md) | CUJ1 - GKE cluster setup |
 | [cuj2.md](cuj2.md) | CUJ2 - EKS inference with Dynamo |
+| [cuj2-demo.md](cuj2-demo.md) | CUJ2 - Annotated demo walkthrough (training vs inference) |
 | [cuj2-eks.md](cuj2-eks.md) | CUJ2 - EKS variant |
+| [cuj2-gke.md](cuj2-gke.md) | CUJ2 - GKE variant |
 | [e2e.md](e2e.md) | End-to-end CLI demo |
 | [valid.md](valid.md) | Validation demo |
 | [data.md](data.md) | External data directory demo |

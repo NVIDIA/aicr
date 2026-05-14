@@ -44,7 +44,7 @@ metadata:
   labels:
     app.kubernetes.io/name: aicr
     app.kubernetes.io/component: snapshot
-    app.kubernetes.io/version: v0.17.0
+    app.kubernetes.io/version: <aicr-version>
 data:
   snapshot.yaml: |  # Complete snapshot YAML
     apiVersion: aicr.nvidia.com/v1alpha1
@@ -185,8 +185,8 @@ aicr snapshot --image ghcr.io/nvidia/aicr:v0.8.0
 ```
 
 **Finding versions:**
-- [GitHub Releases](https://github.com/nvidia/aicr/releases)
-- Container registry: [ghcr.io/nvidia/aicr](https://github.com/nvidia/aicr/pkgs/container/aicr)
+- [GitHub Releases](https://github.com/NVIDIA/aicr/releases)
+- Container registry: [ghcr.io/nvidia/aicr](https://github.com/NVIDIA/aicr/pkgs/container/aicr)
 
 ## Post-Deployment
 

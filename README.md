@@ -28,7 +28,6 @@ brew install aicr
 # Or use the install script
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 
-
 # Capture your cluster's current state
 aicr snapshot --output snapshot.yaml
 

@@ -20,8 +20,10 @@ This section is for integrators who:
 | [EKS Dynamo Networking](eks-dynamo-networking.md) | Security group prerequisites for Dynamo overlays on EKS |
 | [GKE TCPXO Networking](gke-tcpxo-networking.md) | GPUDirect TCPXO prerequisites for GKE training overlays |
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
+| [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
 | [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
+| [NodeWright Component](components/nodewright.md) | NodeWright component reference and configuration |
 
 ## Quick Start
 

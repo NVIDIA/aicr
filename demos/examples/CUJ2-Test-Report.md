@@ -1,5 +1,7 @@
 # CUJ2 Test Report (Run 2) - EKS Inference with Dynamo
 
+**Historical capture.** This report was generated before PR #871 migrated `kgateway` → `agentgateway`. Current bundles install `agentgateway` charts in namespace `agentgateway-system`; the log lines below reflecting `kgateway-*` releases are obsolete.
+
 **Date:** 2026-03-13
 **Branch:** `fix/cuj2-timeout-issue` (includes PR #397 fix, rebased on main)
 **AICR Version:** built from source (fix/cuj2-timeout-issue)

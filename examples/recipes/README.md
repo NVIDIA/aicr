@@ -18,7 +18,7 @@ aicr bundle --recipe eks-gb200-ubuntu-training-with-validation.yaml --output ./b
 # With value overrides
 aicr bundle \
   --recipe eks-gb200-ubuntu-training-with-validation.yaml \
-  --set gpuoperator:driver.version=580.82.07 \
+  --set gpuoperator:driver.version=580.105.08 \
   --output ./bundles
 
 # Validate against snapshot (default phase: readiness)

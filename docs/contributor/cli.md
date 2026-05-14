@@ -291,8 +291,9 @@ flowchart TD
     B --> B2["SystemDCollector<br/>(containerd, docker, kubelet)"]
     B --> B3["KubernetesCollector<br/>(server, images, policies)"]
     B --> B4["GPUCollector<br/>(nvidia-smi data)"]
+    B --> B5["NodeTopologyCollector<br/>(cluster-wide taints, labels)"]
     
-    B1 & B2 & B3 & B4 --> C[NodeSnapshotter.Measure]
+    B1 & B2 & B3 & B4 & B5 --> C[NodeSnapshotter.Measure]
     
     C --> D["Parallel Collection<br/>(errgroup)"]
     
@@ -301,16 +302,19 @@ flowchart TD
     D --> D3["Go Routine 3: SystemD<br/>• containerd.service<br/>• docker.service<br/>• kubelet.service"]
     D --> D4["Go Routine 4: OS Config<br/>• GRUB parameters<br/>• Kernel modules<br/>• Sysctl parameters"]
     D --> D5["Go Routine 5: GPU<br/>• nvidia-smi properties<br/>• driver, CUDA, etc."]
+    D --> D6["Go Routine 6: NodeTopology<br/>• cluster-wide taints<br/>• cluster-wide labels"]
     
-    D1 & D2 & D3 & D4 & D5 --> E["All goroutines complete<br/>or first error returns"]
+    D1 & D2 & D3 & D4 & D5 & D6 --> E["All goroutines complete<br/>or first error returns"]
     
-    E --> F["Snapshot Structure<br/>kind: Snapshot<br/>apiVersion: aicr.nvidia.com/v1alpha1<br/>measurements: [k8s, systemd, os, gpu]"]
+    E --> F["Snapshot Structure<br/>kind: Snapshot<br/>apiVersion: aicr.nvidia.com/v1alpha1<br/>measurements: [K8s, SystemD, OS, GPU, NodeTopology]"]
     
     F --> G[serializer.NewFileWriterOrStdout]
     
     G --> G1["Format: JSON/YAML/Table"]
     G --> G2["Output: stdout or file"]
 ```
+
+Snapshot measurement types: `K8s`, `SystemD`, `OS`, `GPU`, `NodeTopology` (cluster-wide node taints and labels — see `pkg/measurement/types.go` for the canonical constants).
 
 #### Usage Examples
 
@@ -979,10 +983,7 @@ INFO  generating bundle recipeFilePath=recipe.yaml outputDir=./bundles bundlerTy
 INFO  starting bundle generation bundler_count=1 output_dir=./bundles
 INFO  bundler completed bundler_type=gpu-operator files=5 size_bytes=12458 duration=45ms
 INFO  bundle generation complete summary="Generated 5 files (12 KB) in 45ms. Success: 1/1 bundlers."
-INFO  bundle generation completed success=1 errors=0 duration_sec=0.045 summary="Generated 5 files (12 KB) in 45ms. Success: 1/1 bundlers."
 ```
-
-**Common Errors**:
 
 ## Shared Infrastructure
 
@@ -999,6 +1000,7 @@ type Factory interface {
     CreateOSCollector() Collector
     CreateKubernetesCollector() Collector
     CreateGPUCollector() Collector
+    CreateNodeTopologyCollector() Collector
 }
 ```
 
@@ -1053,7 +1055,7 @@ type Reading struct {
 ```bash
 # Invalid accelerator type
 $ aicr recipe --accelerator invalid-gpu
-[cli] command failed: error=[INTERNAL] error building recipe: [INVALID_REQUEST] error parsing criteria: [INVALID_REQUEST] failed to apply criteria option: [INVALID_REQUEST] failed to parse accelerator type: [INVALID_REQUEST] invalid accelerator type: invalid-gpu exitCode=8
+[cli] command failed: error=[INVALID_REQUEST] error parsing criteria: [INVALID_REQUEST] invalid accelerator type: invalid-gpu exitCode=2
 
 # Unknown output format
 $ aicr snapshot --format xml
@@ -1384,7 +1386,7 @@ spec:
             effect: NoSchedule
           containers:
           - name: aicr
-            image: ghcr.io/nvidia/aicr:v0.6.4
+            image: ghcr.io/nvidia/aicr:<release-tag>  # replace with the AICR release you target
             command:
               - /bin/sh
               - -c

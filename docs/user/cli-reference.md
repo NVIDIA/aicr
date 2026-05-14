@@ -232,7 +232,7 @@ metadata:
   labels:
     app.kubernetes.io/name: aicr
     app.kubernetes.io/component: snapshot
-    app.kubernetes.io/version: v0.17.0
+    app.kubernetes.io/version: <aicr-version>
 data:
   snapshot.yaml: |
     # Full snapshot content
@@ -593,7 +593,7 @@ aicr validate [flags]
 | `--no-cluster` | | bool | false | Skip cluster access (test mode): skips RBAC and Job deployment, reports checks as skipped |
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
-| `--feature` | `-f` | string[] | | Feature flags for validation (repeatable) |
+| `--feature` | `-f` | string[] | | CNCF evidence-collection feature(s) to scope (repeatable). Valid names: `dra-support`, `gang-scheduling`, `secure-access`, `accelerator-metrics`, `ai-service-metrics`, `inference-gateway`, `robust-operator`, `pod-autoscaling`, `cluster-autoscaling`. Empty selects all features. |
 | `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [ADR-007](../design/007-recipe-evidence.md). |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
@@ -928,6 +928,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 |------|-------------|
 | `0` | All checks passed |
 | `2` | Invalid input (bad flags, missing recipe) |
+| `5` | Timeout (validator section or context deadline exceeded) |
 | `8` | One or more checks failed (when `--fail-on-error` is set) |
 
 ---
@@ -1118,7 +1119,7 @@ This results in:
 - Each component creates a subdirectory in the output directory
 - Components are deployed in the order specified by `deploymentOrder` in the recipe
 
-#### Storage Class (`--storage-class`)
+#### Storage Class
 
 The `--storage-class` flag injects a Kubernetes StorageClass name into components at bundle time. StorageClass is a cluster infrastructure detail — the right value depends on what the target cluster has provisioned, not on the recipe.
 
@@ -1140,7 +1141,7 @@ aicr bundle --recipe recipe.yaml \
 
 When `--storage-class` is not set, any `storageClassName` values already defined in the recipe overlays are preserved as defaults. When it is set, `--set <component>:<path>=<value>` on the same path still wins — `--storage-class` only fills in paths that were not explicitly overridden.
 
-#### Deployment Methods (`--deployer`)
+#### Deployment Methods
 
 The `--deployer` flag controls how deployment artifacts are generated:
 
@@ -1161,7 +1162,7 @@ All deployers respect the `deploymentOrder` field from the recipe, ensuring comp
 - **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
 - **Flux**: Uses `dependsOn` references in HelmRelease/Kustomization CRs (each component depends on its predecessor)
 
-#### Value Overrides (`--set`)
+#### Value Overrides
 
 Override any value in the generated bundle files using dot notation:
 
@@ -1766,7 +1767,7 @@ The deploy script installs components in the order specified by `deploymentOrder
 | `--best-effort` | Continue past individual component failures instead of exiting |
 | `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
 
-Unknown flags are rejected with an error to catch typos (e.g., `--best-effort`).
+Unknown flags are rejected with an error to catch typos (e.g., `--bes-effort` or `--retires N`).
 
 > **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
 
@@ -2251,8 +2252,8 @@ aicr recipe --os ubuntu --gpu h100
 # Verify recipe file
 cat recipe.yaml
 
-# Check bundler is valid
-aicr bundle --help  # Shows available bundlers
+# List available flags
+aicr bundle --help
 
 # Run with debug
 aicr --debug bundle -r recipe.yaml

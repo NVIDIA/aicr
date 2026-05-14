@@ -65,7 +65,7 @@ aicr bundle \
 Expected:
 - Completes in <10s
 - `bundle` created
-- Nodewright Warning about workload selector
+- Nodewright emits a warning about the workload selector
 
 ## Validate (dry run, no-cluster)
 

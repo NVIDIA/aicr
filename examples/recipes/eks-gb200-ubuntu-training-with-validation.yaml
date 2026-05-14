@@ -18,7 +18,7 @@
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  version: v0.26.7-next
+  version: dev
   appliedOverlays:
     - base
     - eks
@@ -61,18 +61,27 @@ validation:
   deployment:
     constraints:
       - name: gpu-operator.version
-        value: "== v25.10.1"
+        value: "== v26.3.1"
         severity: warning
-        remediation: "Update GPU Operator to v25.10.1"
+        remediation: "Update GPU Operator to v26.3.1"
     checks:
       - expected-resources
 
-  # Performance phase: Validate system performance
+  # Performance phase: Validate system performance.
+  #
+  # Each NCCL variant requires an exact-named constraint — a generic
+  # `nccl-all-reduce-bw` only satisfies the legacy default variant, so the
+  # `-net` and `-nvls` variants Skip when their named constraints are absent.
+  # Thresholds below mirror recipes/overlays/gb200-eks-training.yaml.
   performance:
-    infrastructure: nccl-doctor
     checks:
-      - nccl-bandwidth-test
-      - fabric-health-check
+      - nccl-all-reduce-bw-net
+      - nccl-all-reduce-bw-nvls
+    constraints:
+      - name: nccl-all-reduce-bw-net
+        value: ">= 40"
+      - name: nccl-all-reduce-bw-nvls
+        value: ">= 500"
 
   # Conformance phase: Validate workload-specific requirements
   # (not configured in this example - will be skipped)
@@ -91,7 +100,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v25.3.3
+    version: v26.3.1
     valuesFile: components/gpu-operator/values-eks-training.yaml
     expectedResources:
       - kind: Deployment
@@ -121,7 +130,7 @@ componentRefs:
     chart: nvidia-dra-driver-gpu
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: 25.8.1
+    version: 25.12.0
     valuesFile: components/nvidia-dra-driver-gpu/values.yaml
     dependencyRefs:
       - gpu-operator
@@ -145,6 +154,14 @@ componentRefs:
     valuesFile: components/nodewright-operator/values.yaml
     overrides:
       customization: ubuntu
+
+  - name: kube-prometheus-stack
+    namespace: monitoring
+    chart: kube-prometheus-stack
+    type: Helm
+    source: https://prometheus-community.github.io/helm-charts
+    version: 84.4.0
+    valuesFile: components/kube-prometheus-stack/values.yaml
 
 deploymentOrder:
   - cert-manager

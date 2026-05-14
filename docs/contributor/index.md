@@ -39,7 +39,7 @@ AICR is not a deployment engine. It does not:
 - Orchestrate cross-component dependencies at runtime
 
 These responsibilities belong to the deployment tool that consumes
-AICR's artifacts (e.g. Helm, Argo CD, Flux). These tools own release reconciliation and lifecycle. 
+AICR's artifacts (e.g. Helm, Argo CD, Flux). These tools own release reconciliation and lifecycle.
 
 A note on terminology: code under `pkg/bundler` includes things we
 call *deployers*. They are **output adapters** that emit artifacts in
@@ -157,6 +157,7 @@ running outside the cluster. Detail per stage lives in the
 | `pkg/bundler` | Per-component bundle generation, output adapters | [component.md](component.md) |
 | `pkg/component` | Bundler utilities and test helpers | [component.md](component.md) |
 | `pkg/collector` | System state collection (parallel via errgroup) | — |
+| `pkg/collector/topology` | Cluster-wide node taint/label topology collection | — |
 | `pkg/snapshotter` | Orchestrates collector execution and aggregates measurements | — |
 | `pkg/validator` | Constraint evaluation; container-per-validator | [validator.md](validator.md), [validations.md](validations.md) |
 | `pkg/k8s/client` | Singleton Kubernetes clientset (in-cluster + kubeconfig) | — |

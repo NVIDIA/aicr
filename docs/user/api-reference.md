@@ -343,27 +343,30 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 
 | Component | Description |
 |-----------|-------------|
-| `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
-| `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
-| `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
+| `agentgateway` | Kubernetes Gateway API implementation for AI/ML inference (InferencePool routing) |
+| `agentgateway-crds` | Kubernetes Gateway API CRDs for AI/ML inference (Gateway API + Inference Extension) |
+| `aws-ebs-csi-driver` | Amazon EBS CSI driver (EKS) |
 | `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
 | `cert-manager` | TLS certificate management |
-| `nodewright-operator` | OS-level node tuning and kernel configuration |
-| `nodewright-customizations` | Environment-specific node tuning profiles |
-| `nvsentinel` | GPU health monitoring and automated remediation |
-| `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
-| `kube-prometheus-stack` | Prometheus, Grafana, Alertmanager monitoring stack |
-| `prometheus-adapter` | Custom metrics for HPA scaling |
-| `aws-ebs-csi-driver` | Amazon EBS CSI driver (EKS) |
-| `k8s-ephemeral-storage-metrics` | Ephemeral storage usage metrics |
-| `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
-| `grove` | Dynamo pod lifecycle management |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
-| `agentgateway-crds` | Kubernetes Gateway API CRDs for AI/ML inference (Gateway API + Inference Extension) |
-| `agentgateway` | Kubernetes Gateway API implementation for AI/ML inference (InferencePool routing) |
+| `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
+| `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
+| `grove` | Dynamo pod lifecycle management |
+| `k8s-ephemeral-storage-metrics` | Ephemeral storage usage metrics |
 | `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
-| `kueue` | Kubernetes-native job queuing for batch and AI workloads |
+| `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
+| `kube-prometheus-stack` | Prometheus, Grafana, Alertmanager monitoring stack |
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
+| `kueue` | Kubernetes-native job queuing for batch and AI workloads |
+| `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
+| `nfd` | Node Feature Discovery — labels nodes with hardware features; publishes per-node `NodeResourceTopology` CRDs on production GPU recipes |
+| `nodewright-customizations` | Environment-specific node tuning profiles |
+| `nodewright-operator` | OS-level node tuning and kernel configuration |
+| `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
+| `nvsentinel` | GPU health monitoring and automated remediation |
+| `prometheus-adapter` | Custom metrics for HPA scaling |
+| `slinky-slurm-operator` | SchedMD Slinky Slurm operator and admission webhook |
+| `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
 
 **Examples:**
 

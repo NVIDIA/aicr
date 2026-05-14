@@ -370,7 +370,7 @@ Constraints use fully qualified paths: `{Type}.{Subtype}.{Key}`
 | Path | Description |
 |------|-------------|
 | `K8s.server.version` | Kubernetes server version |
-| `OS.release.ID` | Operating system family (ubuntu, rhel) |
+| `OS.release.ID` | Operating system family (ubuntu, rhel, cos, amazonlinux, talos) |
 | `OS.release.VERSION_ID` | OS version (22.04, 24.04) |
 | `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
 | `GPU.driver.version` | NVIDIA driver version |
@@ -711,7 +711,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v25.3.3
+      targetRevision: v26.3.1
       chart: gpu-operator
       helm:
         valueFiles:

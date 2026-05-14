@@ -208,6 +208,39 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 Phases run sequentially. If any phase fails, subsequent phases are skipped.
 
+## Scoping CNCF submission evidence to specific features
+
+The `--feature` flag scopes which CNCF AI conformance features get behavioral
+evidence collected. It only applies to the CNCF-submission evidence collector
+and is rejected by the CLI unless `--cncf-submission` is also set (which in
+turn requires `--evidence-dir`). It does **not** scope the regular
+`--phase conformance` validator run — that one always evaluates every check
+defined in the recipe.
+
+```bash
+aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
+  --phase conformance \
+  --cncf-submission \
+  --evidence-dir ./evidence \
+  --feature dra-support --feature gang-scheduling
+```
+
+Empty `--feature` (the default) collects evidence for every feature.
+
+Valid feature names (from `pkg/evidence/cncf/collector.go`):
+
+| Name | What it checks |
+|------|----------------|
+| `dra-support` | Dynamic Resource Allocation driver and ResourceSlices |
+| `gang-scheduling` | Gang-scheduler presence and PodGroup support |
+| `secure-access` | Cluster authn/authz posture for AI workloads |
+| `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config |
+| `ai-service-metrics` | Inference-service metrics via custom-metrics API |
+| `inference-gateway` | Gateway API + Inference Extension installation |
+| `robust-operator` | Operator readiness and leader-election posture |
+| `pod-autoscaling` | HPA / custom-metrics-driven pod autoscaling |
+| `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
+
 ## Input modes
 
 Snapshot and recipe can come from a file, an HTTPS URL, or a Kubernetes ConfigMap:

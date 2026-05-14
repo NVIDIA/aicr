@@ -23,7 +23,7 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v25.3.4
+      version: v26.3.1
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
       overrides:
         driver:
@@ -33,7 +33,7 @@ spec:
 **3. Run tests** ([details](#testing-and-validation))
 ```bash
 make test  # Validates schema, criteria, references, constraints
-make qualify  # Includes end to end tests before submitting
+make qualify  # Includes end-to-end tests before submitting
 ```
 
 **4. Open PR** ([best practices](#best-practices))
@@ -153,7 +153,7 @@ Only use this pattern when the content is truly uniform across the wildcard dime
 componentRefs:
   - name: gpu-operator
     type: Helm
-    version: v25.3.4
+    version: v26.3.1
     valuesFile: components/gpu-operator/values.yaml
     overrides:
       driver:
@@ -337,7 +337,7 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v25.3.4
+      version: v26.3.1
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
 ```
 
@@ -348,7 +348,7 @@ spec:
 # Update component version
 componentRefs:
   - name: gpu-operator
-    version: v25.3.4  # Changed from v25.3.3
+    version: v26.3.1  # Changed from v26.3.0
 ```
 
 **Adding components:**

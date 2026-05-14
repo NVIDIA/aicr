@@ -3,7 +3,7 @@
 ## Assumptions
 
 * Assuming user is already authenticated to an EKS cluster with 2+ H100 node.
-* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`, and `--system-node-toleration` flags are only for example purposes. Assuming user will update these to match their cluster.
+* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`, `--system-node-selector`, and `--system-node-toleration` flags are only for example purposes. Assuming user will update these to match their cluster.
 
 ## Snapshot
 
@@ -41,13 +41,20 @@ aicr validate \
 
 ## Generate Bundle
 
+The selector and toleration values below mirror AICR's reference EKS clusters
+(`aicr1`, `aicr2`): nodes carry the label `nodeGroup={system-worker,gpu-worker}`
+and the unrelated taint key `dedicated={system-workload,worker-workload}:{NoSchedule,NoExecute}`.
+The selector key (`nodeGroup`) and toleration key (`dedicated`) intentionally
+differ — the label drives scheduling targeting and the taint drives admission.
+Adjust both pairs to your cluster's actual labels and taints.
+
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
   --accelerated-node-selector nodeGroup=gpu-worker \
   --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
   --accelerated-node-toleration dedicated=worker-workload:NoExecute \
-  --system-node-selector dedicated=system-workload \
+  --system-node-selector nodeGroup=system-worker \
   --system-node-toleration dedicated=system-workload:NoSchedule \
   --system-node-toleration dedicated=system-workload:NoExecute \
   --storage-class <storage-class> \

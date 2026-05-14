@@ -119,6 +119,12 @@ Every validator container must follow this contract:
 | **stderr** | Debug/progress logs (`slog` output) | Streamed live to user terminal |
 | `/dev/termination-log` | Failure reason (max 4096 bytes) | CTRF report on failure |
 
+### RBAC
+
+The validator engine creates a per-run ServiceAccount and ClusterRoleBinding for every `aicr validate` invocation. Both are named `aicr-validator-<runID>` where `<runID>` is the unique identifier generated at the start of the run (see `pkg/validator/job/rbac.go`). Per-run naming prevents concurrent validation runs from clobbering each other's RBAC and ensures cleanup at run end deletes only the resources owned by that run.
+
+External tooling that needs to match validator RBAC (e.g., for monitoring or cleanup) should select by the `app.kubernetes.io/name=aicr-validator` label rather than by literal resource name, since the suffix changes every run.
+
 ### Mounted Data
 
 The validator engine mounts snapshot and recipe data as ConfigMaps:
@@ -147,16 +153,16 @@ The `validators.Context` struct provides all dependencies a check needs:
 
 ```go
 type Context struct {
-    Ctx           context.Context        // Parent context with timeout
-    Cancel        context.CancelFunc     // Release resources (caller must defer)
-    Clientset     kubernetes.Interface   // Typed K8s client
-    RESTConfig    *rest.Config           // For exec, port-forward, dynamic client
-    DynamicClient dynamic.Interface      // For CRD access
-    Snapshot      *snapshotter.Snapshot  // Captured cluster state
-    Recipe        *recipe.RecipeResult   // Recipe with validation config
-    Namespace     string                 // Validation namespace
-    NodeSelector  map[string]string      // User-provided node selector override (nil = use defaults)
-    Tolerations   []corev1.Toleration    // User-provided toleration override (nil = use defaults)
+    Ctx             context.Context        // Parent context with timeout
+    Cancel          context.CancelFunc     // Release resources (caller must defer)
+    Clientset       kubernetes.Interface   // Typed K8s client
+    RESTConfig      *rest.Config           // For exec, port-forward, dynamic client
+    DynamicClient   dynamic.Interface      // For CRD access
+    Snapshot        *snapshotter.Snapshot  // Captured cluster state
+    ValidationInput *v1.ValidationInput    // Validation specification (config + context)
+    Namespace       string                 // Validation namespace
+    NodeSelector    map[string]string      // User-provided node selector override (nil = use defaults)
+    Tolerations     []corev1.Toleration    // User-provided toleration override (nil = use defaults)
 }
 ```
 
@@ -199,8 +205,8 @@ pods, err := ctx.Clientset.CoreV1().Pods(ns).List(subCtx, opts)
 
 ```go
 func checkFeatureX(ctx *validators.Context) error {
-    if ctx.Recipe.Validation == nil {
-        return validators.Skip("no validation section in recipe")
+    if ctx.ValidationInput == nil {
+        return validators.Skip("no validation input provided")
     }
     // ... actual check logic ...
     return nil
@@ -274,12 +280,16 @@ validation:
 
 ## Performance Validators
 
-Two performance checks ship today, both registered in `validators/performance/main.go`:
+Four performance checks ship today (see [`recipes/validators/catalog.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/validators/catalog.yaml) for the authoritative list), registered in `validators/performance/main.go`:
 
 | Check | Intent | Workload | Constraints |
 |-------|--------|----------|-------------|
 | `nccl-all-reduce-bw` | training | NCCL `all_reduce_perf` under a Kubeflow `TrainJob` | `nccl-all-reduce-bw >= N GB/s` |
+| `nccl-all-reduce-bw-net` | training | NCCL `all_reduce_perf` over network fabric | `nccl-all-reduce-bw-net >= N GB/s` |
+| `nccl-all-reduce-bw-nvls` | training | NCCL `all_reduce_perf` with NVLink Sharp | `nccl-all-reduce-bw-nvls >= N GB/s` |
 | `inference-perf` | inference+Dynamo | `DynamoGraphDeployment` (vLLM, Qwen/Qwen3-0.6B) + AIPerf Job | `inference-throughput >= N tok/s`, `inference-ttft-p99 <= N ms` |
+
+> **Constraint-name contract.** Each NCCL variant looks up a constraint with the *exact* same name as the check (`constraintNameForVariant` in `validators/performance/nccl_all_reduce_bw.go`). A recipe that runs the `-net` or `-nvls` variant **must** declare a same-named constraint; a generic `nccl-all-reduce-bw` constraint only satisfies the legacy default variant and the variant checks will Skip when it's the only one present.
 
 Both follow a consistent lifecycle:
 

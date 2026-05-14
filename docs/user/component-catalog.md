@@ -2,7 +2,7 @@
 
 AICR recipes are composed of components — the individual software packages that make up a GPU-accelerated Kubernetes runtime. This page lists every component that can appear in a recipe.
 
-> ***Note:*** Components are included as appropriate in recipes. Not every component listed here will appear in a recipe.
+> **Note:** Components are included as appropriate in recipes. Not every component listed here will appear in a recipe.
 
 The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). Each entry in the registry defines the component's Helm chart (or Kustomize source), default version, namespace, and node scheduling configuration. If a component is not listed there, it cannot appear in a recipe.
 

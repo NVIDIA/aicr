@@ -37,12 +37,18 @@ docs/conformance/cncf/
             ├── pod-autoscaling.md
             └── cluster-autoscaling.md
 
-pkg/evidence/scripts/                 # Evidence collection script + test manifests
-├── collect-evidence.sh
-└── manifests/
-    ├── dra-gpu-test.yaml
-    ├── gang-scheduling-test.yaml
-    └── hpa-gpu-test.yaml
+pkg/evidence/cncf/                    # CNCF evidence collector package
+├── collector.go                      # Feature registry, alias mapping
+├── renderer.go                       # Evidence file rendering
+├── requirements.go                   # CNCF requirement ID mapping
+├── templates.go                      # Evidence templates
+├── types.go                          # Shared types
+└── scripts/                          # Evidence collection script + test manifests
+    ├── collect-evidence.sh
+    └── manifests/
+        ├── dra-gpu-test.yaml
+        ├── gang-scheduling-test.yaml
+        └── hpa-gpu-test.yaml
 ```
 
 ## Usage
@@ -75,10 +81,13 @@ aicr validate --phase conformance \
   --evidence-dir ./evidence --cncf-submission -f dra -f hpa
 ```
 
-Alternatively, run the evidence collection script directly:
+Alternatively, run the evidence collection script directly. Valid section
+names are `dra`, `gang`, `secure`, `accelerator-metrics`, `service-metrics`,
+`gateway`, `operator`, `hpa`, `cluster-autoscaling`, or `all`:
+
 ```bash
-./pkg/evidence/scripts/collect-evidence.sh all
-./pkg/evidence/scripts/collect-evidence.sh dra
+./pkg/evidence/cncf/scripts/collect-evidence.sh all
+./pkg/evidence/cncf/scripts/collect-evidence.sh dra
 ```
 
 > **Note:** The `--cncf-submission` flag deploys GPU workloads and takes ~5-10

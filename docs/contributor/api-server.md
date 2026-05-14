@@ -267,6 +267,7 @@ Supported content types:
 | `gpu` | AcceleratorType | Alias for accelerator | `gpu=h100` |
 | `intent` | IntentType | Enum: training, inference, any | `intent=training` |
 | `os` | OSType | Enum: ubuntu, rhel, cos, amazonlinux, talos, any | `os=ubuntu` |
+| `platform` | PlatformType | Enum: dynamo, kubeflow, nim, slurm, any | `platform=kubeflow` |
 | `nodes` | int | >= 0 | `nodes=8` |
 
 ### Recipe Builder: `pkg/recipe/builder.go`
@@ -369,7 +370,7 @@ Endpoints `GET /v1/recipe` (query parameters) and `POST /v1/recipe` (criteria bo
 - `X-RateLimit-Limit` - Total requests allowed per second
 - `X-RateLimit-Remaining` - Requests remaining in current window
 - `X-RateLimit-Reset` - Unix timestamp when window resets
-- `Cache-Control` - Caching policy (public, max-age=300)
+- `Cache-Control` - Caching policy (public, max-age=600)
 
 ### Health Check
 
@@ -438,7 +439,9 @@ aicr_panic_recoveries_total 0
   "service": "aicrd",
   "version": "v1.0.0",
   "routes": [
-    "/v1/recipe"
+    "/v1/recipe",
+    "/v1/query",
+    "/v1/bundle"
   ]
 }
 ```
@@ -737,7 +740,7 @@ spec:
 ### Caching Strategy
 
 - **Recipe Store**: Loaded once per process, cached globally
-- **Client-Side**: 5-minute cache via Cache-Control header
+- **Client-Side**: 10-minute cache via Cache-Control header (`defaults.RecipeCacheTTL`)
 - **CDN**: Recommended for public-facing deployments
 
 ## Error Handling
@@ -836,7 +839,7 @@ When a request uses a criteria value not in the configured allowlist:
 - Request ID tracking for distributed tracing
 - Structured logging for debugging
 
-## Monitoring & Observability
+## Monitoring and Observability
 
 ### Prometheus Metrics
 
@@ -975,7 +978,7 @@ func TestRecipeHandler(t *testing.T) {
 - `pkg/serializer` - JSON response formatting
 - `pkg/logging` - Logging configuration
 
-## Build & Deployment
+## Build and Deployment
 
 ### Automated CI/CD Pipeline
 
@@ -1002,7 +1005,7 @@ export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | 
 gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --owner nvidia
 ```
 
-For detailed CI/CD architecture, see [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md#github-actions--cicd) and [Architecture Overview](index.md#cicd-architecture).
+For detailed CI/CD architecture, see [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md#github-actions--cicd) and the [Architecture Overview](index.md).
 
 ### Local Build Configuration
 
@@ -1070,6 +1073,7 @@ export AICR_ALLOWED_SERVICES=eks,gke
 - The `any` value is always allowed regardless of allowlist
 - Both `/v1/recipe` and `/v1/bundle` endpoints enforce allowlists
 - CLI (`aicr`) is not affected by allowlists
+- The `platform` criteria field has no allowlist env var today; all valid platform enum values are accepted (invalid enum values are rejected with HTTP 400 by the criteria parser)
 
 ## Extension and Operating Patterns
 
@@ -1097,7 +1101,7 @@ See [API Server: Extension and Operating Patterns](api-server-extending.md).
 - [Google SRE Book](https://sre.google/sre-book/table-of-contents/) - Site reliability engineering  
 - [Release Engineering](https://sre.google/workbook/release-engineering/) - Deployment best practices
 
-### HTTP & APIs
+### HTTP and APIs
 
 - [HTTP/2 in Go](https://go.dev/blog/h2push) - HTTP/2 server push  
 - [RESTful API Design](https://cloud.google.com/apis/design) - Google Cloud API design guide  

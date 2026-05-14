@@ -8,7 +8,7 @@ NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the 
 |------|-------------|
 | **Snapshot** | A captured state of a system including OS, kernel, Kubernetes, GPU, and SystemD configuration. Created by `aicr snapshot` or the Kubernetes agent. |
 | **Recipe** | A generated configuration recommendation containing component references, constraints, and deployment order. Created by `aicr recipe` based on criteria or snapshot analysis. |
-| **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke/kind/lke), `accelerator` (h100/gb200/b200/a100/l40/rtx-pro-6000), `intent` (training/inference), `os` (ubuntu/rhel/cos/amazonlinux/talos), `platform` (kubeflow), and `nodes`. |
+| **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke/kind/lke), `accelerator` (h100/gb200/b200/a100/l40/rtx-pro-6000), `intent` (training/inference), `os` (ubuntu/rhel/cos/amazonlinux/talos), `platform` (dynamo, kubeflow, nim, slurm), and `nodes`. |
 | **Overlay** | A recipe metadata file that extends the base recipe for specific environments. Overlays are matched against criteria using asymmetric matching. |
 | **Mixin** | A composable recipe fragment (`kind: RecipeMixin`) that carries only `constraints` and `componentRefs`. Mixins live in `recipes/mixins/`, are excluded from overlay discovery, and are referenced by leaf overlays via `spec.mixins` to share orthogonal content (e.g., OS constraints, platform components) without duplication. See [ADR-005](design/005-overlay-refactoring.md). |
 | **Bundle** | Deployment artifacts generated from a recipe: Helm values files, Kubernetes manifests, installation scripts, and checksums. |
@@ -40,7 +40,7 @@ Previously, administrators relied on static documentation and manual installatio
 
 ### The Solution: Automated Approach
 
-AICR replaces manual interpretation of documentation with a **automated approach**. It treats infrastructure configuration as code, providing a deterministic engine that generates the exact artifacts needed for a specific environment.
+AICR replaces manual interpretation of documentation with an **automated approach**. It treats infrastructure configuration as code, providing a deterministic engine that generates the exact artifacts needed for a specific environment.
 
 **Key Benefits:**
 1.  **Deterministic & Validated:** The system guarantees that the inputs (your system state) always produce the same valid outputs, tested against NVIDIA hardware.
@@ -159,6 +159,10 @@ For engineers integrating AICR into CI/CD pipelines, GitOps workflows, or larger
 | [Kubernetes Deployment](integrator/kubernetes-deployment.md) | Self-hosted API server deployment |
 | [Recipe Development](integrator/recipe-development.md) | Adding and modifying recipe metadata |
 | [Validator Extension](integrator/validator-extension.md) | Custom validators via `--data` |
+| [AKS GPU Setup](integrator/aks-gpu-setup.md) | Azure Kubernetes Service GPU node setup |
+| [EKS Dynamo Networking](integrator/eks-dynamo-networking.md) | EKS networking for Dynamo workloads |
+| [GKE TCPXO Networking](integrator/gke-tcpxo-networking.md) | GKE TCPXO networking integration |
+| [Talos Integration](integrator/talos-integration.md) | Running AICR on Talos Linux |
 
 ## Quick Start
 
