@@ -845,7 +845,7 @@ func TestOverlayMergeDoesNotLoseBaseComponents(t *testing.T) {
 	builder := NewBuilder()
 
 	// Build H100 EKS inference recipe with dynamo platform
-	// Matches overlay chain that adds kgateway, dynamo-platform, kai-scheduler, etc.
+	// Matches overlay chain that adds agentgateway, dynamo-platform, kai-scheduler, etc.
 	criteria := NewCriteria()
 	criteria.Service = CriteriaServiceEKS
 	criteria.Accelerator = CriteriaAcceleratorH100

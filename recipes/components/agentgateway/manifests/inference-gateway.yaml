@@ -14,52 +14,62 @@
 
 # Inference Gateway — provides external access to inference services
 # via the Kubernetes Gateway API. Any inference workload (dynamo, vLLM,
-# TGI, etc.) can route through this gateway using HTTPRoute or
-# InferenceModel resources.
-{{- $kgw := index .Values "kgateway" }}
-# GatewayParameters configures the proxy pod scheduling to match the
-# system node tolerations/nodeSelector injected by the bundler into
-# the kgateway controller. Without this, proxy pods land on any
-# untainted node instead of system infrastructure nodes.
+# TGI, etc.) can route through this gateway using HTTPRoute backendRefs
+# to InferencePool resources or plain Service backends.
+{{- $agw := index .Values "agentgateway" }}
+# AgentgatewayParameters configures the proxy pod scheduling to match the
+# system node tolerations/nodeSelector injected by the bundler into the
+# agentgateway controller. Without this, proxy pods land on any untainted
+# node instead of system infrastructure nodes. The new API uses a
+# strategic-merge-patch into the generated Deployment spec.
 ---
-apiVersion: gateway.kgateway.dev/v1alpha1
-kind: GatewayParameters
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
 metadata:
   name: system-proxy
-  namespace: kgateway-system
+  namespace: agentgateway-system
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  kube:
-    podTemplate:
-      extraLabels:
+  deployment:
+    metadata:
+      labels:
         app.kubernetes.io/managed-by: aicr
-      {{- if $kgw.nodeSelector }}
-      nodeSelector:
-        {{- toYaml $kgw.nodeSelector | nindent 8 }}
-      {{- end }}
-      {{- if $kgw.tolerations }}
-      tolerations:
-        {{- toYaml $kgw.tolerations | nindent 8 }}
-      {{- end }}
+    spec:
+      template:
+        metadata:
+          labels:
+            # Mirrors the old kgateway GatewayParameters podTemplate.extraLabels
+            # behavior so the proxy pods themselves carry the AICR ownership
+            # label, not just the Deployment.
+            app.kubernetes.io/managed-by: aicr
+        spec:
+          {{- if $agw.nodeSelector }}
+          nodeSelector:
+            {{- toYaml $agw.nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- if $agw.tolerations }}
+          tolerations:
+            {{- toYaml $agw.tolerations | nindent 12 }}
+          {{- end }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: inference-gateway
-  namespace: kgateway-system
+  namespace: agentgateway-system
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  gatewayClassName: kgateway
+  gatewayClassName: agentgateway
   infrastructure:
     parametersRef:
-      group: gateway.kgateway.dev
-      kind: GatewayParameters
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
       name: system-proxy
   listeners:
     - name: http

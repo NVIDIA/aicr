@@ -83,7 +83,7 @@ kubectl get dynamographdeployments -n dynamo-workload
 kubectl get pods -n dynamo-workload -o wide -w
 
 # Verify the inference gateway routes to the workload
-kubectl get gateway inference-gateway -n kgateway-system
+kubectl get gateway inference-gateway -n agentgateway-system
 kubectl get inferencepool -n dynamo-workload
 ```
 

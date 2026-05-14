@@ -259,9 +259,9 @@ print_dynamo_diagnostics() {
   kubectl_kind -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
 }
 
-print_kgateway_diagnostics() {
-  echo "=== kgateway pods ==="
-  kubectl_kind -n kgateway-system get pods -o wide 2>/dev/null || true
+print_agentgateway_diagnostics() {
+  echo "=== agentgateway pods ==="
+  kubectl_kind -n agentgateway-system get pods -o wide 2>/dev/null || true
   echo "=== GatewayClass status ==="
   kubectl_kind get gatewayclass -o yaml 2>/dev/null || true
   echo "=== Gateway status ==="
@@ -280,9 +280,9 @@ case "${mode}" in
     print_kubeflow_diagnostics
     ;;
   inference)
-    print_h100_common_diagnostics dynamo-system kgateway-system
+    print_h100_common_diagnostics dynamo-system agentgateway-system
     print_dynamo_diagnostics
-    print_kgateway_diagnostics
+    print_agentgateway_diagnostics
     ;;
   *)
     echo "::error::unknown GPU_TEST_DIAGNOSTIC_MODE: ${mode}"

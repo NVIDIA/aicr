@@ -267,6 +267,8 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 
 **Note:** A component must have either `helm` OR `kustomize` configuration, not both.
 
+**After any change to `recipes/registry.yaml`, a component's values file, or a chart version pin (in registry, overlay, or mixin):** run `make bom-docs` and commit the regenerated `docs/user/container-images.md` in the same PR. The BOM is rendered fresh from each Helm chart's actual templates, so an unbumped pin can still pick up upstream image drift — running it locally is the only reliable way to know whether the doc needs an update. `make bom-check` verifies the committed BOM matches a fresh regen, but it is **opt-in only** — not wired into `make qualify`, `make lint`, or the merge gate today. Do not rely on either to catch a missed regen.
+
 **Using mixins for shared OS/platform content:**
 ```yaml
 # Leaf overlay referencing mixins instead of duplicating content

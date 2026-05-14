@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# kgateway CRDs Helm values
-# Installs kgateway-specific CRDs (Backends, DirectResponses, GatewayExtensions,
-# GatewayParameters, HTTPListenerPolicies, TrafficPolicies).
+# agentgateway CRDs Helm values
+# Installs agentgateway-specific CRDs (AgentgatewayBackend, AgentgatewayPolicy,
+# AgentgatewayParameters) in the agentgateway.dev/v1alpha1 API group.
 #
-# Note: Standard Gateway API CRDs (GatewayClass, Gateway, HTTPRoute) and
-# Inference Extension CRDs (InferencePool, InferenceModel) must be installed
-# separately before deploying kgateway. See the kgateway getting started guide:
+# Note: Standard Gateway API CRDs (GatewayClass, Gateway, HTTPRoute, GRPCRoute,
+# ReferenceGrant) and Gateway API Inference Extension CRDs (InferencePool,
+# InferenceObjective) must be installed separately before deploying agentgateway.
+# See the upstream guide:
 # https://gateway-api-inference-extension.sigs.k8s.io/guides/
 
 # This chart has no configurable values — it only installs CRDs.

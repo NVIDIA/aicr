@@ -12,16 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# KGateway Health Check
+# Agentgateway Health Check
 #
-# Validates that KGateway is running and healthy in the kgateway-system
-# namespace. Checks that the kgateway deployment has at least one available
-# replica and that no pods in the namespace are stuck in Pending, Failed,
-# or Unknown phases.
+# Validates that agentgateway is running and healthy in the agentgateway-system
+# namespace. Checks that the agentgateway deployment has at least one available
+# replica and that no pods in the namespace are stuck in Pending, Failed, or
+# Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: kgateway-health-check
+  name: agentgateway-health-check
 spec:
   timeouts:
     assert: 5m
@@ -29,14 +29,14 @@ spec:
     - name: validate-deployment-exists
       try:
         # Guard against vacuous pass on empty namespace: verify the
-        # kgateway deployment exists and has at least one ready replica.
+        # agentgateway deployment exists and has at least one ready replica.
         - assert:
             resource:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: kgateway
-                namespace: kgateway-system
+                name: agentgateway
+                namespace: agentgateway-system
               status:
                 (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
@@ -49,7 +49,7 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                namespace: kgateway-system
+                namespace: agentgateway-system
               status:
                 phase: Pending
         - error:
@@ -57,7 +57,7 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                namespace: kgateway-system
+                namespace: agentgateway-system
               status:
                 phase: Failed
         - error:
@@ -65,6 +65,6 @@ spec:
               apiVersion: v1
               kind: Pod
               metadata:
-                namespace: kgateway-system
+                namespace: agentgateway-system
               status:
                 phase: Unknown

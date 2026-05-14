@@ -16,23 +16,23 @@
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: cli-bundle-kgateway-templates
+  name: cli-bundle-agentgateway-templates
 spec:
   description: |
-    Validates that kgateway manifest templates render correctly.
-    Tests inference-gateway GatewayParameters scheduling (nodeSelector/tolerations).
-    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/kgateway
+    Validates that agentgateway manifest templates render correctly.
+    Tests inference-gateway AgentgatewayParameters scheduling (nodeSelector/tolerations).
+    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/agentgateway
   timeouts:
     exec: 30s
   steps:
 
     - name: generate-recipe
-      description: Generate an EKS H100 inference recipe (kgateway is inference-only).
+      description: Generate an EKS H100 inference recipe (agentgateway is inference-only).
       try:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-kgateway-templates"
+              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               rm -rf "${WORK}" && mkdir -p "${WORK}"
               ${AICR_BIN} recipe \
                 --service eks \
@@ -49,26 +49,26 @@ spec:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-kgateway-templates"
+              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               rm -rf "${WORK}/bundle-defaults"
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle-defaults"
 
     - name: assert-gateway-defaults
-      description: Verify GatewayParameters and Gateway resources exist.
+      description: Verify AgentgatewayParameters and Gateway resources exist.
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-bundle-kgateway-templates"
-              ## kgateway is a mixed component (upstream Helm + raw manifests),
-              ## so its raw manifests render into an injected NNN-kgateway-post/
+              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
+              ## agentgateway is a mixed component (upstream Helm + raw manifests),
+              ## so its raw manifests render into an injected NNN-agentgateway-post/
               ## wrapped chart's templates/ folder under #662's layout.
-              MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-kgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
-              [ -n "${MANIFEST}" ] || { echo "kgateway inference-gateway.yaml not found" >&2; exit 1; }
-              ## The manifest contains two resources (GatewayParameters + Gateway).
+              MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-agentgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
+              [ -n "${MANIFEST}" ] || { echo "agentgateway inference-gateway.yaml not found" >&2; exit 1; }
+              ## The manifest contains two resources (AgentgatewayParameters + Gateway).
               ## Verify both are present.
-              grep -q 'kind: GatewayParameters' "${MANIFEST}"
+              grep -q 'kind: AgentgatewayParameters' "${MANIFEST}"
               grep -q 'kind: Gateway' "${MANIFEST}"
 
     ## ── With system node scheduling ────────────────────────────────────
@@ -79,7 +79,7 @@ spec:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-kgateway-templates"
+              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               rm -rf "${WORK}/bundle-scheduling"
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
@@ -87,17 +87,17 @@ spec:
                 --system-node-selector nodeGroup=system-pool
 
     - name: assert-gateway-scheduling
-      description: Verify GatewayParameters has nodeSelector for proxy pods.
+      description: Verify AgentgatewayParameters has nodeSelector for proxy pods.
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-bundle-kgateway-templates"
-              MANIFEST=$(ls "${WORK}"/bundle-scheduling/[0-9][0-9][0-9]-kgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
-              [ -n "${MANIFEST}" ] || { echo "kgateway inference-gateway.yaml not found in scheduling bundle" >&2; exit 1; }
-              ## Verify nodeSelector was injected into GatewayParameters
+              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
+              MANIFEST=$(ls "${WORK}"/bundle-scheduling/[0-9][0-9][0-9]-agentgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
+              [ -n "${MANIFEST}" ] || { echo "agentgateway inference-gateway.yaml not found in scheduling bundle" >&2; exit 1; }
+              ## Verify nodeSelector was injected into AgentgatewayParameters
               grep -q 'nodeSelector:' "${MANIFEST}"
               grep -q 'nodeGroup: system-pool' "${MANIFEST}"
       cleanup:
         - script:
             content: |
-              rm -rf /tmp/chainsaw-bundle-kgateway-templates
+              rm -rf /tmp/chainsaw-bundle-agentgateway-templates

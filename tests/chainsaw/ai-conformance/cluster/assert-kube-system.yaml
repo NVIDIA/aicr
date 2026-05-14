@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Assert AWS EFA device plugin DaemonSet is healthy.
-# Chart: aws-efa-k8s-device-plugin v0.5.3
+# Chart: aws-efa-k8s-device-plugin v0.5.26
 #
 # Note: aws-ebs-csi-driver is disabled by default on EKS (managed addon)
 # and is not asserted here. If enabled via --set aws-ebs-csi-driver.enabled=true,

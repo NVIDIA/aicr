@@ -82,8 +82,8 @@ Visual: Single input forking into two divergent paths
 │  Unique:              │       │  Unique:              │
 │    kubeflow-trainer   │       │    dynamo-crds        │
 │                       │       │    dynamo-platform    │
-│  GPU Operator:        │       │    kgateway-crds      │
-│    CDI=true           │       │    kgateway           │
+│  GPU Operator:        │       │    agentgateway-crds  │
+│    CDI=true           │       │    agentgateway       │
 │    gdrcopy=true       │       │                       │
 │                       │       │  DRA driver:          │
 │                       │       │    gpuResources=true  │

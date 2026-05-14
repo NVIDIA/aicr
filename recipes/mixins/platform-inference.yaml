@@ -18,22 +18,22 @@ metadata:
   name: platform-inference
 spec:
   componentRefs:
-    - name: kgateway-crds
+    - name: agentgateway-crds
       type: Helm
-      source: oci://cr.kgateway.dev/kgateway-dev/charts
-      version: v2.0.0
-      valuesFile: components/kgateway-crds/values.yaml
+      source: oci://cr.agentgateway.dev/charts
+      version: v2.2.1
+      valuesFile: components/agentgateway-crds/values.yaml
       manifestFiles:
-        - components/kgateway-crds/manifests/gateway-api-crds.yaml
-        - components/kgateway-crds/manifests/inference-extension-crds.yaml
+        - components/agentgateway-crds/manifests/gateway-api-crds.yaml
+        - components/agentgateway-crds/manifests/inference-extension-crds.yaml
 
-    - name: kgateway
+    - name: agentgateway
       type: Helm
-      source: oci://cr.kgateway.dev/kgateway-dev/charts
-      version: v2.0.0
-      valuesFile: components/kgateway/values.yaml
+      source: oci://cr.agentgateway.dev/charts
+      version: v2.2.1
+      valuesFile: components/agentgateway/values.yaml
       manifestFiles:
-        - components/kgateway/manifests/inference-gateway.yaml
+        - components/agentgateway/manifests/inference-gateway.yaml
       dependencyRefs:
-        - kgateway-crds
+        - agentgateway-crds
         - cert-manager

@@ -129,7 +129,7 @@ aicr query --service eks --accelerator h100 --intent inference --os ubuntu \
 diff /tmp/training.txt /tmp/inference.txt
 ```
 
-> `> kgateway` and `> kgateway-crds` — the Inference Gateway is added only
+> `> agentgateway` and `> agentgateway-crds` — the Inference Gateway is added only
 > when `--intent inference`.
 
 CDI defaults also flip:

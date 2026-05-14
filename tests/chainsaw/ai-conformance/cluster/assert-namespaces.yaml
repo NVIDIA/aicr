@@ -53,7 +53,7 @@ status:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: kgateway-system
+  name: agentgateway-system
 status:
   phase: Active
 ---

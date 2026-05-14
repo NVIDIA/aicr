@@ -16,7 +16,7 @@
 #
 # Validates that `aicr recipe --service gke --accelerator h100 --intent inference
 # --os cos --platform dynamo` produces a valid recipe with correct criteria,
-# inference-specific components (kgateway, DRA driver, KAI scheduler, Dynamo),
+# inference-specific components (agentgateway, DRA driver, KAI scheduler, Dynamo),
 # and standard GPU stack components.
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
@@ -30,15 +30,14 @@ constraints:
   - name: K8s.server.version
     value: '>= 1.34'
 componentRefs: ## alphabetically sorted
+  - name: agentgateway
+  - name: agentgateway-crds
   - name: cert-manager
   - name: dynamo-platform
-  - name: grove
   - name: gpu-operator
   - name: grove
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler
-  - name: kgateway
-  - name: kgateway-crds
   - name: kube-prometheus-stack
   - name: nfd
   - name: nodewright-customizations
@@ -47,13 +46,13 @@ componentRefs: ## alphabetically sorted
   - name: nvsentinel
   - name: prometheus-adapter
 deploymentOrder:
+  - agentgateway-crds
   - cert-manager
+  - agentgateway
   - grove
-  - kgateway-crds
-  - kgateway
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics
-  - prometheus-adapter
+  - nfd
   - nodewright-operator
   - nodewright-customizations
   - gpu-operator
@@ -61,3 +60,4 @@ deploymentOrder:
   - dynamo-platform
   - nvidia-dra-driver-gpu
   - nvsentinel
+  - prometheus-adapter

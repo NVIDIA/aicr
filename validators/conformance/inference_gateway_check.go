@@ -39,13 +39,13 @@ type gatewayDataPlaneReport struct {
 }
 
 // CheckInferenceGateway validates CNCF requirement #6: Inference Gateway.
-// Verifies GatewayClass "kgateway" is accepted, Gateway "inference-gateway" is programmed,
+// Verifies GatewayClass "agentgateway" is accepted, Gateway "inference-gateway" is programmed,
 // and required Gateway API + InferencePool CRDs exist.
 func CheckInferenceGateway(ctx *validators.Context) error {
-	// Skip if the recipe does not include kgateway (inference gateway component).
+	// Skip if the recipe does not include agentgateway (inference gateway component).
 	// Training clusters typically don't have an inference gateway.
-	if !recipeHasComponent(ctx, "kgateway") {
-		return validators.Skip("kgateway not in recipe — inference gateway check applies to inference clusters only")
+	if !recipeHasComponent(ctx, "agentgateway") {
+		return validators.Skip("agentgateway not in recipe — inference gateway check applies to inference clusters only")
 	}
 
 	dynClient, err := getDynamicClient(ctx)
@@ -55,13 +55,13 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 
 	collectGatewayControlPlaneArtifacts(ctx)
 
-	// 1. GatewayClass "kgateway" accepted
+	// 1. GatewayClass "agentgateway" accepted
 	gcGVR := schema.GroupVersionResource{
 		Group: apiGroupGateway, Version: "v1", Resource: "gatewayclasses",
 	}
-	gc, err := dynClient.Resource(gcGVR).Get(ctx.Ctx, "kgateway", metav1.GetOptions{})
+	gc, err := dynClient.Resource(gcGVR).Get(ctx.Ctx, "agentgateway", metav1.GetOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "GatewayClass 'kgateway' not found", err)
+		return errors.Wrap(errors.ErrCodeNotFound, "GatewayClass 'agentgateway' not found", err)
 	}
 	gcCond, condErr := getConditionObservation(gc, "Accepted")
 	if condErr != nil {
@@ -74,7 +74,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	}
 	controllerName, _, _ := unstructured.NestedString(gc.Object, "spec", "controllerName")
 	recordRawTextArtifact(ctx, "GatewayClass",
-		"kubectl get gatewayclass kgateway -o yaml",
+		"kubectl get gatewayclass agentgateway -o yaml",
 		fmt.Sprintf("Name:            %s\nControllerName:  %s\nAccepted:        %s\nReason:          %s\nMessage:         %s",
 			gc.GetName(), valueOrUnknown(controllerName), gcCond.Status, gcCond.Reason, gcCond.Message))
 
@@ -82,7 +82,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 	gwGVR := schema.GroupVersionResource{
 		Group: apiGroupGateway, Version: "v1", Resource: "gateways",
 	}
-	gw, err := dynClient.Resource(gwGVR).Namespace("kgateway-system").Get(
+	gw, err := dynClient.Resource(gwGVR).Namespace("agentgateway-system").Get(
 		ctx.Ctx, "inference-gateway", metav1.GetOptions{})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, "Gateway 'inference-gateway' not found", err)
@@ -106,7 +106,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 		fmt.Sprintf("Name:            %s/%s\nProgrammed:      %s\nReason:          %s\nMessage:         %s\nAddressCount:    %d",
 			gw.GetNamespace(), gw.GetName(), gwCond.Status, gwCond.Reason, gwCond.Message, addressCount))
 	recordObjectYAMLArtifact(ctx, "Gateway details",
-		"kubectl get gateway inference-gateway -n kgateway-system -o yaml", gw.Object)
+		"kubectl get gateway inference-gateway -n agentgateway-system -o yaml", gw.Object)
 
 	// 3. Required CRDs exist
 	crdGVR := schema.GroupVersionResource{
@@ -133,7 +133,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 		return err
 	}
 	recordRawTextArtifact(ctx, "Gateway Data Plane",
-		"kubectl get endpointslices -n kgateway-system",
+		"kubectl get endpointslices -n agentgateway-system",
 		fmt.Sprintf("Listeners:               %d\nAttached HTTPRoutes:     %d\nHTTPRoutes (all):        %d\nMatching EndpointSlices: %d\nReady endpoints:         %d",
 			report.ListenerCount, report.AttachedHTTPRoutes, report.TotalHTTPRoutes,
 			report.MatchingEndpointSlice, report.ReadyEndpoints))
@@ -159,7 +159,7 @@ func validateGatewayDataPlane(ctx *validators.Context) (*gatewayDataPlaneReport,
 	gwGVR := schema.GroupVersionResource{
 		Group: apiGroupGateway, Version: "v1", Resource: "gateways",
 	}
-	gw, gwErr := dynClient.Resource(gwGVR).Namespace("kgateway-system").Get(
+	gw, gwErr := dynClient.Resource(gwGVR).Namespace("agentgateway-system").Get(
 		ctx.Ctx, "inference-gateway", metav1.GetOptions{})
 	if gwErr == nil {
 		listeners, found, _ := unstructured.NestedSlice(gw.Object, "status", "listeners")
@@ -204,11 +204,11 @@ func validateGatewayDataPlane(ctx *validators.Context) (*gatewayDataPlaneReport,
 	// 3. Endpoint readiness (hard requirement): verify inference-gateway proxy has ready endpoints.
 	// Filter by kubernetes.io/service-name containing "inference-gateway" to avoid matching
 	// unrelated services in the namespace (e.g. controller manager, webhooks).
-	slices, err := ctx.Clientset.DiscoveryV1().EndpointSlices("kgateway-system").List(
+	slices, err := ctx.Clientset.DiscoveryV1().EndpointSlices("agentgateway-system").List(
 		ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to list EndpointSlices in kgateway-system", err)
+			"failed to list EndpointSlices in agentgateway-system", err)
 	}
 
 	for _, slice := range slices.Items {
@@ -226,7 +226,7 @@ func validateGatewayDataPlane(ctx *validators.Context) (*gatewayDataPlaneReport,
 
 	if report.ReadyEndpoints == 0 {
 		return nil, errors.New(errors.ErrCodeInternal,
-			"no ready endpoints for inference-gateway proxy in kgateway-system")
+			"no ready endpoints for inference-gateway proxy in agentgateway-system")
 	}
 
 	return report, nil
@@ -237,10 +237,10 @@ func collectGatewayControlPlaneArtifacts(ctx *validators.Context) {
 		return
 	}
 
-	deploys, deployErr := ctx.Clientset.AppsV1().Deployments("kgateway-system").List(
+	deploys, deployErr := ctx.Clientset.AppsV1().Deployments("agentgateway-system").List(
 		ctx.Ctx, metav1.ListOptions{})
 	if deployErr != nil {
-		recordRawTextArtifact(ctx, "kgateway deployments", "kubectl get deploy -n kgateway-system",
+		recordRawTextArtifact(ctx, "agentgateway deployments", "kubectl get deploy -n agentgateway-system",
 			fmt.Sprintf("failed to list deployments: %v", deployErr))
 	} else {
 		var deploymentSummary strings.Builder
@@ -252,12 +252,12 @@ func collectGatewayControlPlaneArtifacts(ctx *validators.Context) {
 			fmt.Fprintf(&deploymentSummary, "%-40s available=%d/%d image=%s\n",
 				d.Name, d.Status.AvailableReplicas, expected, firstContainerImage(d.Spec.Template.Spec.Containers))
 		}
-		recordRawTextArtifact(ctx, "kgateway deployments", "kubectl get deploy -n kgateway-system", deploymentSummary.String())
+		recordRawTextArtifact(ctx, "agentgateway deployments", "kubectl get deploy -n agentgateway-system", deploymentSummary.String())
 	}
 
-	pods, podErr := ctx.Clientset.CoreV1().Pods("kgateway-system").List(ctx.Ctx, metav1.ListOptions{})
+	pods, podErr := ctx.Clientset.CoreV1().Pods("agentgateway-system").List(ctx.Ctx, metav1.ListOptions{})
 	if podErr != nil {
-		recordRawTextArtifact(ctx, "kgateway pods", "kubectl get pods -n kgateway-system",
+		recordRawTextArtifact(ctx, "agentgateway pods", "kubectl get pods -n agentgateway-system",
 			fmt.Sprintf("failed to list pods: %v", podErr))
 		return
 	}
@@ -266,5 +266,5 @@ func collectGatewayControlPlaneArtifacts(ctx *validators.Context) {
 		fmt.Fprintf(&podSummary, "%-48s ready=%s phase=%s node=%s\n",
 			pod.Name, podReadyCount(pod), pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName))
 	}
-	recordRawTextArtifact(ctx, "kgateway pods", "kubectl get pods -n kgateway-system", podSummary.String())
+	recordRawTextArtifact(ctx, "agentgateway pods", "kubectl get pods -n agentgateway-system", podSummary.String())
 }

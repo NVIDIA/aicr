@@ -19,18 +19,20 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **22**
-- Unique images: **69**
+- Components: **24**
+- Unique images: **71**
 - Distinct registries: **11**
 
-Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
+Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
 
 ## Components
 
 | Component | Type | Chart | Pinned Version | Images |
 |-----------|------|-------|----------------|--------|
+| agentgateway | helm | agentgateway | v2.2.1 | 1 |
+| agentgateway-crds | helm | agentgateway-crds | v2.2.1 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
-| aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.3 | 1 |
+| aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.26 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | dynamo-platform | helm | dynamo-platform | 1.0.2 | 1 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
@@ -39,8 +41,6 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.14.1 | 2 |
-| kgateway | helm | kgateway | v2.0.0 | 1 |
-| kgateway-crds | helm | kgateway-crds | v2.0.0 | 0 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.17.1 | 1 |
@@ -51,8 +51,18 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 | nvidia-dra-driver-gpu | helm | nvidia/nvidia-dra-driver-gpu | 25.12.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.3.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
+| slinky-slurm-operator | helm | slurm-operator | 1.1.0 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.1.0 | 0 |
 
 ## Images by component
+
+### agentgateway
+
+- `cr.agentgateway.dev/controller:v2.2.1`
+
+### agentgateway-crds
+
+_No images extracted._
 
 ### aws-ebs-csi-driver
 
@@ -65,7 +75,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 
 ### aws-efa
 
-- `602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin:v0.5.3`
+- `602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin:v0.5.18`
 
 ### cert-manager
 
@@ -119,14 +129,6 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 - `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.14.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.14.1`
 
-### kgateway
-
-- `cr.kgateway.dev/kgateway-dev/kgateway:v2.0.0`
-
-### kgateway-crds
-
-_No images extracted._
-
 ### kube-prometheus-stack
 
 - `docker.io/grafana/grafana:13.0.1`
@@ -141,7 +143,7 @@ _No images extracted._
 ### kubeflow-trainer
 
 - `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.0`
-- `pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime@sha256:7b324d212a4450795b49edba9949b7cdc72429148a64e974334bfe5774d51385`
+- `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
 - `registry.k8s.io/jobset/jobset:v0.11.0`
 
 ### kueue
@@ -150,7 +152,7 @@ _No images extracted._
 
 ### network-operator
 
-- `busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662`
+- `busybox:1.37@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
@@ -190,6 +192,15 @@ _No images extracted._
 
 - `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
 
+### slinky-slurm-operator
+
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.1.0`
+- `ghcr.io/slinkyproject/slurm-operator:1.1.0`
+
+### slinky-slurm-operator-crds
+
+_No images extracted._
+
 <!-- END AICR-BOM -->
 
 ## How to read this list
@@ -211,7 +222,7 @@ AICR pulls from a deliberately diverse set of registries:
 - **`public.ecr.aws`** — AWS public artifacts (aws-ebs-csi-driver).
 - **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry below shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
 - **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).
-- **`cr.kgateway.dev`** — kgateway.
+- **`cr.agentgateway.dev`** — agentgateway (AI inference gateway).
 - **`docker.io`** — assorted upstream images (`busybox`, `pytorch`, etc.).
 
 Customers running in air-gapped or private-registry environments need to mirror every registry above. A dedicated mirroring guide is tracked under [#743](https://github.com/NVIDIA/aicr/issues/743).
