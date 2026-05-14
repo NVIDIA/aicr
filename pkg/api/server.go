@@ -211,7 +211,7 @@ func setupDiscovery() ([]server.Option, http.HandlerFunc, error) {
 		Protocol:     discovery.ProtocolMCP,
 		Namespace:    ns,
 		ServiceName:  name,
-		Port:         uint16(server.ResolvePort(defaults.ServerDefaultPort)),
+		Port:         server.ResolvePort(defaults.ServerDefaultPort),
 		Capabilities: []string{"recipe", "bundle", "validate", "query"},
 		Version:      version,
 	}

@@ -19,6 +19,7 @@
 package testdns
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -32,7 +33,11 @@ import (
 func Start(t *testing.T, handler dns.HandlerFunc) string {
 	t.Helper()
 
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	// noctx lint requires the context-aware ListenConfig variant rather
+	// than the bare net.ListenPacket. Background() is fine here — test
+	// servers don't need a real deadline.
+	lc := &net.ListenConfig{}
+	pc, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("testdns: listen: %v", err)
 	}

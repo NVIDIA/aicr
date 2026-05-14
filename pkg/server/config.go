@@ -38,10 +38,12 @@ type LifecycleHook func(ctx context.Context) error
 // the server port across the API server and any sidecars (e.g. discovery
 // publishers) that need to register the same port.
 //
+// The return type is uint16 — matching net's port representation — so
+// callsites do not need an unchecked int→uint16 cast (the gosec G115 trap).
 // strconv.Atoi (rather than fmt.Sscanf) is used because Sscanf accepts
 // trailing garbage — "8080abc" would silently parse as 8080. Atoi requires
 // the entire string to be a valid integer.
-func ResolvePort(defaultPort int) int {
+func ResolvePort(defaultPort uint16) uint16 {
 	portStr := os.Getenv("PORT")
 	if portStr == "" {
 		return defaultPort
@@ -52,7 +54,7 @@ func ResolvePort(defaultPort int) int {
 			"value", portStr, "default", defaultPort, "error", err)
 		return defaultPort
 	}
-	return port
+	return uint16(port) //nolint:gosec // bounded above
 }
 
 // config holds server configuration
@@ -98,8 +100,10 @@ func parseConfig() *config {
 		ShutdownTimeout: defaults.ServerShutdownTimeout,
 	}
 
-	// Override with environment variables if set
-	cfg.Port = ResolvePort(cfg.Port)
+	// Override with environment variables if set. cfg.Port is int because
+	// historical tests reach in and set it directly; the static default
+	// (8080) is well within uint16 range so the cast both ways is safe.
+	cfg.Port = int(ResolvePort(uint16(cfg.Port))) //nolint:gosec // bounded by ResolvePort
 
 	// Allow customization of shutdown timeout to match K8s eviction grace period
 	if shutdownStr := os.Getenv("SHUTDOWN_TIMEOUT_SECONDS"); shutdownStr != "" {

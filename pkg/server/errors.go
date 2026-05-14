@@ -69,7 +69,10 @@ func httpStatusFromCode(code aicrerrors.ErrorCode) int {
 		return http.StatusMethodNotAllowed
 	case aicrerrors.ErrCodeRateLimitExceeded:
 		return http.StatusTooManyRequests
-	case aicrerrors.ErrCodeUnavailable:
+	case aicrerrors.ErrCodeUnavailable, aicrerrors.ErrCodePolicyFetch:
+		// A policy-fetch failure means an upstream policy URI was
+		// unreachable; surface that as 503 the same way as any other
+		// upstream-unavailable condition.
 		return http.StatusServiceUnavailable
 	case aicrerrors.ErrCodeTimeout:
 		// Prefer 504 for upstream timeouts and internal deadline exceeded.
@@ -93,6 +96,7 @@ func retryableFromCode(code aicrerrors.ErrorCode) bool {
 		return false
 	case aicrerrors.ErrCodeTimeout,
 		aicrerrors.ErrCodeUnavailable,
+		aicrerrors.ErrCodePolicyFetch,
 		aicrerrors.ErrCodeRateLimitExceeded,
 		aicrerrors.ErrCodeInternal:
 		return true

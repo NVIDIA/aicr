@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -149,8 +150,9 @@ func (s *Server) setReady(ready bool) {
 }
 
 // Start starts the HTTP server and listens for incoming requests.
-// OnStart hooks run before the server accepts traffic.
-// The server is marked ready only after hooks succeed and the listener is up.
+// OnStart hooks run before the server accepts traffic. Readiness flips to
+// true only after the listener is actually bound to its port, so probes
+// cannot see "ready" while the socket still returns connection-refused.
 func (s *Server) Start(ctx context.Context) error {
 	slog.Debug("server start", "port", s.httpServer.Addr)
 
@@ -166,20 +168,34 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 
-	// Start server in goroutine. Always send on errChan (nil for clean exit)
-	// so the consumer below is deterministic even when the server crashes
-	// after Shutdown is initiated.
+	// Bind the listener synchronously BEFORE flipping readiness. The
+	// previous pattern called http.Server.ListenAndServe from a goroutine
+	// and immediately set ready=true on the main goroutine, opening a
+	// window where /ready returned 200 while the kernel was still waiting
+	// to bind the port — probes would 200 then get connection-refused on
+	// the next request. Binding here is synchronous; if it fails we abort
+	// cleanly without ever advertising ready.
+	lc := &net.ListenConfig{}
+	ln, err := lc.Listen(ctx, "tcp", s.httpServer.Addr)
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeUnavailable,
+			"failed to bind listener", err)
+	}
+
+	// Listener is bound — safe to advertise readiness.
+	s.setReady(true)
+
+	// Start serving in a goroutine. Always send on errChan (nil for clean
+	// exit) so the select below is deterministic even when the server
+	// crashes after Shutdown is initiated.
 	errChan := make(chan error, 1)
 	go func() {
-		err := s.httpServer.ListenAndServe()
+		err := s.httpServer.Serve(ln)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
 		errChan <- err
 	}()
-
-	// Mark ready after hooks and listener are up
-	s.setReady(true)
 
 	// Wait for context cancellation or server error
 	select {

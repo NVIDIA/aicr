@@ -314,3 +314,61 @@ func TestMultipleOnShutdownHooksExecuteInOrder(t *testing.T) {
 		t.Errorf("OnShutdown hooks executed in wrong order: %v", order)
 	}
 }
+
+// TestReadyImpliesListenerBound exercises the readiness-bind race fix: once
+// readiness flips to true, the port must already be accepting connections.
+// Before the fix, Start kicked off ListenAndServe in a goroutine and then
+// set ready=true on the main goroutine, opening a window where /ready
+// reported 200 while the kernel was still binding the socket.
+func TestReadyImpliesListenerBound(t *testing.T) {
+	port := freePort(t)
+	cfg := parseConfig()
+	cfg.Port = port
+	cfg.ShutdownTimeout = 1 * time.Second
+
+	s := New(withConfig(cfg))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errChan := make(chan error, 1)
+	go func() { errChan <- s.Start(ctx) }()
+
+	// Spin until readiness flips; cap with a generous deadline so the test
+	// doesn't hang if Start regresses.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.RLock()
+		ready := s.ready
+		s.mu.RUnlock()
+		if ready {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	s.mu.RLock()
+	ready := s.ready
+	s.mu.RUnlock()
+	if !ready {
+		cancel()
+		<-errChan
+		t.Fatal("server never became ready")
+	}
+
+	// The moment readiness is true, a dial against the port MUST succeed
+	// without retries. A flake here means the race is back.
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+	if err != nil {
+		cancel()
+		<-errChan
+		t.Fatalf("ready=true but listener not accepting: %v", err)
+	}
+	_ = conn.Close()
+
+	cancel()
+	select {
+	case <-errChan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown timed out")
+	}
+}

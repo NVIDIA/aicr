@@ -87,7 +87,10 @@ func exitCodeFromErrorCode(code ErrorCode) int {
 		return ExitUnauthorized
 	case ErrCodeTimeout:
 		return ExitTimeout
-	case ErrCodeUnavailable:
+	case ErrCodeUnavailable, ErrCodePolicyFetch:
+		// PolicyFetch failures are treated as upstream-unavailable: the
+		// caller-side policy guard fails open, but the CLI exit code
+		// should still flag that an external dependency couldn't be reached.
 		return ExitUnavailable
 	case ErrCodeRateLimitExceeded:
 		return ExitRateLimited

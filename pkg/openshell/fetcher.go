@@ -218,7 +218,17 @@ func (f *Fetcher) fetchAndCache(ctx context.Context, policyURI string) (*PolicyD
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := f.client.Do(req)
+	// SSRF mitigations applied at three layers before this call:
+	//   1. validateURL — pre-flight: rejects non-HTTPS schemes and any
+	//      IP literal in the URL that resolves to a private/loopback range.
+	//   2. newSafeTransport (HTTP transport) — post-resolution: rejects any
+	//      dial target whose resolved IP is private/loopback/link-local;
+	//      pins the dial to the validated IP to close the TOCTOU window
+	//      between LookupIPAddr and dialer.DialContext.
+	//   3. checkRedirect — re-applies the HTTPS-only check on every 3xx
+	//      hop and caps redirect chains at 10.
+	// Regression test: TestFetcherSSRFDialBlocksPrivateIP.
+	resp, err := f.client.Do(req) //nolint:gosec // G704: SSRF mitigated above
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodePolicyFetch, "failed to fetch policy document", err)
 	}
