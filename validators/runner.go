@@ -26,8 +26,9 @@ import (
 )
 
 // terminationLogPath is the standard K8s termination message path.
-// Kept as a constant (not configurable) since it matches the Job spec.
-const terminationLogPath = "/dev/termination-log"
+// Declared as a var (not const) only so unit tests can redirect writes
+// to a temp file; production code must not reassign it.
+var terminationLogPath = "/dev/termination-log"
 
 // exitCodeSkip is the exit code for a skipped check (not applicable).
 const exitCodeSkip = 2
@@ -89,24 +90,44 @@ func runCheck(checkFn CheckFunc) int {
 		return 1
 	}
 	defer ctx.Cancel()
+	return handleCheckResult(checkFn(ctx))
+}
 
-	if err := checkFn(ctx); err != nil {
-		if errors.Is(err, errSkip) {
-			slog.Info("SKIP", "reason", err.Error())
-			return exitCodeSkip
-		}
-		writeTerminationLog("%v", err)
-		return 1
+// handleCheckResult maps a CheckFunc return value to an exit code and
+// surfaces the reason (skip or failure) via slog and the termination log.
+// Writing the skip reason to the termination log is required for the
+// orchestrator's ValidatorResult.TerminationMsg to flow into the CTRF
+// report's TestResult.Message; without it skipped checks appear with a
+// null message in the signed evidence bundle.
+func handleCheckResult(err error) int {
+	if err == nil {
+		return 0
 	}
+	if errors.Is(err, errSkip) {
+		slog.Info("SKIP", "reason", err.Error())
+		writeTerminationFile(err.Error())
+		return exitCodeSkip
+	}
+	writeTerminationLog("%v", err)
+	return 1
+}
 
-	return 0
+// writeTerminationFile writes msg to the termination log path, truncated
+// to TerminationLogMaxSize. Does not emit any slog entry for the message
+// itself; callers log separately so the slog level can reflect skip vs.
+// failure. A failed write is logged at WARN — silent loss here is the
+// exact class of bug this code path exists to prevent.
+func writeTerminationFile(msg string) {
+	if len(msg) > defaults.TerminationLogMaxSize {
+		msg = msg[:defaults.TerminationLogMaxSize]
+	}
+	if err := os.WriteFile(filepath.Clean(terminationLogPath), []byte(msg), 0o600); err != nil { //nolint:gosec // Fixed path, not user-controlled
+		slog.Warn("failed to write termination log", "path", terminationLogPath, "error", err)
+	}
 }
 
 func writeTerminationLog(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	slog.Error("FAIL", "message", msg)
-	if len(msg) > defaults.TerminationLogMaxSize {
-		msg = msg[:defaults.TerminationLogMaxSize]
-	}
-	_ = os.WriteFile(filepath.Clean(terminationLogPath), []byte(msg), 0o600) //nolint:gosec // Fixed path, not user-controlled
+	writeTerminationFile(msg)
 }

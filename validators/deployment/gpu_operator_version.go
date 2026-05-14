@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/constraints"
@@ -40,8 +39,7 @@ func checkGPUOperatorVersion(ctx *validators.Context) error {
 	// Find the version constraint in the recipe
 	constraintExpr, found := findDeploymentConstraint(ctx, "Deployment.gpu-operator.version")
 	if !found {
-		slog.Info("no version constraint in recipe, reporting detected version only")
-		return nil
+		return validators.Skip(fmt.Sprintf("no Deployment.gpu-operator.version constraint in recipe; detected %s", version))
 	}
 
 	// Evaluate constraint
