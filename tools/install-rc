@@ -36,8 +36,8 @@ the current OS/architecture from github.com/${REPO}.
 
 Options:
   -t, --tag <tag>     Install a specific tag (e.g., v0.13.0-rc3).
-                      Defaults to the most recent prerelease that matches
-                      'v*-rc*' or any prerelease if no rc tag exists.
+                      Defaults to the most recent prerelease tag matching
+                      'v*-rc[0-9]+'.
   -d, --dir <path>    Install directory (default: ${DEFAULT_DIR}).
                       Tilde and \$HOME expansion are honored.
       --keep-tmp      Keep the temporary download directory for debugging.
@@ -90,7 +90,7 @@ case "$INSTALL_DIR" in
 esac
 
 # Required tools
-has_tools curl tar uname shasum
+has_tools curl tar uname shasum jq
 
 # Detect OS
 case "$(uname -s)" in
@@ -120,13 +120,18 @@ resolve_latest_rc() {
       echo "$picked"; return 0
     fi
   fi
-  # Fallback: GitHub REST API (unauthenticated, low rate limit)
+  # Fallback: GitHub REST API (unauthenticated, low rate limit).
+  # Apply the same draft/prerelease filtering as the gh path.
   local api="https://api.github.com/repos/${REPO}/releases?per_page=50"
   curl -fsSL "$api" 2>/dev/null \
-    | grep -E '"tag_name"' \
-    | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' \
-    | grep -E -- '-rc[0-9]+$' \
-    | head -1
+    | jq -r '
+        [ .[]
+          | select(.draft == false)
+          | select(.prerelease == true)
+          | .tag_name
+          | select(test("-rc[0-9]+$"))
+        ][0] // empty
+      '
 }
 
 if [[ -z "$TAG" ]]; then
@@ -135,8 +140,12 @@ if [[ -z "$TAG" ]]; then
   [[ -n "$TAG" ]] || err "Could not resolve a latest RC tag. Pass one with --tag."
 fi
 
-# Validate tag format: v<semver>-rc<n> OR allow any v<semver>... for explicit overrides
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+# Validate tag format strictly with a safe charset before deriving paths/URLs.
+# Accepts vMAJOR.MINOR.PATCH with optional dot/hyphen-separated alnum segments
+# (e.g., v1.2.3, v1.2.3-rc1, v1.2.3-beta.1). Rejects slashes, dots, underscores,
+# or any character that could enable path traversal when concatenated into URLs
+# or filesystem paths.
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]]; then
   err "Tag '$TAG' does not look like a release tag (expected vMAJOR.MINOR.PATCH[-rcN])."
 fi
 
