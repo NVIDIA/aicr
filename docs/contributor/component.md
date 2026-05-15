@@ -96,21 +96,21 @@ For components that need additional Kubernetes manifests (beyond the Helm chart)
 
 **Step 1: Create manifest file**
 
-Create `recipes/components/gpu-operator/manifests/dcgm-exporter.yaml`:
+Create `recipes/components/gpu-operator/manifests/kernel-module-params.yaml`:
 
 ```yaml
-# DCGM Exporter ConfigMap
+# Kernel module params ConfigMap (consumed by gpu-operator NvidiaDriver)
 {{- $gpuOp := index .Values "gpu-operator" }}
-{{- if and $gpuOp $gpuOp.dcgmExporter $gpuOp.dcgmExporter.config $gpuOp.dcgmExporter.config.create }}
+{{- if and $gpuOp $gpuOp.driver $gpuOp.driver.kernelModuleConfig $gpuOp.driver.kernelModuleConfig.name }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $gpuOp.dcgmExporter.config.name | default "dcgm-exporter" }}
+  name: {{ $gpuOp.driver.kernelModuleConfig.name | default "kernel-module-params" }}
   namespace: {{ .Release.Namespace }}
 data:
-  dcgm-metrics.csv: |
-    # Metrics configuration
+  nvidia.conf: |
+    options nvidia NVreg_GrdmaPciTopoCheckOverride=1
 {{- end }}
 ```
 
@@ -124,10 +124,18 @@ componentRefs:
     type: Helm
     version: v25.3.3
     manifestFiles:
-      - components/gpu-operator/manifests/dcgm-exporter.yaml
+      - components/gpu-operator/manifests/kernel-module-params.yaml
 ```
 
 The bundler automatically includes manifest files in the component's `manifests/` directory.
+
+**When to inline values instead.** If the upstream chart already exposes a
+templating hook for the resource you want to ship (e.g. the gpu-operator
+chart renders a dcgm-exporter ConfigMap directly from
+`dcgmExporter.config.data`), put the content in the component's
+`values.yaml` instead of adding a post-manifest. Inlining keeps the resource
+in the same Helm release as its consumer, so install ordering and upgrades
+are handled by Helm and an extra `kubectl apply` pass is unnecessary.
 
 ### Registry Configuration Reference
 

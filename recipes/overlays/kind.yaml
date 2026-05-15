@@ -54,14 +54,14 @@ spec:
         dcgm:
           # Disable standalone DCGM hostengine in kind - use embedded exporter
           enabled: false
-        # Disable custom DCGM exporter ConfigMap in kind — the manifest that
-        # creates it is applied AFTER helm --wait, causing a deadlock where
-        # ClusterPolicy stays InProgress waiting for exporter pods that need
-        # the ConfigMap. Use the exporter's built-in default metrics instead.
+        # Use the exporter's built-in default metrics in kind — the custom
+        # metrics list targets real datacenter GPUs (NVLink/profiling/etc.),
+        # most of which are unavailable on the simulated devices kind uses.
         dcgmExporter:
           config:
             create: false
             name: ""
+            data: ""
           # Exclude control-plane nodes — NFD labels them with GPU features
           # (shared host kernel) but they lack actual device access, causing
           # operand init containers to hang and ClusterPolicy to stay notReady.

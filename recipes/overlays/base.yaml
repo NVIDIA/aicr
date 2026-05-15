@@ -42,8 +42,6 @@ spec:
       source: https://helm.ngc.nvidia.com/nvidia
       version: v25.10.1
       valuesFile: components/gpu-operator/values.yaml
-      manifestFiles:
-        - components/gpu-operator/manifests/dcgm-exporter.yaml
       dependencyRefs:
         - nfd
         - cert-manager

@@ -39,8 +39,6 @@ spec:
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-gke-cos.yaml
-      manifestFiles:
-        - components/gpu-operator/manifests/dcgm-exporter.yaml
 
     # Enable Prometheus persistent storage for GKE (GKE PD CSI is built-in)
     - name: kube-prometheus-stack

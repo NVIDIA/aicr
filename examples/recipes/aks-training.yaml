@@ -61,8 +61,6 @@ componentRefs:
     dependencyRefs:
       - cert-manager
       - kube-prometheus-stack
-    manifestFiles:
-      - components/gpu-operator/manifests/dcgm-exporter.yaml
   - name: k8s-ephemeral-storage-metrics
     namespace: monitoring
     chart: k8s-ephemeral-storage-metrics

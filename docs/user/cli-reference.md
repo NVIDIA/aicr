@@ -1618,7 +1618,7 @@ bundles/
     ├── values.yaml
     ├── cluster-values.yaml
     └── templates/
-        └── dcgm-exporter.yaml
+        └── kernel-module-params.yaml
 ```
 
 **Folder layout rules:**

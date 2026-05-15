@@ -438,8 +438,8 @@ bundles.zip
 ├── gpu-operator/
 │   ├── values.yaml              # Helm chart values
 │   ├── manifests/
-│   │   ├── clusterpolicy.yaml   # ClusterPolicy CR
-│   │   └── dcgm-exporter.yaml   # DCGM Exporter config
+│   │   ├── clusterpolicy.yaml      # ClusterPolicy CR
+│   │   └── kernel-module-params.yaml  # GB200 kernel module params
 │   ├── scripts/
 │   │   ├── install.sh           # Installation script
 │   │   └── uninstall.sh         # Cleanup script

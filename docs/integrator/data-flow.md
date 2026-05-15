@@ -677,7 +677,7 @@ bundle-output/
 │   ├── values.yaml        # Component Helm values
 │   ├── README.md          # Component install/upgrade/uninstall
 │   └── manifests/         # Optional manifest files
-│       └── dcgm-exporter.yaml
+│       └── kernel-module-params.yaml
 └── network-operator/
     ├── values.yaml
     └── README.md
