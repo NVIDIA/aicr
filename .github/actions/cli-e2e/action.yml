@@ -23,12 +23,11 @@ inputs:
     description: 'GoReleaser version (e.g., v2.15.3)'
     required: true
   chainsaw_version:
-    description: 'Chainsaw version (e.g., v0.2.14)'
+    description: 'Chainsaw version (from .settings.yaml via load-versions)'
     required: true
   chainsaw_sha256:
-    description: 'Chainsaw SHA256 checksum for linux/amd64 (from .settings.yaml)'
-    required: false
-    default: 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e'
+    description: 'Chainsaw SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions)'
+    required: true
   helmfile_version:
     description: 'Helmfile version (e.g., v1.5.1) — required by tests/chainsaw/cli/bundle-helmfile'
     required: true
