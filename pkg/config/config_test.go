@@ -232,94 +232,77 @@ func TestValidate_Errors(t *testing.T) {
 	}
 }
 
-func TestValidate_SnapshotOnly(t *testing.T) {
-	cfg := &config.AICRConfig{
-		Kind:       config.Kind,
-		APIVersion: config.APIVersion,
-		Spec: config.Spec{
-			Snapshot: &config.SnapshotSpec{
+// TestValidate_Snapshot exercises Validate on the spec.snapshot section.
+// Cases share the same shape (build a config with snapshot only → call
+// Validate → assert error substring or nil) so they consolidate cleanly.
+func TestValidate_Snapshot(t *testing.T) {
+	tests := []struct {
+		name    string
+		snap    *config.SnapshotSpec
+		wantSub string // "" = expect no error
+	}{
+		{
+			name: "happy path snapshot only",
+			snap: &config.SnapshotSpec{
 				Output: &config.SnapshotOutputSpec{Path: "./snapshot.yaml"},
 				Agent: &config.SnapshotAgentSpec{
-					Namespace: "aicr-validation",
-					NodeSelector: map[string]string{
-						"nodeGroup": "gpu-worker",
-					},
-					Tolerations: []string{
-						"dedicated=gpu-workload:NoSchedule",
-					},
+					Namespace:    "aicr-validation",
+					NodeSelector: map[string]string{"nodeGroup": "gpu-worker"},
+					Tolerations:  []string{"dedicated=gpu-workload:NoSchedule"},
 				},
-				Execution: &config.SnapshotExecutionSpec{
-					Timeout: "5m",
-				},
+				Execution: &config.SnapshotExecutionSpec{Timeout: "5m"},
 			},
 		},
-	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-}
-
-func TestValidate_InvalidSnapshotTimeout(t *testing.T) {
-	cfg := &config.AICRConfig{
-		Kind:       config.Kind,
-		APIVersion: config.APIVersion,
-		Spec: config.Spec{
-			Snapshot: &config.SnapshotSpec{
+		{
+			name: "invalid timeout",
+			snap: &config.SnapshotSpec{
 				Execution: &config.SnapshotExecutionSpec{Timeout: "abc"},
 			},
+			wantSub: "spec.snapshot.execution.timeout",
 		},
-	}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.execution.timeout") {
-		t.Fatalf("expected timeout error, got %v", err)
-	}
-}
-
-func TestValidate_InvalidSnapshotFormat(t *testing.T) {
-	cfg := &config.AICRConfig{
-		Kind:       config.Kind,
-		APIVersion: config.APIVersion,
-		Spec: config.Spec{
-			Snapshot: &config.SnapshotSpec{
+		{
+			name: "invalid format",
+			snap: &config.SnapshotSpec{
 				Output: &config.SnapshotOutputSpec{Format: "xml"},
 			},
+			wantSub: "spec.snapshot.output.format",
 		},
-	}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.output.format") {
-		t.Fatalf("expected format error, got %v", err)
-	}
-}
-
-func TestValidate_InvalidSnapshotTolerations(t *testing.T) {
-	cfg := &config.AICRConfig{
-		Kind:       config.Kind,
-		APIVersion: config.APIVersion,
-		Spec: config.Spec{
-			Snapshot: &config.SnapshotSpec{
+		{
+			name: "invalid tolerations",
+			snap: &config.SnapshotSpec{
 				Agent: &config.SnapshotAgentSpec{Tolerations: []string{"::"}},
 			},
+			wantSub: "spec.snapshot.agent.tolerations",
 		},
-	}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.agent.tolerations") {
-		t.Fatalf("expected tolerations error, got %v", err)
-	}
-}
-
-func TestValidate_NegativeSnapshotMaxNodesPerEntry(t *testing.T) {
-	cfg := &config.AICRConfig{
-		Kind:       config.Kind,
-		APIVersion: config.APIVersion,
-		Spec: config.Spec{
-			Snapshot: &config.SnapshotSpec{
+		{
+			name: "negative maxNodesPerEntry",
+			snap: &config.SnapshotSpec{
 				Execution: &config.SnapshotExecutionSpec{MaxNodesPerEntry: -1},
 			},
+			wantSub: "spec.snapshot.execution.maxNodesPerEntry",
 		},
 	}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.execution.maxNodesPerEntry") {
-		t.Fatalf("expected maxNodesPerEntry error, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.AICRConfig{
+				Kind:       config.Kind,
+				APIVersion: config.APIVersion,
+				Spec:       config.Spec{Snapshot: tt.snap},
+			}
+			err := cfg.Validate()
+			if tt.wantSub == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+		})
 	}
 }
 

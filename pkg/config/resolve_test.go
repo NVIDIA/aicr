@@ -739,30 +739,36 @@ func TestValidateResolve_NilVsExplicitlyEmpty(t *testing.T) {
 
 // === SnapshotSpec.Resolve ===
 
-func TestSnapshotResolve_NilReceiver(t *testing.T) {
-	var s *config.SnapshotSpec
-	got, err := s.Resolve()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// TestSnapshotResolve_ShapeEdges covers the nil-receiver and empty-spec
+// cases together: both must return a non-nil, all-zero SnapshotResolved
+// so callers can read fields without nil-checking the result.
+func TestSnapshotResolve_ShapeEdges(t *testing.T) {
+	tests := []struct {
+		name string
+		in   *config.SnapshotSpec
+	}{
+		{"nil receiver", nil},
+		{"empty spec", &config.SnapshotSpec{}},
 	}
-	if got == nil {
-		t.Fatal("nil SnapshotResolved")
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.in.Resolve()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got == nil {
+				t.Fatal("nil SnapshotResolved")
+			}
+			if got.OutputPath != "" || got.OutputFormat != "" || got.OutputTemplate != "" ||
+				got.Namespace != "" || got.Image != "" || got.JobName != "" ||
+				got.ServiceAccountName != "" || got.RequireGPU || got.RuntimeClassName != "" ||
+				got.OS != "" || got.Requests != "" || got.Limits != "" || got.NoCleanup ||
+				got.MaxNodesPerEntry != 0 || got.Timeout != nil || got.Privileged != nil ||
+				got.NodeSelector != nil || got.Tolerations != nil || got.ImagePullSecrets != nil {
 
-func TestSnapshotResolve_EmptySpec(t *testing.T) {
-	got, err := (&config.SnapshotSpec{}).Resolve()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.OutputPath != "" || got.OutputFormat != "" || got.OutputTemplate != "" ||
-		got.Namespace != "" || got.Image != "" || got.JobName != "" ||
-		got.ServiceAccountName != "" || got.RequireGPU || got.RuntimeClassName != "" ||
-		got.OS != "" || got.Requests != "" || got.Limits != "" || got.NoCleanup ||
-		got.MaxNodesPerEntry != 0 || got.Timeout != nil || got.Privileged != nil ||
-		got.NodeSelector != nil || got.Tolerations != nil || got.ImagePullSecrets != nil {
-
-		t.Errorf("expected all zero, got %+v", got)
+				t.Errorf("expected all zero, got %+v", got)
+			}
+		})
 	}
 }
 
@@ -833,10 +839,54 @@ func TestSnapshotResolve_AllFieldsPopulated(t *testing.T) {
 	}
 }
 
+// TestSnapshotResolve_InvalidInput consolidates the wire-form parser
+// failure modes: every case is "bad input → expected error substring."
+func TestSnapshotResolve_InvalidInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      *config.SnapshotSpec
+		wantSub string
+	}{
+		{
+			name:    "invalid timeout",
+			in:      &config.SnapshotSpec{Execution: &config.SnapshotExecutionSpec{Timeout: "not-a-duration"}},
+			wantSub: "spec.snapshot.execution.timeout",
+		},
+		{
+			name:    "negative timeout",
+			in:      &config.SnapshotSpec{Execution: &config.SnapshotExecutionSpec{Timeout: "-5s"}},
+			wantSub: ">= 0",
+		},
+		{
+			name:    "negative maxNodesPerEntry",
+			in:      &config.SnapshotSpec{Execution: &config.SnapshotExecutionSpec{MaxNodesPerEntry: -1}},
+			wantSub: "spec.snapshot.execution.maxNodesPerEntry",
+		},
+		{
+			name:    "invalid toleration",
+			in:      &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{Tolerations: []string{"::"}}},
+			wantSub: "spec.snapshot.agent.tolerations",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.in.Resolve()
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestSnapshotResolve_ZeroTimeoutPreserved verifies that a config-supplied
+// "0s" surfaces as a non-nil zero, distinct from "field unset" (nil), so
+// callers like durationFlagOrConfig can honor an intentional
+// disable-timeout setting. Kept separate from the error-table because
+// the assertion shape (non-nil + dereferenced value) differs.
 func TestSnapshotResolve_ZeroTimeoutPreserved(t *testing.T) {
-	// A config-supplied "0s" must surface as a non-nil zero, distinct from
-	// "field unset" (nil), so callers like durationFlagOrConfig can honor
-	// an intentional disable-timeout setting.
 	s := &config.SnapshotSpec{Execution: &config.SnapshotExecutionSpec{Timeout: "0s"}}
 	got, err := s.Resolve()
 	if err != nil {
@@ -850,86 +900,94 @@ func TestSnapshotResolve_ZeroTimeoutPreserved(t *testing.T) {
 	}
 }
 
-func TestSnapshotResolve_InvalidTimeout(t *testing.T) {
-	s := &config.SnapshotSpec{Execution: &config.SnapshotExecutionSpec{Timeout: "not-a-duration"}}
-	_, err := s.Resolve()
-	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.execution.timeout") {
-		t.Fatalf("expected timeout error, got %v", err)
+// TestSnapshotResolve_DefensiveCloneOfCollections verifies Resolve does
+// not alias map/slice memory with the source spec, so callers mutating
+// the resolved value cannot leak into a shared config.
+func TestSnapshotResolve_DefensiveCloneOfCollections(t *testing.T) {
+	tests := []struct {
+		name   string
+		assert func(t *testing.T, srcSpec *config.SnapshotSpec, got *config.SnapshotResolved)
+	}{
+		{
+			name: "node selector",
+			assert: func(t *testing.T, srcSpec *config.SnapshotSpec, got *config.SnapshotResolved) {
+				got.NodeSelector["nodeGroup"] = "mutated"
+				if srcSpec.Agent.NodeSelector["nodeGroup"] != "gpu-worker" {
+					t.Errorf("Resolve must defensively clone NodeSelector; source mutated to %q",
+						srcSpec.Agent.NodeSelector["nodeGroup"])
+				}
+			},
+		},
+		{
+			name: "image pull secrets",
+			assert: func(t *testing.T, srcSpec *config.SnapshotSpec, got *config.SnapshotResolved) {
+				got.ImagePullSecrets[0] = "mutated"
+				if srcSpec.Agent.ImagePullSecrets[0] != "secret-a" {
+					t.Errorf("Resolve must defensively clone ImagePullSecrets; source mutated to %q",
+						srcSpec.Agent.ImagePullSecrets[0])
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{
+				NodeSelector:     map[string]string{"nodeGroup": "gpu-worker"},
+				ImagePullSecrets: []string{"secret-a"},
+			}}
+			got, err := src.Resolve()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			tt.assert(t, src, got)
+		})
 	}
 }
 
-func TestSnapshotResolve_NegativeTimeout(t *testing.T) {
-	s := &config.SnapshotSpec{Execution: &config.SnapshotExecutionSpec{Timeout: "-5s"}}
-	_, err := s.Resolve()
-	if err == nil || !strings.Contains(err.Error(), ">= 0") {
-		t.Fatalf("expected negative-timeout error, got %v", err)
+// TestSnapshotResolve_TolerationsNilVsExplicitlyEmpty pins the
+// distinguish-the-two-sentinels contract. Both cases share shape: build
+// a spec, call Resolve, assert on the resolved Tolerations slice.
+func TestSnapshotResolve_TolerationsNilVsExplicitlyEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		// nil = no Tolerations field on the input spec.
+		// non-nil with len 0 = explicit `tolerations: []`.
+		in       []string
+		wantNil  bool
+		wantLen0 bool
+	}{
+		{
+			// Downstream uses nil as the "no override" sentinel so
+			// the snapshotter's default (tolerate-all) applies.
+			name: "nil source → resolved nil",
+			in:   nil, wantNil: true,
+		},
+		{
+			// Explicit empty list opts out of tolerate-all; resolved
+			// must preserve the non-nil-but-empty shape.
+			name: "explicit [] source → resolved non-nil empty",
+			in:   []string{}, wantLen0: true,
+		},
 	}
-}
-
-func TestSnapshotResolve_NegativeMaxNodesPerEntry(t *testing.T) {
-	s := &config.SnapshotSpec{Execution: &config.SnapshotExecutionSpec{MaxNodesPerEntry: -1}}
-	_, err := s.Resolve()
-	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.execution.maxNodesPerEntry") {
-		t.Fatalf("expected maxNodesPerEntry error, got %v", err)
-	}
-}
-
-func TestSnapshotResolve_InvalidToleration(t *testing.T) {
-	s := &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{Tolerations: []string{"::"}}}
-	_, err := s.Resolve()
-	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.agent.tolerations") {
-		t.Fatalf("expected tolerations error, got %v", err)
-	}
-}
-
-func TestSnapshotResolve_DefensiveCloneOfNodeSelector(t *testing.T) {
-	src := map[string]string{"nodeGroup": "gpu-worker"}
-	s := &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{NodeSelector: src}}
-	got, err := s.Resolve()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got.NodeSelector["nodeGroup"] = "mutated"
-	if src["nodeGroup"] != "gpu-worker" {
-		t.Errorf("Resolve must defensively clone NodeSelector; source mutated to %q", src["nodeGroup"])
-	}
-}
-
-func TestSnapshotResolve_DefensiveCloneOfImagePullSecrets(t *testing.T) {
-	src := []string{"secret-a"}
-	s := &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{ImagePullSecrets: src}}
-	got, err := s.Resolve()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got.ImagePullSecrets[0] = "mutated"
-	if src[0] != "secret-a" {
-		t.Errorf("Resolve must defensively clone ImagePullSecrets; source mutated to %q", src[0])
-	}
-}
-
-func TestSnapshotResolve_NilVsExplicitlyEmpty(t *testing.T) {
-	// Tolerations nil → resolved nil. Downstream uses nil as the "no
-	// override" sentinel so the snapshotter's default (tolerate-all) applies.
-	s1 := &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{}}
-	got1, err := s1.Resolve()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got1.Tolerations != nil {
-		t.Errorf("nil source → expected nil Tolerations, got %v", got1.Tolerations)
-	}
-	// Tolerations [] → resolved non-nil empty slice (explicit opt-out).
-	s2 := &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{Tolerations: []string{}}}
-	got2, err := s2.Resolve()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got2.Tolerations == nil {
-		t.Error("explicit [] source → expected non-nil empty Tolerations, got nil")
-	}
-	if len(got2.Tolerations) != 0 {
-		t.Errorf("explicit [] source → expected len 0, got %v", got2.Tolerations)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &config.SnapshotSpec{Agent: &config.SnapshotAgentSpec{Tolerations: tt.in}}
+			got, err := s.Resolve()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantNil && got.Tolerations != nil {
+				t.Errorf("expected nil Tolerations, got %v", got.Tolerations)
+			}
+			if tt.wantLen0 {
+				if got.Tolerations == nil {
+					t.Error("expected non-nil empty Tolerations, got nil")
+				}
+				if len(got.Tolerations) != 0 {
+					t.Errorf("expected len 0, got %v", got.Tolerations)
+				}
+			}
+		})
 	}
 }
 
