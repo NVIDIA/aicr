@@ -84,6 +84,20 @@ type ComponentConfig struct {
 	//
 	// See https://github.com/NVIDIA/aicr/issues/915.
 	GKECriticalPriority bool `yaml:"gkeCriticalPriority,omitempty"`
+
+	// InstallsCRDs signals that the component's chart registers one or
+	// more CustomResourceDefinitions that other components in the same
+	// bundle may reference. The helmfile deployer splits its output
+	// into two sub-helmfiles when any referenced component carries this
+	// flag — CRD owners land in crds.yaml, everything else in
+	// releases.yaml — and the top-level helmfile.yaml processes the two
+	// sequentially. This sidesteps the helm-diff render pass running
+	// against the live REST mapper before any release is installed,
+	// which fails when a release's templates reference a CRD that has
+	// not yet been registered.
+	//
+	// See https://github.com/NVIDIA/aicr/issues/914.
+	InstallsCRDs bool `yaml:"installsCRDs,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.

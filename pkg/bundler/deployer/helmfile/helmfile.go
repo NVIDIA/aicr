@@ -40,6 +40,15 @@ const (
 	fileHelmfile = "helmfile.yaml"
 	// fileReadme is the user-facing apply/diff/destroy walkthrough.
 	fileReadme = "README.md"
+	// fileCRDsHelmfile holds the CRD-owner sub-helmfile when the bundle
+	// uses the split layout. Referenced from helmfile.yaml's helmfiles:
+	// list and processed first. Issue #914.
+	fileCRDsHelmfile = "crds.yaml"
+	// fileMainHelmfile holds the non-CRD-owner sub-helmfile when the
+	// bundle uses the split layout. Referenced second in helmfile.yaml's
+	// helmfiles: list so all CRDs are registered before its releases
+	// render.
+	fileMainHelmfile = "releases.yaml"
 )
 
 //go:embed templates/README.md.tmpl
@@ -156,23 +165,16 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
-	// Build helmfile.yaml from the written folders. buildHelmfile returns
-	// pkg/errors StructuredError values (e.g. ErrCodeInvalidRequest for
-	// unsupported folder kinds); use PropagateOrWrap so those codes survive
-	// rather than being overwritten with ErrCodeInternal.
-	doc, err := buildHelmfile(writeResult.Folders, namespaceByComponent, g.DynamicValues)
-	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to build helmfile document")
-	}
-	helmfilePath, helmfileSize, err := writeHelmfileYAML(outputDir, doc)
+	// Emit either the legacy single-file helmfile.yaml or the split
+	// helmfiles: layout depending on whether any referenced component
+	// is registry-marked InstallsCRDs (issue #914).
+	splitLayout, err := g.writeHelmfileLayout(outputDir, output, writeResult.Folders, sortedRefs, namespaceByComponent)
 	if err != nil {
 		return nil, err
 	}
-	output.Files = append(output.Files, helmfilePath)
-	output.TotalSize += helmfileSize
 
 	// README.md
-	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts)
+	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts, splitLayout)
 	if err != nil {
 		return nil, err
 	}
@@ -232,6 +234,74 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
+// writeHelmfileLayout decides between the legacy single-file layout
+// and the split multi-helmfiles layout (issue #914), writes the
+// appropriate files to outputDir, threads the file metadata into
+// output, and reports whether the split layout was used so the README
+// renderer can include the helmfiles: explainer.
+//
+// Selection:
+//   - No CRD-owner components → single helmfile.yaml (legacy path).
+//   - Every component is a CRD-owner → single helmfile.yaml (no
+//     non-CRD layer means the split would add no value).
+//   - Mixed → split layout: crds.yaml + releases.yaml + top-level
+//     helmfile.yaml with a helmfiles: list.
+func (g *Generator) writeHelmfileLayout(
+	outputDir string,
+	output *deployer.Output,
+	folders []localformat.Folder,
+	sortedRefs []recipe.ComponentRef,
+	namespaceByComponent map[string]string,
+) (bool, error) {
+
+	crdSet, err := componentsInstallingCRDs(sortedRefs)
+	if err != nil {
+		return false, errors.Wrap(errors.ErrCodeInternal,
+			"failed to load registry for CRD partition", err)
+	}
+	crdFolders, mainFolders := splitFoldersByCRD(folders, crdSet)
+
+	// buildHelmfile returns pkg/errors StructuredError values (e.g.
+	// ErrCodeInvalidRequest for unsupported folder kinds); use
+	// PropagateOrWrap so those codes survive rather than being
+	// overwritten with ErrCodeInternal.
+	writeDoc := func(folders []localformat.Folder, name string) error {
+		doc, buildErr := buildHelmfile(folders, namespaceByComponent, g.DynamicValues)
+		if buildErr != nil {
+			return errors.PropagateOrWrap(buildErr, errors.ErrCodeInternal,
+				fmt.Sprintf("failed to build %s", name))
+		}
+		path, size, writeErr := writeHelmfileYAMLAs(outputDir, doc, name)
+		if writeErr != nil {
+			return writeErr
+		}
+		output.Files = append(output.Files, path)
+		output.TotalSize += size
+		return nil
+	}
+
+	switch {
+	case len(crdFolders) == 0:
+		return false, writeDoc(mainFolders, fileHelmfile)
+	case len(mainFolders) == 0:
+		return false, writeDoc(crdFolders, fileHelmfile)
+	}
+
+	if err := writeDoc(crdFolders, fileCRDsHelmfile); err != nil {
+		return false, err
+	}
+	if err := writeDoc(mainFolders, fileMainHelmfile); err != nil {
+		return false, err
+	}
+	topPath, topSize, topErr := writeTopHelmfile(outputDir)
+	if topErr != nil {
+		return false, topErr
+	}
+	output.Files = append(output.Files, topPath)
+	output.TotalSize += topSize
+	return true, nil
+}
+
 // toLocalformatComponents maps the recipe ComponentRefs (already sorted by
 // deployment order) to the per-component inputs consumed by
 // localformat.Write, and returns a namespaceByComponent lookup that
@@ -266,10 +336,48 @@ func toLocalformatComponents(
 	return out, ns
 }
 
-// writeHelmfileYAML marshals doc to outputDir/helmfile.yaml. Marshals
+// writeHelmfileYAMLAs marshals doc to outputDir/<filename>. Marshals
 // directly to YAML (not via text/template) so field order is anchored to
-// the Helmfile struct and round-trip-stable across runs.
-func writeHelmfileYAML(outputDir string, doc Helmfile) (string, int64, error) {
+// the Helmfile struct and round-trip-stable across runs. The filename is
+// parameterized so the same writer powers the single-file layout
+// (helmfile.yaml) and the split layout's sub-helmfiles (crds.yaml,
+// releases.yaml).
+func writeHelmfileYAMLAs(outputDir string, doc Helmfile, filename string) (string, int64, error) {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("encode %s", filename), err)
+	}
+	if err := enc.Close(); err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("close %s encoder", filename), err)
+	}
+
+	path, err := deployer.SafeJoin(outputDir, filename)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("write %s", filename), err)
+	}
+	return path, int64(buf.Len()), nil
+}
+
+// writeTopHelmfile emits the split-layout top-level helmfile.yaml with
+// a fixed helmfiles: list referencing crds.yaml first and releases.yaml
+// second. The body is intentionally minimal — repositories and
+// helmDefaults live in the sub-files so each layer can declare only
+// what it needs.
+func writeTopHelmfile(outputDir string) (string, int64, error) {
+	doc := TopHelmfile{
+		Helmfiles: []SubHelmfileRef{
+			{Path: fileCRDsHelmfile},
+			{Path: fileMainHelmfile},
+		},
+	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -290,12 +398,54 @@ func writeHelmfileYAML(outputDir string, doc Helmfile) (string, int64, error) {
 	return path, int64(buf.Len()), nil
 }
 
+// componentsInstallingCRDs returns a set of component names from refs
+// that the registry marks InstallsCRDs. Loaded once per Generate so
+// the partition step does a single registry round-trip.
+func componentsInstallingCRDs(refs []recipe.ComponentRef) (map[string]bool, error) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		cfg := registry.Get(ref.Name)
+		if cfg != nil && cfg.InstallsCRDs {
+			out[ref.Name] = true
+		}
+	}
+	return out, nil
+}
+
+// splitFoldersByCRD partitions the localformat folders into a CRD-layer
+// group and a main-layer group, preserving the original order within
+// each group. A folder is classified by its parent component name, so
+// the auxiliary -pre and -post folders inherit their primary's
+// classification (all three travel together to the same sub-helmfile).
+//
+// crdComponents is the lookup table built by componentsInstallingCRDs.
+// A nil or empty map yields an empty crd slice and main = folders.
+func splitFoldersByCRD(folders []localformat.Folder, crdComponents map[string]bool) (crd, main []localformat.Folder) {
+	for _, f := range folders {
+		if crdComponents[f.Parent] {
+			crd = append(crd, f)
+		} else {
+			main = append(main, f)
+		}
+	}
+	return crd, main
+}
+
 // readmeData is the template data for README.md generation.
 type readmeData struct {
 	BundlerVersion string
 	HasDynamic     bool
 	HasVendored    bool
-	Components     []readmeComponent
+	// HasCRDLayer is true when the bundle uses the split-helmfile
+	// layout (crds.yaml + releases.yaml referenced from helmfile.yaml's
+	// helmfiles: list). Drives a short README note explaining the
+	// structure to operators. Issue #914.
+	HasCRDLayer bool
+	Components  []readmeComponent
 }
 
 type readmeComponent struct {
@@ -305,11 +455,12 @@ type readmeComponent struct {
 }
 
 // writeReadme renders README.md from the embedded template.
-func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored bool) (string, int64, error) {
+func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored, hasCRDLayer bool) (string, int64, error) {
 	data := readmeData{
 		BundlerVersion: deployer.NormalizeVersionWithDefault(version),
 		HasDynamic:     hasDynamic,
 		HasVendored:    hasVendored,
+		HasCRDLayer:    hasCRDLayer,
 		Components:     make([]readmeComponent, 0, len(refs)),
 	}
 	for _, r := range refs {

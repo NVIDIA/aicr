@@ -58,10 +58,16 @@ func TestGenerate_Scenarios(t *testing.T) {
 		goldens []string
 	}{
 		{
-			// Simplest case: two upstream-helm components in deployment
-			// order. Verifies repository dedupe, release ordering via
-			// needs:, and values-path normalization. README is included
-			// to lock its component-table rendering.
+			// Two-component split-layout case (issue #914):
+			// cert-manager is registry-marked InstallsCRDs, so the
+			// generator emits a top-level helmfile.yaml with a
+			// helmfiles: list referencing crds.yaml (cert-manager) and
+			// releases.yaml (gpu-operator). The needs: edge from
+			// gpu-operator to cert-manager dissolves at the
+			// sub-helmfile boundary — helmfile processes the list
+			// sequentially, so cert-manager's CRDs are registered
+			// before releases.yaml renders. README is included to
+			// lock its component-table rendering.
 			name: "upstream_helm_only",
 			gen: &Generator{
 				RecipeResult: recipeWith(
@@ -74,7 +80,7 @@ func TestGenerate_Scenarios(t *testing.T) {
 				},
 				Version: testBundlerVersion,
 			},
-			goldens: []string{"helmfile.yaml", "README.md"},
+			goldens: []string{"helmfile.yaml", "crds.yaml", "releases.yaml", "README.md"},
 		},
 		{
 			// cluster-values.yaml must be referenced in the release's
@@ -738,12 +744,51 @@ func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
 	}
 }
 
-// assertHelmfileShape parses helmfile.yaml and verifies the document has
-// the three top-level keys we always emit, plus that every release has
-// the required name/namespace/chart fields. Catches indentation /
-// missing-key regressions without locking the test to literal byte
-// content (those are caught separately by the golden compare).
+// assertHelmfileShape parses helmfile.yaml at path and verifies its
+// structural invariants. Two layouts are supported:
+//
+//   - Single-file: helmfile.yaml IS a leaf with releases/helmDefaults.
+//   - Split (issue #914): helmfile.yaml is a TopHelmfile carrying a
+//     helmfiles: list pointing at crds.yaml + releases.yaml siblings.
+//
+// In the split case the top-level file is validated for the helmfiles:
+// list shape and each leaf sub-helmfile is recursively checked.
 func assertHelmfileShape(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	// Try top-level multi-helmfiles layout first. yaml.v3 is permissive
+	// and would also parse this into Helmfile{} with empty fields, so
+	// gate on a populated Helmfiles list to detect intent.
+	var top TopHelmfile
+	if topErr := yaml.Unmarshal(data, &top); topErr == nil && len(top.Helmfiles) > 0 {
+		dir := filepath.Dir(path)
+		for _, sub := range top.Helmfiles {
+			if sub.Path == "" {
+				t.Errorf("helmfiles entry has empty path")
+				continue
+			}
+			subPath := filepath.Join(dir, sub.Path)
+			if _, statErr := os.Stat(subPath); statErr != nil {
+				t.Errorf("helmfiles entry %q does not resolve to a file: %v",
+					sub.Path, statErr)
+				continue
+			}
+			assertHelmfileLeafShape(t, subPath)
+		}
+		return
+	}
+
+	assertHelmfileLeafShape(t, path)
+}
+
+// assertHelmfileLeafShape verifies the structural invariants of a leaf
+// helmfile.yaml or sub-helmfile (crds.yaml / releases.yaml in the split
+// layout): non-zero helmDefaults.timeout and per-release sanity checks.
+func assertHelmfileLeafShape(t *testing.T, path string) {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -754,17 +799,17 @@ func assertHelmfileShape(t *testing.T, path string) {
 		t.Fatalf("parse %s: %v\n--- content ---\n%s", path, err, data)
 	}
 	if doc.HelmDefaults.Timeout == 0 {
-		t.Errorf("helmDefaults.timeout should be non-zero, got 0")
+		t.Errorf("%s: helmDefaults.timeout should be non-zero, got 0", path)
 	}
 	for i, rel := range doc.Releases {
 		if rel.Name == "" {
-			t.Errorf("releases[%d].name is empty", i)
+			t.Errorf("%s: releases[%d].name is empty", path, i)
 		}
 		if rel.Namespace == "" {
-			t.Errorf("releases[%d] (%s).namespace is empty", i, rel.Name)
+			t.Errorf("%s: releases[%d] (%s).namespace is empty", path, i, rel.Name)
 		}
 		if rel.Chart == "" {
-			t.Errorf("releases[%d] (%s).chart is empty", i, rel.Name)
+			t.Errorf("%s: releases[%d] (%s).chart is empty", path, i, rel.Name)
 		}
 		// KindUpstreamHelm releases must carry a version; KindLocalHelm
 		// (chart: ./<dir>) must not (helmfile would otherwise reject the
@@ -772,11 +817,11 @@ func assertHelmfileShape(t *testing.T, path string) {
 		isLocal := strings.HasPrefix(rel.Chart, "./")
 		switch {
 		case isLocal && rel.Version != "":
-			t.Errorf("releases[%d] (%s) is a local chart but has version=%q",
-				i, rel.Name, rel.Version)
+			t.Errorf("%s: releases[%d] (%s) is a local chart but has version=%q",
+				path, i, rel.Name, rel.Version)
 		case !isLocal && rel.Version == "":
-			t.Errorf("releases[%d] (%s) references an upstream chart %q but has no version",
-				i, rel.Name, rel.Chart)
+			t.Errorf("%s: releases[%d] (%s) references an upstream chart %q but has no version",
+				path, i, rel.Name, rel.Chart)
 		}
 	}
 }

@@ -86,44 +86,75 @@ spec:
               ($error == null): true
 
     - name: helmfile-top-level-shape
-      description: helmfile.yaml has the expected top-level keys and defaults.
+      description: |
+        helmfile.yaml has the expected top-level keys and defaults.
+        Issue #914 added a split-helmfile layout: when the recipe
+        contains any CRD-installing component, helmfile.yaml is a thin
+        `helmfiles: [crds.yaml, releases.yaml]` orchestrator and the
+        leaf shape lives in the sub-files. This step walks whichever
+        layout the bundle produced.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
-              HF="${WORK}/basic/helmfile.yaml"
-              # Top-level keys we always emit.
-              grep -q "^repositories:" "${HF}" \
-                || { echo "missing repositories: block" >&2; exit 1; }
-              grep -q "^helmDefaults:" "${HF}" \
-                || { echo "missing helmDefaults: block" >&2; exit 1; }
-              grep -q "^releases:" "${HF}" \
-                || { echo "missing releases: block" >&2; exit 1; }
-              # Default wait/timeout/createNamespace settings.
-              grep -q "wait: true" "${HF}" \
-                || { echo "helmDefaults.wait should be true" >&2; exit 1; }
-              grep -q "timeout: 600" "${HF}" \
-                || { echo "helmDefaults.timeout should be 600 (10m)" >&2; exit 1; }
-              grep -q "createNamespace: true" "${HF}" \
-                || { echo "helmDefaults.createNamespace should be true" >&2; exit 1; }
+              TOP="${WORK}/basic/helmfile.yaml"
+              # Resolve leaf helmfile docs. Split layout (issue #914)
+              # carries the leaf shape in crds.yaml + releases.yaml;
+              # legacy single-file layout keeps it in helmfile.yaml.
+              if grep -q "^helmfiles:" "${TOP}"; then
+                # Top-level must list both sub-helmfiles in order.
+                grep -q "path: crds.yaml" "${TOP}" \
+                  || { echo "split layout missing crds.yaml entry" >&2; exit 1; }
+                grep -q "path: releases.yaml" "${TOP}" \
+                  || { echo "split layout missing releases.yaml entry" >&2; exit 1; }
+                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+              else
+                LEAVES="${TOP}"
+              fi
+              for HF in ${LEAVES}; do
+                # Top-level keys we always emit in a leaf.
+                grep -q "^repositories:" "${HF}" \
+                  || { echo "${HF}: missing repositories: block" >&2; exit 1; }
+                grep -q "^helmDefaults:" "${HF}" \
+                  || { echo "${HF}: missing helmDefaults: block" >&2; exit 1; }
+                grep -q "^releases:" "${HF}" \
+                  || { echo "${HF}: missing releases: block" >&2; exit 1; }
+                # Default wait/timeout/createNamespace settings.
+                grep -q "wait: true" "${HF}" \
+                  || { echo "${HF}: helmDefaults.wait should be true" >&2; exit 1; }
+                grep -q "timeout: 600" "${HF}" \
+                  || { echo "${HF}: helmDefaults.timeout should be 600 (10m)" >&2; exit 1; }
+                grep -q "createNamespace: true" "${HF}" \
+                  || { echo "${HF}: helmDefaults.createNamespace should be true" >&2; exit 1; }
+              done
             check:
               ($error == null): true
 
     - name: needs-ordering
       description: >
-        First release has no needs entry; every subsequent release lists exactly
-        its immediate predecessor — verifies the linear deployment chain.
+        First release in each helmfile leaf has no needs entry; every
+        subsequent release in the same leaf lists exactly its immediate
+        predecessor — verifies the linear deployment chain. In the
+        split layout (issue #914) the chain restarts per sub-helmfile
+        because helmfile processes sub-helmfiles sequentially and the
+        cross-boundary edge dissolves.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
-              HF="${WORK}/basic/helmfile.yaml"
+              TOP="${WORK}/basic/helmfile.yaml"
+              if grep -q "^helmfiles:" "${TOP}"; then
+                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+              else
+                LEAVES="${TOP}"
+              fi
+              for HF in ${LEAVES}; do
               # Extract every release name in declaration order.
               names=$(awk '
                 /^releases:/ {in_releases=1; next}
                 in_releases && /^  - name: / {print $3}
               ' "${HF}")
-              [ -n "$names" ] || { echo "no releases parsed" >&2; exit 1; }
+              [ -n "$names" ] || { echo "${HF}: no releases parsed" >&2; exit 1; }
               count=$(printf "%s\n" "$names" | wc -l | tr -d ' ')
               # At least one release must exist; the chain-walk below
               # naturally skips when count==1 (only release[0] validation
@@ -185,59 +216,82 @@ spec:
               $names
               EOF
               [ "$missing_needs_count" -eq 0 ] \
-                || { echo "$missing_needs_count releases missing needs:" >&2; exit 1; }
-              echo "needs: chain valid across $count releases"
+                || { echo "${HF}: $missing_needs_count releases missing needs:" >&2; exit 1; }
+              echo "${HF}: needs: chain valid across $count releases"
+              done
             check:
               ($error == null): true
 
     - name: repository-deduplication
-      description: Components sharing a chart-repo URL produce a single repositories[] entry.
+      description: >
+        Components sharing a chart-repo URL produce a single
+        repositories[] entry per helmfile leaf. In the split layout
+        (issue #914) each sub-helmfile keeps its own repositories: list
+        scoped to just the releases it owns, so the invariant holds
+        within each leaf rather than across the bundle.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
-              HF="${WORK}/basic/helmfile.yaml"
-              # Repository entries — names are unique by construction.
-              repo_count=$(awk '
-                /^repositories:/ {in_repos=1; next}
-                in_repos && /^[a-z]/ {in_repos=0}
-                in_repos && /^  - name:/ {n++}
-                END {print n+0}
-              ' "${HF}")
-              # Distinct release.chart values of the form <alias>/<chart>.
-              release_repo_refs=$(awk '
-                /^releases:/ {in_releases=1; next}
-                in_releases && /^    chart: [^.]/ {
-                  split($2, parts, "/"); print parts[1]
-                }
-              ' "${HF}" | sort -u | wc -l | tr -d ' ')
-              # Dedup invariant: the number of repository entries equals the number
-              # of distinct alias prefixes referenced by upstream-helm releases.
-              [ "$repo_count" -eq "$release_repo_refs" ] \
-                || { echo "repo dedup mismatch: $repo_count repo entries vs $release_repo_refs distinct aliases" >&2; exit 1; }
+              TOP="${WORK}/basic/helmfile.yaml"
+              if grep -q "^helmfiles:" "${TOP}"; then
+                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+              else
+                LEAVES="${TOP}"
+              fi
+              for HF in ${LEAVES}; do
+                # Repository entries — names are unique by construction.
+                repo_count=$(awk '
+                  /^repositories:/ {in_repos=1; next}
+                  in_repos && /^[a-z]/ {in_repos=0}
+                  in_repos && /^  - name:/ {n++}
+                  END {print n+0}
+                ' "${HF}")
+                # Distinct release.chart values of the form <alias>/<chart>.
+                release_repo_refs=$(awk '
+                  /^releases:/ {in_releases=1; next}
+                  in_releases && /^    chart: [^.]/ {
+                    split($2, parts, "/"); print parts[1]
+                  }
+                ' "${HF}" | sort -u | wc -l | tr -d ' ')
+                # Dedup invariant: the number of repository entries equals the number
+                # of distinct alias prefixes referenced by upstream-helm releases.
+                [ "$repo_count" -eq "$release_repo_refs" ] \
+                  || { echo "${HF}: repo dedup mismatch: $repo_count repo entries vs $release_repo_refs distinct aliases" >&2; exit 1; }
+              done
             check:
               ($error == null): true
 
     - name: per-component-values-paths
-      description: Every release values list references real files under its NNN-<name>/ dir.
+      description: >
+        Every release values list references real files under its
+        NNN-<name>/ dir. Iterates per leaf helmfile so the split layout
+        (issue #914) gets the same coverage as the single-file layout.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
-              HF="${WORK}/basic/helmfile.yaml"
-              # Extract every values: path (entries start with "./").
-              awk '
-                /^releases:/ {in_releases=1; next}
-                in_releases && /^    values:/ {in_values=1; next}
-                in_values && /^      - / {print substr($0, 9)}
-                in_values && /^    [a-z]/ {in_values=0}
-                in_values && /^  - name:/ {in_values=0}
-              ' "${HF}" | while IFS= read -r path; do
-                [ -z "$path" ] && continue
-                # Strip leading "./" for filesystem check.
-                file="${WORK}/basic/${path#./}"
-                test -f "$file" \
-                  || { echo "values path $path does not resolve to an existing file" >&2; exit 1; }
+              TOP="${WORK}/basic/helmfile.yaml"
+              if grep -q "^helmfiles:" "${TOP}"; then
+                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+              else
+                LEAVES="${TOP}"
+              fi
+              for HF in ${LEAVES}; do
+                # Extract every values: path (entries start with "./").
+                awk '
+                  /^releases:/ {in_releases=1; next}
+                  in_releases && /^    values:/ {in_values=1; next}
+                  in_values && /^      - / {print substr($0, 9)}
+                  in_values && /^    [a-z]/ {in_values=0}
+                  in_values && /^  - name:/ {in_values=0}
+                ' "${HF}" | while IFS= read -r path; do
+                  [ -z "$path" ] && continue
+                  # Strip leading "./" for filesystem check.
+                  file="${WORK}/basic/${path#./}"
+                  test -f "$file" \
+                    || { echo "${HF}: values path $path does not resolve to an existing file" >&2; exit 1; }
+                done
               done
             check:
               ($error == null): true
@@ -246,13 +300,27 @@ spec:
       description: >
         kai-scheduler is hardcoded as async in the helm deployer; the helmfile
         deployer mirrors this with wait: false + timeout: 1200 on the matching
-        release. Skipped when the recipe does not include kai-scheduler.
+        release. kai-scheduler is not a CRD-owner, so in the split layout
+        (issue #914) it lands in releases.yaml — the search walks every leaf.
+        Skipped when the recipe does not include kai-scheduler.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
-              HF="${WORK}/basic/helmfile.yaml"
-              if ! grep -q "name: kai-scheduler" "${HF}"; then
+              TOP="${WORK}/basic/helmfile.yaml"
+              if grep -q "^helmfiles:" "${TOP}"; then
+                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+              else
+                LEAVES="${TOP}"
+              fi
+              HF=""
+              for candidate in ${LEAVES}; do
+                if grep -q "name: kai-scheduler" "${candidate}"; then
+                  HF="${candidate}"
+                  break
+                fi
+              done
+              if [ -z "${HF}" ]; then
                 echo "kai-scheduler not in this recipe; skipping override assertion"
                 exit 0
               fi
@@ -310,23 +378,41 @@ spec:
                 || { echo "missing cluster-values.yaml under $(basename "$gpu_dir")" >&2; exit 1; }
 
               # The release's values: list must reference both values.yaml and
-              # cluster-values.yaml.
-              HF="${WORK}/dynamic-out/helmfile.yaml"
+              # cluster-values.yaml. In the split layout (issue #914)
+              # gpu-operator (not a CRD-owner) lives in releases.yaml;
+              # search every leaf so the test is layout-agnostic.
+              TOP="${WORK}/dynamic-out/helmfile.yaml"
+              if grep -q "^helmfiles:" "${TOP}"; then
+                LEAVES="${WORK}/dynamic-out/crds.yaml ${WORK}/dynamic-out/releases.yaml"
+              else
+                LEAVES="${TOP}"
+              fi
               gpu_dir_name=$(basename "$gpu_dir")
-              grep -q "./${gpu_dir_name}/values.yaml" "${HF}" \
-                || { echo "helmfile.yaml missing values.yaml reference for gpu-operator" >&2; exit 1; }
-              grep -q "./${gpu_dir_name}/cluster-values.yaml" "${HF}" \
-                || { echo "helmfile.yaml missing cluster-values.yaml reference for gpu-operator" >&2; exit 1; }
+              found_values=false
+              found_cluster=false
+              for HF in ${LEAVES}; do
+                grep -q "./${gpu_dir_name}/values.yaml" "${HF}" && found_values=true
+                grep -q "./${gpu_dir_name}/cluster-values.yaml" "${HF}" && found_cluster=true
+              done
+              [ "$found_values" = "true" ] \
+                || { echo "no leaf helmfile references values.yaml for gpu-operator" >&2; exit 1; }
+              [ "$found_cluster" = "true" ] \
+                || { echo "no leaf helmfile references cluster-values.yaml for gpu-operator" >&2; exit 1; }
             check:
               ($error == null): true
 
     - name: yaml-validity
-      description: helmfile.yaml and every component values file pass yamllint.
+      description: >
+        Every helmfile leaf and component values file passes yamllint.
+        Split-layout sub-helmfiles (crds.yaml + releases.yaml, issue
+        #914) are included via the glob — missing files are skipped.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
               for yamlfile in "${WORK}"/basic/helmfile.yaml \
+                              "${WORK}"/basic/crds.yaml \
+                              "${WORK}"/basic/releases.yaml \
                               "${WORK}"/basic/[0-9][0-9][0-9]-*/values.yaml; do
                 [ -f "$yamlfile" ] || continue
                 yamllint -d '{extends: relaxed, rules: {trailing-spaces: disable}}' "$yamlfile" \

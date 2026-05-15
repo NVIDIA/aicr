@@ -35,6 +35,25 @@ type Helmfile struct {
 	Releases     []Release    `yaml:"releases"`
 }
 
+// TopHelmfile is the multi-sub-helmfile orchestration document emitted
+// when the bundle contains any release whose parent component is
+// registry-marked InstallsCRDs. helmfile processes the helmfiles: list
+// sequentially, so by the time the second sub-helmfile renders, every
+// CRD installed by the first is already registered with the cluster's
+// REST mapper. This sidesteps the helm-diff render pass running against
+// a fresh cluster's empty REST mapper.
+//
+// See https://github.com/NVIDIA/aicr/issues/914.
+type TopHelmfile struct {
+	Helmfiles []SubHelmfileRef `yaml:"helmfiles"`
+}
+
+// SubHelmfileRef is one entry in TopHelmfile.Helmfiles. Helmfile resolves
+// path relative to the parent helmfile.yaml.
+type SubHelmfileRef struct {
+	Path string `yaml:"path"`
+}
+
 // Repository is one entry in helmfile's top-level repositories: list.
 // Helmfile resolves release.chart values of the form "<name>/<chart>"
 // against this list at apply time.

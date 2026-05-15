@@ -158,11 +158,7 @@ parallelism and idempotent re-apply. This will take a few min.
 
 ```shell
 cd ./bundle
-# --skip-diff-on-install avoids a fresh-cluster CRD/CR ordering trap where
-# helm-diff renders nodewright-customizations (kind: Skyhook) against live
-# discovery before nodewright-operator has registered the Skyhook CRD.
-# See https://github.com/NVIDIA/aicr/issues/914.
-helmfile apply --skip-diff-on-install
+helmfile apply
 cd ..
 ```
 

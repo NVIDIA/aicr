@@ -160,6 +160,10 @@ components:
     displayName: cert-manager
     valueOverrideKeys:
       - certmanager
+    # Registers Certificate, Issuer, ClusterIssuer, Order, Challenge, and
+    # CertificateRequest CRDs that downstream components (agentgateway,
+    # webhooks, monitoring) reference. Issue #914.
+    installsCRDs: true
     healthCheck:
       assertFile: checks/cert-manager/health-check.yaml
     helm:
@@ -185,6 +189,11 @@ components:
     valueOverrideKeys:
       - nodewright
       - skyhook
+    # Registers the Skyhook CRD that nodewright-customizations references
+    # via kind: Skyhook. The originating failure mode for issue #914 —
+    # helm-diff on nodewright-customizations renders against the live REST
+    # mapper before nodewright-operator has registered the CRD.
+    installsCRDs: true
     healthCheck:
       assertFile: checks/nodewright-operator/health-check.yaml
     helm:
@@ -244,6 +253,9 @@ components:
     displayName: nvsentinel
     valueOverrideKeys:
       - nv-sentinel
+    # Registers HealthCheck / NodeHealth CRDs consumed by sibling
+    # observability and triage components. Issue #914.
+    installsCRDs: true
     healthCheck:
       assertFile: checks/nvsentinel/health-check.yaml
     helm:
@@ -286,6 +298,11 @@ components:
     valueOverrideKeys:
       - prometheus
       - kubeprometheusstack
+    # Registers ServiceMonitor, PodMonitor, AlertmanagerConfig,
+    # Prometheus, Alertmanager, ThanosRuler, PrometheusRule, and
+    # Probe CRDs that downstream observability components reference.
+    # Issue #914.
+    installsCRDs: true
     healthCheck:
       assertFile: checks/kube-prometheus-stack/health-check.yaml
     helm:
@@ -434,6 +451,9 @@ components:
     displayName: agentgateway-crds
     valueOverrideKeys:
       - agentgatewaycrds
+    # CRDs-only chart; agentgateway consumes the kinds it registers.
+    # Issue #914.
+    installsCRDs: true
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway-crds
@@ -531,6 +551,9 @@ components:
     valueOverrideKeys:
       - slinkyslurmoperatorcrds
       - slurmoperatorcrds
+    # CRDs-only chart; slinky-slurm-operator consumes the kinds it
+    # registers. Issue #914.
+    installsCRDs: true
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
