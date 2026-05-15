@@ -68,6 +68,12 @@ demos/images/*local.png
 demos/*local.md
 bundle.zip
 image-oci
+/aicr-config.yaml
+/snapshot.yaml
+/dry-run.json
+/evidence
+/report.json
+/evidence-result.json
 
 # =============================================================================
 # Terraform
