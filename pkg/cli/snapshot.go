@@ -18,16 +18,215 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/urfave/cli/v3"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/collector"
+	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
+
+// resolveSnapshotNodeSelector resolves the snapshot node selector with
+// CLI-overrides-config precedence. The CLI flag is a repeated string in
+// key=value form; the config value is already a typed map. Either source
+// can be empty; the result preserves the same nil-vs-empty semantics.
+func resolveSnapshotNodeSelector(cmd *cli.Command, resolved *config.SnapshotResolved) (map[string]string, error) {
+	if cmd.IsSet("node-selector") {
+		ns, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
+		}
+		if resolved.NodeSelector != nil {
+			slog.Info("CLI flag overriding config value", "flag", "node-selector",
+				"config", resolved.NodeSelector, "override", ns)
+		}
+		return ns, nil
+	}
+	return resolved.NodeSelector, nil
+}
+
+// resolveSnapshotTolerations resolves the snapshot toleration list with
+// CLI-overrides-config precedence.
+//
+// Behavior preserves the pre-config semantics of `aicr snapshot`:
+//   - CLI flag set: parse the CLI value (empty input → DefaultTolerations).
+//   - CLI unset, config set: use the config value (a non-nil empty slice
+//     in config means "operator opted out of the tolerate-all default").
+//   - CLI unset, config unset: fall through to DefaultTolerations()
+//     (the legacy snapshot behavior — without it, an aicr snapshot
+//     invocation that does not pass --toleration would suddenly stop
+//     tolerating tainted nodes).
+func resolveSnapshotTolerations(cmd *cli.Command, resolved *config.SnapshotResolved) ([]corev1.Toleration, error) {
+	if cmd.IsSet("toleration") {
+		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
+		}
+		if resolved.Tolerations != nil {
+			slog.Info("CLI flag overriding config value", "flag", "toleration",
+				"config", resolved.Tolerations, "override", tols)
+		}
+		return tols, nil
+	}
+	if resolved.Tolerations != nil {
+		return resolved.Tolerations, nil
+	}
+	return snapshotter.DefaultTolerations(), nil
+}
+
+// snapshotCmdOptions holds every option resolved by parseSnapshotCmdOptions,
+// in the form used by both the Action's deploy path and tests that want to
+// assert on the merged CLI-overrides-config result. Resource lists and
+// tolerations are typed so callers do not re-parse them.
+type snapshotCmdOptions struct {
+	kubeconfig         string
+	namespace          string
+	image              string
+	imagePullSecrets   []string
+	jobName            string
+	serviceAccountName string
+	nodeSelector       map[string]string
+	tolerations        []corev1.Toleration
+	timeout            time.Duration
+	cleanup            bool
+	debug              bool
+	privileged         bool
+	requireGPU         bool
+	runtimeClass       string
+	os                 string
+	maxNodesPerEntry   int
+	requests           corev1.ResourceList
+	limits             corev1.ResourceList
+	tmplOpts           *snapshotTemplateOptions
+}
+
+// toAgentConfig converts the resolved options into the snapshotter.AgentConfig
+// the snapshotter deploy path expects.
+func (o *snapshotCmdOptions) toAgentConfig() *snapshotter.AgentConfig {
+	return &snapshotter.AgentConfig{
+		Kubeconfig:         o.kubeconfig,
+		Namespace:          o.namespace,
+		Image:              o.image,
+		ImagePullSecrets:   o.imagePullSecrets,
+		JobName:            o.jobName,
+		ServiceAccountName: o.serviceAccountName,
+		NodeSelector:       o.nodeSelector,
+		Tolerations:        o.tolerations,
+		Timeout:            o.timeout,
+		Cleanup:            o.cleanup,
+		Output:             o.tmplOpts.outputPath,
+		Debug:              o.debug,
+		Privileged:         o.privileged,
+		RequireGPU:         o.requireGPU,
+		RuntimeClassName:   o.runtimeClass,
+		TemplatePath:       o.tmplOpts.templatePath,
+		MaxNodesPerEntry:   o.maxNodesPerEntry,
+		OS:                 o.os,
+		Requests:           o.requests,
+		Limits:             o.limits,
+	}
+}
+
+// parseSnapshotCmdOptions resolves snapshot command inputs by merging CLI
+// flags with the optional --config (AICRConfig) source. CLI flags always win
+// over config values. Returns a fully-typed snapshotCmdOptions that callers
+// can pass to the snapshotter without further parsing.
+func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapshotCmdOptions, error) {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits"); err != nil {
+		return nil, err
+	}
+
+	resolved, err := cfg.Snapshot().Resolve()
+	if err != nil {
+		return nil, err
+	}
+
+	// Normalize/validate the --os value via the recipe parser so that
+	// only documented OS criteria values reach the agent and the
+	// in-pod collector factory.
+	osVal := stringFlagOrConfig(cmd, "os", resolved.OS)
+	if osVal != "" {
+		parsedOS, parseErr := recipe.ParseCriteriaOSType(osVal)
+		if parseErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --os value", parseErr)
+		}
+		osVal = string(parsedOS)
+	}
+
+	requireGPU := boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU)
+	runtimeClass := stringFlagOrConfig(cmd, "runtime-class", resolved.RuntimeClassName)
+
+	// Mutual exclusion: --require-gpu and --runtime-class cannot be used together
+	if requireGPU && runtimeClass != "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--require-gpu and --runtime-class are mutually exclusive; "+
+				"prefer --runtime-class, which provides nvidia-smi access via the container runtime without consuming a GPU allocation")
+	}
+
+	// Parse output format. The config-provided format only kicks in
+	// when the CLI flag is not explicitly set; otherwise the CLI
+	// value wins. Validation of unknown formats happens here.
+	if !cmd.IsSet("format") && resolved.OutputFormat != "" {
+		if setErr := cmd.Set("format", resolved.OutputFormat); setErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.snapshot.output.format", setErr)
+		}
+	}
+	outFormat, err := parseOutputFormat(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	tmplOpts, err := parseSnapshotTemplateOptions(cmd, outFormat, resolved)
+	if err != nil {
+		return nil, err
+	}
+
+	nodeSelector, err := resolveSnapshotNodeSelector(cmd, resolved)
+	if err != nil {
+		return nil, err
+	}
+	tolerations, err := resolveSnapshotTolerations(cmd, resolved)
+	if err != nil {
+		return nil, err
+	}
+
+	resourceRequests, err := snapshotter.ParseResourceList(stringFlagOrConfig(cmd, "requests", resolved.Requests))
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --requests")
+	}
+	resourceLimits, err := snapshotter.ParseResourceList(stringFlagOrConfig(cmd, "limits", resolved.Limits))
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
+	}
+
+	return &snapshotCmdOptions{
+		kubeconfig:         cmd.String("kubeconfig"),
+		namespace:          stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
+		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
+		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
+		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
+		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		nodeSelector:       nodeSelector,
+		tolerations:        tolerations,
+		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
+		cleanup:            !boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
+		debug:              cmd.Bool("debug"),
+		privileged:         boolFlagOrConfig(cmd, "privileged", derefBoolOr(resolved.Privileged, true)),
+		requireGPU:         requireGPU,
+		runtimeClass:       runtimeClass,
+		os:                 osVal,
+		maxNodesPerEntry:   intFlagOrConfig(cmd, "max-nodes-per-entry", resolved.MaxNodesPerEntry),
+		requests:           resourceRequests,
+		limits:             resourceLimits,
+		tmplOpts:           tmplOpts,
+	}, nil
+}
 
 // snapshotTemplateOptions holds parsed template options for the snapshot command.
 type snapshotTemplateOptions struct {
@@ -36,9 +235,9 @@ type snapshotTemplateOptions struct {
 	format       serializer.Format
 }
 
-func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format) (*snapshotTemplateOptions, error) {
-	templatePath := cmd.String("template")
-	outputPath := cmd.String("output")
+func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format, resolved *config.SnapshotResolved) (*snapshotTemplateOptions, error) {
+	templatePath := stringFlagOrConfig(cmd, "template", resolved.OutputTemplate)
+	outputPath := stringFlagOrConfig(cmd, "output", resolved.OutputPath)
 
 	if templatePath != "" {
 		// Validate format is YAML when using template
@@ -175,6 +374,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		outputFlag(),
 		formatFlag(),
+		configFlag(),
 		kubeconfigFlag(),
 	}
 }
@@ -250,50 +450,23 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 `,
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "os", "requests", "limits"); err != nil {
-				return err
-			}
-
-			// Normalize/validate the --os value via the recipe parser so that
-			// only documented OS criteria values reach the agent and the
-			// in-pod collector factory.
-			osVal := cmd.String("os")
-			if osVal != "" {
-				parsedOS, err := recipe.ParseCriteriaOSType(osVal)
-				if err != nil {
-					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --os value", err)
-				}
-				osVal = string(parsedOS)
-			}
-
-			// Mutual exclusion: --require-gpu and --runtime-class cannot be used together
-			if cmd.Bool("require-gpu") && cmd.String("runtime-class") != "" {
-				return errors.New(errors.ErrCodeInvalidRequest,
-					"--require-gpu and --runtime-class are mutually exclusive; "+
-						"prefer --runtime-class, which provides nvidia-smi access via the container runtime without consuming a GPU allocation")
-			}
-
-			// Parse output format
-			outFormat, err := parseOutputFormat(cmd)
+			cfg, err := loadCmdConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
-
-			// Parse and validate template options
-			tmplOpts, err := parseSnapshotTemplateOptions(cmd, outFormat)
+			opts, err := parseSnapshotCmdOptions(cmd, cfg)
 			if err != nil {
 				return err
 			}
 
 			// Create factory
 			factory := collector.NewDefaultFactory(
-				collector.WithMaxNodesPerEntry(cmd.Int("max-nodes-per-entry")),
-				collector.WithOS(osVal),
+				collector.WithMaxNodesPerEntry(opts.maxNodesPerEntry),
+				collector.WithOS(opts.os),
 			)
 
 			// Create output serializer
-			ser, err := createSnapshotSerializer(tmplOpts)
+			ser, err := createSnapshotSerializer(opts.tmplOpts)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output serializer", err)
 			}
@@ -310,30 +483,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Version:    version,
 				Factory:    factory,
 				Serializer: ser,
-				RequireGPU: cmd.Bool("require-gpu"),
-			}
-
-			// Parse node selectors
-			nodeSelector, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
-			if err != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
-			}
-
-			// Parse tolerations
-			tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
-			if err != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
-			}
-
-			// Parse resource overrides (CLI takes the same comma-separated
-			// 'name=quantity' shape as kubectl run --requests / --limits).
-			resourceRequests, err := snapshotter.ParseResourceList(cmd.String("requests"))
-			if err != nil {
-				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --requests")
-			}
-			resourceLimits, err := snapshotter.ParseResourceList(cmd.String("limits"))
-			if err != nil {
-				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
+				RequireGPU: opts.requireGPU,
 			}
 
 			// When running inside an agent Job, collect locally instead of
@@ -345,30 +495,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				return ns.Measure(ctx)
 			}
 
-			// Configure agent deployment
-			ns.AgentConfig = &snapshotter.AgentConfig{
-				Kubeconfig:         cmd.String("kubeconfig"),
-				Namespace:          cmd.String("namespace"),
-				Image:              cmd.String("image"),
-				ImagePullSecrets:   cmd.StringSlice("image-pull-secret"),
-				JobName:            cmd.String("job-name"),
-				ServiceAccountName: cmd.String("service-account-name"),
-				NodeSelector:       nodeSelector,
-				Tolerations:        tolerations,
-				Timeout:            cmd.Duration("timeout"),
-				Cleanup:            !cmd.Bool("no-cleanup"),
-				Output:             tmplOpts.outputPath,
-				Debug:              cmd.Bool("debug"),
-				Privileged:         cmd.Bool("privileged"),
-				RequireGPU:         cmd.Bool("require-gpu"),
-				RuntimeClassName:   cmd.String("runtime-class"),
-				TemplatePath:       tmplOpts.templatePath,
-				MaxNodesPerEntry:   cmd.Int("max-nodes-per-entry"),
-				OS:                 osVal,
-				Requests:           resourceRequests,
-				Limits:             resourceLimits,
-			}
-
+			ns.AgentConfig = opts.toAgentConfig()
 			return ns.Measure(ctx)
 		},
 	}

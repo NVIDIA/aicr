@@ -435,6 +435,159 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 	return out, nil
 }
 
+// SnapshotResolved is the typed-domain projection of SnapshotSpec produced
+// by (*SnapshotSpec).Resolve. Conversion from the wire form happens
+// exactly once at this boundary; CLI consumers layer flag overrides on
+// top of these values rather than re-parsing the spec strings.
+//
+// Zero values mean "config did not set this field." Maps and slices
+// preserve the nil-vs-explicitly-empty distinction from the wire spec —
+// callers can detect whether a user wrote `nodeSelector: {}` to clear an
+// inherited default vs. omitted the field entirely.
+type SnapshotResolved struct {
+	// OutputPath is spec.snapshot.output.path.
+	OutputPath string
+
+	// OutputFormat is spec.snapshot.output.format (validated against the
+	// serializer's known formats but left as a string; the CLI parses
+	// the flag form anyway).
+	OutputFormat string
+
+	// OutputTemplate is spec.snapshot.output.template.
+	OutputTemplate string
+
+	// Namespace is spec.snapshot.agent.namespace.
+	Namespace string
+
+	// Image is spec.snapshot.agent.image.
+	Image string
+
+	// ImagePullSecrets is spec.snapshot.agent.imagePullSecrets. Nil if
+	// config did not set the field.
+	ImagePullSecrets []string
+
+	// JobName is spec.snapshot.agent.jobName.
+	JobName string
+
+	// ServiceAccountName is spec.snapshot.agent.serviceAccountName.
+	ServiceAccountName string
+
+	// NodeSelector is spec.snapshot.agent.nodeSelector. Nil if unset;
+	// non-nil empty if `{}` was explicit.
+	NodeSelector map[string]string
+
+	// Tolerations is the parsed spec.snapshot.agent.tolerations slice.
+	// Nil if config did not set the field.
+	Tolerations []corev1.Toleration
+
+	// RequireGPU is spec.snapshot.agent.requireGpu.
+	RequireGPU bool
+
+	// RuntimeClassName is spec.snapshot.agent.runtimeClassName.
+	RuntimeClassName string
+
+	// OS is spec.snapshot.agent.os.
+	OS string
+
+	// Requests is spec.snapshot.agent.requests (raw "name=quantity,..." form).
+	Requests string
+
+	// Limits is spec.snapshot.agent.limits (raw "name=quantity,..." form).
+	Limits string
+
+	// Timeout is the parsed spec.snapshot.execution.timeout. Nil pointer
+	// signals "config did not set the field" so callers can fall through
+	// to the CLI flag's default duration.
+	Timeout *time.Duration
+
+	// NoCleanup is spec.snapshot.execution.noCleanup.
+	NoCleanup bool
+
+	// Privileged is spec.snapshot.execution.privileged. Nil pointer
+	// signals "config did not set the field" so the CLI flag's default
+	// (true) flows through; *false preserves an explicit opt-out.
+	Privileged *bool
+
+	// MaxNodesPerEntry is spec.snapshot.execution.maxNodesPerEntry.
+	MaxNodesPerEntry int
+}
+
+// Resolve converts a SnapshotSpec from the wire-string form to a typed
+// SnapshotResolved. It is nil-receiver tolerant and never returns a nil
+// pointer — callers reach into fields, so nil would just relocate the
+// nil-pointer dereference.
+//
+// Errors are attributed to their source spec path (for example,
+// "spec.snapshot.agent.tolerations") so callers can surface the location
+// of invalid input without reconstructing the path themselves.
+func (s *SnapshotSpec) Resolve() (*SnapshotResolved, error) {
+	out := &SnapshotResolved{}
+	if s == nil {
+		return out, nil
+	}
+
+	if s.Output != nil {
+		out.OutputPath = s.Output.Path
+		out.OutputFormat = s.Output.Format
+		out.OutputTemplate = s.Output.Template
+	}
+
+	if s.Agent != nil {
+		out.Namespace = s.Agent.Namespace
+		out.Image = s.Agent.Image
+		out.JobName = s.Agent.JobName
+		out.ServiceAccountName = s.Agent.ServiceAccountName
+		out.RequireGPU = s.Agent.RequireGPU
+		out.RuntimeClassName = s.Agent.RuntimeClassName
+		out.OS = s.Agent.OS
+		out.Requests = s.Agent.Requests
+		out.Limits = s.Agent.Limits
+		out.ImagePullSecrets = slices.Clone(s.Agent.ImagePullSecrets)
+		out.NodeSelector = maps.Clone(s.Agent.NodeSelector)
+		if s.Agent.Tolerations != nil {
+			if len(s.Agent.Tolerations) == 0 {
+				// Preserve the explicit-clear intent: `tolerations: []`
+				// means "drop the default tolerate-all," not "use it."
+				out.Tolerations = []corev1.Toleration{}
+			} else {
+				tols, err := snapshotter.ParseTolerations(s.Agent.Tolerations)
+				if err != nil {
+					return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+						"invalid spec.snapshot.agent.tolerations", err)
+				}
+				out.Tolerations = tols
+			}
+		}
+	}
+
+	if s.Execution != nil {
+		out.NoCleanup = s.Execution.NoCleanup
+		if s.Execution.MaxNodesPerEntry < 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("spec.snapshot.execution.maxNodesPerEntry must be >= 0, got %d", s.Execution.MaxNodesPerEntry))
+		}
+		out.MaxNodesPerEntry = s.Execution.MaxNodesPerEntry
+		if s.Execution.Privileged != nil {
+			b := *s.Execution.Privileged
+			out.Privileged = &b
+		}
+		if s.Execution.Timeout != "" {
+			d, err := time.ParseDuration(s.Execution.Timeout)
+			if err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					"invalid spec.snapshot.execution.timeout", err)
+			}
+			if d < 0 {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("spec.snapshot.execution.timeout must be >= 0, got %s", d))
+			}
+			out.Timeout = &d
+		}
+	}
+
+	return out, nil
+}
+
 // ResolveCriteria converts the recipe criteria spec from wire-string form
 // to a typed *recipe.Criteria. Nil-receiver tolerant; never returns a nil
 // pointer.

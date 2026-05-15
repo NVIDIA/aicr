@@ -132,13 +132,14 @@ func TestValidate_Errors(t *testing.T) {
 			wantSub: "invalid apiVersion",
 		},
 		{
-			name: "no recipe, no bundle, and no validate",
+			name: "no snapshot, no recipe, no bundle, and no validate",
 			mutate: func(c *config.AICRConfig) {
+				c.Spec.Snapshot = nil
 				c.Spec.Recipe = nil
 				c.Spec.Bundle = nil
 				c.Spec.Validate = nil
 			},
-			wantSub: "none of spec.recipe, spec.bundle, spec.validate",
+			wantSub: "none of spec.snapshot, spec.recipe, spec.bundle, spec.validate",
 		},
 		{
 			name: "criteria and snapshot mutually exclusive",
@@ -228,6 +229,97 @@ func TestValidate_Errors(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
 			}
 		})
+	}
+}
+
+func TestValidate_SnapshotOnly(t *testing.T) {
+	cfg := &config.AICRConfig{
+		Kind:       config.Kind,
+		APIVersion: config.APIVersion,
+		Spec: config.Spec{
+			Snapshot: &config.SnapshotSpec{
+				Output: &config.SnapshotOutputSpec{Path: "./snapshot.yaml"},
+				Agent: &config.SnapshotAgentSpec{
+					Namespace: "aicr-validation",
+					NodeSelector: map[string]string{
+						"nodeGroup": "gpu-worker",
+					},
+					Tolerations: []string{
+						"dedicated=gpu-workload:NoSchedule",
+					},
+				},
+				Execution: &config.SnapshotExecutionSpec{
+					Timeout: "5m",
+				},
+			},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestValidate_InvalidSnapshotTimeout(t *testing.T) {
+	cfg := &config.AICRConfig{
+		Kind:       config.Kind,
+		APIVersion: config.APIVersion,
+		Spec: config.Spec{
+			Snapshot: &config.SnapshotSpec{
+				Execution: &config.SnapshotExecutionSpec{Timeout: "abc"},
+			},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.execution.timeout") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func TestValidate_InvalidSnapshotFormat(t *testing.T) {
+	cfg := &config.AICRConfig{
+		Kind:       config.Kind,
+		APIVersion: config.APIVersion,
+		Spec: config.Spec{
+			Snapshot: &config.SnapshotSpec{
+				Output: &config.SnapshotOutputSpec{Format: "xml"},
+			},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.output.format") {
+		t.Fatalf("expected format error, got %v", err)
+	}
+}
+
+func TestValidate_InvalidSnapshotTolerations(t *testing.T) {
+	cfg := &config.AICRConfig{
+		Kind:       config.Kind,
+		APIVersion: config.APIVersion,
+		Spec: config.Spec{
+			Snapshot: &config.SnapshotSpec{
+				Agent: &config.SnapshotAgentSpec{Tolerations: []string{"::"}},
+			},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.agent.tolerations") {
+		t.Fatalf("expected tolerations error, got %v", err)
+	}
+}
+
+func TestValidate_NegativeSnapshotMaxNodesPerEntry(t *testing.T) {
+	cfg := &config.AICRConfig{
+		Kind:       config.Kind,
+		APIVersion: config.APIVersion,
+		Spec: config.Spec{
+			Snapshot: &config.SnapshotSpec{
+				Execution: &config.SnapshotExecutionSpec{MaxNodesPerEntry: -1},
+			},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "spec.snapshot.execution.maxNodesPerEntry") {
+		t.Fatalf("expected maxNodesPerEntry error, got %v", err)
 	}
 }
 

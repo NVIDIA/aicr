@@ -49,6 +49,14 @@ func (c *AICRConfig) Validation() *ValidateSpec {
 	return c.Spec.Validate
 }
 
+// Snapshot returns the snapshot section, or nil if cfg or the section is unset.
+func (c *AICRConfig) Snapshot() *SnapshotSpec {
+	if c == nil {
+		return nil
+	}
+	return c.Spec.Snapshot
+}
+
 // SnapshotPath returns spec.recipe.input.snapshot, or "" when unset.
 func (r *RecipeSpec) SnapshotPath() string {
 	if r == nil || r.Input == nil {

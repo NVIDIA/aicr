@@ -76,6 +76,7 @@ aicr snapshot [flags]
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (cm://namespace/name), or stdout |
 | `--format` | | string | yaml | Output format: json, yaml, table |
+| `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) that populates `spec.snapshot.*`. CLI flags below always win over the corresponding config field. |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env) |
 | `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
@@ -163,6 +164,54 @@ aicr snapshot \
   --namespace gpu-operator \
   --template examples/templates/snapshot-template.md.tmpl \
   --output cluster-report.yaml
+```
+
+#### Snapshot Config File Mode
+
+Drive `aicr snapshot` from an `AICRConfig` document so the snapshot inputs version-control alongside the recipe, bundle, and validate steps in an end-to-end workflow.
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: gke-h100-training
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml          # written to disk; same shape as -o
+      format: yaml                 # yaml | json | table
+      template: ""                 # optional Go template path
+    agent:
+      namespace: aicr-validation
+      image: ""                    # default: ghcr.io/nvidia/aicr:latest
+      imagePullSecrets: []
+      jobName: aicr
+      serviceAccountName: aicr
+      nodeSelector:
+        nodeGroup: gpu-worker
+      tolerations:
+        - dedicated=gpu-workload:NoSchedule
+        - nvidia.com/gpu=present:NoSchedule
+      requireGpu: false
+      runtimeClassName: ""         # mutually exclusive with requireGpu
+      os: ""                       # ubuntu | rhel | cos | amazonlinux | talos
+      requests: ""                 # "cpu=500m,memory=1Gi"
+      limits: ""                   # "cpu=1,memory=2Gi"
+    execution:
+      timeout: 5m
+      noCleanup: false
+      privileged: true             # set false for PSS-restricted namespaces
+      maxNodesPerEntry: 0          # 0 = unlimited topology entries
+```
+
+Precedence: a CLI flag always wins over the matching config field. Selectors and tolerations omitted entirely inherit the snapshotter's compiled-in defaults (`tolerations` defaults to *tolerate all taints*); an explicit empty list (`tolerations: []`) clears the tolerate-all default — the same nil-vs-empty semantics used by `spec.validate.agent`.
+
+```shell
+# Run snapshot driven entirely by config
+aicr snapshot --config aicr-config.yaml
+
+# Reuse the same config but write to a one-off path
+aicr snapshot --config aicr-config.yaml -o /tmp/snapshot.yaml
 ```
 
 #### Custom Templates

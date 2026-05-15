@@ -213,6 +213,29 @@ func TestLoad_RejectsUnknownJSONField(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsUnknownSnapshotField guards spec.snapshot against typos.
+// Schema parity with the other sections: unknown keys must surface a
+// decode error rather than silently dropping the field.
+func TestLoad_RejectsUnknownSnapshotField(t *testing.T) {
+	bad := `kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+    agent:
+      namespacE: aicr-validation   # typo on purpose
+`
+	path := writeTempFile(t, "config.yaml", bad)
+	_, err := config.Load(context.Background(), path)
+	if err == nil {
+		t.Fatal("expected error for unknown snapshot agent field, got nil")
+	}
+	if !strings.Contains(err.Error(), "namespacE") {
+		t.Errorf("error should reference unknown field, got %q", err.Error())
+	}
+}
+
 // TestLoad_HTTPBodyLimit verifies the HTTP fetch path bounds response size
 // against defaults.HTTPResponseBodyLimit.
 func TestLoad_HTTPBodyLimit(t *testing.T) {

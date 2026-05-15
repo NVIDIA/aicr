@@ -21,7 +21,7 @@ const Kind = "AICRConfig"
 const APIVersion = "aicr.nvidia.com/v1alpha1"
 
 // AICRConfig is the top-level schema for the --config file accepted by
-// the aicr CLI's recipe, bundle, and validate commands.
+// the aicr CLI's snapshot, recipe, bundle, and validate commands.
 type AICRConfig struct {
 	Kind       string   `yaml:"kind" json:"kind"`
 	APIVersion string   `yaml:"apiVersion" json:"apiVersion"`
@@ -40,9 +40,60 @@ type Metadata struct {
 // populate just Recipe; one used only with `aicr bundle` may populate just
 // Bundle. A single file may populate any combination for end-to-end workflows.
 type Spec struct {
+	Snapshot *SnapshotSpec `yaml:"snapshot,omitempty" json:"snapshot,omitempty"`
 	Recipe   *RecipeSpec   `yaml:"recipe,omitempty" json:"recipe,omitempty"`
 	Bundle   *BundleSpec   `yaml:"bundle,omitempty" json:"bundle,omitempty"`
 	Validate *ValidateSpec `yaml:"validate,omitempty" json:"validate,omitempty"`
+}
+
+// SnapshotSpec captures the inputs to `aicr snapshot`.
+//
+// Snapshot does not declare an input section: it produces the snapshot
+// from a live cluster. Agent shape mirrors ValidateAgentSpec so a single
+// config file can pin matching agent placement across snapshot and
+// validate runs.
+type SnapshotSpec struct {
+	Output    *SnapshotOutputSpec    `yaml:"output,omitempty" json:"output,omitempty"`
+	Agent     *SnapshotAgentSpec     `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Execution *SnapshotExecutionSpec `yaml:"execution,omitempty" json:"execution,omitempty"`
+}
+
+// SnapshotOutputSpec describes how the snapshot is emitted.
+type SnapshotOutputSpec struct {
+	Path     string `yaml:"path,omitempty" json:"path,omitempty"`
+	Format   string `yaml:"format,omitempty" json:"format,omitempty"`
+	Template string `yaml:"template,omitempty" json:"template,omitempty"`
+}
+
+// SnapshotAgentSpec configures the in-cluster snapshot-capture Job pod.
+// Empty fields use the snapshotter's compiled-in defaults; selectors and
+// tolerations omitted entirely (nil) inherit the defaults, while an
+// explicit empty map/list (`{}` / `[]`) clears them.
+type SnapshotAgentSpec struct {
+	Namespace          string            `yaml:"namespace,omitempty" json:"namespace,omitempty"`
+	Image              string            `yaml:"image,omitempty" json:"image,omitempty"`
+	ImagePullSecrets   []string          `yaml:"imagePullSecrets,omitempty" json:"imagePullSecrets,omitempty"`
+	JobName            string            `yaml:"jobName,omitempty" json:"jobName,omitempty"`
+	ServiceAccountName string            `yaml:"serviceAccountName,omitempty" json:"serviceAccountName,omitempty"`
+	NodeSelector       map[string]string `yaml:"nodeSelector,omitempty" json:"nodeSelector,omitempty"`
+	Tolerations        []string          `yaml:"tolerations,omitempty" json:"tolerations,omitempty"`
+	RequireGPU         bool              `yaml:"requireGpu,omitempty" json:"requireGpu,omitempty"`
+	RuntimeClassName   string            `yaml:"runtimeClassName,omitempty" json:"runtimeClassName,omitempty"`
+	OS                 string            `yaml:"os,omitempty" json:"os,omitempty"`
+	Requests           string            `yaml:"requests,omitempty" json:"requests,omitempty"`
+	Limits             string            `yaml:"limits,omitempty" json:"limits,omitempty"`
+}
+
+// SnapshotExecutionSpec controls snapshot behavior independent of where
+// the agent runs.
+//
+// Timeout is the wire-string form (e.g. "5m"); Resolve parses it to a
+// time.Duration with errors attributed to spec.snapshot.execution.timeout.
+type SnapshotExecutionSpec struct {
+	Timeout          string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	NoCleanup        bool   `yaml:"noCleanup,omitempty" json:"noCleanup,omitempty"`
+	Privileged       *bool  `yaml:"privileged,omitempty" json:"privileged,omitempty"`
+	MaxNodesPerEntry int    `yaml:"maxNodesPerEntry,omitempty" json:"maxNodesPerEntry,omitempty"`
 }
 
 // RecipeSpec captures the inputs to `aicr recipe`.

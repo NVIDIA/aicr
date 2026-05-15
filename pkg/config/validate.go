@@ -40,9 +40,12 @@ func (c *AICRConfig) Validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid apiVersion %q: expected %q", c.APIVersion, APIVersion))
 	}
-	if c.Spec.Recipe == nil && c.Spec.Bundle == nil && c.Spec.Validate == nil {
+	if c.Spec.Snapshot == nil && c.Spec.Recipe == nil && c.Spec.Bundle == nil && c.Spec.Validate == nil {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"config has none of spec.recipe, spec.bundle, spec.validate; at least one is required")
+			"config has none of spec.snapshot, spec.recipe, spec.bundle, spec.validate; at least one is required")
+	}
+	if err := c.Spec.Snapshot.validate(); err != nil {
+		return err
 	}
 	if err := c.Spec.Recipe.validate(); err != nil {
 		return err
@@ -126,6 +129,22 @@ func (v *ValidateSpec) validate() error {
 	}
 	if _, err := v.Resolve(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *SnapshotSpec) validate() error {
+	if s == nil {
+		return nil
+	}
+	if _, err := s.Resolve(); err != nil {
+		return err
+	}
+	if s.Output != nil && s.Output.Format != "" {
+		if serializer.Format(s.Output.Format).IsUnknown() {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid spec.snapshot.output.format %q (valid: yaml, json, table)", s.Output.Format))
+		}
 	}
 	return nil
 }
