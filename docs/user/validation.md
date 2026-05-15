@@ -359,6 +359,35 @@ Common reasons and their cause:
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
 | `skipped due to previous phase failure` | `message` | An earlier phase failed and subsequent phases are skipped | Fix the earlier phase first, then re-run |
 
+### `ai-service-metrics` fails with "Prometheus unreachable"
+
+On EKS clusters that split worker and system pods across separate security
+groups (e.g. DGXC EKS with distinct customer/system ENI subnets), the
+conformance check `ai-service-metrics` can fail non-deterministically with:
+
+```
+[SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
+```
+
+The validator orchestrator Job tolerates every taint and has no node-affinity
+toward Prometheus, so the kube-scheduler may place it on any worker node —
+including one whose ENI is in a security group whose ingress to the
+Prometheus-hosting SG is missing or asymmetric. The outcome is **not stable
+across re-runs**: image-locality scoring tends to keep the pod on whatever
+node won the first scheduling decision, so a passing run on a fresh cluster
+does not prove the SG topology is correct.
+
+This is a cluster-side prerequisite, not an AICR bug per se — see
+[EKS Dynamo Networking Prerequisites](../integrator/eks-dynamo-networking.md#required-security-group-rules)
+for the SG ingress rules required for Prometheus (`tcp/9090`). The underlying
+issue is tracked at [#933](https://github.com/NVIDIA/aicr/issues/933).
+
+Workaround when SG changes are not available: re-run the check until the
+orchestrator lands on a node whose SG can reach Prometheus, then leave the
+image cached there so image-locality keeps subsequent runs on the same node.
+This is unreliable and should not be used as the steady-state validation
+strategy.
+
 ### Benchmark Job stuck or timed out
 
 Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:`. For `inference-perf`, the full pipeline (workload ready → endpoint health → benchmark) can take up to 30 min on cold-start clusters. If it still times out:
