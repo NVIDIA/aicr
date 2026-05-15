@@ -15,7 +15,16 @@
 name: UAT - GCP
 
 on:
-  workflow_dispatch: {}  # allow manual runs for testing
+  workflow_dispatch:
+    inputs:
+      skip_delete:
+        description: 'Skip cluster teardown (manual runs only; schedule always deletes)'
+        type: boolean
+        default: false
+      skip_tests:
+        description: 'Skip UAT test execution (manual runs only; schedule always tests)'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 4 * * *' # daily at midnight PST, runs on default branch only
 
@@ -40,9 +49,6 @@ jobs:
       GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:latest"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
-
-      # Debug
-      SKIP_DELETE: "false"  # skip cluster deletion
 
     steps:
       # Checkout
@@ -148,7 +154,7 @@ jobs:
       # Test (capped to guarantee teardown headroom within the 90m job timeout)
       - name: Run UAT Tests
         id: tests
-        if: steps.client.outcome == 'success'
+        if: steps.client.outcome == 'success' && inputs.skip_tests != true
         timeout-minutes: 30
         shell: bash
         env:
@@ -161,7 +167,7 @@ jobs:
 
       # Teardown (retry up to 3 times)
       - name: Destroy Cluster
-        if: always() && steps.infra.outcome != 'skipped' && env.SKIP_DELETE != 'true'
+        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
         shell: bash
         run: |
           set -euxo pipefail
