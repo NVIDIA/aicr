@@ -17,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-helm upgrade --install skyhook-customizations ./ \
+helm upgrade --install --force-conflicts skyhook-customizations ./ \
   --namespace skyhook --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}

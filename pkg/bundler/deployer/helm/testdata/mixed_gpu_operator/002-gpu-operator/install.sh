@@ -22,7 +22,7 @@ source ./upstream.env
 # CHART carries the full OCI URI for OCI charts and just the chart name for
 # HTTP/HTTPS charts. REPO is non-empty only for HTTP/HTTPS charts; the
 # ${REPO:+--repo "${REPO}"} expansion adds --repo iff REPO is set.
-helm upgrade --install gpu-operator "${CHART}" \
+helm upgrade --install --force-conflicts gpu-operator "${CHART}" \
   ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
   --namespace privileged-gpu-operator --create-namespace \
   -f values.yaml -f cluster-values.yaml \

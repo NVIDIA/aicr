@@ -22,7 +22,7 @@ source ./upstream.env
 # CHART carries the full OCI URI for OCI charts and just the chart name for
 # HTTP/HTTPS charts. REPO is non-empty only for HTTP/HTTPS charts; the
 # ${REPO:+--repo "${REPO}"} expansion adds --repo iff REPO is set.
-helm upgrade --install nfd "${CHART}" \
+helm upgrade --install --force-conflicts nfd "${CHART}" \
   ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
   --namespace node-feature-discovery --create-namespace \
   -f values.yaml -f cluster-values.yaml \
