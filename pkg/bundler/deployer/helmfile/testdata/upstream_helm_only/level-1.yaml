@@ -12,3 +12,4 @@ releases:
     version: v25.3.3
     values:
       - ./002-gpu-operator/values.yaml
+    disableValidation: true

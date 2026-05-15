@@ -42,16 +42,19 @@ componentRefs: ## alphabetically sorted
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
+  - name: prometheus-operator-crds
 deploymentOrder:
   - cert-manager
-  - kube-prometheus-stack
-  - k8s-ephemeral-storage-metrics
-  - prometheus-adapter
+  - nfd
   - nodewright-operator
   - nodewright-customizations
+  - prometheus-operator-crds
+  - kube-prometheus-stack
   - gpu-operator
   - gke-nccl-tcpxo
+  - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - kubeflow-trainer
   - nvidia-dra-driver-gpu
   - nvsentinel
+  - prometheus-adapter

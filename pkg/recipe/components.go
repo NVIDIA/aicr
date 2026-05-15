@@ -85,19 +85,27 @@ type ComponentConfig struct {
 	// See https://github.com/NVIDIA/aicr/issues/915.
 	GKECriticalPriority bool `yaml:"gkeCriticalPriority,omitempty"`
 
-	// InstallsCRDs signals that the component's chart registers one or
-	// more CustomResourceDefinitions that other components in the same
-	// bundle may reference. The helmfile deployer splits its output
-	// into two sub-helmfiles when any referenced component carries this
-	// flag — CRD owners land in crds.yaml, everything else in
-	// releases.yaml — and the top-level helmfile.yaml processes the two
-	// sequentially. This sidesteps the helm-diff render pass running
-	// against the live REST mapper before any release is installed,
-	// which fails when a release's templates reference a CRD that has
-	// not yet been registered.
+	// HasSelfRefCRDs signals that the component's chart contains both
+	// a CRD (shipped under `crds/` or via a CRDs subchart) AND a
+	// template that creates a CR of that kind in the SAME release.
+	// helm-diff's render pass fails on such charts on a fresh cluster:
+	// it renders templates and validates against the live REST mapper,
+	// but the mapper does not yet know the CRD because helm only
+	// applies `crds/` resources during `helm install` (not during
+	// render). This flag instructs the helmfile deployer to emit
+	// `disableValidation: true` on the release, telling helm-diff to
+	// skip the mapper check for that release only.
 	//
-	// See https://github.com/NVIDIA/aicr/issues/914.
-	InstallsCRDs bool `yaml:"installsCRDs,omitempty"`
+	// Cross-chart CRD ordering — where one chart ships CRDs that
+	// another chart's templates reference — is handled separately by
+	// the helmfile bundler's DAG-stratified sub-helmfile layout (one
+	// sub-helmfile per dependency level, processed sequentially). That
+	// machinery reads ComponentRef.DependencyRefs and needs no
+	// registry flag; correct dependencyRefs encode the ordering.
+	// gpu-operator is the canonical example for self-reference: its
+	// templates create a ClusterPolicy CR of the ClusterPolicy CRD it
+	// ships in `crds/`. See https://github.com/NVIDIA/aicr/issues/914.
+	HasSelfRefCRDs bool `yaml:"hasSelfRefCRDs,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.

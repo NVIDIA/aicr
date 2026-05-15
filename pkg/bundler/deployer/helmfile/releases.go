@@ -36,12 +36,13 @@ type Helmfile struct {
 }
 
 // TopHelmfile is the multi-sub-helmfile orchestration document emitted
-// when the bundle contains any release whose parent component is
-// registry-marked InstallsCRDs. helmfile processes the helmfiles: list
-// sequentially, so by the time the second sub-helmfile renders, every
-// CRD installed by the first is already registered with the cluster's
-// REST mapper. This sidesteps the helm-diff render pass running against
-// a fresh cluster's empty REST mapper.
+// when the bundle's dependency DAG produces more than one topological
+// level. One sub-helmfile per non-empty level (`level-0.yaml` ...
+// `level-N.yaml`) is referenced in dependency order. helmfile processes
+// the helmfiles: list sequentially, so by the time level K renders,
+// every release in levels 0..K-1 has fully applied (CRDs registered,
+// REST mapper warm). This sidesteps the helm-diff render pass running
+// against a fresh cluster's empty REST mapper.
 //
 // See https://github.com/NVIDIA/aicr/issues/914.
 type TopHelmfile struct {
@@ -94,6 +95,14 @@ type Release struct {
 	// (true) applies otherwise. Pointer so a deliberate false survives
 	// YAML marshaling and a nil value omits the field entirely.
 	CreateNamespace *bool `yaml:"createNamespace,omitempty"`
+	// DisableValidation is emitted when the chart self-references its
+	// own CRDs at diff time (registry flag HasSelfRefCRDs). helm-diff
+	// will skip the live-cluster REST-mapper check for this release,
+	// letting render succeed when a template creates a CR whose CRD
+	// is shipped under `crds/` in the same chart and not yet present
+	// in the cluster. Scoped per-release so other releases keep the
+	// safety check. Issue #914.
+	DisableValidation bool `yaml:"disableValidation,omitempty"`
 }
 
 // overrides carries per-component helm flag overrides.
@@ -129,7 +138,10 @@ func defaultHelmDefaults() HelmDefaults {
 // injected -pre / -post folders inherit the parent component's namespace.
 // dynamicValues maps ComponentRef.Name → dynamic value paths; presence
 // drives whether cluster-values.yaml is referenced in the release values:.
-func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string]string, dynamicValues map[string][]string) (Helmfile, error) {
+// flags maps ComponentRef.Name → registry-marked behavioral flags
+// (currently just HasSelfRefCRDs) and drives per-release
+// DisableValidation. A nil map disables those features.
+func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string]string, dynamicValues map[string][]string, flags map[string]componentFlags) (Helmfile, error) {
 	releases := make([]Release, 0, len(folders))
 	repoSet := make(map[string]Repository) // keyed by URL for dedupe
 
@@ -192,6 +204,17 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		if !f.CreateNamespace {
 			falseVal := false
 			rel.CreateNamespace = &falseVal
+		}
+
+		// Registry-driven per-release flags. HasSelfRefCRDs emits
+		// Registry-driven per-release flags. HasSelfRefCRDs emits
+		// disableValidation: true so helm-diff skips the live-cluster
+		// mapper check for charts whose own templates reference CRDs
+		// they ship in `crds/` (e.g., gpu-operator's clusterpolicy
+		// template). Keyed by f.Parent so injected -pre / -post
+		// folders inherit the same flag.
+		if flags[f.Parent].HasSelfRefCRDs {
+			rel.DisableValidation = true
 		}
 
 		releases = append(releases, rel)

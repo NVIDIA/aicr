@@ -35,6 +35,7 @@ package recipe
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -207,6 +208,305 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Errorf("TopologicalSort()[%d] = %v, want %v", i, got[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+// TestRecipeMetadataSpecTopologicalLevels exercises the level-grouped
+// variant of the topological sort. Within a level, components must be
+// independent (no edges among them) and listed alphabetically for
+// determinism. The bundler relies on this to slice releases into
+// sequential sub-helmfiles where each level can install in parallel
+// while still respecting cross-level dependencies (issue #914).
+//
+// A subtle bug class to guard against: two nodes that both reach
+// zero in-degree on the SAME iteration must land in the SAME level
+// (not split across two adjacent levels). The Kahn variant in
+// TopologicalLevels processes the whole current queue as one batch
+// for this reason — these tests assert that.
+func TestRecipeMetadataSpecTopologicalLevels(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    RecipeMetadataSpec
+		want    [][]string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "empty spec yields empty levels",
+			spec: RecipeMetadataSpec{},
+			want: nil,
+		},
+		{
+			name: "single component no deps is one level",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+				},
+			},
+			want: [][]string{{"cert-manager"}},
+		},
+		{
+			name: "multiple independent components share level 0 alphabetically",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "gpu-operator", Type: ComponentTypeHelm},
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+					{Name: "nfd", Type: ComponentTypeHelm},
+				},
+			},
+			want: [][]string{{"cert-manager", "gpu-operator", "nfd"}},
+		},
+		{
+			name: "linear chain produces N levels of one component each",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
+					{Name: "nvidia-dra-driver-gpu", Type: ComponentTypeHelm, DependencyRefs: []string{"gpu-operator"}},
+				},
+			},
+			want: [][]string{
+				{"cert-manager"},
+				{"gpu-operator"},
+				{"nvidia-dra-driver-gpu"},
+			},
+		},
+		{
+			name: "diamond collapses to three levels (root, two parallel, sink)",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
+					{Name: "network-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
+					{Name: "nvsentinel", Type: ComponentTypeHelm, DependencyRefs: []string{"gpu-operator", "network-operator"}},
+				},
+			},
+			want: [][]string{
+				{"cert-manager"},
+				{"gpu-operator", "network-operator"},
+				{"nvsentinel"},
+			},
+		},
+		{
+			name: "siblings with different depths still respect deepest path",
+			// b depends on a; c depends on a AND b. c must be in level 2,
+			// not level 1, because its longest path from a is 2.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm},
+					{Name: "b", Type: ComponentTypeHelm, DependencyRefs: []string{"a"}},
+					{Name: "c", Type: ComponentTypeHelm, DependencyRefs: []string{"a", "b"}},
+				},
+			},
+			want: [][]string{
+				{"a"},
+				{"b"},
+				{"c"},
+			},
+		},
+		{
+			name: "wide root, many parallel sinks",
+			// Root r; three sinks a, b, c each depending only on r.
+			// All three sinks must share level 1.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "r", Type: ComponentTypeHelm},
+					{Name: "c", Type: ComponentTypeHelm, DependencyRefs: []string{"r"}},
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"r"}},
+					{Name: "b", Type: ComponentTypeHelm, DependencyRefs: []string{"r"}},
+				},
+			},
+			want: [][]string{
+				{"r"},
+				{"a", "b", "c"},
+			},
+		},
+		{
+			name: "realistic aicr-shaped bundle",
+			// Mirrors the actual base.yaml dependency edges so a future
+			// refactor that breaks level assignment fails this test
+			// loudly. nfd, cert-manager, prometheus-operator-crds have
+			// no deps → level 0. gpu-operator and kube-prometheus-stack
+			// each depend on something in level 0 → level 1. nvsentinel
+			// depends on level-1 → level 2.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "nfd", Type: ComponentTypeHelm},
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+					{Name: "prometheus-operator-crds", Type: ComponentTypeHelm},
+					{Name: "kube-prometheus-stack", Type: ComponentTypeHelm, DependencyRefs: []string{"prometheus-operator-crds"}},
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"nfd", "cert-manager", "kube-prometheus-stack"}},
+					{Name: "nvsentinel", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager", "gpu-operator"}},
+				},
+			},
+			want: [][]string{
+				{"cert-manager", "nfd", "prometheus-operator-crds"},
+				{"kube-prometheus-stack"},
+				{"gpu-operator"},
+				{"nvsentinel"},
+			},
+		},
+		{
+			name: "self-loop returns cycle error",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"a"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular dependencies exist",
+		},
+		{
+			name: "two-node cycle returns cycle error",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"b"}},
+					{Name: "b", Type: ComponentTypeHelm, DependencyRefs: []string{"a"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular dependencies exist",
+		},
+		{
+			name: "three-node cycle returns cycle error",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"b"}},
+					{Name: "b", Type: ComponentTypeHelm, DependencyRefs: []string{"c"}},
+					{Name: "c", Type: ComponentTypeHelm, DependencyRefs: []string{"a"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular dependencies exist",
+		},
+		{
+			name: "missing dependency surfaces as cycle error",
+			// Matches TopologicalSort behavior: an undeclared dependency
+			// keeps the dependent's in-degree above zero indefinitely,
+			// indistinguishable from a cycle by this algorithm.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm, DependencyRefs: []string{"phantom"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "circular dependencies exist",
+		},
+		{
+			name: "nil and empty DependencyRefs are equivalent",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "a", Type: ComponentTypeHelm},                             // nil
+					{Name: "b", Type: ComponentTypeHelm, DependencyRefs: []string{}}, // empty
+				},
+			},
+			want: [][]string{{"a", "b"}},
+		},
+		{
+			name: "wide level-1 from single root, mixed alphabetics",
+			// Z, A, M all depend only on root. Within their shared
+			// level they must come back A, M, Z (alphabetical), not in
+			// insertion order.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "root", Type: ComponentTypeHelm},
+					{Name: "Z", Type: ComponentTypeHelm, DependencyRefs: []string{"root"}},
+					{Name: "A", Type: ComponentTypeHelm, DependencyRefs: []string{"root"}},
+					{Name: "M", Type: ComponentTypeHelm, DependencyRefs: []string{"root"}},
+				},
+			},
+			want: [][]string{
+				{"root"},
+				{"A", "M", "Z"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.spec.TopologicalLevels()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("TopologicalLevels() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("TopologicalLevels() error = %v, want contains %q", err, tt.errMsg)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("TopologicalLevels() level count = %d %v, want %d %v",
+					len(got), got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if len(got[i]) != len(tt.want[i]) {
+					t.Errorf("TopologicalLevels() level[%d] len = %d %v, want %d %v",
+						i, len(got[i]), got[i], len(tt.want[i]), tt.want[i])
+					continue
+				}
+				for j := range got[i] {
+					if got[i][j] != tt.want[i][j] {
+						t.Errorf("TopologicalLevels() level[%d][%d] = %q, want %q",
+							i, j, got[i][j], tt.want[i][j])
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestRecipeMetadataSpecTopologicalLevelsMatchesSort cross-checks: the
+// flat sequence of names produced by concatenating levels in order must
+// satisfy the same dependency constraints as TopologicalSort (every
+// dependency appears before its dependent). This catches a class of
+// bugs where TopologicalLevels would correctly partition components but
+// place them in a wrong inter-level order.
+func TestRecipeMetadataSpecTopologicalLevelsMatchesSort(t *testing.T) {
+	specs := []RecipeMetadataSpec{
+		{
+			ComponentRefs: []ComponentRef{
+				{Name: "cert-manager", Type: ComponentTypeHelm},
+				{Name: "nfd", Type: ComponentTypeHelm},
+				{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"nfd", "cert-manager"}},
+				{Name: "kube-prometheus-stack", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
+				{Name: "nvsentinel", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager", "gpu-operator"}},
+				{Name: "nvidia-dra-driver-gpu", Type: ComponentTypeHelm, DependencyRefs: []string{"gpu-operator"}},
+				{Name: "prometheus-adapter", Type: ComponentTypeHelm, DependencyRefs: []string{"kube-prometheus-stack"}},
+			},
+		},
+	}
+
+	for i, spec := range specs {
+		t.Run(fmt.Sprintf("spec_%d", i), func(t *testing.T) {
+			levels, err := spec.TopologicalLevels()
+			if err != nil {
+				t.Fatalf("TopologicalLevels() error = %v", err)
+			}
+
+			// Flatten levels → assert every dependency appears before
+			// its dependent in the resulting sequence.
+			indexOf := map[string]int{}
+			idx := 0
+			for _, level := range levels {
+				for _, name := range level {
+					indexOf[name] = idx
+					idx++
+				}
+			}
+			for _, c := range spec.ComponentRefs {
+				for _, dep := range c.DependencyRefs {
+					if indexOf[dep] >= indexOf[c.Name] {
+						t.Errorf("dep %q (idx=%d) must come before %q (idx=%d) in flattened levels",
+							dep, indexOf[dep], c.Name, indexOf[c.Name])
+					}
+				}
+			}
+
+			// And every component must appear exactly once.
+			if idx != len(spec.ComponentRefs) {
+				t.Errorf("flattened levels have %d entries, want %d", idx, len(spec.ComponentRefs))
 			}
 		})
 	}

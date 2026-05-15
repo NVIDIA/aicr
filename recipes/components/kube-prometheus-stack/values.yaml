@@ -15,6 +15,13 @@
 # Kube Prometheus Stack Helm values
 # Comprehensive monitoring stack with Prometheus, Grafana, and AlertManager
 
+# CRDs are installed by the sibling prometheus-operator-crds release.
+# Splitting them out breaks the helm-diff self-reference where this
+# chart's own templates create CRs of kinds defined by its bundled
+# `crds` subchart. See registry.yaml for the full rationale (issue #914).
+crds:
+  enabled: false
+
 # Override release name prefix to avoid aicr-stack- prefix in resource names
 fullnameOverride: kube-prometheus
 

@@ -12,19 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Tests for the helmfile bundler's dependency-level partition. The
+// stratified layout (issue #914) emits one sub-helmfile per DAG level
+// computed from recipe ComponentRef.DependencyRefs. Sub-helmfiles are
+// processed sequentially by `helmfile`, so by the time level K diffs,
+// every release in levels 0..K-1 has fully applied (CRDs registered,
+// REST mapper warm).
+
 package helmfile
 
 import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // testGenerateTimeout bounds the context for in-test Generate calls.
@@ -34,10 +41,11 @@ import (
 // performance. See pkg/bundler/deployer/helmfile docstring.
 const testGenerateTimeout = 30 * time.Second
 
-// TestSplitFoldersByCRD pins the partition logic for issue #914.
-// Auxiliary -pre / -post folders inherit their parent's classification
-// so the three travel together.
-func TestSplitFoldersByCRD(t *testing.T) {
+// TestSplitFoldersByLevel pins the partition logic for the stratified
+// layout (issue #914). Folders inherit their parent's DAG level so
+// auxiliary -pre / -post folders travel with the primary, and all
+// folders at level i land in out[i].
+func TestSplitFoldersByLevel(t *testing.T) {
 	folders := []localformat.Folder{
 		{Dir: "001-cert-manager-pre", Parent: "cert-manager"},
 		{Dir: "002-cert-manager", Parent: "cert-manager"},
@@ -47,62 +55,82 @@ func TestSplitFoldersByCRD(t *testing.T) {
 		{Dir: "006-nodewright-operator", Parent: "nodewright-operator"},
 		{Dir: "007-nodewright-customizations", Parent: "nodewright-customizations"},
 	}
-	crdSet := map[string]bool{
-		"cert-manager":        true,
-		"nodewright-operator": true,
+	levels := [][]string{
+		{"cert-manager", "nodewright-operator"},
+		{"gpu-operator", "nodewright-customizations"},
 	}
 
-	crd, main := splitFoldersByCRD(folders, crdSet)
+	got := splitFoldersByLevel(folders, levels)
 
-	wantCRDDirs := []string{
+	if len(got) != 2 {
+		t.Fatalf("level count = %d, want 2", len(got))
+	}
+	wantLevel0 := []string{
 		"001-cert-manager-pre",
 		"002-cert-manager",
 		"003-cert-manager-post",
 		"006-nodewright-operator",
 	}
-	wantMainDirs := []string{
+	wantLevel1 := []string{
 		"004-gpu-operator",
 		"005-gpu-operator-post",
 		"007-nodewright-customizations",
 	}
-	if got := dirsOf(crd); !equalStringSlices(got, wantCRDDirs) {
-		t.Errorf("crd dirs = %v, want %v", got, wantCRDDirs)
+	if dirs := dirsOf(got[0]); !equalStringSlices(dirs, wantLevel0) {
+		t.Errorf("level[0] dirs = %v, want %v", dirs, wantLevel0)
 	}
-	if got := dirsOf(main); !equalStringSlices(got, wantMainDirs) {
-		t.Errorf("main dirs = %v, want %v", got, wantMainDirs)
+	if dirs := dirsOf(got[1]); !equalStringSlices(dirs, wantLevel1) {
+		t.Errorf("level[1] dirs = %v, want %v", dirs, wantLevel1)
 	}
 }
 
-// TestSplitFoldersByCRD_NilCRDSet covers the "no CRD owners in this
-// recipe" path: every folder lands in main, crd is empty. The
-// downstream Generate switch then takes the single-file layout branch.
-func TestSplitFoldersByCRD_NilCRDSet(t *testing.T) {
+// TestSplitFoldersByLevel_EmptyLevels covers the defensive fallback:
+// when levels is empty (recipe with no components, or topological-sort
+// failure) the partition returns a single bucket containing all
+// folders so callers see a non-empty partition rather than silently
+// dropping work.
+func TestSplitFoldersByLevel_EmptyLevels(t *testing.T) {
 	folders := []localformat.Folder{
 		{Dir: "001-foo", Parent: "foo"},
 		{Dir: "002-bar", Parent: "bar"},
 	}
-	crd, main := splitFoldersByCRD(folders, nil)
-	if len(crd) != 0 {
-		t.Errorf("crd = %v, want empty", crd)
+	got := splitFoldersByLevel(folders, nil)
+	if len(got) != 1 {
+		t.Fatalf("fallback partition count = %d, want 1", len(got))
 	}
-	if len(main) != 2 {
-		t.Errorf("main len = %d, want 2", len(main))
+	if len(got[0]) != len(folders) {
+		t.Errorf("fallback level[0] has %d folders, want %d", len(got[0]), len(folders))
 	}
 }
 
-// TestGenerate_SplitLayout drives Generator.Generate end-to-end with a
-// cert-manager + gpu-operator recipe (the canonical mixed case) and
-// asserts the three-file layout lands on disk with the expected
-// pointers. Complements TestGenerate_Scenarios/upstream_helm_only,
-// which pins the golden-file content; this test pins the runtime
-// structure independently so a future refactor that swaps the golden
-// shape can't silently break the helmfiles: list.
-func TestGenerate_SplitLayout(t *testing.T) {
+// TestSplitFoldersByLevel_UnknownParentLandsInLevel0 documents the
+// defensive behavior: a folder whose parent isn't represented in any
+// level (e.g., a wrapper for a name the DAG doesn't know) is placed
+// at level 0 instead of being silently dropped.
+func TestSplitFoldersByLevel_UnknownParentLandsInLevel0(t *testing.T) {
+	folders := []localformat.Folder{
+		{Dir: "001-known", Parent: "known"},
+		{Dir: "002-orphan", Parent: "phantom"},
+	}
+	levels := [][]string{{"known"}}
+	got := splitFoldersByLevel(folders, levels)
+	if len(got) != 1 || len(got[0]) != 2 {
+		t.Fatalf("expected both folders in level[0], got %v", got)
+	}
+}
+
+// TestGenerate_MultiLevelLayout drives Generator.Generate end-to-end
+// with a two-component recipe where gpu-operator depends on cert-manager.
+// Asserts the stratified layout: top-level helmfile.yaml carries a
+// helmfiles: list referencing level-0.yaml + level-1.yaml in order,
+// each sub-helmfile is a valid leaf, and the cross-level needs: edge
+// dissolves (sub-helmfile sequencing handles cross-level ordering).
+func TestGenerate_MultiLevelLayout(t *testing.T) {
+	cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
+	gpu := ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia")
+	gpu.DependencyRefs = []string{"cert-manager"}
 	g := &Generator{
-		RecipeResult: recipeWith(
-			ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
-			ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia"),
-		),
+		RecipeResult: recipeWith(cm, gpu),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
 			"gpu-operator": {"driver": map[string]any{"enabled": true}},
@@ -116,7 +144,7 @@ func TestGenerate_SplitLayout(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// Top-level helmfile.yaml must be the multi-helmfiles document.
+	// Top-level helmfile.yaml carries the helmfiles: list.
 	topData, err := os.ReadFile(filepath.Join(outputDir, fileHelmfile))
 	if err != nil {
 		t.Fatalf("read top helmfile.yaml: %v", err)
@@ -128,21 +156,21 @@ func TestGenerate_SplitLayout(t *testing.T) {
 	if len(top.Helmfiles) != 2 {
 		t.Fatalf("top helmfiles len = %d, want 2; doc:\n%s", len(top.Helmfiles), topData)
 	}
-	if top.Helmfiles[0].Path != fileCRDsHelmfile {
-		t.Errorf("helmfiles[0] = %q, want %q (CRD layer must come first)",
-			top.Helmfiles[0].Path, fileCRDsHelmfile)
-	}
-	if top.Helmfiles[1].Path != fileMainHelmfile {
-		t.Errorf("helmfiles[1] = %q, want %q", top.Helmfiles[1].Path, fileMainHelmfile)
+	wantPaths := []string{"level-0.yaml", "level-1.yaml"}
+	for i, want := range wantPaths {
+		if top.Helmfiles[i].Path != want {
+			t.Errorf("helmfiles[%d] = %q, want %q (dependency-order sequence is load-bearing)",
+				i, top.Helmfiles[i].Path, want)
+		}
 	}
 
-	// Sub-helmfiles must each parse as a leaf Helmfile with the right releases.
+	// Each level sub-helmfile holds the expected release.
 	tests := []struct {
 		file        string
 		wantRelease string
 	}{
-		{fileCRDsHelmfile, "cert-manager"},
-		{fileMainHelmfile, "gpu-operator"},
+		{"level-0.yaml", "cert-manager"},
+		{"level-1.yaml", "gpu-operator"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -162,20 +190,19 @@ func TestGenerate_SplitLayout(t *testing.T) {
 					tt.file, sub.Releases[0].Name, tt.wantRelease)
 			}
 			if len(sub.Releases[0].Needs) != 0 {
-				t.Errorf("%s release %q has unexpected needs %v (the cross-sub-helmfile edge must dissolve)",
+				t.Errorf("%s release %q has unexpected needs %v (cross-level edges must dissolve)",
 					tt.file, tt.wantRelease, sub.Releases[0].Needs)
 			}
 		})
 	}
 }
 
-// TestGenerate_AllCRD_CollapsesToSingleFile pins the edge case where
-// every referenced component installs CRDs: the split would have no
-// main layer to add value, so the generator collapses back to the
-// legacy single-file layout instead of emitting an empty
-// releases.yaml. Regression guard so this branch doesn't silently
-// shift to the multi-file path.
-func TestGenerate_AllCRD_CollapsesToSingleFile(t *testing.T) {
+// TestGenerate_SingleLevelCollapse pins the optimization where a bundle
+// whose DAG produces only one non-empty level (every component
+// independent or only one component) collapses to a single
+// helmfile.yaml — no sub-helmfile sequencing because there's no
+// ordering work to do.
+func TestGenerate_SingleLevelCollapse(t *testing.T) {
 	g := &Generator{
 		RecipeResult: recipeWith(
 			ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
@@ -192,13 +219,15 @@ func TestGenerate_AllCRD_CollapsesToSingleFile(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// helmfile.yaml must be a leaf, not a TopHelmfile.
+	// helmfile.yaml must be a leaf, not a TopHelmfile with helmfiles: list.
 	data, err := os.ReadFile(filepath.Join(outputDir, fileHelmfile))
 	if err != nil {
 		t.Fatalf("read helmfile.yaml: %v", err)
 	}
 	var top TopHelmfile
-	_ = yaml.Unmarshal(data, &top)
+	if err := yaml.Unmarshal(data, &top); err != nil {
+		t.Fatalf("parse helmfile.yaml as top-level doc: %v", err)
+	}
 	if len(top.Helmfiles) > 0 {
 		t.Errorf("expected leaf helmfile.yaml (no helmfiles: list), got top-level:\n%s", data)
 	}
@@ -210,20 +239,22 @@ func TestGenerate_AllCRD_CollapsesToSingleFile(t *testing.T) {
 		t.Errorf("releases = %+v, want exactly cert-manager", sub.Releases)
 	}
 
-	// crds.yaml / releases.yaml must NOT have been emitted.
-	assertSubHelmfilesAbsent(t, outputDir, "single-file collapse path")
+	// No level-*.yaml should exist.
+	assertLevelSubHelmfilesAbsent(t, outputDir, "single-level collapse path")
 }
 
-// TestGenerate_NoCRD_KeepsSingleFile is the inverse guard: a recipe
-// with zero InstallsCRDs components stays on the legacy single-file
-// layout. Catches a regression where every Generate call accidentally
-// flipped to the split path.
-func TestGenerate_NoCRD_KeepsSingleFile(t *testing.T) {
+// TestGenerate_IndependentComponentsCollapse covers a recipe with
+// multiple components but no inter-component dependencies. All
+// components land at level 0; partition is single-level; layout
+// collapses to one file.
+func TestGenerate_IndependentComponentsCollapse(t *testing.T) {
 	g := &Generator{
 		RecipeResult: recipeWith(
+			ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
 			ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia"),
 		),
 		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
 			"gpu-operator": {"driver": map[string]any{"enabled": true}},
 		},
 		Version: testBundlerVersion,
@@ -234,25 +265,22 @@ func TestGenerate_NoCRD_KeepsSingleFile(t *testing.T) {
 	if _, err := g.Generate(ctx, outputDir); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
-	assertSubHelmfilesAbsent(t, outputDir, "no-CRD bundle")
+	assertLevelSubHelmfilesAbsent(t, outputDir, "independent-components bundle")
 }
 
-// assertSubHelmfilesAbsent fails the test if the split-layout
-// sub-helmfiles are present in outputDir. Distinguishes "file
-// exists" (test failure) from any other os.Stat error (test fatal —
-// hides real filesystem problems if treated as "absent").
-func assertSubHelmfilesAbsent(t *testing.T, outputDir, context string) {
+// assertLevelSubHelmfilesAbsent fails the test if any level-*.yaml is
+// present in outputDir. Used to pin the single-file-collapse branch.
+// Checks level-0.yaml..level-9.yaml (well beyond any realistic depth).
+func assertLevelSubHelmfilesAbsent(t *testing.T, outputDir, context string) {
 	t.Helper()
-	for _, name := range []string{fileCRDsHelmfile, fileMainHelmfile} {
-		path := filepath.Join(outputDir, name)
-		_, err := os.Stat(path)
-		switch {
-		case err == nil:
-			t.Errorf("unexpected %s present in %s", name, context)
-		case os.IsNotExist(err):
-			// Expected — the absence-of-sub-helmfile invariant.
-		default:
-			t.Fatalf("stat %s: %v", path, err)
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		t.Fatalf("read outputDir %s: %v", outputDir, err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), fileLevelHelmfilePrefix) && strings.HasSuffix(e.Name(), ".yaml") {
+			t.Errorf("unexpected %s present in %s (single-level collapse should not emit per-level files)",
+				e.Name(), context)
 		}
 	}
 }
@@ -277,33 +305,4 @@ func equalStringSlices(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-// Ensure the recipe package's CRD-marked components stay in the
-// registry. A renamed/removed component without a corresponding test
-// update would silently disable the issue #914 fix for that name.
-// Sentinel guard rather than a full registry audit.
-func TestRegistry_CRDOwnersStillMarked(t *testing.T) {
-	registry, err := recipe.GetComponentRegistry()
-	if err != nil {
-		t.Fatalf("GetComponentRegistry: %v", err)
-	}
-	mustBeMarked := []string{
-		"cert-manager",
-		"nodewright-operator",
-		"kube-prometheus-stack",
-		"nvsentinel",
-		"agentgateway-crds",
-		"slinky-slurm-operator-crds",
-	}
-	for _, name := range mustBeMarked {
-		cfg := registry.Get(name)
-		if cfg == nil {
-			t.Errorf("registry missing component %q (rename or deletion?)", name)
-			continue
-		}
-		if !cfg.InstallsCRDs {
-			t.Errorf("component %q must keep installsCRDs: true (issue #914)", name)
-		}
-	}
 }

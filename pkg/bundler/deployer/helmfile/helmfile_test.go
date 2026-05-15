@@ -58,29 +58,30 @@ func TestGenerate_Scenarios(t *testing.T) {
 		goldens []string
 	}{
 		{
-			// Two-component split-layout case (issue #914):
-			// cert-manager is registry-marked InstallsCRDs, so the
-			// generator emits a top-level helmfile.yaml with a
-			// helmfiles: list referencing crds.yaml (cert-manager) and
-			// releases.yaml (gpu-operator). The needs: edge from
-			// gpu-operator to cert-manager dissolves at the
-			// sub-helmfile boundary — helmfile processes the list
-			// sequentially, so cert-manager's CRDs are registered
-			// before releases.yaml renders. README is included to
-			// lock its component-table rendering.
+			// Two-component stratified-layout case (issue #914):
+			// gpu-operator declares cert-manager as a dependency, so
+			// the DAG produces two levels and the generator emits a
+			// top-level helmfile.yaml carrying a helmfiles: list
+			// referencing level-0.yaml (cert-manager) and level-1.yaml
+			// (gpu-operator). The needs: edge across levels dissolves
+			// because helmfile processes the helmfiles: list
+			// sequentially. README is included to lock its
+			// component-table rendering.
 			name: "upstream_helm_only",
-			gen: &Generator{
-				RecipeResult: recipeWith(
-					ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io"),
-					ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia"),
-				),
-				ComponentValues: map[string]map[string]any{
-					"cert-manager": {"crds": map[string]any{"enabled": true}},
-					"gpu-operator": {"driver": map[string]any{"enabled": true}},
-				},
-				Version: testBundlerVersion,
-			},
-			goldens: []string{"helmfile.yaml", "crds.yaml", "releases.yaml", "README.md"},
+			gen: func() *Generator {
+				cm := ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2", "https://charts.jetstack.io")
+				gpu := ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3", "https://helm.ngc.nvidia.com/nvidia")
+				gpu.DependencyRefs = []string{"cert-manager"}
+				return &Generator{
+					RecipeResult: recipeWith(cm, gpu),
+					ComponentValues: map[string]map[string]any{
+						"cert-manager": {"crds": map[string]any{"enabled": true}},
+						"gpu-operator": {"driver": map[string]any{"enabled": true}},
+					},
+					Version: testBundlerVersion,
+				}
+			}(),
+			goldens: []string{"helmfile.yaml", "level-0.yaml", "level-1.yaml", "README.md"},
 		},
 		{
 			// cluster-values.yaml must be referenced in the release's
@@ -349,7 +350,7 @@ func TestBuildHelmfile_NilUpstream(t *testing.T) {
 	folders := []localformat.Folder{
 		{Index: 1, Dir: "001-x", Kind: localformat.KindUpstreamHelm, Name: "x", Parent: "x", Upstream: nil},
 	}
-	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil)
+	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil, nil)
 	if err == nil {
 		t.Fatalf("buildHelmfile with nil Upstream expected error, got nil")
 	}
@@ -368,7 +369,7 @@ func TestBuildHelmfile_UnsupportedKind(t *testing.T) {
 	folders := []localformat.Folder{
 		{Index: 1, Dir: "001-x", Kind: localformat.FolderKind(99), Name: "x", Parent: "x"},
 	}
-	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil)
+	_, err := buildHelmfile(folders, map[string]string{"x": "ns"}, nil, nil)
 	if err == nil {
 		t.Fatalf("buildHelmfile with unsupported kind expected error, got nil")
 	}
@@ -425,7 +426,7 @@ func TestBuildHelmfile_CrossNamespaceNeeds(t *testing.T) {
 		"cert-manager":          "cert-manager",
 		"kube-prometheus-stack": "monitoring",
 	}
-	doc, err := buildHelmfile(folders, ns, nil)
+	doc, err := buildHelmfile(folders, ns, nil, nil)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -451,7 +452,7 @@ func TestBuildHelmfile_SameNamespaceNeedsBare(t *testing.T) {
 		{Index: 2, Dir: "002-gpu-operator-post", Kind: localformat.KindLocalHelm, Name: "gpu-operator-post", Parent: "gpu-operator"},
 	}
 	ns := map[string]string{"gpu-operator": "gpu-operator"}
-	doc, err := buildHelmfile(folders, ns, nil)
+	doc, err := buildHelmfile(folders, ns, nil, nil)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}
@@ -481,7 +482,7 @@ func TestBuildHelmfile_CreateNamespaceFromFolder(t *testing.T) {
 			Upstream: &localformat.Upstream{Chart: "gpu-operator", Repo: "https://helm.ngc.nvidia.com/nvidia", Version: "v25.3.3"}},
 	}
 	ns := map[string]string{"gpu-operator": "privileged-gpu-operator"}
-	doc, err := buildHelmfile(folders, ns, nil)
+	doc, err := buildHelmfile(folders, ns, nil, nil)
 	if err != nil {
 		t.Fatalf("buildHelmfile() error = %v", err)
 	}

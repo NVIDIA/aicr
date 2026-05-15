@@ -696,6 +696,73 @@ func (s *RecipeMetadataSpec) detectCycles() error {
 	return nil
 }
 
+// TopologicalLevels returns components grouped into dependency-depth tiers
+// (Kahn-style, level-by-level). Level i contains exactly the components
+// whose longest dependency path from a root is i. All components within
+// a level are mutually independent (no edges among them), so a deployer
+// can install/diff them in parallel.
+//
+// Within each level, names are sorted alphabetically for determinism.
+//
+// Error semantics match TopologicalSort: missing or cyclic dependencies
+// surface as ErrCodeInvalidRequest with "circular dependencies exist."
+// (Same trade-off — a dependency on an undeclared component appears as
+// a cycle because its in-degree never drains to zero.)
+func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
+	return ComponentRefsTopologicalLevels(s.ComponentRefs)
+}
+
+// ComponentRefsTopologicalLevels is the free-function form of
+// RecipeMetadataSpec.TopologicalLevels — operates on a bare
+// []ComponentRef slice. Callers that have refs but not a full
+// RecipeMetadataSpec (e.g., the bundler post-resolution) use this.
+func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
+	inDegree := make(map[string]int, len(refs))
+	for _, c := range refs {
+		inDegree[c.Name] = len(c.DependencyRefs)
+	}
+	dependents := make(map[string][]string, len(refs))
+	for _, c := range refs {
+		for _, dep := range c.DependencyRefs {
+			dependents[dep] = append(dependents[dep], c.Name)
+		}
+	}
+
+	// Seed level 0: components with no incoming edges.
+	current := make([]string, 0, len(inDegree))
+	for name, degree := range inDegree {
+		if degree == 0 {
+			current = append(current, name)
+		}
+	}
+	sort.Strings(current)
+
+	var levels [][]string
+	processed := 0
+	for len(current) > 0 {
+		levels = append(levels, append([]string(nil), current...))
+		processed += len(current)
+
+		next := make([]string, 0)
+		for _, node := range current {
+			for _, dependent := range dependents[node] {
+				inDegree[dependent]--
+				if inDegree[dependent] == 0 {
+					next = append(next, dependent)
+				}
+			}
+		}
+		sort.Strings(next)
+		current = next
+	}
+
+	if processed != len(refs) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"cannot determine deployment levels: circular dependencies exist")
+	}
+	return levels, nil
+}
+
 // TopologicalSort returns components in dependency order (dependencies first).
 // Components with no dependencies come first, then components that depend only
 // on already-listed components, etc.

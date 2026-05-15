@@ -61,6 +61,13 @@ componentRefs:
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
     version: v0.15.1
     valuesFile: components/nodewright-operator/values.yaml
+  - name: prometheus-operator-crds
+    namespace: monitoring
+    chart: prometheus-operator-crds
+    type: Helm
+    source: https://prometheus-community.github.io/helm-charts
+    version: 28.0.1
+    valuesFile: components/prometheus-operator-crds/values.yaml
   - name: kube-prometheus-stack
     namespace: monitoring
     chart: kube-prometheus-stack
@@ -68,8 +75,11 @@ componentRefs:
     source: https://prometheus-community.github.io/helm-charts
     version: 84.4.0
     valuesFile: components/kube-prometheus-stack/values.yaml
+    dependencyRefs:
+      - prometheus-operator-crds
 deploymentOrder:
   - cert-manager
+  - prometheus-operator-crds
   - kube-prometheus-stack
   - gpu-operator
   - nvsentinel

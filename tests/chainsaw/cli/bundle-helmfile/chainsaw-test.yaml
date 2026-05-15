@@ -88,26 +88,31 @@ spec:
     - name: helmfile-top-level-shape
       description: |
         helmfile.yaml has the expected top-level keys and defaults.
-        Issue #914 added a split-helmfile layout: when the recipe
-        contains any CRD-installing component, helmfile.yaml is a thin
-        `helmfiles: [crds.yaml, releases.yaml]` orchestrator and the
-        leaf shape lives in the sub-files. This step walks whichever
-        layout the bundle produced.
+        Issue #914 added a stratified-helmfile layout: when the recipe's
+        dependency DAG produces more than one topological level,
+        helmfile.yaml is a thin `helmfiles: [level-0.yaml, level-1.yaml,
+        ...]` orchestrator and the leaf shape lives in the per-level
+        sub-files. Single-level bundles keep the leaf shape in
+        helmfile.yaml directly. This step walks whichever layout the
+        bundle produced.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
               TOP="${WORK}/basic/helmfile.yaml"
-              # Resolve leaf helmfile docs. Split layout (issue #914)
-              # carries the leaf shape in crds.yaml + releases.yaml;
-              # legacy single-file layout keeps it in helmfile.yaml.
+              # Resolve leaf helmfile docs. Stratified layout (issue #914)
+              # carries the leaf shape in level-N.yaml siblings; single-
+              # level bundles keep it in helmfile.yaml.
               if grep -q "^helmfiles:" "${TOP}"; then
-                # Top-level must list both sub-helmfiles in order.
-                grep -q "path: crds.yaml" "${TOP}" \
-                  || { echo "split layout missing crds.yaml entry" >&2; exit 1; }
-                grep -q "path: releases.yaml" "${TOP}" \
-                  || { echo "split layout missing releases.yaml entry" >&2; exit 1; }
-                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+                # Top-level must reference at least two level files in
+                # dependency order.
+                grep -q "path: level-0.yaml" "${TOP}" \
+                  || { echo "stratified layout missing level-0.yaml entry" >&2; exit 1; }
+                grep -q "path: level-1.yaml" "${TOP}" \
+                  || { echo "stratified layout missing level-1.yaml entry" >&2; exit 1; }
+                LEAVES=$(ls "${WORK}"/basic/level-*.yaml 2>/dev/null | sort)
+                [ -n "${LEAVES}" ] \
+                  || { echo "no level-*.yaml files in ${WORK}/basic" >&2; exit 1; }
               else
                 LEAVES="${TOP}"
               fi
@@ -135,16 +140,16 @@ spec:
         First release in each helmfile leaf has no needs entry; every
         subsequent release in the same leaf lists exactly its immediate
         predecessor — verifies the linear deployment chain. In the
-        split layout (issue #914) the chain restarts per sub-helmfile
-        because helmfile processes sub-helmfiles sequentially and the
-        cross-boundary edge dissolves.
+        stratified layout (issue #914) the chain restarts per
+        sub-helmfile because helmfile processes sub-helmfiles
+        sequentially and cross-level dependency edges dissolve.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
               TOP="${WORK}/basic/helmfile.yaml"
               if grep -q "^helmfiles:" "${TOP}"; then
-                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+                LEAVES=$(ls "${WORK}"/basic/level-*.yaml 2>/dev/null | sort)
               else
                 LEAVES="${TOP}"
               fi
@@ -225,17 +230,17 @@ spec:
     - name: repository-deduplication
       description: >
         Components sharing a chart-repo URL produce a single
-        repositories[] entry per helmfile leaf. In the split layout
-        (issue #914) each sub-helmfile keeps its own repositories: list
-        scoped to just the releases it owns, so the invariant holds
-        within each leaf rather than across the bundle.
+        repositories[] entry per helmfile leaf. In the stratified
+        layout (issue #914) each sub-helmfile keeps its own
+        repositories: list scoped to just the releases it owns, so the
+        invariant holds within each leaf rather than across the bundle.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
               TOP="${WORK}/basic/helmfile.yaml"
               if grep -q "^helmfiles:" "${TOP}"; then
-                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+                LEAVES=$(ls "${WORK}"/basic/level-*.yaml 2>/dev/null | sort)
               else
                 LEAVES="${TOP}"
               fi
@@ -265,15 +270,16 @@ spec:
     - name: per-component-values-paths
       description: >
         Every release values list references real files under its
-        NNN-<name>/ dir. Iterates per leaf helmfile so the split layout
-        (issue #914) gets the same coverage as the single-file layout.
+        NNN-<name>/ dir. Iterates per leaf helmfile so the stratified
+        layout (issue #914) gets the same coverage as the single-file
+        layout.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
               TOP="${WORK}/basic/helmfile.yaml"
               if grep -q "^helmfiles:" "${TOP}"; then
-                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+                LEAVES=$(ls "${WORK}"/basic/level-*.yaml 2>/dev/null | sort)
               else
                 LEAVES="${TOP}"
               fi
@@ -310,16 +316,16 @@ spec:
       description: >
         kai-scheduler is hardcoded as async in the helm deployer; the helmfile
         deployer mirrors this with wait: false + timeout: 1200 on the matching
-        release. kai-scheduler is not a CRD-owner, so in the split layout
-        (issue #914) it lands in releases.yaml — the search walks every leaf.
-        Skipped when the recipe does not include kai-scheduler.
+        release. In the stratified layout (issue #914) kai-scheduler lives in
+        whichever level its dependencies land it in — the search walks every
+        leaf. Skipped when the recipe does not include kai-scheduler.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
               TOP="${WORK}/basic/helmfile.yaml"
               if grep -q "^helmfiles:" "${TOP}"; then
-                LEAVES="${WORK}/basic/crds.yaml ${WORK}/basic/releases.yaml"
+                LEAVES=$(ls "${WORK}"/basic/level-*.yaml 2>/dev/null | sort)
               else
                 LEAVES="${TOP}"
               fi
@@ -388,12 +394,12 @@ spec:
                 || { echo "missing cluster-values.yaml under $(basename "$gpu_dir")" >&2; exit 1; }
 
               # The release's values: list must reference both values.yaml and
-              # cluster-values.yaml. In the split layout (issue #914)
-              # gpu-operator (not a CRD-owner) lives in releases.yaml;
-              # search every leaf so the test is layout-agnostic.
+              # cluster-values.yaml. In the stratified layout (issue #914)
+              # gpu-operator lives in whichever level its dependencies place
+              # it; search every leaf so the test is layout-agnostic.
               TOP="${WORK}/dynamic-out/helmfile.yaml"
               if grep -q "^helmfiles:" "${TOP}"; then
-                LEAVES="${WORK}/dynamic-out/crds.yaml ${WORK}/dynamic-out/releases.yaml"
+                LEAVES=$(ls "${WORK}"/dynamic-out/level-*.yaml 2>/dev/null | sort)
               else
                 LEAVES="${TOP}"
               fi
@@ -414,15 +420,15 @@ spec:
     - name: yaml-validity
       description: >
         Every helmfile leaf and component values file passes yamllint.
-        Split-layout sub-helmfiles (crds.yaml + releases.yaml, issue
-        #914) are included via the glob — missing files are skipped.
+        Stratified-layout sub-helmfiles (level-N.yaml, issue #914) are
+        picked up via the level-*.yaml glob — missing files are
+        skipped.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-helmfile"
               for yamlfile in "${WORK}"/basic/helmfile.yaml \
-                              "${WORK}"/basic/crds.yaml \
-                              "${WORK}"/basic/releases.yaml \
+                              "${WORK}"/basic/level-*.yaml \
                               "${WORK}"/basic/[0-9][0-9][0-9]-*/values.yaml; do
                 [ -f "$yamlfile" ] || continue
                 yamllint -d '{extends: relaxed, rules: {trailing-spaces: disable}}' "$yamlfile" \

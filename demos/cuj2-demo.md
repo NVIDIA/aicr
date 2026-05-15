@@ -37,6 +37,7 @@
   │  recipe.yaml ──▶ bundle/                                               │
   │    ├── deploy.sh                                                       │
   │    ├── cert-manager/             (TLS certificates)                    │
+  │    ├── prometheus-operator-crds/ (CRDs for monitoring stack)           │
   │    ├── kube-prometheus-stack/    (Prometheus, Grafana, alerting)       │
   │    ├── prometheus-adapter/       (custom metrics API for HPA)          │
   │    ├── k8s-ephemeral-storage-metrics/  (storage monitoring)            │

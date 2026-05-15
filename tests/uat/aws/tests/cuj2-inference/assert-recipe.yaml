@@ -53,6 +53,7 @@ componentRefs: ## alphabetically sorted
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
+  - name: prometheus-operator-crds
 deploymentOrder:
   - agentgateway-crds
   - aws-ebs-csi-driver
@@ -60,12 +61,13 @@ deploymentOrder:
   - cert-manager
   - agentgateway
   - grove
-  - kube-prometheus-stack
-  - k8s-ephemeral-storage-metrics
   - nfd
   - nodewright-operator
   - nodewright-customizations
+  - prometheus-operator-crds
+  - kube-prometheus-stack
   - gpu-operator
+  - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - dynamo-platform
   - nvidia-dra-driver-gpu

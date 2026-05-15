@@ -106,6 +106,7 @@ flow; the diff lands as a normal PR with CI.
 | `nvidia-dra-driver-gpu` | pinned (Phase B of #748) | digest-pin our overrides (#749) | unpinned in-tree → #745 |
 | `nodewright-operator` | pinned (Phase B of #748) | already digest-pinned (skyhook packages) | unpinned in-tree → #745 |
 | `cert-manager` | already pinned (`v1.20.2`) | none today | unpinned in-tree → #745 |
+| `prometheus-operator-crds` | already pinned (`28.0.1`) | none today | none (CRDs-only chart, no images) |
 | `kube-prometheus-stack` | already pinned (`84.4.0`) | none today | unpinned in-tree → #745 |
 | `nfd`, `k8s-ephemeral-storage-metrics` | pinned (Phase A of #748, ✅) | none today | unpinned in-tree → #745 |
 | All others | pinned today | digest-pin our overrides (#749) | unpinned in-tree → #745 |

@@ -19,7 +19,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **24**
+- Components: **25**
 - Unique images: **71**
 - Distinct registries: **11**
 
@@ -51,6 +51,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | nvidia-dra-driver-gpu | helm | nvidia/nvidia-dra-driver-gpu | 25.12.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.3.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
+| prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | slinky-slurm-operator | helm | slurm-operator | 1.1.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.1.0 | 0 |
 
@@ -191,6 +192,10 @@ _No images extracted._
 ### prometheus-adapter
 
 - `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
+
+### prometheus-operator-crds
+
+_No images extracted._
 
 ### slinky-slurm-operator
 

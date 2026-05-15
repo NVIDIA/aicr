@@ -84,6 +84,17 @@ components:
     # bundler synthesizes a permissive ResourceQuota in the gpu-operator
     # namespace so admission control admits these pods. See issue #915.
     gkeCriticalPriority: true
+    # gpu-operator ships ClusterPolicy / NvidiaDriver CRDs in `crds/`
+    # AND a templates/clusterpolicy.yaml that creates a ClusterPolicy CR
+    # in the same release. On a fresh cluster helm-diff's render pass
+    # fails because the CRD has not been registered yet — only `helm
+    # install` applies `crds/` before rendering, and helm-diff does not.
+    # The bundler emits `disableValidation: true` on this release so
+    # helm-diff skips the live-mapper check. No upstream
+    # gpu-operator-crds chart exists, so the split-into-separate-release
+    # mitigation used for kube-prometheus-stack does not apply.
+    # See https://github.com/NVIDIA/aicr/issues/914.
+    hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/gpu-operator/health-check.yaml
     helm:
@@ -160,10 +171,6 @@ components:
     displayName: cert-manager
     valueOverrideKeys:
       - certmanager
-    # Registers Certificate, Issuer, ClusterIssuer, Order, Challenge, and
-    # CertificateRequest CRDs that downstream components (agentgateway,
-    # webhooks, monitoring) reference. Issue #914.
-    installsCRDs: true
     healthCheck:
       assertFile: checks/cert-manager/health-check.yaml
     helm:
@@ -189,11 +196,6 @@ components:
     valueOverrideKeys:
       - nodewright
       - skyhook
-    # Registers the Skyhook CRD that nodewright-customizations references
-    # via kind: Skyhook. The originating failure mode for issue #914 —
-    # helm-diff on nodewright-customizations renders against the live REST
-    # mapper before nodewright-operator has registered the CRD.
-    installsCRDs: true
     healthCheck:
       assertFile: checks/nodewright-operator/health-check.yaml
     helm:
@@ -253,9 +255,13 @@ components:
     displayName: nvsentinel
     valueOverrideKeys:
       - nv-sentinel
-    # Registers HealthCheck / NodeHealth CRDs consumed by sibling
-    # observability and triage components. Issue #914.
-    installsCRDs: true
+    # nvsentinel's templates create monitoring.coreos.com/v1 PodMonitor
+    # CRs that prometheus-operator-crds must register first. Ordering
+    # is satisfied transitively in the DAG-stratified helmfile layout:
+    # nvsentinel depends on gpu-operator, which depends on
+    # kube-prometheus-stack, which depends on prometheus-operator-crds,
+    # so by the time nvsentinel's level diffs, the monitoring CRDs are
+    # already registered. Issue #914.
     healthCheck:
       assertFile: checks/nvsentinel/health-check.yaml
     helm:
@@ -293,16 +299,36 @@ components:
         tolerationPaths:
           - kubeletPlugin.tolerations
 
+  - name: prometheus-operator-crds
+    displayName: prometheus-operator-crds
+    valueOverrideKeys:
+      - prometheusoperatorcrds
+    # CRDs-only chart for the prometheus-operator; kube-prometheus-stack
+    # (and any sibling chart that creates ServiceMonitor / PodMonitor /
+    # Alertmanager / Prometheus / etc. CRs) consumes the kinds it
+    # registers. Split out of kube-prometheus-stack to break the
+    # helm-diff self-reference: the stack chart's own templates create
+    # CRs of kinds its `crds/` subchart defines, so helm-diff against a
+    # fresh cluster aborts before any install. kube-prometheus-stack
+    # now ships with `crds.enabled: false` and depends on this chart
+    # via DependencyRefs, so the DAG-stratified helmfile layout
+    # installs CRDs first automatically. Issue #914.
+    helm:
+      defaultRepository: https://prometheus-community.github.io/helm-charts
+      defaultChart: prometheus-community/prometheus-operator-crds
+      defaultVersion: 28.0.1
+      defaultNamespace: monitoring
+
   - name: kube-prometheus-stack
     displayName: kube-prometheus-stack
     valueOverrideKeys:
       - prometheus
       - kubeprometheusstack
-    # Registers ServiceMonitor, PodMonitor, AlertmanagerConfig,
-    # Prometheus, Alertmanager, ThanosRuler, PrometheusRule, and
-    # Probe CRDs that downstream observability components reference.
-    # Issue #914.
-    installsCRDs: true
+    # ServiceMonitor / PodMonitor / Alertmanager / Prometheus /
+    # ThanosRuler / PrometheusRule / Probe CRDs are now installed by
+    # the sibling prometheus-operator-crds release (crds.enabled: false
+    # on this chart). The split fixes the helm-diff self-reference
+    # described in issue #914.
     healthCheck:
       assertFile: checks/kube-prometheus-stack/health-check.yaml
     helm:
@@ -398,6 +424,14 @@ components:
     displayName: kai-scheduler
     valueOverrideKeys:
       - kaischeduler
+    # kai-scheduler ships Queue (scheduling.run.ai/v2) and SchedulingShard
+    # (kai.scheduler/v1) CRDs in `crds/` AND templates that create CRs of
+    # those kinds (default-parent-queue, default-queue, default
+    # SchedulingShard). helm-diff's render pass fails on a fresh cluster
+    # because the CRDs are not yet registered. disableValidation: true
+    # on this release tells helm-diff to skip the live-mapper check.
+    # See https://github.com/NVIDIA/aicr/issues/914.
+    hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/kai-scheduler/health-check.yaml
     helm:
@@ -451,9 +485,10 @@ components:
     displayName: agentgateway-crds
     valueOverrideKeys:
       - agentgatewaycrds
-    # CRDs-only chart; agentgateway consumes the kinds it registers.
-    # Issue #914.
-    installsCRDs: true
+    # CRDs-only chart; agentgateway consumes the kinds it registers
+    # via its templates, so agentgateway must declare this chart as a
+    # DependencyRef for the DAG-stratified helmfile layout to install
+    # CRDs first. Issue #914.
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway-crds
@@ -520,6 +555,14 @@ components:
     valueOverrideKeys:
       - kubeflowtrainer
       - trainer
+    # Ships TrainJob / TrainingRuntime / ClusterTrainingRuntime CRDs in
+    # `crds/` AND default ClusterTrainingRuntime CRs (torch-distributed,
+    # mlx-distributed, deepspeed-distributed, jax-distributed, xgboost-
+    # distributed, ...) in templates/runtimes/. helm-diff on a fresh
+    # cluster fails to resolve the CR kind. disableValidation: true
+    # on this release tells helm-diff to skip the live-mapper check.
+    # See https://github.com/NVIDIA/aicr/issues/914.
+    hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/kubeflow-trainer/health-check.yaml
     helm:
@@ -552,8 +595,9 @@ components:
       - slinkyslurmoperatorcrds
       - slurmoperatorcrds
     # CRDs-only chart; slinky-slurm-operator consumes the kinds it
-    # registers. Issue #914.
-    installsCRDs: true
+    # registers via its templates, so slinky-slurm-operator must
+    # declare this chart as a DependencyRef for the DAG-stratified
+    # helmfile layout to install CRDs first. Issue #914.
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds

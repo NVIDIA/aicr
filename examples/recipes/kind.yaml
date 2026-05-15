@@ -39,6 +39,13 @@ componentRefs:
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
     version: v0.15.1
     valuesFile: components/nodewright-operator/values.yaml
+  - name: prometheus-operator-crds
+    namespace: nvidia-system
+    chart: prometheus-operator-crds
+    type: Helm
+    source: https://prometheus-community.github.io/helm-charts
+    version: 28.0.1
+    valuesFile: components/prometheus-operator-crds/values.yaml
   - name: kube-prometheus-stack
     namespace: nvidia-system
     chart: kube-prometheus-stack
@@ -46,6 +53,8 @@ componentRefs:
     source: https://prometheus-community.github.io/helm-charts
     version: 84.4.0
     valuesFile: components/kube-prometheus-stack/values.yaml
+    dependencyRefs:
+      - prometheus-operator-crds
   - name: k8s-ephemeral-storage-metrics
     namespace: nvidia-system
     chart: k8s-ephemeral-storage-metrics
@@ -53,9 +62,10 @@ componentRefs:
     source: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
     version: 1.19.2
     valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
-  
+
 deploymentOrder:
   - cert-manager
   - nodewright-operator
+  - prometheus-operator-crds
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics

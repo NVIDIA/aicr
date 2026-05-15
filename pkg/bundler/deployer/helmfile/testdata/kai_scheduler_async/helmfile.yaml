@@ -15,3 +15,4 @@ releases:
       - ./001-kai-scheduler/values.yaml
     wait: false
     timeout: 1200
+    disableValidation: true

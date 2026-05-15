@@ -34,21 +34,18 @@ import (
 )
 
 const (
+	// fileLevelHelmfilePrefix is prepended to each per-level sub-helmfile
+	// in the stratified layout (issue #914). Level N's sub-helmfile is
+	// "level-N.yaml". Operators reading the bundle see the dependency
+	// depth as the filename.
+	fileLevelHelmfilePrefix = "level-"
+
 	// fileHelmfile is the top-level orchestration document emitted by this
 	// deployer. The name matches helmfile's default discovery so operators
 	// can run `helmfile apply` from the bundle directory with no `-f` flag.
 	fileHelmfile = "helmfile.yaml"
 	// fileReadme is the user-facing apply/diff/destroy walkthrough.
 	fileReadme = "README.md"
-	// fileCRDsHelmfile holds the CRD-owner sub-helmfile when the bundle
-	// uses the split layout. Referenced from helmfile.yaml's helmfiles:
-	// list and processed first. Issue #914.
-	fileCRDsHelmfile = "crds.yaml"
-	// fileMainHelmfile holds the non-CRD-owner sub-helmfile when the
-	// bundle uses the split layout. Referenced second in helmfile.yaml's
-	// helmfiles: list so all CRDs are registered before its releases
-	// render.
-	fileMainHelmfile = "releases.yaml"
 )
 
 //go:embed templates/README.md.tmpl
@@ -165,9 +162,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
-	// Emit either the legacy single-file helmfile.yaml or the split
-	// helmfiles: layout depending on whether any referenced component
-	// is registry-marked InstallsCRDs (issue #914).
+	// Emit either the single-file helmfile.yaml or the stratified
+	// helmfiles: layout depending on whether the dependency DAG
+	// produces more than one level (issue #914).
 	splitLayout, err := g.writeHelmfileLayout(outputDir, output, writeResult.Folders, sortedRefs, namespaceByComponent)
 	if err != nil {
 		return nil, err
@@ -234,18 +231,23 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
-// writeHelmfileLayout decides between the legacy single-file layout
-// and the split multi-helmfiles layout (issue #914), writes the
-// appropriate files to outputDir, threads the file metadata into
-// output, and reports whether the split layout was used so the README
-// renderer can include the helmfiles: explainer.
+// writeHelmfileLayout decides between the single-file layout and the
+// stratified multi-helmfiles layout (issue #914), writes the appropriate
+// files to outputDir, threads the file metadata into output, and reports
+// whether the split layout was used so the README renderer can include
+// the helmfiles: explainer.
 //
-// Selection:
-//   - No CRD-owner components → single helmfile.yaml (legacy path).
-//   - Every component is a CRD-owner → single helmfile.yaml (no
-//     non-CRD layer means the split would add no value).
-//   - Mixed → split layout: crds.yaml + releases.yaml + top-level
-//     helmfile.yaml with a helmfiles: list.
+// Selection is driven by dependency depth (recipe.ComponentRefsTopological
+// Levels). A bundle whose dependency DAG produces a single level (every
+// component independent, or only one component) emits a single
+// helmfile.yaml. A bundle producing N > 1 levels emits one sub-helmfile
+// per level — `level-0.yaml`, `level-1.yaml`, ... — plus a top-level
+// `helmfile.yaml` whose `helmfiles:` list references them in order.
+// Sub-helmfiles are processed sequentially by `helmfile`, so by the
+// time level K diffs, every release in levels 0…K-1 has fully applied
+// (and any CRD they install is registered in the cluster's REST mapper).
+// This removes any need for the bundler to know which charts ship CRDs
+// — the dependency edges already encode it.
 func (g *Generator) writeHelmfileLayout(
 	outputDir string,
 	output *deployer.Output,
@@ -254,19 +256,24 @@ func (g *Generator) writeHelmfileLayout(
 	namespaceByComponent map[string]string,
 ) (bool, error) {
 
-	crdSet, err := componentsInstallingCRDs(sortedRefs)
+	flags, err := componentFlagsByName(sortedRefs)
 	if err != nil {
 		return false, errors.Wrap(errors.ErrCodeInternal,
-			"failed to load registry for CRD partition", err)
+			"failed to load registry for component flags", err)
 	}
-	crdFolders, mainFolders := splitFoldersByCRD(folders, crdSet)
+	levels, err := recipe.ComponentRefsTopologicalLevels(sortedRefs)
+	if err != nil {
+		return false, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to compute dependency levels")
+	}
+	folderLevels := splitFoldersByLevel(folders, levels)
 
 	// buildHelmfile returns pkg/errors StructuredError values (e.g.
 	// ErrCodeInvalidRequest for unsupported folder kinds); use
 	// PropagateOrWrap so those codes survive rather than being
 	// overwritten with ErrCodeInternal.
 	writeDoc := func(folders []localformat.Folder, name string) error {
-		doc, buildErr := buildHelmfile(folders, namespaceByComponent, g.DynamicValues)
+		doc, buildErr := buildHelmfile(folders, namespaceByComponent, g.DynamicValues, flags)
 		if buildErr != nil {
 			return errors.PropagateOrWrap(buildErr, errors.ErrCodeInternal,
 				fmt.Sprintf("failed to build %s", name))
@@ -280,20 +287,34 @@ func (g *Generator) writeHelmfileLayout(
 		return nil
 	}
 
-	switch {
-	case len(crdFolders) == 0:
-		return false, writeDoc(mainFolders, fileHelmfile)
-	case len(mainFolders) == 0:
-		return false, writeDoc(crdFolders, fileHelmfile)
+	// Collapse to single file when the DAG has at most one non-empty
+	// level (every component is independent, or only one component
+	// exists). Skipping the sub-helmfile sequencing avoids the extra
+	// file count and helmfile-process overhead when there's no
+	// ordering work to do.
+	nonEmpty := 0
+	for _, l := range folderLevels {
+		if len(l) > 0 {
+			nonEmpty++
+		}
+	}
+	if nonEmpty <= 1 {
+		return false, writeDoc(folders, fileHelmfile)
 	}
 
-	if err := writeDoc(crdFolders, fileCRDsHelmfile); err != nil {
-		return false, err
+	subPaths := make([]string, 0, len(folderLevels))
+	for i, levelFolders := range folderLevels {
+		if len(levelFolders) == 0 {
+			continue
+		}
+		name := fmt.Sprintf("%s%d.yaml", fileLevelHelmfilePrefix, i)
+		if err := writeDoc(levelFolders, name); err != nil {
+			return false, err
+		}
+		subPaths = append(subPaths, name)
 	}
-	if err := writeDoc(mainFolders, fileMainHelmfile); err != nil {
-		return false, err
-	}
-	topPath, topSize, topErr := writeTopHelmfile(outputDir)
+
+	topPath, topSize, topErr := writeTopHelmfile(outputDir, subPaths)
 	if topErr != nil {
 		return false, topErr
 	}
@@ -366,18 +387,17 @@ func writeHelmfileYAMLAs(outputDir string, doc Helmfile, filename string) (strin
 	return path, int64(buf.Len()), nil
 }
 
-// writeTopHelmfile emits the split-layout top-level helmfile.yaml with
-// a fixed helmfiles: list referencing crds.yaml first and releases.yaml
-// second. The body is intentionally minimal — repositories and
-// helmDefaults live in the sub-files so each layer can declare only
-// what it needs.
-func writeTopHelmfile(outputDir string) (string, int64, error) {
-	doc := TopHelmfile{
-		Helmfiles: []SubHelmfileRef{
-			{Path: fileCRDsHelmfile},
-			{Path: fileMainHelmfile},
-		},
+// writeTopHelmfile emits the stratified-layout top-level helmfile.yaml
+// with a helmfiles: list referencing each per-level sub-helmfile in
+// dependency order (level-0.yaml first, level-1.yaml next, ...). The
+// body is intentionally minimal — repositories and helmDefaults live
+// in the sub-files so each layer can declare only what it needs.
+func writeTopHelmfile(outputDir string, subPaths []string) (string, int64, error) {
+	refs := make([]SubHelmfileRef, 0, len(subPaths))
+	for _, p := range subPaths {
+		refs = append(refs, SubHelmfileRef{Path: p})
 	}
+	doc := TopHelmfile{Helmfiles: refs}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -398,41 +418,79 @@ func writeTopHelmfile(outputDir string) (string, int64, error) {
 	return path, int64(buf.Len()), nil
 }
 
-// componentsInstallingCRDs returns a set of component names from refs
-// that the registry marks InstallsCRDs. Loaded once per Generate so
-// the partition step does a single registry round-trip.
-func componentsInstallingCRDs(refs []recipe.ComponentRef) (map[string]bool, error) {
+// componentFlags captures the registry-derived behavioral flags that
+// affect how a component's release is rendered in the generated
+// helmfile. Today only HasSelfRefCRDs is consumed (it drives
+// disableValidation: true per release); the struct exists as a
+// gathering point so future per-release knobs can be added without
+// changing call signatures.
+type componentFlags struct {
+	HasSelfRefCRDs bool
+}
+
+// componentFlagsByName returns a per-component map of registry flags
+// for the refs in this recipe. Loaded once per Generate so the
+// release-rendering step does a single registry round-trip.
+// Components not in the registry are absent from the map (treated as
+// all-false).
+func componentFlagsByName(refs []recipe.ComponentRef) (map[string]componentFlags, error) {
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]bool, len(refs))
+	out := make(map[string]componentFlags, len(refs))
 	for _, ref := range refs {
 		cfg := registry.Get(ref.Name)
-		if cfg != nil && cfg.InstallsCRDs {
-			out[ref.Name] = true
+		if cfg == nil {
+			continue
+		}
+		out[ref.Name] = componentFlags{
+			HasSelfRefCRDs: cfg.HasSelfRefCRDs,
 		}
 	}
 	return out, nil
 }
 
-// splitFoldersByCRD partitions the localformat folders into a CRD-layer
-// group and a main-layer group, preserving the original order within
-// each group. A folder is classified by its parent component name, so
-// the auxiliary -pre and -post folders inherit their primary's
-// classification (all three travel together to the same sub-helmfile).
+// splitFoldersByLevel partitions the localformat folders into per-DAG-
+// level groups, preserving the original folder order within each group.
+// A folder's level is its parent component's level in levels (as
+// produced by recipe.ComponentRefsTopologicalLevels). Auxiliary -pre
+// and -post folders share the parent's level so the three travel
+// together to the same sub-helmfile.
 //
-// crdComponents is the lookup table built by componentsInstallingCRDs.
-// A nil or empty map yields an empty crd slice and main = folders.
-func splitFoldersByCRD(folders []localformat.Folder, crdComponents map[string]bool) (crd, main []localformat.Folder) {
-	for _, f := range folders {
-		if crdComponents[f.Parent] {
-			crd = append(crd, f)
-		} else {
-			main = append(main, f)
+// Returns a slice of length len(levels). Each index i holds the folders
+// whose parent component is in dependency level i. A level with no
+// folders yields an empty slice at that index (callers skip empties
+// when emitting sub-helmfiles).
+//
+// Folders whose parent component is not represented in levels (e.g.,
+// injected wrapper folders for a component name that doesn't appear in
+// the DAG) default to level 0. In a correctly-constructed bundle this
+// shouldn't happen — levels covers every recipe component — but the
+// fallback keeps the partition total and avoids silently dropping
+// folders.
+func splitFoldersByLevel(folders []localformat.Folder, levels [][]string) [][]localformat.Folder {
+	levelOf := make(map[string]int, 0)
+	for i, level := range levels {
+		for _, name := range level {
+			levelOf[name] = i
 		}
 	}
-	return crd, main
+	out := make([][]localformat.Folder, len(levels))
+	if len(out) == 0 {
+		// No components produced any levels — defensive: emit one
+		// level containing all folders so callers see a non-empty
+		// partition.
+		return [][]localformat.Folder{folders}
+	}
+	for _, f := range folders {
+		idx, ok := levelOf[f.Parent]
+		if !ok {
+			idx = 0
+		}
+		out[idx] = append(out[idx], f)
+	}
+	return out
 }
 
 // readmeData is the template data for README.md generation.

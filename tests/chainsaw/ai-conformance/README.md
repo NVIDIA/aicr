@@ -43,7 +43,7 @@ The Kind GPU workflows use these leaf recipes instead:
 - `h100-kind-inference-dynamo`
 - `h100-kind-training-kubeflow`
 
-## Cluster Inference Components (16)
+## Cluster Inference Components (17)
 
 | Component | Namespace | Type | What is Validated |
 |-----------|-----------|------|-------------------|
@@ -51,7 +51,8 @@ The Kind GPU workflows use these leaf recipes instead:
 | gpu-operator | gpu-operator | Helm | Operator Deployment, ClusterPolicy ready, 6 DaemonSets (driver, device-plugin, dcgm-exporter, toolkit, gfd, validator) |
 | nvsentinel | nvsentinel | Helm | Controller Deployment, platform-connector DaemonSet |
 | nodewright-operator | skyhook | Helm | Controller-manager Deployment |
-| kube-prometheus-stack | monitoring | Helm | 3 Deployments (operator, grafana, kube-state-metrics), 2 StatefulSets (prometheus, alertmanager), node-exporter DaemonSet |
+| prometheus-operator-crds | monitoring | Helm | CRDs only (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc. — `monitoring.coreos.com/v1`) |
+| kube-prometheus-stack | monitoring | Helm | 3 Deployments (operator, grafana, kube-state-metrics), 2 StatefulSets (prometheus, alertmanager), node-exporter DaemonSet (CRDs installed by `prometheus-operator-crds`) |
 | k8s-ephemeral-storage-metrics | monitoring | Helm | Deployment |
 | prometheus-adapter | monitoring | Helm | Deployment |
 | aws-ebs-csi-driver | kube-system | Helm | **Disabled by default** (EKS managed addon) |
