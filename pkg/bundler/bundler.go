@@ -43,6 +43,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // digestAlgoSHA256 is the algorithm key used in attestation digest maps.
@@ -1298,9 +1299,11 @@ func computeGKECriticalPriorityQuotaPods(nodeCount int) int {
 
 // renderGKECriticalPriorityQuota returns the YAML for a ResourceQuota
 // that admits pods with system-*-critical priority classes in the
-// given namespace. Marshaled via yaml.Marshal so the layout is stable
-// and round-trippable; a string template would be more concise but
-// would silently break on namespace names that need YAML quoting.
+// given namespace. Uses serializer.MarshalYAMLDeterministic so the
+// bytes are stable across runs — the synthesized manifest is part of
+// the bundle artifact (checksummed and optionally attested), and
+// yaml.v3 walks randomized Go map order, which would otherwise
+// produce a different SHA on every invocation.
 func renderGKECriticalPriorityQuota(namespace string, pods int) ([]byte, error) {
 	quota := map[string]any{
 		"apiVersion": "v1",
@@ -1327,5 +1330,5 @@ func renderGKECriticalPriorityQuota(namespace string, pods int) ([]byte, error) 
 			},
 		},
 	}
-	return yaml.Marshal(quota)
+	return serializer.MarshalYAMLDeterministic(quota)
 }

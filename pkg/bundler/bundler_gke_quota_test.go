@@ -98,6 +98,31 @@ func TestRenderGKECriticalPriorityQuota(t *testing.T) {
 	}
 }
 
+// TestRenderGKECriticalPriorityQuota_Deterministic guards the
+// serializer.MarshalYAMLDeterministic call: the bundle is checksummed
+// and optionally attested, so two renders of the same inputs must
+// produce byte-identical output. yaml.v3 walks randomized Go map
+// order, which would silently regress this if the call ever flipped
+// back to the stdlib yaml.Marshal.
+func TestRenderGKECriticalPriorityQuota_Deterministic(t *testing.T) {
+	// 50 iterations is generous; map-order non-determinism typically
+	// surfaces within ~5 with a multi-key spec.
+	first, err := renderGKECriticalPriorityQuota("gpu-operator", 320)
+	if err != nil {
+		t.Fatalf("first render: %v", err)
+	}
+	for i := range 50 {
+		got, err := renderGKECriticalPriorityQuota("gpu-operator", 320)
+		if err != nil {
+			t.Fatalf("render %d: %v", i, err)
+		}
+		if string(got) != string(first) {
+			t.Fatalf("non-deterministic render at iter %d:\nfirst:\n%s\ngot:\n%s",
+				i, string(first), string(got))
+		}
+	}
+}
+
 // TestInjectGKECriticalPriorityQuotas covers the integration of the
 // synthesizer with collectComponentPreManifests. Each case asserts both
 // presence/absence and (where applicable) the namespace + pods cap that
