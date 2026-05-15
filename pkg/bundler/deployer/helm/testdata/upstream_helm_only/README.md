@@ -50,6 +50,15 @@ cd NNN-<component-name>
 bash install.sh
 ```
 
+> **Helm 4 vs Helm 3:** On Helm 4 (server-side apply by default), each
+> `install.sh` automatically passes `--force-conflicts` so the upgrade can
+> overwrite fields that operators (cert-manager, gpu-operator, nvsentinel,
+> grove, ...) own on their rotated webhook cert Secrets — without it the
+> upgrade fails on field-manager conflicts. On Helm 3 (client-side apply,
+> no field-manager conflicts) the flag is omitted; the script detects the
+> Helm major version at run time, so the same bundle works with either
+> binary.
+
 ## Customization
 
 Each component folder has its own `values.yaml` (static) and `cluster-values.yaml`
