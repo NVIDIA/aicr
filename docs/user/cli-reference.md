@@ -1210,7 +1210,7 @@ All deployers respect the `deploymentOrder` field from the recipe, ensuring comp
 
 - **Helm**: Components listed in README in deployment order
 - **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
-- **Flux**: Uses `dependsOn` references in HelmRelease/Kustomization CRs (each component depends on its predecessor)
+- **Flux**: Uses `dependsOn` references in HelmRelease CRs (each component depends on the previous component's terminal release — its `<prev>-post` release when post-manifests are present, otherwise `<prev>`). Components with pre-manifests insert a `<name>-pre` release that the primary HelmRelease depends on, so the chain becomes `previous → <name>-pre → <name> → <name>-post → next`. The bundle's root `kustomization.yaml` is a plain Kustomize file (not a Flux Kustomization CR).
 - **Helmfile**: Uses `needs:` references in each release (each component depends on its predecessor)
 
 #### Value Overrides

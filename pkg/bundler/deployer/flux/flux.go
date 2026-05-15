@@ -44,6 +44,11 @@ const (
 	fileReadme        = "README.md"
 )
 
+// summaryTypeHelmRelease is the value placed in ComponentSummary.Type for
+// every row of the README's Components table — every emitted release
+// (pre / primary / post) is a Flux HelmRelease CR.
+const summaryTypeHelmRelease = "HelmRelease"
+
 //go:embed templates/configmap-values.yaml.tmpl
 var configMapTemplate string
 
@@ -125,6 +130,14 @@ type Generator struct {
 	// components. Components without manifests do not appear in the map.
 	ComponentManifests map[string]map[string][]byte
 
+	// ComponentPreManifests maps component name → manifest path → rendered bytes.
+	// Emitted as a <name>-pre HelmRelease that the primary HelmRelease
+	// dependsOn, ensuring pre-phase manifests reconcile before the chart.
+	// Wired by the bundler from ComponentRef.PreManifestFiles and the
+	// synthesized GKE critical-priority ResourceQuota (see issue #915).
+	// Components without pre-manifests do not appear in the map.
+	ComponentPreManifests map[string]map[string][]byte
+
 	// DynamicValues maps component names to their dynamic value paths.
 	// When non-empty, dynamic paths are split from inline values into a
 	// ConfigMap and referenced via spec.valuesFrom in the HelmRelease.
@@ -202,6 +215,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
+	if err := g.detectInjectedReleaseCollisions(sortedRefs); err != nil {
+		return nil, err
+	}
+
 	// Create sources directory.
 	sourcesDir, err := deployer.SafeJoin(outputDir, "sources")
 	if err != nil {
@@ -258,7 +275,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Write README.md.
 	readmeData := ReadmeData{
 		BundlerVersion: deployer.NormalizeVersionWithDefault(g.Version),
-		Components:     buildComponentSummaries(sortedRefs, g.ComponentManifests),
+		Components:     buildComponentSummaries(sortedRefs, g.ComponentPreManifests, g.ComponentManifests),
 	}
 	if err := writeTemplate(output, readmeTemplate, readmeData,
 		outputDir, fileReadme, "failed to write README.md"); err != nil {
@@ -337,9 +354,36 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			fmt.Sprintf("failed to create component directory %s", ref.Name), err)
 	}
 
-	dependsOn := buildDependsOn(sortedRefs, index)
+	primaryDependsOn := g.buildPrimaryDependsOn(sortedRefs, index)
+	hasPreManifests := len(g.ComponentPreManifests[ref.Name]) > 0
 	hasManifests := len(g.ComponentManifests[ref.Name]) > 0
 	var resources []string
+
+	// Emit the <name>-pre HelmRelease BEFORE the primary when pre-manifests
+	// exist, and rewire the primary's dependsOn to point at the pre release.
+	// Chain becomes: previous → <name>-pre → <name> → <name>-post → next.
+	if hasPreManifests {
+		preName := ref.Name + "-pre"
+		preDir, preDirErr := deployer.SafeJoin(outputDir, preName)
+		if preDirErr != nil {
+			return nil, preDirErr
+		}
+		if mkErr := os.MkdirAll(preDir, 0750); mkErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to create pre directory %s", preName), mkErr)
+		}
+		preWroteCM, preErr := g.generateManifestHelmChart(ref.Name, preName, ref.Namespace, preDir,
+			g.ComponentPreManifests[ref.Name], gitSources, primaryDependsOn, output)
+		if preErr != nil {
+			return nil, preErr
+		}
+		resources = append(resources, filepath.Join(preName, fileHelmRelease))
+		if preWroteCM {
+			resources = append(resources, filepath.Join(preName, fileConfigMap))
+		}
+		// Primary chart now waits for the pre release.
+		primaryDependsOn = []DependsOnRef{{Name: preName}}
+	}
 
 	switch ref.Type { //nolint:exhaustive // only Helm is supported; default rejects others
 	case recipe.ComponentTypeHelm:
@@ -347,15 +391,15 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// Package as a local Helm chart so Flux renders the templates natively.
 		if ref.Chart == "" && ref.Source == "" && hasManifests {
 			wroteCM, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir,
-				g.ComponentManifests[ref.Name], gitSources, dependsOn, output)
+				g.ComponentManifests[ref.Name], gitSources, primaryDependsOn, output)
 			if genErr != nil {
 				return nil, genErr
 			}
-			res := []string{filepath.Join(ref.Name, fileHelmRelease)}
+			resources = append(resources, filepath.Join(ref.Name, fileHelmRelease))
 			if wroteCM {
-				res = append(res, filepath.Join(ref.Name, fileConfigMap))
+				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
 			}
-			return res, nil
+			return resources, nil
 		}
 
 		// Vendored Helm component: pull chart tarball, write wrapper,
@@ -364,7 +408,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// manifests (the existing flow handles them correctly).
 		if g.VendorCharts && isVendorable(ref) {
 			wroteCM, rec, vendErr := g.generateVendoredHelmComponent(
-				ctx, ref, compDir, dependsOn, gitSources, puller, output)
+				ctx, ref, compDir, primaryDependsOn, gitSources, puller, output)
 			if vendErr != nil {
 				return nil, vendErr
 			}
@@ -377,7 +421,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 				"component", ref.Name,
 				"chart", rec.Chart, "version", rec.Version, "sha256", rec.SHA256)
 		} else {
-			wroteCM, helmErr := g.generateHelmComponent(ref, compDir, dependsOn, helmSources, output)
+			wroteCM, helmErr := g.generateHelmComponent(ref, compDir, primaryDependsOn, helmSources, output)
 			if helmErr != nil {
 				return nil, helmErr
 			}
@@ -470,15 +514,67 @@ func filterEnabled(refs []recipe.ComponentRef) []recipe.ComponentRef {
 	return enabled
 }
 
-// buildDependsOn returns a dependsOn reference to the immediate predecessor
-// in the deployment order. All components produce HelmReleases, so every
-// component at index N depends on component at index N-1.
-func buildDependsOn(sortedRefs []recipe.ComponentRef, index int) []DependsOnRef {
+// detectInjectedReleaseCollisions rejects recipes that declare both a
+// component "foo" (with pre- or post-manifests) and a separate component
+// "foo-pre" / "foo-post". The injection rule would synthesize a HelmRelease
+// that collides with the explicitly-declared one. Mirrors the rule in
+// pkg/bundler/deployer/localformat/writer.go.
+func (g *Generator) detectInjectedReleaseCollisions(sortedRefs []recipe.ComponentRef) error {
+	declared := make(map[string]struct{}, len(sortedRefs))
+	for _, ref := range sortedRefs {
+		declared[ref.Name] = struct{}{}
+	}
+	for _, ref := range sortedRefs {
+		if len(g.ComponentPreManifests[ref.Name]) > 0 {
+			if _, clash := declared[ref.Name+"-pre"]; clash {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q has preManifestFiles and would inject %q-pre, but a component named %q-pre is already declared in the recipe — rename one to avoid collision",
+						ref.Name, ref.Name, ref.Name))
+			}
+		}
+		// Post injection only fires for mixed components (chart/source +
+		// post-manifests); manifest-only components fold their manifests
+		// into the primary release and never emit a -post folder.
+		hasChartOrSource := ref.Chart != "" || ref.Source != ""
+		if hasChartOrSource && len(g.ComponentManifests[ref.Name]) > 0 {
+			if _, clash := declared[ref.Name+"-post"]; clash {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
+						ref.Name, ref.Name, ref.Name))
+			}
+		}
+	}
+	return nil
+}
+
+// buildPrimaryDependsOn returns the dependsOn reference for the head of the
+// current component's chain (the <name>-pre release if pre-manifests exist,
+// otherwise the primary HelmRelease). The reference targets the previous
+// component's TERMINAL release — its <prev>-post folder when the previous
+// component has post-manifests, otherwise <prev>. This ensures the next
+// component waits for the previous component's full chain
+// (pre → primary → post) to reconcile before starting.
+func (g *Generator) buildPrimaryDependsOn(sortedRefs []recipe.ComponentRef, index int) []DependsOnRef {
 	if index == 0 {
 		return nil
 	}
 	prev := sortedRefs[index-1]
-	return []DependsOnRef{{Name: prev.Name}}
+	return []DependsOnRef{{Name: terminalReleaseNameFor(prev, g.ComponentManifests)}}
+}
+
+// terminalReleaseNameFor returns the name of the LAST HelmRelease emitted for a
+// component. Mixed components (chart/source + post-manifests) terminate at
+// <name>-post; manifest-only and chart-only components terminate at <name>.
+// Pre-manifests never extend the tail — they live BEFORE the primary.
+//
+// Free function so the README renderer (buildComponentSummaries) can reuse it
+// without a Generator handle.
+func terminalReleaseNameFor(ref recipe.ComponentRef, postManifests map[string]map[string][]byte) string {
+	hasChart := ref.Chart != "" || ref.Source != ""
+	if hasChart && len(postManifests[ref.Name]) > 0 {
+		return ref.Name + "-post"
+	}
+	return ref.Name
 }
 
 // nonAlphanumericRe collapses runs of non-DNS characters into a single hyphen.
@@ -526,7 +622,9 @@ func sourceResourcePaths(helmSources map[string]*HelmRepoSourceData, gitSources 
 }
 
 // buildComponentSummaries builds the component summary list for the README.
-func buildComponentSummaries(sortedRefs []recipe.ComponentRef, manifests map[string]map[string][]byte) []ComponentSummary {
+// The list mirrors the actual HelmRelease graph (pre → primary → post) so the
+// rendered "Depends On" column matches what Flux will reconcile.
+func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, manifests map[string]map[string][]byte) []ComponentSummary {
 	summaries := make([]ComponentSummary, 0, len(sortedRefs))
 	for i, ref := range sortedRefs {
 		version := ref.Version
@@ -534,17 +632,34 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, manifests map[str
 			version = ref.Tag
 		}
 
-		dependsOnStr := "-"
-		if deps := buildDependsOn(sortedRefs, i); len(deps) > 0 {
-			dependsOnStr = deps[0].Name
+		// Terminal of the previous component (its <prev>-post when post-manifests
+		// exist, otherwise <prev>). Head of the chain has no previous, so "-".
+		previousTerminal := "-"
+		if i > 0 {
+			previousTerminal = terminalReleaseNameFor(sortedRefs[i-1], manifests)
+		}
+
+		// When pre-manifests exist, generation inserts a <name>-pre HelmRelease
+		// before the primary and rewires the primary's dependsOn to point at it.
+		// Reflect that in the README so the table matches the generated CRs.
+		primaryDependsOn := previousTerminal
+		if len(preManifests[ref.Name]) > 0 {
+			preName := ref.Name + "-pre"
+			summaries = append(summaries, ComponentSummary{
+				Name:         preName,
+				Type:         summaryTypeHelmRelease,
+				Namespace:    ref.Namespace,
+				DependsOnStr: previousTerminal,
+			})
+			primaryDependsOn = preName
 		}
 
 		summaries = append(summaries, ComponentSummary{
 			Name:         ref.Name,
-			Type:         "HelmRelease",
+			Type:         summaryTypeHelmRelease,
 			Version:      version,
 			Namespace:    ref.Namespace,
-			DependsOnStr: dependsOnStr,
+			DependsOnStr: primaryDependsOn,
 		})
 
 		// Mixed components (Helm chart + manifests) produce a post HelmRelease
@@ -553,7 +668,7 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, manifests map[str
 		if isMixed {
 			summaries = append(summaries, ComponentSummary{
 				Name:         ref.Name + "-post",
-				Type:         "HelmRelease",
+				Type:         summaryTypeHelmRelease,
 				Namespace:    ref.Namespace,
 				DependsOnStr: ref.Name,
 			})

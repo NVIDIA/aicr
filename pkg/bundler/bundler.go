@@ -387,26 +387,28 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		}, nil
 
 	case config.DeployerFlux:
+		componentPreManifests, preErr := b.collectComponentPreManifests(ctx, recipeResult)
+		if preErr != nil {
+			return nil, errors.PropagateOrWrap(preErr, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
+		}
 		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
 		if manifestErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(manifestErr, &se) {
-				return nil, manifestErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", manifestErr)
+			return nil, errors.PropagateOrWrap(manifestErr, errors.ErrCodeInternal,
+				"failed to collect component manifests")
 		}
 		return &flux.Generator{
-			RecipeResult:       recipeResult,
-			ComponentValues:    componentValues,
-			Version:            b.Config.Version(),
-			RepoURL:            b.Config.RepoURL(),
-			TargetRevision:     b.Config.TargetRevision(),
-			IncludeChecksums:   b.Config.IncludeChecksums(),
-			DataFiles:          dataFiles,
-			ComponentManifests: componentManifests,
-			DynamicValues:      dynamicValues,
-			VendorCharts:       b.Config.VendorCharts(),
+			RecipeResult:          recipeResult,
+			ComponentValues:       componentValues,
+			Version:               b.Config.Version(),
+			RepoURL:               b.Config.RepoURL(),
+			TargetRevision:        b.Config.TargetRevision(),
+			IncludeChecksums:      b.Config.IncludeChecksums(),
+			DataFiles:             dataFiles,
+			ComponentPreManifests: componentPreManifests,
+			ComponentManifests:    componentManifests,
+			DynamicValues:         dynamicValues,
+			VendorCharts:          b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerHelmfile:

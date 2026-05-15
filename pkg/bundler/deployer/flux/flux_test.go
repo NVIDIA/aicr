@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	stderrors "errors"
 	"flag"
 	"fmt"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1002,12 +1004,29 @@ func TestSanitizeSourceName(t *testing.T) {
 	}
 }
 
-func TestBuildDependsOn(t *testing.T) {
+func TestBuildPrimaryDependsOn(t *testing.T) {
+	// Mixed component (cert-manager has source + post-manifests) → its
+	// terminal release is cert-manager-post. Manifest-only components
+	// (manifest-only has post-manifests but no source/chart) fold
+	// manifests into the primary, so terminal is the component name.
 	refs := []recipe.ComponentRef{
-		{Name: "cert-manager", Namespace: "cert-manager", Type: recipe.ComponentTypeHelm},
+		{Name: "cert-manager", Namespace: "cert-manager", Type: recipe.ComponentTypeHelm,
+			Chart: "cert-manager", Source: "https://charts.jetstack.io"},
 		{Name: "manifest-only", Namespace: "default", Type: recipe.ComponentTypeHelm},
-		{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm},
-		{Name: "network-operator", Namespace: "network-operator", Type: recipe.ComponentTypeHelm},
+		{Name: "gpu-operator", Namespace: "gpu-operator", Type: recipe.ComponentTypeHelm,
+			Chart: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia"},
+		{Name: "network-operator", Namespace: "network-operator", Type: recipe.ComponentTypeHelm,
+			Chart: "network-operator", Source: "https://helm.ngc.nvidia.com/nvidia"},
+	}
+	g := &Generator{
+		ComponentManifests: map[string]map[string][]byte{
+			// cert-manager is mixed (chart + post-manifests) → terminal is cert-manager-post.
+			"cert-manager": {"crds.yaml": []byte("---")},
+			// manifest-only has post-manifests but no chart/source → manifests fold
+			// into the primary; terminal stays "manifest-only".
+			"manifest-only": {"cm.yaml": []byte("---")},
+			// gpu-operator is chart-only here → no -post → terminal is "gpu-operator".
+		},
 	}
 
 	tests := []struct {
@@ -1017,19 +1036,19 @@ func TestBuildDependsOn(t *testing.T) {
 		wantDep string
 	}{
 		{"first has no deps", 0, 0, ""},
-		{"second depends on first", 1, 1, "cert-manager"},
-		{"third depends on second", 2, 1, "manifest-only"},
-		{"fourth depends on third", 3, 1, "gpu-operator"},
+		{"second depends on cert-manager-post (prev is mixed)", 1, 1, "cert-manager-post"},
+		{"third depends on manifest-only (prev folds into primary)", 2, 1, "manifest-only"},
+		{"fourth depends on gpu-operator (prev is chart-only, no -post)", 3, 1, "gpu-operator"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildDependsOn(refs, tt.index)
+			got := g.buildPrimaryDependsOn(refs, tt.index)
 			if len(got) != tt.wantLen {
-				t.Errorf("buildDependsOn() returned %d deps, want %d", len(got), tt.wantLen)
+				t.Errorf("buildPrimaryDependsOn() returned %d deps, want %d", len(got), tt.wantLen)
 			}
 			if tt.wantLen > 0 && got[0].Name != tt.wantDep {
-				t.Errorf("buildDependsOn() dep name = %q, want %q", got[0].Name, tt.wantDep)
+				t.Errorf("buildPrimaryDependsOn() dep name = %q, want %q", got[0].Name, tt.wantDep)
 			}
 		})
 	}
@@ -1646,4 +1665,364 @@ func extractSourceName(t *testing.T, yamlContent string) string {
 		}
 	}
 	return ""
+}
+
+// TestGenerate_WithPreManifests pins the contract that components with
+// pre-manifests emit a <name>-pre HelmRelease BEFORE the primary, and
+// that the primary's dependsOn points at <name>-pre instead of the
+// previous component. Regression guard for issue #923 (the GKE
+// ResourceQuota fix from PR #921 was silently dropped on flux because
+// the deployer didn't consume ComponentPreManifests).
+func TestGenerate_WithPreManifests(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.14.0",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
+
+	preManifests := map[string]map[string][]byte{
+		"gpu-operator": {
+			"gke-critical-pods-quota.yaml": []byte("apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: aicr-gke-critical-pods\n  namespace: gpu-operator\nspec:\n  hard:\n    pods: \"32\"\n"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:          recipeResult,
+		ComponentValues:       map[string]map[string]any{"gpu-operator": {"driver": map[string]any{"enabled": true}}},
+		ComponentPreManifests: preManifests,
+		Version:               "v0.9.0",
+		RepoURL:               "https://github.com/my-org/gitops.git",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Pre folder: Chart.yaml + templates/<file> + helmrelease.yaml.
+	preDir := filepath.Join(outputDir, "gpu-operator-pre")
+	for _, rel := range []string{"Chart.yaml", "helmrelease.yaml", filepath.Join("templates", "gke-critical-pods-quota.yaml")} {
+		path := filepath.Join(preDir, rel)
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			t.Errorf("expected gpu-operator-pre/%s to exist", rel)
+		}
+	}
+
+	// Pre HelmRelease depends on the previous component (cert-manager),
+	// preserving the deployment-order chain.
+	preHR := readFile(t, filepath.Join(preDir, "helmrelease.yaml"))
+	if !strings.Contains(preHR, "name: cert-manager") {
+		t.Errorf("expected pre HelmRelease to depend on cert-manager; got:\n%s", preHR)
+	}
+
+	// Primary HelmRelease depends on gpu-operator-pre, NOT cert-manager.
+	primaryHR := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(primaryHR, "name: gpu-operator-pre") {
+		t.Errorf("expected primary HelmRelease to depend on gpu-operator-pre; got:\n%s", primaryHR)
+	}
+	if strings.Contains(primaryHR, "name: cert-manager") {
+		t.Errorf("primary HelmRelease should no longer depend on cert-manager directly; got:\n%s", primaryHR)
+	}
+
+	// Root kustomization references the pre folder.
+	rootKustom := readFile(t, filepath.Join(outputDir, "kustomization.yaml"))
+	if !strings.Contains(rootKustom, "gpu-operator-pre/helmrelease.yaml") {
+		t.Errorf("expected root kustomization.yaml to include gpu-operator-pre/helmrelease.yaml; got:\n%s", rootKustom)
+	}
+}
+
+// TestGenerate_PreAndPostManifests pins the full chain when both pre
+// and post manifests are present on the same component, and asserts
+// the *next* component depends on the previous component's TERMINAL
+// release (-post), not its primary. Chain shape:
+//
+//	gpu-operator-pre → gpu-operator → gpu-operator-post → gke-nccl-tcpxo
+//
+// This is the realistic GKE shape (synthesized quota pre + dcgm-exporter
+// post + downstream component) and a regression guard for the issue
+// Codex caught: before the fix, the next component depended on
+// "gpu-operator" so Flux could reconcile it in parallel with the post
+// manifests, defeating the chain's purpose.
+func TestGenerate_PreAndPostManifests(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+		{
+			Name:      "gke-nccl-tcpxo",
+			Namespace: "kube-system",
+			Chart:     "gke-nccl-tcpxo",
+			Version:   "v1.0.0",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator", "gke-nccl-tcpxo"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator":   {"driver": map[string]any{"enabled": true}},
+			"gke-nccl-tcpxo": {},
+		},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"quota.yaml": []byte("apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: q\n  namespace: gpu-operator\n"),
+			},
+		},
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: dcgm-exporter\n"),
+			},
+		},
+		Version: "v0.9.0",
+		RepoURL: "https://github.com/my-org/gitops.git",
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Pre is head of the chain (gpu-operator is index 0, no preceding component).
+	preHR := readFile(t, filepath.Join(outputDir, "gpu-operator-pre", "helmrelease.yaml"))
+	if strings.Contains(preHR, "dependsOn:") {
+		t.Errorf("expected pre HelmRelease to have no dependsOn (head of chain); got:\n%s", preHR)
+	}
+
+	// Primary depends on -pre.
+	primaryHR := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(primaryHR, "name: gpu-operator-pre") {
+		t.Errorf("expected primary to depend on gpu-operator-pre; got:\n%s", primaryHR)
+	}
+
+	// Post depends on the primary.
+	postHR := readFile(t, filepath.Join(outputDir, "gpu-operator-post", "helmrelease.yaml"))
+	if !strings.Contains(postHR, "name: gpu-operator") {
+		t.Errorf("expected post HelmRelease to depend on gpu-operator; got:\n%s", postHR)
+	}
+
+	// Next component depends on the TERMINAL release of the previous
+	// component (gpu-operator-post), not its primary.
+	nextHR := readFile(t, filepath.Join(outputDir, "gke-nccl-tcpxo", "helmrelease.yaml"))
+	if !strings.Contains(nextHR, "name: gpu-operator-post") {
+		t.Errorf("expected next component to depend on gpu-operator-post (terminal of previous chain); got:\n%s", nextHR)
+	}
+
+	// README's "Components" table must mirror the actual HelmRelease
+	// graph. A reader skimming the bundle README should see rows for
+	// gpu-operator-pre and gpu-operator-post alongside the primary, with
+	// dependsOn pointing at the correct chain links — not at the
+	// previous component (which is what the README used to render).
+	readme := readFile(t, filepath.Join(outputDir, "README.md"))
+	for _, want := range []string{
+		"| gpu-operator-pre |",
+		"| gpu-operator-post |",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("expected README.md to contain row %q; got:\n%s", want, readme)
+		}
+	}
+	if !strings.Contains(readme, "| gpu-operator | HelmRelease | v25.3.3 | gpu-operator | gpu-operator-pre |") {
+		t.Errorf("expected README.md to show primary gpu-operator depending on gpu-operator-pre; got:\n%s", readme)
+	}
+	if !strings.Contains(readme, "| gke-nccl-tcpxo | HelmRelease | v1.0.0 | kube-system | gpu-operator-post |") {
+		t.Errorf("expected README.md to show gke-nccl-tcpxo depending on gpu-operator-post; got:\n%s", readme)
+	}
+}
+
+// TestGenerate_VendoredChartWithPreManifests verifies that the
+// pre-manifest rewire works on the vendored-chart code path too. The
+// vendored branch (g.generateVendoredHelmComponent) receives the same
+// rewired primaryDependsOn, but the dedicated pre/post tests only
+// exercise the non-vendored helm path — a future refactor that
+// re-shadowed primaryDependsOn on the vendored branch would slip
+// through without this guard.
+func TestGenerate_VendoredChartWithPreManifests(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {"driver": map[string]any{"enabled": true}}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"quota.yaml": []byte("apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: q\n  namespace: gpu-operator\n"),
+			},
+		},
+		Version:      "v0.9.0",
+		RepoURL:      "https://github.com/my-org/gitops.git",
+		VendorCharts: true,
+		Puller:       &stubChartPuller{},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Pre folder is emitted alongside the vendored wrapper chart.
+	preHRPath := filepath.Join(outputDir, "gpu-operator-pre", "helmrelease.yaml")
+	if _, statErr := os.Stat(preHRPath); os.IsNotExist(statErr) {
+		t.Fatal("expected gpu-operator-pre/helmrelease.yaml to exist on vendored path")
+	}
+
+	// Primary HelmRelease (the vendored wrapper) depends on -pre, not on
+	// the previous component / chain head.
+	primaryHR := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(primaryHR, "name: gpu-operator-pre") {
+		t.Errorf("expected vendored primary HelmRelease to depend on gpu-operator-pre; got:\n%s", primaryHR)
+	}
+
+	// Vendored wrapper still references its local GitRepository chart, not
+	// a HelmRepository — sanity-check that the vendored path is actually
+	// the one we exercised.
+	if !strings.Contains(primaryHR, "kind: GitRepository") {
+		t.Errorf("expected vendored primary HelmRelease to reference GitRepository source; got:\n%s", primaryHR)
+	}
+}
+
+// TestGenerate_PreManifestsCollision asserts that a recipe declaring
+// both component "foo" (with pre-manifests) and a separate component
+// "foo-pre" is rejected at bundle time, mirroring the localformat
+// writer's guard.
+func TestGenerate_PreManifestsCollision(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "foo",
+			Namespace: "foo",
+			Chart:     "foo",
+			Version:   "v1.0.0",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://example.com/charts",
+		},
+		{
+			Name:      "foo-pre",
+			Namespace: "foo",
+			Chart:     "foo-pre",
+			Version:   "v1.0.0",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://example.com/charts",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"foo", "foo-pre"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {
+				"quota.yaml": []byte("apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: q\n"),
+			},
+		},
+		Version: "v0.9.0",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `would inject "foo"-pre`) {
+		t.Errorf("expected collision error to name the offending pair, got: %v", err)
+	}
+}
+
+// TestGenerate_PostManifestsCollision asserts that a recipe declaring
+// both a mixed component "foo" (chart + post-manifests) and a separate
+// component "foo-post" is rejected at bundle time. Mirrors the
+// pre-manifest rule and the parity declared in the localformat writer.
+func TestGenerate_PostManifestsCollision(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "foo",
+			Namespace: "foo",
+			Chart:     "foo",
+			Version:   "v1.0.0",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://example.com/charts",
+		},
+		{
+			Name:      "foo-post",
+			Namespace: "foo",
+			Chart:     "foo-post",
+			Version:   "v1.0.0",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://example.com/charts",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"foo", "foo-post"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentManifests: map[string]map[string][]byte{
+			"foo": {
+				"cm.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n"),
+			},
+		},
+		Version: "v0.9.0",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `would inject "foo"-post`) {
+		t.Errorf("expected collision error to name the offending pair, got: %v", err)
+	}
 }

@@ -35,6 +35,12 @@ Components are deployed in order using Flux dependsOn references. The deployment
 order is determined by the recipe's DeploymentOrder field. Each component depends
 on the component immediately preceding it in the order.
 
+When a component declares pre-manifests (ComponentRef.PreManifestFiles, or
+synthesized bundler manifests like the GKE critical-priority ResourceQuota),
+the generator emits a <name>-pre HelmRelease ahead of the primary chart and
+rewires the primary's dependsOn to point at <name>-pre. The chain becomes:
+previous → <name>-pre → <name> → <name>-post → next.
+
 # Source Deduplication
 
 Multiple components sharing the same upstream repository (e.g., two charts from
@@ -79,11 +85,16 @@ components produce an ErrCodeInvalidRequest error at generation time.
 	│   └── helmrepo-helm-ngc-nvidia-com-nvidia.yaml
 	├── cert-manager/
 	│   └── helmrelease.yaml            # HelmRelease (HelmRepository source)
+	├── gpu-operator-pre/               # Synthesized when PreManifestFiles is non-empty
+	│   ├── Chart.yaml                  # Local Helm chart for pre-phase manifest templates
+	│   ├── helmrelease.yaml            # HelmRelease (GitRepository source); the primary dependsOn this
+	│   └── templates/
+	│       └── gke-critical-pods-quota.yaml  # e.g. synthesized GKE ResourceQuota (issue #915)
 	├── gpu-operator/
-	│   └── helmrelease.yaml            # HelmRelease (HelmRepository source)
+	│   └── helmrelease.yaml            # HelmRelease (HelmRepository source); dependsOn gpu-operator-pre
 	├── gpu-operator-post/
 	│   ├── Chart.yaml                  # Local Helm chart for manifest templates
-	│   ├── helmrelease.yaml            # HelmRelease (GitRepository source)
+	│   ├── helmrelease.yaml            # HelmRelease (GitRepository source); dependsOn gpu-operator
 	│   └── templates/
 	│       └── dcgm-exporter.yaml      # Manifest template rendered by Helm controller
 	└── nodewright-customizations/
