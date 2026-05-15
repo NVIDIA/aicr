@@ -348,7 +348,7 @@ check_release_for_stuck_crds() {
   local all_crds_json kubectl_err crd_name
   manifest=$(helm get manifest "${release}" -n "${ns}" 2>/dev/null || true)
   manifest_crds=$(echo "${manifest}" \
-    | awk '/^kind:/{kind=$2} /^  name:/ && kind=="CustomResourceDefinition"{print $2; kind=""}')
+    | awk '/^kind:/{kind=$2} /^  name:/ && kind=="CustomResourceDefinition"{name=$2; gsub(/"/,"",name); print name; kind=""}')
 
   all_crds_json="${PREFLIGHT_ALL_CRDS_JSON:-}"
   if [[ -z "${all_crds_json}" ]]; then
