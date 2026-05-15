@@ -277,6 +277,14 @@ spec:
               else
                 LEAVES="${TOP}"
               fi
+              # Stash awk output to a temp file before iterating so the
+              # while loop runs in the parent shell — `awk | while`
+              # would push the loop into a subshell and an `exit 1`
+              # from the body would only exit the subshell, letting
+              # the script return 0 despite missing files. Process
+              # substitution `< <(...)` is bash-only; chainsaw runs
+              # scripts under /bin/sh.
+              paths_file="${WORK}/.helmfile-values-paths"
               for HF in ${LEAVES}; do
                 # Extract every values: path (entries start with "./").
                 awk '
@@ -285,14 +293,16 @@ spec:
                   in_values && /^      - / {print substr($0, 9)}
                   in_values && /^    [a-z]/ {in_values=0}
                   in_values && /^  - name:/ {in_values=0}
-                ' "${HF}" | while IFS= read -r path; do
+                ' "${HF}" > "${paths_file}"
+                while IFS= read -r path; do
                   [ -z "$path" ] && continue
                   # Strip leading "./" for filesystem check.
                   file="${WORK}/basic/${path#./}"
                   test -f "$file" \
-                    || { echo "${HF}: values path $path does not resolve to an existing file" >&2; exit 1; }
-                done
+                    || { echo "${HF}: values path $path does not resolve to an existing file" >&2; rm -f "${paths_file}"; exit 1; }
+                done < "${paths_file}"
               done
+              rm -f "${paths_file}"
             check:
               ($error == null): true
 

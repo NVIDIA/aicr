@@ -19,12 +19,20 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// testGenerateTimeout bounds the context for in-test Generate calls.
+// Generation is local file I/O over a small fixture, so 30s is well
+// over the realistic ceiling; the timeout is here to enforce the
+// "I/O methods always carry a deadline" project rule, not to gate on
+// performance. See pkg/bundler/deployer/helmfile docstring.
+const testGenerateTimeout = 30 * time.Second
 
 // TestSplitFoldersByCRD pins the partition logic for issue #914.
 // Auxiliary -pre / -post folders inherit their parent's classification
@@ -102,7 +110,9 @@ func TestGenerate_SplitLayout(t *testing.T) {
 		Version: testBundlerVersion,
 	}
 	outputDir := t.TempDir()
-	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), testGenerateTimeout)
+	defer cancel()
+	if _, err := g.Generate(ctx, outputDir); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
@@ -176,7 +186,9 @@ func TestGenerate_AllCRD_CollapsesToSingleFile(t *testing.T) {
 		Version: testBundlerVersion,
 	}
 	outputDir := t.TempDir()
-	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), testGenerateTimeout)
+	defer cancel()
+	if _, err := g.Generate(ctx, outputDir); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
@@ -199,11 +211,7 @@ func TestGenerate_AllCRD_CollapsesToSingleFile(t *testing.T) {
 	}
 
 	// crds.yaml / releases.yaml must NOT have been emitted.
-	for _, name := range []string{fileCRDsHelmfile, fileMainHelmfile} {
-		if _, err := os.Stat(filepath.Join(outputDir, name)); !os.IsNotExist(err) {
-			t.Errorf("unexpected %s present in single-file collapse path", name)
-		}
-	}
+	assertSubHelmfilesAbsent(t, outputDir, "single-file collapse path")
 }
 
 // TestGenerate_NoCRD_KeepsSingleFile is the inverse guard: a recipe
@@ -221,12 +229,30 @@ func TestGenerate_NoCRD_KeepsSingleFile(t *testing.T) {
 		Version: testBundlerVersion,
 	}
 	outputDir := t.TempDir()
-	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), testGenerateTimeout)
+	defer cancel()
+	if _, err := g.Generate(ctx, outputDir); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
+	assertSubHelmfilesAbsent(t, outputDir, "no-CRD bundle")
+}
+
+// assertSubHelmfilesAbsent fails the test if the split-layout
+// sub-helmfiles are present in outputDir. Distinguishes "file
+// exists" (test failure) from any other os.Stat error (test fatal —
+// hides real filesystem problems if treated as "absent").
+func assertSubHelmfilesAbsent(t *testing.T, outputDir, context string) {
+	t.Helper()
 	for _, name := range []string{fileCRDsHelmfile, fileMainHelmfile} {
-		if _, err := os.Stat(filepath.Join(outputDir, name)); !os.IsNotExist(err) {
-			t.Errorf("unexpected %s present in no-CRD bundle", name)
+		path := filepath.Join(outputDir, name)
+		_, err := os.Stat(path)
+		switch {
+		case err == nil:
+			t.Errorf("unexpected %s present in %s", name, context)
+		case os.IsNotExist(err):
+			// Expected — the absence-of-sub-helmfile invariant.
+		default:
+			t.Fatalf("stat %s: %v", path, err)
 		}
 	}
 }
