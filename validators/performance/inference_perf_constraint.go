@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	validatorv1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
@@ -1219,7 +1220,7 @@ echo '%s'`,
 							Name:  "aiperf",
 							Image: aiperfImage,
 							// Apply the same pull policy the outer validator
-							// Job uses (catalog.ImagePullPolicy handles the
+							// Job uses (validatorv1.ImagePullPolicy handles the
 							// AICR_VALIDATOR_IMAGE_TAG override and digest
 							// pins) so a mutable override tag on the CLI
 							// doesn't let the aiperf pod serve a stale
@@ -1229,7 +1230,7 @@ echo '%s'`,
 							// only for :latest), which is insufficient for
 							// `:edge`, `:main`, and similar rolling tags
 							// on-push.yaml recreates on every merge.
-							ImagePullPolicy: catalog.ImagePullPolicy(aiperfImage),
+							ImagePullPolicy: validatorv1.ImagePullPolicy(aiperfImage),
 							Command:         []string{"/bin/sh", "-c"},
 							Args:            []string{script},
 						},
