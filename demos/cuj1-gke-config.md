@@ -18,14 +18,6 @@ recipe-evidence bundle out.
 
   > Make sure to cleanup after yourself
 
-  Then connect locally:
-
-  ```shell
-  gcloud container clusters get-credentials "aicr-<run-id>" \
-    --region us-central1 --project eidosx
-  kubectl get nodes
-  ```
-
   The cluster has 2× `a3-megagpu-8g` (H100, 8 GPUs/node) GPU nodes labeled
   `nodeGroup=gpu-worker` with taint `dedicated=gpu-workload:NoSchedule`, and
   system nodes labeled `nodeGroup=system-worker` (no custom taints — GKE
