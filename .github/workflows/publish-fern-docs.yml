@@ -71,7 +71,10 @@ jobs:
 
           # Add version entry to docs.yml (insert after Latest, before older versions)
           export TAG_VERSION
-          yq -i '.products[0].versions |= [.[0]] + [{"display-name": env(TAG_VERSION), "path": "versions/" + env(TAG_VERSION) + ".yml", "slug": env(TAG_VERSION), "availability": "stable"}] + .[1:]' fern/docs.yml
+          EXPR='.products[0].versions |= [.[0]] + [{"display-name": env(TAG_VERSION),'
+          EXPR+=' "path": "versions/" + env(TAG_VERSION) + ".yml",'
+          EXPR+=' "slug": env(TAG_VERSION), "availability": "stable"}] + .[1:]'
+          yq -i "$EXPR" fern/docs.yml
 
           echo "--- docs.yml versions after insert ---"
           yq '.products[0].versions[].display-name' fern/docs.yml
