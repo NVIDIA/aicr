@@ -96,13 +96,6 @@ quality:
 build:
   image_registry: 'ghcr.io/nvidia'
 
-# Documentation Tools
-docs_tools:
-  # renovate: datasource=github-releases depName=gohugoio/hugo depType=docs_tools
-  hugo: '0.155.3'
-  # renovate: datasource=node-version depName=node depType=docs_tools
-  node: '22'
-
 # Testing Configuration
 testing:
   # renovate: datasource=docker depName=kindest/node depType=testing

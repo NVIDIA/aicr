@@ -85,12 +85,6 @@ outputs:
   yq:
     description: 'yq version'
     value: ${{ steps.versions.outputs.yq }}
-  hugo:
-    description: 'Hugo version'
-    value: ${{ steps.versions.outputs.hugo }}
-  node:
-    description: 'Node.js major version'
-    value: ${{ steps.versions.outputs.node }}
   coverage_threshold:
     description: 'Minimum test coverage percentage'
     value: ${{ steps.versions.outputs.coverage_threshold }}
@@ -155,10 +149,6 @@ runs:
         echo "chainsaw_sha256_linux_arm64=$(yq eval '.testing_tools.chainsaw_checksums.linux_arm64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yq=$(yq eval '.testing_tools.yq' .settings.yaml)" >> $GITHUB_OUTPUT
 
-        # Documentation tools
-        echo "hugo=$(yq eval '.docs_tools.hugo' .settings.yaml)" >> $GITHUB_OUTPUT
-        echo "node=$(yq eval '.docs_tools.node' .settings.yaml)" >> $GITHUB_OUTPUT
-
         # Quality thresholds
         echo "coverage_threshold=$(yq eval '.quality.coverage_threshold' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "lint_timeout=$(yq eval '.quality.lint_timeout' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -198,8 +188,6 @@ runs:
         echo "  chainsaw_sha256_linux_amd64: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}"
         echo "  chainsaw_sha256_linux_arm64: ${{ steps.versions.outputs.chainsaw_sha256_linux_arm64 }}"
         echo "  yq: ${{ steps.versions.outputs.yq }}"
-        echo "  hugo: ${{ steps.versions.outputs.hugo }}"
-        echo "  node: ${{ steps.versions.outputs.node }}"
         echo "  coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}"
         echo "  lint_timeout: ${{ steps.versions.outputs.lint_timeout }}"
         echo "  test_timeout: ${{ steps.versions.outputs.test_timeout }}"
