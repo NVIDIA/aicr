@@ -1177,7 +1177,155 @@ func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeRe
 // collectComponentPreManifests gathers the pre-phase manifests (those
 // the bundler will emit BEFORE each component's primary chart). Wired
 // into each deployer call site in buildDeployer alongside the
-// post-phase collector.
+// post-phase collector. Also folds in any synthesized pre-manifests
+// (e.g. GKE critical-priority ResourceQuotas — see issue #915) so
+// every deployer benefits from the same fix without per-deployer
+// branching.
 func (b *DefaultBundler) collectComponentPreManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
-	return b.collectComponentManifestsByPhase(ctx, recipeResult, phasePreManifests)
+	pre, err := b.collectComponentManifestsByPhase(ctx, recipeResult, phasePreManifests)
+	if err != nil {
+		return nil, err
+	}
+	return b.injectGKECriticalPriorityQuotas(pre, recipeResult)
+}
+
+// gkeCriticalPriorityQuotaPodFloor is the smallest `pods` cap the
+// synthesized ResourceQuota carries. The cap is an admission allowlist
+// — not a real capacity gate — so the value is intentionally generous.
+// The floor handles recipes that did not declare a node count (Nodes
+// defaults to 0 in CriteriaSpec when --nodes is omitted on both recipe
+// and bundle), so demos and small clusters do not need to specify it.
+const gkeCriticalPriorityQuotaPodFloor = 32
+
+// gkeCriticalPriorityQuotaPodsPerNode is the multiplier applied to the
+// recipe's declared node count. gpu-operator alone runs ~8-10
+// critical-priority DaemonSet pods per GPU node (driver, toolkit,
+// device-plugin, GFD, DCGM, DCGM exporter, MIG manager, validator)
+// plus the controller Deployment; 32× covers steady-state plus
+// rolling-update churn (old + new pods during a chart upgrade) with a
+// ~3× safety margin.
+const gkeCriticalPriorityQuotaPodsPerNode = 32
+
+// gkeCriticalPriorityQuotaName is the metadata.name of the synthesized
+// ResourceQuota. Stable across runs so idempotent re-apply by the
+// deployer (helmfile / argocd / flux) updates the existing object
+// rather than creating duplicates.
+const gkeCriticalPriorityQuotaName = "aicr-gke-critical-pods"
+
+// gkeCriticalPriorityQuotaFilename is the manifest filename injected
+// into the pre-manifests map. It is unique to this synthesized object
+// and namespaced under a directory prefix so it cannot collide with a
+// real PreManifestFiles path declared in a component overlay.
+const gkeCriticalPriorityQuotaFilename = "aicr/synthesized/gke-critical-pods-quota.yaml"
+
+// injectGKECriticalPriorityQuotas appends a synthesized ResourceQuota
+// pre-manifest to every component whose ComponentConfig declares
+// GKECriticalPriority=true, when the recipe targets GKE. GKE Standard
+// ships a kube-system ResourceQuota scoped to the system-*-critical
+// PriorityClasses; per the Kubernetes spec, once any cluster-wide
+// quota scopes by PriorityClass for those values, pods that request a
+// matching priority class can only be created in namespaces that have
+// a matching quota. Without the synthesized quota, gpu-operator (and
+// any other marked component) hits a 10-minute helmfile-apply timeout
+// when its first pod is rejected by admission. See issue #915.
+//
+// Non-GKE recipes return the input map unchanged, so the additive
+// nature of the fix is preserved across services.
+func (b *DefaultBundler) injectGKECriticalPriorityQuotas(
+	pre map[string]map[string][]byte,
+	recipeResult *recipe.RecipeResult,
+) (map[string]map[string][]byte, error) {
+
+	if recipeResult == nil || recipeResult.Criteria == nil ||
+		recipeResult.Criteria.Service != recipe.CriteriaServiceGKE {
+
+		return pre, nil
+	}
+
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to load component registry for GKE quota synthesis", err)
+	}
+
+	pods := computeGKECriticalPriorityQuotaPods(recipeResult.Criteria.Nodes)
+
+	if pre == nil {
+		pre = make(map[string]map[string][]byte)
+	}
+
+	for _, ref := range recipeResult.ComponentRefs {
+		cfg := registry.Get(ref.Name)
+		if cfg == nil || !cfg.GKECriticalPriority {
+			continue
+		}
+		if ref.Namespace == "" {
+			// Defensive — the recipe resolver fills Namespace from the
+			// registry's defaultNamespace before bundling. An empty
+			// namespace here would produce an invalid ResourceQuota,
+			// so skip with a warning rather than emit broken YAML.
+			slog.Warn("skipping GKE critical-priority quota: component has no namespace",
+				"component", ref.Name)
+			continue
+		}
+		manifest, err := renderGKECriticalPriorityQuota(ref.Namespace, pods)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to render GKE critical-priority quota for %s", ref.Name), err)
+		}
+		if pre[ref.Name] == nil {
+			pre[ref.Name] = make(map[string][]byte)
+		}
+		pre[ref.Name][gkeCriticalPriorityQuotaFilename] = manifest
+	}
+
+	return pre, nil
+}
+
+// computeGKECriticalPriorityQuotaPods returns the `hard.pods` value for
+// the synthesized ResourceQuota. nodeCount of 0 (the CriteriaSpec
+// default when --nodes is omitted) falls through to the floor.
+func computeGKECriticalPriorityQuotaPods(nodeCount int) int {
+	if nodeCount <= 0 {
+		return gkeCriticalPriorityQuotaPodFloor
+	}
+	pods := nodeCount * gkeCriticalPriorityQuotaPodsPerNode
+	if pods < gkeCriticalPriorityQuotaPodFloor {
+		return gkeCriticalPriorityQuotaPodFloor
+	}
+	return pods
+}
+
+// renderGKECriticalPriorityQuota returns the YAML for a ResourceQuota
+// that admits pods with system-*-critical priority classes in the
+// given namespace. Marshaled via yaml.Marshal so the layout is stable
+// and round-trippable; a string template would be more concise but
+// would silently break on namespace names that need YAML quoting.
+func renderGKECriticalPriorityQuota(namespace string, pods int) ([]byte, error) {
+	quota := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ResourceQuota",
+		"metadata": map[string]any{
+			"name":      gkeCriticalPriorityQuotaName,
+			"namespace": namespace,
+		},
+		"spec": map[string]any{
+			"hard": map[string]any{
+				"pods": strconv.Itoa(pods),
+			},
+			"scopeSelector": map[string]any{
+				"matchExpressions": []map[string]any{
+					{
+						"operator":  "In",
+						"scopeName": "PriorityClass",
+						"values": []string{
+							"system-node-critical",
+							"system-cluster-critical",
+						},
+					},
+				},
+			},
+		},
+	}
+	return yaml.Marshal(quota)
 }

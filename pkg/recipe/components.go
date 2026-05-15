@@ -67,6 +67,23 @@ type ComponentConfig struct {
 
 	// HealthCheck defines custom health check configuration for this component.
 	HealthCheck HealthCheckConfig `yaml:"healthCheck,omitempty"`
+
+	// GKECriticalPriority signals that the component's default chart manifests
+	// include pods with `priorityClassName: system-node-critical` or
+	// `system-cluster-critical`. When true and the recipe's
+	// `criteria.service` is "gke", the bundler synthesizes a permissive
+	// ResourceQuota into the component's namespace (PreManifestFiles phase)
+	// so GKE Standard's ResourceQuota admission plugin admits the pods.
+	//
+	// GKE Standard ships a kube-system ResourceQuota scoped to
+	// `system-*-critical` PriorityClasses; per the Kubernetes spec, once
+	// any quota in the cluster scopes by PriorityClass for those values,
+	// pods that request a matching priority class can only be created in
+	// namespaces that have a matching quota. Other services (EKS, AKS,
+	// OKE, bare-metal) do not ship this default and are unaffected.
+	//
+	// See https://github.com/NVIDIA/aicr/issues/915.
+	GKECriticalPriority bool `yaml:"gkeCriticalPriority,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.

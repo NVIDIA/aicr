@@ -153,33 +153,6 @@ to render upgrade diffs):
 helm plugin install https://github.com/databus23/helm-diff
 ```
 
-GKE's `ResourceQuota` admission plugin blocks pods that declare
-`priorityClassName: system-*-critical` outside `kube-system`. The gpu-operator
-controller (and its DaemonSets) request `system-node-critical`, so apply a
-permissive quota in the gpu-operator namespace before the helmfile run.
-See https://github.com/NVIDIA/aicr/issues/915.
-
-```shell
-kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: gpu-operator-critical-pods
-  namespace: gpu-operator
-spec:
-  hard:
-    pods: "16"
-  scopeSelector:
-    matchExpressions:
-      - operator: In
-        scopeName: PriorityClass
-        values:
-          - system-node-critical
-          - system-cluster-critical
-EOF
-```
-
 `helmfile.yaml` carries the release graph and ordering; helmfile handles
 parallelism and idempotent re-apply. This will take a few min.
 

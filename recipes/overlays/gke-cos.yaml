@@ -32,13 +32,15 @@ spec:
 
   componentRefs:
     # GKE-COS-specific GPU Operator overrides
-    # GKE preinstalls NVIDIA drivers on COS; disable driver installation
+    # GKE preinstalls NVIDIA drivers on COS; disable driver installation.
+    # The GKE ResourceQuota that admits system-*-critical pods is synthesized
+    # by the bundler from registry.yaml (gkeCriticalPriority: true); no
+    # manifestFiles entry needed here. Issue #915.
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-gke-cos.yaml
       manifestFiles:
         - components/gpu-operator/manifests/dcgm-exporter.yaml
-        - components/gpu-operator/manifests/gke-resource-quota.yaml
 
     # Enable Prometheus persistent storage for GKE (GKE PD CSI is built-in)
     - name: kube-prometheus-stack

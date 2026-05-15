@@ -79,6 +79,11 @@ components:
     displayName: gpu-operator
     valueOverrideKeys:
       - gpuoperator
+    # Default chart sets priorityClassName: system-node-critical on the
+    # controller Deployment and the DaemonSets it manages. On GKE the
+    # bundler synthesizes a permissive ResourceQuota in the gpu-operator
+    # namespace so admission control admits these pods. See issue #915.
+    gkeCriticalPriority: true
     healthCheck:
       assertFile: checks/gpu-operator/health-check.yaml
     helm:
