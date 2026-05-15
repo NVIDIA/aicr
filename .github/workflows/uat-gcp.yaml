@@ -71,6 +71,7 @@ jobs:
             vendor/modules.txt
 
       - name: Build aicr binary
+        if: inputs.skip_tests != true
         env:
           GOFLAGS: -mod=vendor
         run: |
@@ -81,6 +82,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Build and push validator images
+        if: inputs.skip_tests != true
         run: |
           GO_VERSION="$(cat .go-version)"
           for phase in deployment performance conformance; do
@@ -189,7 +191,7 @@ jobs:
 
       # Cleanup
       - name: Cleanup validator image
-        if: always()
+        if: always() && inputs.skip_tests != true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
