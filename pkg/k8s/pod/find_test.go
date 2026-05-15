@@ -73,6 +73,45 @@ func TestGetPodForJob(t *testing.T) {
 			wantErr:   true,
 			wantCode:  errors.ErrCodeInternal,
 		},
+		{
+			name: "prefers youngest active pod over stale failed pod",
+			objects: []runtime.Object{
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "validator-job-aaa-stale",
+						Namespace:         ns,
+						Labels:            map[string]string{"batch.kubernetes.io/job-name": jobName},
+						CreationTimestamp: metav1.Unix(10, 0),
+					},
+					Status: corev1.PodStatus{Phase: corev1.PodFailed},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "validator-job-zzz-current",
+						Namespace:         ns,
+						Labels:            map[string]string{"batch.kubernetes.io/job-name": jobName},
+						CreationTimestamp: metav1.Unix(20, 0),
+					},
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
+				},
+			},
+			wantName: "validator-job-zzz-current",
+		},
+		{
+			name: "falls back to failed pod when no active pod exists",
+			objects: []runtime.Object{
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "validator-job-failed",
+						Namespace:         ns,
+						Labels:            map[string]string{"batch.kubernetes.io/job-name": jobName},
+						CreationTimestamp: metav1.Unix(30, 0),
+					},
+					Status: corev1.PodStatus{Phase: corev1.PodFailed},
+				},
+			},
+			wantName: "validator-job-failed",
+		},
 	}
 
 	for _, tt := range tests {

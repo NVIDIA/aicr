@@ -27,7 +27,7 @@ import (
 // Job (batch/v1) starting in 1.27. It supersedes the legacy job-name label.
 const jobNameLabel = "batch.kubernetes.io/job-name"
 
-// GetPodForJob returns the first pod owned by the named Job, located via the
+// GetPodForJob returns the best pod owned by the named Job, located via the
 // standard `batch.kubernetes.io/job-name=<jobName>` label selector.
 //
 // Returns an ErrCodeNotFound StructuredError when the listing succeeds but
@@ -39,13 +39,49 @@ func GetPodForJob(ctx context.Context, client kubernetes.Interface, namespace, j
 	})
 	if err != nil {
 		return nil, errors.WrapWithContext(errors.ErrCodeInternal, "failed to list pods for Job", err,
-			map[string]any{keyNamespace: namespace, "job": jobName})
+			map[string]any{keyNamespace: namespace, keyJob: jobName})
 	}
 
 	if len(pods.Items) == 0 {
 		return nil, errors.NewWithContext(errors.ErrCodeNotFound, "pod for job not found",
-			map[string]any{keyNamespace: namespace, "job": jobName})
+			map[string]any{keyNamespace: namespace, keyJob: jobName})
 	}
 
-	return &pods.Items[0], nil
+	selected := selectPodForJob(pods.Items)
+	if selected == nil {
+		return nil, errors.NewWithContext(errors.ErrCodeNotFound, "pod for job not found",
+			map[string]any{keyNamespace: namespace, keyJob: jobName})
+	}
+
+	return selected, nil
+}
+
+func selectPodForJob(pods []corev1.Pod) *corev1.Pod {
+	var newestNonFailed *corev1.Pod
+	var newestFailed *corev1.Pod
+
+	for i := range pods {
+		p := &pods[i]
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+		if p.Status.Phase == corev1.PodFailed {
+			if isNewerPod(p, newestFailed) {
+				newestFailed = p
+			}
+			continue
+		}
+		if isNewerPod(p, newestNonFailed) {
+			newestNonFailed = p
+		}
+	}
+
+	if newestNonFailed != nil {
+		return newestNonFailed
+	}
+	return newestFailed
+}
+
+func isNewerPod(candidate, current *corev1.Pod) bool {
+	return current == nil || candidate.CreationTimestamp.After(current.CreationTimestamp.Time)
 }
