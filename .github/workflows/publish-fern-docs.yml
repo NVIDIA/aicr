@@ -90,7 +90,7 @@ jobs:
           fi
 
           # Remove excess entries from the end (oldest) and their version files
-          PRUNED=$(yq ".products[0].versions[$KEEP:].[].slug" fern/docs.yml)
+          PRUNED=$(yq ".products[0].versions[$KEEP:][].slug" fern/docs.yml)
           yq -i ".products[0].versions |= .[:$KEEP]" fern/docs.yml
 
           for slug in $PRUNED; do
