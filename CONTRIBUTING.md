@@ -108,9 +108,9 @@ These principles guide all design decisions in AICR. When faced with trade-offs,
 
 The same tools, same versions, and same validation run locally and in CI.
 
-**What:** Tool versions are centralized in `.settings.yaml`. Both `make tools-setup` (local) and GitHub Actions use this single source of truth. `make qualify` runs the exact same checks as CI.
+**What:** Tool versions are centralized in `.settings.yaml`. `make tools-setup` (first-time install), `make tools-update` (upgrade to current pins), `make tools-check` (verify), and GitHub Actions all use this single source of truth. `make qualify` runs the exact same checks as CI.
 
-**Why:** "Works on my machine" is not acceptable. If a contributor can run `make qualify` locally and it passes, CI will pass. This eliminates surprise failures and reduces feedback loops.
+**Why:** "Works on my machine" is not acceptable. If a contributor can run `make qualify` locally and it passes, CI will pass. This eliminates surprise failures and reduces feedback loops. Note that this only holds when your local toolchain matches `.settings.yaml` — run `make tools-update` after a `git pull` that touches `.settings.yaml`, or whenever `make tools-check` shows a `⚠` for a lint-sensitive tool. A behind-CI `golangci-lint` will silently miss lint findings that CI catches.
 
 ### Adoption Comes from Idiomatic Experience
 
@@ -329,7 +329,7 @@ By making a contribution to this project, I certify that:
 
 1. Start with issues labeled `good first issue`
 2. Read existing code in the package you're modifying before writing
-3. Run `make tools-check` to verify your environment
+3. Run `make tools-check` to verify your environment; run `make tools-update` if any tool is behind
 4. Study the [Design Principles](#design-principles) section
 
 **Good first contributions:**

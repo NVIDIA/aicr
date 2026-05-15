@@ -28,7 +28,8 @@ alias aicrup='curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/insta
 ```bash
 # 1. Clone and setup
 git clone https://github.com/NVIDIA/aicr.git && cd aicr
-make tools-setup    # Install all required tools
+make tools-setup    # Install all required tools (first-time)
+make tools-update   # Upgrade existing tools to versions in .settings.yaml
 make tools-check    # Verify versions match .settings.yaml
 
 # 2. Develop
@@ -90,15 +91,25 @@ sudo chmod +x /usr/local/bin/yq
 The project uses `.settings.yaml` as a single source of truth for tool versions. This ensures consistency between local development and CI.
 
 ```bash
-# Install all required tools (interactive mode)
+# Install all required tools (first-time, interactive mode)
 make tools-setup
 
 # Or skip prompts for CI/scripts
 AUTO_MODE=true make tools-setup
 
+# Upgrade existing tools to the pinned versions in .settings.yaml
+# (run periodically — see "Keeping the toolchain in sync" below)
+make tools-update
+
 # Verify installation
 make tools-check
 ```
+
+#### Keeping the toolchain in sync
+
+CI uses the versions pinned in `.settings.yaml`. When Renovate bumps a pinned version (e.g. `golangci-lint`), your local install drifts behind CI until you run `make tools-update`. The most painful symptom is **silent false-negative lint runs locally**: a newer `golangci-lint` may default-enable a check (e.g. tighter `goconst` thresholds) that your older local version doesn't flag, so `make qualify` passes locally and fails in CI on the same code.
+
+Run `make tools-update` after a `git pull` that touches `.settings.yaml`, or whenever `make tools-check` shows a `⚠` for a lint-sensitive tool.
 
 Example `make tools-check` output:
 
@@ -124,7 +135,8 @@ Legend: ✓ = installed, ⚠ = version mismatch, ✗ = missing
 ### Version Management
 
 All tool versions are centrally managed in `.settings.yaml`, the single source of truth used by:
-- `make tools-setup` - Local development setup
+- `make tools-setup` - Local development setup (first-time install)
+- `make tools-update` - Upgrade existing tools to the pinned versions
 - `make tools-check` - Version verification
 - GitHub Actions CI - Ensures CI uses identical versions
 
@@ -605,7 +617,8 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 | Target | Description |
 |--------|-------------|
 | `make tools-check` | Check tools and compare versions |
-| `make tools-setup` | Install all development tools |
+| `make tools-setup` | Install all development tools (first-time) |
+| `make tools-update` | Upgrade existing tools to versions pinned in `.settings.yaml` |
 
 ### Utilities
 
@@ -625,7 +638,8 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 
 | Issue | Solution |
 |-------|----------|
-| `make tools-check` shows version mismatch | Run `make tools-setup` to update tools |
+| `make tools-check` shows version mismatch | Run `make tools-update` to upgrade tools to versions pinned in `.settings.yaml` |
+| `make qualify` passes locally but lint fails in CI | Local toolchain has drifted behind CI; run `make tools-update` and re-run `make qualify` |
 | Tests fail with race conditions | Ensure `context.Done()` is checked in loops |
 | Linter errors about `errors.Is()` | Use `errors.Is()` instead of `==` for error comparison |
 | Build failures | Run `make tidy` to update dependencies |
