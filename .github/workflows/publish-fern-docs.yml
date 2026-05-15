@@ -1,4 +1,4 @@
-# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,10 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Publishes the Fern documentation site when a docs tag is pushed or manually triggered.
+# Publishes the Fern documentation site on release tag push or manual dispatch.
 #
-# To publish:  git tag docs/v1.2.0 && git push origin docs/v1.2.0
-# Or use the "Run workflow" button in the Actions tab.
+# On a vX.Y.Z release tag push the workflow also:
+#   1. Generates fern/versions/vX.Y.Z.yml from the tag's docs/index.yml
+#   2. Adds a version entry to fern/docs.yml
+#   3. Prunes older versions to keep only the 3 most recent (plus Latest)
+#   4. Commits changes back to main so future publishes include the new version
+#
+# Pre-release tags (e.g. v1.6.0-rc1) trigger publish but skip version registration.
 #
 # Required configuration:
 # - Organization secret: DOCS_FERN_TOKEN (from `fern token` for the nvidia Fern org)
@@ -25,15 +30,18 @@ name: Publish Fern Docs
 on:
   push:
     tags:
-      - 'docs/v*'
+      - "v[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: fern-publish
   cancel-in-progress: true
+
+env:
+  MAX_VERSIONS: 3
 
 jobs:
   publish:
@@ -42,7 +50,70 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-tags: true
+          ref: main
+
+      - name: Register new version from tag
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
+        run: |
+          set -eo pipefail
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"  # e.g. v1.5.0
+
+          # Skip if version file already exists
+          if [ -f "fern/versions/${TAG_VERSION}.yml" ]; then
+            echo "Version ${TAG_VERSION} already registered — skipping"
+            exit 0
+          fi
+
+          # Generate version nav from the tag's docs/index.yml
+          echo "Generating fern/versions/${TAG_VERSION}.yml from tag $TAG_VERSION"
+          git archive "${TAG_VERSION}" -- docs/index.yml | tar -xO docs/index.yml | \
+            sed "s|path: |path: ${TAG_VERSION}-content/|g" > "fern/versions/${TAG_VERSION}.yml"
+
+          # Add version entry to docs.yml (insert after Latest, before older versions)
+          export TAG_VERSION
+          yq -i '.products[0].versions |= [.[0]] + [{"display-name": env(TAG_VERSION), "path": "versions/" + env(TAG_VERSION) + ".yml", "slug": env(TAG_VERSION), "availability": "stable"}] + .[1:]' fern/docs.yml
+
+          echo "--- docs.yml versions after insert ---"
+          yq '.products[0].versions[].display-name' fern/docs.yml
+
+      - name: Prune old versions
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
+        run: |
+          set -eo pipefail
+          KEEP=$((MAX_VERSIONS + 1))  # +1 for the Latest entry at index 0
+
+          # Count current versioned entries (including Latest)
+          TOTAL=$(yq '.products[0].versions | length' fern/docs.yml)
+          if [ "$TOTAL" -le "$KEEP" ]; then
+            echo "Only $TOTAL version entries — nothing to prune"
+            exit 0
+          fi
+
+          # Remove excess entries from the end (oldest) and their version files
+          PRUNED=$(yq ".products[0].versions[$KEEP:].[].slug" fern/docs.yml)
+          yq -i ".products[0].versions |= .[:$KEEP]" fern/docs.yml
+
+          for slug in $PRUNED; do
+            rm -f "fern/versions/${slug}.yml"
+            echo "Pruned version $slug"
+          done
+
+          echo "--- docs.yml versions after prune ---"
+          yq '.products[0].versions[].display-name' fern/docs.yml
+
+      - name: Commit version changes
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"
+          if git diff --quiet fern/ && [ -z "$(git ls-files --deleted fern/)" ]; then
+            echo "No version changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fern/versions/ fern/docs.yml
+          git commit -m "chore(fern): register ${TAG_VERSION}, keep latest ${MAX_VERSIONS} versions [automated]"
+          git push origin main
 
       - name: Checkout frozen version content
         run: |
