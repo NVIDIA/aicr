@@ -519,7 +519,13 @@ func TestResolveImage(t *testing.T) {
 			want:    imgLatest,
 		},
 		{
-			name:    "-next version — no tag rewrite",
+			// Goreleaser snapshot template `{{ .Tag }}-next` is not a
+			// published image tag — must fall through to :sha-<commit>
+			// (the path on-push.yaml does publish). Regression guard for
+			// issue #916: silently dropping the -next exclusion would
+			// route every main-development build to an unpublished
+			// :v0.X.Y-next tag.
+			name:    "-next snapshot version — no tag rewrite",
 			image:   imgLatest,
 			version: "v0.11.1-next",
 			want:    imgLatest,
@@ -531,10 +537,55 @@ func TestResolveImage(t *testing.T) {
 			want:    imgLatest,
 		},
 		{
-			name:    "pre-release rc suffix is not a release",
+			// on-tag.yaml publishes `:v1.0.0-rc1` for pre-release tags;
+			// the binary's version is the same `.Tag` string goreleaser
+			// stamps in, so they must resolve to the same image tag.
+			// Regression guard for issue #916.
+			name:    "pre-release rc tag rewrites :latest to :vX.Y.Z-rc1",
 			image:   imgLatest,
 			version: "v1.0.0-rc1",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:v1.0.0-rc1",
+		},
+		{
+			name:    "pre-release beta tag rewrites :latest to :vX.Y.Z-beta",
+			image:   imgLatest,
+			version: "v1.0.0-beta",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:v1.0.0-beta",
+		},
+		{
+			name:    "pre-release alpha.1 (dotted) tag rewrites :latest",
+			image:   imgLatest,
+			version: "v1.0.0-alpha.1",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:v1.0.0-alpha.1",
+		},
+		{
+			// Snapshot of a pre-release checkout: goreleaser snapshot
+			// produces `v1.0.0-rc1-next`. The internal dash takes the
+			// suffix out of the single-segment shape AND the trailing
+			// -next is excluded — either guard alone is sufficient,
+			// both are present for defense-in-depth.
+			name:    "snapshot of a pre-release tag falls through",
+			image:   imgLatest,
+			version: "v1.0.0-rc1-next",
 			want:    imgLatest,
+		},
+		{
+			// Snapshot of stable release falls through to :sha-<commit>.
+			name:    "snapshot of stable release with commit → sha tag",
+			image:   imgLatest,
+			version: "v1.0.0-next",
+			commit:  "abc1234",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:sha-abc1234",
+		},
+		{
+			// Pre-release version takes precedence over commit (same
+			// as stable releases — the release workflow published the
+			// tagged image, no need to chase :sha-<commit>).
+			name:    "pre-release tag ignores commit (release wins)",
+			image:   imgLatest,
+			version: "v1.0.0-rc1",
+			commit:  "abc1234",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:v1.0.0-rc1",
 		},
 		{
 			name:    "snapshot with valid commit resolves to sha tag",

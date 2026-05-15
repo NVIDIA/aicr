@@ -46,8 +46,10 @@ type (
 // by name, and new validators are appended.
 //
 // Image tag resolution (applied in order):
-//  1. If a catalog entry uses :latest and version is a release (vX.Y.Z),
-//     the tag is replaced with the CLI version for reproducibility.
+//  1. If a catalog entry uses :latest and version looks like a release tag
+//     published by on-tag.yaml (vX.Y.Z or vX.Y.Z-<prerelease>, but not the
+//     goreleaser snapshot suffix -next), the tag is replaced with the CLI
+//     version for reproducibility.
 //  2. If version is a non-release dev build and commit is a valid short SHA,
 //     the tag is replaced with :sha-<commit> to match on-push.yaml image tags.
 //  3. If AICR_VALIDATOR_IMAGE_TAG is set, the resolved tag is overridden.
@@ -81,7 +83,10 @@ func Load(version, commit string) (*ValidatorCatalog, error) {
 // catalog (for example the inner AIPerf benchmark image referenced by the
 // inference-perf validator). Applies, in order:
 //
-//  1. :latest tag replacement with version if version is a release (vX.Y.Z).
+//  1. :latest tag replacement with version if version looks like a release
+//     tag published by on-tag.yaml — strict (vX.Y.Z) or a pre-release
+//     suffix (vX.Y.Z-rc1, vX.Y.Z-beta, vX.Y.Z-alpha.1). Goreleaser snapshot
+//     strings (suffix -next) are NOT releases and fall through to step 2.
 //  2. If non-release and commit is a valid SHA, :latest → :sha-<commit>.
 //  3. Tag override if AICR_VALIDATOR_IMAGE_TAG is set (overrides steps 1-2
 //     AND explicit catalog tags). Intended for feature-branch dev builds
@@ -149,15 +154,39 @@ func ImagePullPolicy(image string) corev1.PullPolicy {
 	return corev1.PullIfNotPresent
 }
 
-// releaseVersionPattern matches strict semantic versions: vX.Y.Z or X.Y.Z
-// with no pre-release suffix. This ensures snapshot strings like
-// v0.0.0-12-gabc1234 or pre-release tags like v1.0.0-rc1 are not treated
-// as releases.
-var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
+// releaseVersionPattern matches the version strings on-tag.yaml turns into
+// validator image tags: strict semver (vX.Y.Z) or a single pre-release
+// suffix (vX.Y.Z-rc1, vX.Y.Z-beta, vX.Y.Z-alpha.1). The suffix is one
+// segment of alphanumerics and dots — multi-segment forms like the git
+// describe snapshot v0.0.0-12-gabc1234 contain an internal dash and do
+// not match.
+//
+// Mirrors the on-tag.yaml trigger filter `v[0-9]+.[0-9]+.[0-9]+*`: any
+// reference that filter accepts produces an image manifest tagged
+// `:<github.ref_name>`, and the binary's version string is the same
+// `.Tag` value goreleaser stamps in, so the two move in lockstep.
+var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$`)
 
-// isReleaseVersion returns true for strict semantic version strings (vX.Y.Z),
-// false for dev builds, pre-release suffixes, snapshots, and empty strings.
+// snapshotSuffixPattern matches goreleaser's snapshot.version_template
+// (`{{ .Tag }}-next` in .goreleaser.yaml). Snapshot builds produced by
+// on-push.yaml stamp the binary with versions like `v0.13.0-next` —
+// shape-equivalent to a pre-release tag but with NO corresponding image
+// in ghcr. Excluding them keeps the main-development flow on the
+// :sha-<commit> path (which on-push.yaml does publish).
+//
+// Do NOT remove this guard without also moving the main-push CI to
+// publish `v<version>-next` image tags — the two coordinated changes
+// must land together or :validate goes back to ImagePullBackOff on main.
+var snapshotSuffixPattern = regexp.MustCompile(`-next$`)
+
+// isReleaseVersion returns true when the version string matches a tag
+// on-tag.yaml would publish (strict semver or pre-release) AND is not a
+// goreleaser snapshot string. Dev builds, empty strings, and snapshots
+// fall through to the :sha-<commit> resolution path.
 func isReleaseVersion(version string) bool {
+	if snapshotSuffixPattern.MatchString(version) {
+		return false
+	}
 	return releaseVersionPattern.MatchString(version)
 }
 

@@ -195,14 +195,8 @@ cd ..
 
 ## Validate Cluster + Emit Evidence
 
-`AICR_VALIDATOR_IMAGE_TAG=edge` works around tagged-release binaries asking for
-a `:sha-<commit>` validator image the release workflow never publishes (it
-publishes `:v<version>` instead). Drop the env var once running a binary built
-from a `main` push (whose `:sha-<commit>` images exist).
-See https://github.com/NVIDIA/aicr/issues/916.
-
 ```shell
-AICR_VALIDATOR_IMAGE_TAG=edge aicr validate --config aicr-config.yaml \
+aicr validate --config aicr-config.yaml \
     --phase conformance \
     --output report.json
 ```
