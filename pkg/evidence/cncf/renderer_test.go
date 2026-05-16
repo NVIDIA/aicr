@@ -140,9 +140,14 @@ func TestRenderSeparateMetricsFiles(t *testing.T) {
 // TestRenderWithNow_DeterministicTimestamp verifies that WithNow injects a
 // fixed timestamp into the rendered index, which is required for
 // reproducible-build (SLSA) callers that hash the output.
+//
+// Use a far-future date so the assertion can't false-pass against the
+// current wall clock — checking only the year would silently succeed in
+// 2026 even if WithNow were ignored. The expected substring includes the
+// month and day, which uniquely identifies the injected value.
 func TestRenderWithNow_DeterministicTimestamp(t *testing.T) {
 	dir := t.TempDir()
-	injected := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	injected := time.Date(2099, 7, 14, 12, 30, 45, 0, time.UTC)
 	r := New(WithOutputDir(dir), WithNow(injected))
 
 	report := &ctrf.Report{
@@ -160,12 +165,12 @@ func TestRenderWithNow_DeterministicTimestamp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index.md: %v", err)
 	}
-	// The template renders GeneratedAt with default Go time formatting,
-	// which includes the year/month/day. Verifying the injected year is
-	// present is sufficient to confirm the threading works without
-	// pinning the exact format.
-	if !strings.Contains(string(body), "2026") {
-		t.Errorf("index.md does not contain injected year 2026: %s", body)
+	// Match the date portion of the Go default time format
+	// ("2099-07-14 12:30:45 +0000 UTC"). This catches the injection
+	// without pinning the exact suffix.
+	want := "2099-07-14"
+	if !strings.Contains(string(body), want) {
+		t.Errorf("index.md does not contain injected date %q: %s", want, body)
 	}
 }
 

@@ -36,17 +36,28 @@ import (
 // (LayeredProviderConfig.MaxFileSize) so a smaller-than-default cap
 // still applies under TOCTOU swaps.
 //
-// relPath must be local to baseDir; the filepath.IsLocal check rejects
-// absolute paths, parent-directory refs (..), and (on Windows) reserved
-// device names. It also acts as a path-injection sanitizer for static
-// analysis, so callers can pass relPath values derived from external
-// data without tripping go/path-injection.
+// Path handling is defense-in-depth:
+//
+//   - filepath.IsLocal(relPath) rejects absolute paths, parent-directory
+//     refs (..), and (on Windows) reserved device names. It also acts
+//     as a path-injection sanitizer for static analysis, so callers can
+//     pass relPath values derived from external data without tripping
+//     go/path-injection.
+//   - When allowSymlinks is false (the default), os.OpenRoot confines
+//     all opens to baseDir at the syscall level. If a regular file gets
+//     swapped to a symlink between walk-time validation and the read,
+//     Root.Open will refuse to follow it — preventing a post-validation
+//     symlink escape that plain os.Open would silently honor.
+//   - When allowSymlinks is true the caller has explicitly opted into
+//     symlink resolution at walk time, so the read falls back to plain
+//     os.Open with a containment check on the resolved target so a
+//     symlink whose target points outside baseDir is still rejected.
 //
 // The walk-time MaxFileSize check on LayeredDataProvider is best-effort;
 // a TOCTOU window or network-mount swap can substitute a much larger
 // file between walk and read, so the read-time bound is the
 // authoritative guard.
-func readExternalFile(baseDir, relPath string, maxBytes int64) ([]byte, error) {
+func readExternalFile(baseDir, relPath string, maxBytes int64, allowSymlinks bool) ([]byte, error) {
 	if !filepath.IsLocal(relPath) {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("external data path %q is not local to base directory", relPath))
@@ -54,8 +65,7 @@ func readExternalFile(baseDir, relPath string, maxBytes int64) ([]byte, error) {
 	if maxBytes <= 0 {
 		maxBytes = defaults.MaxExternalDataFileBytes
 	}
-	fullPath := filepath.Join(baseDir, relPath)
-	f, err := os.Open(fullPath) //nolint:gosec // relPath validated by filepath.IsLocal above
+	f, err := openExternalFile(baseDir, relPath, allowSymlinks)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +79,46 @@ func readExternalFile(baseDir, relPath string, maxBytes int64) ([]byte, error) {
 			fmt.Sprintf("external data file %q exceeds %d-byte limit", relPath, maxBytes))
 	}
 	return data, nil
+}
+
+// openExternalFile opens relPath under baseDir using the path-confinement
+// strategy appropriate to the provider's symlink policy. See readExternalFile
+// for the rationale.
+func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, error) {
+	if !allowSymlinks {
+		root, err := os.OpenRoot(baseDir)
+		if err != nil {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+				fmt.Sprintf("failed to open base directory %q", baseDir), err)
+		}
+		defer func() { _ = root.Close() }()
+		return root.Open(relPath)
+	}
+	// AllowSymlinks=true: caller opted into symlinks at walk time, but the
+	// resolved target must still be contained in baseDir. Resolve both
+	// sides through EvalSymlinks so the comparison is robust on platforms
+	// where the temp/data root itself is a symlink (e.g., macOS's
+	// /var/folders -> /private/var/folders).
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+			fmt.Sprintf("failed to resolve base directory %q", baseDir), err)
+	}
+	canonicalBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+			fmt.Sprintf("failed to canonicalize base directory %q", baseDir), err)
+	}
+	fullPath := filepath.Join(canonicalBase, relPath)
+	resolved, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(resolved, canonicalBase+string(filepath.Separator)) && resolved != canonicalBase {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("external data path %q resolves outside base directory", relPath))
+	}
+	return os.Open(resolved) //nolint:gosec // resolved is verified to be within canonicalBase above
 }
 
 // DataProvider abstracts access to recipe data files.
@@ -143,6 +193,11 @@ type LayeredDataProvider struct {
 	// check uses, so a TOCTOU swap on a network mount cannot bypass a
 	// configured smaller-than-default cap.
 	maxFileSize int64
+
+	// allowSymlinks mirrors LayeredProviderConfig.AllowSymlinks so the
+	// read-time helper can pick between os.OpenRoot (strict, no symlinks)
+	// and a containment-checked EvalSymlinks path (caller opted in).
+	allowSymlinks bool
 
 	// Cached merged registry (computed once on first access)
 	mergedRegistryOnce sync.Once
@@ -299,6 +354,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 		embedded:      embedded,
 		externalDir:   config.ExternalDir,
 		maxFileSize:   config.MaxFileSize,
+		allowSymlinks: config.AllowSymlinks,
 		externalFiles: externalFiles,
 	}, nil
 }
@@ -339,7 +395,7 @@ func (p *LayeredDataProvider) ReadFile(path string) ([]byte, error) {
 
 	// Check external directory first
 	if p.externalFiles[path] {
-		data, err := readExternalFile(p.externalDir, path, p.maxFileSize)
+		data, err := readExternalFile(p.externalDir, path, p.maxFileSize, p.allowSymlinks)
 		if err != nil {
 			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path))
 		}
@@ -435,7 +491,7 @@ type fileReader interface {
 // unmarshals each into type T, merges them using the provided function, and serializes
 // the result back to YAML bytes.
 func mergeEmbeddedAndExternal[T any](
-	embedded fileReader, externalDir string, maxFileSize int64,
+	embedded fileReader, externalDir string, maxFileSize int64, allowSymlinks bool,
 	fileName string, merge func(embedded, external *T) *T,
 ) ([]byte, error) {
 
@@ -454,7 +510,7 @@ func mergeEmbeddedAndExternal[T any](
 	}
 
 	// Load external
-	externalData, err := readExternalFile(externalDir, fileName, maxFileSize)
+	externalData, err := readExternalFile(externalDir, fileName, maxFileSize, allowSymlinks)
 	if err != nil {
 		return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "failed to read external "+kind)
 	}
@@ -481,7 +537,7 @@ func mergeEmbeddedAndExternal[T any](
 func (p *LayeredDataProvider) getMergedRegistry() ([]byte, error) {
 	p.mergedRegistryOnce.Do(func() {
 		p.mergedRegistry, p.mergedRegistryErr = mergeEmbeddedAndExternal(
-			p.embedded, p.externalDir, p.maxFileSize, registryFileName, mergeRegistries,
+			p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName, mergeRegistries,
 		)
 	})
 
@@ -562,7 +618,7 @@ type catalogForMerge struct {
 func (p *LayeredDataProvider) getMergedCatalog() ([]byte, error) {
 	p.mergedCatalogOnce.Do(func() {
 		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
-			p.embedded, p.externalDir, p.maxFileSize, catalogFileName, mergeCatalogs,
+			p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName, mergeCatalogs,
 		)
 	})
 

@@ -288,7 +288,7 @@ func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 // non-local paths and oversized files so a TOCTOU swap can't bypass either.
 func TestReadExternalFile(t *testing.T) {
 	t.Run("rejects non-local relative path", func(t *testing.T) {
-		_, err := readExternalFile(t.TempDir(), "../escape", 1024)
+		_, err := readExternalFile(t.TempDir(), "../escape", 1024, false)
 		if err == nil {
 			t.Fatal("expected error for non-local relative path")
 		}
@@ -308,7 +308,7 @@ func TestReadExternalFile(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "big.yaml"), make([]byte, 64), 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-		_, err := readExternalFile(dir, "big.yaml", 32)
+		_, err := readExternalFile(dir, "big.yaml", 32, false)
 		if err == nil {
 			t.Fatal("expected error for oversized file")
 		}
@@ -327,12 +327,60 @@ func TestReadExternalFile(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "small.yaml"), want, 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-		got, err := readExternalFile(dir, "small.yaml", 1024)
+		got, err := readExternalFile(dir, "small.yaml", 1024, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if string(got) != string(want) {
 			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("rejects post-validation symlink escape", func(t *testing.T) {
+		// Simulate a TOCTOU swap: a legitimate file is replaced with a
+		// symlink that points outside the base directory between
+		// walk-time validation and the read. os.OpenRoot must refuse
+		// to follow it. This is the failure mode plain os.Open
+		// silently honored.
+		dir := t.TempDir()
+		secrets := t.TempDir()
+		secretPath := filepath.Join(secrets, "leak")
+		if err := os.WriteFile(secretPath, []byte("secret"), 0o600); err != nil {
+			t.Fatalf("write secret: %v", err)
+		}
+		swap := filepath.Join(dir, "swap.yaml")
+		if err := os.Symlink(secretPath, swap); err != nil {
+			t.Skipf("cannot create symlinks on this platform: %v", err)
+		}
+		if _, err := readExternalFile(dir, "swap.yaml", 1024, false); err == nil {
+			t.Fatal("expected error from symlink escape, got nil")
+		}
+	})
+
+	t.Run("allowSymlinks=true rejects symlink escaping baseDir", func(t *testing.T) {
+		// Even when symlinks are allowed at the provider level, the resolved
+		// target must stay inside baseDir. A symlink whose target leaks to
+		// an unrelated directory is rejected.
+		dir := t.TempDir()
+		outside := t.TempDir()
+		outsideFile := filepath.Join(outside, "leak")
+		if err := os.WriteFile(outsideFile, []byte("secret"), 0o600); err != nil {
+			t.Fatalf("write outside file: %v", err)
+		}
+		link := filepath.Join(dir, "leak.yaml")
+		if err := os.Symlink(outsideFile, link); err != nil {
+			t.Skipf("cannot create symlinks on this platform: %v", err)
+		}
+		_, err := readExternalFile(dir, "leak.yaml", 1024, true)
+		if err == nil {
+			t.Fatal("expected error from symlink target outside baseDir, got nil")
+		}
+		var se *aicrerrors.StructuredError
+		if !stderrors.As(err, &se) {
+			t.Fatalf("expected StructuredError, got %T", err)
+		}
+		if se.Code != aicrerrors.ErrCodeInvalidRequest {
+			t.Errorf("code = %v, want %v", se.Code, aicrerrors.ErrCodeInvalidRequest)
 		}
 	})
 }
