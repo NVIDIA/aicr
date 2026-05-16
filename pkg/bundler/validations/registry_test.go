@@ -124,6 +124,7 @@ func TestRunValidations(t *testing.T) {
 			bundlerConfig: config.NewConfig(),
 			wantWarnings:  0,
 			wantErrors:    1,
+			wantMsg:       "unknown validation function",
 		},
 		{
 			name:          "workload selector missing with message",

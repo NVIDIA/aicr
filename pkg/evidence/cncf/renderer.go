@@ -40,7 +40,11 @@ type Renderer struct {
 	// now overrides wall-clock time when non-zero. Set via WithNow for
 	// reproducible builds (SLSA, signed artifacts) where the index file
 	// and embedded entry timestamps must be byte-stable across runs.
-	now time.Time
+	// When WithNow is not set, the first call to resolveNow() captures a
+	// single wall-clock value into nowResolved so per-entry GeneratedAt
+	// and the index timestamp agree within a single Render call.
+	now         time.Time
+	nowResolved time.Time
 }
 
 // Option configures a Renderer.
@@ -72,13 +76,17 @@ func New(opts ...Option) *Renderer {
 }
 
 // resolveNow returns the renderer's injected time when set, otherwise
-// wall-clock time. Computed once per render call so all entries and the
-// index share a single timestamp.
+// the wall-clock time captured on the first call. Memoizing here means
+// buildEntries (per-entry GeneratedAt) and renderIndex (index
+// timestamp) observe the same value within a single Render.
 func (r *Renderer) resolveNow() time.Time {
 	if !r.now.IsZero() {
 		return r.now
 	}
-	return time.Now().UTC()
+	if r.nowResolved.IsZero() {
+		r.nowResolved = time.Now().UTC()
+	}
+	return r.nowResolved
 }
 
 // Render generates evidence markdown files from a CTRF report.

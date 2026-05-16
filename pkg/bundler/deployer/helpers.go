@@ -78,7 +78,7 @@ func WriteValuesFile(values map[string]any, baseDir, filename string) (string, i
 		// (and thus the bundle attestation) are byte-stable across runs.
 		yamlBytes, err := serializer.MarshalYAMLDeterministic(values)
 		if err != nil {
-			return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
+			return "", 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to marshal values")
 		}
 		buf.Write(yamlBytes)
 	}

@@ -1093,7 +1093,7 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir string) (int64, error) {
 	recipeData, err := serializer.MarshalYAMLDeterministic(recipeResult)
 	if err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
+		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize recipe")
 	}
 
 	recipePath, joinErr := deployer.SafeJoin(dir, "recipe.yaml")

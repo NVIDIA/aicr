@@ -31,13 +31,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// readExternalFile streams a file through io.LimitReader against
-// defaults.MaxExternalDataFileBytes. The walk-time MaxFileSize check on
-// LayeredDataProvider is best-effort; a TOCTOU window or network-mount
-// swap can substitute a much larger file between walk and read, so the
-// read-time bound is the authoritative guard.
-func readExternalFile(path string) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // path validated by LayeredDataProvider walk
+// readExternalFile streams a file under baseDir through io.LimitReader
+// against defaults.MaxExternalDataFileBytes.
+//
+// relPath must be local to baseDir; the filepath.IsLocal check rejects
+// absolute paths, parent-directory refs (..), and (on Windows) reserved
+// device names. It also acts as a path-injection sanitizer for static
+// analysis, so callers can pass relPath values derived from external
+// data without tripping go/path-injection.
+//
+// The walk-time MaxFileSize check on LayeredDataProvider is best-effort;
+// a TOCTOU window or network-mount swap can substitute a much larger
+// file between walk and read, so the read-time bound is the
+// authoritative guard.
+func readExternalFile(baseDir, relPath string) ([]byte, error) {
+	if !filepath.IsLocal(relPath) {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("external data path %q is not local to base directory", relPath))
+	}
+	fullPath := filepath.Join(baseDir, relPath)
+	f, err := os.Open(fullPath) //nolint:gosec // relPath validated by filepath.IsLocal above
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +61,7 @@ func readExternalFile(path string) ([]byte, error) {
 	}
 	if int64(len(data)) > defaults.MaxExternalDataFileBytes {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("external data file %q exceeds %d-byte limit", path, defaults.MaxExternalDataFileBytes))
+			fmt.Sprintf("external data file %q exceeds %d-byte limit", relPath, defaults.MaxExternalDataFileBytes))
 	}
 	return data, nil
 }
@@ -315,8 +328,7 @@ func (p *LayeredDataProvider) ReadFile(path string) ([]byte, error) {
 
 	// Check external directory first
 	if p.externalFiles[path] {
-		externalPath := filepath.Join(p.externalDir, path)
-		data, err := readExternalFile(externalPath)
+		data, err := readExternalFile(p.externalDir, path)
 		if err != nil {
 			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path), err)
 		}
@@ -431,8 +443,7 @@ func mergeEmbeddedAndExternal[T any](
 	}
 
 	// Load external
-	externalPath := filepath.Join(externalDir, fileName)
-	externalData, err := readExternalFile(externalPath)
+	externalData, err := readExternalFile(externalDir, fileName)
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read external "+kind, err)
 	}

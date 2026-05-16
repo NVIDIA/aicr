@@ -204,6 +204,22 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 	}
 	build()
 
+	// Caller-scoped cancellation must not poison the cache: a per-request
+	// timeout that fires during the first rebuild would otherwise mark this
+	// generation as permanently failed until SetDataProvider bumps it.
+	// Reset the generation so the next caller with a fresh context retries,
+	// and surface the cancel/timeout error without caching it.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		buildErr := cachedMetadataErr
+		cachedMetadataStore = nil
+		cachedMetadataErr = nil
+		cachedMetadataGen = -1
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "metadata load canceled", ctxErr)
+	}
+
 	if cachedMetadataErr != nil {
 		return nil, cachedMetadataErr
 	}

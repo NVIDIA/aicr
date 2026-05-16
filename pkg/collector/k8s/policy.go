@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -85,13 +84,15 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 		}
 	}
 
-	// Phase 2: fan-out per-GVR Lists. Sequential N×RTT becomes ~⌈N/conc⌉ rounds.
-	policyData := make(map[string]measurement.Reading)
-	var mu sync.Mutex
+	// Phase 2: fan-out per-GVR Lists. Sequential N×RTT becomes ~⌈N/conc⌉
+	// rounds. Each goroutine writes its result into a pre-sized indexed
+	// slot so the post-Wait merge happens in stable GVR order — overlapping
+	// keys are not last-writer-wins on goroutine completion order.
+	results := make([]map[string]measurement.Reading, len(gvrs))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(policyListConcurrency)
 
-	for _, gvr := range gvrs {
+	for i, gvr := range gvrs {
 		g.Go(func() error {
 			if err := gctx.Err(); err != nil {
 				return errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
@@ -123,16 +124,20 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 				}
 				flattenSpec(spec, "", local)
 			}
-			mu.Lock()
-			for k, v := range local {
-				policyData[k] = v
-			}
-			mu.Unlock()
+			results[i] = local
 			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+
+	// Ordered merge so overlapping keys resolve deterministically by GVR order.
+	policyData := make(map[string]measurement.Reading)
+	for _, m := range results {
+		for k, v := range m {
+			policyData[k] = v
+		}
 	}
 
 	slog.Debug("collected cluster policies", slog.Int("count", len(policyData)))

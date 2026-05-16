@@ -16,6 +16,7 @@ package pod
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 	"time"
 
@@ -26,6 +27,20 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
+
+// classifyReGetError preserves the timeout/cancel error code when a
+// re-Get races against context expiry. Without this guard, a context
+// deadline that fires between the watch-close and the re-Get would
+// surface as ErrCodeUnavailable instead of ErrCodeTimeout, breaking
+// upstream code that distinguishes transient API unavailability from
+// the caller's own deadline.
+func classifyReGetError(ctx context.Context, message string, getErr error) error {
+	canceled := ctx.Err() != nil || stderrors.Is(getErr, context.DeadlineExceeded) || stderrors.Is(getErr, context.Canceled)
+	if canceled {
+		return errors.Wrap(errors.ErrCodeTimeout, message, getErr)
+	}
+	return errors.Wrap(errors.ErrCodeUnavailable, message, getErr)
+}
 
 // WaitForPodSucceeded waits for a pod to reach the Succeeded phase.
 // Returns nil on PodSucceeded, error on PodFailed, error on timeout.
@@ -72,7 +87,7 @@ func WaitForPodSucceeded(ctx context.Context, client kubernetes.Interface, names
 				}
 				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
 				if getErr != nil {
-					return errors.Wrap(errors.ErrCodeUnavailable, "pod watch closed and re-Get failed", getErr)
+					return classifyReGetError(timeoutCtx, "pod watch closed and re-Get failed", getErr)
 				}
 				if done, checkErr := checkPodPhase(current); done {
 					return checkErr
@@ -259,7 +274,7 @@ func WaitForPodReady(ctx context.Context, client kubernetes.Interface, namespace
 				}
 				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
 				if getErr != nil {
-					return errors.Wrap(errors.ErrCodeUnavailable, "pod watch closed and re-Get failed", getErr)
+					return classifyReGetError(timeoutCtx, "pod watch closed and re-Get failed", getErr)
 				}
 				if done, checkErr := checkPodReady(current); done {
 					return checkErr

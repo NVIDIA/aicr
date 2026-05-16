@@ -53,7 +53,12 @@ func GetPodForJob(ctx context.Context, client kubernetes.Interface, namespace, j
 	var best *corev1.Pod
 	for i := range pods.Items {
 		p := &pods.Items[i]
-		if p.DeletionTimestamp != nil {
+		// Filter out terminating pods AND failed pods from prior runs:
+		// in delete-then-create flows or under BackoffLimit > 0, a failed
+		// Pod can outlive the live Job pod under the same selector. The
+		// caller wants the active candidate, so a Failed orphan must not
+		// outrank an in-flight Pending or Running pod.
+		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodFailed {
 			continue
 		}
 		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
