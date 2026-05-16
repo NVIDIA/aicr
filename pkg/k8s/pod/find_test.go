@@ -199,6 +199,13 @@ func TestGetPodForJob_TieredSelection(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error, got pod %+v", got)
 				}
+				var se *errors.StructuredError
+				if !stderrors.As(err, &se) {
+					t.Fatalf("expected StructuredError, got %T", err)
+				}
+				if se.Code != errors.ErrCodeNotFound {
+					t.Errorf("code = %q, want %q", se.Code, errors.ErrCodeNotFound)
+				}
 				return
 			}
 			if err != nil {

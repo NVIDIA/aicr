@@ -455,10 +455,13 @@ const (
 	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
 
 	// MaxExternalDataFileBytes caps the size of recipe/registry data files
-	// read from the external data directory by LayeredDataProvider. Matches
-	// DefaultMaxFileSize (10 MiB) — bounds attacker-controlled file content
-	// when a network mount swaps a file between walk-time validation and
-	// the read at consumption time.
+	// read from the external data directory by LayeredDataProvider. This is
+	// the single source of truth for the external-data size limit:
+	// LayeredProviderConfig.MaxFileSize falls back here when zero, and
+	// readExternalFile uses it when its caller passes a non-positive
+	// bound. Bounds attacker-controlled file content when a network mount
+	// swaps a file between walk-time validation and the read at
+	// consumption time.
 	MaxExternalDataFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
 )
 

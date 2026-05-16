@@ -170,8 +170,11 @@ func TestRenderWithNow_DeterministicTimestamp(t *testing.T) {
 }
 
 // TestRenderWithNow_FreshTimestampPerCall confirms the wall-clock path is
-// captured per Render call and not memoized on the Renderer, so successive
-// renders in non-deterministic mode produce fresh timestamps.
+// captured per Render call and not memoized on the Renderer: two
+// non-deterministic renders separated by a sleep must produce index.md
+// outputs that differ in the embedded timestamp. Asserting on the
+// rendered bytes (not on a Renderer field) is what actually catches a
+// regression where the timestamp gets memoized across calls.
 func TestRenderWithNow_FreshTimestampPerCall(t *testing.T) {
 	dir := t.TempDir()
 	r := New(WithOutputDir(dir))
@@ -186,15 +189,22 @@ func TestRenderWithNow_FreshTimestampPerCall(t *testing.T) {
 	if err := r.Render(context.Background(), report); err != nil {
 		t.Fatalf("Render 1 failed: %v", err)
 	}
-	// Capture the time of the second render with a small sleep so the
-	// renderTimestamp clock observably advances even on fast hosts.
-	time.Sleep(10 * time.Millisecond)
-	if err := r.Render(context.Background(), report); err != nil {
+	first, err := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("read first index.md: %v", err)
+	}
+	// Sleep so the rendered Go-formatted time (second precision) observably
+	// advances even on fast hosts.
+	time.Sleep(1100 * time.Millisecond)
+	if err = r.Render(context.Background(), report); err != nil {
 		t.Fatalf("Render 2 failed: %v", err)
 	}
-	// Renderer should not be holding a memoized timestamp from the first call.
-	if !r.now.IsZero() {
-		t.Errorf("Renderer.now should remain zero in non-deterministic mode; got %v", r.now)
+	second, err := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("read second index.md: %v", err)
+	}
+	if string(first) == string(second) {
+		t.Errorf("expected different index.md across renders in non-deterministic mode; got identical output:\n%s", first)
 	}
 }
 

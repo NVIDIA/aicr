@@ -171,9 +171,6 @@ type LayeredProviderConfig struct {
 }
 
 const (
-	// DefaultMaxFileSize is the default maximum file size (10MB).
-	DefaultMaxFileSize = 10 * 1024 * 1024
-
 	// sourceEmbedded is the source name for embedded files.
 	sourceEmbedded = "embedded"
 
@@ -203,7 +200,10 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 		"allow_symlinks", config.AllowSymlinks)
 
 	if config.MaxFileSize == 0 {
-		config.MaxFileSize = DefaultMaxFileSize
+		// Single source of truth: same constant readExternalFile uses
+		// when its caller passes a non-positive maxBytes, so direct
+		// helper callers and provider-backed reads cannot drift.
+		config.MaxFileSize = defaults.MaxExternalDataFileBytes
 	}
 
 	// Validate external directory exists
