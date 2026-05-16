@@ -57,13 +57,25 @@ type Header struct {
 // Init initializes the Header with the specified kind, apiVersion, and version.
 // It sets the Kind, APIVersion, and populates Metadata with timestamp and version.
 // Uses unprefixed keys (timestamp, version) for all kinds.
+//
+// The timestamp is wall-clock time. Reproducible-build callers (SLSA, signed
+// artifacts) must inject a fixed timestamp via InitWithTime to keep the
+// serialized header byte-stable across runs.
 func (h *Header) Init(kind Kind, apiVersion string, version string) {
+	h.InitWithTime(kind, apiVersion, version, time.Now().UTC())
+}
+
+// InitWithTime is like Init but uses the caller-supplied timestamp. Use this
+// when the header feeds into a digest, signature, or otherwise reproducible
+// artifact — derive ts from a content-addressable source (commit SHA, the
+// SOURCE_DATE_EPOCH environment variable, etc.).
+func (h *Header) InitWithTime(kind Kind, apiVersion string, version string, ts time.Time) {
 	h.Kind = kind
 	h.APIVersion = apiVersion
 	h.Metadata = make(map[string]string)
 
 	// Use unprefixed keys for all kinds
-	h.Metadata["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+	h.Metadata["timestamp"] = ts.UTC().Format(time.RFC3339)
 	if version != "" {
 		h.Metadata["version"] = version
 	}

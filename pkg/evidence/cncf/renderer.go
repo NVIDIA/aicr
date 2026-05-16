@@ -37,6 +37,10 @@ var (
 // Renderer generates CNCF conformance evidence documents from CTRF reports.
 type Renderer struct {
 	outputDir string
+	// now overrides wall-clock time when non-zero. Set via WithNow for
+	// reproducible builds (SLSA, signed artifacts) where the index file
+	// and embedded entry timestamps must be byte-stable across runs.
+	now time.Time
 }
 
 // Option configures a Renderer.
@@ -49,6 +53,15 @@ func WithOutputDir(dir string) Option {
 	}
 }
 
+// WithNow injects a fixed reference time for reproducible builds. When
+// non-zero, this value is used for both per-entry GeneratedAt and the
+// rendered index timestamp instead of time.Now().
+func WithNow(t time.Time) Option {
+	return func(r *Renderer) {
+		r.now = t
+	}
+}
+
 // New creates a new evidence Renderer with the given options.
 func New(opts ...Option) *Renderer {
 	r := &Renderer{}
@@ -56,6 +69,16 @@ func New(opts ...Option) *Renderer {
 		opt(r)
 	}
 	return r
+}
+
+// resolveNow returns the renderer's injected time when set, otherwise
+// wall-clock time. Computed once per render call so all entries and the
+// index share a single timestamp.
+func (r *Renderer) resolveNow() time.Time {
+	if !r.now.IsZero() {
+		return r.now
+	}
+	return time.Now().UTC()
 }
 
 // Render generates evidence markdown files from a CTRF report.
@@ -107,7 +130,7 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 
 // buildEntries groups CTRF test results by requirement.
 func (r *Renderer) buildEntries(report *ctrf.Report) []evidenceEntry {
-	now := time.Now().UTC()
+	now := r.resolveNow()
 
 	// Group by evidence file, preserving order of first appearance.
 	type fileGroup struct {
@@ -205,7 +228,7 @@ func (r *Renderer) renderIndex(entries []evidenceEntry) (err error) {
 		GeneratedAt time.Time
 		Entries     []evidenceEntry
 	}{
-		GeneratedAt: time.Now().UTC(),
+		GeneratedAt: r.resolveNow(),
 		Entries:     entries,
 	}
 

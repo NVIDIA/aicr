@@ -22,10 +22,9 @@ import (
 	"strings"
 	"text/template"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // IsSafePathComponent returns true if name is a single path component without
@@ -76,7 +75,9 @@ func WriteValuesFile(values map[string]any, baseDir, filename string) (string, i
 	buf.WriteString("---\n")
 
 	if len(values) > 0 {
-		yamlBytes, err := yaml.Marshal(values)
+		// Deterministic marshal so values files feeding checksums.txt
+		// (and thus the bundle attestation) are byte-stable across runs.
+		yamlBytes, err := serializer.MarshalYAMLDeterministic(values)
 		if err != nil {
 			return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
 		}

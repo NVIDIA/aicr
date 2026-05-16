@@ -25,8 +25,6 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -1058,8 +1056,11 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 }
 
 // writeRecipeFile serializes the recipe to the bundle directory.
+// Uses deterministic YAML marshaling so the bundle's recipe.yaml is
+// byte-stable across runs — required because the file feeds checksums.txt
+// which is in turn the subject of the bundle attestation.
 func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir string) (int64, error) {
-	recipeData, err := yaml.Marshal(recipeResult)
+	recipeData, err := serializer.MarshalYAMLDeterministic(recipeResult)
 	if err != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
 	}
