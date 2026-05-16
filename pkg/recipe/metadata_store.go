@@ -972,7 +972,7 @@ func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 func applyRegistryDefaults(refs []ComponentRef) error {
 	registry, err := GetComponentRegistry()
 	if err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to get component registry for defaults", err)
+		return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "failed to get component registry for defaults")
 	}
 
 	for i := range refs {

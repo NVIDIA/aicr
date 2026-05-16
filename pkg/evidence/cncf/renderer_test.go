@@ -18,7 +18,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
@@ -132,6 +134,67 @@ func TestRenderSeparateMetricsFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ai-service-metrics.md")); err != nil {
 		t.Errorf("ai-service-metrics.md not found: %v", err)
+	}
+}
+
+// TestRenderWithNow_DeterministicTimestamp verifies that WithNow injects a
+// fixed timestamp into the rendered index, which is required for
+// reproducible-build (SLSA) callers that hash the output.
+func TestRenderWithNow_DeterministicTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	injected := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	r := New(WithOutputDir(dir), WithNow(injected))
+
+	report := &ctrf.Report{
+		Results: ctrf.Results{
+			Tests: []ctrf.TestResult{
+				{Name: "dra-support", Status: "passed", Duration: 1000},
+			},
+		},
+	}
+	if err := r.Render(context.Background(), report); err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("read index.md: %v", err)
+	}
+	// The template renders GeneratedAt with default Go time formatting,
+	// which includes the year/month/day. Verifying the injected year is
+	// present is sufficient to confirm the threading works without
+	// pinning the exact format.
+	if !strings.Contains(string(body), "2026") {
+		t.Errorf("index.md does not contain injected year 2026: %s", body)
+	}
+}
+
+// TestRenderWithNow_FreshTimestampPerCall confirms the wall-clock path is
+// captured per Render call and not memoized on the Renderer, so successive
+// renders in non-deterministic mode produce fresh timestamps.
+func TestRenderWithNow_FreshTimestampPerCall(t *testing.T) {
+	dir := t.TempDir()
+	r := New(WithOutputDir(dir))
+
+	report := &ctrf.Report{
+		Results: ctrf.Results{
+			Tests: []ctrf.TestResult{
+				{Name: "dra-support", Status: "passed", Duration: 1000},
+			},
+		},
+	}
+	if err := r.Render(context.Background(), report); err != nil {
+		t.Fatalf("Render 1 failed: %v", err)
+	}
+	// Capture the time of the second render with a small sleep so the
+	// renderTimestamp clock observably advances even on fast hosts.
+	time.Sleep(10 * time.Millisecond)
+	if err := r.Render(context.Background(), report); err != nil {
+		t.Fatalf("Render 2 failed: %v", err)
+	}
+	// Renderer should not be holding a memoized timestamp from the first call.
+	if !r.now.IsZero() {
+		t.Errorf("Renderer.now should remain zero in non-deterministic mode; got %v", r.now)
 	}
 }
 

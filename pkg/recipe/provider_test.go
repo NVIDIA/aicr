@@ -15,11 +15,13 @@
 package recipe
 
 import (
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -276,6 +278,61 @@ func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 
 		if err == nil {
 			t.Error("expected error for non-existent directory")
+		}
+	})
+}
+
+// TestReadExternalFile pins the path-injection and size-bound guards on the
+// read-time helper. The walk-time check in NewLayeredDataProvider is
+// best-effort; this helper is the authoritative bound and must reject
+// non-local paths and oversized files so a TOCTOU swap can't bypass either.
+func TestReadExternalFile(t *testing.T) {
+	t.Run("rejects non-local relative path", func(t *testing.T) {
+		_, err := readExternalFile(t.TempDir(), "../escape", 1024)
+		if err == nil {
+			t.Fatal("expected error for non-local relative path")
+		}
+		var se *aicrerrors.StructuredError
+		if !stderrors.As(err, &se) {
+			t.Fatalf("expected StructuredError, got %T", err)
+		}
+		if se.Code != aicrerrors.ErrCodeInvalidRequest {
+			t.Errorf("code = %v, want %v", se.Code, aicrerrors.ErrCodeInvalidRequest)
+		}
+	})
+
+	t.Run("enforces caller-supplied max size", func(t *testing.T) {
+		dir := t.TempDir()
+		// Write a 64-byte file then require maxBytes=32 — the helper must
+		// reject it even though the walk-time check used a larger limit.
+		if err := os.WriteFile(filepath.Join(dir, "big.yaml"), make([]byte, 64), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		_, err := readExternalFile(dir, "big.yaml", 32)
+		if err == nil {
+			t.Fatal("expected error for oversized file")
+		}
+		var se *aicrerrors.StructuredError
+		if !stderrors.As(err, &se) {
+			t.Fatalf("expected StructuredError, got %T", err)
+		}
+		if se.Code != aicrerrors.ErrCodeInvalidRequest {
+			t.Errorf("code = %v, want %v", se.Code, aicrerrors.ErrCodeInvalidRequest)
+		}
+	})
+
+	t.Run("reads a small file successfully", func(t *testing.T) {
+		dir := t.TempDir()
+		want := []byte("hello\n")
+		if err := os.WriteFile(filepath.Join(dir, "small.yaml"), want, 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		got, err := readExternalFile(dir, "small.yaml", 1024)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("got %q, want %q", got, want)
 		}
 	})
 }

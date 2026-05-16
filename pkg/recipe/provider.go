@@ -32,7 +32,9 @@ import (
 )
 
 // readExternalFile streams a file under baseDir through io.LimitReader
-// against defaults.MaxExternalDataFileBytes.
+// against maxBytes. Callers pass the configured per-provider limit
+// (LayeredProviderConfig.MaxFileSize) so a smaller-than-default cap
+// still applies under TOCTOU swaps.
 //
 // relPath must be local to baseDir; the filepath.IsLocal check rejects
 // absolute paths, parent-directory refs (..), and (on Windows) reserved
@@ -44,10 +46,13 @@ import (
 // a TOCTOU window or network-mount swap can substitute a much larger
 // file between walk and read, so the read-time bound is the
 // authoritative guard.
-func readExternalFile(baseDir, relPath string) ([]byte, error) {
+func readExternalFile(baseDir, relPath string, maxBytes int64) ([]byte, error) {
 	if !filepath.IsLocal(relPath) {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("external data path %q is not local to base directory", relPath))
+	}
+	if maxBytes <= 0 {
+		maxBytes = defaults.MaxExternalDataFileBytes
 	}
 	fullPath := filepath.Join(baseDir, relPath)
 	f, err := os.Open(fullPath) //nolint:gosec // relPath validated by filepath.IsLocal above
@@ -55,13 +60,13 @@ func readExternalFile(baseDir, relPath string) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxExternalDataFileBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > defaults.MaxExternalDataFileBytes {
+	if int64(len(data)) > maxBytes {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("external data file %q exceeds %d-byte limit", relPath, defaults.MaxExternalDataFileBytes))
+			fmt.Sprintf("external data file %q exceeds %d-byte limit", relPath, maxBytes))
 	}
 	return data, nil
 }
@@ -133,6 +138,11 @@ func (p *EmbeddedDataProvider) Source(path string) string {
 type LayeredDataProvider struct {
 	embedded    *EmbeddedDataProvider
 	externalDir string
+
+	// maxFileSize bounds read-time loads against the same limit the walk-time
+	// check uses, so a TOCTOU swap on a network mount cannot bypass a
+	// configured smaller-than-default cap.
+	maxFileSize int64
 
 	// Cached merged registry (computed once on first access)
 	mergedRegistryOnce sync.Once
@@ -288,6 +298,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 	return &LayeredDataProvider{
 		embedded:      embedded,
 		externalDir:   config.ExternalDir,
+		maxFileSize:   config.MaxFileSize,
 		externalFiles: externalFiles,
 	}, nil
 }
@@ -328,9 +339,9 @@ func (p *LayeredDataProvider) ReadFile(path string) ([]byte, error) {
 
 	// Check external directory first
 	if p.externalFiles[path] {
-		data, err := readExternalFile(p.externalDir, path)
+		data, err := readExternalFile(p.externalDir, path, p.maxFileSize)
 		if err != nil {
-			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path), err)
+			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path))
 		}
 		slog.Debug("read from external data directory", "path", path)
 		return data, nil
@@ -424,7 +435,7 @@ type fileReader interface {
 // unmarshals each into type T, merges them using the provided function, and serializes
 // the result back to YAML bytes.
 func mergeEmbeddedAndExternal[T any](
-	embedded fileReader, externalDir string,
+	embedded fileReader, externalDir string, maxFileSize int64,
 	fileName string, merge func(embedded, external *T) *T,
 ) ([]byte, error) {
 
@@ -443,9 +454,9 @@ func mergeEmbeddedAndExternal[T any](
 	}
 
 	// Load external
-	externalData, err := readExternalFile(externalDir, fileName)
+	externalData, err := readExternalFile(externalDir, fileName, maxFileSize)
 	if err != nil {
-		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read external "+kind, err)
+		return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "failed to read external "+kind)
 	}
 
 	var externalVal T
@@ -470,7 +481,7 @@ func mergeEmbeddedAndExternal[T any](
 func (p *LayeredDataProvider) getMergedRegistry() ([]byte, error) {
 	p.mergedRegistryOnce.Do(func() {
 		p.mergedRegistry, p.mergedRegistryErr = mergeEmbeddedAndExternal(
-			p.embedded, p.externalDir, registryFileName, mergeRegistries,
+			p.embedded, p.externalDir, p.maxFileSize, registryFileName, mergeRegistries,
 		)
 	})
 
@@ -551,7 +562,7 @@ type catalogForMerge struct {
 func (p *LayeredDataProvider) getMergedCatalog() ([]byte, error) {
 	p.mergedCatalogOnce.Do(func() {
 		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
-			p.embedded, p.externalDir, catalogFileName, mergeCatalogs,
+			p.embedded, p.externalDir, p.maxFileSize, catalogFileName, mergeCatalogs,
 		)
 	})
 

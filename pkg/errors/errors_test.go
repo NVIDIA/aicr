@@ -133,6 +133,22 @@ func TestIs_CodeMatching(t *testing.T) {
 			target: errors.New("plain"),
 			want:   false,
 		},
+		{
+			// Defensive guard: two zero-value StructuredErrors must not
+			// match each other on Is — otherwise a literal &StructuredError{}
+			// sentinel used in test code would silently match any other
+			// uncoded error in an errors.Is chain.
+			name:   "two empty codes do not match",
+			err:    &StructuredError{},
+			target: &StructuredError{},
+			want:   false,
+		},
+		{
+			name:   "empty target code never matches",
+			err:    New(ErrCodeNotFound, "x"),
+			target: &StructuredError{},
+			want:   false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,6 +156,60 @@ func TestIs_CodeMatching(t *testing.T) {
 			got := errors.Is(tt.err, tt.target)
 			if got != tt.want {
 				t.Errorf("errors.Is = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPropagateOrWrap pins the helper that callers use to avoid
+// overwriting an inner StructuredError's Code with the outer
+// fallback. Without this, a path that returns ErrCodeInvalidRequest
+// (e.g., a recipe parse error) would be reclassified as
+// ErrCodeInternal by a generic wrapper at the next layer up.
+func TestPropagateOrWrap(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		in       error
+		wantCode ErrorCode
+	}{
+		{
+			name:     "nil propagates as nil",
+			in:       nil,
+			wantCode: "",
+		},
+		{
+			name:     "coded error propagates code",
+			in:       New(ErrCodeInvalidRequest, "bad input"),
+			wantCode: ErrCodeInvalidRequest,
+		},
+		{
+			name:     "wrapped coded error propagates code",
+			in:       Wrap(ErrCodeNotFound, "outer", New(ErrCodeNotFound, "inner")),
+			wantCode: ErrCodeNotFound,
+		},
+		{
+			name:     "uncoded error gets fallback code",
+			in:       errors.New("plain"),
+			wantCode: ErrCodeInternal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := PropagateOrWrap(tt.in, ErrCodeInternal, "outer")
+			if tt.in == nil {
+				if got != nil {
+					t.Errorf("got %v, want nil", got)
+				}
+				return
+			}
+			var se *StructuredError
+			if !errors.As(got, &se) {
+				t.Fatalf("expected StructuredError, got %T", got)
+			}
+			if se.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q", se.Code, tt.wantCode)
 			}
 		})
 	}
