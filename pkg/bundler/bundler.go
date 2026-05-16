@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -39,10 +40,32 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
+
+// readBoundedFile streams a file through io.LimitReader against maxBytes.
+// Used in place of os.ReadFile on paths that may be attacker-influenced
+// (e.g., symlinks into /proc, NFS swaps) so the process cannot be forced
+// to allocate an unbounded buffer before the size limit kicks in.
+func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // caller validates path
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("file %q exceeds %d-byte limit", path, maxBytes))
+	}
+	return data, nil
+}
 
 // digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 const digestAlgoSHA256 = "sha256"
@@ -1036,7 +1059,7 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 	}
 	slog.Info("binary provenance verified", "builder", binaryBuilder)
 
-	binaryAttestData, readErr := os.ReadFile(binaryAttestPath)
+	binaryAttestData, readErr := readBoundedFile(binaryAttestPath, defaults.MaxAttestationFileBytes)
 	if readErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			"binary attestation exists but cannot be read: "+binaryAttestPath, readErr)

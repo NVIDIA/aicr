@@ -17,6 +17,7 @@ package recipe
 import (
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -25,9 +26,32 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
+
+// readExternalFile streams a file through io.LimitReader against
+// defaults.MaxExternalDataFileBytes. The walk-time MaxFileSize check on
+// LayeredDataProvider is best-effort; a TOCTOU window or network-mount
+// swap can substitute a much larger file between walk and read, so the
+// read-time bound is the authoritative guard.
+func readExternalFile(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // path validated by LayeredDataProvider walk
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxExternalDataFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > defaults.MaxExternalDataFileBytes {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("external data file %q exceeds %d-byte limit", path, defaults.MaxExternalDataFileBytes))
+	}
+	return data, nil
+}
 
 // DataProvider abstracts access to recipe data files.
 // This allows layering external directories over embedded data.
@@ -292,7 +316,7 @@ func (p *LayeredDataProvider) ReadFile(path string) ([]byte, error) {
 	// Check external directory first
 	if p.externalFiles[path] {
 		externalPath := filepath.Join(p.externalDir, path)
-		data, err := os.ReadFile(externalPath)
+		data, err := readExternalFile(externalPath)
 		if err != nil {
 			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", path), err)
 		}
@@ -408,7 +432,7 @@ func mergeEmbeddedAndExternal[T any](
 
 	// Load external
 	externalPath := filepath.Join(externalDir, fileName)
-	externalData, err := os.ReadFile(externalPath)
+	externalData, err := readExternalFile(externalPath)
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read external "+kind, err)
 	}

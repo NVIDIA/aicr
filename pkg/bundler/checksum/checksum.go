@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -118,11 +119,31 @@ func VerifyChecksums(bundleDir string) []string {
 	if joinErr != nil {
 		return []string{fmt.Sprintf("unsafe checksum path: %v", joinErr)}
 	}
-	data, err := os.ReadFile(checksumPath)
+	data, err := readBoundedChecksumFile(checksumPath)
 	if err != nil {
 		return []string{fmt.Sprintf("failed to read %s: %v", ChecksumFileName, err)}
 	}
 	return VerifyChecksumsFromData(bundleDir, data)
+}
+
+// readBoundedChecksumFile streams a checksums.txt file through
+// io.LimitReader so an attacker-influenced path cannot force the process
+// to allocate an unbounded buffer.
+func readBoundedChecksumFile(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // path is bundle-local
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxChecksumFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > defaults.MaxChecksumFileBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("checksums file %q exceeds %d-byte limit", path, defaults.MaxChecksumFileBytes))
+	}
+	return data, nil
 }
 
 // VerifyChecksumsFromData verifies checksums using pre-read checksums.txt content.
@@ -171,7 +192,7 @@ func VerifyChecksumsFromData(bundleDir string, data []byte) []string {
 // and the return type (int) has no error channel for SafeJoin.
 func CountEntries(bundleDir string) int {
 	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
-	data, err := os.ReadFile(checksumPath)
+	data, err := readBoundedChecksumFile(checksumPath)
 	if err != nil {
 		return 0
 	}

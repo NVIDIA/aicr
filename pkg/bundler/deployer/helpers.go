@@ -29,17 +29,16 @@ import (
 
 // IsSafePathComponent returns true if name is a single path component without
 // any separators or parent directory references.
+//
+// Reject embedded separators so callers can rely on the result being a
+// single path element. filepath.IsLocal then handles emptiness, absolute
+// paths, parent-directory refs (..), and Windows reserved names — and,
+// unlike a substring scan for "..", accepts benign names like "foo..bak".
 func IsSafePathComponent(name string) bool {
-	if name == "" {
+	if strings.ContainsAny(name, `/\`) {
 		return false
 	}
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return false
-	}
-	if strings.Contains(name, "..") {
-		return false
-	}
-	return true
+	return filepath.IsLocal(name)
 }
 
 // SafeJoin joins baseDir and name, then verifies the result is contained
