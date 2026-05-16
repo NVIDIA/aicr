@@ -223,7 +223,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
 	enabledSet := make(map[string]struct{})
 	for _, ref := range recipeResult.ComponentRefs {
-		if setEnabled, ok := b.getSetEnabledOverride(ref.Name); ok {
+		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name)
+		if overrideErr != nil {
+			return nil, overrideErr
+		}
+		if ok {
 			if !setEnabled {
 				slog.Info("skipping component disabled via --set", "component", ref.Name)
 				continue
@@ -659,24 +663,28 @@ func (b *DefaultBundler) getValueOverridesForComponent(componentName string) map
 }
 
 // getSetEnabledOverride checks if --set overrides contain an "enabled" key
-// for the given component. Returns (value, true) if found, (false, false) otherwise.
+// for the given component. Returns (value, true, nil) if found, (false, false, nil)
+// when no override exists, or (_, _, err) if the override value cannot be parsed
+// as a bool. A parse failure is fatal — silently ignoring it would ship a
+// bundle whose enable/disable state doesn't match the operator's intent, which
+// is the canonical misconfigured-artifact scenario the project rule targets.
 // This allows --set awsebscsidriver:enabled=false to disable a component at bundle time.
-func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool) {
+func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool, error) {
 	overrides := b.getValueOverridesForComponent(componentName)
 	if overrides == nil {
-		return false, false
+		return false, false, nil
 	}
 	val, ok := overrides["enabled"]
 	if !ok {
-		return false, false
+		return false, false, nil
 	}
 	parsed, parseErr := strconv.ParseBool(val)
 	if parseErr != nil {
-		slog.Warn("invalid --set enabled value, ignoring override",
-			"component", componentName, "value", val, "error", parseErr)
-		return false, false
+		return false, false, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"invalid --set enabled value", parseErr,
+			map[string]any{"component": componentName, "value": val})
 	}
-	return parsed, true
+	return parsed, true, nil
 }
 
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.

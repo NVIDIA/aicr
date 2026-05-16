@@ -348,6 +348,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 		recipeEnabled  *bool // nil = no override, true/false = overrides.enabled
 		setEnabled     string
 		expectIncluded bool
+		expectErr      bool
 	}{
 		{
 			name:           "recipe disabled + --set enabled=true => included",
@@ -374,10 +375,12 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			expectIncluded: true,
 		},
 		{
-			name:           "invalid --set value ignored => falls back to recipe",
-			recipeEnabled:  boolPtr(false),
-			setEnabled:     "ture",
-			expectIncluded: false,
+			// Fail closed: an unparseable --set enabled value must error
+			// out rather than silently ignore the operator's intent.
+			name:          "invalid --set value => error",
+			recipeEnabled: boolPtr(false),
+			setEnabled:    "ture",
+			expectErr:     true,
 		},
 	}
 
@@ -419,6 +422,12 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			ctx := context.Background()
 			tmpDir := t.TempDir()
 			_, makeErr := bundler.Make(ctx, recipeResult, tmpDir)
+			if tt.expectErr {
+				if makeErr == nil {
+					t.Fatalf("Make() expected error, got nil")
+				}
+				return
+			}
 			if makeErr != nil {
 				t.Fatalf("Make() error = %v", makeErr)
 			}

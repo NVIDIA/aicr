@@ -73,9 +73,17 @@ func (e *StructuredError) Unwrap() error {
 // Is reports whether target is a *StructuredError with the same Code, enabling
 // idiomatic code-based matching via errors.Is. The Message and Cause are not
 // compared; callers wanting cause-chain matching should rely on Unwrap.
+//
+// A zero-value Code is treated as non-matching — two errors constructed
+// without going through New/Wrap (e.g., literal &StructuredError{}) must not
+// match each other on an empty sentinel, which would otherwise produce
+// surprising false positives in errors.Is chains.
 func (e *StructuredError) Is(target error) bool {
 	t, ok := target.(*StructuredError)
 	if !ok {
+		return false
+	}
+	if e.Code == "" || t.Code == "" {
 		return false
 	}
 	return e.Code == t.Code
