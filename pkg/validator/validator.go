@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
@@ -41,6 +43,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/job"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 )
+
+// validatorFieldManager identifies AICR's server-side-apply writes against the
+// validator namespace. Matches the value used in pkg/validator/job/rbac.go so
+// namespace, RBAC, and Job objects share a single conflict domain.
+const validatorFieldManager = "aicr"
 
 // checkReadiness evaluates top-level validation constraints against the snapshot.
 // Returns an error if any constraint fails, nil if all pass or no constraints exist.
@@ -130,18 +137,25 @@ func (v *Validator) prepareCluster(
 }
 
 // deferClusterCleanup registers deferred cleanup for RBAC and data ConfigMaps.
+// Both cleanup steps share a single deadline so a stalled apiserver cannot
+// extend total post-run blocking time to 2 * K8sCleanupTimeout. Cleanup
+// failures are surfaced at structured-log level so operators see when
+// resources may have been orphaned in the validator namespace.
 func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
-	if v.Cleanup {
-		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-		defer cancel()
-		if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
-			slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
-		}
-		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		cmCtx, cmCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-		defer cmCancel()
-		v.cleanupDataConfigMaps(cmCtx, clientset)
+	if !v.Cleanup {
+		return
+	}
+	//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+	defer cancel()
+
+	if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace, v.RunID); cleanupErr != nil {
+		slog.Warn("failed to cleanup RBAC; resources may be orphaned",
+			"runID", v.RunID, "namespace", v.Namespace, "error", cleanupErr)
+	}
+	if cmErr := v.cleanupDataConfigMaps(cleanupCtx, clientset); cmErr != nil {
+		slog.Warn("failed to cleanup ConfigMaps; resources may be orphaned",
+			"runID", v.RunID, "namespace", v.Namespace, "error", cmErr)
 	}
 }
 
@@ -485,68 +499,51 @@ func (v *Validator) ensureDataConfigMaps(
 }
 
 // cleanupDataConfigMaps removes snapshot and validation ConfigMaps for this run.
-func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kubernetes.Interface) {
+// Returns a joined error covering every delete that failed for a reason other
+// than NotFound, so the caller can decide log severity and operators see when
+// ConfigMaps may have been left behind in the validator namespace.
+func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kubernetes.Interface) error {
+	var errs []error
 	for _, name := range []string{
 		fmt.Sprintf("aicr-snapshot-%s", v.RunID),
 		fmt.Sprintf("aicr-validation-%s", v.RunID),
 	} {
 		err := clientset.CoreV1().ConfigMaps(v.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
-			slog.Warn("failed to delete ConfigMap", "name", name, "error", err)
+			errs = append(errs, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to delete ConfigMap %s", name), err))
 		}
 	}
 
 	// Also cleanup CTRF ConfigMaps
 	for _, phase := range PhaseOrder {
 		if err := ctrf.DeleteCTRFConfigMap(ctx, clientset, v.Namespace, v.RunID, string(phase)); err != nil {
-			slog.Warn("failed to delete CTRF ConfigMap", "phase", phase, "error", err)
+			errs = append(errs, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to delete CTRF ConfigMap for phase %s", phase), err))
 		}
 	}
+
+	return stderrors.Join(errs...)
 }
 
-// ensureNamespace creates the namespace if it does not exist, or updates its
-// labels to the current schema if it does. Namespace names are immutable but
-// labels and annotations are not, so a stale namespace from a prior AICR
-// version would otherwise keep outdated labels.
+// ensureNamespace ensures the validator namespace exists with the current
+// label schema using server-side apply. SSA is idempotent and conflict-free
+// for label reconciliation, so concurrent `aicr validate` runs against a
+// shared cluster don't race each other into update-conflict failures the way
+// a get-then-update sequence would. Namespace names are immutable; only the
+// labels are reconciled.
 func ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
-	desired := map[string]string{
-		labels.Name:      labels.ValueAICR,
-		labels.Component: labels.ValueValidation,
-		labels.ManagedBy: labels.ValueAICR,
-	}
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   namespace,
-			Labels: desired,
-		},
-	}
-	_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsAlreadyExists(err) {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
-	}
-	// Already exists — fetch and reconcile labels if they have drifted.
-	existing, getErr := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-	if getErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to get existing namespace", getErr)
-	}
-	if existing.Labels == nil {
-		existing.Labels = map[string]string{}
-	}
-	changed := false
-	for k, v := range desired {
-		if existing.Labels[k] != v {
-			existing.Labels[k] = v
-			changed = true
-		}
-	}
-	if !changed {
-		return nil
-	}
-	if _, err := clientset.CoreV1().Namespaces().Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to update namespace labels", err)
+	ns := applycorev1.Namespace(namespace).
+		WithLabels(map[string]string{
+			labels.Name:      labels.ValueAICR,
+			labels.Component: labels.ValueValidation,
+			labels.ManagedBy: labels.ValueAICR,
+		})
+	_, err := clientset.CoreV1().Namespaces().Apply(
+		ctx, ns, metav1.ApplyOptions{FieldManager: validatorFieldManager, Force: true},
+	)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to apply namespace", err)
 	}
 	return nil
 }

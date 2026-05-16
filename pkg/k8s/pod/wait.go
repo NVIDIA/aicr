@@ -63,7 +63,23 @@ func WaitForPodSucceeded(ctx context.Context, client kubernetes.Interface, names
 			return errors.Wrap(errors.ErrCodeTimeout, "pod wait timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return errors.New(errors.ErrCodeInternal, "watch channel closed unexpectedly")
+				// Watch channels close routinely on apiserver rolling
+				// restarts, LB drops, and 1.27+ bookmark hiccups. Re-Get
+				// the pod and reclassify rather than treating a transient
+				// apiserver event as a permanent failure.
+				if rcErr := timeoutCtx.Err(); rcErr != nil {
+					return errors.Wrap(errors.ErrCodeTimeout, "pod wait timeout", rcErr)
+				}
+				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
+				if getErr != nil {
+					return errors.Wrap(errors.ErrCodeUnavailable, "pod watch closed and re-Get failed", getErr)
+				}
+				if done, checkErr := checkPodPhase(current); done {
+					return checkErr
+				}
+				return errors.NewWithContext(errors.ErrCodeUnavailable,
+					"pod watch closed before pod reached terminal state",
+					map[string]any{keyNamespace: namespace, keyName: name, "phase": string(current.Status.Phase)})
 			}
 
 			watchedPod, ok := event.Object.(*corev1.Pod)
@@ -236,7 +252,21 @@ func WaitForPodReady(ctx context.Context, client kubernetes.Interface, namespace
 			return errors.Wrap(errors.ErrCodeTimeout, "pod ready wait timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return errors.New(errors.ErrCodeUnavailable, "pod watch channel closed before ready")
+				// Watch channels close routinely on apiserver hiccups;
+				// re-Get and reclassify instead of declaring failure.
+				if rcErr := timeoutCtx.Err(); rcErr != nil {
+					return errors.Wrap(errors.ErrCodeTimeout, "pod ready wait timeout", rcErr)
+				}
+				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
+				if getErr != nil {
+					return errors.Wrap(errors.ErrCodeUnavailable, "pod watch closed and re-Get failed", getErr)
+				}
+				if done, checkErr := checkPodReady(current); done {
+					return checkErr
+				}
+				return errors.NewWithContext(errors.ErrCodeUnavailable,
+					"pod watch closed before pod was ready",
+					map[string]any{keyNamespace: namespace, keyName: name, "phase": string(current.Status.Phase)})
 			}
 			watchedPod, isPod := event.Object.(*corev1.Pod)
 			if !isPod {
