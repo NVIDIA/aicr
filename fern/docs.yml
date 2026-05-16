@@ -15,14 +15,10 @@
 instances:
   - url: aicr.docs.buildwithfern.com/aicr
     custom-domain: docs.nvidia.com/aicr
-
 title: NVIDIA AI Cluster Runtime
-
 metadata:
   canonical-host: "docs.nvidia.com/aicr"
-
 footer: ./components/CustomFooter.tsx
-
 layout:
   searchbar-placement: header
   page-width: 1376px
@@ -30,7 +26,6 @@ layout:
   content-width: 812px
   tabs-placement: header
   hide-feedback: true
-
 colors:
   accentPrimary:
     dark: "#76B900"
@@ -38,32 +33,25 @@ colors:
   background:
     light: "#FFFFFF"
     dark: "#000000"
-
 theme:
   page-actions: toolbar
   footer-nav: minimal
-
 logo:
   dark: ./assets/NVIDIA_dark.svg
   light: ./assets/NVIDIA_light.svg
   height: 20
   href: /
   right-text: AI Cluster Runtime
-
 favicon: ./assets/NVIDIA_symbol.svg
-
 # NVIDIA Adobe Launch (docs.nvidia.com analytics; matches NeMo Curator and other Fern docs)
 js:
   - url: https://assets.adobedtm.com/5d4962a43b79/c1061d2c5e7b/launch-191c2462b890.min.js
     strategy: beforeInteractive
-
 css:
   - ./main.css
-
 navbar-links:
   - type: github
     value: https://github.com/NVIDIA/aicr
-
 products:
   - display-name: AI Cluster Runtime
     slug: /
@@ -74,6 +62,10 @@ products:
         path: ../docs/index.yml
         slug: latest
         availability: stable
+      - display-name: v0.13.0
+        path: versions/v0.13.0.yml
+        slug: v0.13.0
+        availability: stable
       - display-name: "v0.12.1"
         path: versions/v0.12.1.yml
         slug: v0.12.1
@@ -82,11 +74,9 @@ products:
         path: versions/v0.12.0.yml
         slug: v0.12.0
         availability: stable
-
 redirects:
   - source: "/aicr/index.html"
     destination: "/aicr/"
-
 experimental:
   basepath-aware: true
   mdx-components:
