@@ -323,7 +323,7 @@ runs:
         # reordering upstream doesn't silently fall back to a weaker hash.
         curl -fsSL -o "${TMP}/checksums" "${BASE}/checksums"
         curl -fsSL -o "${TMP}/checksums_hashes_order" "${BASE}/checksums_hashes_order"
-        HASH_ROW=$(grep -nx 'SHA-256' "${TMP}/checksums_hashes_order" | cut -d: -f1)
+        HASH_ROW=$(grep -nx 'SHA-256' "${TMP}/checksums_hashes_order" | head -1 | cut -d: -f1)
         if [[ -z "${HASH_ROW}" ]]; then
           echo "::error::SHA-256 column not found in yq checksums_hashes_order"
           exit 1

@@ -206,25 +206,33 @@ jobs:
         with:
           persist-credentials: false
       - name: Install actionlint
-        # Pin to a specific rhysd/actionlint commit + verify the install
-        # script's SHA256 before executing. Replaces `bash <(curl … main …)`,
-        # which fetched a mutable script from the default branch with no
-        # integrity check.
+        # Pin actionlint to a specific version and verify the downloaded
+        # binary's SHA256 against the upstream-published checksum file.
+        # Replaces `bash <(curl … main …)`, which executed a mutable script
+        # from the default branch and downloaded the binary with no
+        # checksum verification (the upstream installer pipes
+        # `curl … | tar xvz` directly).
         env:
-          # Commit SHA for rhysd/actionlint v1.7.12.
-          ACTIONLINT_REF: '914e7df21a07ef503a81201c76d2b11c789d3fca'
-          ACTIONLINT_SCRIPT_SHA256: '72fa3e45ac20f3c3a512d6747b4fcf719e21f890e8c43e78d48a41fdfb900c4e'
+          ACTIONLINT_VERSION: '1.7.11'
         run: |
           set -euo pipefail
+          BASE="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          TAR="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           TMP="$(mktemp -d)"
-          SCRIPT_URL="https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_REF}/scripts/download-actionlint.bash"
-          curl -fsSL -o "${TMP}/download-actionlint.bash" "${SCRIPT_URL}"
-          ACTUAL=$(sha256sum "${TMP}/download-actionlint.bash" | awk '{print $1}')
-          if [[ "${ACTUAL}" != "${ACTIONLINT_SCRIPT_SHA256}" ]]; then
-            echo "::error::actionlint install script checksum mismatch: expected ${ACTIONLINT_SCRIPT_SHA256}, got ${ACTUAL}"
+          curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+          curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          EXPECTED=$(awk -v t="${TAR}" '$2 == t {print $1}' "${TMP}/checksums.txt")
+          if [[ -z "${EXPECTED}" ]]; then
+            echo "::error::no checksum entry for ${TAR} in upstream checksums.txt"
             exit 1
           fi
-          bash "${TMP}/download-actionlint.bash"
+          ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
+          if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+            echo "::error::actionlint checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+            exit 1
+          fi
+          tar -xzf "${TMP}/${TAR}" -C "${TMP}" actionlint
+          mv "${TMP}/actionlint" "${PWD}/actionlint"
           rm -rf "${TMP}"
           echo "${PWD}" >> "$GITHUB_PATH"
       - name: Run actionlint

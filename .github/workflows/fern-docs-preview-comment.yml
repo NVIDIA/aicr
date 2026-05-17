@@ -34,7 +34,9 @@ permissions:
   actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.event.workflow_run.id }}
+  # Include head repository identity so fork branches with the same name
+  # don't share a group key and cancel unrelated runs.
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.event.workflow_run.id }}
   cancel-in-progress: true
 
 jobs:
