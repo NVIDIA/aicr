@@ -58,12 +58,16 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: main
           fetch-tags: true
+          # peter-evans/create-pull-request uses its own GH_TOKEN via API,
+          # so the persisted credentials from checkout are not needed.
+          persist-credentials: false
 
       - name: Resolve target tag
         id: resolve

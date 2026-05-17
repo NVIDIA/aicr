@@ -206,8 +206,26 @@ jobs:
         with:
           persist-credentials: false
       - name: Install actionlint
+        # Pin to a specific rhysd/actionlint commit + verify the install
+        # script's SHA256 before executing. Replaces `bash <(curl … main …)`,
+        # which fetched a mutable script from the default branch with no
+        # integrity check.
+        env:
+          # Commit SHA for rhysd/actionlint v1.7.12.
+          ACTIONLINT_REF: '914e7df21a07ef503a81201c76d2b11c789d3fca'
+          ACTIONLINT_SCRIPT_SHA256: '72fa3e45ac20f3c3a512d6747b4fcf719e21f890e8c43e78d48a41fdfb900c4e'
         run: |
-          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          set -euo pipefail
+          TMP="$(mktemp -d)"
+          SCRIPT_URL="https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_REF}/scripts/download-actionlint.bash"
+          curl -fsSL -o "${TMP}/download-actionlint.bash" "${SCRIPT_URL}"
+          ACTUAL=$(sha256sum "${TMP}/download-actionlint.bash" | awk '{print $1}')
+          if [[ "${ACTUAL}" != "${ACTIONLINT_SCRIPT_SHA256}" ]]; then
+            echo "::error::actionlint install script checksum mismatch: expected ${ACTIONLINT_SCRIPT_SHA256}, got ${ACTUAL}"
+            exit 1
+          fi
+          bash "${TMP}/download-actionlint.bash"
+          rm -rf "${TMP}"
           echo "${PWD}" >> "$GITHUB_PATH"
       - name: Run actionlint
         run: actionlint -color -shellcheck=

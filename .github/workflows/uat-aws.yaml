@@ -21,15 +21,22 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  id-token: write
-  packages: write
+
+# Long-running cloud provisioning — never cancel mid-teardown.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   uat-aws:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      packages: write
     env:
       AWS_ACCOUNT_ID: "615299774277"
       AWS_REGION: "us-east-1"
@@ -47,6 +54,8 @@ jobs:
       # Checkout
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       # Versions
       - name: Load versions
@@ -142,12 +151,12 @@ jobs:
         run: |
           set -euox pipefail
           docker run \
-            -e CONFIG_CONTENT="$(base64 < $CLUSTER_CONFIG)" \
+            -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
             -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             -e AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
-            ${{ env.EKS_IMAGE }} apply
+            "${EKS_IMAGE}" apply
 
       # Connect
       - name: Connect to Cluster
@@ -157,7 +166,7 @@ jobs:
         run: |
           set -euox pipefail
           echo "Updating kubeconfig..."
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.DEPLOYMENT_ID }}
+          aws eks update-kubeconfig --region "${AWS_REGION}" --name "${DEPLOYMENT_ID}"
           echo "Verifying cluster connection..."
           kubectl get nodes
 
@@ -184,12 +193,12 @@ jobs:
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
             if docker run \
-              -e CONFIG_CONTENT="$(base64 < $CLUSTER_CONFIG)" \
+              -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
               -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
               -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
               -e AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
-              ${{ env.EKS_IMAGE }} destroy; then
+              "${EKS_IMAGE}" destroy; then
               echo "Cluster destroyed successfully"
               break
             fi

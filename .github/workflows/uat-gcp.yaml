@@ -30,15 +30,22 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  id-token: write
-  packages: write
+
+# Long-running cloud provisioning — never cancel mid-teardown.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   uat-gcp:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      packages: write
     env:
       GCP_PROJECT_ID: "eidosx"
       GCP_REGION: "us-central1"
@@ -54,6 +61,8 @@ jobs:
       # Checkout
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       # Versions
       - name: Load versions

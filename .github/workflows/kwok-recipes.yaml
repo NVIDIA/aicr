@@ -72,16 +72,18 @@ jobs:
       - name: Classify recipes into tiers
         id: classify
         shell: bash
+        env:
+          DISPATCH_RECIPE: ${{ github.event.inputs.recipe }}
         run: |
           set -euo pipefail
 
           # --- workflow_dispatch: test exactly the requested recipe ---
-          if [[ -n "${{ github.event.inputs.recipe }}" ]]; then
-            single=$(jq -nc '[$r]' --arg r "${{ github.event.inputs.recipe }}")
+          if [[ -n "${DISPATCH_RECIPE}" ]]; then
+            single=$(jq -nc '[$r]' --arg r "${DISPATCH_RECIPE}")
             echo "tier1=${single}" >> "$GITHUB_OUTPUT"
             echo "tier2=[]"       >> "$GITHUB_OUTPUT"
             echo "tier3=[]"       >> "$GITHUB_OUTPUT"
-            echo "Manual dispatch: ${{ github.event.inputs.recipe }}"
+            echo "Manual dispatch: ${DISPATCH_RECIPE}"
             exit 0
           fi
 
