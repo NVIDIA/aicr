@@ -22,25 +22,23 @@ import (
 	"strings"
 	"text/template"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // IsSafePathComponent returns true if name is a single path component without
 // any separators or parent directory references.
+//
+// Reject embedded separators so callers can rely on the result being a
+// single path element. filepath.IsLocal then handles emptiness, absolute
+// paths, parent-directory refs (..), and Windows reserved names — and,
+// unlike a substring scan for "..", accepts benign names like "foo..bak".
 func IsSafePathComponent(name string) bool {
-	if name == "" {
+	if strings.ContainsAny(name, `/\`) {
 		return false
 	}
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return false
-	}
-	if strings.Contains(name, "..") {
-		return false
-	}
-	return true
+	return filepath.IsLocal(name)
 }
 
 // SafeJoin joins baseDir and name, then verifies the result is contained
@@ -76,9 +74,11 @@ func WriteValuesFile(values map[string]any, baseDir, filename string) (string, i
 	buf.WriteString("---\n")
 
 	if len(values) > 0 {
-		yamlBytes, err := yaml.Marshal(values)
+		// Deterministic marshal so values files feeding checksums.txt
+		// (and thus the bundle attestation) are byte-stable across runs.
+		yamlBytes, err := serializer.MarshalYAMLDeterministic(values)
 		if err != nil {
-			return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
+			return "", 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to marshal values")
 		}
 		buf.Write(yamlBytes)
 	}

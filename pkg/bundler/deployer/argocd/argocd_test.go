@@ -685,7 +685,8 @@ func TestIsSafePathComponent(t *testing.T) {
 		{"forward slash", "path/traversal", false},
 		{"backslash", "path\\traversal", false},
 		{"double dot", "..", false},
-		{"contains double dot", "foo..bar", false},
+		// "foo..bar" is a benign filename; only the standalone parent ref ".." is rejected.
+		{"contains double dot is benign", "foo..bar", true},
 		{"single dot", ".", true},
 		{"dashes and numbers", "test-123", true},
 	}

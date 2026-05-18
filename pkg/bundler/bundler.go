@@ -18,14 +18,13 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
@@ -41,10 +40,32 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
+
+// readBoundedFile streams a file through io.LimitReader against maxBytes.
+// Used in place of os.ReadFile on paths that may be attacker-influenced
+// (e.g., symlinks into /proc, NFS swaps) so the process cannot be forced
+// to allocate an unbounded buffer before the size limit kicks in.
+func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // caller validates path
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("file %q exceeds %d-byte limit", path, maxBytes))
+	}
+	return data, nil
+}
 
 // digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 const digestAlgoSHA256 = "sha256"
@@ -202,7 +223,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
 	enabledSet := make(map[string]struct{})
 	for _, ref := range recipeResult.ComponentRefs {
-		if setEnabled, ok := b.getSetEnabledOverride(ref.Name); ok {
+		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name)
+		if overrideErr != nil {
+			return nil, overrideErr
+		}
+		if ok {
 			if !setEnabled {
 				slog.Info("skipping component disabled via --set", "component", ref.Name)
 				continue
@@ -638,24 +663,28 @@ func (b *DefaultBundler) getValueOverridesForComponent(componentName string) map
 }
 
 // getSetEnabledOverride checks if --set overrides contain an "enabled" key
-// for the given component. Returns (value, true) if found, (false, false) otherwise.
+// for the given component. Returns (value, true, nil) if found, (false, false, nil)
+// when no override exists, or (_, _, err) if the override value cannot be parsed
+// as a bool. A parse failure is fatal — silently ignoring it would ship a
+// bundle whose enable/disable state doesn't match the operator's intent, which
+// is the canonical misconfigured-artifact scenario the project rule targets.
 // This allows --set awsebscsidriver:enabled=false to disable a component at bundle time.
-func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool) {
+func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool, error) {
 	overrides := b.getValueOverridesForComponent(componentName)
 	if overrides == nil {
-		return false, false
+		return false, false, nil
 	}
 	val, ok := overrides["enabled"]
 	if !ok {
-		return false, false
+		return false, false, nil
 	}
 	parsed, parseErr := strconv.ParseBool(val)
 	if parseErr != nil {
-		slog.Warn("invalid --set enabled value, ignoring override",
-			"component", componentName, "value", val, "error", parseErr)
-		return false, false
+		return false, false, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+			"invalid --set enabled value", parseErr,
+			map[string]any{"component": componentName, "value": val})
 	}
-	return parsed, true
+	return parsed, true, nil
 }
 
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.
@@ -1038,7 +1067,7 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 	}
 	slog.Info("binary provenance verified", "builder", binaryBuilder)
 
-	binaryAttestData, readErr := os.ReadFile(binaryAttestPath)
+	binaryAttestData, readErr := readBoundedFile(binaryAttestPath, defaults.MaxAttestationFileBytes)
 	if readErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			"binary attestation exists but cannot be read: "+binaryAttestPath, readErr)
@@ -1058,10 +1087,13 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 }
 
 // writeRecipeFile serializes the recipe to the bundle directory.
+// Uses deterministic YAML marshaling so the bundle's recipe.yaml is
+// byte-stable across runs — required because the file feeds checksums.txt
+// which is in turn the subject of the bundle attestation.
 func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir string) (int64, error) {
-	recipeData, err := yaml.Marshal(recipeResult)
+	recipeData, err := serializer.MarshalYAMLDeterministic(recipeResult)
 	if err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
+		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize recipe")
 	}
 
 	recipePath, joinErr := deployer.SafeJoin(dir, "recipe.yaml")

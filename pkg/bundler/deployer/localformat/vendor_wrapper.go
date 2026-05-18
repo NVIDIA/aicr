@@ -43,6 +43,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 
 	"gopkg.in/yaml.v3"
 )
@@ -184,10 +185,12 @@ func injectPostInstallHooks(in []byte) ([]byte, error) {
 			weight++
 		}
 
-		body, mErr := yaml.Marshal(doc)
+		// Deterministic marshal so hook-injected manifests are byte-stable
+		// across runs — they end up in checksums.txt and the bundle attestation.
+		body, mErr := serializer.MarshalYAMLDeterministic(doc)
 		if mErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"re-marshal manifest doc after hook injection", mErr)
+			return nil, errors.PropagateOrWrap(mErr, errors.ErrCodeInternal,
+				"re-marshal manifest doc after hook injection")
 		}
 		if !first {
 			out.WriteString("---\n")

@@ -263,34 +263,84 @@ runs:
     - name: Install kubectl
       if: inputs.install_kubectl == 'true'
       shell: bash
+      env:
+        KUBECTL_VERSION: ${{ inputs.kubectl_version }}
       run: |
         set -euo pipefail
         if [[ -x /usr/local/bin/kubectl ]]; then echo "kubectl already installed"; kubectl version --client; exit 0; fi
         ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        curl -fsSL -o kubectl "https://dl.k8s.io/release/${{ inputs.kubectl_version }}/bin/linux/${ARCH}/kubectl"
-        chmod +x kubectl
-        sudo mv kubectl /usr/local/bin/kubectl
+        BASE="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/kubectl" "${BASE}/kubectl"
+        curl -fsSL -o "${TMP}/kubectl.sha256" "${BASE}/kubectl.sha256"
+        EXPECTED=$(awk '{print $1}' "${TMP}/kubectl.sha256")
+        ACTUAL=$(sha256sum "${TMP}/kubectl" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::kubectl checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        chmod +x "${TMP}/kubectl"
+        sudo mv "${TMP}/kubectl" /usr/local/bin/kubectl
+        rm -rf "${TMP}"
         kubectl version --client
 
     - name: Install Kind
       if: inputs.install_kind == 'true'
       shell: bash
+      env:
+        KIND_VERSION: ${{ inputs.kind_version }}
       run: |
         set -euo pipefail
         if [[ -x /usr/local/bin/kind ]]; then echo "kind already installed"; kind version; exit 0; fi
-        curl -fsSL -o kind "https://kind.sigs.k8s.io/dl/v${{ inputs.kind_version }}/kind-linux-amd64"
-        chmod +x kind
-        sudo mv kind /usr/local/bin/kind
+        BASE="https://kind.sigs.k8s.io/dl/v${KIND_VERSION}"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/kind" "${BASE}/kind-linux-amd64"
+        curl -fsSL -o "${TMP}/kind.sha256sum" "${BASE}/kind-linux-amd64.sha256sum"
+        EXPECTED=$(awk '{print $1}' "${TMP}/kind.sha256sum")
+        ACTUAL=$(sha256sum "${TMP}/kind" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::kind checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        chmod +x "${TMP}/kind"
+        sudo mv "${TMP}/kind" /usr/local/bin/kind
+        rm -rf "${TMP}"
         kind version
 
     - name: Install yq
       if: inputs.install_yq == 'true'
       shell: bash
+      env:
+        YQ_VERSION: ${{ inputs.yq_version }}
       run: |
         set -euo pipefail
         if [[ -x /usr/local/bin/yq ]]; then echo "yq already installed"; yq --version; exit 0; fi
-        YQ_VERSION="${{ inputs.yq_version }}"
-        sudo curl -fsSL -o /usr/local/bin/yq \
-          "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-        sudo chmod +x /usr/local/bin/yq
+        BASE="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/yq" "${BASE}/yq_linux_amd64"
+        # yq publishes a multi-hash 'checksums' file paired with 'checksums_hashes_order'
+        # listing column names. SHA-256 column index is derived dynamically so column
+        # reordering upstream doesn't silently fall back to a weaker hash.
+        curl -fsSL -o "${TMP}/checksums" "${BASE}/checksums"
+        curl -fsSL -o "${TMP}/checksums_hashes_order" "${BASE}/checksums_hashes_order"
+        HASH_ROW=$(grep -nx 'SHA-256' "${TMP}/checksums_hashes_order" | head -1 | cut -d: -f1)
+        if [[ -z "${HASH_ROW}" ]]; then
+          echo "::error::SHA-256 column not found in yq checksums_hashes_order"
+          exit 1
+        fi
+        # Column 1 is the filename, then hash columns follow in header order.
+        SHA256_COL=$((HASH_ROW + 1))
+        EXPECTED=$(awk -v col="${SHA256_COL}" '$1 == "yq_linux_amd64" {print $col}' "${TMP}/checksums")
+        if [[ -z "${EXPECTED}" ]]; then
+          echo "::error::no checksum row for yq_linux_amd64 in upstream checksums"
+          exit 1
+        fi
+        ACTUAL=$(sha256sum "${TMP}/yq" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::yq checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        chmod +x "${TMP}/yq"
+        sudo mv "${TMP}/yq" /usr/local/bin/yq
+        rm -rf "${TMP}"
         yq --version

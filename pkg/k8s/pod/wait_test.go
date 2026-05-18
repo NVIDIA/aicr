@@ -16,13 +16,17 @@ package pod_test
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 	"time"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestWaitForPodSucceeded(t *testing.T) {
@@ -159,5 +163,103 @@ func TestWaitForPodReady(t *testing.T) {
 				t.Errorf("WaitForPodReady() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestWaitForPodSucceeded_WatchClosedReGet exercises the watch-channel-close
+// re-Get branch: the watcher closes without emitting a terminal event, and
+// the re-Get observes the pod has since reached Succeeded. The wait must
+// return nil (success) rather than treating the watch close as a failure.
+func TestWaitForPodSucceeded_WatchClosedReGet(t *testing.T) {
+	t.Parallel()
+
+	pendingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client := fake.NewSimpleClientset(pendingPod)
+
+	watcher := watch.NewFake()
+	client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	// Mutate the underlying store so the re-Get sees a Succeeded pod, then
+	// close the watch channel without emitting a watch event.
+	go func() {
+		_, _ = client.CoreV1().Pods("default").Update(context.Background(),
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: corev1.PodSucceeded},
+			}, metav1.UpdateOptions{})
+		watcher.Stop()
+	}()
+
+	if err := pod.WaitForPodSucceeded(context.Background(), client, "default", "p", 5*time.Second); err != nil {
+		t.Fatalf("expected nil error after watch-close re-Get observes Succeeded, got %v", err)
+	}
+}
+
+// TestWaitForPodSucceeded_WatchClosedReGetStillPending covers the
+// watch-close re-Get branch when the pod has NOT yet reached terminal state:
+// the wait must surface ErrCodeUnavailable so the caller can decide whether
+// to retry or bail.
+func TestWaitForPodSucceeded_WatchClosedReGetStillPending(t *testing.T) {
+	t.Parallel()
+
+	pendingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client := fake.NewSimpleClientset(pendingPod)
+
+	watcher := watch.NewFake()
+	client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(watcher, nil))
+	go watcher.Stop()
+
+	err := pod.WaitForPodSucceeded(context.Background(), client, "default", "p", 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error from watch close while pod is still pending")
+	}
+	var sErr *aicrerrors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != aicrerrors.ErrCodeUnavailable {
+		t.Errorf("code = %v, want %v", sErr.Code, aicrerrors.ErrCodeUnavailable)
+	}
+}
+
+// TestWaitForPodReady_WatchClosedReGet covers the readiness watch-close
+// re-Get branch: when the watcher closes and the re-Get observes a Ready
+// pod, the wait returns success.
+func TestWaitForPodReady_WatchClosedReGet(t *testing.T) {
+	t.Parallel()
+
+	pendingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client := fake.NewSimpleClientset(pendingPod)
+
+	watcher := watch.NewFake()
+	client.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	go func() {
+		_, _ = client.CoreV1().Pods("default").Update(context.Background(),
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			}, metav1.UpdateOptions{})
+		watcher.Stop()
+	}()
+
+	if err := pod.WaitForPodReady(context.Background(), client, "default", "p", 5*time.Second); err != nil {
+		t.Fatalf("expected nil error after watch-close re-Get observes Ready, got %v", err)
 	}
 }

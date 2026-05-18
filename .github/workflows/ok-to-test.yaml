@@ -25,6 +25,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
   authorize:
@@ -33,6 +37,7 @@ jobs:
       github.event.issue.pull_request &&
       github.event.comment.body == '/ok-to-test'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       ref: ${{ steps.pr.outputs.ref }}
     steps:

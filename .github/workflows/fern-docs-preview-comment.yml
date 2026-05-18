@@ -33,9 +33,16 @@ permissions:
   pull-requests: write
   actions: read
 
+concurrency:
+  # Include head repository identity so fork branches with the same name
+  # don't share a group key and cancel unrelated runs.
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.event.workflow_run.id }}
+  cancel-in-progress: true
+
 jobs:
   preview:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Download fern sources and metadata
@@ -57,7 +64,18 @@ jobs:
           node-version: '20'
 
       - name: Install Fern CLI
-        run: npm install -g fern-api@$(jq -r .version fern/fern.config.json)
+        # fern/fern.config.json is sourced from the PR branch (uploaded as an
+        # artifact by the Build workflow). Validate the version against a strict
+        # semver pattern before passing to npm to block shell injection from a
+        # crafted .version field.
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version fern/fern.config.json)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::fern.config.json .version '$VERSION' is not a valid semver"
+            exit 1
+          fi
+          npm install -g "fern-api@${VERSION}"
 
       - name: Generate preview URL
         id: generate-docs

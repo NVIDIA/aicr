@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 	"syscall"
 
@@ -233,6 +234,10 @@ func (s *Server) configureRootHandler() {
 					routes = append(routes, path)
 				}
 			}
+			// Sort so the response is byte-stable across runs — Go map
+			// iteration order is randomized, which otherwise breaks golden
+			// tests, response-diff probes, and CDN cache keys.
+			sort.Strings(routes)
 
 			response := map[string]any{
 				"service": s.config.Name,

@@ -31,10 +31,16 @@ import (
 
 const baseRecipeName = "base"
 
+// Global metadata store cache, keyed by the DataProvider generation that
+// produced it. SetDataProvider increments the generation; the next call to
+// loadMetadataStore observes the change and rebuilds the cache so a
+// late-bound external data source actually takes effect. Mirrors the
+// invalidation pattern in components.go (GetComponentRegistry).
 var (
-	metadataStoreOnce   sync.Once
+	metadataStoreMu     sync.Mutex
 	cachedMetadataStore *MetadataStore
 	cachedMetadataErr   error
+	cachedMetadataGen   = -1
 )
 
 // MetadataStore holds the base recipe and all overlays.
@@ -53,8 +59,24 @@ type MetadataStore struct {
 }
 
 // loadMetadataStore loads and caches the metadata store from the data provider.
+// The cache is keyed by DataProvider generation, so SetDataProvider callers see
+// the new content on the next invocation rather than being stuck on the
+// embedded-only snapshot captured by the first Init.
 func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
-	metadataStoreOnce.Do(func() {
+	gen := getDataProviderGeneration()
+	metadataStoreMu.Lock()
+	defer metadataStoreMu.Unlock()
+	if cachedMetadataGen == gen && (cachedMetadataStore != nil || cachedMetadataErr != nil) {
+		if cachedMetadataErr != nil {
+			return nil, cachedMetadataErr
+		}
+		return cachedMetadataStore, nil
+	}
+	// Cache miss — rebuild against the current DataProvider generation.
+	cachedMetadataStore = nil
+	cachedMetadataErr = nil
+	cachedMetadataGen = gen
+	build := func() {
 		// Record cache miss on first load
 		recipeCacheMisses.Inc()
 
@@ -179,7 +201,24 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 		}
 
 		cachedMetadataStore = store
-	})
+	}
+	build()
+
+	// Caller-scoped cancellation must not poison the cache: a per-request
+	// timeout that fires during the first rebuild would otherwise mark this
+	// generation as permanently failed until SetDataProvider bumps it.
+	// Reset the generation so the next caller with a fresh context retries,
+	// and surface the cancel/timeout error without caching it.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		buildErr := cachedMetadataErr
+		cachedMetadataStore = nil
+		cachedMetadataErr = nil
+		cachedMetadataGen = -1
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "metadata load canceled", ctxErr)
+	}
 
 	if cachedMetadataErr != nil {
 		return nil, cachedMetadataErr
@@ -193,9 +232,11 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 // ResetMetadataStoreForTesting clears the cached metadata store so that
 // tests can reload with different data. Must only be called from tests.
 func ResetMetadataStoreForTesting() {
-	metadataStoreOnce = sync.Once{}
+	metadataStoreMu.Lock()
+	defer metadataStoreMu.Unlock()
 	cachedMetadataStore = nil
 	cachedMetadataErr = nil
+	cachedMetadataGen = -1
 }
 
 // GetValuesFile returns the content of a values file by filename.
@@ -649,7 +690,9 @@ func finalizeRecipeResult(criteria *Criteria, mergedSpec *RecipeMetadataSpec, ap
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to compute deployment order", err)
 	}
 
-	applyRegistryDefaults(mergedSpec.ComponentRefs)
+	if err := applyRegistryDefaults(mergedSpec.ComponentRefs); err != nil {
+		return nil, err
+	}
 
 	result := &RecipeResult{
 		Kind:            RecipeResultKind,
@@ -923,12 +966,13 @@ func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 
 // applyRegistryDefaults fills in ComponentRef fields from ComponentConfig defaults.
 // This allows registry.yaml to specify default values that are applied to components
-// that don't explicitly set them in recipes.
-func applyRegistryDefaults(refs []ComponentRef) {
+// that don't explicitly set them in recipes. Returns an error if the registry
+// cannot be loaded — silently no-op'ing would emit partial ComponentRefs that
+// downstream bundlers would reject far from the root cause.
+func applyRegistryDefaults(refs []ComponentRef) error {
 	registry, err := GetComponentRegistry()
 	if err != nil {
-		slog.Warn("failed to get component registry for defaults", "error", err)
-		return
+		return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "failed to get component registry for defaults")
 	}
 
 	for i := range refs {
@@ -937,4 +981,5 @@ func applyRegistryDefaults(refs []ComponentRef) {
 			refs[i].ApplyRegistryDefaults(config)
 		}
 	}
+	return nil
 }

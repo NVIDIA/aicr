@@ -108,6 +108,10 @@ func TestRunValidations(t *testing.T) {
 			wantErrors:    0,
 		},
 		{
+			// Fail closed: unknown function names are a recipe/registry
+			// contract violation (typo, renamed/removed validator) and
+			// must produce an error so a severity:error check cannot be
+			// silently bypassed.
 			name:          "unknown function",
 			componentName: "test-component",
 			validations: []recipe.ComponentValidationConfig{
@@ -119,7 +123,8 @@ func TestRunValidations(t *testing.T) {
 			recipeResult:  &recipe.RecipeResult{},
 			bundlerConfig: config.NewConfig(),
 			wantWarnings:  0,
-			wantErrors:    0,
+			wantErrors:    1,
+			wantMsg:       "unknown validation function",
 		},
 		{
 			name:          "workload selector missing with message",

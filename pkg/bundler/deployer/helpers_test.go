@@ -59,7 +59,9 @@ func TestIsSafePathComponent(t *testing.T) {
 		{"double dot", "..", false},
 		{"forward slash", "gpu/operator", false},
 		{"backslash", "gpu\\operator", false},
-		{"embedded double dot", "foo..bar", false},
+		// "foo..bar" is a benign filename; filepath.IsLocal correctly accepts it.
+		// Only ".." as a standalone component is a parent reference.
+		{"embedded double dot is benign", "foo..bar", true},
 	}
 
 	for _, tt := range tests {

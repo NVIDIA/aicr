@@ -37,6 +37,13 @@ var (
 // Renderer generates CNCF conformance evidence documents from CTRF reports.
 type Renderer struct {
 	outputDir string
+	// now overrides wall-clock time when non-zero. Set via WithNow for
+	// reproducible builds (SLSA, signed artifacts) where the index file
+	// and embedded entry timestamps must be byte-stable across runs.
+	// When zero, each Render() call captures its own fresh wall-clock
+	// timestamp and threads it through buildEntries and renderIndex so
+	// the two outputs always agree within a single render.
+	now time.Time
 }
 
 // Option configures a Renderer.
@@ -49,6 +56,15 @@ func WithOutputDir(dir string) Option {
 	}
 }
 
+// WithNow injects a fixed reference time for reproducible builds. When
+// non-zero, this value is used for both per-entry GeneratedAt and the
+// rendered index timestamp instead of time.Now().
+func WithNow(t time.Time) Option {
+	return func(r *Renderer) {
+		r.now = t
+	}
+}
+
 // New creates a new evidence Renderer with the given options.
 func New(opts ...Option) *Renderer {
 	r := &Renderer{}
@@ -56,6 +72,18 @@ func New(opts ...Option) *Renderer {
 		opt(r)
 	}
 	return r
+}
+
+// renderTimestamp returns the timestamp to embed in a single Render
+// call's output. Injected time (WithNow) takes precedence so reproducible
+// builds remain byte-stable; otherwise a fresh wall-clock is captured per
+// call (NOT memoized on the Renderer) so successive Render() calls on the
+// same instance produce fresh timestamps in non-deterministic mode.
+func (r *Renderer) renderTimestamp() time.Time {
+	if !r.now.IsZero() {
+		return r.now
+	}
+	return time.Now().UTC()
 }
 
 // Render generates evidence markdown files from a CTRF report.
@@ -75,7 +103,13 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create evidence directory", err)
 	}
 
-	entries := r.buildEntries(report)
+	// Capture a single render-scoped timestamp threaded through both
+	// per-entry GeneratedAt and the index header so the two artifacts
+	// agree without depending on memoization that would persist across
+	// subsequent Render() calls.
+	renderNow := r.renderTimestamp()
+
+	entries := r.buildEntries(report, renderNow)
 	if len(entries) == 0 {
 		slog.Warn("no submission-required checks found, skipping evidence rendering")
 		return nil
@@ -102,13 +136,11 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 		return errors.Wrap(errors.ErrCodeTimeout, "evidence rendering canceled", ctx.Err())
 	default:
 	}
-	return r.renderIndex(entries)
+	return r.renderIndex(entries, renderNow)
 }
 
 // buildEntries groups CTRF test results by requirement.
-func (r *Renderer) buildEntries(report *ctrf.Report) []evidenceEntry {
-	now := time.Now().UTC()
-
+func (r *Renderer) buildEntries(report *ctrf.Report, now time.Time) []evidenceEntry {
 	// Group by evidence file, preserving order of first appearance.
 	type fileGroup struct {
 		meta    *requirementMeta
@@ -189,7 +221,7 @@ func (r *Renderer) renderEvidence(entry evidenceEntry) (err error) {
 	return nil
 }
 
-func (r *Renderer) renderIndex(entries []evidenceEntry) (err error) {
+func (r *Renderer) renderIndex(entries []evidenceEntry, now time.Time) (err error) {
 	path := filepath.Join(r.outputDir, "index.md")
 	f, createErr := os.Create(path)
 	if createErr != nil {
@@ -205,7 +237,7 @@ func (r *Renderer) renderIndex(entries []evidenceEntry) (err error) {
 		GeneratedAt time.Time
 		Entries     []evidenceEntry
 	}{
-		GeneratedAt: time.Now().UTC(),
+		GeneratedAt: now,
 		Entries:     entries,
 	}
 

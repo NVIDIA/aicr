@@ -26,16 +26,31 @@ import (
 	"github.com/google/uuid"
 )
 
-// withMiddleware wraps handlers with common middleware
+// withMiddleware wraps handlers with common middleware.
+//
+// Ordering rationale (outermost first):
+//   - metrics / version / requestID: pure setup, no failure paths to wrap.
+//   - timeout: sets the per-request context deadline so EVERY inner layer
+//     (including body reads inside the handler) sees the same bound.
+//   - logging: must wrap panicRecovery so the "request completed" line is
+//     emitted with the panic-converted 500 status, not lost when a handler
+//     panics inside the inner chain.
+//   - panicRecovery: wraps rateLimit/bodyLimit/handler so a panic anywhere
+//     inside is caught and converted to a 500, but does NOT wrap logging
+//     (panics outside the recovery would otherwise eat the completion log).
+//   - rateLimit: outside bodyLimit so a rejected request short-circuits
+//     without paying for body-cap setup.
+//   - bodyLimit: innermost wrapper before the handler so r.Body is bounded
+//     while still running inside the timeout context.
 func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 	return s.metricsMiddleware(
 		s.versionMiddleware(
 			s.requestIDMiddleware(
-				s.panicRecoveryMiddleware( // Recover first to prevent token waste on panics
-					s.rateLimitMiddleware(
-						s.bodyLimitMiddleware(
-							s.timeoutMiddleware(
-								s.loggingMiddleware(handler),
+				s.timeoutMiddleware(
+					s.loggingMiddleware(
+						s.panicRecoveryMiddleware(
+							s.rateLimitMiddleware(
+								s.bodyLimitMiddleware(handler),
 							),
 						),
 					),
@@ -106,6 +121,12 @@ func (s *Server) requestIDMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // rateLimitMiddleware implements rate limiting
 func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Always emit the rate-limit headers — clients backing off on 429s
+		// need them most, so set them before the Allow() branch returns.
+		w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", int(s.config.RateLimit)))
+		w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", int(s.rateLimiter.Tokens())))
+		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(defaults.ServerRateLimitWindow).Unix()))
+
 		if !s.rateLimiter.Allow() {
 			rateLimitRejects.Inc()
 			w.Header().Set("Retry-After", defaults.ServerRetryAfterSeconds)
@@ -116,11 +137,6 @@ func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				})
 			return
 		}
-
-		// Add rate limit headers
-		w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", int(s.config.RateLimit)))
-		w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", int(s.rateLimiter.Tokens())))
-		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(defaults.ServerRateLimitWindow).Unix()))
 
 		next.ServeHTTP(w, r)
 	}

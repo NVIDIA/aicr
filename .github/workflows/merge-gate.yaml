@@ -146,13 +146,13 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
-      - uses: github/codeql-action/init@68bde559dea0fdcac2102bfdf6230c5f70eb485e  # v4.35.4
+      - uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba  # v4.35.5
         with:
           languages: go
       - run: go build ./...
         env:
           GOFLAGS: -mod=vendor
-      - uses: github/codeql-action/analyze@68bde559dea0fdcac2102bfdf6230c5f70eb485e  # v4.35.4
+      - uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba  # v4.35.5
 
   analyze-skip:
     needs: [check-paths]
@@ -206,8 +206,34 @@ jobs:
         with:
           persist-credentials: false
       - name: Install actionlint
+        # Pin actionlint to a specific version and verify the downloaded
+        # binary's SHA256 against the upstream-published checksum file.
+        # Replaces `bash <(curl … main …)`, which executed a mutable script
+        # from the default branch and downloaded the binary with no
+        # checksum verification (the upstream installer pipes
+        # `curl … | tar xvz` directly).
+        env:
+          ACTIONLINT_VERSION: '1.7.11'
         run: |
-          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          set -euo pipefail
+          BASE="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          TAR="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          TMP="$(mktemp -d)"
+          curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+          curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          EXPECTED=$(awk -v t="${TAR}" '$2 == t {print $1}' "${TMP}/checksums.txt")
+          if [[ -z "${EXPECTED}" ]]; then
+            echo "::error::no checksum entry for ${TAR} in upstream checksums.txt"
+            exit 1
+          fi
+          ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
+          if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+            echo "::error::actionlint checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+            exit 1
+          fi
+          tar -xzf "${TMP}/${TAR}" -C "${TMP}" actionlint
+          mv "${TMP}/actionlint" "${PWD}/actionlint"
+          rm -rf "${TMP}"
           echo "${PWD}" >> "$GITHUB_PATH"
       - name: Run actionlint
         run: actionlint -color -shellcheck=

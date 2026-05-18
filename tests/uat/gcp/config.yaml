@@ -95,8 +95,8 @@ compute:
             - us-central1-c
           autoscaling:
             enabled: true
-            minNodes: 2
-            maxNodes: 2
+            minNodes: 1
+            maxNodes: 1
           guestAccelerator:
             type: nvidia-h100-mega-80gb
             count: 8

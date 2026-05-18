@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"runtime"
@@ -39,6 +40,26 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/trust"
 )
+
+// readBoundedFile streams a file through io.LimitReader against maxBytes.
+// Used in place of os.ReadFile on attacker-influenced verifier inputs so
+// the process cannot be forced to allocate an unbounded buffer.
+func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // verifier paths are bundle-local
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("file %s exceeds maximum size (%d bytes)", path, maxBytes))
+	}
+	return data, nil
+}
 
 // Identity pinning constants for NVIDIA CI.
 const (
@@ -201,7 +222,7 @@ func verifyChecksumStep(bundleDir string, result *VerifyResult) ([]byte, bool) {
 		result.Errors = append(result.Errors, fmt.Sprintf("unsafe checksum path: %v", joinErr))
 		return nil, true
 	}
-	checksumData, err := os.ReadFile(checksumPath)
+	checksumData, err := readBoundedFile(checksumPath, defaults.MaxChecksumFileBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			result.setTrust(TrustUnknown, "checksums.txt not found")
@@ -261,7 +282,7 @@ func resolveExecutablePath() string {
 // parseDSSEPayload extracts and decodes the base64 DSSE payload from a
 // sigstore bundle JSON file. Returns the decoded in-toto statement JSON.
 func parseDSSEPayload(bundlePath string) ([]byte, error) {
-	data, err := os.ReadFile(bundlePath)
+	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read bundle file", err)
 	}
@@ -353,16 +374,10 @@ func extractBinaryDigest(bundlePath string) ([]byte, error) {
 // loadSigstoreBundle reads a .sigstore.json file and returns a parsed Bundle.
 // Rejects files larger than defaults.MaxSigstoreBundleSize.
 func loadSigstoreBundle(path string) (*bundle.Bundle, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to stat sigstore bundle: "+path, err)
-	}
-	if info.Size() > defaults.MaxSigstoreBundleSize {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("sigstore bundle %s exceeds maximum size (%d bytes)", path, defaults.MaxSigstoreBundleSize))
-	}
-
-	data, err := os.ReadFile(path)
+	// readBoundedFile is authoritative on size: a stat-then-read sequence
+	// races on symlink swaps and network mounts, but io.LimitReader bounds
+	// what we actually load into memory.
+	data, err := readBoundedFile(path, defaults.MaxSigstoreBundleSize)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read sigstore bundle: "+path, err)
 	}

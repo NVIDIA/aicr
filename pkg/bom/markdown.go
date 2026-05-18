@@ -53,8 +53,16 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 		}
 	}
 	if !meta.Deterministic {
+		// Honor an injected Timestamp (e.g., commit-derived) so the markdown
+		// output matches the CycloneDX BOM, which already respects
+		// meta.Timestamp in BuildBOM. Only fall back to wall-clock when both
+		// the caller hasn't injected and Deterministic mode is off.
+		ts := meta.Timestamp
+		if ts == "" {
+			ts = time.Now().UTC().Format(time.RFC3339)
+		}
 		if _, err := fmt.Fprintf(w, "_Generated %s for %s %s._\n\n",
-			time.Now().UTC().Format(time.RFC3339), meta.Name, meta.Version); err != nil {
+			ts, meta.Name, meta.Version); err != nil {
 			return err
 		}
 	}

@@ -230,10 +230,14 @@ func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, o
 			"failed to get values for "+cfg.Name, err)
 	}
 
-	// Apply user value overrides from --set flags
+	// Apply user value overrides from --set flags. Fail closed: a typo in
+	// --set must not silently ship a bundle that lacks the operator's
+	// requested override, which is the canonical misconfigured-artifact
+	// scenario the project's fail-closed rule targets.
 	if overrides := getValueOverridesForComponent(b, cfg); len(overrides) > 0 {
 		if applyErr := ApplyMapOverrides(values, overrides); applyErr != nil {
-			slog.Warn("failed to apply some value overrides to values map", "error", applyErr)
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				"failed to apply --set override for "+cfg.Name, applyErr)
 		}
 	}
 

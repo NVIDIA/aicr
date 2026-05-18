@@ -16,6 +16,7 @@ package pod
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 	"time"
 
@@ -26,6 +27,20 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
+
+// classifyReGetError preserves the timeout/cancel error code when a
+// re-Get races against context expiry. Without this guard, a context
+// deadline that fires between the watch-close and the re-Get would
+// surface as ErrCodeUnavailable instead of ErrCodeTimeout, breaking
+// upstream code that distinguishes transient API unavailability from
+// the caller's own deadline.
+func classifyReGetError(ctx context.Context, message string, getErr error) error {
+	canceled := ctx.Err() != nil || stderrors.Is(getErr, context.DeadlineExceeded) || stderrors.Is(getErr, context.Canceled)
+	if canceled {
+		return errors.Wrap(errors.ErrCodeTimeout, message, getErr)
+	}
+	return errors.Wrap(errors.ErrCodeUnavailable, message, getErr)
+}
 
 // WaitForPodSucceeded waits for a pod to reach the Succeeded phase.
 // Returns nil on PodSucceeded, error on PodFailed, error on timeout.
@@ -63,7 +78,23 @@ func WaitForPodSucceeded(ctx context.Context, client kubernetes.Interface, names
 			return errors.Wrap(errors.ErrCodeTimeout, "pod wait timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return errors.New(errors.ErrCodeInternal, "watch channel closed unexpectedly")
+				// Watch channels close routinely on apiserver rolling
+				// restarts, LB drops, and 1.27+ bookmark hiccups. Re-Get
+				// the pod and reclassify rather than treating a transient
+				// apiserver event as a permanent failure.
+				if rcErr := timeoutCtx.Err(); rcErr != nil {
+					return errors.Wrap(errors.ErrCodeTimeout, "pod wait timeout", rcErr)
+				}
+				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
+				if getErr != nil {
+					return classifyReGetError(timeoutCtx, "pod watch closed and re-Get failed", getErr)
+				}
+				if done, checkErr := checkPodPhase(current); done {
+					return checkErr
+				}
+				return errors.NewWithContext(errors.ErrCodeUnavailable,
+					"pod watch closed before pod reached terminal state",
+					map[string]any{keyNamespace: namespace, keyName: name, "phase": string(current.Status.Phase)})
 			}
 
 			watchedPod, ok := event.Object.(*corev1.Pod)
@@ -236,7 +267,21 @@ func WaitForPodReady(ctx context.Context, client kubernetes.Interface, namespace
 			return errors.Wrap(errors.ErrCodeTimeout, "pod ready wait timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return errors.New(errors.ErrCodeUnavailable, "pod watch channel closed before ready")
+				// Watch channels close routinely on apiserver hiccups;
+				// re-Get and reclassify instead of declaring failure.
+				if rcErr := timeoutCtx.Err(); rcErr != nil {
+					return errors.Wrap(errors.ErrCodeTimeout, "pod ready wait timeout", rcErr)
+				}
+				current, getErr := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
+				if getErr != nil {
+					return classifyReGetError(timeoutCtx, "pod watch closed and re-Get failed", getErr)
+				}
+				if done, checkErr := checkPodReady(current); done {
+					return checkErr
+				}
+				return errors.NewWithContext(errors.ErrCodeUnavailable,
+					"pod watch closed before pod was ready",
+					map[string]any{keyNamespace: namespace, keyName: name, "phase": string(current.Status.Phase)})
 			}
 			watchedPod, isPod := event.Object.(*corev1.Pod)
 			if !isPod {

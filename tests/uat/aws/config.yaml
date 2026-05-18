@@ -79,7 +79,7 @@ compute:
         - name: gpu-worker
           instanceType: p5.48xlarge
           capacity:
-            desired: 2
+            desired: 1
             reservation:
               preference: capacity-reservations-only
               target: cr-0cbe491320188dfa6

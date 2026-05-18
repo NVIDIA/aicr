@@ -397,7 +397,9 @@ func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error
 		return nil, err
 	}
 	defer func() {
-		_ = fs.Close()
+		if closeErr := fs.Close(); closeErr != nil {
+			slog.Warn("failed to close referrer file store", "error", closeErr)
+		}
 		if rmErr := os.RemoveAll(tmpDir); rmErr != nil {
 			slog.Warn("failed to remove referrer temp dir", "path", tmpDir, "error", rmErr)
 		}
@@ -469,7 +471,9 @@ func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, strin
 
 	layerDesc, err := fs.Add(ctx, layerFilename, opts.ArtifactType, layerPath)
 	if err != nil {
-		_ = fs.Close()
+		if closeErr := fs.Close(); closeErr != nil {
+			slog.Warn("failed to close referrer file store during error cleanup", "error", closeErr)
+		}
 		_ = os.RemoveAll(tmpDir)
 		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add referrer layer", err)
 	}
@@ -487,14 +491,18 @@ func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, strin
 
 	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, opts.ArtifactType, packOpts)
 	if err != nil {
-		_ = fs.Close()
+		if closeErr := fs.Close(); closeErr != nil {
+			slog.Warn("failed to close referrer file store during error cleanup", "error", closeErr)
+		}
 		_ = os.RemoveAll(tmpDir)
 		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack referrer manifest", err)
 	}
 
 	tag := strings.TrimPrefix(manifestDesc.Digest.String(), "sha256:")
 	if tagErr := fs.Tag(ctx, manifestDesc, tag); tagErr != nil {
-		_ = fs.Close()
+		if closeErr := fs.Close(); closeErr != nil {
+			slog.Warn("failed to close referrer file store during error cleanup", "error", closeErr)
+		}
 		_ = os.RemoveAll(tmpDir)
 		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag referrer manifest", tagErr)
 	}

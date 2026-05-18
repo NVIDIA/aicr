@@ -122,12 +122,25 @@ func readFile(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled before file read", err)
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // path is user-supplied --config target
+	// Stream the read through io.LimitReader rather than os.ReadFile so a
+	// hostile path (/proc symlink, FUSE mount, NFS) cannot force the
+	// process to allocate an unbounded buffer before we react to the size.
+	f, err := os.Open(path) //nolint:gosec // path is user-supplied --config target
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("config file not found: %q", path), err)
 		}
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to open config file %q", path), err)
+	}
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxConfigBytes+1))
+	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to read config file %q", path), err)
+	}
+	if int64(len(data)) > defaults.MaxConfigBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("config file %q exceeds %d-byte limit", path, defaults.MaxConfigBytes))
 	}
 	return data, nil
 }

@@ -1,29 +1,261 @@
 #!/bin/bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# tools/cleanup — remove AICR-installed resources from the current cluster so a
+# fresh install can be re-applied. Targets four classes of residue:
+#
+#   1. Helm releases in known AICR component namespaces
+#   2. `aicr validate` artifacts (namespace, SA, CRB, leftover Jobs/CMs)
+#   3. Custom Resource Definitions owned by AICR components
+#   4. AICR component namespaces (with stuck-finalizer rescue)
+#
+# Scope is intentionally narrow: only namespaces and CRDs known to be installed
+# by AICR registry components are touched. Cluster-scoped resources outside the
+# AICR component domains are left alone.
+
 set -euo pipefail
 
-# Dir setup
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/common
 . "${DIR}/common"
-ROOT=$(dirname "${DIR}")
 
-# Check required tools
+DRY_RUN=false
+ASSUME_YES=false
+KEEP_CRDS=false
+KEEP_NAMESPACES=false
+
+usage() {
+    cat <<EOF
+Usage: tools/cleanup [options]
+
+Removes AICR-installed Kubernetes resources from the currently selected cluster.
+
+Options:
+  -n, --dry-run         Print actions without executing
+  -y, --yes             Skip confirmation prompt
+      --keep-crds       Don't delete CRDs (useful when reinstalling same version)
+      --keep-namespaces Don't delete component namespaces
+  -h, --help            Show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n|--dry-run) DRY_RUN=true; shift ;;
+        -y|--yes) ASSUME_YES=true; shift ;;
+        --keep-crds) KEEP_CRDS=true; shift ;;
+        --keep-namespaces) KEEP_NAMESPACES=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) err "unknown flag: $1" ;;
+    esac
+done
+
 has_tools kubectl
 
-# Prompt user to confirm cleanup
-read -p "Are you sure you want to clean up aicr resources? (y/N): " confirm
-if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "Cleanup aborted."
-    exit 0
+# AICR-managed namespaces. Sourced from `defaultNamespace` entries in
+# recipes/registry.yaml plus child namespaces created at runtime by some
+# operators (e.g. kai-resource-reservation by kai-scheduler).
+AICR_NAMESPACES=(
+    node-feature-discovery
+    gpu-operator
+    nvidia-network-operator
+    cert-manager
+    skyhook
+    nvsentinel
+    nvidia-dra-driver
+    monitoring
+    kai-scheduler
+    kai-resource-reservation
+    dynamo-system
+    agentgateway-system
+    nvidia-nim
+    kueue-system
+    kubeflow
+    slinky
+)
+
+# CRD API-group suffixes owned by AICR components. Matched as substrings
+# against `kubectl get crd -o name`. New component groups should be added here.
+AICR_CRD_PATTERNS=(
+    nfd.k8s-sigs.io
+    nvidia.com
+    mellanox.com
+    cert-manager.io
+    skyhook.nvidia.com
+    nvsentinel.nvidia.com
+    monitoring.coreos.com
+    scheduling.run.ai
+    kai.scheduler
+    grove.io
+    nvidia.io
+    dynamo.nvidia.com
+    agentgateway.dev
+    apps.nvidia.com
+    kueue.x-k8s.io
+    kubeflow.org
+    trainer.kubeflow.org
+    slinky.slurm.net
+)
+
+ctx="$(kubectl config current-context 2>/dev/null || echo unknown)"
+msg "Target cluster context: ${ctx}"
+if $DRY_RUN; then
+    msg "DRY-RUN mode — no changes will be applied."
 fi
 
-msg "Cleaning up aicr resources..."
+if ! $ASSUME_YES && ! $DRY_RUN; then
+    read -rp "Remove AICR resources from '${ctx}'? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        msg "Cleanup aborted."
+        exit 0
+    fi
+fi
 
-# Delete aicr Kubernetes resources, don't fail if they don't exist
-kubectl -n gpu-operator delete job aicr || true
-kubectl -n gpu-operator delete sa aicr || true
-kubectl -n gpu-operator delete role aicr || true
-kubectl -n gpu-operator delete rolebinding aicr || true
-kubectl delete clusterrole aicr || true
-kubectl delete clusterrolebinding aicr || true
+# kubectl wrapper that honors DRY_RUN and never aborts the script on failure.
+kc() {
+    if $DRY_RUN; then
+        echo "  kubectl $*"
+    else
+        kubectl "$@" || true
+    fi
+}
 
-msg "AICR resources cleanup complete."
+# helm wrapper — same semantics as kc. Returns silently if helm is absent.
+hm() {
+    command -v helm >/dev/null 2>&1 || return 0
+    if $DRY_RUN; then
+        echo "  helm $*"
+    else
+        helm "$@" || true
+    fi
+}
+
+is_aicr_namespace() {
+    local target="$1" ns
+    for ns in "${AICR_NAMESPACES[@]}"; do
+        [[ "$target" == "$ns" ]] && return 0
+    done
+    return 1
+}
+
+# Phase 1: Uninstall Helm releases in AICR namespaces.
+msg "Phase 1: Uninstalling Helm releases in AICR namespaces..."
+if command -v helm >/dev/null 2>&1; then
+    while IFS=$'\t' read -r release ns; do
+        [[ -z "$release" || -z "$ns" ]] && continue
+        if is_aicr_namespace "$ns"; then
+            msg "  helm uninstall ${release} -n ${ns}"
+            hm uninstall "$release" -n "$ns" --wait --timeout 2m
+        fi
+    done < <(helm ls -A 2>/dev/null | awk 'NR>1 {print $1"\t"$2}')
+else
+    log_warning "helm not installed; skipping Helm uninstall (namespace deletion will still proceed)"
+fi
+
+# Phase 2: Validator artifacts.
+# Per-run validator resources use the rbacNamePrefix "aicr-validator" with a
+# runID suffix; we delete by label selector to catch all runs. Legacy resources
+# from the older job pattern lived in gpu-operator under the name "aicr".
+msg "Phase 2: Removing AICR validator artifacts..."
+kc delete clusterrolebinding -l app.kubernetes.io/managed-by=aicr --ignore-not-found
+kc delete clusterrole        -l app.kubernetes.io/managed-by=aicr --ignore-not-found
+kc delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator --ignore-not-found
+kc delete clusterrole        -l app.kubernetes.io/name=aicr-validator --ignore-not-found
+# Fall back to name-based deletion for any without the expected labels.
+if ! $DRY_RUN; then
+    kubectl get clusterrolebinding -o name 2>/dev/null \
+        | grep -E '/aicr-validator-|/aicr$' \
+        | xargs -r kubectl delete --ignore-not-found || true
+    kubectl get clusterrole -o name 2>/dev/null \
+        | grep -E '/aicr-validator-|/aicr$' \
+        | xargs -r kubectl delete --ignore-not-found || true
+fi
+kc delete ns aicr-validation --ignore-not-found --wait=false
+# Legacy on-cluster agent leftovers from the older deployment pattern.
+kc -n gpu-operator delete job aicr --ignore-not-found
+kc -n gpu-operator delete sa aicr --ignore-not-found
+kc -n gpu-operator delete role aicr --ignore-not-found
+kc -n gpu-operator delete rolebinding aicr --ignore-not-found
+
+# Phase 3: Component CRDs.
+# Helm does NOT remove CRDs on uninstall — they must be deleted manually or a
+# reinstall fails on "resource already exists" or, worse, picks up stale CRs.
+if ! $KEEP_CRDS; then
+    msg "Phase 3: Deleting AICR component CRDs..."
+    if $DRY_RUN; then
+        for pat in "${AICR_CRD_PATTERNS[@]}"; do
+            echo "  match CRDs against pattern: ${pat}"
+        done
+    else
+        all_crds="$(kubectl get crd -o name 2>/dev/null || true)"
+        for pat in "${AICR_CRD_PATTERNS[@]}"; do
+            # shellcheck disable=SC2086
+            matches=$(echo "$all_crds" | grep -F "$pat" || true)
+            for crd in $matches; do
+                kubectl delete "$crd" --ignore-not-found --wait=false || true
+            done
+        done
+    fi
+else
+    msg "Phase 3: Skipping CRD deletion (--keep-crds)."
+fi
+
+# Phase 4: Namespaces.
+if ! $KEEP_NAMESPACES; then
+    msg "Phase 4: Deleting AICR component namespaces..."
+    for ns in "${AICR_NAMESPACES[@]}"; do
+        if $DRY_RUN; then
+            echo "  kubectl delete ns ${ns} --ignore-not-found --wait=false"
+        else
+            if kubectl get ns "$ns" >/dev/null 2>&1; then
+                kubectl delete ns "$ns" --ignore-not-found --wait=false || true
+            fi
+        fi
+    done
+
+    # Rescue any namespace stuck Terminating because a CR finalizer points at
+    # a controller that no longer exists. We give the apiserver a chance to
+    # finish first, then strip finalizers from residual namespaced objects.
+    if ! $DRY_RUN; then
+        sleep 10
+        for ns in "${AICR_NAMESPACES[@]}"; do
+            kubectl get ns "$ns" >/dev/null 2>&1 || continue
+            phase="$(kubectl get ns "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")"
+            [[ "$phase" != "Terminating" ]] && continue
+            log_warning "Namespace ${ns} stuck Terminating; clearing CR finalizers..."
+            while IFS= read -r api_resource; do
+                [[ -z "$api_resource" ]] && continue
+                # Skip noisy core resources that never block deletion.
+                case "$api_resource" in
+                    events|events.events.k8s.io|pods|endpoints|endpointslices.discovery.k8s.io) continue ;;
+                esac
+                while IFS= read -r obj; do
+                    [[ -z "$obj" ]] && continue
+                    kubectl patch "$obj" -n "$ns" --type=merge \
+                        -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+                done < <(kubectl get "$api_resource" -n "$ns" -o name 2>/dev/null)
+            done < <(kubectl api-resources --verbs=list --namespaced -o name 2>/dev/null)
+        done
+    fi
+else
+    msg "Phase 4: Skipping namespace deletion (--keep-namespaces)."
+fi
+
+msg "AICR cleanup complete."
+if $DRY_RUN; then
+    msg "(dry-run — no changes applied)"
+else
+    msg "Verify: 'kubectl get ns' and 'helm ls -A' should show no AICR remnants."
+fi

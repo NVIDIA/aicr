@@ -434,6 +434,35 @@ const (
 	// path (e.g., /proc symlink, NFS mount) before os.ReadFile would
 	// allocate the whole file into memory.
 	MaxBOMBytes int64 = 8 * 1024 * 1024 // 8 MiB
+
+	// MaxConfigBytes caps the size of a user-supplied --config file. Real
+	// configs are well under 100 KiB; 1 MiB is generous headroom while
+	// preventing a hostile symlink (/proc, FUSE, NFS) from forcing the CLI
+	// or server to allocate an unbounded buffer.
+	MaxConfigBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
+	// MaxChecksumFileBytes caps the size of a bundle checksums.txt file.
+	// One entry is ~80 bytes; 1 MiB allows ~12k entries — well above any
+	// realistic bundle while bounding attacker-influenced inputs at the
+	// verifier/checksum read paths.
+	MaxChecksumFileBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
+	// MaxAttestationFileBytes caps the size of in-bundle attestation
+	// artifacts (binary attestation, intoto statements) that are copied
+	// into the output and signed. Real attestations are tens of KiB;
+	// 10 MiB matches MaxSigstoreBundleSize for parity across signed
+	// supply-chain artifacts.
+	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
+
+	// MaxExternalDataFileBytes caps the size of recipe/registry data files
+	// read from the external data directory by LayeredDataProvider. This is
+	// the single source of truth for the external-data size limit:
+	// LayeredProviderConfig.MaxFileSize falls back here when zero, and
+	// readExternalFile uses it when its caller passes a non-positive
+	// bound. Bounds attacker-controlled file content when a network mount
+	// swaps a file between walk-time validation and the read at
+	// consumption time.
+	MaxExternalDataFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
 )
 
 // Server-wide handler defaults.

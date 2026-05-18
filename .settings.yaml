@@ -50,7 +50,7 @@ security_tools:
 # E2E Testing Tools
 testing_tools:
   # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
-  kubectl: 'v1.36.0'
+  kubectl: 'v1.36.1'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.31.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
@@ -60,7 +60,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.3'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
-  helm: 'v4.1.4'
+  helm: 'v4.2.0'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
   helmfile: 'v1.5.1'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums

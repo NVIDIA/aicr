@@ -24,10 +24,16 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 
+	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+// policyListConcurrency caps fan-out of per-GVR ClusterPolicy List calls.
+// Each call is a network RTT; small bound keeps the apiserver QPS reasonable
+// while collapsing N×RTT to roughly N/policyListConcurrency rounds.
+const policyListConcurrency = 4
 
 // collectClusterPolicies retrieves ClusterPolicy custom resources from all API groups and namespaces.
 // It dynamically discovers all ClusterPolicy CRDs regardless of their API group.
@@ -51,63 +57,64 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 		}
 	}
 
-	policyData := make(map[string]measurement.Reading)
-
-	// Find all ClusterPolicy resources across all API groups
+	// Phase 1: enumerate every ClusterPolicy GVR. Discovery is already done;
+	// this is in-memory filtering, no I/O.
+	gvrs := make([]schema.GroupVersionResource, 0)
 	for _, apiResourceList := range apiResourceLists {
-		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
-		}
-
 		if apiResourceList == nil {
 			continue
 		}
-
 		gv, err := schema.ParseGroupVersion(apiResourceList.GroupVersion)
 		if err != nil {
 			continue
 		}
-
 		for _, resource := range apiResourceList.APIResources {
-			// Look for ClusterPolicy kind
 			if resource.Kind != "ClusterPolicy" {
 				continue
 			}
-
-			// Skip subresources (they contain a slash like "clusterpolicies/status")
+			// Skip subresources (e.g. "clusterpolicies/status").
 			if len(resource.Name) == 0 || strings.Contains(resource.Name, "/") {
 				continue
 			}
-
-			// Construct GVR for this ClusterPolicy resource
-			gvr := schema.GroupVersionResource{
+			gvrs = append(gvrs, schema.GroupVersionResource{
 				Group:    gv.Group,
 				Version:  gv.Version,
 				Resource: resource.Name,
-			}
+			})
+		}
+	}
 
+	// Phase 2: fan-out per-GVR Lists. Sequential N×RTT becomes ~⌈N/conc⌉
+	// rounds. Each goroutine writes its result into a pre-sized indexed
+	// slot so the post-Wait merge happens in stable GVR order — overlapping
+	// keys are not last-writer-wins on goroutine completion order.
+	results := make([]map[string]measurement.Reading, len(gvrs))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(policyListConcurrency)
+
+	for i, gvr := range gvrs {
+		g.Go(func() error {
+			if err := gctx.Err(); err != nil {
+				return errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
+			}
 			slog.Debug("found clusterpolicy resource",
-				slog.String("group", gv.Group),
-				slog.String("version", gv.Version),
-				slog.String("resource", resource.Name))
+				slog.String("group", gvr.Group),
+				slog.String("version", gvr.Version),
+				slog.String("resource", gvr.Resource))
 
-			// List all instances across all namespaces
-			policies, err := dynamicClient.Resource(gvr).Namespace("").List(ctx, v1.ListOptions{})
+			policies, err := dynamicClient.Resource(gvr).Namespace("").List(gctx, v1.ListOptions{})
 			if err != nil {
+				// CRDs can come and go between discovery and List; degrade gracefully.
 				slog.Debug("failed to list clusterpolicy",
-					slog.String("group", gv.Group),
+					slog.String("group", gvr.Group),
 					slog.String("error", err.Error()))
-				continue
+				return nil
 			}
-
-			// Process each policy
+			local := make(map[string]measurement.Reading)
 			for _, policy := range policies.Items {
-				// Check for context cancellation
-				if err := ctx.Err(); err != nil {
-					return nil, errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
+				if err := gctx.Err(); err != nil {
+					return errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
 				}
-
-				// Extract spec for detailed information
 				spec, found, err := unstructured.NestedMap(policy.Object, "spec")
 				if err != nil || !found {
 					slog.Warn("failed to extract spec from clusterpolicy",
@@ -115,10 +122,21 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 						slog.String("error", fmt.Sprintf("%v", err)))
 					continue
 				}
-
-				// Flatten the spec into individual key-value pairs
-				flattenSpec(spec, "", policyData)
+				flattenSpec(spec, "", local)
 			}
+			results[i] = local
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Ordered merge so overlapping keys resolve deterministically by GVR order.
+	policyData := make(map[string]measurement.Reading)
+	for _, m := range results {
+		for k, v := range m {
+			policyData[k] = v
 		}
 	}
 

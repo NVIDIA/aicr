@@ -27,12 +27,26 @@ import (
 // Job (batch/v1) starting in 1.27. It supersedes the legacy job-name label.
 const jobNameLabel = "batch.kubernetes.io/job-name"
 
-// GetPodForJob returns the first pod owned by the named Job, located via the
+// GetPodForJob returns the live pod owned by the named Job, located via the
 // standard `batch.kubernetes.io/job-name=<jobName>` label selector.
 //
-// Returns an ErrCodeNotFound StructuredError when the listing succeeds but
-// matches zero pods (Job's pod has not yet been created or was deleted).
-// Returns an ErrCodeInternal StructuredError if the List call itself fails.
+// Selection is tiered so the result matches what callers expect in every
+// terminal state:
+//
+//  1. Skip pods being deleted (DeletionTimestamp != nil) — never inspect
+//     an orphan from a delete-then-create flow.
+//  2. Prefer a non-Failed pod (Running/Pending/Succeeded), youngest first
+//     by CreationTimestamp — so a stale Failed pod cannot outrank the
+//     live Job's pod under the same selector.
+//  3. Fall back to a Failed pod, youngest first, when no non-Failed
+//     candidate remains. Callers like ExtractResult intentionally inspect
+//     a Failed pod to capture the exit code and termination reason after
+//     WaitForCompletion observes a Job-level failure.
+//
+// Returns an ErrCodeNotFound StructuredError when every candidate is
+// terminating (the Job's pod has not yet been created or every match is
+// in the deletion grace window). Returns an ErrCodeInternal StructuredError
+// if the List call itself fails.
 func GetPodForJob(ctx context.Context, client kubernetes.Interface, namespace, jobName string) (*corev1.Pod, error) {
 	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: jobNameLabel + "=" + jobName,
@@ -42,10 +56,31 @@ func GetPodForJob(ctx context.Context, client kubernetes.Interface, namespace, j
 			map[string]any{keyNamespace: namespace, "job": jobName})
 	}
 
-	if len(pods.Items) == 0 {
-		return nil, errors.NewWithContext(errors.ErrCodeNotFound, "pod for job not found",
-			map[string]any{keyNamespace: namespace, "job": jobName})
+	var (
+		bestActive *corev1.Pod
+		bestFailed *corev1.Pod
+	)
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+		if p.Status.Phase == corev1.PodFailed {
+			if bestFailed == nil || p.CreationTimestamp.After(bestFailed.CreationTimestamp.Time) {
+				bestFailed = p
+			}
+			continue
+		}
+		if bestActive == nil || p.CreationTimestamp.After(bestActive.CreationTimestamp.Time) {
+			bestActive = p
+		}
 	}
-
-	return &pods.Items[0], nil
+	if bestActive != nil {
+		return bestActive, nil
+	}
+	if bestFailed != nil {
+		return bestFailed, nil
+	}
+	return nil, errors.NewWithContext(errors.ErrCodeNotFound, "pod for job not found",
+		map[string]any{keyNamespace: namespace, "job": jobName})
 }

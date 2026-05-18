@@ -87,10 +87,16 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 
 		fn := Get(validation.Function)
 		if fn == nil {
-			slog.Warn("unknown validation function",
-				"component", componentName,
-				"function", validation.Function,
-			)
+			// Fail closed: a typo in `function` (or a renamed/removed
+			// validator) for a severity:error validation would otherwise
+			// skip the safety check and ship a bundle as if it had passed.
+			errors = append(errors, aicrerrors.NewWithContext(
+				aicrerrors.ErrCodeInvalidRequest,
+				"unknown validation function",
+				map[string]any{
+					"component": componentName,
+					"function":  validation.Function,
+				}))
 			continue
 		}
 
