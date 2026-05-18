@@ -121,7 +121,7 @@ Generate an optimized configuration recipe based on environment parameters.
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`, `any` |
-| `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `slurm`, `any` |
+| `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
 | `nodes` | integer | 0 | GPU node count (0 = any) |
 
 **Examples:**

@@ -152,7 +152,7 @@ paths:
           description: Platform/framework type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [dynamo, kubeflow, nim, slurm, any]
+            enum: [dynamo, kubeflow, nim, runai, slurm, any]
             default: any
         - name: nodes
           in: query
@@ -519,7 +519,7 @@ paths:
           description: Platform/framework type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [dynamo, kubeflow, nim, slurm, any]
+            enum: [dynamo, kubeflow, nim, runai, slurm, any]
             default: any
         - name: nodes
           in: query
@@ -1260,7 +1260,7 @@ components:
         platform:
           type: string
           description: Platform/framework type
-          enum: [dynamo, kubeflow, nim, slurm, any]
+          enum: [dynamo, kubeflow, nim, runai, slurm, any]
           example: kubeflow
         nodes:
           type: integer

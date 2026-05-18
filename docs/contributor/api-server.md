@@ -267,7 +267,7 @@ Supported content types:
 | `gpu` | AcceleratorType | Alias for accelerator | `gpu=h100` |
 | `intent` | IntentType | Enum: training, inference, any | `intent=training` |
 | `os` | OSType | Enum: ubuntu, rhel, cos, amazonlinux, talos, any | `os=ubuntu` |
-| `platform` | PlatformType | Enum: dynamo, kubeflow, nim, slurm, any | `platform=kubeflow` |
+| `platform` | PlatformType | Enum: dynamo, kubeflow, nim, runai, slurm, any | `platform=kubeflow` |
 | `nodes` | int | >= 0 | `nodes=8` |
 
 ### Recipe Builder: `pkg/recipe/builder.go`
