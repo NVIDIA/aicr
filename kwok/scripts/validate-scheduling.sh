@@ -334,6 +334,8 @@ generate_bundle() {
     # existing matrix lanes. Extend as additional platforms are validated.
     if [[ "$platform" == "slurm" ]]; then
         recipe_args+=(--platform "$platform")
+    elif [[ -n "$platform" ]]; then
+        log_info "platform=$platform not yet validated under KWOK — resolving without --platform"
     fi
 
     # Generate resolved recipe from criteria
