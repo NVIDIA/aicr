@@ -449,6 +449,26 @@ deploy_bundle() {
     log_info "Waiting for pods to be scheduled..."
     sleep 5
 
+    # slurm-operator reconciles the Controller CR into a StatefulSet AFTER
+    # Helm install completes, so the controller pod appears later than the
+    # 5s window above. Poll up to 60s for spec.nodeName on the controller
+    # pod (presence implies the operator reconciled and the scheduler ran).
+    if kubectl get crd controllers.slinky.slurm.net &>/dev/null; then
+        local waited=0
+        while ((waited < 60)); do
+            local scheduled
+            scheduled=$(kubectl get pods --all-namespaces \
+                -l app.kubernetes.io/name=slurmctld \
+                -o jsonpath='{.items[*].spec.nodeName}' 2>/dev/null || true)
+            if [[ -n "$scheduled" ]]; then
+                log_info "slurm controller scheduled after ${waited}s"
+                break
+            fi
+            sleep 5
+            waited=$((waited + 5))
+        done
+    fi
+
     log_info "Bundle deployed successfully"
 }
 
