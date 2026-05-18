@@ -112,12 +112,6 @@ ensure_cluster() {
     cp_node=$(kubectl get nodes -l '!type' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
     if [[ -n "$cp_node" ]]; then
         kubectl label node "$cp_node" aicr.nvidia.com/node-type=system --overwrite >/dev/null
-        # Remove control-plane NoSchedule taint. KWOK fakes previously
-        # absorbed system-tier workloads vacuously; now that the real CP
-        # is the only system-labeled node, untolerated charts (kai-scheduler,
-        # nvsentinel, monitoring) would go Pending. Real clusters either
-        # untaint dedicated system nodes or run those charts on workers.
-        kubectl taint node "$cp_node" node-role.kubernetes.io/control-plane- 2>/dev/null || true
     fi
 
     # Patch kindnet to exclude KWOK nodes
