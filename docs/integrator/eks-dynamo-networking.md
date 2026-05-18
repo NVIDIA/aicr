@@ -17,7 +17,7 @@ one whose ENI is in a security group that cannot reach the Prometheus pod.
 
 When that happens, the dial times out at 5 s and the check is marked `failed`:
 
-```
+```text
 [SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
 ```
 
@@ -45,6 +45,11 @@ clusters with separate customer/system ENI subnets (e.g. DGXC EKS), this means
 the system SG must accept ingress from the customer SG (and any other worker
 SG), not only from itself.
 
+If the cluster has more than two worker security groups (e.g. a separate
+inference node group), repeat the `9090` rule for each non-system SG that can
+host pods — the validator orchestrator has no scheduling preference and may
+land on any of them.
+
 Example:
 
 ```shell
@@ -69,7 +74,3 @@ aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
 aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
   --protocol tcp --port 9090 --source-group <gpu-sg-id>
 ```
-
-If the cluster has more than two worker security groups, repeat the `9090`
-rule for each non-system SG that can host pods — the validator orchestrator
-has no scheduling preference and may land on any of them.

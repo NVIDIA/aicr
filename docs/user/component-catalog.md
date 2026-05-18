@@ -74,14 +74,14 @@ Migration steps when upgrading from a prior AICR-generated bundle to a newer one
 
 Earlier bundles shipped the `dcgm-exporter` ConfigMap as a post-manifest in a separate Helm release named `gpu-operator-post`. The in-cluster ConfigMap therefore carries ownership annotations pointing at that release:
 
-```
+```yaml
 meta.helm.sh/release-name: gpu-operator-post
 meta.helm.sh/release-namespace: gpu-operator
 ```
 
 Newer bundles render the ConfigMap directly from the main `gpu-operator` chart's `dcgmExporter.config.data` values. On upgrade, Helm 3 refuses to claim the existing ConfigMap because its annotations point at a different release:
 
-```
+```text
 Error: ConfigMap "dcgm-exporter" in namespace "gpu-operator" exists and cannot be
 imported into the current release: invalid ownership metadata; annotation
 validation error: key "meta.helm.sh/release-name" must equal "gpu-operator":
@@ -106,7 +106,7 @@ helm uninstall gpu-operator-post --namespace gpu-operator
 argocd app delete gpu-operator-post --cascade
 ```
 
-**Flux** — delete the stale `HelmRelease` so Flux uninstalls the release and removes the ConfigMap, then reconcile the updated `gpu-operator` HelmRelease:
+**Flux** — delete the stale `HelmRelease` so Flux uninstalls the release and removes the ConfigMap, then reconcile the updated `gpu-operator` HelmRelease. The example below assumes the Flux control plane runs in `flux-system`; substitute the namespace where your Flux installation lives:
 
 ```bash
 kubectl delete helmrelease gpu-operator-post --namespace flux-system
