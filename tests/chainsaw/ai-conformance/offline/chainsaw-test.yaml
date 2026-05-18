@@ -21,7 +21,7 @@ spec:
   description: |
     AI-Conformance Inference Stack — Offline Validation.
     Generates the h100-eks-ubuntu-inference-dynamo recipe and bundle,
-    then asserts the recipe has correct criteria, constraints, all 15
+    then asserts the recipe has correct criteria, constraints, all 16
     components, and expected deployment order.
     No cluster needed. Run with:
       AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/ai-conformance/offline
@@ -81,7 +81,7 @@ spec:
               test -f "${WORK}/bundle/deploy.sh"
               test -x "${WORK}/bundle/deploy.sh"
               test -f "${WORK}/bundle/recipe.yaml"
-              # Verify all 15 component directories exist (aws-ebs-csi-driver excluded: disabled by default in EKS overlay)
+              # Verify all 16 component directories exist (aws-ebs-csi-driver excluded: disabled by default in EKS overlay)
               # Helm deployer now produces NNN-<component>/ numbered folders
               # (#662). Mixed components (helm + raw manifests) emit two
               # adjacent folders — the primary plus an injected "-post"
