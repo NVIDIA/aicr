@@ -1071,6 +1071,104 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 	}
 }
 
+func TestWarnMissingStorageClassForPVCs(t *testing.T) {
+	const scPath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName"
+	const pvcSizePath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage"
+
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{Name: "kube-prometheus-stack"}},
+	}
+
+	tests := []struct {
+		name        string
+		cfgOpts     []config.Option
+		setupValues func(map[string]any)
+		wantWarning bool
+	}{
+		{
+			name: "warns when rendered PVC omits storageClassName",
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, pvcSizePath, "50Gi")
+			},
+			wantWarning: true,
+		},
+		{
+			name: "warns when rendered PVC has blank storageClassName",
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, scPath, " ")
+			},
+			wantWarning: true,
+		},
+		{
+			name: "does not warn when rendered PVC has storageClassName",
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, scPath, "gp3")
+			},
+		},
+		{
+			name: "does not warn for emptyDir storage",
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, "prometheus.prometheusSpec.storageSpec.emptyDir.sizeLimit", "10Gi")
+			},
+		},
+		{
+			name:    "warns when explicit blank override wins over global storageClass",
+			cfgOpts: []config.Option{config.WithStorageClass("gp3")},
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, scPath, " ")
+			},
+			wantWarning: true,
+		},
+		{
+			name:    "does not warn when global storageClass was injected",
+			cfgOpts: []config.Option{config.WithStorageClass("gp3")},
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, scPath, "gp3")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New(WithConfig(config.NewConfig(tt.cfgOpts...)))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			values := map[string]any{}
+			tt.setupValues(values)
+
+			err = b.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
+				"kube-prometheus-stack": values,
+			})
+			if err != nil {
+				t.Fatalf("warnMissingStorageClassForPVCs() error = %v", err)
+			}
+
+			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			}
+
+			if tt.wantWarning {
+				warning := b.warnings[0]
+				for _, want := range []string{
+					"Warning: kube-prometheus-stack renders a PVC without storageClassName",
+					scPath,
+					"--storage-class <name>",
+					"--set kube-prometheus-stack:" + scPath + "=<name>",
+				} {
+					if !strings.Contains(warning, want) {
+						t.Errorf("warning = %q, want substring %q", warning, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestCollectComponentManifests(t *testing.T) {
 	bundler, err := New()
 	if err != nil {
