@@ -1190,6 +1190,8 @@ aicr bundle --recipe recipe.yaml \
 
 When `--storage-class` is not set, any `storageClassName` values already defined in the recipe overlays are preserved as defaults. When it is set, `--set <component>:<path>=<value>` on the same path still wins — `--storage-class` only fills in paths that were not explicitly overridden.
 
+If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
+
 #### Deployment Methods
 
 The `--deployer` flag controls how deployment artifacts are generated:
