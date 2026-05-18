@@ -102,6 +102,24 @@ ensure_cluster() {
             helm upgrade --install kwok-stage-fast kwok/stage-fast --namespace kube-system
     fi
 
+    # Pin --system-node-selector aicr.nvidia.com/node-type=system to the real
+    # Kind control-plane node. KWOK fake "system" nodes carry =kwok-system
+    # (set by apply-nodes.sh) so they do NOT match. Without this, charts with
+    # admission webhooks (cert-manager) land on a fake — pods report Ready
+    # without a running container, webhook is unreachable, downstream installs
+    # that submit cert-manager.io/Certificate (slinky-slurm-operator) fail.
+    local cp_node
+    cp_node=$(kubectl get nodes -l '!type' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [[ -n "$cp_node" ]]; then
+        kubectl label node "$cp_node" aicr.nvidia.com/node-type=system --overwrite >/dev/null
+        # Remove control-plane NoSchedule taint. KWOK fakes previously
+        # absorbed system-tier workloads vacuously; now that the real CP
+        # is the only system-labeled node, untolerated charts (kai-scheduler,
+        # nvsentinel, monitoring) would go Pending. Real clusters either
+        # untaint dedicated system nodes or run those charts on workers.
+        kubectl taint node "$cp_node" node-role.kubernetes.io/control-plane- 2>/dev/null || true
+    fi
+
     # Patch kindnet to exclude KWOK nodes
     if kubectl get daemonset -n kube-system kindnet &>/dev/null; then
         kubectl patch daemonset -n kube-system kindnet --type=json -p='[

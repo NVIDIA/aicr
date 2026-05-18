@@ -96,7 +96,7 @@ generate_node() {
     local max_pods="110"
 
     # System nodes get control-plane label for operator controllers
-    if [[ "$node_type" == "system" ]]; then
+    if [[ "$node_type" == "system" || "$node_type" == "kwok-system" ]]; then
         extra_labels="    node-role.kubernetes.io/control-plane: \"\""
     fi
 
@@ -179,11 +179,18 @@ create_nodes() {
     sys_mem=$(yq eval '.spec.resources.memory' "$sys_profile_path")
     sys_storage=$(yq eval '.spec.resources.storage' "$sys_profile_path")
 
+    # KWOK fake "system" nodes get aicr.nvidia.com/node-type=kwok-system
+    # (not =system) so they do NOT match --system-node-selector
+    # aicr.nvidia.com/node-type=system. That selector is owned by the real
+    # Kind control-plane node (labeled by run-all-recipes.sh ensure_cluster).
+    # Reason: workloads that provide admission webhooks (cert-manager) must
+    # land on a real node — KWOK fakes report pods Ready without running a
+    # container, leaving the webhook unreachable.
     log_info "Creating $SYSTEM_NODE_COUNT system nodes ($sys_instance)"
     for ((i = 0; i < SYSTEM_NODE_COUNT; i++)); do
         local zone node_name="system-${i}"
         zone="${DEFAULT_ZONES[$((i % ${#DEFAULT_ZONES[@]}))]}"
-        generate_node "$node_name" "system" "$sys_instance" "$DEFAULT_REGION" "$zone" \
+        generate_node "$node_name" "kwok-system" "$sys_instance" "$DEFAULT_REGION" "$zone" \
             "$DEFAULT_K8S_VERSION" "$sys_cpu" "$sys_mem" "$sys_storage" "$sys_arch" "$sys_os" \
             > "${temp_dir}/${node_name}.yaml"
         log_info "  $node_name ($zone)"
