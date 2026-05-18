@@ -4,7 +4,9 @@
 [![On Tag Release](https://github.com/NVIDIA/aicr/actions/workflows/on-tag.yaml/badge.svg)](https://github.com/NVIDIA/aicr/actions/workflows/on-tag.yaml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-AI Cluster Runtime (AICR) makes it easy to stand up GPU-accelerated Kubernetes clusters. It captures known-good combinations of drivers, operators, kernels, and system configurations and publishes them as version-locked **recipes** — reproducible artifacts for Helm, Argo CD, and other deployment frameworks.
+AI Cluster Runtime (AICR) makes it easy to stand up GPU-accelerated Kubernetes clusters. It captures known-good combinations of drivers, operators, kernels, and system configurations and publishes them as version-locked **recipes** — reproducible artifacts for Helm, Argo CD, Flux, and Helmfile.
+
+> **Full documentation:** [docs.nvidia.com/aicr](https://docs.nvidia.com/aicr)
 
 ## Why We Built This
 
@@ -28,29 +30,22 @@ brew install aicr
 # Or use the install script
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 
-# Capture your cluster's current state
-aicr snapshot --output snapshot.yaml
-
-# Generate a validated recipe for your environment
-aicr recipe --service aks --accelerator h100 --os ubuntu \
+# Generate a recipe for your environment
+aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
-# Query a specific hydrated config value
-aicr query --service aks --accelerator h100 --os ubuntu --intent training \
+# Inspect any hydrated value (e.g., the resolved GPU driver version)
+aicr query --service eks --accelerator h100 --os ubuntu --intent training --platform kubeflow \
   --selector components.gpu-operator.values.driver.version
 
-# Validate the recipe against your cluster
-aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
+# Render it into deployment-ready bundles (helm, argocd, flux, or helmfile)
+aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
-# Render into deployment-ready Helm charts
-aicr bundle --recipe recipe.yaml --output ./bundles
-
-# Validate your cluster (deployment, performance, conformance)
-aicr validate --recipe recipe.yaml --phase all --output report.json
-
+# After deploying the bundle, validate the running cluster against the recipe
+aicr validate --recipe recipe.yaml
 ```
 
-The `bundles/` directory contains per-component Helm charts with values files, checksums, and deployer configs. Deploy with `helm install`, commit to a GitOps repo, or use the built-in Argo CD deployer.
+The contents of the `bundles/` directory depend on the chosen `--deployer`: Helm values and a `deploy.sh` for `helm`, Argo CD `Application` manifests for `argocd`, `HelmRelease` and `Kustomization` manifests for `flux`, or a `helmfile.yaml` release graph for `helmfile`.
 
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
@@ -58,32 +53,46 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 
 | Feature | Description |
 |---------|-------------|
-| **`aicr` CLI** | Single binary. Generate recipes, create bundles, capture snapshots, validate configs. |
-| **API Server (`aicrd`)** | REST API with the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
-| **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, OS, operators) into a ConfigMap for validation against recipes. |
-| **Supply Chain Security** | SLSA Level 3 provenance, signed SBOMs, image attestations (cosign), and checksum verification on every release. |
+| **`aicr` CLI** | Single binary for the full workflow: snapshot, recipe, bundle, validate, verify, diff, and trust management. |
+| **API Server (`aicrd`)** | REST API exposing the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
+| **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, kernel, OS, operators, K8s config) into a ConfigMap for validation against recipes. |
+| **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD, Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
+| **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
+| **Drift Detection** | `aicr diff` compares two snapshots to surface configuration drift between clusters or over time. |
+| **Supply Chain Security** | SLSA Level 3 provenance, signed SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
 
 ## Supported Components
 
-| Dimension | This Release |
-|-----------|-------------|
-| **Kubernetes** | Amazon EKS, Azure AKS (1.34+), GKE, self-managed (Kind) |
-| **GPUs** | NVIDIA H100, GB200 |
-| **OS** | Ubuntu |
-| **Workloads** | Training (Kubeflow), Inference (Dynamo) |
-| **Components** | GPU Operator, Network Operator, cert-manager, Prometheus stack, etc. |
+AICR recipes compose components from the following groups:
 
-See the full [Component Catalog](docs/user/component-catalog.md) for every component that can appear in a recipe. Don't see what you need? [Open an issue](https://github.com/NVIDIA/aicr/issues) — that feedback directly shapes what gets validated next.
+| Group | Examples |
+|-------|----------|
+| **GPU stack** | GPU Operator, DRA GPU Driver, Network Operator, NFD, NVSentinel |
+| **Cloud integration** | AWS EFA, AWS EBS CSI, GKE NCCL TCPxO |
+| **Node tuning** | Nodewright Operator and customizations, cert-manager |
+| **Observability** | kube-prometheus-stack, Prometheus Operator CRDs, Prometheus Adapter, ephemeral-storage metrics |
+| **Training platforms** | Kubeflow Trainer, Slinky Slurm Operator, KAI Scheduler, Kueue |
+| **Inference platforms** | Dynamo, Grove, NIM Operator, Agent Gateway |
+
+See the full [Component Catalog](docs/user/component-catalog.md) for every component, pinned version, and source. Don't see what you need? [Open an issue](https://github.com/NVIDIA/aicr/issues) — feedback helps inform future validation priorities.
+
+### Supported Environments
+
+| Dimension | Values |
+|-----------|--------|
+| **Services** | EKS, AKS, GKE, OKE, LKE, Kind |
+| **Accelerators** | H100, GB200, B200, RTX PRO 6000 |
+| **Operating systems** | Ubuntu, Talos, COS |
+| **Workload intents** | Training, Inference |
+| **Platforms** | Kubeflow, Slurm (Slinky), Dynamo, NIM |
 
 ## How It Works
 
-![AICR end-to-end workflow](docs/images/aicr-end-to-end.png)
+A **recipe** is a version-locked configuration for a specific environment. You describe your target (cloud, GPU, OS, workload intent, optional platform), and the recipe engine matches it against a library of validated **overlays** — layered configurations that compose bottom-up from base defaults through cloud, accelerator, OS, and workload-specific tuning. Composable **mixins** carry shared fragments (OS constraints, platform components) so a leaf overlay only declares what is unique to it.
 
-A **recipe** is a version-locked configuration for a specific environment. You describe your target (cloud, GPU, OS, workload intent), and the recipe engine matches it against a library of validated **overlays** — layered configurations that compose bottom-up from base defaults through cloud, accelerator, OS, and workload-specific tuning.
+The **bundler** materializes a recipe into deployment-ready artifacts: one folder per component, each with Helm values, checksums, and a README. The **validator** compares a recipe against a live cluster snapshot — first checking declarative constraints, then optionally running deployment, performance, and conformance phases inside the cluster.
 
-The **bundler** materializes a recipe into deployment-ready artifacts: one folder per component, each with Helm values, checksums, and a README. The **validator** compares a recipe against a live cluster snapshot and flags anything out of spec.
-
-This separation means the same validated configuration works whether you deploy with Helm, Argo CD, Flux, or a custom pipeline.
+This separation means the same validated configuration works whether you deploy with Helm, Argo CD, Flux, Helmfile, or a custom pipeline.
 
 ## What AI Cluster Runtime Is Not
 
@@ -91,41 +100,28 @@ This separation means the same validated configuration works whether you deploy 
 - Not a cluster provisioner or lifecycle management system
 - Not a managed control plane or hosted service
 - Not a replacement for your cloud provider or OEM platform
+- Not a generic configuration management platform
 
-You bring your cluster and your tools. AI Cluster Runtime tells you what should be installed and how it should be configured.
+At its core, AICR is a cluster configuration generator. You bring your GPU-accelerated Kubernetes cluster and your deployment tooling; AICR generates the runtime configuration artifacts your tools deploy to the cluster. AICR can also validate that the configuration was correctly materialized and that it delivers the expected performance characteristics.
 
 ## Documentation
 
-<details>
-<summary><strong>User</strong> — Platform and Infrastructure Operators</summary>
+Full documentation lives at **[docs.nvidia.com/aicr](https://docs.nvidia.com/aicr)**. Key entry points:
 
-- **[Installation Guide](docs/user/installation.md)** — Install the `aicr` CLI (automated script, manual, or build from source)
-- **[CLI Reference](docs/user/cli-reference.md)** — Complete command reference with examples
-- **[API Reference](docs/user/api-reference.md)** — REST API quick start
-- **[Agent Deployment](docs/user/agent-deployment.md)** — Deploy the Kubernetes agent for automated snapshots
+- **[Installation](docs/user/installation.md)** — Install the `aicr` CLI (script, manual, or build from source)
+- **[CLI Reference](docs/user/cli-reference.md)** — Every command, flag, and example
+- **[API Reference](docs/user/api-reference.md)** — REST API endpoints for `aicrd`
+- **[Agent Deployment](docs/user/agent-deployment.md)** — Run the snapshot agent in your cluster
+- **[Validation](docs/user/validation.md)** — Deployment, performance, and conformance phases
 - **[Component Catalog](docs/user/component-catalog.md)** — Every component that can appear in a recipe
-</details>
+- **[Recipe Development](docs/integrator/recipe-development.md)** — Add or modify recipe metadata
+- **[Automation Guide](docs/integrator/automation.md)** — CI/CD integration patterns
 
-<details>
-<summary><strong>Contributor</strong> — Developers and Maintainers</summary>
+For contributors:
 
 - **[Contributing Guide](CONTRIBUTING.md)** — Development setup, testing, and PR process
 - **[Development Guide](DEVELOPMENT.md)** — Local development, Make targets, and tooling
-- **[Architecture Overview](docs/contributor/index.md)** — System design and components
-- **[Bundler Development](docs/contributor/component.md)** — How to create new bundlers
-- **[Data Architecture](docs/contributor/data.md)** — Recipe data model and query matching
-- **[Agent Instructions](AGENTS.md)** — Coding-agent guidance for Codex/Copilot
-</details>
-
-<details>
-<summary><strong>Integrator</strong> — Automation and Platform Engineers</summary>
-
-- **[API Reference](docs/user/api-reference.md)** — REST API endpoints and usage examples
-- **[Data Flow](docs/integrator/data-flow.md)** — Understanding snapshots, recipes, and bundles
-- **[Automation Guide](docs/integrator/automation.md)** — CI/CD integration patterns
-- **[Kubernetes Deployment](docs/integrator/kubernetes-deployment.md)** — Self-hosted API server setup
-- **[Recipe Development](docs/integrator/recipe-development.md)** — Adding and modifying recipe metadata
-</details>
+- **[Architecture Overview](docs/contributor/index.md)** — System design and packages
 
 ## Resources
 
@@ -133,11 +129,8 @@ You bring your cluster and your tools. AI Cluster Runtime tells you what should 
 - **[Security](SECURITY.md)** — Supply chain security, vulnerability reporting, and verification
 - **[Releases](https://github.com/NVIDIA/aicr/releases)** — Binaries, SBOMs, and attestations
 - **[Issues](https://github.com/NVIDIA/aicr/issues)** — Bugs, feature requests, and questions
+- **Slack** — Join [Kubernetes Slack](https://kubernetes.slack.com) and visit the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel
 
 ## Contributing
 
-AI Cluster Runtime is Apache 2.0. Contributions are welcome: new recipes for environments we haven't covered (OpenShift, AKS, bare metal), additional bundler formats, validation checks, or bug reports. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the PR process.
-
-## Slack
-
-Join [Kubernetes](https://kubernetes.slack.com) and visit the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel on Slack.
+AI Cluster Runtime is Apache 2.0. Contributions are welcome: new recipes for environments we haven't covered, additional bundler formats, validation checks, or bug reports. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the PR process.
