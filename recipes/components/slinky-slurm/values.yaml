@@ -77,17 +77,11 @@ controller:
   # bare YAML 1.1 scalars (e.g. `no`) would coerce to boolean false.
   # Accounting-only directives belong in the accounting opt-in valuesFile.
   extraConfMap:
-    PriorityType: "priority/multifactor"
-    PriorityWeightAge: "2000"
-    PriorityWeightFairShare: "10000"
-    PriorityWeightJobSize: "1000"
-    PriorityWeightPartition: "1000"
-    PriorityWeightQOS: "10000"
-    PriorityMaxAge: "7-0"
-    PriorityDecayHalfLife: "7-0"
-    PriorityFlags: "NO_NORMAL_ALL"
+    # select/cons_tres is required for GPU GRES to allocate per-resource
+    # rather than whole-node (Slurm's select/linear default). All other
+    # site-policy directives (priority weights, fairshare, QoS) are
+    # deliberately omitted — sites should add them in a leaf valuesFile.
     SelectType: "select/cons_tres"
-    EnforcePartLimits: "no"
     ScronParameters: "enable"
   # /metrics endpoint on; ServiceMonitor stays at chart default (off)
   # so the chart doesn't render a prometheus-operator CR on clusters
