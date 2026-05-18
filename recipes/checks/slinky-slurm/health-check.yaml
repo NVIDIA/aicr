@@ -112,9 +112,10 @@ spec:
                 (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
       try:
-        # Catch Pending / Failed / Unknown phases. The preceding
-        # workload asserts fail loudly if the workloads are missing,
-        # so chainsaw `error` here is not asked to detect that case.
+        # Catch Pending / Failed / Unknown phases. Chainsaw `error` passes
+        # vacuously when no resource matches, so the preceding workload-
+        # readiness asserts (StatefulSet / Deployments / NodeSet) are
+        # load-bearing: they guarantee the pods exist before this step runs.
         - error:
             resource:
               apiVersion: v1
