@@ -18,6 +18,9 @@
 # trailing `-slinky` comes from the chart's default map-key for
 # loginsets/nodesets. Other deployers using a different release name
 # need a parameterized variant of this check.
+# TODO: parameterize CR/workload names once chainsaw supports name-pattern
+# matching (currently hardcoded; flux/argocd deployers will rewrite release
+# names and silently break these asserts).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
