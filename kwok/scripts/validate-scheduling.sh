@@ -359,6 +359,13 @@ generate_bundle() {
     # Disable features not needed for scheduling validation:
     # - PrometheusRules and AlertManager (slow to create)
     # - Nodewright customization (creates CRs that depend on operator CRDs)
+    # - slinky-slurm-operator webhook + cert-manager wiring: the operator's
+    #   webhook validates Slurm CRs through a Service whose pod runs on a
+    #   KWOK fake (Ready without container). Both certManager.enabled and
+    #   webhook.enabled gate the cert-manager.io/Certificate submission
+    #   plus the ValidatingWebhookConfiguration. Disabling them skips
+    #   admission entirely; harmless under KWOK since no real Slurm CRs
+    #   are reconciled.
     log_info "Generating bundle..."
 
     local bundle_output
@@ -371,6 +378,8 @@ generate_bundle() {
         --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
         --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
         --set "certmanager:startupapicheck.enabled=false" \
+        --set "slinkyslurmoperator:webhook.enabled=false" \
+        --set "slinkyslurmoperator:certManager.enabled=false" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
         --set "nodewright-customizations:enabled=false" \
