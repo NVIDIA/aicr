@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **25**
-- Unique images: **71**
+- Components: **26**
+- Unique images: **76**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -52,6 +52,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | nvsentinel | helm | nvsentinel | v1.3.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
+| slinky-slurm | helm | slurm | 1.1.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.1.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.1.0 | 0 |
 
@@ -196,6 +197,14 @@ _No images extracted._
 ### prometheus-operator-crds
 
 _No images extracted._
+
+### slinky-slurm
+
+- `docker.io/library/alpine:3.23.3`
+- `ghcr.io/slinkyproject/login:25.11-ubuntu24.04`
+- `ghcr.io/slinkyproject/slurmctld:25.11-ubuntu24.04`
+- `ghcr.io/slinkyproject/slurmd:25.11-ubuntu24.04`
+- `ghcr.io/slinkyproject/slurmrestd:25.11-ubuntu24.04`
 
 ### slinky-slurm-operator
 

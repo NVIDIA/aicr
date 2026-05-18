@@ -311,21 +311,30 @@ generate_bundle() {
         exit 1
     fi
 
-    # Extract criteria from overlay
-    local service accelerator intent os
+    # Without --platform, *-slurm overlays resolve to their non-platform
+    # parent and the bundle omits the slinky-slurm operator/cluster.
+    # Scoped to slurm: kubeflow/dynamo are not yet validated under KWOK.
+    local service accelerator intent os platform
     service=$(yq eval '.spec.criteria.service // ""' "$recipe_overlay")
     accelerator=$(yq eval '.spec.criteria.accelerator // ""' "$recipe_overlay")
     intent=$(yq eval '.spec.criteria.intent // ""' "$recipe_overlay")
     os=$(yq eval '.spec.criteria.os // ""' "$recipe_overlay")
+    platform=$(yq eval '.spec.criteria.platform // ""' "$recipe_overlay")
 
-    log_info "Criteria: service=$service accelerator=$accelerator intent=$intent os=$os"
+    log_info "Criteria: service=$service accelerator=$accelerator intent=$intent os=$os platform=$platform"
 
-    # Build recipe command with available criteria
     local recipe_args=()
     [[ -n "$service" ]] && recipe_args+=(--service "$service")
     [[ -n "$accelerator" ]] && recipe_args+=(--accelerator "$accelerator")
     [[ -n "$intent" ]] && recipe_args+=(--intent "$intent")
     [[ -n "$os" ]] && recipe_args+=(--os "$os")
+    # Only forward --platform for platforms validated under KWOK. Other
+    # platforms (kubeflow, dynamo, nim) historically resolve to their
+    # non-platform parent here; preserve that behavior to avoid regressing
+    # existing matrix lanes. Extend as additional platforms are validated.
+    if [[ "$platform" == "slurm" ]]; then
+        recipe_args+=(--platform "$platform")
+    fi
 
     # Generate resolved recipe from criteria
     log_info "Generating resolved recipe..."

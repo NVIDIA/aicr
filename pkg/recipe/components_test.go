@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -207,6 +208,78 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	sysSelectors := gpuOp.GetSystemNodeSelectorPaths()
 	if !slices.Contains(sysSelectors, "operator.nodeSelector") {
 		t.Error("gpu-operator should have 'operator.nodeSelector' in system node selector paths")
+	}
+}
+
+// Pins the `slinky` map-key choice for slinky-slurm on both sides:
+// the registry's nodeScheduling paths AND components/slinky-slurm/
+// values.yaml must reference the same key, or injected tolerations
+// land on a non-existent map entry.
+func TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	slurmCluster := registry.Get("slinky-slurm")
+	if slurmCluster == nil {
+		t.Fatal("slinky-slurm not found in registry")
+	}
+
+	wantSysToleration := []string{
+		"controller.podSpec.tolerations",
+		"restapi.podSpec.tolerations",
+		"loginsets.slinky.podSpec.tolerations",
+	}
+	gotSysToleration := slurmCluster.GetSystemTolerationPaths()
+	for _, p := range wantSysToleration {
+		if !slices.Contains(gotSysToleration, p) {
+			t.Errorf("slinky-slurm system toleration paths missing %q (got %v)", p, gotSysToleration)
+		}
+	}
+
+	wantSysSelector := []string{
+		"controller.podSpec.nodeSelector",
+		"restapi.podSpec.nodeSelector",
+		"loginsets.slinky.podSpec.nodeSelector",
+	}
+	gotSysSelector := slurmCluster.GetSystemNodeSelectorPaths()
+	for _, p := range wantSysSelector {
+		if !slices.Contains(gotSysSelector, p) {
+			t.Errorf("slinky-slurm system node selector paths missing %q (got %v)", p, gotSysSelector)
+		}
+	}
+
+	gotAccelSelector := slurmCluster.GetAcceleratedNodeSelectorPaths()
+	if !slices.Contains(gotAccelSelector, "nodesets.slinky.podSpec.nodeSelector") {
+		t.Errorf("slinky-slurm accelerated node selector paths missing %q (got %v)",
+			"nodesets.slinky.podSpec.nodeSelector", gotAccelSelector)
+	}
+	gotAccelToleration := slurmCluster.GetAcceleratedTolerationPaths()
+	if !slices.Contains(gotAccelToleration, "nodesets.slinky.podSpec.tolerations") {
+		t.Errorf("slinky-slurm accelerated toleration paths missing %q (got %v)",
+			"nodesets.slinky.podSpec.tolerations", gotAccelToleration)
+	}
+
+	const valuesPath = "components/slinky-slurm/values.yaml"
+	content, err := GetEmbeddedFS().ReadFile(valuesPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", valuesPath, err)
+	}
+	var values struct {
+		Nodesets  map[string]any `yaml:"nodesets"`
+		Loginsets map[string]any `yaml:"loginsets"`
+	}
+	if err := yaml.Unmarshal(content, &values); err != nil {
+		t.Fatalf("failed to parse %s: %v", valuesPath, err)
+	}
+	if _, ok := values.Nodesets["slinky"]; !ok {
+		t.Errorf("%s must define nodesets.slinky to match the registry's "+
+			"nodeScheduling paths (got nodesets keys: %v)", valuesPath, slices.Sorted(maps.Keys(values.Nodesets)))
+	}
+	if _, ok := values.Loginsets["slinky"]; !ok {
+		t.Errorf("%s must define loginsets.slinky to match the registry's "+
+			"nodeScheduling paths (got loginsets keys: %v)", valuesPath, slices.Sorted(maps.Keys(values.Loginsets)))
 	}
 }
 
