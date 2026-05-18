@@ -148,12 +148,17 @@ loginsets:
       PermitEmptyPasswords no
       ChallengeResponseAuthentication no
 
-# Only one partition can be Default=YES in slurm.conf; an override
-# valuesFile adding another Default=YES partition makes slurmctld fail
-# to start. Note slurmd does NOT auto-register its pod resource limits
-# (known upstream issue); for GPU clusters set explicit Gres/Features
-# via `nodesets.slinky.extraConfMap` and the matching nvidia.com/gpu
-# limit on `nodesets.slinky.slurmd.resources.limits`.
+# Single-tenant policy: one Default=YES partition only — slurmctld
+# refuses to start if an override valuesFile adds a second one.
+# Multi-tenant deployers should disable this partition and define
+# their own (e.g. per-team Default=NO + AllowGroups).
+#
+# The chart does NOT inject CPUs=/RealMemory=/Gres= into slurmd's
+# --conf line from pod resource limits — it only plumbs POD_CPUS /
+# POD_MEMORY env vars and lets the image entrypoint act on them. For
+# GPU clusters, declare Gres/Features explicitly via
+# `nodesets.slinky.extraConfMap` and pair with the matching
+# nvidia.com/gpu limit on `nodesets.slinky.slurmd.resources.limits`.
 nodesets:
   slinky:
     enabled: true
@@ -169,7 +174,10 @@ nodesets:
       configMap:
         State: UP
         Default: "YES"
-        MaxTime: UNLIMITED
+        # Cap default walltime at 24h. UNLIMITED is unsafe as a default:
+        # a single stuck job can hold GPUs indefinitely with no operator
+        # recourse short of scancel. Override per-leaf if needed.
+        MaxTime: "24:00:00"
 
 vendor:
   nvidia:
