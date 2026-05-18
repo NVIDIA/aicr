@@ -34,6 +34,10 @@ curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -
 aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
+# Inspect any hydrated value (e.g., the resolved GPU driver version)
+aicr query --service eks --accelerator h100 --os ubuntu --intent training --platform kubeflow \
+  --selector components.gpu-operator.values.driver.version
+
 # Render it into deployment-ready bundles (helm, argocd, flux, or helmfile)
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
@@ -70,7 +74,7 @@ AICR recipes compose components from the following groups:
 | **Training platforms** | Kubeflow Trainer, Slinky Slurm Operator, KAI Scheduler, Kueue |
 | **Inference platforms** | Dynamo, Grove, NIM Operator, Agent Gateway |
 
-See the full [Component Catalog](docs/user/component-catalog.md) for every component, pinned version, and source. Don't see what you need? [Open an issue](https://github.com/NVIDIA/aicr/issues) — that feedback directly shapes what gets validated next.
+See the full [Component Catalog](docs/user/component-catalog.md) for every component, pinned version, and source. Don't see what you need? [Open an issue](https://github.com/NVIDIA/aicr/issues) — feedback helps inform future validation priorities.
 
 ### Supported Environments
 
