@@ -69,8 +69,14 @@ spec:
               # the ConfigMap at install time.
               VALUES=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null | head -1)
               [ -n "${VALUES}" ] || { echo "values.yaml not found in any *-gpu-operator/" >&2; exit 1; }
-              grep -q 'name: dcgm-exporter' "${VALUES}" || { echo "FAIL: dcgmExporter.config.name not set to dcgm-exporter" >&2; cat "${VALUES}" >&2; exit 1; }
-              grep -q 'DCGM_FI_DEV_GPU_TEMP' "${VALUES}" || { echo "FAIL: dcgmExporter.config.data missing custom metrics" >&2; exit 1; }
+              # Scope assertions to dcgmExporter.config so unrelated keys
+              # (env vars, label values, sibling sections) cannot satisfy them.
+              yq e -e '.dcgmExporter.config.create == true' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.create not true" >&2; cat "${VALUES}" >&2; exit 1; }
+              yq e -e '.dcgmExporter.config.name == "dcgm-exporter"' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.name not set to dcgm-exporter" >&2; cat "${VALUES}" >&2; exit 1; }
+              yq e -e '.dcgmExporter.config.data | test("DCGM_FI_DEV_GPU_TEMP")' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.data missing custom metrics" >&2; exit 1; }
               # Defense in depth: no post-manifest should be emitted for dcgm-exporter.
               if ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml >/dev/null 2>&1; then
                 echo "FAIL: stray dcgm-exporter post-manifest found" >&2
@@ -103,7 +109,10 @@ spec:
               # create=false, the chart skips the ConfigMap at install time.
               VALUES=$(ls "${WORK}"/bundle-dcgm-disabled/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null | head -1)
               [ -n "${VALUES}" ] || { echo "values.yaml not found in any *-gpu-operator/" >&2; exit 1; }
-              grep -Eq '^\s*create:\s*false\s*$' "${VALUES}" || { echo "FAIL: dcgmExporter.config.create not set to false" >&2; cat "${VALUES}" >&2; exit 1; }
+              # Anchor to dcgmExporter.config.create — a stray `create: false`
+              # at another path must not satisfy this check.
+              yq e -e '.dcgmExporter.config.create == false' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.create not set to false" >&2; cat "${VALUES}" >&2; exit 1; }
               if ls "${WORK}"/bundle-dcgm-disabled/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml >/dev/null 2>&1; then
                 echo "FAIL: stray dcgm-exporter post-manifest found" >&2
                 exit 1
