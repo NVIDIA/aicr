@@ -366,6 +366,12 @@ generate_bundle() {
     #   plus the ValidatingWebhookConfiguration. Disabling them skips
     #   admission entirely; harmless under KWOK since no real Slurm CRs
     #   are reconciled.
+    # - slinky-slurm controller persistence: the chart provisions a PVC
+    #   via the cluster's default StorageClass. Kind's local-path provisioner
+    #   binds with WaitForFirstConsumer, so the PVC is pinned to whichever
+    #   node the pod schedules on — and KWOK fakes can't actually back a
+    #   local-path volume, leaving the pod stuck Pending with NominatedNodeName
+    #   set. Disabling persistence lets the controller pod bind.
     log_info "Generating bundle..."
 
     local bundle_output
@@ -380,6 +386,7 @@ generate_bundle() {
         --set "certmanager:startupapicheck.enabled=false" \
         --set "slinkyslurmoperator:webhook.enabled=false" \
         --set "slinkyslurmoperator:certManager.enabled=false" \
+        --set "slurmcluster:controller.persistence.enabled=false" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
         --set "nodewright-customizations:enabled=false" \
@@ -448,26 +455,6 @@ deploy_bundle() {
     # Brief wait for scheduler to place pods
     log_info "Waiting for pods to be scheduled..."
     sleep 5
-
-    # slurm-operator reconciles the Controller CR into a StatefulSet AFTER
-    # Helm install completes, so the controller pod appears later than the
-    # 5s window above. Poll up to 60s for spec.nodeName on the controller
-    # pod (presence implies the operator reconciled and the scheduler ran).
-    if kubectl get crd controllers.slinky.slurm.net &>/dev/null; then
-        local waited=0
-        while ((waited < 60)); do
-            local scheduled
-            scheduled=$(kubectl get pods --all-namespaces \
-                -l app.kubernetes.io/name=slurmctld \
-                -o jsonpath='{.items[*].spec.nodeName}' 2>/dev/null || true)
-            if [[ -n "$scheduled" ]]; then
-                log_info "slurm controller scheduled after ${waited}s"
-                break
-            fi
-            sleep 5
-            waited=$((waited + 5))
-        done
-    fi
 
     log_info "Bundle deployed successfully"
 }
