@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -248,11 +249,11 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 
 	slog.Info("Using inference endpoint", "endpoint", endpoint, "concurrency", config.concurrency)
 
-	// Wait for the endpoint to be healthy. Callee returns ErrCodeTimeout on
-	// deadline exhaustion, ErrCodeInternal on request-construction errors;
-	// both classifications are lost if we rewrap here.
-	if healthErr := waitForEndpointHealth(ctx.Ctx, endpoint); healthErr != nil {
-		return nil, healthErr
+	// Wait for the endpoint to be ready to serve requests. Callee returns
+	// ErrCodeTimeout on deadline exhaustion, ErrCodeInternal on
+	// request-construction errors; both classifications are lost if we rewrap.
+	if readyErr := waitForEndpointReady(ctx.Ctx, endpoint, inferenceModel); readyErr != nil {
+		return nil, readyErr
 	}
 
 	// Run AIPerf benchmark. On failure, surface the captured pod logs so the
@@ -1012,38 +1013,76 @@ func inferServicePort(svc v1.Service) int32 {
 	return 8000
 }
 
-// waitForEndpointHealth polls the inference endpoint health check until it returns 200.
-func waitForEndpointHealth(ctx context.Context, endpoint string) error {
-	healthURL := endpoint + "/health"
-	slog.Info("Waiting for inference endpoint health", "url", healthURL)
+// waitForEndpointReady polls the inference endpoint with a real chat-completion
+// request until it produces a non-empty completion. This is stricter than a
+// /health probe: Dynamo's frontend returns 200 from /health as soon as the HTTP
+// server is up — before backend workers have registered or the model has
+// finished loading. Hitting that window with AIPerf produces an "all requests
+// completed, zero tokens" result that masquerades as a benchmark failure. A
+// real inference probe is the only signal that's both necessary and sufficient
+// for the endpoint to serve a benchmark workload.
+func waitForEndpointReady(ctx context.Context, endpoint, model string) error {
+	return waitForEndpointReadyWithInterval(ctx, endpoint, model, defaults.InferenceHealthPollInterval)
+}
+
+// waitForEndpointReadyWithInterval is the testable seam: production callers go
+// through waitForEndpointReady (10 s poll); tests pass a tighter interval so
+// the success / timeout paths run in milliseconds.
+func waitForEndpointReadyWithInterval(ctx context.Context, endpoint, model string, pollInterval time.Duration) error {
+	chatURL := endpoint + "/v1/chat/completions"
+	slog.Info("Waiting for inference endpoint to serve requests", "url", chatURL, "model", model)
 
 	client := &http.Client{Timeout: defaults.HTTPClientTimeout}
 
 	pollCtx, cancel := context.WithTimeout(ctx, defaults.InferenceHealthTimeout)
 	defer cancel()
 
-	for {
-		req, err := http.NewRequestWithContext(pollCtx, http.MethodGet, healthURL, nil)
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to create health request", err)
-		}
+	bodyTmpl := `{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":4}`
+	body := fmt.Sprintf(bodyTmpl, model)
 
-		resp, err := client.Do(req) //nolint:gosec // G704 -- URL constructed from in-cluster K8s service discovery
+	for {
+		req, err := http.NewRequestWithContext(pollCtx, http.MethodPost, chatURL, strings.NewReader(body))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to create inference probe request", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req) //nolint:gosec // G107 -- URL constructed from in-cluster K8s service discovery
 		if err == nil {
+			respBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, defaults.InferenceProbeBodyLimit+1))
 			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				slog.Info("Inference endpoint is healthy")
-				return nil
+			switch {
+			case readErr != nil:
+				slog.Debug("Inference probe read failed", "error", readErr)
+			case int64(len(respBytes)) > defaults.InferenceProbeBodyLimit:
+				slog.Debug("Inference probe response exceeded limit", "limit", defaults.InferenceProbeBodyLimit)
+			case resp.StatusCode != http.StatusOK:
+				slog.Debug("Inference probe non-200", "status", resp.StatusCode)
+			default:
+				var probe struct {
+					Choices []struct {
+						Message struct {
+							Content string `json:"content"`
+						} `json:"message"`
+					} `json:"choices"`
+				}
+				ok := json.Unmarshal(respBytes, &probe) == nil &&
+					len(probe.Choices) > 0 &&
+					probe.Choices[0].Message.Content != ""
+				if ok {
+					slog.Info("Inference endpoint is serving requests")
+					return nil
+				}
+				slog.Debug("Inference probe response missing completion content")
 			}
-			slog.Debug("Health check returned non-200", "status", resp.StatusCode)
 		} else {
-			slog.Debug("Health check failed", "error", err)
+			slog.Debug("Inference probe request failed", "error", err)
 		}
 
 		select {
 		case <-pollCtx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "timed out waiting for inference endpoint health", pollCtx.Err())
-		case <-time.After(defaults.InferenceHealthPollInterval):
+			return errors.Wrap(errors.ErrCodeTimeout, "timed out waiting for inference endpoint to serve requests", pollCtx.Err())
+		case <-time.After(pollInterval):
 		}
 	}
 }

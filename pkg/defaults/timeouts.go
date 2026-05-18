@@ -315,10 +315,14 @@ const (
 // Inference performance validation timeouts.
 const (
 	// InferenceHealthTimeout is the maximum time to wait for the inference
-	// endpoint to become healthy before running the benchmark.
+	// endpoint to start serving real requests before running the benchmark.
+	// Readiness is determined by a real /v1/chat/completions probe — a /health
+	// 200 is insufficient because the frontend serves /health before backend
+	// workers register.
 	InferenceHealthTimeout = 5 * time.Minute
 
-	// InferenceHealthPollInterval is the polling interval for health checks.
+	// InferenceHealthPollInterval is the polling interval for the readiness
+	// probe described on InferenceHealthTimeout.
 	InferenceHealthPollInterval = 10 * time.Second
 
 	// InferencePerfJobTimeout is the maximum time for the AIPerf benchmark Job
@@ -390,6 +394,14 @@ const (
 	// MaxErrorBodySize is the maximum size in bytes for HTTP error response bodies.
 	// Bounds io.ReadAll on error paths to prevent unbounded memory allocation.
 	MaxErrorBodySize = 4096
+
+	// InferenceProbeBodyLimit caps the response read by the inference-perf
+	// readiness probe (POST /v1/chat/completions before launching AIPerf).
+	// A successful probe with max_tokens=4 is well under 1 KiB; the cap is
+	// generous enough for any reasonable OpenAI-compatible frontend yet small
+	// enough that a runaway/streaming frontend can't blow memory before the
+	// probe gives up.
+	InferenceProbeBodyLimit = 8 * 1024 // 8 KiB
 )
 
 // Job configuration constants.
