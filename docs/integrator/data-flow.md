@@ -675,12 +675,12 @@ bundle-output/
 │   └── README.md          # Component install/upgrade/uninstall
 ├── gpu-operator/
 │   ├── values.yaml        # Component Helm values
-│   ├── README.md          # Component install/upgrade/uninstall
-│   └── manifests/         # Optional manifest files
-│       └── kernel-module-params.yaml
-└── network-operator/
+│   └── README.md          # Component install/upgrade/uninstall
+└── nodewright-customizations/
     ├── values.yaml
-    └── README.md
+    ├── README.md
+    └── manifests/         # Optional manifest files
+        └── tuning.yaml
 ```
 
 **Argo CD Deployer**:

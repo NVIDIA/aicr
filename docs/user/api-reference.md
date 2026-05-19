@@ -437,15 +437,15 @@ curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-oper
 bundles.zip
 ├── gpu-operator/
 │   ├── values.yaml              # Helm chart values
-│   ├── manifests/
-│   │   ├── clusterpolicy.yaml      # ClusterPolicy CR
-│   │   └── kernel-module-params.yaml  # GB200 kernel module params
 │   ├── scripts/
 │   │   ├── install.sh           # Installation script
 │   │   └── uninstall.sh         # Cleanup script
 │   ├── README.md                # Deployment instructions
 │   └── checksums.txt            # SHA256 checksums
-└── network-operator/
+└── nodewright-customizations/
+    ├── values.yaml
+    ├── manifests/
+    │   └── tuning.yaml          # Skyhook CR for GPU-node OS tuning
     └── ...
 ```
 

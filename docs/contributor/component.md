@@ -96,21 +96,29 @@ For components that need additional Kubernetes manifests (beyond the Helm chart)
 
 **Step 1: Create manifest file**
 
-Create `recipes/components/gpu-operator/manifests/kernel-module-params.yaml`:
+Create the manifest under `recipes/components/<name>/manifests/`. The bundler
+renders each manifest as a Helm template, so files can use the same
+`{{ index .Values "<component>" }}` lookup the component's `values.yaml`
+exposes. Abbreviated skeleton (the in-tree
+`recipes/components/nodewright-customizations/manifests/tuning.yaml` is the
+complete real-world example):
 
 ```yaml
-# Kernel module params ConfigMap (consumed by gpu-operator NvidiaDriver)
-{{- $gpuOp := index .Values "gpu-operator" }}
-{{- if and $gpuOp $gpuOp.driver $gpuOp.driver.kernelModuleConfig $gpuOp.driver.kernelModuleConfig.name }}
+# Nodewright EKS Ubuntu GPU customization (Skyhook CR)
+{{- $cust := index .Values "nodewright-customizations" }}
+{{- if ne (toString (index $cust "enabled")) "false" }}
 ---
-apiVersion: v1
-kind: ConfigMap
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
 metadata:
-  name: {{ $gpuOp.driver.kernelModuleConfig.name | default "kernel-module-params" }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+  name: tuning
   namespace: {{ .Release.Namespace }}
-data:
-  nvidia.conf: |
-    options nvidia NVreg_GrdmaPciTopoCheckOverride=1
+spec:
+  runtimeRequired: true
+  # ...spec elided; see tuning.yaml in-tree for the full example.
 {{- end }}
 ```
 
@@ -120,11 +128,10 @@ Add the manifest to the component's `manifestFiles` in the recipe:
 
 ```yaml
 componentRefs:
-  - name: gpu-operator
+  - name: nodewright-customizations
     type: Helm
-    version: v25.3.3
     manifestFiles:
-      - components/gpu-operator/manifests/kernel-module-params.yaml
+      - components/nodewright-customizations/manifests/tuning.yaml
 ```
 
 The bundler automatically includes manifest files in the component's `manifests/` directory.

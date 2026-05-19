@@ -493,7 +493,7 @@ func TestGetValuesForComponent_BuilderIntegration(t *testing.T) {
 
 func TestGetManifestContent(t *testing.T) {
 	t.Run("existing manifest", func(t *testing.T) {
-		content, err := GetManifestContent("components/gpu-operator/manifests/kernel-module-params.yaml")
+		content, err := GetManifestContent("components/nodewright-customizations/manifests/tuning.yaml")
 		if err != nil {
 			t.Fatalf("GetManifestContent() error = %v", err)
 		}

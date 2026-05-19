@@ -92,11 +92,6 @@ components produce an ErrCodeInvalidRequest error at generation time.
 	│       └── gke-critical-pods-quota.yaml  # e.g. synthesized GKE ResourceQuota (issue #915)
 	├── gpu-operator/
 	│   └── helmrelease.yaml            # HelmRelease (HelmRepository source); dependsOn gpu-operator-pre
-	├── gpu-operator-post/
-	│   ├── Chart.yaml                  # Local Helm chart for manifest templates
-	│   ├── helmrelease.yaml            # HelmRelease (GitRepository source); dependsOn gpu-operator
-	│   └── templates/
-	│       └── dcgm-exporter.yaml      # Manifest template rendered by Helm controller
 	└── nodewright-customizations/
 	    ├── Chart.yaml                  # Local Helm chart for manifest templates
 	    ├── helmrelease.yaml            # HelmRelease (GitRepository source)
