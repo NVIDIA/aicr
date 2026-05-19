@@ -69,7 +69,7 @@
 //   - gpu: Alias for accelerator (back-compat)
 //   - intent: Workload intent (training, inference, any)
 //   - os: Operating system (ubuntu, rhel, cos, amazonlinux, talos, any)
-//   - platform: Platform/framework (dynamo, kubeflow, nim, any)
+//   - platform: Platform/framework (dynamo, kubeflow, nim, runai, slurm, any)
 //   - nodes: Number of GPU nodes (0 = any/unspecified)
 //
 // # Request Body (POST /v1/recipe)
