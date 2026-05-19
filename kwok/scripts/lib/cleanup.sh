@@ -66,12 +66,28 @@ ensure_kwok_context_loose() {
 # cluster --name aicr-kwok-test` and then point at a different cluster
 # whose context name happens to be the same — only the kwok-typed
 # nodes prove apply-nodes.sh ran against THIS cluster.
+#
+# The label-selector check is retried with bounded backoff to ride out
+# a sub-second visibility race in the kube-apiserver's label-index
+# path: `apply-nodes.sh`'s `kubectl wait --for=condition=Ready
+# -l type=kwok` matches via the watch cache and returns before the
+# follow-up `kubectl get -l type=kwok` from a fresh subshell can see
+# the same labels (observed ~100 ms gap on KWOK Tier-1 CI). 10 tries
+# at 0.5 s gives the apiserver up to 5 s to converge — well past any
+# real race window, still tight enough to surface a genuinely empty
+# cluster within a normal CI step.
 ensure_kwok_context() {
     ensure_kwok_context_loose
 
-    if ! kubectl get nodes -l type=kwok -o name 2>/dev/null | grep -q . ; then
-        echo "[ERROR] ensure_kwok_context: refusing to run — current context has no kwok-typed nodes" >&2
-        echo "[ERROR] Run kwok/scripts/apply-nodes.sh <recipe> first, or verify you're against the right cluster" >&2
-        exit 1
-    fi
+    local i
+    for i in $(seq 1 10); do
+        if kubectl get nodes -l type=kwok -o name 2>/dev/null | grep -q . ; then
+            return 0
+        fi
+        sleep 0.5
+    done
+
+    echo "[ERROR] ensure_kwok_context: refusing to run — current context has no kwok-typed nodes (checked 10× over 5s)" >&2
+    echo "[ERROR] Run kwok/scripts/apply-nodes.sh <recipe> first, or verify you're against the right cluster" >&2
+    exit 1
 }
