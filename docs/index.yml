@@ -76,3 +76,5 @@ navigation:
         path: contributor/validator.md
       - page: Maintaining Recipe Contributions
         path: contributor/maintaining.md
+      - page: KWOK Deployer Matrix Testing
+        path: contributor/kwok-testing.md

@@ -224,7 +224,7 @@ jobs:
 
   # ── Tier 1: PR gate — generic overlays (PR + push, skip on schedule) ──
   test-tier1:
-    name: 'Tier 1: ${{ matrix.recipe }}'
+    name: 'Tier 1: ${{ matrix.recipe }} (${{ matrix.deployer }})'
     needs: discover
     if: >-
       github.event_name != 'schedule' &&
@@ -236,6 +236,7 @@ jobs:
       fail-fast: false
       matrix:
         recipe: ${{ fromJSON(needs.discover.outputs.tier1) }}
+        deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci]
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -250,6 +251,7 @@ jobs:
         uses: ./.github/actions/kwok-test
         with:
           recipe: ${{ matrix.recipe }}
+          deployer: ${{ matrix.deployer }}
           go_version: ${{ steps.versions.outputs.go }}
           goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
           kind_version: ${{ steps.versions.outputs.kind }}
@@ -300,7 +302,7 @@ jobs:
   # Per ADR-003: separate concurrency group per SHA so successive merges
   # to main never cancel in-flight Tier 3 runs.
   test-tier3:
-    name: 'Tier 3: ${{ matrix.recipe }}'
+    name: 'Tier 3: ${{ matrix.recipe }} (${{ matrix.deployer }})'
     needs: discover
     concurrency:
       group: kwok-tier3-${{ github.sha }}
@@ -315,6 +317,7 @@ jobs:
       fail-fast: false
       matrix:
         recipe: ${{ fromJSON(needs.discover.outputs.tier3) }}
+        deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci]
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -329,6 +332,7 @@ jobs:
         uses: ./.github/actions/kwok-test
         with:
           recipe: ${{ matrix.recipe }}
+          deployer: ${{ matrix.deployer }}
           go_version: ${{ steps.versions.outputs.go }}
           goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
           kind_version: ${{ steps.versions.outputs.kind }}

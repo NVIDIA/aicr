@@ -323,9 +323,29 @@ func TestWrite_VendorCharts_KustomizeFallthrough(t *testing.T) {
 	// regardless of whether the downstream kustomize build succeeds in
 	// this test environment.
 	//
-	// kustomize build may shell out to a git fetch; bound the call so a
-	// stalled subprocess can't hang the suite.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// kustomize build may shell out to a git fetch when Repository is a
+	// remote URL. Two hermeticity guards:
+	//
+	//  1. GIT_TERMINAL_PROMPT=0 — on macOS with a credential helper
+	//     installed, git falls through to a `Username for 'https://
+	//     github.com':` prompt instead of failing fast on missing
+	//     creds; that prompt blocks `make qualify` until the helper
+	//     times out. Setting this env var makes git exit immediately
+	//     so the test stays deterministic regardless of developer git
+	//     config.
+	//
+	//  2. The Repository points at the RFC-2606 reserved `.invalid`
+	//     TLD so DNS fails before any HTTP round trip — no chance of
+	//     accidentally reaching a real github.com 404 (which would
+	//     trigger the credential-helper path again on some setups).
+	//
+	// Bound the overall call so a stalled subprocess can't hang the
+	// suite even if both guards fail somehow. 5s is plenty — DNS for
+	// .invalid resolves to NXDOMAIN in milliseconds and the only
+	// reason this would approach the budget is a misbehaving
+	// kustomize/git-library internal retry loop.
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	outDir := t.TempDir()
@@ -334,7 +354,7 @@ func TestWrite_VendorCharts_KustomizeFallthrough(t *testing.T) {
 		Components: []localformat.Component{{
 			Name:       "kpack",
 			Namespace:  "kpack",
-			Repository: "https://github.com/example/kpack-overlay",
+			Repository: "https://kpack-overlay.invalid",
 			Path:       "config/default",
 			Tag:        "v0.1.0",
 		}},
@@ -343,9 +363,9 @@ func TestWrite_VendorCharts_KustomizeFallthrough(t *testing.T) {
 	})
 	recs := res.VendoredCharts
 	// Unconditional: kustomize must never produce a vendor record,
-	// build success or not. (The kustomize build itself typically fails
-	// in the hermetic test environment because we can't reach the git
-	// remote, but the routing decision is what we're pinning here.)
+	// build success or not. (The kustomize build itself fails fast
+	// because the .invalid TLD doesn't resolve, but the routing
+	// decision is what we're pinning here.)
 	if len(recs) != 0 {
 		t.Errorf("kustomize component should not produce vendor records, got %d (err=%v)", len(recs), err)
 	}

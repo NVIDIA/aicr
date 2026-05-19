@@ -85,6 +85,19 @@ testing_tools:
   yq: 'v4.53.2'
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
   karpenter: 'v1.12.0'
+  # In-cluster OCI registry for KWOK deployer-matrix CI (issue #843).
+  # renovate: datasource=docker depName=registry depType=testing_tools
+  registry_image: 'registry:2.8.3'
+  # Argo CD Helm chart for KWOK deployer-matrix CI. v9.5.x pins app v3.4.x,
+  # the first stable line with native OCI artifact source (issue #843).
+  # renovate: datasource=helm depName=argo-cd registryUrl=https://argoproj.github.io/argo-helm depType=testing_tools
+  argocd_chart: '9.5.14'
+  # Flux 2 release for KWOK deployer-matrix CI flux-oci lane (issue #843).
+  # install.yaml is downloaded from the GitHub release; source-controller,
+  # kustomize-controller and helm-controller are the only controllers the
+  # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
+  # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
+  flux_version: 'v2.8.7'
 
 # Quality Thresholds
 quality:

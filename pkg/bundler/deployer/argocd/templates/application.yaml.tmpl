@@ -12,6 +12,14 @@ spec:
     repoURL: '{{ .RepoURL }}'
     targetRevision: {{ .TargetRevision }}
     path: {{ .BundleDir }}
+{{- else if .InlineValues }}
+  source:
+    repoURL: {{ .Repository }}
+    chart: {{ .Chart }}
+    targetRevision: {{ .Version }}
+    helm:
+      valuesObject:
+{{ .ValuesYAML -}}
 {{- else }}
   sources:
     - repoURL: {{ .Repository }}
