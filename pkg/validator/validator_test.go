@@ -87,21 +87,6 @@ func TestNewWithOptions(t *testing.T) {
 	}
 }
 
-func TestGenerateRunID(t *testing.T) {
-	id1 := generateRunID()
-	id2 := generateRunID()
-
-	if id1 == "" {
-		t.Error("RunID should not be empty")
-	}
-	if id1 == id2 {
-		t.Error("RunIDs should be unique")
-	}
-	if len(id1) < 20 {
-		t.Errorf("RunID too short: %q", id1)
-	}
-}
-
 func loadEmbeddedCatalog(t *testing.T) *catalog.ValidatorCatalog {
 	t.Helper()
 	cat, err := catalog.Load("", "")

@@ -284,6 +284,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			"failed to extract component values", err)
 	}
 
+	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
+		return nil, warningErr
+	}
+
 	// Run component-specific validations
 	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -804,6 +808,100 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 	}
 }
 
+// warnMissingStorageClassForPVCs emits a bundle note when a rendered component creates
+// a PVC but leaves storageClassName unset, causing Kubernetes to rely on the
+// target cluster's default StorageClass.
+func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
+	if b.Config == nil {
+		return nil
+	}
+
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			"failed to load component registry for storage class warnings", err)
+	}
+
+	for _, ref := range recipeResult.ComponentRefs {
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"context cancelled during storage class warning evaluation", err)
+		}
+
+		comp := registry.Get(ref.Name)
+		if comp == nil {
+			continue
+		}
+
+		values := componentValues[ref.Name]
+		if values == nil {
+			continue
+		}
+
+		for _, path := range comp.GetStorageClassPaths() {
+			if !storageClassPathHasPVCSpec(values, path) || hasConfiguredStorageClass(values, path) {
+				continue
+			}
+
+			msg := fmt.Sprintf(
+				"%s renders a PVC without storageClassName at %s; set --storage-class <name> or --set %s:%s=<name> to avoid relying on the cluster default StorageClass",
+				ref.Name,
+				path,
+				ref.Name,
+				path,
+			)
+			b.appendWarning(msg)
+			slog.Warn("component PVC storageClassName is unset",
+				"component", ref.Name,
+				"path", path,
+			)
+		}
+	}
+
+	return nil
+}
+
+func storageClassPathHasPVCSpec(values map[string]any, path string) bool {
+	parentPath, ok := storageClassPathParent(path)
+	if !ok {
+		return false
+	}
+
+	parent, ok := component.GetValueByPath(values, parentPath)
+	if !ok || parent == nil {
+		return false
+	}
+	_, ok = parent.(map[string]any)
+	return ok
+}
+
+func storageClassPathParent(path string) (string, bool) {
+	idx := strings.LastIndex(path, ".")
+	if idx <= 0 {
+		return "", false
+	}
+	return path[:idx], true
+}
+
+func hasConfiguredStorageClass(values map[string]any, path string) bool {
+	value, ok := component.GetValueByPath(values, path)
+	if !ok || value == nil {
+		return false
+	}
+
+	if s, ok := value.(string); ok {
+		return strings.TrimSpace(s) != ""
+	}
+	return true
+}
+
+func (b *DefaultBundler) appendWarning(warning string) {
+	if !strings.HasPrefix(warning, "Warning: ") {
+		warning = "Warning: " + warning
+	}
+	b.warnings = append(b.warnings, warning)
+}
+
 // runComponentValidations executes all component-specific validations registered in the registry.
 // Collects warnings and errors based on validation severity.
 func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
@@ -849,11 +947,7 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 
 		// Collect warnings (prepend "Warning: " if not already present)
 		for _, warning := range warnings {
-			msg := warning
-			if !strings.HasPrefix(warning, "Warning: ") {
-				msg = "Warning: " + warning
-			}
-			b.warnings = append(b.warnings, msg)
+			b.appendWarning(warning)
 		}
 
 		// Return first error (errors are blocking)

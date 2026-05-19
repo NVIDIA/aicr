@@ -16,8 +16,6 @@ package validator
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
@@ -80,7 +78,7 @@ func checkReadiness(validationInput *v1.ValidationInput, snap *snapshotter.Snaps
 func New(opts ...Option) *Validator {
 	v := &Validator{
 		Namespace:   "aicr-validation",
-		RunID:       generateRunID(),
+		RunID:       v1.GenerateRunID(),
 		Cleanup:     true,
 		Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 	}
@@ -435,12 +433,16 @@ func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, rea
 	}
 }
 
-// ensureDataConfigMaps creates snapshot and validation ConfigMaps for this run.
-// The validation payload is marshaled as v1.ValidationInput (the wire shape
-// that validator containers consume) with phase configs nested under `config:`.
-func (v *Validator) ensureDataConfigMaps(
+// EnsureDataConfigMaps creates or updates snapshot and validation ConfigMaps.
+// Creates ConfigMaps named aicr-snapshot-{runID} and aicr-validation-{runID} with
+// create-or-update semantics. External controllers should call this after generating
+// a runID and before rendering validator Jobs. The Jobs mount these ConfigMaps at
+// /data/snapshot and /data/validation.
+func EnsureDataConfigMaps(
 	ctx context.Context,
 	clientset kubernetes.Interface,
+	namespace string,
+	runID string,
 	snap *snapshotter.Snapshot,
 	validationInput *v1.ValidationInput,
 ) error {
@@ -455,8 +457,8 @@ func (v *Validator) ensureDataConfigMaps(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize validation", err)
 	}
 
-	snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", v.RunID)
-	validationCMName := fmt.Sprintf("aicr-validation-%s", v.RunID)
+	snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", runID)
+	validationCMName := fmt.Sprintf("aicr-validation-%s", runID)
 
 	for _, cm := range []struct {
 		name string
@@ -469,12 +471,12 @@ func (v *Validator) ensureDataConfigMaps(
 		configMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      cm.name,
-				Namespace: v.Namespace,
+				Namespace: namespace,
 				Labels: map[string]string{
 					labels.Name:      labels.ValueAICR,
 					labels.Component: labels.ValueValidation,
 					labels.ManagedBy: labels.ValueAICR,
-					labels.RunID:     v.RunID,
+					labels.RunID:     runID,
 				},
 			},
 			Data: map[string]string{
@@ -482,20 +484,49 @@ func (v *Validator) ensureDataConfigMaps(
 			},
 		}
 
-		_, createErr := clientset.CoreV1().ConfigMaps(v.Namespace).Create(ctx, configMap, metav1.CreateOptions{})
+		_, createErr := clientset.CoreV1().ConfigMaps(namespace).Create(ctx, configMap, metav1.CreateOptions{})
 		if createErr != nil && !apierrors.IsAlreadyExists(createErr) {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to create ConfigMap %s", cm.name), createErr)
 		}
 		if apierrors.IsAlreadyExists(createErr) {
-			_, updateErr := clientset.CoreV1().ConfigMaps(v.Namespace).Update(ctx, configMap, metav1.UpdateOptions{})
+			// Fetch existing ConfigMap and mutate it in place to preserve metadata
+			existing, getErr := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, cm.name, metav1.GetOptions{})
+			if getErr != nil {
+				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to get ConfigMap %s", cm.name), getErr)
+			}
+			// Update labels in place
+			if existing.Labels == nil {
+				existing.Labels = map[string]string{}
+			}
+			existing.Labels[labels.Name] = labels.ValueAICR
+			existing.Labels[labels.Component] = labels.ValueValidation
+			existing.Labels[labels.ManagedBy] = labels.ValueAICR
+			existing.Labels[labels.RunID] = runID
+			// Update data
+			existing.Data = map[string]string{
+				cm.key: cm.data,
+			}
+			_, updateErr := clientset.CoreV1().ConfigMaps(namespace).Update(ctx, existing, metav1.UpdateOptions{})
 			if updateErr != nil {
 				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to update ConfigMap %s", cm.name), updateErr)
 			}
 		}
 	}
 
-	slog.Debug("data ConfigMaps ensured", "runID", v.RunID)
+	slog.Debug("data ConfigMaps ensured", "runID", runID)
 	return nil
+}
+
+// ensureDataConfigMaps creates snapshot and validation ConfigMaps for this run.
+// Delegates to the public EnsureDataConfigMaps function.
+func (v *Validator) ensureDataConfigMaps(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	snap *snapshotter.Snapshot,
+	validationInput *v1.ValidationInput,
+) error {
+
+	return EnsureDataConfigMaps(ctx, clientset, v.Namespace, v.RunID, snap, validationInput)
 }
 
 // cleanupDataConfigMaps removes snapshot and validation ConfigMaps for this run.
@@ -546,13 +577,4 @@ func ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namesp
 		return errors.Wrap(errors.ErrCodeInternal, "failed to apply namespace", err)
 	}
 	return nil
-}
-
-func generateRunID() string {
-	timestamp := time.Now().Format("20060102-150405")
-	randomBytes := make([]byte, 8)
-	if _, err := rand.Read(randomBytes); err != nil {
-		return timestamp
-	}
-	return fmt.Sprintf("%s-%s", timestamp, hex.EncodeToString(randomBytes))
 }

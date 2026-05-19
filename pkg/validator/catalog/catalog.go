@@ -27,7 +27,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // Re-exported types from pkg/api/validator/v1 for backward compatibility.
@@ -109,49 +108,6 @@ func ResolveImage(image, version, commit string) string {
 		image = replaceRegistry(image, override)
 	}
 	return image
-}
-
-// ImagePullPolicy returns the appropriate Kubernetes pull policy for a
-// resolved validator image. The caller should pass the image that
-// ResolveImage would return (i.e. after any env-var rewriting); callers that
-// just installed an image from the catalog can reuse this helper so the
-// outer validator Job and any inner workload Jobs (e.g. inference-perf's
-// aiperf-bench Job) stay in lockstep.
-//
-// Precedence (first match wins):
-//
-//  1. Side-loaded refs (ko.local/*, kind.local/*) → Never. No registry to
-//     pull from — the image is preloaded via `kind load docker-image`.
-//  2. Digest-pinned refs (name@sha256:...) → IfNotPresent. The digest is
-//     cryptographically immutable, so a cached copy is always correct;
-//     forcing Always here would break disconnected/private clusters that
-//     preload images and make kubelet re-contact the registry every run.
-//  3. AICR_VALIDATOR_IMAGE_TAG is set → Always. The override is intended
-//     for mutable published tags (e.g. `latest`, `edge`, `main` — tags
-//     on-push.yaml recreates on every merge); re-pulling prevents
-//     node-local caches from serving stale images.
-//  4. `:latest` suffix → Always. Mutable tag by convention.
-//  5. Otherwise → IfNotPresent. Versioned tag assumed immutable enough
-//     that caching is a win.
-func ImagePullPolicy(image string) corev1.PullPolicy {
-	// Trailing slash anchors the match to the full registry segment so a
-	// real registry like `ko.localhost:5000/...` is not mistaken for a
-	// side-loaded `ko.local/...` ref and wrongly forced to PullNever.
-	if strings.HasPrefix(image, "ko.local/") || strings.HasPrefix(image, "kind.local/") {
-		return corev1.PullNever
-	}
-	if strings.Contains(image, "@") {
-		// Digest pin — immutable by construction. Caching is safe and
-		// also required for disconnected/air-gapped deployments.
-		return corev1.PullIfNotPresent
-	}
-	if os.Getenv("AICR_VALIDATOR_IMAGE_TAG") != "" {
-		return corev1.PullAlways
-	}
-	if strings.HasSuffix(image, ":latest") {
-		return corev1.PullAlways
-	}
-	return corev1.PullIfNotPresent
 }
 
 // releaseVersionPattern matches the version strings on-tag.yaml turns into
