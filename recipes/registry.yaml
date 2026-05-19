@@ -606,10 +606,8 @@ components:
 
   - name: slinky-slurm-operator
     displayName: slinky-slurm-operator
-    # The short alias `slurm` is reserved here for the operator. When the Slinky `slurm`
-    # cluster chart (oci://ghcr.io/slinkyproject/charts/slurm) is added
-    # to AICR, we will assign it a distinct short alias (e.g.
-    # `slurm-cluster`) so `slurm` continues to route to the operator.
+    # Short alias `slurm` routes to the operator; the cluster chart
+    # (slinky-slurm below) uses the distinct alias `slurmcluster`.
     valueOverrideKeys:
       - slinkyslurmoperator
       - slurmoperator
@@ -643,3 +641,36 @@ components:
         tolerationPaths:
           - operator.tolerations
           - webhook.tolerations
+
+  - name: slinky-slurm
+    displayName: slinky-slurm
+    # Cluster instance chart; wired in via platform-slurm-cluster mixin.
+    valueOverrideKeys:
+      - slinkyslurm
+      - slurmcluster
+    healthCheck:
+      assertFile: checks/slinky-slurm/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/slinkyproject/charts
+      defaultChart: slurm
+      # When bumping defaultVersion, re-verify the `slinky` default
+      # map-keys for nodesets/loginsets still exist (the cross-check in
+      # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
+      # enforces this, but the chart change must come first).
+      defaultVersion: "1.1.0"
+      defaultNamespace: slurm
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controller.podSpec.nodeSelector
+          - restapi.podSpec.nodeSelector
+          - loginsets.slinky.podSpec.nodeSelector
+        tolerationPaths:
+          - controller.podSpec.tolerations
+          - restapi.podSpec.tolerations
+          - loginsets.slinky.podSpec.tolerations
+      accelerated:
+        nodeSelectorPaths:
+          - nodesets.slinky.podSpec.nodeSelector
+        tolerationPaths:
+          - nodesets.slinky.podSpec.tolerations

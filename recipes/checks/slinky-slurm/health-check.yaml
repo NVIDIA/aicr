@@ -1,0 +1,145 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Slinky Slurm cluster health check.
+#
+# Names assume the AICR localformat release name `slinky-slurm`; the
+# trailing `-slinky` comes from the chart's default map-key for
+# loginsets/nodesets. Other deployers using a different release name
+# need a parameterized variant of this check.
+# TODO: parameterize CR/workload names once chainsaw supports name-pattern
+# matching (currently hardcoded; flux/argocd deployers will rewrite release
+# names and silently break these asserts).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: slinky-slurm-health-check
+spec:
+  timeouts:
+    assert: 10m
+  steps:
+    - name: validate-controller-cr
+      try:
+        - assert:
+            resource:
+              apiVersion: slinky.slurm.net/v1beta1
+              kind: Controller
+              metadata:
+                name: slinky-slurm
+                namespace: slurm
+    - name: validate-loginset-cr
+      try:
+        - assert:
+            resource:
+              apiVersion: slinky.slurm.net/v1beta1
+              kind: LoginSet
+              metadata:
+                name: slinky-slurm-login-slinky
+                namespace: slurm
+    - name: validate-nodeset-cr
+      try:
+        - assert:
+            resource:
+              apiVersion: slinky.slurm.net/v1beta1
+              kind: NodeSet
+              metadata:
+                name: slinky-slurm-worker-slinky
+                namespace: slurm
+    - name: validate-restapi-cr
+      try:
+        - assert:
+            resource:
+              apiVersion: slinky.slurm.net/v1beta1
+              kind: RestApi
+              metadata:
+                name: slinky-slurm
+                namespace: slurm
+    # CR existence alone does not prove reconciliation into running
+    # pods: assert each workload reports a ready replica before the
+    # pod-phase guard runs against the namespace.
+    - name: validate-controller-statefulset-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: StatefulSet
+              metadata:
+                name: slinky-slurm-controller
+                namespace: slurm
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-login-deployment-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slinky-slurm-login-slinky
+                namespace: slurm
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-restapi-deployment-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slinky-slurm-restapi
+                namespace: slurm
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-nodeset-ready
+      try:
+        # NodeSet exposes its own status; operator tracks per-node counts.
+        - assert:
+            resource:
+              apiVersion: slinky.slurm.net/v1beta1
+              kind: NodeSet
+              metadata:
+                name: slinky-slurm-worker-slinky
+                namespace: slurm
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        # Catch Pending / Failed / Unknown phases. Chainsaw `error` passes
+        # vacuously when no resource matches, so the preceding workload-
+        # readiness asserts (StatefulSet / Deployments / NodeSet) are
+        # load-bearing: they guarantee the pods exist before this step runs.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: slurm
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: slurm
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: slurm
+              status:
+                phase: Unknown

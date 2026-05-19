@@ -1,0 +1,50 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: h100-eks-ubuntu-training-slurm
+
+spec:
+  # H100 + EKS + Ubuntu + training with the Slinky operator and a
+  # Slinky-managed Slurm cluster. EKS-specific cluster tuning (gp3
+  # storage, GPU GRES, DCGM job-mapping) is layered at install time
+  # via `aicr bundle ... --set slurmcluster:...` or a valuesFile.
+  base: h100-eks-ubuntu-training
+
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+    platform: slurm
+
+  mixins:
+    - os-ubuntu
+    - platform-slurm
+    - platform-slurm-cluster
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  # Mixin-contributed components cannot be overridden from a leaf; use
+  # `--set slurmcluster:...` or a valuesFile at install time instead.
+  # Accelerated nodeSelector/tolerations on slurmd are injected via the
+  # registry's nodesets.slinky.podSpec.{nodeSelector,tolerations} paths.
+  componentRefs: []
+
+  # Validation is inherited from h100-eks-training (operator-health,
+  # expected-resources, gpu-operator-version, check-nvidia-smi).
