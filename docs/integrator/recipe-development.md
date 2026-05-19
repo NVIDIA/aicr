@@ -655,10 +655,8 @@ The verifier records the signature step as "skipped (unsigned)" and
 the manifest-hash chain becomes self-consistency only — useful for
 catching accidental corruption during development, but **not
 acceptable for the CI gate**, which requires a signed bundle bound
-to a committed pointer. Two paths forward:
+to a committed pointer.
 
-- Coordinate with a maintainer to obtain push access to an
-  NVIDIA-hosted registry.
 - For mechanical changes that touch `recipes/**` but carry no
   recipe semantics (file renames, comment-only changes, license
   header sweeps, self-bootstrapping evidence-pipeline changes), ask
