@@ -527,14 +527,154 @@ aicr recipe --service eks --accelerator gb200 --format yaml  # Test generation
 ## Submitting Your Recipe
 
 Recipes that target hardware AICR maintainers cannot independently
-re-run require an evidence bundle so reviewers can verify the recipe
-without owning the hardware. The end-to-end contribution flow — local
-validation, OCI push, pointer commit, PR template — is documented
-alongside the recipe-evidence CI gate; for now, the maintainer-side
-view of how those bundles are reviewed lives in
-[Maintaining Recipe Contributions](../contributor/maintaining.md).
-ADR-007 ([Recipe Evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md))
-is the source of truth for the bundle format and verifier semantics.
+re-run require an **evidence bundle** so a reviewer can verify the
+recipe without owning the hardware. The bundle is a signed,
+OCI-distributed artifact that captures the resolved recipe, the
+cluster snapshot, the validator phase results, a CycloneDX BOM, and
+a manifest of per-file hashes. It is produced by adding two flags to
+the same `aicr validate` invocation you already use to check the
+recipe — no separate build step.
+
+### When You Need Evidence
+
+You need an evidence bundle when your PR adds or changes a recipe
+whose `criteria` reach hardware or a service that AICR maintainers
+cannot independently re-run — most non-H100 GPUs, non-EKS services,
+and specialty fabrics fall into this bucket. The recipe-evidence CI
+gate posts a sticky Markdown comment on every PR touching
+`recipes/**` and fails closed when a touched recipe has no matching
+`recipes/evidence/<recipe>.yaml` pointer.
+
+Non-material edits (comments, formatting, `displayName`,
+`description`, key-order) produce the same material-slice digest and
+do not require a fresh bundle — the existing pointer stays valid.
+The CI gate's canonicalizer collapses these to the same digest, so
+the gate passes without re-attestation. See
+[ADR-007 § Material-slice canonicalization](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md#material-slice-canonicalization-proposed)
+for the slice definition.
+
+### Producing the Bundle
+
+Run `aicr validate` against the cluster that exercises your recipe
+and add `--emit-attestation` (writes the bundle to disk) and
+`--push` (signs and uploads the OCI artifact):
+
+```bash
+# 1. Capture snapshot and resolve the recipe you're contributing.
+aicr snapshot --output snapshot.yaml
+aicr recipe --service eks --accelerator gb200 --os ubuntu \
+            --intent training --output recipe.yaml
+
+# 2. Validate with attestation emission. Replace the OCI ref with a
+#    registry you control (GHCR, GitLab Container Registry, Harbor,
+#    AWS ECR, Google Artifact Registry, Azure Container Registry,
+#    or JFrog Artifactory — any OCI 1.1 registry with Referrers API
+#    support).
+aicr validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --emit-attestation ./out \
+  --push ghcr.io/<owner>/aicr-evidence
+
+# 3. Commit the pointer. The bundle bytes live in OCI; the repo
+#    only stores the locator.
+mkdir -p recipes/evidence
+cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
+git add recipes/evidence/<recipe-name>.yaml
+```
+
+`--push` triggers cosign keyless signing through Sigstore's
+public-good infrastructure. The CLI resolves an OIDC token through
+the precedence chain documented under
+[`--identity-token`](../user/cli-reference.md#aicr-validate); if no
+pre-fetched token, ambient GitHub Actions OIDC, or
+`--oidc-device-flow` is available, it opens a browser. The signed
+`attestation.intoto.jsonl` is attached to the OCI artifact as a
+Sigstore Bundle referrer.
+
+For the full bundle layout, flag reference, and registry
+compatibility notes, see
+[Emitting recipe evidence for a PR](../user/validation.md#emitting-recipe-evidence-for-a-pr).
+For the producer-and-consumer walkthrough end-to-end, see
+[Recipe Evidence Demo](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md).
+
+### Self-Verifying Before You Open the PR
+
+Run the verifier locally — it is the same code the CI gate runs
+against the committed pointer, so failures here will block merge:
+
+```bash
+aicr evidence verify recipes/evidence/<recipe-name>.yaml
+```
+
+Exit 0 means signature, schema, inventory, manifest hashes,
+fingerprint match against the recipe's criteria, and BOM
+cross-reference all passed. A non-zero exit writes a structured
+Markdown report describing the specific check that failed. See
+[`aicr evidence verify`](../user/cli-reference.md#aicr-evidence-verify)
+for the full check list and exit-code semantics.
+
+### What to Include in the PR
+
+The recipe-evidence CI gate posts a Markdown summary as a sticky
+comment, so you do not need to inline the verifier output. The PR
+template asks for three additional pieces of context the verifier
+cannot infer:
+
+- **The OCI ref** of the pushed bundle, digest-pinned, so a
+  maintainer can audit it directly:
+  `ghcr.io/<owner>/aicr-evidence@sha256:<digest>`.
+- **The cluster you attested from** — cloud, accelerator SKU, OS,
+  Kubernetes version, node count. The fingerprint dimensions are in
+  the predicate, but the human description is what the maintainer
+  reads first.
+- **Evidence disposition.** If `aicr evidence verify` reported a
+  non-zero exit with a `1` in the JSON output's `exit` field
+  (signature valid, recorded phase results show failures), include a
+  short justification in the PR template's "Evidence disposition"
+  section. The maintainer either applies the `evidence/known-failure`
+  label and merges, or requests changes. See
+  [Exit-1 Review Process](../contributor/maintaining.md#exit-1-review-process)
+  for what counts as an acceptable reason — broadly: optional check
+  not applicable to your hardware, performance ceiling limited by
+  your test bed, or a validator under known active rework.
+
+### If You Cannot Push to a Registry
+
+You can still produce a bundle locally without `--push`. The
+resulting `./out/summary-bundle/` directory is unsigned but
+otherwise complete:
+
+```bash
+aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
+  --emit-attestation ./out
+aicr evidence verify ./out/summary-bundle
+```
+
+The verifier records the signature step as "skipped (unsigned)" and
+the manifest-hash chain becomes self-consistency only — useful for
+catching accidental corruption during development, but **not
+acceptable for the CI gate**, which requires a signed bundle bound
+to a committed pointer. Two paths forward:
+
+- Coordinate with a maintainer to obtain push access to an
+  NVIDIA-hosted registry.
+- For mechanical changes that touch `recipes/**` but carry no
+  recipe semantics (file renames, comment-only changes, license
+  header sweeps, self-bootstrapping evidence-pipeline changes), ask
+  a maintainer to apply `evidence/exempt` per the
+  [bypass policy](../contributor/maintaining.md#evidenceexempt-bypass-policy).
+  Self-applying that label is not appropriate.
+
+"I don't have the hardware right now, please merge" is **not** a
+valid exempt path — see the bypass policy's "Inappropriate uses."
+
+### Reference
+
+- [Emitting recipe evidence for a PR](../user/validation.md#emitting-recipe-evidence-for-a-pr) — user-facing flag reference and bundle layout
+- [Recipe Evidence Demo](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md) — full producer-and-consumer walkthrough
+- [Maintaining Recipe Contributions](../contributor/maintaining.md) — maintainer-side review checklist
+- [ADR-007](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) — bundle format and verifier semantics
 
 ---
 

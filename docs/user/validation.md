@@ -241,6 +241,96 @@ Valid feature names (from `pkg/evidence/cncf/collector.go`):
 | `pod-autoscaling` | HPA / custom-metrics-driven pod autoscaling |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
+## Emitting recipe evidence for a PR
+
+When a recipe PR targets hardware AICR maintainers cannot independently
+re-run, the contributor needs to attach a signed **evidence bundle** so a
+maintainer can verify the recipe offline. `aicr validate` produces the
+bundle as a side effect when `--emit-attestation` is set; adding `--push`
+signs it (cosign keyless via Sigstore) and uploads it to an OCI registry.
+This is a different artifact from the CNCF-submission evidence above —
+the two flag families produce independent outputs and may run from a
+single `aicr validate` invocation.
+
+```bash
+aicr validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --emit-attestation ./out \
+  --push ghcr.io/<owner>/aicr-evidence
+```
+
+After the command finishes:
+
+```text
+./out
+├── pointer.yaml                  # locator; copy into recipes/evidence/
+└── summary-bundle/
+    ├── recipe.yaml               # canonical post-resolution recipe
+    ├── snapshot.yaml             # snapshot at validate-time
+    ├── bom.cdx.json              # CycloneDX BOM (auto-generated from
+    │                             #   recipe + validator catalog when
+    │                             #   --bom is omitted)
+    ├── ctrf/                     # per-phase test results
+    ├── manifest.json             # per-file sha256 inventory
+    ├── statement.intoto.json     # unsigned in-toto Statement
+    └── attestation.intoto.jsonl  # signed (when --push is set)
+```
+
+Commit `pointer.yaml` to `recipes/evidence/<recipe>.yaml`; the bundle
+itself lives in OCI. Then self-verify before opening the PR — the same
+verifier runs against the committed pointer in the CI gate, so exit 0
+locally means the gate will pass:
+
+```bash
+aicr evidence verify recipes/evidence/<recipe>.yaml
+```
+
+**Flag reference:**
+
+| Flag | What it does |
+|------|--------------|
+| `--emit-attestation <dir>` | Write the bundle to `<dir>`. Required to produce evidence. |
+| `--push <oci-ref>` | Sign via cosign keyless OIDC and push to the registry. Without it, the bundle is unsigned (development/self-debug only). |
+| `--bom <path>` | Embed an existing CycloneDX BOM instead of the auto-generated one. Pass `make bom` output for an exhaustive BOM that includes chart-default sub-images. |
+| `--identity-token <token>` | Pre-fetched OIDC identity token, skipping the browser flow. Reads `COSIGN_IDENTITY_TOKEN`. |
+| `--oidc-device-flow` | Use OAuth device-code flow instead of opening a browser. Reads `AICR_OIDC_DEVICE_FLOW`. |
+| `--plain-http` | HTTP instead of HTTPS (local-registry tests only). |
+| `--insecure-tls` | Skip TLS verification (self-signed registries). |
+
+**Registry requirements:** the registry must support the OCI 1.1
+Referrers API (or its tag-schema fallback) so the Sigstore Bundle can
+be attached to the artifact. Known-good registries: GHCR, GitLab
+Container Registry, Harbor (≥ 2.8), AWS ECR, Google Artifact Registry,
+Azure Container Registry, JFrog Artifactory. Without referrer support
+the bundle pushes but the signature is not discoverable, and the
+verifier records signature-verify as "skipped (unsigned)" even on a
+signed bundle.
+
+**OIDC token resolution.** `--push` resolves an identity token through
+this precedence chain: `--identity-token` (or `COSIGN_IDENTITY_TOKEN`)
+→ ambient GitHub Actions OIDC (`ACTIONS_ID_TOKEN_REQUEST_URL`
+present) → `--oidc-device-flow` (or `AICR_OIDC_DEVICE_FLOW=true`) →
+interactive browser. CI pipelines typically rely on the ambient
+GitHub Actions path; local workstations get the browser flow.
+
+**Local-only mode (no registry access).** Omitting `--push` still
+produces a complete bundle on disk — the verifier records the
+signature step as "skipped (unsigned)" and the manifest-hash chain
+becomes self-consistency only. Useful for catching accidental
+corruption during development, but unsuitable for the CI gate, which
+requires a signed bundle bound to a pointer.
+
+For the full producer-and-consumer walkthrough — including OCI-only
+verification, the tamper demo, and JSON output for CI gates — see
+[Recipe Evidence Demo](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md).
+For the bundle format and verifier semantics, see
+[ADR-007](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md).
+For the maintainer-side review checklist, see
+[Maintaining Recipe Contributions](../contributor/maintaining.md).
+For the per-flag reference on `aicr evidence verify`, see
+[CLI reference](cli-reference.md#aicr-evidence-verify).
+
 ## Input modes
 
 Snapshot and recipe can come from a file, an HTTPS URL, or a Kubernetes ConfigMap:
