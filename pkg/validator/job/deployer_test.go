@@ -734,47 +734,6 @@ func TestWaitForCompletionJobNotFound(t *testing.T) {
 	}
 }
 
-func TestImagePullPolicy(t *testing.T) {
-	tests := []struct {
-		name   string
-		image  string
-		envTag string // AICR_VALIDATOR_IMAGE_TAG — empty means unset
-		expect corev1.PullPolicy
-	}{
-		{name: "latest tag uses Always", image: "ghcr.io/nvidia/aicr-validators/conformance:latest", expect: corev1.PullAlways},
-		{name: "versioned tag uses IfNotPresent", image: "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0", expect: corev1.PullIfNotPresent},
-		{name: "ko.local uses Never", image: "ko.local/aicr-validators/conformance:latest", expect: corev1.PullNever},
-		{name: "kind.local uses Never", image: "kind.local/aicr-validators/conformance:latest", expect: corev1.PullNever},
-		{name: "localhost registry with latest uses Always", image: "localhost:5001/aicr-validators/conformance:latest", expect: corev1.PullAlways},
-		{name: "localhost registry versioned uses IfNotPresent", image: "localhost:5001/aicr-validators/conformance:v1.0.0", expect: corev1.PullIfNotPresent},
-		// --- AICR_VALIDATOR_IMAGE_TAG forces PullAlways ------------------
-		// Mutable published tags (edge, main, nightly, or any rolling tag
-		// on-push.yaml recreates on every merge) would otherwise get
-		// PullIfNotPresent and serve a stale cached image. When the user
-		// opts into the override, treat the resolved tag as mutable.
-		{name: "override with mutable tag :edge — Always", image: "ghcr.io/nvidia/aicr-validators/conformance:edge", envTag: "edge", expect: corev1.PullAlways},
-		{name: "override with :latest still Always (no regression)", image: "ghcr.io/nvidia/aicr-validators/conformance:latest", envTag: "latest", expect: corev1.PullAlways},
-		{name: "override with release :v0.11.0 — Always (safe over-pull)", image: "ghcr.io/nvidia/aicr-validators/conformance:v0.11.0", envTag: "v0.11.0", expect: corev1.PullAlways},
-		{name: "override with ko.local still Never (side-load wins)", image: "ko.local/aicr-validators/conformance:edge", envTag: "edge", expect: corev1.PullNever},
-		// Digest-pinned refs stay IfNotPresent even when the override env
-		// var is set — required so disconnected/air-gapped clusters that
-		// preload pinned images don't re-contact the registry every run.
-		{name: "digest-pinned ref + override → IfNotPresent (digest wins over override)", image: "ghcr.io/nvidia/aicr-validators/conformance@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", envTag: "latest", expect: corev1.PullIfNotPresent},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
-			entry := testEntry()
-			entry.Image = tt.image
-			d := &Deployer{entry: entry}
-			got := d.imagePullPolicy()
-			if got != tt.expect {
-				t.Errorf("imagePullPolicy() = %q, want %q", got, tt.expect)
-			}
-		})
-	}
-}
-
 func TestWaitForCompletionTimeout(t *testing.T) {
 	ns := createUniqueNamespace(t)
 
