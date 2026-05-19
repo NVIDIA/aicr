@@ -1609,18 +1609,18 @@ bundles/
 │   ├── values.yaml
 │   ├── cluster-values.yaml        # Dynamic-path overrides (operator-edited)
 │   └── upstream.env               # CHART, REPO, VERSION (sourced by install.sh)
-├── 002-nodewright-customizations/      # Mixed component primary (upstream-helm)
+├── 002-network-operator/          # Mixed component primary (upstream-helm)
 │   ├── install.sh
 │   ├── values.yaml
 │   ├── cluster-values.yaml
 │   └── upstream.env
-└── 003-nodewright-customizations-post/ # Injected -post wrapped chart (mixed component's raw manifests)
-    ├── Chart.yaml                      # Local-helm folder: Chart.yaml + templates/ present
-    ├── install.sh                      # Rendered: helm upgrade --install ... ./
+└── 003-network-operator-post/     # Injected -post wrapped chart (mixed component's raw manifests)
+    ├── Chart.yaml                 # Local-helm folder: Chart.yaml + templates/ present
+    ├── install.sh                 # Rendered: helm upgrade --install ... ./
     ├── values.yaml
     ├── cluster-values.yaml
     └── templates/
-        └── tuning.yaml
+        └── nfd-network-rule.yaml
 ```
 
 **Folder layout rules:**

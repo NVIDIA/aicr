@@ -442,10 +442,10 @@ bundles.zip
 │   │   └── uninstall.sh         # Cleanup script
 │   ├── README.md                # Deployment instructions
 │   └── checksums.txt            # SHA256 checksums
-└── nodewright-customizations/
+└── network-operator/
     ├── values.yaml
     ├── manifests/
-    │   └── tuning.yaml          # Skyhook CR for GPU-node OS tuning
+    │   └── nfd-network-rule.yaml   # NodeFeatureRule for Mellanox NICs
     └── ...
 ```
 

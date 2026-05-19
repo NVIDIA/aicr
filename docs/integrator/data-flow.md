@@ -676,11 +676,11 @@ bundle-output/
 ├── gpu-operator/
 │   ├── values.yaml        # Component Helm values
 │   └── README.md          # Component install/upgrade/uninstall
-└── nodewright-customizations/
+└── network-operator/
     ├── values.yaml
     ├── README.md
     └── manifests/         # Optional manifest files
-        └── tuning.yaml
+        └── nfd-network-rule.yaml
 ```
 
 **Argo CD Deployer**:
