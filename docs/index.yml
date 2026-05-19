@@ -72,3 +72,5 @@ navigation:
         path: contributor/validations.md
       - page: Validator Development
         path: contributor/validator.md
+      - page: Maintaining Recipe Contributions
+        path: contributor/maintaining.md

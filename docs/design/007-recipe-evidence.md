@@ -298,16 +298,14 @@ surface item 1 below for the full schema).
      # where <input> is auto-detected as:
      #   recipes/evidence/<recipe>.yaml      → pointer file
      #   ghcr.io/.../aicr-evidence:<digest>  → OCI reference
-     #   ./bundle.tar.gz                     → tarball
      #   ./out/summary-bundle/               → unpacked directory
      ```
 
      Detection is by URL prefix, file extension, and directory
-     existence. The four forms map to distinct workflows: pointer for
-     CI, OCI for canonical artifact verification, tarball for
-     air-gapped or email transport, unpacked directory for contributor
-     self-debug without a packaging step. Same verification logic runs
-     against any of the four.
+     existence. The three forms map to distinct workflows: pointer for
+     CI, OCI for canonical artifact verification, unpacked directory
+     for contributor self-debug without a packaging step. Same
+     verification logic runs against any of the three.
 
    - **`aicr evidence list`** — enumerate evidence available locally
      or in a target OCI repository. Useful for "which recipes have
@@ -607,7 +605,7 @@ authoritative; the pointer points at it.
 ### Verifier steps (proposed)
 
 `aicr evidence verify recipes/evidence/<recipe>.yaml` (or any
-auto-detected input form — OCI ref, tarball, unpacked directory):
+auto-detected input form — OCI ref or unpacked directory):
 
 1. **Schema-validate** the pointer file.
 2. **Cosign signature verify** the in-toto Statement against Rekor
@@ -616,11 +614,9 @@ auto-detected input form — OCI ref, tarball, unpacked directory):
 4. **Materialize the bundle.** From an OCI ref: `oras pull` and
    confirm the artifact's digest matches `pointer.attestations[*].bundle.digest`
    (or the user-supplied digest when `--bundle` is used without a
-   pointer). From a tarball: extract to a temp dir; recompute the
-   tarball's SHA-256 and confirm match against any digest claim in
-   scope. From an unpacked directory: read in place; no digest claim
-   to check at this step (the inventory check in step 5 is what binds
-   files to the signature). In all four forms, downstream steps are
+   pointer). From an unpacked directory: read in place; no digest
+   claim to check at this step (the inventory check in step 5 is what
+   binds files to the signature). In all forms, downstream steps are
    identical because they operate on the materialized file tree.
 5. **Inventory check.** Verify every file in `manifest.json` exists
    in the bundle; recompute SHA-256 per file; confirm match. Confirm
@@ -713,11 +709,11 @@ Three V1 choices preserve future evolution at near-zero cost:
    in schema 2.0 is additive: more entries, plus a `role:` field
    defaulting to `primary`. No structural break for V1 pointers.
 3. **The verifier takes a single positional input** that auto-detects
-   the form (pointer / OCI / tarball / directory), so the CLI surface
-   stays small even as transport options grow. New input forms in V2
-   (e.g., bundles fetched via custom resolver, signed registry refs)
-   slot in as additional auto-detect cases without breaking V1
-   invocations.
+   the form (pointer / OCI / directory), so the CLI surface stays
+   small even as transport options grow. New input forms in V2 (e.g.,
+   tarballs for air-gapped transport, bundles fetched via custom
+   resolver, signed registry refs) slot in as additional auto-detect
+   cases without breaking V1 invocations.
 
 ### What V1 does *not* ship
 
@@ -732,6 +728,7 @@ Three V1 choices preserve future evolution at near-zero cost:
 | Reusable workflow (`workflow_call`) | Multiple contributors ask for a turn-key path AND have hardware they can register against a public fork (corporate policy commonly disallows). Local `cosign attest` is documented in CONTRIBUTING. |
 | Mirror bot + archive registry | First contributor's OCI registry goes dark on an accepted bundle. |
 | Fingerprint per-signal provenance | First Tier-C-equivalent contribution gets pushback for "is this cluster real?" V1 records resolved `{value}` only; per-signal sources (`signals: [kubelet, dcgm, imds]`, `confidence: high`) are additive predicate fields. |
+| Tarball input form (`./bundle.tar.gz`) for `aicr evidence verify` auto-detect | First contributor with no out-of-band OCI access (air-gapped review, email transport of a one-off bundle). V1 ships pointer / OCI / unpacked directory; tarballs can be unpacked locally first and verified via the directory path. |
 
 Each row's pull-trigger is the demand signal that should bring the
 feature in. Per-row design happens at the demand event, not now —
@@ -975,10 +972,9 @@ commitments the demand event has not yet justified.
    reusing `AttestationSpec` and `RegistrySpec` so cosign and OCI
    surfaces stay consistent across `bundle` and `validate`.
 3. **PR-B: `aicr evidence` CLI family.** Adds `aicr evidence verify`
-   (single positional input — pointer / OCI / tarball / directory,
-   auto-detected — twelve verification steps, three exit codes,
-   Markdown + JSON output), `aicr evidence list`, and `aicr evidence
-   show`. Depends on PR-A (predicate parsing + pointer parsing).
+   (single positional input — pointer / OCI / directory, auto-detected
+   — twelve verification steps, three exit codes, Markdown + JSON
+   output), `aicr evidence list`, and `aicr evidence show`. Depends on PR-A (predicate parsing + pointer parsing).
    Future evidence kinds (CNCF conformance, BOM-only, SLSA provenance)
    plug in as additional verifier dispatches under the same family
    without further top-level CLI growth.
