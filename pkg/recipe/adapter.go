@@ -31,7 +31,7 @@ func GetEmbeddedFS() embed.FS {
 }
 
 // GetManifestContent retrieves a manifest file from the data provider.
-// Path should be relative to data directory (e.g., "components/gpu-operator/manifests/dcgm-exporter.yaml").
+// Path should be relative to data directory (e.g., "components/network-operator/manifests/nfd-network-rule.yaml").
 func GetManifestContent(path string) ([]byte, error) {
 	provider := GetDataProvider()
 	return provider.ReadFile(path)

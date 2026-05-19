@@ -437,15 +437,15 @@ curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-oper
 bundles.zip
 ├── gpu-operator/
 │   ├── values.yaml              # Helm chart values
-│   ├── manifests/
-│   │   ├── clusterpolicy.yaml   # ClusterPolicy CR
-│   │   └── dcgm-exporter.yaml   # DCGM Exporter config
 │   ├── scripts/
 │   │   ├── install.sh           # Installation script
 │   │   └── uninstall.sh         # Cleanup script
 │   ├── README.md                # Deployment instructions
 │   └── checksums.txt            # SHA256 checksums
 └── network-operator/
+    ├── values.yaml
+    ├── manifests/
+    │   └── nfd-network-rule.yaml   # NodeFeatureRule for Mellanox NICs
     └── ...
 ```
 

@@ -675,12 +675,12 @@ bundle-output/
 │   └── README.md          # Component install/upgrade/uninstall
 ├── gpu-operator/
 │   ├── values.yaml        # Component Helm values
-│   ├── README.md          # Component install/upgrade/uninstall
-│   └── manifests/         # Optional manifest files
-│       └── dcgm-exporter.yaml
+│   └── README.md          # Component install/upgrade/uninstall
 └── network-operator/
     ├── values.yaml
-    └── README.md
+    ├── README.md
+    └── manifests/         # Optional manifest files
+        └── nfd-network-rule.yaml
 ```
 
 **Argo CD Deployer**:

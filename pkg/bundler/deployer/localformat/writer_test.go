@@ -90,7 +90,7 @@ func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 		ComponentPostManifests: map[string]map[string][]byte{
 			"skyhook-customizations": {
 				// Realistic input: project recipe manifests carry a license header
-				// (see recipes/components/gpu-operator/manifests/dcgm-exporter.yaml).
+				// (see recipes/components/gpu-operator/manifests/kernel-module-params.yaml).
 				"components/skyhook-customizations/manifests/customization.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

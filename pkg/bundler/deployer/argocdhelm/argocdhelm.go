@@ -462,15 +462,27 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 			continue
 		}
 
-		// Mixed components emit a `-post` folder for raw manifests, alongside
-		// the primary upstream-helm folder. The -post folder is not a
-		// registered component on its own — its overrides flow from the
-		// parent (e.g., 010-gpu-operator-post → gpu-operator). Resolve the
-		// parent before looking up the override key.
+		// Mixed components emit synthetic `-pre` and `-post` folders for raw
+		// manifests that bracket the primary upstream-helm folder. Neither
+		// suffixed folder is a registered component on its own — both
+		// inherit overrides from the parent (e.g., 006-gpu-operator-pre and
+		// 010-gpu-operator-post both flow from gpu-operator). Resolve the
+		// parent before looking up the override key; if neither suffix
+		// matches a registered component, keep the original name and let
+		// resolveOverrideKey surface the registry miss.
+		//
+		// Symmetry note: the previous version handled only `-post`. Recipes
+		// with PreManifestFiles (e.g. the gke-cos OS overlay's gpu-driver
+		// toolkit prereq) synthesize a `-pre` folder; without the matching
+		// strip, resolveOverrideKey was called with "gpu-operator-pre" and
+		// failed `component %q not found in registry` at bundle time.
 		parentComponent := folderComponent
-		if base, ok := strings.CutSuffix(folderComponent, "-post"); ok {
-			if findComponentByName(g.RecipeResult.ComponentRefs, base) {
-				parentComponent = base
+		for _, suffix := range []string{"-pre", "-post"} {
+			if base, ok := strings.CutSuffix(folderComponent, suffix); ok {
+				if findComponentByName(g.RecipeResult.ComponentRefs, base) {
+					parentComponent = base
+					break
+				}
 			}
 		}
 

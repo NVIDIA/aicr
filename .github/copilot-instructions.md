@@ -602,7 +602,6 @@ Most bundlers don't need a templates directory - they only generate values.yaml 
 
 ```
 pkg/component/gpuoperator/templates/
-├── dcgm-exporter.yaml.tmpl        # Custom ConfigMap manifest
 └── kernel-module-params.yaml.tmpl # Custom ConfigMap manifest
 ```
 

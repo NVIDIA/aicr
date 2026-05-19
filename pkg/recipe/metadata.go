@@ -100,7 +100,7 @@ type ComponentRef struct {
 
 	// ManifestFiles lists manifest files to include in the component bundle.
 	// Paths are relative to the data directory.
-	// Example: ["components/gpu-operator/manifests/dcgm-exporter.yaml"]
+	// Example: ["components/network-operator/manifests/nfd-network-rule.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`
 
 	// PreManifestFiles lists manifest files that must be bundled and applied

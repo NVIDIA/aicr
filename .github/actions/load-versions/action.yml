@@ -85,6 +85,12 @@ outputs:
   yq:
     description: 'yq version'
     value: ${{ steps.versions.outputs.yq }}
+  registry_image:
+    description: 'OCI registry image (in-cluster registry for KWOK deployer-matrix CI)'
+    value: ${{ steps.versions.outputs.registry_image }}
+  argocd_chart:
+    description: 'Argo CD Helm chart version (for KWOK deployer-matrix CI)'
+    value: ${{ steps.versions.outputs.argocd_chart }}
   coverage_threshold:
     description: 'Minimum test coverage percentage'
     value: ${{ steps.versions.outputs.coverage_threshold }}
@@ -148,6 +154,8 @@ runs:
         echo "chainsaw_sha256_linux_amd64=$(yq eval '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "chainsaw_sha256_linux_arm64=$(yq eval '.testing_tools.chainsaw_checksums.linux_arm64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yq=$(yq eval '.testing_tools.yq' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "registry_image=$(yq eval '.testing_tools.registry_image' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "argocd_chart=$(yq eval '.testing_tools.argocd_chart' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Quality thresholds
         echo "coverage_threshold=$(yq eval '.quality.coverage_threshold' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -188,6 +196,8 @@ runs:
         echo "  chainsaw_sha256_linux_amd64: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}"
         echo "  chainsaw_sha256_linux_arm64: ${{ steps.versions.outputs.chainsaw_sha256_linux_arm64 }}"
         echo "  yq: ${{ steps.versions.outputs.yq }}"
+        echo "  registry_image: ${{ steps.versions.outputs.registry_image }}"
+        echo "  argocd_chart: ${{ steps.versions.outputs.argocd_chart }}"
         echo "  coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}"
         echo "  lint_timeout: ${{ steps.versions.outputs.lint_timeout }}"
         echo "  test_timeout: ${{ steps.versions.outputs.test_timeout }}"

@@ -1180,13 +1180,169 @@ func TestBuildApplicationData_OCIHandling(t *testing.T) {
 				Kind:   localformat.KindUpstreamHelm,
 				Parent: "test-component",
 			}
-			data := buildApplicationData(comp, folder, 0, "https://github.com/example/repo.git", "main")
+			data, err := buildApplicationData(comp, folder, 0, "https://github.com/example/repo.git", "main", nil, false)
+			if err != nil {
+				t.Fatalf("buildApplicationData() error = %v", err)
+			}
 			if data.Repository != tt.wantRepository {
 				t.Errorf("Repository: got %q, want %q (source=%q chart=%q)",
 					data.Repository, tt.wantRepository, tt.source, tt.chart)
 			}
 			if data.Version != tt.wantVersion {
 				t.Errorf("Version: got %q, want %q", data.Version, tt.wantVersion)
+			}
+		})
+	}
+}
+
+// TestGenerate_InlineUpstreamValues verifies that an OCI-bound bundle
+// inlines per-component values under helm.valuesObject and drops the
+// multi-source $values ref. Closes #960: Argo CD's $values multi-source
+// pattern is Git-only — over OCI, the repo-server attempts a git ListRefs
+// against the OCI URL and fails with `unsupported scheme "oci"`.
+func TestGenerate_InlineUpstreamValues(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.20.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager"}
+
+	values := map[string]any{
+		"installCRDs": true,
+		"resources": map[string]any{
+			"requests": map[string]any{
+				"cpu":    "100m",
+				"memory": "128Mi",
+			},
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"cert-manager": values},
+		Version:         "v0.9.0",
+		RepoURL:         "oci://registry.aicr-registry.svc.cluster.local:5000/aicr/test",
+		TargetRevision:  "v0.9.0",
+		// Mirrors the bundler wiring at pkg/bundler/bundler.go for an
+		// OCI-bound --deployer argocd target.
+		InlineUpstreamValues: true,
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	appPath := filepath.Join(outputDir, "001-cert-manager", "application.yaml")
+	content, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("failed to read application.yaml: %v", err)
+	}
+	assertValidYAML(t, appPath)
+
+	var doc map[string]any
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		t.Fatalf("failed to parse application.yaml: %v", err)
+	}
+	spec, ok := doc["spec"].(map[string]any)
+	if !ok {
+		t.Fatal("spec is not a map")
+	}
+
+	if _, hasSources := spec["sources"]; hasSources {
+		t.Error("spec.sources should NOT be set when InlineUpstreamValues is true (would re-introduce Git-only $values ref)")
+	}
+	source, ok := spec["source"].(map[string]any)
+	if !ok {
+		t.Fatal("spec.source is not a map")
+	}
+	if source["repoURL"] != "https://charts.jetstack.io" {
+		t.Errorf("source.repoURL = %v, want https://charts.jetstack.io", source["repoURL"])
+	}
+	if source["chart"] != "cert-manager" {
+		t.Errorf("source.chart = %v, want cert-manager", source["chart"])
+	}
+	// HTTPS Helm-chart-repo sources strip the `v` prefix (index.yaml
+	// convention); OCI sources preserve it. cert-manager here is HTTPS.
+	if source["targetRevision"] != "1.20.2" {
+		t.Errorf("source.targetRevision = %v, want 1.20.2", source["targetRevision"])
+	}
+
+	helm, ok := source["helm"].(map[string]any)
+	if !ok {
+		t.Fatal("source.helm is not a map")
+	}
+	valuesObj, ok := helm["valuesObject"].(map[string]any)
+	if !ok {
+		t.Fatalf("helm.valuesObject is not a map: %T", helm["valuesObject"])
+	}
+	if valuesObj["installCRDs"] != true {
+		t.Errorf("valuesObject.installCRDs = %v, want true", valuesObj["installCRDs"])
+	}
+
+	// $values literals must not appear anywhere — that token is the symptom
+	// of the bug being fixed; if it leaks back in, the regression goes
+	// silent until a live Argo CD parse.
+	if strings.Contains(string(content), "$values") {
+		t.Errorf("application.yaml still references $values:\n%s", string(content))
+	}
+	if strings.Contains(string(content), "ref: values") {
+		t.Errorf("application.yaml still has ref: values source:\n%s", string(content))
+	}
+}
+
+// TestRenderInlineValuesYAML covers the edge cases for the inline-values
+// helper: empty map produces a well-formed `{}` (Argo CD's schema rejects a
+// bare key with no value), and non-empty maps are 8-space indented to drop
+// cleanly under `helm.valuesObject:` at column 6.
+func TestRenderInlineValuesYAML(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]any
+		want   string
+	}{
+		{
+			name:   "empty map → explicit {} (Argo CD rejects bare valuesObject:)",
+			values: nil,
+			want:   "        {}\n",
+		},
+		{
+			name:   "scalar value at top level",
+			values: map[string]any{"replicaCount": 3},
+			want:   "        replicaCount: 3\n",
+		},
+		{
+			name: "nested map preserves indentation under 8-space base",
+			values: map[string]any{
+				"resources": map[string]any{
+					"requests": map[string]any{
+						"cpu": "100m",
+					},
+				},
+			},
+			// yaml.v3 uses 2-space indent for nested keys; 8-space base
+			// stacks on top: col 8 = resources, col 10 = requests, col 12 = cpu.
+			want: "        resources:\n          requests:\n            cpu: 100m\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := renderInlineValuesYAML(tt.values)
+			if err != nil {
+				t.Fatalf("renderInlineValuesYAML() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("renderInlineValuesYAML() got:\n%q\nwant:\n%q", got, tt.want)
 			}
 		})
 	}

@@ -493,7 +493,7 @@ func TestGetValuesForComponent_BuilderIntegration(t *testing.T) {
 
 func TestGetManifestContent(t *testing.T) {
 	t.Run("existing manifest", func(t *testing.T) {
-		content, err := GetManifestContent("components/gpu-operator/manifests/dcgm-exporter.yaml")
+		content, err := GetManifestContent("components/network-operator/manifests/nfd-network-rule.yaml")
 		if err != nil {
 			t.Fatalf("GetManifestContent() error = %v", err)
 		}

@@ -56,20 +56,32 @@ spec:
                 --output "${WORK}/bundle-defaults"
 
     - name: assert-dcgm-defaults
-      description: Verify dcgm-exporter ConfigMap is created with default name.
+      description: Verify dcgm-exporter ConfigMap is rendered into the values.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
-              # gpu-operator is mixed (helm + manifests): manifests live in the
-              # sibling -post folder under templates/. Glob the indexed prefix
-              # since the deployment-order index can shift across recipes.
-              MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml 2>/dev/null | head -1)
-              [ -n "${MANIFEST}" ] || { echo "dcgm-exporter.yaml not found in any *-gpu-operator-post/templates/" >&2; exit 1; }
-              chainsaw assert \
-                --resource "${MANIFEST}" \
-                --file ./assert-dcgm-defaults.yaml \
-                --no-color --timeout 5s
+              # The upstream gpu-operator chart renders the dcgm-exporter
+              # ConfigMap directly from values.yaml under
+              # dcgmExporter.config.data; AICR no longer ships a separate
+              # post-manifest for it. Verify the values block carries the
+              # config (name + non-empty data) the chart needs to render
+              # the ConfigMap at install time.
+              VALUES=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null | head -1)
+              [ -n "${VALUES}" ] || { echo "values.yaml not found in any *-gpu-operator/" >&2; exit 1; }
+              # Scope assertions to dcgmExporter.config so unrelated keys
+              # (env vars, label values, sibling sections) cannot satisfy them.
+              yq e -e '.dcgmExporter.config.create == true' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.create not true" >&2; cat "${VALUES}" >&2; exit 1; }
+              yq e -e '.dcgmExporter.config.name == "dcgm-exporter"' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.name not set to dcgm-exporter" >&2; cat "${VALUES}" >&2; exit 1; }
+              yq e -e '.dcgmExporter.config.data | test("DCGM_FI_DEV_GPU_TEMP")' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.data missing custom metrics" >&2; exit 1; }
+              # Defense in depth: no post-manifest should be emitted for dcgm-exporter.
+              if ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml >/dev/null 2>&1; then
+                echo "FAIL: stray dcgm-exporter post-manifest found" >&2
+                exit 1
+              fi
 
     ## ── DCGM Exporter: disabled ────────────────────────────────────────
 
@@ -87,16 +99,22 @@ spec:
                 --set gpuoperator:dcgmExporter.config.create=false
 
     - name: assert-dcgm-disabled
-      description: Verify dcgm-exporter manifest is empty when create=false.
+      description: Verify the override flows into values when create=false.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
-              ## When create=false, the template gate prevents any YAML objects
-              ## from being rendered. The bundler removes empty manifests.
-              MATCHES=$(ls "${WORK}"/bundle-dcgm-disabled/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml 2>/dev/null | wc -l)
-              if [ "${MATCHES}" -ne 0 ]; then
-                echo "FAIL: dcgm-exporter.yaml should not exist when create=false"
+              # The upstream chart gates the ConfigMap on `config.create`
+              # AND non-empty `config.data` — when the override sets
+              # create=false, the chart skips the ConfigMap at install time.
+              VALUES=$(ls "${WORK}"/bundle-dcgm-disabled/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null | head -1)
+              [ -n "${VALUES}" ] || { echo "values.yaml not found in any *-gpu-operator/" >&2; exit 1; }
+              # Anchor to dcgmExporter.config.create — a stray `create: false`
+              # at another path must not satisfy this check.
+              yq e -e '.dcgmExporter.config.create == false' "${VALUES}" >/dev/null \
+                || { echo "FAIL: dcgmExporter.config.create not set to false" >&2; cat "${VALUES}" >&2; exit 1; }
+              if ls "${WORK}"/bundle-dcgm-disabled/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml >/dev/null 2>&1; then
+                echo "FAIL: stray dcgm-exporter post-manifest found" >&2
                 exit 1
               fi
       cleanup:

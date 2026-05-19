@@ -1251,6 +1251,75 @@ func TestCollectComponentManifests(t *testing.T) {
 	})
 }
 
+func TestCollectComponentManifests_MissingPath(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          "gpu-operator",
+				ManifestFiles: []string{"components/gpu-operator/manifests/removed-in-newer-binary.yaml"},
+			},
+		},
+	}
+
+	t.Run("embedded-only provider", func(t *testing.T) {
+		_, err := bundler.collectComponentManifests(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected error for missing manifest path")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+		}
+		msg := err.Error()
+		for _, want := range []string{"removed-in-newer-binary.yaml", "gpu-operator", "embedded data", "regenerate"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("error message should mention %q: %v", want, msg)
+			}
+		}
+		if strings.Contains(msg, "--data") {
+			t.Errorf("embedded-only message should not mention --data: %v", msg)
+		}
+	})
+
+	t.Run("layered provider with --data", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		minimalRegistry := "apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"
+		if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(minimalRegistry), 0600); writeErr != nil {
+			t.Fatalf("write registry.yaml: %v", writeErr)
+		}
+
+		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+		layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
+			ExternalDir: tmpDir,
+		})
+		if layeredErr != nil {
+			t.Fatalf("NewLayeredDataProvider: %v", layeredErr)
+		}
+
+		original := recipe.GetDataProvider()
+		recipe.SetDataProvider(layered)
+		defer recipe.SetDataProvider(original)
+
+		_, err := bundler.collectComponentManifests(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected error for missing manifest path")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+		}
+		msg := err.Error()
+		for _, want := range []string{"removed-in-newer-binary.yaml", "gpu-operator", "--data", "regenerate"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("error message should mention %q: %v", want, msg)
+			}
+		}
+	})
+}
+
 // TestMake_Reproducible verifies that bundle generation is deterministic.
 // Running Make() twice with the same input should produce identical output.
 func TestMake_Reproducible(t *testing.T) {

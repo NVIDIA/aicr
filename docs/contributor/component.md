@@ -96,22 +96,26 @@ For components that need additional Kubernetes manifests (beyond the Helm chart)
 
 **Step 1: Create manifest file**
 
-Create `recipes/components/gpu-operator/manifests/dcgm-exporter.yaml`:
+Create the manifest under `recipes/components/<name>/manifests/`. Files are
+rendered as Helm templates, so they can reference component values via
+`{{ index .Values "<component>" }}` when needed. Abbreviated skeleton (the
+in-tree `recipes/components/network-operator/manifests/nfd-network-rule.yaml`
+is the complete real-world example):
 
 ```yaml
-# DCGM Exporter ConfigMap
-{{- $gpuOp := index .Values "gpu-operator" }}
-{{- if and $gpuOp $gpuOp.dcgmExporter $gpuOp.dcgmExporter.config $gpuOp.dcgmExporter.config.create }}
----
-apiVersion: v1
-kind: ConfigMap
+# NFD NodeFeatureRule for Mellanox InfiniBand NICs
+apiVersion: nfd.k8s-sigs.io/v1alpha1
+kind: NodeFeatureRule
 metadata:
-  name: {{ $gpuOp.dcgmExporter.config.name | default "dcgm-exporter" }}
-  namespace: {{ .Release.Namespace }}
-data:
-  dcgm-metrics.csv: |
-    # Metrics configuration
-{{- end }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+  name: nfd-network-rule
+spec:
+  rules:
+    - name: nfd-network-rule
+      labels:
+        feature.node.kubernetes.io/pci-15b3.present: "true"
+      # ...matchFeatures elided; see nfd-network-rule.yaml in-tree.
 ```
 
 **Step 2: Reference in recipe**
@@ -120,14 +124,21 @@ Add the manifest to the component's `manifestFiles` in the recipe:
 
 ```yaml
 componentRefs:
-  - name: gpu-operator
+  - name: network-operator
     type: Helm
-    version: v25.3.3
     manifestFiles:
-      - components/gpu-operator/manifests/dcgm-exporter.yaml
+      - components/network-operator/manifests/nfd-network-rule.yaml
 ```
 
 The bundler automatically includes manifest files in the component's `manifests/` directory.
+
+**When to inline values instead.** If the upstream chart already exposes a
+templating hook for the resource you want to ship (e.g. the gpu-operator
+chart renders a dcgm-exporter ConfigMap directly from
+`dcgmExporter.config.data`), put the content in the component's
+`values.yaml` instead of adding a post-manifest. Inlining keeps the resource
+in the same Helm release as its consumer, so install ordering and upgrades
+are handled by Helm and an extra `kubectl apply` pass is unnecessary.
 
 ### Registry Configuration Reference
 

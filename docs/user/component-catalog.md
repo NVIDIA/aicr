@@ -66,3 +66,59 @@ The output lists every component with its pinned version and configuration value
 ## Adding Components
 
 New components are added declaratively in `recipes/registry.yaml` — no Go code required. See the [Contributing Guide](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) and [Bundler Development](../contributor/component.md) docs for details.
+
+## Upgrade Notes
+
+Migration steps when upgrading from a prior AICR-generated bundle to a newer one that changes how a component delivers its Kubernetes resources.
+
+A generated recipe is a point-in-time artifact of the AICR binary that produced it: the embedded registry, overlays, manifest paths, and chart pins are part of that binary's surface. When upgrading AICR, regenerate the recipe from scratch with the new binary (`aicr recipe ...`) before re-bundling. `aicr bundle --recipe <old-file>` against a newer binary may fail if the saved recipe references manifest paths the new release has moved or removed (see [Bundle Generation Fails](cli-reference.md#bundle-generation-fails) for the specific error).
+
+### `gpu-operator`: `dcgm-exporter` ConfigMap moved into the main release
+
+Earlier bundles shipped the `dcgm-exporter` ConfigMap as a post-manifest in a separate Helm release named `gpu-operator-post`. The in-cluster ConfigMap therefore carries ownership annotations pointing at that release:
+
+```yaml
+meta.helm.sh/release-name: gpu-operator-post
+meta.helm.sh/release-namespace: gpu-operator
+```
+
+Newer bundles render the ConfigMap directly from the main `gpu-operator` chart's `dcgmExporter.config.data` values. On upgrade, Helm 3 refuses to claim the existing ConfigMap because its annotations point at a different release:
+
+```text
+Error: ConfigMap "dcgm-exporter" in namespace "gpu-operator" exists and cannot be
+imported into the current release: invalid ownership metadata; annotation
+validation error: key "meta.helm.sh/release-name" must equal "gpu-operator":
+current value is "gpu-operator-post"
+```
+
+Fresh installs are not affected. To migrate an existing cluster, remove the stale `gpu-operator-post` release before applying the new bundle.
+
+**Raw Helm (per-component bundle / `deploy.sh`):**
+
+```bash
+helm uninstall gpu-operator-post --namespace gpu-operator
+```
+
+`helm uninstall` removes the ConfigMap it owns; the next `gpu-operator` upgrade re-creates it from values.
+
+**Helmfile** — the new bundle no longer references `gpu-operator-post`, so `helmfile apply` will not prune it on its own. Run the `helm uninstall` above first, then `helmfile apply`.
+
+**Argo CD** — delete the stale Application (it will not self-prune unless an `ApplicationSet` was managing it), then sync the updated `gpu-operator` application:
+
+```bash
+argocd app delete gpu-operator-post --cascade
+```
+
+**Flux** — delete the stale `HelmRelease` so Flux uninstalls the release and removes the ConfigMap, then reconcile the updated `gpu-operator` HelmRelease. The example below assumes the Flux control plane runs in `flux-system`; substitute the namespace where your Flux installation lives:
+
+```bash
+kubectl delete helmrelease gpu-operator-post --namespace flux-system
+```
+
+After migration, confirm the ConfigMap is owned by the `gpu-operator` release:
+
+```bash
+kubectl get configmap dcgm-exporter -n gpu-operator \
+  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
+# Expected: gpu-operator
+```

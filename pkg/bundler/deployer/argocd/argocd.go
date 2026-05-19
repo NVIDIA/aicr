@@ -54,6 +54,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 //go:embed templates/application.yaml.tmpl
@@ -74,6 +75,12 @@ var readmeTemplate string
 // pure-Helm KindUpstreamHelm folders). BundleDir carries the NNN-<name>
 // directory name for both kinds: it is the chart path for KindLocalHelm and
 // the values $ref path for KindUpstreamHelm.
+//
+// InlineValues drives the Application shape for KindUpstreamHelm when the
+// bundle repo is OCI: instead of the multi-source $values pattern (Git-only
+// in Argo CD), the Application is rendered single-source with helm.valuesObject
+// inlined from ValuesYAML. See InlineUpstreamValues on Generator for the
+// reason.
 type ApplicationData struct {
 	Name           string
 	Namespace      string
@@ -85,6 +92,8 @@ type ApplicationData struct {
 	TargetRevision string // Target revision for the user's repo
 	BundleDir      string // NNN-<name> directory inside the bundle
 	IsLocalChart   bool   // true → path-based single-source; false → multi-source upstream-helm
+	InlineValues   bool   // KindUpstreamHelm + OCI → single-source with helm.valuesObject inlined
+	ValuesYAML     string // Pre-indented YAML (8 spaces) for helm.valuesObject; used when InlineValues
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -170,6 +179,19 @@ type Generator struct {
 	// longer required. See pkg/bundler/deployer/localformat for the
 	// vendoring shape.
 	VendorCharts bool
+
+	// InlineUpstreamValues replaces the multi-source $values pattern for
+	// KindUpstreamHelm Applications with a single source whose helm.valuesObject
+	// is inlined from ComponentValues. Required when RepoURL is OCI because
+	// Argo CD's $values multi-source ref is Git-only — the repo-server
+	// attempts a `git ListRefs` against the OCI URL and fails with
+	// `unsupported scheme "oci"`. Off by default to preserve the existing
+	// multi-source shape for Git-backed deployments (operators retain
+	// per-component values.yaml edit ergonomics). Wired by the bundler
+	// when --deployer argocd targets oci://. Should remain off for
+	// argocdhelm's inner Generator — that path relies on the multi-source
+	// shape to transform it into a Helm template with dynamic merging.
+	InlineUpstreamValues bool
 
 	// vendorRecords is populated by Generate when VendorCharts is on.
 	// Captured here so VendorRecords() can expose it to callers
@@ -371,7 +393,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 				fmt.Sprintf("localformat returned folder for unknown component %q", f.Parent))
 		}
 
-		appData := buildApplicationData(*comp, f, i, repoURL, targetRevision)
+		var inlineValues map[string]any
+		if g.InlineUpstreamValues && f.Kind == localformat.KindUpstreamHelm {
+			inlineValues = g.ComponentValues[comp.Name]
+		}
+
+		appData, err := buildApplicationData(*comp, f, i, repoURL, targetRevision, inlineValues, g.InlineUpstreamValues)
+		if err != nil {
+			return nil, err
+		}
 		appDataList = append(appDataList, appData)
 
 		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)
@@ -507,11 +537,17 @@ func findComponentRef(refs []recipe.ComponentRef, parent string) *recipe.Compone
 }
 
 // buildApplicationData constructs ApplicationData for a single folder. The
-// FolderKind drives the Application shape — KindLocalHelm sets LocalChartPath
+// FolderKind drives the Application shape — KindLocalHelm sets IsLocalChart
 // (path-based single-source); KindUpstreamHelm leaves it empty (multi-source
 // upstream-helm). The folder's name is used as the Application name to keep
 // primary and injected -post folders distinct in Argo.
-func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWave int, repoURL, targetRevision string) ApplicationData {
+//
+// When inline is true and the folder is KindUpstreamHelm, values are
+// marshaled to deterministic YAML and indented 8 spaces for embedding under
+// helm.valuesObject. The result is a single-source Application that avoids
+// Argo CD's Git-only $values multi-source ref. Errors from value marshaling
+// surface as ErrCodeInternal.
+func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWave int, repoURL, targetRevision string, values map[string]any, inline bool) (ApplicationData, error) {
 	chart := comp.Chart
 	if chart == "" {
 		chart = comp.Name
@@ -548,6 +584,47 @@ func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWa
 			data.Version = deployer.NormalizeVersion(comp.Version)
 		}
 		data.Chart = chart
+
+		if inline {
+			data.InlineValues = true
+			yamlStr, err := renderInlineValuesYAML(values)
+			if err != nil {
+				return ApplicationData{}, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+					fmt.Sprintf("failed to render inline values for %s", comp.Name))
+			}
+			data.ValuesYAML = yamlStr
+		}
 	}
-	return data
+	return data, nil
+}
+
+// renderInlineValuesYAML marshals values to deterministic YAML and indents
+// every line by 8 spaces so the result drops cleanly under
+// `spec.source.helm.valuesObject:` (column 6) at column 8.
+//
+// Empty / nil values produce "        {}\n" so the template always emits a
+// well-formed map node — Argo CD's schema validation rejects a bare key with
+// no value. Trailing-blank lines from yaml.v3 are stripped to keep the
+// rendered Application stable across runs.
+func renderInlineValuesYAML(values map[string]any) (string, error) {
+	if len(values) == 0 {
+		return "        {}\n", nil
+	}
+	yamlBytes, err := serializer.MarshalYAMLDeterministic(values)
+	if err != nil {
+		return "", err
+	}
+	const indent = "        "
+	lines := strings.Split(strings.TrimRight(string(yamlBytes), "\n"), "\n")
+	var b strings.Builder
+	for _, line := range lines {
+		if line == "" {
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString(indent)
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String(), nil
 }
