@@ -346,6 +346,46 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
   {{- range .Components }}
   {{- if eq .Name "nvidia-dra-driver-gpu" }}
   if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then
+    # gpu-operator's k8s-driver-manager reloads NVIDIA kernel modules
+    # asynchronously per-node after `helm upgrade gpu-operator` returns.
+    # If the DRA kubelet plugin pod re-rolls (via the chart's
+    # podAnnotations or the post-install restart below) before those
+    # reloads finish on every managed GPU node, the freshly-started
+    # plugin can pin its NVML handle to the now-stale driver state on
+    # a not-yet-migrated node. CDI spec generation then fails with
+    # "invalid CDI Spec: empty device edits" and DRA-allocated pods
+    # stay in ContainerCreating until the plugin is restarted again.
+    # Wait for the migration to settle on every managed node before
+    # touching the plugin. See issue #973.
+    #
+    # Two gates skip this wait safely:
+    #   1. The gpu-operator nvidia-driver-daemonset is absent — host-
+    #      managed-driver recipes (GKE COS, OKE, Kind, etc.) run
+    #      gpu-operator with driver.enabled=false, so the DaemonSet is
+    #      never created. Look it up by name across all namespaces so
+    #      we discover it whichever namespace the operator runs in
+    #      (e.g. os-talos moves it to "privileged-gpu-operator").
+    #   2. No nodes carry nvidia.com/gpu.deploy.driver=true — the
+    #      operator's reconciler sets that label only on nodes its
+    #      driver DaemonSet selects (this respects
+    #      --accelerated-node-selector). Waiting on every
+    #      gpu.present=true node would block until the 15-min timeout
+    #      for any GPU node the operator deliberately excludes.
+    DRIVER_DS_NS=$(kubectl get daemonset -A -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' 2>/dev/null | awk '{print $1}')
+    if [[ -z "${DRIVER_DS_NS}" ]]; then
+      echo "  gpu-operator nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"
+    else
+      MANAGED_NODES=$(kubectl get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
+      if [[ "${MANAGED_NODES}" -gt 0 ]]; then
+        echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS})..."
+        if ! kubectl wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
+             nodes -l nvidia.com/gpu.deploy.driver=true --timeout=15m; then
+          echo "  WARNING: not all managed GPU nodes reached upgrade-done within 15m; proceeding with restart anyway"
+        fi
+      else
+        echo "  No nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait"
+      fi
+    fi
     # Best-effort mitigation for kubelet DRA plugin registration drift.
     # After uninstall/reinstall, kubelet's fsnotify watcher may not detect new
     # registration sockets. Restarting the plugin DS forces fresh socket creation.

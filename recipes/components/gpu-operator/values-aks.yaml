@@ -28,6 +28,19 @@
 nfd:
   enabled: false
 
+# Re-enable GPUDirect RDMA. The AKS overlay deploys network-operator,
+# which installs MOFED kernel modules on the host (ND-series InfiniBand
+# nodes). useHostMofed: true tells gpu-operator's driver container to
+# bind nvidia_peermem against the host's MOFED symbols instead of
+# building its own bundled MOFED — required for the network-operator
+# integration to actually work end-to-end. The global default in
+# components/gpu-operator/values.yaml is off because EFA / non-MOFED
+# fabrics trip v26.3.1's driver-validation gate.
+driver:
+  rdma:
+    enabled: true
+    useHostMofed: true
+
 # The following flags are set in the aks-rdma-infiniband reference configuration
 # but are not required for RDMA functionality. They suppress DaemonSets that
 # serve no purpose on AKS ND-H100 nodes. Uncomment if your deployment needs them.
