@@ -311,21 +311,32 @@ generate_bundle() {
         exit 1
     fi
 
-    # Extract criteria from overlay
-    local service accelerator intent os
+    # Without --platform, *-slurm overlays resolve to their non-platform
+    # parent and the bundle omits the slinky-slurm operator/cluster.
+    # Scoped to slurm: kubeflow/dynamo are not yet validated under KWOK.
+    local service accelerator intent os platform
     service=$(yq eval '.spec.criteria.service // ""' "$recipe_overlay")
     accelerator=$(yq eval '.spec.criteria.accelerator // ""' "$recipe_overlay")
     intent=$(yq eval '.spec.criteria.intent // ""' "$recipe_overlay")
     os=$(yq eval '.spec.criteria.os // ""' "$recipe_overlay")
+    platform=$(yq eval '.spec.criteria.platform // ""' "$recipe_overlay")
 
-    log_info "Criteria: service=$service accelerator=$accelerator intent=$intent os=$os"
+    log_info "Criteria: service=$service accelerator=$accelerator intent=$intent os=$os platform=$platform"
 
-    # Build recipe command with available criteria
     local recipe_args=()
     [[ -n "$service" ]] && recipe_args+=(--service "$service")
     [[ -n "$accelerator" ]] && recipe_args+=(--accelerator "$accelerator")
     [[ -n "$intent" ]] && recipe_args+=(--intent "$intent")
     [[ -n "$os" ]] && recipe_args+=(--os "$os")
+    # Only forward --platform for platforms validated under KWOK. Other
+    # platforms (kubeflow, dynamo, nim) historically resolve to their
+    # non-platform parent here; preserve that behavior to avoid regressing
+    # existing matrix lanes. Extend as additional platforms are validated.
+    if [[ "$platform" == "slurm" ]]; then
+        recipe_args+=(--platform "$platform")
+    elif [[ -n "$platform" ]]; then
+        log_info "platform=$platform not yet validated under KWOK — resolving without --platform"
+    fi
 
     # Generate resolved recipe from criteria
     log_info "Generating resolved recipe..."
@@ -348,6 +359,19 @@ generate_bundle() {
     # Disable features not needed for scheduling validation:
     # - PrometheusRules and AlertManager (slow to create)
     # - Nodewright customization (creates CRs that depend on operator CRDs)
+    # - slinky-slurm-operator webhook + cert-manager wiring: the operator's
+    #   webhook validates Slurm CRs through a Service whose pod runs on a
+    #   KWOK fake (Ready without container). Both certManager.enabled and
+    #   webhook.enabled gate the cert-manager.io/Certificate submission
+    #   plus the ValidatingWebhookConfiguration. Disabling them skips
+    #   admission entirely; harmless under KWOK since no real Slurm CRs
+    #   are reconciled.
+    # - slinky-slurm controller persistence: the chart provisions a PVC
+    #   via the cluster's default StorageClass. Kind's local-path provisioner
+    #   binds with WaitForFirstConsumer, so the PVC is pinned to whichever
+    #   node the pod schedules on — and KWOK fakes can't actually back a
+    #   local-path volume, leaving the pod stuck Pending with NominatedNodeName
+    #   set. Disabling persistence lets the controller pod bind.
     log_info "Generating bundle..."
 
     local bundle_output
@@ -360,6 +384,9 @@ generate_bundle() {
         --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
         --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
         --set "certmanager:startupapicheck.enabled=false" \
+        --set "slinkyslurmoperator:webhook.enabled=false" \
+        --set "slinkyslurmoperator:certManager.enabled=false" \
+        --set "slurmcluster:controller.persistence.enabled=false" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
         --set "nodewright-customizations:enabled=false" \

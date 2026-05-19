@@ -148,7 +148,7 @@ func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 	//
 	//   InferenceNamespaceTerminationWait (5m)  — prior run's ns drain
 	//   + InferenceWorkloadReadyTimeout   (10m) — DynamoGraphDeployment ready
-	//   + InferenceHealthTimeout          (5m)  — frontend /health probe
+	//   + InferenceHealthTimeout          (5m)  — /v1/chat/completions readiness probe
 	//   + InferencePerfPodTimeout         (5m)  — AIPerf pod scheduling
 	//   + InferencePerfJobTimeout         (15m) — AIPerf benchmark runtime
 	//

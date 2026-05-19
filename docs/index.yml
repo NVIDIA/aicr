@@ -30,6 +30,8 @@ navigation:
         path: user/agent-deployment.md
       - page: Component Catalog
         path: user/component-catalog.md
+      - page: Validation
+        path: user/validation.md
 
   - section: Integrator Guide
     contents:

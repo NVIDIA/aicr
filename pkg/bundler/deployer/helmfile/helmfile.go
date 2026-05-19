@@ -165,13 +165,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Emit either the single-file helmfile.yaml or the stratified
 	// helmfiles: layout depending on whether the dependency DAG
 	// produces more than one level (issue #914).
-	splitLayout, err := g.writeHelmfileLayout(outputDir, output, writeResult.Folders, sortedRefs, namespaceByComponent)
+	stratified, err := g.writeHelmfileLayout(outputDir, output, writeResult.Folders, sortedRefs, namespaceByComponent)
 	if err != nil {
 		return nil, err
 	}
 
 	// README.md
-	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts, splitLayout)
+	readmePath, readmeSize, err := writeReadme(outputDir, g.Version, sortedRefs, len(g.DynamicValues) > 0, g.VendorCharts, stratified)
 	if err != nil {
 		return nil, err
 	}
@@ -498,12 +498,13 @@ type readmeData struct {
 	BundlerVersion string
 	HasDynamic     bool
 	HasVendored    bool
-	// HasCRDLayer is true when the bundle uses the split-helmfile
-	// layout (crds.yaml + releases.yaml referenced from helmfile.yaml's
-	// helmfiles: list). Drives a short README note explaining the
-	// structure to operators. Issue #914.
-	HasCRDLayer bool
-	Components  []readmeComponent
+	// HasSubHelmfiles is true when the bundle uses the stratified
+	// multi-helmfiles layout (one level-N.yaml per DAG level,
+	// referenced from helmfile.yaml's helmfiles: list). Drives a
+	// short README note explaining the structure to operators.
+	// Issue #914.
+	HasSubHelmfiles bool
+	Components      []readmeComponent
 }
 
 type readmeComponent struct {
@@ -513,13 +514,13 @@ type readmeComponent struct {
 }
 
 // writeReadme renders README.md from the embedded template.
-func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored, hasCRDLayer bool) (string, int64, error) {
+func writeReadme(outputDir, version string, refs []recipe.ComponentRef, hasDynamic, hasVendored, hasSubHelmfiles bool) (string, int64, error) {
 	data := readmeData{
-		BundlerVersion: deployer.NormalizeVersionWithDefault(version),
-		HasDynamic:     hasDynamic,
-		HasVendored:    hasVendored,
-		HasCRDLayer:    hasCRDLayer,
-		Components:     make([]readmeComponent, 0, len(refs)),
+		BundlerVersion:  deployer.NormalizeVersionWithDefault(version),
+		HasDynamic:      hasDynamic,
+		HasVendored:     hasVendored,
+		HasSubHelmfiles: hasSubHelmfiles,
+		Components:      make([]readmeComponent, 0, len(refs)),
 	}
 	for _, r := range refs {
 		v := r.Version

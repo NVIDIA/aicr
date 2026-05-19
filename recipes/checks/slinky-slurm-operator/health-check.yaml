@@ -1,4 +1,4 @@
-# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,9 +28,6 @@ spec:
   steps:
     - name: validate-operator-deployment
       try:
-        # Guard against vacuous pass on empty namespace: verify the
-        # slurm-operator deployment exists and has at least one ready
-        # replica.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -42,8 +39,7 @@ spec:
                 (availableReplicas > `0`): true
     - name: validate-webhook-deployment
       try:
-        # The webhook must be ready before any Slinky CRs (Controller,
-        # NodeSet, etc.) can be created, so assert it independently.
+        # Webhook must be ready before any Slinky CR can be created.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -55,17 +51,10 @@ spec:
                 (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
       try:
-        # Assert no pods are in unhealthy phases.
-        # Pods must be Running (long-lived) or Succeeded (completed jobs).
-        # This catches Pending (init containers, scheduling), Failed, and
-        # Unknown.
-        #
-        # chainsaw `error` assertions pass when no matching resource exists,
-        # which would let this step trivially pass on an empty namespace.
-        # The two preceding deployment-availability steps prevent that:
-        # they require both deployments to have at least one ready replica
-        # in `slinky`, which guarantees pods exist and are inspectable
-        # before this step runs.
+        # Catch Pending / Failed / Unknown phases. Chainsaw `error` passes
+        # vacuously when no resource matches, so the preceding deployment-
+        # availability asserts are load-bearing: they guarantee the pods
+        # exist before this step runs.
         - error:
             resource:
               apiVersion: v1

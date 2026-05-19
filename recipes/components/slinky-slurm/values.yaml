@@ -1,0 +1,179 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Slinky Slurm cluster Helm values.
+#
+# Overrides the chart's default `slinky` map-keys for `nodesets` /
+# `loginsets`: those keys carry the full required sub-tree (image,
+# slurmd, logfile sidecar, partition); any other key would have to
+# redefine it all. The cross-check in pkg/recipe TestComponentRegistry_
+# SlinkySlurm_NodeSchedulingPaths enforces this alignment with the
+# registry's nodeScheduling paths.
+#
+# Accounting (slurmdbd) and DCGM job-mapping are disabled by default:
+# accounting needs an external MariaDB AICR does not bundle; DCGM needs
+# dcgm-exporter on workers. Both opt in via valuesFile / --set.
+
+# Cgroup isolation + NVIDIA GPU autodetect (no-op without GPUs).
+configFiles:
+  cgroup.conf: |
+    CgroupPlugin=autodetect
+    IgnoreSystemd=yes
+    EnableControllers=yes
+    ConstrainCores=yes
+    ConstrainRAMSpace=yes
+    ConstrainDevices=yes
+    ConstrainSwapSpace=yes
+    AllowedRAMSpace=95.0
+    AllowedSwapSpace=100.0
+  gres.conf: |
+    AutoDetect=nvidia
+
+# File-based local users (no LDAP/AD provider bundled).
+sssd:
+  conf: |
+    [sssd]
+    config_file_version = 2
+    services = nss,pam
+    domains = LOCAL
+
+    [nss]
+    filter_groups = root,slurm
+    filter_users = root,slurm
+
+    [pam]
+
+    [domain/LOCAL]
+    id_provider = files
+    auth_provider = files
+
+controller:
+  # Pin the logfile sidecar to an immutable Alpine tag (chart default is
+  # :latest). Re-verify on defaultVersion bumps in case the chart pins
+  # it upstream.
+  logfile:
+    image:
+      tag: "3.23.3"
+  persistence:
+    enabled: true
+    storageClassName: null
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 4Gi
+  # All values quoted as strings: extraConfMap is map[string]string and
+  # bare YAML 1.1 scalars (e.g. `no`) would coerce to boolean false.
+  # Accounting-only directives belong in the accounting opt-in valuesFile.
+  extraConfMap:
+    # select/cons_tres is required for GPU GRES to allocate per-resource
+    # rather than whole-node (Slurm's select/linear default). All other
+    # site-policy directives (priority weights, fairshare, QoS) are
+    # deliberately omitted — sites should add them in a leaf valuesFile.
+    SelectType: "select/cons_tres"
+    ScronParameters: "enable"
+  # /metrics endpoint on; ServiceMonitor stays at chart default (off)
+  # so the chart doesn't render a prometheus-operator CR on clusters
+  # without it.
+  metrics:
+    enabled: true
+
+restapi:
+  replicas: 1
+  slurmrestd:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  # Chart wraps Service overrides as {metadata, spec}; bare service.type
+  # is rejected by the RestApi CRD.
+  service:
+    spec:
+      type: ClusterIP
+
+# Accounting (slurmdbd) is wrapped in `if .Values.accounting.enabled`
+# in the chart, so storageConfig below is inert until enabled. Values
+# mirror the chart defaults (Service named `mariadb`, Secret named
+# `mariadb-password` with key `password`) so operators see the expected
+# external MariaDB shape; this is also the wiring AICR will produce
+# when a MariaDB component is bundled.
+accounting:
+  enabled: false
+  storageConfig:
+    host: mariadb
+    port: 3306
+    database: slurm_acct_db
+    username: slurm
+    passwordKeyRef:
+      name: mariadb-password
+      key: password
+
+# Secure default: the login pod is intentionally unreachable via SSH
+# (empty rootSshAuthorizedKeys + PasswordAuthentication off) until an
+# operator supplies real keys. Do not "fix" without wiring key delivery.
+loginsets:
+  slinky:
+    enabled: true
+    replicas: 1
+    # Pin the initconf sidecar to an immutable Alpine tag (chart default
+    # is :latest).
+    initconf:
+      image:
+        tag: "3.23.3"
+    rootSshAuthorizedKeys: |
+      # PLACEHOLDER -- override via valuesFile or --set before deploy
+      # ssh-ed25519 AAAA... user@example.com
+    extraSshdConfig: |
+      PasswordAuthentication no
+      PermitEmptyPasswords no
+      ChallengeResponseAuthentication no
+
+# Single-tenant policy: one Default=YES partition only — slurmctld
+# refuses to start if an override valuesFile adds a second one.
+# Multi-tenant deployers should disable this partition and define
+# their own (e.g. per-team Default=NO + AllowGroups).
+#
+# The chart does NOT inject CPUs=/RealMemory=/Gres= into slurmd's
+# --conf line from pod resource limits — it only plumbs POD_CPUS /
+# POD_MEMORY env vars and lets the image entrypoint act on them. For
+# GPU clusters, declare Gres/Features explicitly via
+# `nodesets.slinky.extraConfMap` and pair with the matching
+# nvidia.com/gpu limit on `nodesets.slinky.slurmd.resources.limits`.
+nodesets:
+  slinky:
+    enabled: true
+    scalingMode: StatefulSet
+    replicas: 1
+    # Pin the logfile sidecar to an immutable Alpine tag (chart default
+    # is :latest).
+    logfile:
+      image:
+        tag: "3.23.3"
+    partition:
+      enabled: true
+      configMap:
+        State: UP
+        Default: "YES"
+        # Cap default walltime at 24h. UNLIMITED is unsafe as a default:
+        # a single stuck job can hold GPUs indefinitely with no operator
+        # recourse short of scancel. Override per-leaf if needed.
+        MaxTime: "24:00:00"
+
+vendor:
+  nvidia:
+    dcgm:
+      enabled: false

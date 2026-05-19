@@ -17,11 +17,17 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	validatorv1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	v1 "k8s.io/api/core/v1"
@@ -937,5 +943,79 @@ func TestRequireComparatorPrefix(t *testing.T) {
 					tt.value, tt.want, err, tt.wantError)
 			}
 		})
+	}
+}
+
+// TestWaitForEndpointReady_AcceptsOnFirstRealCompletion covers the warmup race
+// the function exists to handle: Dynamo's frontend responds 200 to /health
+// before backend workers register, so a /health-only probe lets AIPerf launch
+// against an endpoint that completes requests with zero tokens. The probe must
+// only accept once /v1/chat/completions returns a non-empty completion — every
+// other shape (404, 503, 200-empty-content, 200-but-no-choices) must be
+// retried, not treated as ready.
+func TestWaitForEndpointReady_AcceptsOnFirstRealCompletion(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if r.Method != http.MethodPost {
+			t.Errorf("probe method = %q, want %q", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("probe hit %q, expected /v1/chat/completions", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch n {
+		case 1: // backend not registered yet
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case 2: // accepted but no completion produced (the failure mode we're guarding against)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":""}}]}`))
+		case 3: // worker connected, real completion
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hi"}}]}`))
+		default:
+			t.Errorf("unexpected extra probe call %d after success", n)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hi"}}]}`))
+		}
+	}))
+	defer srv.Close()
+
+	// Bound the success-path probe so a regression that breaks the accept
+	// condition fails the test in milliseconds rather than blocking up to
+	// InferenceHealthTimeout (5 m). 250 ms is comfortable headroom over the
+	// 3-call/1 ms expected critical path while still tight enough to surface
+	// a stuck loop.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	if err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond); err != nil {
+		t.Fatalf("waitForEndpointReady returned error: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Errorf("probe call count = %d, want 3 (503 → empty 200 → real 200)", got)
+	}
+}
+
+// TestWaitForEndpointReady_TimesOutWhenAlwaysEmpty ensures the probe doesn't
+// silently treat persistent "200 with empty completion" as ready — that's the
+// exact failure mode (frontend up, workers absent) the function exists to
+// detect. Use a tiny ctx deadline so the test stays fast.
+func TestWaitForEndpointReady_TimesOutWhenAlwaysEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("error code = %v, want ErrCodeTimeout (err=%v)", err, err)
 	}
 }

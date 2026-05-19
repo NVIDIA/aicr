@@ -25,7 +25,6 @@ import (
 	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
-	corev1 "k8s.io/api/core/v1"
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
@@ -825,82 +824,6 @@ func TestResolveImage(t *testing.T) {
 			got := ResolveImage(tt.image, tt.version, tt.commit)
 			if got != tt.want {
 				t.Errorf("ResolveImage(%q, %q, %q) = %q, want %q", tt.image, tt.version, tt.commit, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestImagePullPolicy covers the shared helper that both the outer
-// validator Deployer and the inner aiperf-bench Job call, so they stay in
-// lockstep. The digest-pin case is the specific Codex P3 concern: forcing
-// PullAlways on a digest-pinned ref (e.g. an external catalog entry that
-// stayed `name@sha256:…`) would break disconnected/private clusters by
-// making kubelet re-contact the registry every run, for no correctness
-// benefit (the digest is cryptographically immutable).
-func TestImagePullPolicy(t *testing.T) {
-	tests := []struct {
-		name   string
-		image  string
-		envTag string // AICR_VALIDATOR_IMAGE_TAG — empty means unset
-		want   corev1.PullPolicy
-	}{
-		// ----- side-loaded refs win unconditionally -----
-		{name: "ko.local → Never", image: "ko.local/aicr-validators/x:latest", want: corev1.PullNever},
-		{name: "kind.local → Never", image: "kind.local/aicr-validators/x:latest", want: corev1.PullNever},
-		{name: "ko.local + override still Never", image: "ko.local/aicr-validators/x:edge", envTag: "edge", want: corev1.PullNever},
-		// The side-load check must anchor on the full registry segment
-		// (trailing slash) so a real registry like `ko.localhost:5000/...`
-		// is not misread as `ko.local/...` and forced to PullNever —
-		// kubelet would then be unable to pull from the real registry.
-		{name: "ko.localhost:5000 registry → not treated as side-load", image: "ko.localhost:5000/aicr-validators/x:v1", want: corev1.PullIfNotPresent},
-		{name: "kind.localhost:5000 registry → not treated as side-load", image: "kind.localhost:5000/aicr-validators/x:v1", want: corev1.PullIfNotPresent},
-
-		// ----- digest pins are immutable → IfNotPresent -----
-		{
-			name:  "digest-only ref → IfNotPresent (immutable by construction)",
-			image: "ghcr.io/foo/bar@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-			want:  corev1.PullIfNotPresent,
-		},
-		{
-			// Codex P3: the tag override must NOT upgrade a digest ref to
-			// PullAlways. Doing so would make disconnected/air-gapped
-			// clusters re-contact the registry every run for no gain.
-			name:   "digest-only ref + override → IfNotPresent (override does not apply)",
-			image:  "ghcr.io/foo/bar@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-			envTag: "latest",
-			want:   corev1.PullIfNotPresent,
-		},
-		{
-			name:  "mixed ref name:tag@digest → IfNotPresent (digest wins)",
-			image: "ghcr.io/foo/bar:v1.0.0@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-			want:  corev1.PullIfNotPresent,
-		},
-
-		// ----- override forces Always on non-digest refs -----
-		{
-			name:   "override with :edge → Always (avoid stale cache on mutable tag)",
-			image:  "ghcr.io/nvidia/aicr-validators/performance:edge",
-			envTag: "edge",
-			want:   corev1.PullAlways,
-		},
-		{
-			name:   "override with release :v0.11.0 → Always (safe over-pull, not a regression)",
-			image:  "ghcr.io/nvidia/aicr-validators/performance:v0.11.0",
-			envTag: "v0.11.0",
-			want:   corev1.PullAlways,
-		},
-
-		// ----- default policy (no override) -----
-		{name: ":latest → Always", image: "ghcr.io/nvidia/aicr-validators/performance:latest", want: corev1.PullAlways},
-		{name: ":vX.Y.Z → IfNotPresent", image: "ghcr.io/nvidia/aicr-validators/performance:v1.0.0", want: corev1.PullIfNotPresent},
-		{name: ":sha-<commit> → IfNotPresent (main-branch dev default)", image: "ghcr.io/nvidia/aicr-validators/performance:sha-abc1234", want: corev1.PullIfNotPresent},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
-			if got := ImagePullPolicy(tt.image); got != tt.want {
-				t.Errorf("ImagePullPolicy(%q) = %q, want %q", tt.image, got, tt.want)
 			}
 		})
 	}
