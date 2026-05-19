@@ -390,6 +390,10 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			VendorCharts:           b.Config.VendorCharts(),
+			// Inline values when the bundle repo is OCI: Argo CD's $values
+			// multi-source ref is Git-only (see #960), so an OCI repoURL
+			// must use single-source with helm.valuesObject embedded.
+			InlineUpstreamValues: strings.HasPrefix(b.Config.RepoURL(), "oci://"),
 		}, nil
 
 	case config.DeployerHelm:

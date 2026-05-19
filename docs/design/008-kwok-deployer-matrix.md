@@ -57,23 +57,37 @@ round-trip.
 ## Decision
 
 Add a `deployer` dimension to the existing `kwok-recipes.yaml` matrix
-with values `{helm, argocd-oci, argocd-helm-oci}`. Per matrix cell,
-boot a shared in-cluster OCI registry and Argo CD; push the bundle
-via OCI; observe Argo CD reconciliation to `Synced+Healthy`; then
-reuse the existing pod-Running verification.
+with values `{helm, argocd-oci, argocd-helm-oci, flux-oci}`. Per matrix
+cell, boot a shared in-cluster OCI registry plus the GitOps controllers
+needed by the selected deployer (Argo CD for `argocd-*`, Flux 2 for
+`flux-oci`); push the bundle via OCI; observe reconciliation to a
+controller-specific terminal-pass state; then reuse the existing
+pod-Running verification.
 
 | Tier | Trigger | Deployer values |
 |---|---|---|
-| Tier 1 — generic overlays | every PR + push | `{helm, argocd-oci, argocd-helm-oci}` |
+| Tier 1 — generic overlays | every PR + push | `{helm, argocd-oci, argocd-helm-oci, flux-oci}` |
 | Tier 2 — diff-aware accelerator overlays | PR only, conditional | `helm` only (unchanged) |
-| Tier 3 — full overlay set | push to main + nightly | `{helm, argocd-oci, argocd-helm-oci}` |
+| Tier 3 — full overlay set | push to main + nightly | `{helm, argocd-oci, argocd-helm-oci, flux-oci}` |
 
-**Rationale for tier scope.** Argo CD template regressions surface on
-generic overlays (Tier 1) — that is where the issue's bug class
-lives. Full accelerator-specific Argo CD coverage runs nightly and on
-push to main without inflating PR latency. Tier 2 stays helm-only
-because its purpose is diff-aware accelerator-config validation;
-Argo CD shape is orthogonal.
+**Rationale for tier scope.** Argo CD / Flux template regressions
+surface on generic overlays (Tier 1) — that is where the issue's bug
+class lives. Full accelerator-specific GitOps coverage runs nightly
+and on push to main without inflating PR latency. Tier 2 stays
+helm-only because its purpose is diff-aware accelerator-config
+validation; GitOps shape is orthogonal.
+
+**Rationale for adding `flux-oci`.** AICR ships a `flux` deployer
+alongside `argocd` / `argocd-helm`. Without an end-to-end CI lane,
+Flux-side bundle-format regressions ship to `main` undetected (same
+class of bug `argocd-oci` was added to catch). Flux's source-controller
+can consume the AICR generic OCI artifact via an outer `OCIRepository`
++ `Kustomization` wrapper (`spec.layerSelector.mediaType:
+application/vnd.oci.image.layer.v1.tar+gzip`, `operation: extract`);
+the inner `HelmRelease` resources then reconcile their per-component
+charts via helm-controller. The lane validates that bundle shape, not
+chart reconciliation completeness under KWOK fidelity gaps (see the
+terminal-pass framing below).
 
 **Rationale for OCI over Git source.** The user-confirmed production
 path is OCI. A local Gitea / dumb-HTTP git server would test the
@@ -111,9 +125,9 @@ One Kind cluster per matrix cell. Inside each cluster:
 │           │             │   (KWOK fake pods → Running)    │        │
 │           │             └─────────────────────────────────┘        │
 └───────────┼───────────────────────────────────────────────────────┘
-            │ kind extraPortMappings: host 5000 → node 30500
+            │ kind extraPortMappings: host 5500 → node 30500
    ┌────────┴────────┐
-   │   CI runner     │  aicr bundle --output oci://localhost:5000/...
+   │   CI runner     │  aicr bundle --output oci://localhost:5500/...
    └─────────────────┘
 ```
 
@@ -165,24 +179,45 @@ Per `(recipe, deployer)` matrix cell:
         └── if deployer in {argocd-oci, argocd-helm-oci}:
               aicr bundle --recipe ... \
                           --deployer <d> \
-                          --output oci://localhost:5000/aicr/<recipe>:<sha>-<deployer>
+                          --output oci://localhost:5500/aicr/<recipe>:<sha>-<deployer>
               kubectl apply -f bundle/app-of-apps.yaml          (argocd)
               # or: helm install <release> oci://...             (argocd-helm)
-              wait_for_argocd_sync                              (new helper)
+              wait_for_argocd_sync                              (helper)
+              verify_pods                                       (existing)
+
+        └── if deployer == flux-oci:
+              aicr bundle --recipe ... \
+                          --deployer flux \
+                          --output oci://localhost:5500/aicr/<recipe>:<sha>-flux-oci
+              kubectl apply -f -    # OCIRepository (layerSelector +
+                                    # spec.insecure for plain-HTTP)
+              kubectl apply -f -    # Kustomization (sourceRef -> OCIRepository,
+                                    # path: ./, wait: false)
+              wait_for_flux_sync                                (helper)
               verify_pods                                       (existing)
 
 3. Per-recipe teardown
-   └── cleanup_between_tests           [argocd/registry survive]
+   └── cleanup_between_tests           [argocd/flux-system/registry survive]
 ```
 
-**`wait_for_argocd_sync` (new helper)** polls
+**`wait_for_argocd_sync` (helper)** polls
 `kubectl get application -n argocd -o json` until every `Application`
 has `status.sync.status=Synced` and `status.health.status=Healthy`
 (or `Progressing` after a bounded retry window — KWOK pods may take
 a few stage-fast cycles to settle). On failure, dumps specific Argo
 CD conditions for actionable logs.
 
-**OCI tag convention:** `oci://localhost:5000/aicr/<recipe>:<short-sha>-<deployer>`
+**`wait_for_flux_sync` (helper)** polls the outer `Kustomization`
+status until `Ready=True`, then polls `kubectl get helmrelease -A -o
+json` until every `HelmRelease` reaches a terminal pass state:
+either `Ready=True` (canonical pass) or `Released=True` AND
+`status.history[0].status=="deployed"` AND `Stalled!=True` ("bundle
+applied; KWOK can't drive readiness probes" pass — analog of Argo CD's
+`Synced + Progressing` arm). Reuses the EXIT_ARGOCD_SYNC_TIMEOUT (50)
+exit code so `run-all-recipes.sh`'s 3-strike rule fires symmetrically
+across both GitOps lanes.
+
+**OCI tag convention:** `oci://localhost:5500/aicr/<recipe>:<short-sha>-<deployer>`
 avoids stale-tag confusion when running the same recipe across
 deployer values back-to-back in local development.
 
@@ -193,12 +228,12 @@ deployer values back-to-back in local development.
 | File | Change |
 |---|---|
 | `.settings.yaml` | Pin `argocd_chart` and `registry_image` under `versions:` |
-| `kwok/kind-config.yaml` | Add `extraPortMappings: {containerPort: 30500, hostPort: 5000}` |
+| `kwok/kind-config.yaml` | Add `extraPortMappings: {containerPort: 30500, hostPort: 5500}` (avoids macOS ControlCenter port-5000 collision) |
 | `kwok/scripts/install-infra.sh` (new) | Idempotent install of registry + Argo CD + repo-creds Secret |
 | `kwok/scripts/validate-scheduling.sh` | Add `--deployer <name>` flag; branch on deployer |
 | `kwok/scripts/run-all-recipes.sh` | Accept deployer arg; allowlist `aicr-registry` / `argocd` in cleanup |
 | `.github/actions/kwok-test/action.yml` | New input `deployer`; pass through to `run-all-recipes.sh` |
-| `.github/workflows/kwok-recipes.yaml` | Add `deployer: [helm, argocd-oci, argocd-helm-oci]` to Tier 1 and Tier 3 matrices |
+| `.github/workflows/kwok-recipes.yaml` | Add `deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci]` to Tier 1 and Tier 3 matrices |
 | `Makefile` | New `kwok-test-deployer RECIPE=... DEPLOYER=...` target |
 | `docs/contributor/<area>.md` (KWOK testing page) | Document the matrix and local repro |
 
@@ -220,7 +255,7 @@ deployer values back-to-back in local development.
 
 | # | Failure | Detection | Remediation |
 |---|---|---|---|
-| 1 | Registry push fails | `aicr bundle --output oci://...` exits non-zero | `wait_for_registry_ready` polls `curl -sf http://localhost:5000/v2/` before any bundle step; dump registry Pod logs |
+| 1 | Registry push fails | `aicr bundle --output oci://...` exits non-zero | `wait_for_registry_ready` polls `curl -sf http://localhost:5500/v2/` before any bundle step; dump registry Pod logs |
 | 2 | Argo CD install / CRD not ready | `kubectl wait --for=condition=Established crd/applications.argoproj.io --timeout=120s` | Bounded wait; fail fast with `kubectl describe deploy -n argocd` |
 | 3 | Argo CD cannot pull from local OCI | `Application.status.conditions[].type=ComparisonError` | `dump_argocd_failures` runs `kubectl get applications -n argocd -o json \| jq '.items[].status.conditions'` + repo-server logs |
 | 4 | Application stuck `OutOfSync` / `Progressing` past deadline | `wait_for_argocd_sync` deadline (default 300 s, override via `KWOK_ARGOCD_SYNC_TIMEOUT`) | Dump each Application's `status.operationState.message` and `status.health.message` |

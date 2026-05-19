@@ -235,6 +235,125 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+// TestGenerate_PreManifestParentResolution exercises the synthetic
+// `-pre` folder path that recipes with ComponentPreManifests emit
+// (e.g. the gke-cos OS overlay, which injects a Talos-style driver
+// prerequisite Namespace ahead of gpu-operator). The folder is named
+// `NNN-gpu-operator-pre`; the bundler must strip the `-pre` suffix
+// when resolving the override key, otherwise resolveOverrideKey is
+// called with "gpu-operator-pre" and fails `component %q not found
+// in registry` at bundle time. Caught in the KWOK gke-cos-training
+// CI lane after the pre-fix; before this commit the bug only
+// surfaced for recipes that combined Helm + pre-manifest overlays.
+func TestGenerate_PreManifestParentResolution(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	g := &Generator{
+		RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
+			{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
+		}),
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version: "test",
+		RepoURL: "https://github.com/example/repo.git",
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/cos-namespace.yaml": []byte(
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: gpu-operator\n",
+				),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v (regression: -pre suffix not stripped before resolveOverrideKey)", err)
+	}
+
+	// The -pre folder content is copied into the bundle so Argo CD's
+	// repo-server can resolve the path-based child Application's
+	// `path: NNN-<name>-pre` reference. Confirm it survived the
+	// argocdhelm wrapper transformation.
+	preDir := filepath.Join(outputDir, "001-gpu-operator-pre")
+	if _, err := os.Stat(preDir); err != nil {
+		t.Errorf("expected -pre folder copied into bundle at %s: %v", preDir, err)
+	}
+
+	// The transformed template under templates/ should be keyed by the
+	// PARENT component (gpu-operator), not the -pre folder name,
+	// because the override key comes from the parent's registry entry.
+	tmplPath := filepath.Join(outputDir, "templates", "gpu-operator-pre.yaml")
+	if _, err := os.Stat(tmplPath); err != nil {
+		t.Errorf("expected wrapper template for -pre folder at %s: %v", tmplPath, err)
+	}
+}
+
+// TestGenerate_PreAndPostManifestParentResolution covers the actual
+// gke-cos OS overlay shape: a single registered component (`gpu-operator`)
+// with BOTH preManifestFiles (cos-namespace prep) and postManifestFiles
+// (dcgm-exporter). The argocdhelm processFolders loop sees 3 entries
+// (`<NNN>-gpu-operator-pre`, `<NNN>-gpu-operator`, `<NNN>-gpu-operator-post`)
+// and runs the suffix-strip logic twice across two distinct folders.
+// Both wrapper templates must resolve back to the same parent override
+// key so the values applied to the chart and the manifest hooks stay
+// consistent. Earlier revisions handled only `-post`; this test guards
+// against re-introducing that asymmetry.
+func TestGenerate_PreAndPostManifestParentResolution(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	g := &Generator{
+		RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
+			{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
+		}),
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version: "test",
+		RepoURL: "https://github.com/example/repo.git",
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/cos-namespace.yaml": []byte(
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: gpu-operator\n",
+				),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dcgm-config\n",
+				),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Both synthetic folders must exist in the bundle so the path-based
+	// child Applications can resolve them.
+	preDir := filepath.Join(outputDir, "001-gpu-operator-pre")
+	if _, err := os.Stat(preDir); err != nil {
+		t.Errorf("expected -pre folder at %s: %v", preDir, err)
+	}
+	postDir := filepath.Join(outputDir, "003-gpu-operator-post")
+	if _, err := os.Stat(postDir); err != nil {
+		t.Errorf("expected -post folder at %s: %v", postDir, err)
+	}
+
+	// Both wrapper templates must be present under templates/, both
+	// keyed by the PARENT component name (not the -pre / -post folder
+	// names). Asymmetric handling would lose one of them.
+	for _, suffix := range []string{"-pre", "-post"} {
+		tmplPath := filepath.Join(outputDir, "templates", "gpu-operator"+suffix+".yaml")
+		if _, err := os.Stat(tmplPath); err != nil {
+			t.Errorf("expected wrapper template for %s folder at %s: %v", suffix, tmplPath, err)
+		}
+	}
+}
+
 func TestGenerate_DataFiles(t *testing.T) {
 	makeGenerator := func(dataFiles []string, includeChecksums bool) *Generator {
 		return &Generator{

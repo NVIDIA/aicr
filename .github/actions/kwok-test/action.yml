@@ -19,6 +19,10 @@ inputs:
   recipe:
     description: 'Recipe name to test'
     required: true
+  deployer:
+    description: 'Deployer to exercise: helm | argocd-oci | argocd-helm-oci | flux-oci'
+    required: false
+    default: 'helm'
   go_version:
     description: 'Go version to install'
     required: true
@@ -108,7 +112,9 @@ runs:
       env:
         KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
       run: |
-        KWOK_CLUSTER=aicr-kwok-test bash kwok/scripts/run-all-recipes.sh ${{ inputs.recipe }}
+        KWOK_CLUSTER=aicr-kwok-test bash kwok/scripts/run-all-recipes.sh \
+          --deployer ${{ inputs.deployer }} \
+          ${{ inputs.recipe }}
 
     - name: Collect debug artifacts
       if: failure()
@@ -122,6 +128,14 @@ runs:
           kubectl get nodes -o wide > "/tmp/kwok-debug-artifacts/${cluster}-nodes.txt" || true
           kubectl get events --all-namespaces --sort-by='.lastTimestamp' > "/tmp/kwok-debug-artifacts/${cluster}-events.txt" || true
           kubectl get pods --all-namespaces -o wide > "/tmp/kwok-debug-artifacts/${cluster}-pods.txt" || true
+          kubectl get applications -n argocd -o yaml > "/tmp/kwok-debug-artifacts/${cluster}-argo-apps.yaml" 2>/dev/null || true
+          kubectl logs -n argocd deploy/argocd-repo-server --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-argo-reposerver.log" 2>/dev/null || true
+          kubectl logs -n argocd statefulset/argocd-application-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-argo-appcontroller.log" 2>/dev/null || true
+          kubectl get ocirepositories,kustomizations,helmreleases -A -o yaml > "/tmp/kwok-debug-artifacts/${cluster}-flux-resources.yaml" 2>/dev/null || true
+          kubectl logs -n flux-system deploy/source-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-flux-source-controller.log" 2>/dev/null || true
+          kubectl logs -n flux-system deploy/kustomize-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-flux-kustomize-controller.log" 2>/dev/null || true
+          kubectl logs -n flux-system deploy/helm-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-flux-helm-controller.log" 2>/dev/null || true
+          kubectl logs -n aicr-registry deploy/registry --tail=200 > "/tmp/kwok-debug-artifacts/${cluster}-registry.log" 2>/dev/null || true
         done
 
     - name: Export Kind logs
@@ -137,7 +151,7 @@ runs:
       if: failure() && inputs.upload_artifacts == 'true'
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
       with:
-        name: kwok-debug-${{ inputs.recipe }}-${{ github.run_id }}
+        name: kwok-debug-${{ inputs.recipe }}-${{ inputs.deployer }}-${{ github.run_id }}
         path: |
           /tmp/kwok-debug-artifacts/
           /tmp/kwok-kind-logs/

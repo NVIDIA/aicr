@@ -16,7 +16,10 @@
 #
 # Features:
 # - DRA (Dynamic Resource Allocation) enabled for GPU scheduling tests
-# - CoreDNS skipped - not needed for scheduling tests
+# - CoreDNS enabled — required by the Argo CD deployer-matrix lanes so
+#   in-cluster pods (argocd-server, repo-server, redis, etc.) can resolve
+#   each other via Service DNS. Costs ~15s extra boot vs the historical
+#   skip; trivial for KWOK CI. Issue #843.
 # - Control-plane tainted to prevent test workloads from scheduling there
 
 kind: Cluster
@@ -27,11 +30,27 @@ runtimeConfig:
   "resource.k8s.io/v1beta1": "true"
 nodes:
   - role: control-plane
+    # Host port 5500 → NodePort 30500 exposes the in-cluster OCI registry
+    # (registry.aicr-registry.svc) to the runner for `aicr bundle --output oci://...`
+    # pushes during the KWOK deployer-matrix lanes. Plain HTTP — gated by
+    # `--plain-http` on the bundler side and `insecureOCIForceHttp` on the
+    # Argo CD repo secret.
+    #
+    # Why 5500 and not 5000: on macOS, Apple ControlCenter (AirPlay /
+    # Handoff) listens on host port 5000 by default, and `kind create
+    # cluster` then fails to bind the extraPortMapping. Linux CI
+    # runners have port 5500 free as well, so the unconventional
+    # choice costs nothing there. The Service `containerPort: 5000`
+    # and NodePort `30500` are unchanged — Argo CD's repo-server
+    # reaches the registry in-cluster via Service DNS on port 5000
+    # regardless of the host-side mapping. Issue #843.
+    extraPortMappings:
+      - containerPort: 30500
+        hostPort: 5500
+        protocol: TCP
     kubeadmConfigPatches:
       - |
         kind: InitConfiguration
-        skipPhases:
-          - addon/coredns
         nodeRegistration:
           ignorePreflightErrors:
             - SystemVerification
