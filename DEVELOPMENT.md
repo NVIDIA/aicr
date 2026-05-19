@@ -522,10 +522,13 @@ make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 
 Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates scheduling (node selectors, tolerations, resource requests) but not runtime behavior (no container execution or GPU functionality).
 
+For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Matrix Testing](docs/contributor/kwok-testing.md).
+
 | Command | Description |
 |---------|-------------|
 | `make kwok-test-all` | Test all recipes in shared cluster (serial) |
 | `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
+| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`) |
 | `make kwok-cluster` | Create Kind cluster with KWOK |
 | `make kwok-status` | Show cluster and node status |
 | `make kwok-cluster-delete` | Delete cluster |

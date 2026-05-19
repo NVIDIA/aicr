@@ -453,6 +453,15 @@ const (
 	// or server to allocate an unbounded buffer.
 	MaxConfigBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
+	// MaxChartYAMLBytes caps the size of a Chart.yaml file that
+	// pkg/oci.PackageAndPushHelmChart reads from a caller-supplied
+	// SourceDir before pushing as an OCI artifact. Real Chart.yaml
+	// files are well under 4 KiB (apiVersion + name + version +
+	// maybe dependencies); 1 MiB is generous headroom while bounding
+	// an attacker-influenced SourceDir (symlink to /proc, NFS mount,
+	// FUSE filesystem) before os.ReadFile would OOM the process.
+	MaxChartYAMLBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxChecksumFileBytes caps the size of a bundle checksums.txt file.
 	// One entry is ~80 bytes; 1 MiB allows ~12k entries — well above any
 	// realistic bundle while bounding attacker-influenced inputs at the

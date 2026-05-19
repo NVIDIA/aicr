@@ -16,6 +16,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
@@ -118,5 +120,74 @@ func TestSelectAttester_WiresEnvAndFlags(t *testing.T) {
 	}
 	if _, ok := att.(*attestation.LazyKeylessAttester); !ok {
 		t.Errorf("expected *LazyKeylessAttester (deferred token resolution), got %T", att)
+	}
+}
+
+// TestParseBundleCmdOptions_OCIRepoURLDerivation verifies the auto-population
+// rules for opts.repoURL when bundling to an OCI target:
+//
+//   - --deployer argocd: derive `oci://...` from --output. Argo CD v3.1+
+//     parses a schemeless registry/repo string as a Git remote and fails
+//     on ssh-agent; the `oci://` prefix routes to its native OCI source.
+//   - --deployer argocd-helm: do NOT derive. That bundle is URL-portable
+//     by design — the publish location is supplied at `helm install`
+//     time via `--set repoURL=...`. Auto-deriving would surface the
+//     "--repo is ignored" warning even when the user never passed --repo.
+//   - --deployer helm: never derive.
+//   - explicit --repo: never overwritten.
+func TestParseBundleCmdOptions_OCIRepoURLDerivation(t *testing.T) {
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+
+	const ociOutput = "oci://reg.example.com:5000/aicr/foo:v1"
+
+	tests := []struct {
+		name           string
+		args           []string
+		expectedRepo   string
+		expectedTarget string
+	}{
+		{
+			name:           "argocd OCI derives oci:// scheme",
+			args:           []string{"--recipe", recipePath, "--output", ociOutput, "--deployer", "argocd"},
+			expectedRepo:   "oci://reg.example.com:5000/aicr/foo",
+			expectedTarget: "v1",
+		},
+		{
+			name:           "argocd-helm OCI does NOT derive repoURL (URL-portable contract)",
+			args:           []string{"--recipe", recipePath, "--output", ociOutput, "--deployer", "argocd-helm"},
+			expectedRepo:   "",
+			expectedTarget: "v1",
+		},
+		{
+			name:           "explicit --repo not overwritten",
+			args:           []string{"--recipe", recipePath, "--output", ociOutput, "--deployer", "argocd", "--repo", "https://github.com/x/y"},
+			expectedRepo:   "https://github.com/x/y",
+			expectedTarget: "v1",
+		},
+		{
+			name:           "helm deployer leaves repoURL empty",
+			args:           []string{"--recipe", recipePath, "--output", ociOutput, "--deployer", "helm"},
+			expectedRepo:   "",
+			expectedTarget: "v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := captureBundleOpts(t, tt.args)
+			if opts == nil {
+				t.Fatal("captureBundleOpts returned nil")
+			}
+			if opts.repoURL != tt.expectedRepo {
+				t.Errorf("repoURL = %q, want %q", opts.repoURL, tt.expectedRepo)
+			}
+			if opts.targetRevision != tt.expectedTarget {
+				t.Errorf("targetRevision = %q, want %q", opts.targetRevision, tt.expectedTarget)
+			}
+		})
 	}
 }

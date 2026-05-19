@@ -167,10 +167,20 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.outputDir = absOut
 	}
 
-	// When using Argo CD deployer with OCI output and no explicit --repo,
-	// auto-populate repoURL from the OCI reference (issue #519).
+	// When using --deployer argocd with OCI output and no explicit --repo,
+	// auto-populate repoURL from the OCI reference. The oci:// scheme is
+	// required so Argo CD routes to its native OCI artifact source instead
+	// of treating the value as a Git remote.
+	//
+	// argocd-helm is intentionally excluded: that bundle is URL-portable
+	// by design — the publish location is supplied at `helm install`
+	// time via `--set repoURL=...`, and the bundler's --repo flag is a
+	// no-op for it (the helper logs `--repo is ignored with --deployer
+	// argocd-helm`). Auto-filling repoURL here would surface that
+	// "ignored" warning even when the user never passed --repo, which
+	// blurs the URL-portable contract of the deployer.
 	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
-		opts.repoURL = opts.ociRef.Registry + "/" + opts.ociRef.Repository
+		opts.repoURL = oci.EnsureScheme(opts.ociRef.Registry + "/" + opts.ociRef.Repository)
 	}
 
 	// Derive target revision: use OCI tag when available
@@ -636,15 +646,34 @@ func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.At
 }
 
 // pushOCIBundle packages and pushes the bundle to an OCI registry.
+// Branches on deployer: --deployer argocd-helm uses the Helm OCI flow
+// (helm.config.v1+json config + helm.chart.content.v1.tar+gzip layer)
+// so `helm pull oci://…` discovers the chart at pull time; every other
+// deployer uses AICR's generic OCI artifactType. See #961.
 func pushOCIBundle(ctx context.Context, opts *bundleCmdOptions, out *result.Output) error {
-	pushResult, err := oci.PackageAndPush(ctx, oci.OutputConfig{
-		SourceDir:   opts.outputDir,
-		OutputDir:   opts.outputDir,
-		Reference:   opts.ociRef,
-		Version:     version,
-		PlainHTTP:   opts.plainHTTP,
-		InsecureTLS: opts.insecureTLS,
-	})
+	var (
+		pushResult *oci.PackageAndPushResult
+		err        error
+	)
+	if opts.deployer == config.DeployerArgoCDHelm {
+		pushResult, err = oci.PackageAndPushHelmChart(ctx, oci.HelmChartOptions{
+			SourceDir:   opts.outputDir,
+			OutputDir:   opts.outputDir,
+			Reference:   opts.ociRef,
+			Version:     version,
+			PlainHTTP:   opts.plainHTTP,
+			InsecureTLS: opts.insecureTLS,
+		})
+	} else {
+		pushResult, err = oci.PackageAndPush(ctx, oci.OutputConfig{
+			SourceDir:   opts.outputDir,
+			OutputDir:   opts.outputDir,
+			Reference:   opts.ociRef,
+			Version:     version,
+			PlainHTTP:   opts.plainHTTP,
+			InsecureTLS: opts.insecureTLS,
+		})
+	}
 	if err != nil {
 		return err
 	}
