@@ -483,8 +483,8 @@ github.com/theupdateframework/go-tuf/data
 github.com/theupdateframework/go-tuf/internal/roles
 github.com/theupdateframework/go-tuf/pkg/keys
 github.com/theupdateframework/go-tuf/verify
-# github.com/theupdateframework/go-tuf/v2 v2.4.1
-## explicit; go 1.25.5
+# github.com/theupdateframework/go-tuf/v2 v2.4.2
+## explicit; go 1.25.0
 github.com/theupdateframework/go-tuf/v2/metadata
 github.com/theupdateframework/go-tuf/v2/metadata/config
 github.com/theupdateframework/go-tuf/v2/metadata/fetcher
