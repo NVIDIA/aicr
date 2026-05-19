@@ -524,11 +524,24 @@ make test     # All tests
 aicr recipe --service eks --accelerator gb200 --format yaml  # Test generation
 ```
 
+## Submitting Your Recipe
+
+Recipes that target hardware AICR maintainers cannot independently
+re-run require an evidence bundle so reviewers can verify the recipe
+without owning the hardware. The end-to-end contribution flow — local
+validation, OCI push, pointer commit, PR template — is documented
+alongside the recipe-evidence CI gate; for now, the maintainer-side
+view of how those bundles are reviewed lives in
+[Maintaining Recipe Contributions](../contributor/maintaining.md).
+ADR-007 ([Recipe Evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md))
+is the source of truth for the bundle format and verifier semantics.
+
 ---
 
 ## See Also
 
 - [Data Architecture](../contributor/data.md) - Recipe generation process, overlay system, query matching algorithm
 - [Bundler Development Guide](../contributor/component.md) - Creating new bundlers
+- [Maintaining Recipe Contributions](../contributor/maintaining.md) - Maintainer runbook for evidence-backed recipe PRs
 - [CLI Reference](../user/cli-reference.md) - CLI commands for recipe and bundle generation
 - [API Reference](../user/api-reference.md) - Programmatic recipe access
