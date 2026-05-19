@@ -11,6 +11,11 @@ Example recipe files demonstrating common configurations.
 
 ## Using Example Recipes
 
+Example recipes are persisted, editable artifacts, but they are not a
+cross-version compatibility boundary. After upgrading AICR, regenerate
+recipes with `aicr recipe ...` before bundling because embedded manifest
+paths, chart pins, and defaults can change between versions.
+
 ```shell
 # Generate deployment bundle
 aicr bundle --recipe eks-gb200-ubuntu-training-with-validation.yaml --output ./bundles

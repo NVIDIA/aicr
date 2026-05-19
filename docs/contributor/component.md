@@ -96,30 +96,26 @@ For components that need additional Kubernetes manifests (beyond the Helm chart)
 
 **Step 1: Create manifest file**
 
-Create the manifest under `recipes/components/<name>/manifests/`. The bundler
-renders each manifest as a Helm template, so files can use the same
-`{{ index .Values "<component>" }}` lookup the component's `values.yaml`
-exposes. Abbreviated skeleton (the in-tree
-`recipes/components/nodewright-customizations/manifests/tuning.yaml` is the
-complete real-world example):
+Create the manifest under `recipes/components/<name>/manifests/`. Files are
+rendered as Helm templates, so they can reference component values via
+`{{ index .Values "<component>" }}` when needed. Abbreviated skeleton (the
+in-tree `recipes/components/network-operator/manifests/nfd-network-rule.yaml`
+is the complete real-world example):
 
 ```yaml
-# Nodewright EKS Ubuntu GPU customization (Skyhook CR)
-{{- $cust := index .Values "nodewright-customizations" }}
-{{- if ne (toString (index $cust "enabled")) "false" }}
----
-apiVersion: skyhook.nvidia.com/v1alpha1
-kind: Skyhook
+# NFD NodeFeatureRule for Mellanox InfiniBand NICs
+apiVersion: nfd.k8s-sigs.io/v1alpha1
+kind: NodeFeatureRule
 metadata:
   annotations:
     helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "10"
-  name: tuning
-  namespace: {{ .Release.Namespace }}
+  name: nfd-network-rule
 spec:
-  runtimeRequired: true
-  # ...spec elided; see tuning.yaml in-tree for the full example.
-{{- end }}
+  rules:
+    - name: nfd-network-rule
+      labels:
+        feature.node.kubernetes.io/pci-15b3.present: "true"
+      # ...matchFeatures elided; see nfd-network-rule.yaml in-tree.
 ```
 
 **Step 2: Reference in recipe**
@@ -128,10 +124,10 @@ Add the manifest to the component's `manifestFiles` in the recipe:
 
 ```yaml
 componentRefs:
-  - name: nodewright-customizations
+  - name: network-operator
     type: Helm
     manifestFiles:
-      - components/nodewright-customizations/manifests/tuning.yaml
+      - components/network-operator/manifests/nfd-network-rule.yaml
 ```
 
 The bundler automatically includes manifest files in the component's `manifests/` directory.
