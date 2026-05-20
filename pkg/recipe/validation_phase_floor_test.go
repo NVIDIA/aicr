@@ -186,6 +186,15 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 
 	leaves := discoverLeafOverlays(store)
 	t.Logf("leaf overlays discovered: %d", len(leaves))
+	if len(leaves) == 0 {
+		t.Fatal("no leaf overlays discovered; the floor check would be vacuous — " +
+			"verify discoverLeafOverlays and the recipes/overlays/ directory")
+	}
+
+	// triggeredKnownGaps tracks which knownGaps entries actually downgraded
+	// a failure during this run. Subtests run sequentially (no t.Parallel),
+	// so plain map writes from the fail closure are safe.
+	triggeredKnownGaps := make(map[string]bool, len(knownGaps))
 
 	for _, name := range leaves {
 		t.Run(name, func(t *testing.T) {
@@ -213,6 +222,7 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 			fail := func(phase string) {
 				msg := report("FAIL", "required", phase)
 				if knownGaps[name] {
+					triggeredKnownGaps[name] = true
 					t.Logf("KNOWN GAP (#969): %s", msg)
 					return
 				}
@@ -238,6 +248,22 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	// Hygiene: every entry in knownGaps must have downgraded at least one
+	// failure during this run. Stale entries indicate the allowlist has
+	// drifted out of sync with the data (e.g., #969 fixed the overlay but
+	// forgot to remove the entry) — fail so the next reader cleans it up.
+	var stale []string
+	for name := range knownGaps {
+		if !triggeredKnownGaps[name] {
+			stale = append(stale, name)
+		}
+	}
+	if len(stale) > 0 {
+		sort.Strings(stale)
+		t.Errorf("stale knownGaps entries — overlay now meets the floor; "+
+			"remove from knownGaps: %s", strings.Join(stale, ", "))
 	}
 }
 
