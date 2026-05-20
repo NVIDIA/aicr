@@ -14,6 +14,8 @@
 
 package recipe
 
+import "maps"
+
 // ValidationConfig defines validation phases and settings.
 type ValidationConfig struct {
 	// Readiness defines readiness validation phase settings.
@@ -58,4 +60,51 @@ type NodeSelection struct {
 
 	// ExcludeNodes lists node names to exclude from validation.
 	ExcludeNodes []string `json:"excludeNodes,omitempty" yaml:"excludeNodes,omitempty"`
+}
+
+// cloneValidationConfig returns a deep copy of v. RecipeMetadataSpec.Merge
+// uses this to avoid aliasing the source's nested phase pointers — without
+// it, successive merges mutate whichever cached overlay's ValidationConfig
+// the destination aliased.
+func cloneValidationConfig(v *ValidationConfig) *ValidationConfig {
+	if v == nil {
+		return nil
+	}
+	return &ValidationConfig{
+		Readiness:   cloneValidationPhase(v.Readiness),
+		Deployment:  cloneValidationPhase(v.Deployment),
+		Performance: cloneValidationPhase(v.Performance),
+		Conformance: cloneValidationPhase(v.Conformance),
+	}
+}
+
+// cloneValidationPhase returns a deep copy of p with independent backing
+// slices and a freshly allocated NodeSelection, so callers writing through
+// the clone cannot reach the source's cached metadata.
+func cloneValidationPhase(p *ValidationPhase) *ValidationPhase {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	if p.Constraints != nil {
+		out.Constraints = make([]Constraint, len(p.Constraints))
+		copy(out.Constraints, p.Constraints)
+	}
+	if p.Checks != nil {
+		out.Checks = make([]string, len(p.Checks))
+		copy(out.Checks, p.Checks)
+	}
+	if p.NodeSelection != nil {
+		ns := *p.NodeSelection
+		if p.NodeSelection.Selector != nil {
+			ns.Selector = make(map[string]string, len(p.NodeSelection.Selector))
+			maps.Copy(ns.Selector, p.NodeSelection.Selector)
+		}
+		if p.NodeSelection.ExcludeNodes != nil {
+			ns.ExcludeNodes = make([]string, len(p.NodeSelection.ExcludeNodes))
+			copy(ns.ExcludeNodes, p.NodeSelection.ExcludeNodes)
+		}
+		out.NodeSelection = &ns
+	}
+	return &out
 }
