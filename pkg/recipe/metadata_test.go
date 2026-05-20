@@ -1012,6 +1012,72 @@ func TestMergeValidationConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("merged validation does not alias overlay", func(t *testing.T) {
+		phases := []struct {
+			name string
+			set  func(*ValidationConfig, *ValidationPhase)
+			get  func(*ValidationConfig) *ValidationPhase
+		}{
+			{
+				name: "readiness",
+				set:  func(config *ValidationConfig, phase *ValidationPhase) { config.Readiness = phase },
+				get:  func(config *ValidationConfig) *ValidationPhase { return config.Readiness },
+			},
+			{
+				name: "deployment",
+				set:  func(config *ValidationConfig, phase *ValidationPhase) { config.Deployment = phase },
+				get:  func(config *ValidationConfig) *ValidationPhase { return config.Deployment },
+			},
+			{
+				name: "performance",
+				set:  func(config *ValidationConfig, phase *ValidationPhase) { config.Performance = phase },
+				get:  func(config *ValidationConfig) *ValidationPhase { return config.Performance },
+			},
+			{
+				name: "conformance",
+				set:  func(config *ValidationConfig, phase *ValidationPhase) { config.Conformance = phase },
+				get:  func(config *ValidationConfig) *ValidationPhase { return config.Conformance },
+			},
+		}
+
+		for _, tt := range phases {
+			t.Run(tt.name, func(t *testing.T) {
+				base := RecipeMetadataSpec{}
+				overlay := RecipeMetadataSpec{Validation: &ValidationConfig{}}
+				tt.set(overlay.Validation, &ValidationPhase{
+					Constraints: []Constraint{{Name: testK8sVersionConstant, Value: ">= 1.30"}},
+					Checks:      []string{"expected-resources"},
+					NodeSelection: &NodeSelection{
+						Selector:    map[string]string{"accelerator": "h100"},
+						MaxNodes:     2,
+						ExcludeNodes: []string{"node-a"},
+					},
+				})
+				base.Merge(&overlay)
+
+				overlayPhase := tt.get(overlay.Validation)
+				overlayPhase.Constraints[0].Value = ">= 1.31"
+				overlayPhase.Checks[0] = "check-nvidia-smi"
+				overlayPhase.NodeSelection.Selector["accelerator"] = "b200"
+				overlayPhase.NodeSelection.ExcludeNodes[0] = "node-b"
+
+				mergedPhase := tt.get(base.Validation)
+				if mergedPhase.Constraints[0].Value != ">= 1.30" {
+					t.Error("constraints should not alias overlay")
+				}
+				if mergedPhase.Checks[0] != "expected-resources" {
+					t.Error("checks should not alias overlay")
+				}
+				if mergedPhase.NodeSelection.Selector["accelerator"] != "h100" {
+					t.Error("node selector should not alias overlay")
+				}
+				if mergedPhase.NodeSelection.ExcludeNodes[0] != "node-a" {
+					t.Error("excluded nodes should not alias overlay")
+				}
+			})
+		}
+	})
+
 	t.Run("nil overlay validation preserves base", func(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{

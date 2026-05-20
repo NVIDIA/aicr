@@ -459,19 +459,19 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 	// Merge validation config - overlay phases take precedence
 	if other.Validation != nil {
 		if s.Validation == nil {
-			s.Validation = other.Validation
+			s.Validation = cloneValidationConfig(other.Validation)
 		} else {
 			if other.Validation.Readiness != nil {
-				s.Validation.Readiness = other.Validation.Readiness
+				s.Validation.Readiness = cloneValidationPhase(other.Validation.Readiness)
 			}
 			if other.Validation.Deployment != nil {
-				s.Validation.Deployment = other.Validation.Deployment
+				s.Validation.Deployment = cloneValidationPhase(other.Validation.Deployment)
 			}
 			if other.Validation.Performance != nil {
-				s.Validation.Performance = other.Validation.Performance
+				s.Validation.Performance = cloneValidationPhase(other.Validation.Performance)
 			}
 			if other.Validation.Conformance != nil {
-				s.Validation.Conformance = other.Validation.Conformance
+				s.Validation.Conformance = cloneValidationPhase(other.Validation.Conformance)
 			}
 		}
 	}
@@ -610,6 +610,44 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 	}
 
 	return result
+}
+
+func cloneValidationConfig(in *ValidationConfig) *ValidationConfig {
+	if in == nil {
+		return nil
+	}
+	return &ValidationConfig{
+		Readiness:   cloneValidationPhase(in.Readiness),
+		Deployment:  cloneValidationPhase(in.Deployment),
+		Performance: cloneValidationPhase(in.Performance),
+		Conformance: cloneValidationPhase(in.Conformance),
+	}
+}
+
+func cloneValidationPhase(in *ValidationPhase) *ValidationPhase {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Constraints = append([]Constraint(nil), in.Constraints...)
+	out.Checks = append([]string(nil), in.Checks...)
+	out.NodeSelection = cloneNodeSelection(in.NodeSelection)
+	return &out
+}
+
+func cloneNodeSelection(in *NodeSelection) *NodeSelection {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Selector != nil {
+		out.Selector = make(map[string]string, len(in.Selector))
+		for key, value := range in.Selector {
+			out.Selector[key] = value
+		}
+	}
+	out.ExcludeNodes = append([]string(nil), in.ExcludeNodes...)
+	return &out
 }
 
 // ValidateDependencies validates that all dependencyRefs reference existing components.
