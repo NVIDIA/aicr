@@ -17,7 +17,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -57,10 +56,6 @@ func (c component) kind() string {
 	default:
 		return "manifest"
 	}
-}
-
-func (h helmCfg) isOCI() bool {
-	return strings.HasPrefix(h.DefaultRepository, "oci://")
 }
 
 func loadRegistry(path string) (*registry, error) {

@@ -189,6 +189,7 @@ func newRootCmd() *cli.Command {
 			validateCmd(),
 			evidenceCmd(),
 			diffCmd(),
+			mirrorCmd(),
 			trustCmd(),
 			skillCmd(),
 		},

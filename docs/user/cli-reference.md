@@ -1921,6 +1921,54 @@ After uninstalling each component, the script checks for orphaned validating/mut
 
 ---
 
+### aicr mirror list
+
+Discover container images and Helm charts referenced by a recipe for air-gapped
+mirroring. Renders each component's Helm chart with recipe-resolved values and
+scans embedded manifests to produce a deduplicated image and chart list.
+
+For an end-to-end walkthrough covering Hauler and Zarf workflows, see
+[Air-Gapped Mirroring](air-gap-mirror.md).
+
+**Synopsis:**
+```shell
+aicr mirror list [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--recipe` | `-r` | string | | Path/URI to a previously generated recipe. Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (`cm://namespace/name`). |
+| `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`). Alternative to `--recipe`. |
+| `--accelerator` | | string | | GPU accelerator (e.g., `h100`, `gb200`). Alternative to `--recipe`. |
+| `--intent` | | string | | Workload intent (`training` or `inference`). Alternative to `--recipe`. |
+| `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
+| `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
+| `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
+| `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
+| `--output` | `-o` | string | stdout | Output file path |
+
+**Examples:**
+
+```shell
+# List images from a recipe file (YAML to stdout)
+aicr mirror list --recipe recipe.yaml
+
+# Resolve recipe from query parameters
+aicr mirror list --service eks --accelerator h100 --intent training --os ubuntu
+
+# Generate Hauler manifest
+aicr mirror list --recipe recipe.yaml --format hauler --output hauler-manifest.yaml
+
+# Generate Zarf package config
+aicr mirror list --recipe recipe.yaml --format zarf --output zarf.yaml
+
+# Override a value that affects image discovery
+aicr mirror list --recipe recipe.yaml --set gpuoperator:driver.enabled=false
+```
+
+---
+
 ### aicr verify
 
 Verify the integrity and attestation chain of a bundle. Verification is fully offline — no network calls are made.

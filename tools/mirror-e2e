@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# =============================================================================
+# Mirror E2E: Validate Hauler and Zarf output against a local registry
+# =============================================================================
+#
+# PURPOSE:
+# Proves that `aicr mirror list --format hauler` and `--format zarf` produce
+# manifests that the real tools can consume. Images are synced into a local
+# Kind registry via Hauler and packaged via Zarf.
+#
+# WHAT THIS SCRIPT DOES:
+# 1. Builds the aicr binary
+# 2. Ensures a Kind cluster + local registry (ctlptl, reuses .ctlptl.yaml)
+# 3. Generates a recipe via query parameters
+# 4. Runs `aicr mirror list` in all formats (validates the full pipeline)
+# 5. Trims Hauler/Zarf manifests to public images only (avoids NGC auth)
+# 6. Syncs trimmed manifest via Hauler into the local registry
+# 7. Creates a Zarf package from the trimmed config
+# 8. Verifies images exist in the local registry via crane
+#
+# PREREQUISITES:
+# - make, docker, goreleaser, kind, kubectl, ctlptl, crane, yq, jq, helm
+# - hauler (optional — test skipped if missing)
+# - zarf   (optional — test skipped if missing)
+#
+# USAGE:
+#   tools/mirror-e2e                    # default recipe (kind/training)
+#   MAX_IMAGES=3 tools/mirror-e2e       # limit to 3 public images
+#
+# =============================================================================
+
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/common
+. "${DIR}/common"
+ROOT="$(cd "${DIR}/.." && pwd)"
+
+# ── Configuration ──
+
+REGISTRY_HOST="localhost:5001"
+MAX_IMAGES="${MAX_IMAGES:-5}"
+WORK=""
+
+# Track which optional tools are available
+HAS_HAULER=false
+HAS_ZARF=false
+
+# ── Cleanup ──
+
+cleanup() {
+    local rc=$?
+    if [[ -n "$WORK" && -d "$WORK" ]]; then
+        rm -rf "$WORK"
+    fi
+    exit $rc
+}
+trap cleanup EXIT
+
+# ── Functions ──
+
+check_tools() {
+    has_tools make docker kind kubectl crane yq jq helm ctlptl goreleaser
+
+    if command -v hauler &>/dev/null; then
+        HAS_HAULER=true
+        msg "hauler found: $(hauler version 2>&1 | head -1)"
+    else
+        msg "hauler not found — Hauler sync test will be skipped"
+    fi
+
+    if command -v zarf &>/dev/null; then
+        HAS_ZARF=true
+        msg "zarf found: $(zarf version 2>&1 | head -1)"
+    else
+        msg "zarf not found — Zarf package test will be skipped"
+    fi
+
+    if [[ "$HAS_HAULER" == "false" && "$HAS_ZARF" == "false" ]]; then
+        msg "WARNING: Neither hauler nor zarf is installed. Only format validation will run."
+    fi
+}
+
+find_binary() {
+    msg "Locating aicr binary..."
+
+    local os_name arch_name
+    os_name=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch_name=$(uname -m)
+
+    case "$arch_name" in
+        x86_64) arch_name="amd64" ;;
+        aarch64|arm64) arch_name="arm64" ;;
+    esac
+
+    AICR_BIN=""
+    for pattern in \
+        "${ROOT}/dist/aicr_${os_name}_${arch_name}/aicr" \
+        "${ROOT}/dist/aicr_${os_name}_${arch_name}_v1/aicr" \
+        "${ROOT}/dist/aicr_${os_name}_${arch_name}_v8.0/aicr" \
+        "${ROOT}/dist/aicr_${os_name}_all/aicr"; do
+        if [[ -x "$pattern" ]]; then
+            AICR_BIN="$pattern"
+            break
+        fi
+    done
+
+    if [[ -z "$AICR_BIN" ]]; then
+        err "aicr binary not found in dist/ — 'make mirror-e2e' builds automatically via the prerequisite"
+    fi
+
+    msg "Using binary: ${AICR_BIN}"
+}
+
+ensure_cluster() {
+    msg "Ensuring Kind cluster + local registry..."
+    ctlptl apply -f "${ROOT}/.ctlptl.yaml"
+    kubectl wait --for=condition=Ready node --all --timeout=120s
+
+    # Verify registry is reachable
+    if ! crane catalog "${REGISTRY_HOST}" &>/dev/null; then
+        err "Local registry at ${REGISTRY_HOST} is not reachable"
+    fi
+    msg "Registry verified at ${REGISTRY_HOST}"
+}
+
+generate_recipe() {
+    msg "Generating recipe..."
+    "$AICR_BIN" recipe \
+        --service kind \
+        --accelerator h100 \
+        --intent training \
+        --os ubuntu \
+        --output "${WORK}/recipe.yaml" 2>&1
+
+    if [[ ! -f "${WORK}/recipe.yaml" ]]; then
+        err "Recipe file was not created"
+    fi
+    msg "Recipe generated at ${WORK}/recipe.yaml"
+}
+
+run_mirror_list() {
+    msg "Running mirror list in all formats..."
+
+    # Hauler manifest
+    "$AICR_BIN" mirror list --recipe "${WORK}/recipe.yaml" --format hauler \
+        --output "${WORK}/hauler-full.yaml" 2>&1
+    if [[ ! -s "${WORK}/hauler-full.yaml" ]]; then
+        err "Hauler manifest is empty"
+    fi
+    if ! grep -q "kind: Images" "${WORK}/hauler-full.yaml"; then
+        err "Hauler manifest missing 'kind: Images'"
+    fi
+    msg "  hauler: ${WORK}/hauler-full.yaml ($(wc -l < "${WORK}/hauler-full.yaml") lines)"
+
+    # Zarf package config
+    "$AICR_BIN" mirror list --recipe "${WORK}/recipe.yaml" --format zarf \
+        --output "${WORK}/zarf-full.yaml" 2>&1
+    if [[ ! -s "${WORK}/zarf-full.yaml" ]]; then
+        err "Zarf config is empty"
+    fi
+    if ! grep -q "kind: ZarfPackageConfig" "${WORK}/zarf-full.yaml"; then
+        err "Zarf config missing 'kind: ZarfPackageConfig'"
+    fi
+    msg "  zarf:   ${WORK}/zarf-full.yaml ($(wc -l < "${WORK}/zarf-full.yaml") lines)"
+
+    # JSON — validate it parses
+    "$AICR_BIN" mirror list --recipe "${WORK}/recipe.yaml" --format json \
+        --output "${WORK}/mirror.json" 2>&1
+    if ! jq empty "${WORK}/mirror.json" >/dev/null 2>&1; then
+        err "JSON output is not valid JSON"
+    fi
+    msg "  json:   valid"
+
+    # YAML — validate it parses
+    "$AICR_BIN" mirror list --recipe "${WORK}/recipe.yaml" --format yaml \
+        --output "${WORK}/mirror.yaml" 2>&1
+    if ! yq eval '.' "${WORK}/mirror.yaml" >/dev/null 2>&1; then
+        err "YAML output is not valid YAML"
+    fi
+    msg "  yaml:   valid"
+}
+
+# Filter the real aicr-generated manifests to public images only.
+# "Public" = not starting with nvcr.io (which requires NGC auth).
+# Uses yq to surgically trim the actual output rather than reconstructing YAML.
+trim_to_public_images() {
+    msg "Trimming manifests to public images (max ${MAX_IMAGES})..."
+
+    # Collect public images from the hauler manifest (multi-doc: first doc is Images)
+    local all_images public_images
+    all_images=$(yq eval 'select(.kind == "Images") | .spec.images[].name' "${WORK}/hauler-full.yaml" 2>/dev/null | sort -u || true)
+    # Filter out:
+    #   - nvcr.io images (require NGC auth)
+    #   - digest-pinned refs (tag@sha256:...) — Hauler store copy produces
+    #     DIGEST_INVALID with plain-HTTP registries for these refs
+    #     (https://github.com/hauler-dev/hauler/issues/259).
+    #     Strip the @sha256:... suffix so Hauler pulls by tag only.
+    public_images=$(echo "$all_images" \
+        | grep -v '^nvcr\.io' \
+        | sed -E 's/(:[^@]*)@sha256:[a-f0-9]*/\1/' \
+        | head -n "${MAX_IMAGES}" || true)
+
+    if [[ -z "$public_images" ]]; then
+        msg "WARNING: No public images found after filtering. Skipping Hauler/Zarf tests."
+        return 1
+    fi
+
+    local count
+    count=$(echo "$public_images" | wc -l | tr -d ' ')
+    msg "  Found ${count} public image(s) to test"
+
+    # Build trimmed Hauler manifest from the cleaned image list.
+    # We can't filter the original manifest with yq because digest-stripped
+    # names won't match the original .spec.images[].name entries.
+    # Instead, extract the apiVersion from the real output and rebuild.
+    local hauler_api_version
+    hauler_api_version=$(yq eval 'select(.kind == "Images") | .apiVersion' "${WORK}/hauler-full.yaml")
+
+    yq -n ".apiVersion = \"${hauler_api_version}\" | .kind = \"Images\" | .metadata.name = \"aicr-mirror-e2e\"" > "${WORK}/hauler-trimmed.yaml"
+    # Add each image entry
+    while IFS= read -r img; do
+        yq eval -i ".spec.images += [{\"name\": \"${img}\"}]" "${WORK}/hauler-trimmed.yaml"
+    done <<< "$public_images"
+    msg "  Hauler trimmed: ${WORK}/hauler-trimmed.yaml (${count} images)"
+
+    # Build trimmed Zarf config: copy original, replace images, remove charts.
+    cp "${WORK}/zarf-full.yaml" "${WORK}/zarf-trimmed.yaml"
+    # Clear existing images and set the filtered list
+    yq eval -i ".components[0].images = []" "${WORK}/zarf-trimmed.yaml"
+    while IFS= read -r img; do
+        yq eval -i ".components[0].images += [\"${img}\"]" "${WORK}/zarf-trimmed.yaml"
+    done <<< "$public_images"
+    yq eval -i 'del(.components[0].charts)' "${WORK}/zarf-trimmed.yaml"
+    msg "  Zarf trimmed:   ${WORK}/zarf-trimmed.yaml (${count} images)"
+
+    # Save public image list for verification
+    echo "$public_images" > "${WORK}/public-images.txt"
+    return 0
+}
+
+# Reset the local registry to a clean state by recreating the container.
+reset_registry() {
+    local tool_name="${1:-}"
+    msg "Resetting local registry for ${tool_name} test..."
+    docker rm -f ctlptl-registry &>/dev/null || true
+    # Recreate via ctlptl (idempotent, picks up the Registry resource)
+    ctlptl apply -f "${ROOT}/.ctlptl.yaml" 2>&1
+    # Wait for registry to be ready
+    local retries=0
+    while ! crane catalog "${REGISTRY_HOST}" &>/dev/null; do
+        retries=$((retries + 1))
+        if [[ $retries -ge 10 ]]; then
+            err "Registry at ${REGISTRY_HOST} not ready after reset"
+        fi
+        sleep 1
+    done
+    msg "  Registry reset and ready"
+}
+
+test_hauler() {
+    if [[ "$HAS_HAULER" == "false" ]]; then
+        msg "SKIP: Hauler test (hauler not installed)"
+        return 0
+    fi
+
+    reset_registry "Hauler"
+    msg "Testing Hauler: sync → local registry → verify..."
+
+    local store_dir="${WORK}/hauler-store"
+
+    # Detect platform (container images are always linux)
+    local arch_name
+    arch_name=$(uname -m)
+    case "$arch_name" in
+        x86_64)       arch_name="amd64" ;;
+        aarch64|arm64) arch_name="arm64" ;;
+    esac
+    local platform="linux/${arch_name}"
+
+    # Sync images into the Hauler store (single platform to avoid
+    # MANIFEST_BLOB_UNKNOWN errors when copying multi-arch manifests)
+    msg "  hauler store sync (platform=${platform})..."
+    if ! hauler store sync \
+        --store "${store_dir}" \
+        --platform "${platform}" \
+        --filename "${WORK}/hauler-trimmed.yaml" 2>&1; then
+        err "hauler store sync failed"
+    fi
+
+    # Copy from store to local registry (positional arg, plain HTTP for localhost)
+    msg "  hauler store copy → ${REGISTRY_HOST}..."
+    if ! hauler store copy \
+        --store "${store_dir}" \
+        --plain-http \
+        "registry://${REGISTRY_HOST}" 2>&1; then
+        err "hauler store copy failed"
+    fi
+
+    msg "  Hauler sync complete"
+    verify_registry "Hauler"
+}
+
+test_zarf() {
+    if [[ "$HAS_ZARF" == "false" ]]; then
+        msg "SKIP: Zarf test (zarf not installed)"
+        return 0
+    fi
+
+    reset_registry "Zarf"
+    msg "Testing Zarf: create package → mirror to registry → verify..."
+
+    local pkg_dir="${WORK}/zarf-pkg"
+    mkdir -p "${pkg_dir}"
+    cp "${WORK}/zarf-trimmed.yaml" "${pkg_dir}/zarf.yaml"
+
+    # Create the Zarf package (pulls images into a tarball)
+    msg "  zarf package create..."
+    if ! (cd "${pkg_dir}" && zarf package create . \
+        --confirm \
+        --output "${pkg_dir}" \
+        --skip-sbom 2>&1); then
+        err "zarf package create failed"
+    fi
+
+    # Find the created package
+    local pkg_file
+    pkg_file=$(find "${pkg_dir}" -name "zarf-package-*.tar.zst" -type f | head -1)
+    if [[ -z "$pkg_file" ]]; then
+        err "Zarf package file not found"
+    fi
+
+    local pkg_size
+    pkg_size=$(du -h "$pkg_file" | cut -f1)
+    msg "  Zarf package created: $(basename "$pkg_file") (${pkg_size})"
+
+    # Mirror the package images into the local registry
+    msg "  zarf package mirror-resources → ${REGISTRY_HOST}..."
+    if ! zarf package mirror-resources "${pkg_file}" \
+        --registry-url "${REGISTRY_HOST}" \
+        --plain-http \
+        --no-img-checksum \
+        --images \
+        --confirm 2>&1; then
+        err "zarf package mirror-resources failed"
+    fi
+
+    msg "  Zarf mirror complete"
+    verify_registry "Zarf"
+}
+
+# Verify all expected images exist in the local registry.
+# $1 = label for log messages (e.g., "Hauler" or "Zarf")
+verify_registry() {
+    local tool_name="${1:-}"
+    msg "Verifying images in local registry (${tool_name})..."
+
+    local total=0 verified=0 failed=0
+
+    while IFS= read -r img; do
+        [[ -z "$img" ]] && continue
+        total=$((total + 1))
+
+        # Parse image reference to get the path in the local registry.
+        # Tools strip the registry domain when it has a dot or port
+        # (e.g., "ghcr.io/foo/bar:v1" → "foo/bar:v1") but keep the full
+        # path for Docker Hub library images without a domain prefix
+        # (e.g., "bitnami/kubectl:latest" stays "bitnami/kubectl:latest").
+        local img_path img_tag first_segment
+        first_segment="${img%%/*}"
+        if [[ "$first_segment" == *"."* || "$first_segment" == *":"* ]]; then
+            # Has a registry domain (contains . or :) — strip it
+            img_path="${img#*/}"
+        else
+            # No registry domain (e.g., bitnami/kubectl:latest) — keep as-is
+            img_path="$img"
+        fi
+        img_tag="${img_path##*:}"
+        img_path="${img_path%:*}"
+
+        if crane manifest "${REGISTRY_HOST}/${img_path}:${img_tag}" &>/dev/null; then
+            msg "  OK: ${img_path}:${img_tag}"
+            verified=$((verified + 1))
+        else
+            msg "  MISSING: ${img_path}:${img_tag}"
+            failed=$((failed + 1))
+        fi
+    done < "${WORK}/public-images.txt"
+
+    if [[ $failed -gt 0 ]]; then
+        err "${tool_name} registry verification failed: ${verified}/${total} images found (${failed} missing)"
+    fi
+
+    msg "  ${tool_name} registry verification: ${verified}/${total} images OK"
+}
+
+# ── Main ──
+
+msg "=========================================="
+msg "Mirror E2E: Hauler + Zarf validation"
+msg "=========================================="
+
+WORK=$(mktemp -d /tmp/aicr-mirror-e2e-XXXXXX)
+msg "Work directory: ${WORK}"
+
+check_tools
+find_binary
+ensure_cluster
+generate_recipe
+run_mirror_list
+
+if trim_to_public_images; then
+    test_hauler
+    test_zarf
+else
+    msg "No public images available — skipping Hauler/Zarf tests"
+fi
+
+msg "=========================================="
+msg "Mirror E2E: all tests passed"
+msg "=========================================="
