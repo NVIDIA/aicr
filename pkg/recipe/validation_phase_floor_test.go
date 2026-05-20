@@ -13,14 +13,16 @@
 // limitations under the License.
 
 // validation_phase_floor_test.go enforces a per-intent validation phase
-// floor on every leaf overlay. For each user-selectable overlay it walks
-// the spec.base chain, resolves the merged ValidationConfig per
-// pkg/recipe/metadata.go Merge semantics, classifies the overlay by
-// intent/service/platform, and asserts the resolved validation contains
-// the required phases.
+// floor on every overlay production can return as a maximal-leaf
+// candidate for some query. For each candidate it calls BuildRecipeResult
+// with the overlay's own criteria — the same code path the CLI and API
+// use — and asserts the resolved validation contains the required phases
+// per the candidate's classification. Wildcard fragments (intent or
+// service "any") are excluded because their criteria do not correspond
+// to a meaningful user query.
 //
-// Closes the loophole that let 27 of 41 GPU overlays drift to
-// conformance-only without a CI gate (see issue #970, companion #969).
+// Closes the loophole that let GPU overlays drift to conformance-only
+// without a CI gate (see issue #970, companion #969).
 //
 // Per-intent floor:
 //   Training (non-Kind)               : deployment + conformance   [performance recommended]
@@ -32,10 +34,9 @@
 // performance phase from warn-only to required. Default OFF until #969
 // closes the data gap and Azure/OCI performance testbeds land.
 //
-// knownGaps allowlist: overlays tracked by #969 are listed below so the
-// contract can land independently of the data fix. Entries downgrade
-// failures to logs. Empty this map as #969 closes; the test fails any
-// NEW overlay added without the floor because it is not allowlisted.
+// knownGaps allowlist: keyed by (overlay, phase) so a regression in a
+// different phase is not silently masked. Drain as #969 lands; new
+// overlay/phase failures that are not allowlisted block CI.
 
 package recipe
 
@@ -50,18 +51,51 @@ import (
 
 const strictEnvVar = "AICR_VALIDATION_FLOOR_STRICT"
 
-// knownGaps lists leaf overlays that fail the floor today and are tracked
-// under #969. Each entry downgrades an Errorf to a Logf prefixed with
-// "KNOWN GAP (#969):". Drain this map as #969 lands; delete the map and
-// gap handling once empty.
-var knownGaps = map[string]bool{
-	"gb200-oke-ubuntu-inference-dynamo":  true,
-	"gb200-oke-ubuntu-training-kubeflow": true,
-	"h100-kind-inference-dynamo":         true,
-	"h100-kind-training-kubeflow":        true,
-	"h100-kind-training-slurm":           true,
-	"rtx-pro-6000-lke-ubuntu-inference":  true,
-	"rtx-pro-6000-lke-ubuntu-training":   true,
+// knownGaps lists (overlay, phase) pairs that fail the floor today and
+// are tracked under #969. Each entry downgrades an Errorf to a Logf
+// prefixed with "KNOWN GAP (#969):". Drain this map as #969 lands per-
+// overlay fixes; delete the map entirely once empty. New (overlay, phase)
+// failures not in this map block CI.
+var knownGaps = map[string]map[string]bool{
+	"aks":                                {"deployment": true},
+	"aks-inference":                      {"deployment": true},
+	"aks-training":                       {"deployment": true},
+	"eks":                                {"deployment": true},
+	"eks-inference":                      {"deployment": true},
+	"eks-training":                       {"deployment": true},
+	"gb200-oke-inference":                {"deployment": true},
+	"gb200-oke-training":                 {"deployment": true},
+	"gb200-oke-ubuntu-inference":         {"deployment": true},
+	"gb200-oke-ubuntu-inference-dynamo":  {"deployment": true},
+	"gb200-oke-ubuntu-training":          {"deployment": true},
+	"gb200-oke-ubuntu-training-kubeflow": {"deployment": true},
+	"gke-cos":                            {"deployment": true},
+	"gke-cos-inference":                  {"deployment": true},
+	"gke-cos-training":                   {"deployment": true},
+	"h100-aks-inference":                 {"deployment": true},
+	"h100-aks-ubuntu-inference":          {"deployment": true},
+	"h100-eks-inference":                 {"deployment": true},
+	"h100-eks-ubuntu-inference":          {"deployment": true},
+	"h100-gke-cos-inference":             {"deployment": true},
+	"h100-gke-cos-training":              {"deployment": true},
+	"h100-gke-cos-training-kubeflow":     {"deployment": true},
+	"h100-kind-inference":                {"deployment": true},
+	"h100-kind-inference-dynamo":         {"deployment": true},
+	"h100-kind-training":                 {"deployment": true},
+	"h100-kind-training-kubeflow":        {"deployment": true},
+	"h100-kind-training-slurm":           {"deployment": true},
+	"kind":                               {"deployment": true},
+	"kind-inference":                     {"deployment": true},
+	"lke":                                {"deployment": true},
+	"lke-inference":                      {"deployment": true},
+	"lke-training":                       {"deployment": true},
+	"oke":                                {"deployment": true},
+	"oke-inference":                      {"deployment": true},
+	"oke-training":                       {"deployment": true},
+	"rtx-pro-6000-lke-inference":         {"deployment": true},
+	"rtx-pro-6000-lke-training":          {"deployment": true},
+	"rtx-pro-6000-lke-ubuntu-inference":  {"deployment": true},
+	"rtx-pro-6000-lke-ubuntu-training":   {"deployment": true},
 }
 
 // classification captures the inputs that drive the per-intent floor.
@@ -122,41 +156,21 @@ func resolvedPhases(v *ValidationConfig) []string {
 	return out
 }
 
-// resolveValidation walks the base: chain for the named recipe and
-// returns the merged ValidationConfig using the same Merge semantics
-// the production resolver uses.
-func resolveValidation(s *MetadataStore, name string) (*ValidationConfig, error) {
-	chain, err := s.resolveInheritanceChain(name)
-	if err != nil {
-		return nil, err
-	}
-	merged := &RecipeMetadataSpec{}
-	for _, recipe := range chain {
-		merged.Merge(&recipe.Spec)
-	}
-	return merged.Validation, nil
-}
-
-// discoverLeafOverlays returns the names of every user-selectable leaf
-// overlay. A leaf has criteria, is not referenced as another overlay's
-// spec.base, and is not a criteria-wildcard fragment (one whose
-// criteria.intent or criteria.service is "any"). Wildcard overlays are
-// cross-cutting fragments applied via the resolver's wildcard-match
-// path — see docs/contributor/data.md#criteria-wildcard-overlays — not
-// user-selectable entry points subject to the per-intent floor.
-// Sorted for deterministic test output.
-func discoverLeafOverlays(s *MetadataStore) []string {
-	referencedAsBase := make(map[string]bool)
-	for _, overlay := range s.Overlays {
-		if overlay.Spec.Base != "" {
-			referencedAsBase[overlay.Spec.Base] = true
-		}
-	}
-	var leaves []string
+// enumerateGateableOverlays returns the names of every overlay production
+// can return as a maximal-leaf candidate for some query — every overlay
+// with concrete criteria, minus wildcard fragments whose intent or service
+// is "any". Wildcard fragments are cross-cutting overlays composed onto
+// specific queries — see docs/contributor/data.md#criteria-wildcard-overlays —
+// not standalone user-facing entry points.
+//
+// Concrete intermediate overlays (e.g., h100-gke-cos-training) are NOT
+// excluded merely because another overlay references them as spec.base.
+// Production's filterToMaximalLeaves is per-query, so an intermediate is
+// the maximal leaf for queries that don't narrow further (e.g., no
+// platform specified); the gate must cover that case too.
+func enumerateGateableOverlays(s *MetadataStore) []string {
+	var out []string
 	for name, overlay := range s.Overlays {
-		if referencedAsBase[name] {
-			continue
-		}
 		c := overlay.Spec.Criteria
 		if c == nil {
 			continue
@@ -164,15 +178,26 @@ func discoverLeafOverlays(s *MetadataStore) []string {
 		if c.Intent == CriteriaIntentAny || c.Service == CriteriaServiceAny {
 			continue
 		}
-		leaves = append(leaves, name)
+		out = append(out, name)
 	}
-	sort.Strings(leaves)
-	return leaves
+	sort.Strings(out)
+	return out
 }
 
-// TestOverlayValidationPhaseFloor asserts every leaf overlay's resolved
-// validation block contains the per-intent required phases. See file
-// header for the floor matrix and the strict-mode toggle.
+// knownGapEntries totals the number of (overlay, phase) downgrade pairs
+// in the allowlist for logging.
+func knownGapEntries() int {
+	n := 0
+	for _, phases := range knownGaps {
+		n += len(phases)
+	}
+	return n
+}
+
+// TestOverlayValidationPhaseFloor asserts every gateable overlay's
+// production-resolved validation block contains the per-intent required
+// phases. See file header for the floor matrix, the strict-mode toggle,
+// and the allowlist contract.
 func TestOverlayValidationPhaseFloor(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
@@ -182,30 +207,33 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 
 	strict := os.Getenv(strictEnvVar) == "1"
 	t.Logf("strict mode (%s=1): %t", strictEnvVar, strict)
-	t.Logf("knownGaps allowlist size (#969): %d", len(knownGaps))
+	t.Logf("knownGaps allowlist entries (#969): %d", knownGapEntries())
 
-	leaves := discoverLeafOverlays(store)
-	t.Logf("leaf overlays discovered: %d", len(leaves))
-	if len(leaves) == 0 {
-		t.Fatal("no leaf overlays discovered; the floor check would be vacuous — " +
-			"verify discoverLeafOverlays and the recipes/overlays/ directory")
+	overlays := enumerateGateableOverlays(store)
+	t.Logf("gateable overlays discovered: %d", len(overlays))
+	if len(overlays) == 0 {
+		t.Fatal("no gateable overlays discovered; the floor check would be vacuous — " +
+			"verify enumerateGateableOverlays and the recipes/overlays/ directory")
 	}
 
-	// triggeredKnownGaps tracks which knownGaps entries actually downgraded
-	// a failure during this run. Subtests run sequentially (no t.Parallel),
-	// so plain map writes from the fail closure are safe.
-	triggeredKnownGaps := make(map[string]bool, len(knownGaps))
+	// triggered tracks which (overlay, phase) knownGaps entries actually
+	// downgraded a failure during this run. Subtests run sequentially
+	// (no t.Parallel), so plain map writes from the fail closure are safe.
+	triggered := make(map[string]map[string]bool, len(knownGaps))
 
-	for _, name := range leaves {
+	for _, name := range overlays {
 		t.Run(name, func(t *testing.T) {
 			overlay := store.Overlays[name]
 			class := classifyOverlay(overlay.Spec.Criteria)
 
-			validation, err := resolveValidation(store, name)
+			// Use the production resolver so the test gates the same
+			// ValidationConfig the CLI and API actually produce — wildcard
+			// overlay contributions and mixins included.
+			result, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria)
 			if err != nil {
-				t.Fatalf("resolveValidation: %v", err)
+				t.Fatalf("BuildRecipeResult: %v", err)
 			}
-			phases := resolvedPhases(validation)
+			phases := resolvedPhases(result.Validation)
 
 			report := func(severity, kind, phase string) string {
 				return fmt.Sprintf(
@@ -216,13 +244,16 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 				)
 			}
 
-			// fail records a missing required phase. Overlays in knownGaps
-			// are downgraded to logs so the contract can land before #969
-			// finishes closing the data gap.
+			// fail records a missing required phase. (overlay, phase)
+			// pairs in knownGaps are downgraded to logs so the contract
+			// can land before #969 closes the data gap.
 			fail := func(phase string) {
 				msg := report("FAIL", "required", phase)
-				if knownGaps[name] {
-					triggeredKnownGaps[name] = true
+				if knownGaps[name][phase] {
+					if triggered[name] == nil {
+						triggered[name] = map[string]bool{}
+					}
+					triggered[name][phase] = true
 					t.Logf("KNOWN GAP (#969): %s", msg)
 					return
 				}
@@ -230,19 +261,19 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 			}
 
 			// Required: deployment + conformance for every classification.
-			if validation == nil || validation.Deployment == nil {
+			if result.Validation == nil || result.Validation.Deployment == nil {
 				fail("deployment")
 			}
-			if validation == nil || validation.Conformance == nil {
+			if result.Validation == nil || result.Validation.Conformance == nil {
 				fail("conformance")
 			}
 
 			// Performance: warn-only by default; strict mode promotes to
-			// required. Either way, knownGaps downgrades the result to
-			// preserve the allowlist contract.
-			if class.requiresPerformance() && (validation == nil || validation.Performance == nil) {
+			// required. Either way, the knownGaps lookup downgrades the
+			// result so the allowlist contract holds in both modes.
+			if class.requiresPerformance() && (result.Validation == nil || result.Validation.Performance == nil) {
 				if strict {
-					fail("performance (strict)")
+					fail("performance")
 				} else {
 					t.Log(report("WARN", "recommended", "performance"))
 				}
@@ -250,19 +281,21 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 		})
 	}
 
-	// Hygiene: every entry in knownGaps must have downgraded at least one
-	// failure during this run. Stale entries indicate the allowlist has
-	// drifted out of sync with the data (e.g., #969 fixed the overlay but
-	// forgot to remove the entry) — fail so the next reader cleans it up.
+	// Hygiene: every (overlay, phase) entry in knownGaps must have
+	// downgraded at least one failure. Stale entries indicate the data
+	// has caught up — remove them so a future regression in that phase
+	// is not silently masked.
 	var stale []string
-	for name := range knownGaps {
-		if !triggeredKnownGaps[name] {
-			stale = append(stale, name)
+	for name, phases := range knownGaps {
+		for phase := range phases {
+			if !triggered[name][phase] {
+				stale = append(stale, fmt.Sprintf("%s:%s", name, phase))
+			}
 		}
 	}
 	if len(stale) > 0 {
 		sort.Strings(stale)
-		t.Errorf("stale knownGaps entries — overlay now meets the floor; "+
+		t.Errorf("stale knownGaps entries — overlay/phase now meets the floor; "+
 			"remove from knownGaps: %s", strings.Join(stale, ", "))
 	}
 }
