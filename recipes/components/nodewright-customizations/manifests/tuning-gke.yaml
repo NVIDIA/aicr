@@ -63,8 +63,8 @@ spec:
   # Tuning
   packages:
     tuning:
-      image: ghcr.io/nvidia/skyhook-packages/nvidia-tuning-gke
-      version: "0.1.1"
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke
+      version: "0.1.2"
       interrupt:
         type: service
         services:

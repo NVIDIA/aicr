@@ -168,7 +168,7 @@ _No images extracted._
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.2.2`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.0`
-- `ghcr.io/nvidia/skyhook-packages/nvidia-tuning-gke:0.1.1`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 
 ### nodewright-operator
