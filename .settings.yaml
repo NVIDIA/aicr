@@ -87,7 +87,7 @@ testing_tools:
   karpenter: 'v1.12.0'
   # In-cluster OCI registry for KWOK deployer-matrix CI (issue #843).
   # renovate: datasource=docker depName=registry depType=testing_tools
-  registry_image: 'registry:2.8.3'
+  registry_image: 'registry:3.1.1'
   # Argo CD Helm chart for KWOK deployer-matrix CI. v9.5.x pins app v3.4.x,
   # the first stable line with native OCI artifact source (issue #843).
   # renovate: datasource=helm depName=argo-cd registryUrl=https://argoproj.github.io/argo-helm depType=testing_tools
