@@ -77,8 +77,6 @@ var knownGaps = map[string]map[string]bool{
 	"h100-eks-inference":                 {"deployment": true},
 	"h100-eks-ubuntu-inference":          {"deployment": true},
 	"h100-gke-cos-inference":             {"deployment": true},
-	"h100-gke-cos-training":              {"deployment": true},
-	"h100-gke-cos-training-kubeflow":     {"deployment": true},
 	"h100-kind-inference":                {"deployment": true},
 	"h100-kind-inference-dynamo":         {"deployment": true},
 	"h100-kind-training":                 {"deployment": true},
