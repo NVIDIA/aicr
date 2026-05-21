@@ -17,6 +17,7 @@ package helmtest
 
 import (
 	"context"
+	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/helm"
 )
@@ -30,10 +31,18 @@ type MockRenderer struct {
 	Rendered map[string][]byte
 	// Errs maps component name → error to return.
 	Errs map[string]error
+
+	// mu protects Inputs from concurrent Render calls.
+	mu sync.Mutex
+	// Inputs records every ChartInput passed to Render, in call order.
+	Inputs []helm.ChartInput
 }
 
 // Render returns the canned response for the given input name.
 func (m *MockRenderer) Render(_ context.Context, input helm.ChartInput) ([]byte, error) {
+	m.mu.Lock()
+	m.Inputs = append(m.Inputs, input)
+	m.mu.Unlock()
 	if err, ok := m.Errs[input.Name]; ok {
 		return nil, err
 	}

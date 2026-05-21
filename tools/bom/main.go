@@ -82,9 +82,11 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		return errors.Wrap(errors.ErrCodeInternal, "mkdir out-dir", mkErr)
 	}
 
+	ctx := context.Background()
+
 	results := make([]bom.ComponentResult, 0, len(reg.Components))
 	for _, c := range reg.Components {
-		results = append(results, surveyComponent(repoRoot, c, renderer, skipHelm))
+		results = append(results, surveyComponent(ctx, repoRoot, c, renderer, skipHelm))
 	}
 
 	if strict {
@@ -163,16 +165,21 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 // renderHelmComponent shells out to `helm template` for c. The timeout
 // context is scoped to this call so its associated timer is canceled before
 // the manifests walk begins, regardless of how many components are surveyed.
-func renderHelmComponent(repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultHelmTimeout)
+func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
+	ctx, cancel := context.WithTimeout(ctx, defaultHelmTimeout)
 	defer cancel()
+
+	var warnings []string
 
 	valuesPath := filepath.Join(repoRoot, "recipes", "components", c.Name, "values.yaml")
 	if _, err := os.Stat(valuesPath); err != nil {
-		valuesPath = ""
+		if os.IsNotExist(err) {
+			valuesPath = ""
+		} else {
+			warnings = append(warnings, fmt.Sprintf("stat values.yaml: %v", err))
+			valuesPath = ""
+		}
 	}
-
-	var warnings []string
 	out, err := r.Render(ctx, helm.ChartInput{
 		Name:       c.Name,
 		Chart:      c.Helm.DefaultChart,
@@ -189,7 +196,7 @@ func renderHelmComponent(repoRoot string, c component, r helm.Renderer) ([]byte,
 
 // surveyComponent renders the component's chart (if any) and walks its
 // embedded manifests directory, returning the union of image refs.
-func surveyComponent(repoRoot string, c component, r helm.Renderer, skipHelm bool) bom.ComponentResult {
+func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer, skipHelm bool) bom.ComponentResult {
 	res := bom.ComponentResult{
 		Name:        c.Name,
 		DisplayName: c.DisplayName,
@@ -204,7 +211,7 @@ func surveyComponent(repoRoot string, c component, r helm.Renderer, skipHelm boo
 	images := map[string]struct{}{}
 
 	if c.kind() == kindHelm && !skipHelm {
-		out, warnings := renderHelmComponent(repoRoot, c, r)
+		out, warnings := renderHelmComponent(ctx, repoRoot, c, r)
 		res.Warnings = append(res.Warnings, warnings...)
 		if len(out) > 0 {
 			imgs, parseErr := bom.ExtractImagesFromYAML(out)

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
@@ -305,14 +306,14 @@ func TestKubeVersionFromConstraints(t *testing.T) {
 		{
 			name:        "no constraints returns default",
 			constraints: nil,
-			want:        "1.33.0",
+			want:        defaults.MirrorDefaultKubeVersion,
 		},
 		{
 			name: "no k8s constraint returns default",
 			constraints: []recipe.Constraint{
 				{Name: "worker-os", Value: "ubuntu"},
 			},
-			want: "1.33.0",
+			want: defaults.MirrorDefaultKubeVersion,
 		},
 		{
 			name: "semver range >= 1.32.4",

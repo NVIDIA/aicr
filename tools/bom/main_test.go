@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -205,7 +206,7 @@ func TestSurveyComponentHelm(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(root, c, mock, false)
+	res := surveyComponent(context.Background(), root, c, mock, false)
 	if res.Name != "gpu-operator" {
 		t.Errorf("Name = %q, want %q", res.Name, "gpu-operator")
 	}
@@ -248,7 +249,7 @@ func TestSurveyComponentSkipHelm(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(root, c, mock, true)
+	res := surveyComponent(context.Background(), root, c, mock, true)
 	// With skipHelm, no images should come from the renderer.
 	if len(res.Images) != 0 {
 		t.Errorf("expected 0 images with skipHelm, got %d: %v", len(res.Images), res.Images)
@@ -273,7 +274,7 @@ func TestSurveyComponentRendererError(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(root, c, mock, false)
+	res := surveyComponent(context.Background(), root, c, mock, false)
 	if len(res.Warnings) == 0 {
 		t.Fatal("expected warnings from renderer error, got none")
 	}
@@ -293,7 +294,7 @@ func TestSurveyComponentKustomize(t *testing.T) {
 		},
 	}
 
-	res := surveyComponent(root, c, mock, false)
+	res := surveyComponent(context.Background(), root, c, mock, false)
 	if res.Type != "kustomize" {
 		t.Errorf("Type = %q, want %q", res.Type, "kustomize")
 	}
@@ -330,7 +331,7 @@ spec:
 		DisplayName: "My Component",
 	}
 
-	res := surveyComponent(root, c, mock, false)
+	res := surveyComponent(context.Background(), root, c, mock, false)
 	if res.Type != "manifest" {
 		t.Errorf("Type = %q, want %q", res.Type, "manifest")
 	}
@@ -379,7 +380,7 @@ spec:
 		},
 	}
 
-	res := surveyComponent(root, c, mock, false)
+	res := surveyComponent(context.Background(), root, c, mock, false)
 	// 2 from helm + 1 from manifests = 3 unique images.
 	if len(res.Images) != 3 {
 		t.Fatalf("expected 3 images (helm + manifests), got %d: %v", len(res.Images), res.Images)
@@ -404,7 +405,7 @@ func TestRenderHelmComponent(t *testing.T) {
 		},
 	}
 
-	out, warnings := renderHelmComponent(root, c, mock)
+	out, warnings := renderHelmComponent(context.Background(), root, c, mock)
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
@@ -429,7 +430,7 @@ func TestRenderHelmComponentError(t *testing.T) {
 		},
 	}
 
-	out, warnings := renderHelmComponent(root, c, mock)
+	out, warnings := renderHelmComponent(context.Background(), root, c, mock)
 	if len(out) != 0 {
 		t.Errorf("expected empty output on error, got %d bytes", len(out))
 	}
@@ -465,12 +466,79 @@ func TestRenderHelmComponentWithValuesFile(t *testing.T) {
 		},
 	}
 
-	out, warnings := renderHelmComponent(root, c, mock)
+	out, warnings := renderHelmComponent(context.Background(), root, c, mock)
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
 	if len(out) == 0 {
 		t.Error("expected non-empty rendered output")
+	}
+
+	// Verify the values file path was passed to the renderer.
+	if len(mock.Inputs) != 1 {
+		t.Fatalf("expected 1 render call, got %d", len(mock.Inputs))
+	}
+	wantValuesPath := filepath.Join(root, "recipes", "components", "gpu-operator", "values.yaml")
+	if got := mock.Inputs[0].ValuesPath; got != wantValuesPath {
+		t.Errorf("ValuesPath = %q, want %q", got, wantValuesPath)
+	}
+}
+
+func TestRenderHelmComponentValuesStatError(t *testing.T) {
+	root := writeTestRegistry(t, testRegistryHelm)
+
+	// Create the component directory but make it unreadable so os.Stat
+	// on values.yaml returns a permission error rather than os.IsNotExist.
+	valuesDir := filepath.Join(root, "recipes", "components", "gpu-operator")
+	if err := os.MkdirAll(valuesDir, 0o755); err != nil {
+		t.Fatalf("mkdir values: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(valuesDir, "values.yaml"), []byte("x: 1\n"), 0o644); err != nil {
+		t.Fatalf("write values.yaml: %v", err)
+	}
+	// Remove read+execute on the directory so stat on the file fails with EACCES.
+	if err := os.Chmod(valuesDir, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(valuesDir, 0o755) }) //nolint:errcheck // best-effort restore for TempDir cleanup
+
+	mock := &helmtest.MockRenderer{
+		Rendered: map[string][]byte{
+			"gpu-operator": []byte(renderedYAML),
+		},
+	}
+
+	c := component{
+		Name: "gpu-operator",
+		Helm: helmCfg{
+			DefaultChart:      "gpu-operator",
+			DefaultRepository: "oci://ghcr.io/nvidia",
+			DefaultVersion:    "25.3.0",
+		},
+	}
+
+	_, warnings := renderHelmComponent(context.Background(), root, c, mock)
+	if len(warnings) == 0 {
+		t.Fatal("expected warning from values.yaml stat permission error, got none")
+	}
+
+	found := false
+	for _, w := range warnings {
+		if len(w) > 0 && w[:len("stat values.yaml:")] == "stat values.yaml:" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected stat warning, got: %v", warnings)
+	}
+
+	// ValuesPath should be cleared so the render still proceeds.
+	if len(mock.Inputs) != 1 {
+		t.Fatalf("expected 1 render call, got %d", len(mock.Inputs))
+	}
+	if mock.Inputs[0].ValuesPath != "" {
+		t.Errorf("ValuesPath = %q, want empty after stat error", mock.Inputs[0].ValuesPath)
 	}
 }
 
