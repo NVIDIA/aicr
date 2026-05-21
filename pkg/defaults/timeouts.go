@@ -674,6 +674,14 @@ var MirrorExtraAPIVersions = []string{
 // serves as a safety net so the subprocess is never unbounded.
 const HelmTemplateTimeout = 90 * time.Second
 
+// HelmTemplateOutputLimit caps the bytes written to the stdout buffer of
+// a helm-template subprocess. --recipe accepts user-provided chart sources
+// with no allowlist, so the subprocess is not a trusted source. The 90s
+// context deadline bounds time but not memory; this limit bounds memory.
+// 100 MiB is generous — real charts are single-digit MB — while still
+// preventing a malicious or buggy chart from exhausting memory.
+const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
+
 // Helm chart-pull timeouts for the bundle-time --vendor-charts path.
 // Sized for one chart pull from a remote Helm or OCI registry, including
 // repo index fetch (HTTPS) or registry resolution (OCI), tarball download,

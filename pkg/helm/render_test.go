@@ -15,10 +15,15 @@
 package helm
 
 import (
+	"bytes"
+	stderrors "errors"
 	"os"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestWriteValuesFile(t *testing.T) {
@@ -133,5 +138,78 @@ func TestRenderChartNoChart(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for empty chart, got nil")
+	}
+}
+
+func TestLimitedWriterUnderLimit(t *testing.T) {
+	var buf bytes.Buffer
+	lw := &limitedWriter{w: &buf, limit: 100}
+
+	data := []byte("hello world")
+	n, err := lw.Write(data)
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if n != len(data) {
+		t.Errorf("Write() n = %d, want %d", n, len(data))
+	}
+	if buf.String() != "hello world" {
+		t.Errorf("buffer = %q, want %q", buf.String(), "hello world")
+	}
+	if lw.written != int64(len(data)) {
+		t.Errorf("written = %d, want %d", lw.written, len(data))
+	}
+}
+
+func TestLimitedWriterExactLimit(t *testing.T) {
+	var buf bytes.Buffer
+	lw := &limitedWriter{w: &buf, limit: 5}
+
+	n, err := lw.Write([]byte("12345"))
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if n != 5 {
+		t.Errorf("Write() n = %d, want 5", n)
+	}
+}
+
+func TestLimitedWriterOverflow(t *testing.T) {
+	var buf bytes.Buffer
+	lw := &limitedWriter{w: &buf, limit: 10}
+
+	// First write fits.
+	if _, err := lw.Write([]byte("12345")); err != nil {
+		t.Fatalf("first Write() error = %v", err)
+	}
+
+	// Second write exceeds the limit — must error.
+	_, err := lw.Write([]byte("678901"))
+	if err == nil {
+		t.Fatal("expected error on overflow, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("expected ErrCodeInternal, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "exceeds size limit") {
+		t.Errorf("error message = %q, want substring %q", err.Error(), "exceeds size limit")
+	}
+
+	// Buffer must contain only the first write — no partial data from overflow.
+	if buf.String() != "12345" {
+		t.Errorf("buffer after overflow = %q, want %q", buf.String(), "12345")
+	}
+}
+
+func TestLimitedWriterSingleWriteOverflow(t *testing.T) {
+	var buf bytes.Buffer
+	lw := &limitedWriter{w: &buf, limit: 3}
+
+	_, err := lw.Write([]byte("too long"))
+	if err == nil {
+		t.Fatal("expected error on overflow, got nil")
+	}
+	if buf.Len() != 0 {
+		t.Errorf("buffer should be empty after rejected write, got %q", buf.String())
 	}
 }

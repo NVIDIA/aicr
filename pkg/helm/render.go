@@ -157,16 +157,17 @@ func RenderChart(ctx context.Context, input ChartInput) ([]byte, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, "helm", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stdoutBuf, stderr bytes.Buffer
+	stdout := &limitedWriter{w: &stdoutBuf, limit: defaults.HelmTemplateOutputLimit}
+	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), errors.WrapWithContext(errors.ErrCodeInternal, "helm template failed", err,
+		return stdoutBuf.Bytes(), errors.WrapWithContext(errors.ErrCodeInternal, "helm template failed", err,
 			map[string]any{"component": input.Name, "stderr": strings.TrimSpace(stderr.String())})
 	}
 
-	return stdout.Bytes(), nil
+	return stdoutBuf.Bytes(), nil
 }
 
 // writeValuesFile marshals values to a temporary YAML file and returns
@@ -195,6 +196,25 @@ func writeValuesFile(values map[string]any) (string, error) {
 	}
 
 	return f.Name(), nil
+}
+
+// limitedWriter wraps an io.Writer and enforces a byte cap. Once the cap
+// is reached, Write returns an error instead of silently truncating —
+// silent truncation would produce partial YAML and mask missing images.
+type limitedWriter struct {
+	w       *bytes.Buffer
+	limit   int64
+	written int64
+}
+
+func (lw *limitedWriter) Write(p []byte) (int, error) {
+	if lw.written+int64(len(p)) > lw.limit {
+		return 0, errors.New(errors.ErrCodeInternal,
+			"helm template output exceeds size limit")
+	}
+	n, err := lw.w.Write(p)
+	lw.written += int64(n)
+	return n, err //nolint:wrapcheck // bytes.Buffer.Write never errors; propagation is safe
 }
 
 // lastPathSegment returns the last path segment of s (after the final "/").
