@@ -108,6 +108,10 @@ type MirrorListMetadata struct {
 
 // Render writes the MirrorList to w in the given format.
 func Render(w io.Writer, list *MirrorList, format Format) error {
+	if list == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "mirror list is nil")
+	}
+
 	switch format {
 	case FormatJSON:
 		enc := json.NewEncoder(w)
