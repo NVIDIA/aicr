@@ -56,6 +56,29 @@ type ChartInput struct {
 	APIVersions []string
 }
 
+// Renderer renders a Helm chart to YAML bytes. The default implementation
+// (CLIRenderer) shells out to `helm template`; tests inject a mock that
+// returns canned YAML without requiring the helm binary on PATH.
+type Renderer interface {
+	Render(ctx context.Context, input ChartInput) ([]byte, error)
+}
+
+// CLIRenderer implements Renderer by shelling out to the helm CLI binary.
+type CLIRenderer struct{}
+
+// Default returns a CLIRenderer suitable for production use.
+func Default() Renderer { return &CLIRenderer{} }
+
+// Render delegates to RenderChart after verifying the helm binary is
+// available on PATH.
+func (r *CLIRenderer) Render(ctx context.Context, input ChartInput) ([]byte, error) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		return nil, errors.New(errors.ErrCodeNotFound,
+			"helm binary not found on PATH; install helm to discover images from chart templates")
+	}
+	return RenderChart(ctx, input)
+}
+
 // RenderChart shells out to `helm template` and returns rendered YAML.
 // OCI charts (Repository starts with "oci://") use the full URL as the
 // chart argument with no --repo flag; HTTP charts use the bare chart name

@@ -20,42 +20,16 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
-
-// mockHelmRenderer returns canned YAML for testing without the helm binary.
-type mockHelmRenderer struct {
-	// rendered maps component name → rendered YAML bytes.
-	rendered map[string][]byte
-	// errs maps component name → error to return.
-	errs map[string]error
-}
-
-func (m *mockHelmRenderer) Render(_ context.Context, ref *recipe.ComponentRef, _ map[string]any) ([]byte, error) {
-	if err, ok := m.errs[ref.Name]; ok {
-		return nil, err
-	}
-	if data, ok := m.rendered[ref.Name]; ok {
-		return data, nil
-	}
-	return nil, nil
-}
-
-// blockingHelmRenderer blocks until the context is canceled, then returns
-// the context error. Used to verify Discover propagates context cancellation
-// through the concurrent rendering path.
-type blockingHelmRenderer struct{}
-
-func (b *blockingHelmRenderer) Render(ctx context.Context, _ *recipe.ComponentRef, _ map[string]any) ([]byte, error) {
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
 
 func TestDiscover(t *testing.T) {
 	tests := []struct {
 		name         string
 		rec          *recipe.RecipeResult
-		helmRenderer HelmRenderer
+		helmRenderer helm.Renderer
 		ctxFunc      func() (context.Context, context.CancelFunc)
 		wantErr      bool
 		wantImages   int
@@ -73,7 +47,7 @@ func TestDiscover(t *testing.T) {
 			rec: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{},
 			},
-			helmRenderer: &mockHelmRenderer{},
+			helmRenderer: &helmtest.MockRenderer{},
 			wantImages:   0,
 			wantCharts:   0,
 			wantComps:    0,
@@ -91,8 +65,8 @@ func TestDiscover(t *testing.T) {
 					},
 				},
 			},
-			helmRenderer: &mockHelmRenderer{
-				rendered: map[string][]byte{
+			helmRenderer: &helmtest.MockRenderer{
+				Rendered: map[string][]byte{
 					"gpu-operator": []byte(`
 apiVersion: apps/v1
 kind: Deployment
@@ -126,8 +100,8 @@ spec:
 					},
 				},
 			},
-			helmRenderer: &mockHelmRenderer{
-				errs: map[string]error{
+			helmRenderer: &helmtest.MockRenderer{
+				Errs: map[string]error{
 					"broken-chart": errors.New(errors.ErrCodeInternal, "chart not found"),
 				},
 			},
@@ -156,8 +130,8 @@ spec:
 					},
 				},
 			},
-			helmRenderer: &mockHelmRenderer{
-				rendered: map[string][]byte{
+			helmRenderer: &helmtest.MockRenderer{
+				Rendered: map[string][]byte{
 					"comp-a": []byte(`
 apiVersion: v1
 kind: Pod
@@ -194,7 +168,7 @@ spec:
 					},
 				},
 			},
-			helmRenderer: &mockHelmRenderer{},
+			helmRenderer: &helmtest.MockRenderer{},
 			wantImages:   0,
 			wantCharts:   0,
 			wantComps:    0,
@@ -212,7 +186,7 @@ spec:
 					},
 				},
 			},
-			helmRenderer: &blockingHelmRenderer{},
+			helmRenderer: &helmtest.BlockingRenderer{},
 			ctxFunc: func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), time.Millisecond)
 			},

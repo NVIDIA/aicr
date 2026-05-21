@@ -37,6 +37,7 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/helm"
 )
 
 const (
@@ -63,13 +64,14 @@ func main() {
 	flag.BoolVar(&noTitle, "no-title", false, "omit the H1 title in the Markdown output so the body can be embedded as a section of a larger document")
 	flag.Parse()
 
-	if err := run(repoRoot, outDir, aicrVersion, skipHelm, strict, deterministic, noTitle); err != nil {
+	renderer := helm.Default()
+	if err := run(repoRoot, outDir, aicrVersion, renderer, skipHelm, strict, deterministic, noTitle); err != nil {
 		fmt.Fprintln(os.Stderr, "bom:", err)
 		os.Exit(1)
 	}
 }
 
-func run(repoRoot, outDir, aicrVersion string, skipHelm, strict, deterministic, noTitle bool) error {
+func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm, strict, deterministic, noTitle bool) error {
 	registryPath := filepath.Join(repoRoot, "recipes", "registry.yaml")
 	reg, err := loadRegistry(registryPath)
 	if err != nil {
@@ -82,7 +84,7 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict, deterministic, 
 
 	results := make([]bom.ComponentResult, 0, len(reg.Components))
 	for _, c := range reg.Components {
-		results = append(results, surveyComponent(repoRoot, c, skipHelm))
+		results = append(results, surveyComponent(repoRoot, c, renderer, skipHelm))
 	}
 
 	if strict {
@@ -161,17 +163,24 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict, deterministic, 
 // renderHelmComponent shells out to `helm template` for c. The timeout
 // context is scoped to this call so its associated timer is canceled before
 // the manifests walk begins, regardless of how many components are surveyed.
-func renderHelmComponent(repoRoot string, c component) ([]byte, []string) {
+func renderHelmComponent(repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultHelmTimeout)
 	defer cancel()
 
-	valuesPath := componentValuesPath(repoRoot, c.Name)
+	valuesPath := filepath.Join(repoRoot, "recipes", "components", c.Name, "values.yaml")
 	if _, err := os.Stat(valuesPath); err != nil {
 		valuesPath = ""
 	}
 
 	var warnings []string
-	out, err := renderChart(ctx, c, valuesPath)
+	out, err := r.Render(ctx, helm.ChartInput{
+		Name:       c.Name,
+		Chart:      c.Helm.DefaultChart,
+		Repository: c.Helm.DefaultRepository,
+		Version:    c.Helm.DefaultVersion,
+		Namespace:  c.Helm.DefaultNamespace,
+		ValuesPath: valuesPath,
+	})
 	if err != nil {
 		warnings = append(warnings, err.Error())
 	}
@@ -180,7 +189,7 @@ func renderHelmComponent(repoRoot string, c component) ([]byte, []string) {
 
 // surveyComponent renders the component's chart (if any) and walks its
 // embedded manifests directory, returning the union of image refs.
-func surveyComponent(repoRoot string, c component, skipHelm bool) bom.ComponentResult {
+func surveyComponent(repoRoot string, c component, r helm.Renderer, skipHelm bool) bom.ComponentResult {
 	res := bom.ComponentResult{
 		Name:        c.Name,
 		DisplayName: c.DisplayName,
@@ -195,7 +204,7 @@ func surveyComponent(repoRoot string, c component, skipHelm bool) bom.ComponentR
 	images := map[string]struct{}{}
 
 	if c.kind() == kindHelm && !skipHelm {
-		out, warnings := renderHelmComponent(repoRoot, c)
+		out, warnings := renderHelmComponent(repoRoot, c, r)
 		res.Warnings = append(res.Warnings, warnings...)
 		if len(out) > 0 {
 			imgs, parseErr := bom.ExtractImagesFromYAML(out)
@@ -208,7 +217,7 @@ func surveyComponent(repoRoot string, c component, skipHelm bool) bom.ComponentR
 		}
 	}
 
-	manifestsDir := componentManifestsDir(repoRoot, c.Name)
+	manifestsDir := filepath.Join(repoRoot, "recipes", "components", c.Name, "manifests")
 	if info, err := os.Stat(manifestsDir); err == nil && info.IsDir() {
 		walkErr := filepath.WalkDir(manifestsDir, func(path string, d fs.DirEntry, werr error) error {
 			if werr != nil {

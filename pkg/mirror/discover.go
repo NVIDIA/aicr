@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -48,7 +49,7 @@ func WithValueOverrides(overrides []config.ComponentPath) Option {
 
 // WithHelmRenderer sets a custom renderer (used in tests to inject
 // canned YAML without requiring the helm binary).
-func WithHelmRenderer(r HelmRenderer) Option {
+func WithHelmRenderer(r helm.Renderer) Option {
 	return func(l *Lister) { l.helmRenderer = r }
 }
 
@@ -57,7 +58,7 @@ type Lister struct {
 	version        string
 	kubeVersion    string
 	valueOverrides []config.ComponentPath
-	helmRenderer   HelmRenderer
+	helmRenderer   helm.Renderer
 }
 
 // WithKubeVersion sets the Kubernetes version passed to `helm template
@@ -72,17 +73,11 @@ func NewLister(opts ...Option) *Lister {
 	for _, opt := range opts {
 		opt(l)
 	}
-	// Wire kube version into the default renderer if no custom renderer
-	// was injected (tests inject mocks that ignore this).
+	if l.kubeVersion == "" {
+		l.kubeVersion = defaults.MirrorDefaultKubeVersion
+	}
 	if l.helmRenderer == nil {
-		kv := l.kubeVersion
-		if kv == "" {
-			kv = defaults.MirrorDefaultKubeVersion
-		}
-		l.helmRenderer = &defaultHelmRenderer{
-			kubeVersion: kv,
-			apiVersions: defaults.MirrorExtraAPIVersions,
-		}
+		l.helmRenderer = helm.Default()
 	}
 	return l
 }
@@ -146,7 +141,16 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 					}
 					applyValueOverrides(values, keyOverrides)
 
-					rendered, renderErr := l.helmRenderer.Render(gctx, &rec.ComponentRefs[i], values)
+					rendered, renderErr := l.helmRenderer.Render(gctx, helm.ChartInput{
+						Name:        compRef.Name,
+						Chart:       compRef.Chart,
+						Repository:  compRef.Source,
+						Version:     compRef.Version,
+						Namespace:   compRef.Namespace,
+						Values:      values,
+						KubeVersion: l.kubeVersion,
+						APIVersions: defaults.MirrorExtraAPIVersions,
+					})
 					if renderErr != nil {
 						// Context cancellation is fatal — propagate it.
 						if gctx.Err() != nil {
