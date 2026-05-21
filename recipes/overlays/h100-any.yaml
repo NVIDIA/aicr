@@ -1,0 +1,54 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Cross-cutting overlay applied via criteria-wildcard matching.
+#
+# This overlay is NOT referenced by any recipe via spec.base or spec.mixins.
+# The resolver picks it up for every H100 query (any service, any intent)
+# because its `service: any` criterion wildcard-matches any service. It
+# contributes the H100-wide deployment-phase floor — the 4 standard checks
+# plus the gpu-operator version pin — without duplicating it in every
+# service+intent leaf.
+#
+# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
+# that declare their own `deployment:` block (e.g., h100-eks-training,
+# h100-aks-training, h100-eks-ubuntu-inference-dynamo) continue to win —
+# their constraint values match the floor here so the override is a no-op.
+#
+# See docs/contributor/data.md#criteria-wildcard-overlays for details.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: h100-any
+
+spec:
+  base: base
+
+  criteria:
+    service: any
+    accelerator: h100
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # H100 datacenter cards have stable gpu-operator support from
+        # v24.6.0 forward. Set as the floor; concrete leaves can tighten.
+        - name: Deployment.gpu-operator.version
+          value: ">= v24.6.0"

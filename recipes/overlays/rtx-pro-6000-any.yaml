@@ -1,0 +1,52 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Cross-cutting overlay applied via criteria-wildcard matching.
+#
+# This overlay is NOT referenced by any recipe via spec.base or spec.mixins.
+# The resolver picks it up for every RTX Pro 6000 query (any service, any
+# intent). It contributes the RTX Pro 6000-wide deployment-phase floor —
+# the 4 standard checks plus the gpu-operator version pin — without
+# duplicating it in every leaf.
+#
+# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
+# that declare their own `deployment:` block win. None of the current
+# rtx-pro-6000-lke-* leaves do, so they all inherit this floor.
+#
+# See docs/contributor/data.md#criteria-wildcard-overlays for details.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: rtx-pro-6000-any
+
+spec:
+  base: base
+
+  criteria:
+    service: any
+    accelerator: rtx-pro-6000
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # RTX Pro 6000 (Blackwell workstation) needs the same Blackwell-era
+        # baseline as GB200. Tighten when an empirical floor is established.
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
