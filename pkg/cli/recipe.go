@@ -151,8 +151,12 @@ Override snapshot-detected criteria:
 			// run until inside buildRecipeFromCmdWithConfig — after
 			// criteria validation, when the registry-based fallback
 			// can't help yet.
+			//
+			// PropagateOrWrap preserves the inner error code so YAML
+			// parse failures surface as ErrCodeInvalidRequest instead of
+			// being masked as ErrCodeInternal.
 			if err = recipe.LoadCatalog(ctx); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to load recipe catalog", err)
+				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load recipe catalog")
 			}
 
 			// Apply criteria-strict AFTER the catalog has loaded —

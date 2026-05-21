@@ -422,7 +422,7 @@ Integrators can extend or override embedded recipe data using the `--data` flag 
 - Private component values with organization-specific settings
 - Extended registries with internal Helm charts
 - Rapid iteration without rebuilding binaries
-- New criteria values (service / accelerator / OS / intent / platform) admitted at runtime via the catalog-driven [criteria registry](data-extension.md#adding-a-criteria-value-the-registry-path) — no rebuild required
+- New criteria values (service / accelerator / OS / intent / platform) admitted at runtime via the catalog-driven [criteria registry](data-extension.md#adding-a-criteria-value) — no rebuild required
 
 See [Data Extension](data-extension.md) for the full walkthrough (folder layout, registry rules, strict mode, debugging). The summary below is for quick reference.
 

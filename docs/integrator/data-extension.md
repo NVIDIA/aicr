@@ -73,7 +73,7 @@ components: []
 External components in this file are merged with the embedded registry; on
 name collision, the external definition wins.
 
-## Adding a criteria value (the registry path)
+## Adding a criteria value
 
 Criteria value validation (`service`, `accelerator`, `intent`, `os`,
 `platform`) is data-driven: the static OSS list is the fast path, and the
