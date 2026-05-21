@@ -23,6 +23,15 @@ cdi:
 toolkit:
   enabled: false
 
+# Re-enable GPUDirect RDMA. AKS ships MOFED via network-operator on
+# ND-series InfiniBand nodes; useHostMofed: true binds nvidia_peermem
+# against the host's MOFED kernel modules (see values-aks.yaml for the
+# full rationale).
+driver:
+  rdma:
+    enabled: true
+    useHostMofed: true
+
 validator:
   plugin:
     env:
