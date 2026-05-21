@@ -76,8 +76,17 @@ func renderZarf(w io.Writer, list *MirrorList) error {
 
 	charts := make([]zarfChart, 0, len(list.Charts))
 	for _, ch := range list.Charts {
+		// Strip any path prefix from the chart name (e.g., "nvidia/gpu-operator"
+		// → "gpu-operator"). Recipe resolution normalizes this via
+		// pkg/recipe/metadata.go, but pre-hydrated RecipeResult files loaded
+		// via --recipe bypass that path and may carry the raw registry value.
+		chartName := ch.Chart
+		if idx := strings.LastIndex(chartName, "/"); idx >= 0 {
+			chartName = chartName[idx+1:]
+		}
+
 		zc := zarfChart{
-			Name:      ch.Chart,
+			Name:      chartName,
 			Version:   ch.Version,
 			Namespace: ch.Namespace,
 		}
@@ -85,10 +94,10 @@ func renderZarf(w io.Writer, list *MirrorList) error {
 		// OCI charts use the full OCI URL; HTTPS charts use the repo URL
 		// with a separate repoName field.
 		if strings.HasPrefix(ch.Repository, "oci://") {
-			zc.URL = strings.TrimRight(ch.Repository, "/") + "/" + ch.Chart
+			zc.URL = strings.TrimRight(ch.Repository, "/") + "/" + chartName
 		} else {
 			zc.URL = ch.Repository
-			zc.RepoName = ch.Chart
+			zc.RepoName = chartName
 		}
 
 		charts = append(charts, zc)

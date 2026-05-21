@@ -95,6 +95,67 @@ func TestRenderHauler(t *testing.T) {
 	}
 }
 
+func TestRenderHaulerChartNameStripsPathPrefix(t *testing.T) {
+	tests := []struct {
+		name        string
+		chart       ChartRef
+		wantParts   []string
+		wantNoParts []string
+	}{
+		{
+			name: "chart with path prefix",
+			chart: ChartRef{
+				Name:       "gpu-operator",
+				Repository: "oci://ghcr.io/nvidia",
+				Chart:      "nvidia/gpu-operator",
+				Version:    "v25.3.0",
+			},
+			wantParts: []string{
+				"name: gpu-operator",
+			},
+			wantNoParts: []string{
+				"name: nvidia/gpu-operator",
+			},
+		},
+		{
+			name: "chart without path prefix unchanged",
+			chart: ChartRef{
+				Name:       "gpu-operator",
+				Repository: "oci://ghcr.io/nvidia",
+				Chart:      "gpu-operator",
+				Version:    "v25.3.0",
+			},
+			wantParts: []string{
+				"name: gpu-operator",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			list := &MirrorList{
+				Images: []string{"placeholder:v1"},
+				Charts: []ChartRef{tt.chart},
+			}
+			var buf bytes.Buffer
+			if err := renderHauler(&buf, list); err != nil {
+				t.Fatalf("renderHauler() error = %v", err)
+			}
+			output := buf.String()
+			for _, part := range tt.wantParts {
+				if !strings.Contains(output, part) {
+					t.Errorf("output missing %q\nGot:\n%s", part, output)
+				}
+			}
+			for _, noPart := range tt.wantNoParts {
+				if strings.Contains(output, noPart) {
+					t.Errorf("output should not contain %q\nGot:\n%s", noPart, output)
+				}
+			}
+		})
+	}
+}
+
 func TestRenderHaulerAPIVersion(t *testing.T) {
 	list := &MirrorList{
 		Images: []string{"test:v1"},

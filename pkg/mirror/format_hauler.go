@@ -16,6 +16,7 @@ package mirror
 
 import (
 	"io"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -107,8 +108,17 @@ func renderHauler(w io.Writer, list *MirrorList) error {
 			Spec:       haulerChartsSpec{Charts: make([]haulerChart, 0, len(list.Charts))},
 		}
 		for _, ch := range list.Charts {
+			// Strip any path prefix from the chart name (e.g., "nvidia/gpu-operator"
+			// → "gpu-operator"). Recipe resolution normalizes this via
+			// pkg/recipe/metadata.go, but pre-hydrated RecipeResult files loaded
+			// via --recipe bypass that path and may carry the raw registry value.
+			chartName := ch.Chart
+			if idx := strings.LastIndex(chartName, "/"); idx >= 0 {
+				chartName = chartName[idx+1:]
+			}
+
 			charts.Spec.Charts = append(charts.Spec.Charts, haulerChart{
-				Name:    ch.Chart,
+				Name:    chartName,
 				RepoURL: ch.Repository,
 				Version: ch.Version,
 			})

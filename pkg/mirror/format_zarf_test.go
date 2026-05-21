@@ -96,6 +96,84 @@ func TestRenderZarf(t *testing.T) {
 	}
 }
 
+func TestRenderZarfChartNameStripsPathPrefix(t *testing.T) {
+	tests := []struct {
+		name        string
+		chart       ChartRef
+		wantParts   []string
+		wantNoParts []string
+	}{
+		{
+			name: "OCI chart with path prefix",
+			chart: ChartRef{
+				Name:       "gpu-operator",
+				Repository: "oci://ghcr.io/nvidia",
+				Chart:      "nvidia/gpu-operator",
+				Version:    "v25.3.0",
+				Namespace:  "gpu-operator",
+			},
+			wantParts: []string{
+				"name: gpu-operator",
+				"url: oci://ghcr.io/nvidia/gpu-operator",
+			},
+			wantNoParts: []string{
+				"name: nvidia/gpu-operator",
+			},
+		},
+		{
+			name: "HTTPS chart with path prefix",
+			chart: ChartRef{
+				Name:       "aws-ebs-csi-driver",
+				Repository: "https://kubernetes-sigs.github.io/aws-ebs-csi-driver",
+				Chart:      "charts/aws-ebs-csi-driver",
+				Version:    "2.40.0",
+				Namespace:  "kube-system",
+			},
+			wantParts: []string{
+				"name: aws-ebs-csi-driver",
+				"repoName: aws-ebs-csi-driver",
+			},
+			wantNoParts: []string{
+				"name: charts/aws-ebs-csi-driver",
+			},
+		},
+		{
+			name: "chart without path prefix unchanged",
+			chart: ChartRef{
+				Name:       "gpu-operator",
+				Repository: "oci://ghcr.io/nvidia",
+				Chart:      "gpu-operator",
+				Version:    "v25.3.0",
+				Namespace:  "gpu-operator",
+			},
+			wantParts: []string{
+				"name: gpu-operator",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			list := &MirrorList{Charts: []ChartRef{tt.chart}}
+			var buf bytes.Buffer
+			if err := renderZarf(&buf, list); err != nil {
+				t.Fatalf("renderZarf() error = %v", err)
+			}
+			output := buf.String()
+			for _, part := range tt.wantParts {
+				if !strings.Contains(output, part) {
+					t.Errorf("output missing %q\nGot:\n%s", part, output)
+				}
+			}
+			for _, noPart := range tt.wantNoParts {
+				if strings.Contains(output, noPart) {
+					t.Errorf("output should not contain %q\nGot:\n%s", noPart, output)
+				}
+			}
+		})
+	}
+}
+
 func TestRenderZarfOCIChartURL(t *testing.T) {
 	list := &MirrorList{
 		Charts: []ChartRef{
