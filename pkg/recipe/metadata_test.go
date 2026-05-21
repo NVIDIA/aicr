@@ -1860,6 +1860,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"h100-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
 		{"h100-eks-ubuntu-training-kubeflow", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"h100-eks-ubuntu-training-slurm", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-eks-ubuntu-inference-dynamo", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		{"h100-eks-ubuntu-inference-nim", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformNIM}, true},
 		// H100 AKS Ubuntu variants
@@ -1869,6 +1870,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-aks-ubuntu-inference-dynamo", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// H100 GKE COS platform variants (GKE uses COS, no Ubuntu variant)
 		{"h100-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"h100-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 EKS Ubuntu variants
 		{"gb200-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
@@ -1889,6 +1891,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-kind-inference", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentInference, ""}, false},
 		// Deeper kind leaves — platform variants must also stay OFF
 		{"h100-kind-training-kubeflow", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentTraining, CriteriaPlatformKubeflow}, false},
+		{"h100-kind-training-slurm", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentTraining, CriteriaPlatformSlurm}, false},
 		{"h100-kind-inference-dynamo", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentInference, CriteriaPlatformDynamo}, false},
 	}
 
