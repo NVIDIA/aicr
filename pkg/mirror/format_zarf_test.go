@@ -32,6 +32,7 @@ func TestRenderZarf(t *testing.T) {
 			name: "valid list with OCI and HTTPS charts",
 			list: testMirrorList(),
 			wantParts: []string{
+				"apiVersion: " + zarfAPIVersion,
 				"kind: ZarfPackageConfig",
 				"name: aicr",
 				"description: NVIDIA AI Cluster Runtime",
@@ -54,6 +55,7 @@ func TestRenderZarf(t *testing.T) {
 				Images: []string{"nginx:latest"},
 			},
 			wantParts: []string{
+				"apiVersion: " + zarfAPIVersion,
 				"kind: ZarfPackageConfig",
 				"- nginx:latest",
 			},

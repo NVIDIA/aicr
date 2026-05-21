@@ -22,9 +22,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// Zarf package config schema. Pinned to the v1beta1 API defined in
+// Zarf package config schema. Pinned to the v1alpha1 API defined in
 // Zarf v0.76.0 (2026-05-14). The canonical Go type lives at
-// github.com/zarf-dev/zarf/src/api/v1beta1.ZarfPackageConfig.
+// github.com/zarf-dev/zarf/src/api/v1alpha1.ZarfPackageConfig.
 //
 // Upstream schema reference:
 //   https://docs.zarf.dev/docs/create-a-zarf-package/zarf-schema
@@ -33,8 +33,12 @@ import (
 // We define minimal local structs instead of importing the upstream Go
 // module to avoid pulling Zarf's large transitive dependency tree.
 
+// zarfAPIVersion is the upstream schema version (zarf.dev/v1alpha1).
+const zarfAPIVersion = "zarf.dev/v1alpha1"
+
 // zarfPackageConfig is the root ZarfPackageConfig document.
 type zarfPackageConfig struct {
+	APIVersion string          `yaml:"apiVersion"`
 	Kind       string          `yaml:"kind"`
 	Metadata   zarfMeta        `yaml:"metadata"`
 	Components []zarfComponent `yaml:"components"`
@@ -91,7 +95,8 @@ func renderZarf(w io.Writer, list *MirrorList) error {
 	}
 
 	pkg := zarfPackageConfig{
-		Kind: "ZarfPackageConfig",
+		APIVersion: zarfAPIVersion,
+		Kind:       "ZarfPackageConfig",
 		Metadata: zarfMeta{
 			Name:        "aicr",
 			Description: "NVIDIA AI Cluster Runtime container images and Helm charts for air-gapped deployment",
