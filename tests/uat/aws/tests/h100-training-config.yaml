@@ -16,9 +16,16 @@
 #
 # Drives the EKS H100 training UAT — codifies the workflow demonstrated in
 # `demos/cuj1-eks.md` against the cluster provisioned by
-# `../cluster-config.yaml`. Scheduling fields match that cluster's node
-# labels; tolerations defensively cover the NVIDIA device plugin's standard
-# GPU taint even though the cluster-level config declares no taints.
+# `../cluster-config.yaml`.
+#
+# Scheduling note: the EKS actuator auto-applies `dedicated=worker-workload`
+# taints to GPU nodes and `dedicated=system-workload` taints to system
+# nodes (both NoSchedule + NoExecute), even though the cluster-config.yaml
+# does not declare them. The taint *value* intentionally differs from the
+# `dedicated` *label* on the node (`user-workload` / `system-workload`) —
+# label drives scheduling targeting, the unrelated taint key drives
+# admission, per the demo. Tolerations below must match the actual taints,
+# not the labels.
 #
 # `spec.validate.evidence.attestation.push` carries the stable repo prefix
 # only; `../run` appends `-${RUN_ID}` at runtime so each UAT execution
@@ -37,6 +44,8 @@ spec:
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
+        - dedicated=worker-workload:NoSchedule
+        - dedicated=worker-workload:NoExecute
         - nvidia.com/gpu=present:NoSchedule
 
   recipe:
@@ -60,9 +69,14 @@ spec:
       acceleratedNodeSelector:
         nodeGroup: gpu-worker
       acceleratedNodeTolerations:
+        - dedicated=worker-workload:NoSchedule
+        - dedicated=worker-workload:NoExecute
         - nvidia.com/gpu=present:NoSchedule
       systemNodeSelector:
         nodeGroup: system-worker
+      systemNodeTolerations:
+        - dedicated=system-workload:NoSchedule
+        - dedicated=system-workload:NoExecute
       # EKS default backed by the EBS CSI driver. Matches the UAT cluster.
       storageClass: gp3
 
@@ -73,6 +87,8 @@ spec:
     agent:
       namespace: aicr-validation
       tolerations:
+        - dedicated=worker-workload:NoSchedule
+        - dedicated=worker-workload:NoExecute
         - nvidia.com/gpu=present:NoSchedule
     evidence:
       attestation:
