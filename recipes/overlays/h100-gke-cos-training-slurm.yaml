@@ -90,11 +90,14 @@ spec:
                 limits:
                   nvidia.com/gpu: 8
 
-  # K8s-native NCCL bandwidth check is dropped on slurm leaves: on a
-  # Slinky cluster the equivalent validation is a slurm-launched job
-  # (`srun nccl-tests/all_reduce_perf`) that exercises slurmd + the
+  # K8s-native nccl-all-reduce-bw is dropped on Slinky leaves: that
+  # check launches a Pod against the cluster scheduler, so on a
+  # Slinky-managed cluster it bypasses slurmd entirely and measures the
+  # wrong path. The equivalent signal here is a slurm-launched
+  # `srun nccl-tests/all_reduce_perf` that goes through slurmd + the
   # GPUDirect TCPXO plugin already deployed by the parent leaf via
-  # gke-nccl-tcpxo. Conformance checks are inherited unchanged.
+  # gke-nccl-tcpxo. Deployment and conformance checks are inherited
+  # unchanged.
   validation:
     performance:
       checks: []

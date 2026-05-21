@@ -88,3 +88,15 @@ spec:
               resources:
                 limits:
                   nvidia.com/gpu: 8
+
+  # K8s-native nccl-all-reduce-bw is dropped on Slinky leaves: that
+  # check launches a Pod against the cluster scheduler, so on a
+  # Slinky-managed cluster it bypasses slurmd entirely and measures the
+  # wrong path. The equivalent signal here is a slurm-launched
+  # `srun nccl-tests/all_reduce_perf` that goes through slurmd + the
+  # EFA libfabric stack already present on the parent EKS leaf.
+  # Deployment and conformance checks are inherited unchanged.
+  validation:
+    performance:
+      checks: []
+      constraints: []
