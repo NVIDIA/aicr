@@ -115,7 +115,15 @@ spec:
 
 Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/data.md#mixin-composition) for details.
 
-A platform's full component stack is declared inline per leaf overlay rather than via a platform mixin, so each leaf can carry its own hardware-specific tuning (GPU GRES, resource limits, partition layout). For example, `--platform slurm` leaves inline the SchedMD Slinky operator CRDs, the operator itself, and the Slinky-managed Slurm cluster instance (Controller / LoginSet / NodeSet / RestApi) as three `componentRefs` entries — same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. A leaf that wants the operator only inlines `slinky-slurm-operator-crds` + `slinky-slurm-operator` and omits the `slinky-slurm` componentRef; a leaf that wants the full cluster adds all three with leaf-specific `overrides` on `slinky-slurm` — see `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the latter.
+A platform's full component stack is declared inline per leaf overlay rather than via a platform mixin. This lets each leaf carry its own hardware-specific tuning — most commonly GPU GRES strings and accelerator resource limits — without going through the mixin merge path.
+
+For example, `--platform slurm` leaves inline three `componentRefs`:
+
+- `slinky-slurm-operator-crds` — SchedMD Slinky CRDs
+- `slinky-slurm-operator` — the operator and admission webhook
+- `slinky-slurm` — the Slinky-managed Slurm cluster instance (Controller / LoginSet / NodeSet / RestApi), with leaf-specific `overrides` (e.g. H100 GRES wiring on the `nodesets.slinky` map)
+
+This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. See `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the full example.
 
 When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-talos` mixin to your overlay's `spec.mixins` list (e.g. `spec.mixins: [os-talos]`, or `[platform-kubeflow, os-talos]` if you already mix in a non-OS fragment). OS-scoped mixins are mutually exclusive — combining `os-ubuntu` and `os-talos` in one overlay is a recipe authoring error, not a supported composition. The mixin overrides namespaces for affected components and supplies PSA-privileged Namespace manifests via `componentRefs[].preManifestFiles`, which are applied before each chart — see [Talos integration](talos-integration.md) for the component list and labels.
 
