@@ -15,7 +15,16 @@
 name: UAT - AWS
 
 on:
-  workflow_dispatch: {}  # allow manual runs for testing
+  workflow_dispatch:
+    inputs:
+      skip_delete:
+        description: 'Skip cluster teardown (manual runs only; schedule always deletes)'
+        type: boolean
+        default: false
+      skip_tests:
+        description: 'Skip UAT test execution (manual runs only; schedule always tests)'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 4 * * *' # daily at midnight PST, runs on default branch only
 
@@ -42,13 +51,11 @@ jobs:
       AWS_REGION: "us-east-1"
       GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
       DEPLOYMENT_ID: "aicr-uat-${{ github.run_id }}"
-      CLUSTER_CONFIG: tests/uat/aws/config.yaml
+      CLUSTER_CONFIG: tests/uat/aws/cluster-config.yaml
+      TEST_CONFIG: tests/uat/aws/tests/h100-training-config.yaml
       EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:c631e2bebf605690c6cfbb072cb2116023fd0f6b43c2c4c6ead0416ee586635d"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
-
-      # Debug
-      SKIP_DELETE: "false"  # skip cluster deletion
 
     steps:
       # Checkout
@@ -73,6 +80,7 @@ jobs:
             vendor/modules.txt
 
       - name: Build aicr binary
+        if: inputs.skip_tests != true
         env:
           GOFLAGS: -mod=vendor
         run: |
@@ -83,6 +91,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Build and push validator images
+        if: inputs.skip_tests != true
         run: |
           GO_VERSION="$(cat .go-version)"
           for phase in deployment performance conformance; do
@@ -132,9 +141,11 @@ jobs:
           kubectl_version: '${{ steps.versions.outputs.kubectl }}'
           install_yq: 'true'
           yq_version: '${{ steps.versions.outputs.yq }}'
-          install_chainsaw: 'true'
-          chainsaw_version: '${{ steps.versions.outputs.chainsaw }}'
-          chainsaw_sha256: '${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_helmfile: 'true'
+          helmfile_version: '${{ steps.versions.outputs.helmfile }}'
+          helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
 
       # Config
       - name: Update Config
@@ -170,23 +181,151 @@ jobs:
           echo "Verifying cluster connection..."
           kubectl get nodes
 
-      # Test (capped to guarantee teardown headroom within the 90m job timeout)
-      - name: Run UAT Tests
-        id: tests
-        if: steps.client.outcome == 'success'
-        timeout-minutes: 30
+      # UAT phases — each step invokes tests/uat/aws/run so the demo
+      # (demos/cuj1-eks.md) and CI stay in lockstep, and per-phase
+      # failures surface as discrete steps in the GitHub Actions UI. Phases
+      # chain on success: prep → install → conformance → train → verify.
+      # The signed evidence bundle is produced by the conformance step; the
+      # subsequent train step exercises the deployed stack so the recorded
+      # evidence reflects a fully successful run.
+      - name: UAT - prep (snapshot + recipe + validate + bundle)
+        id: prep
+        if: steps.client.outcome == 'success' && inputs.skip_tests != true
+        timeout-minutes: 15
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
-        run: |
-          set -euxo pipefail
-          chainsaw test \
-            --config tests/uat/chainsaw-config.yaml \
-            --test-dir tests/uat/aws/tests/
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run prep "${TEST_CONFIG}"
 
-      # Teardown (retry up to 3 times)
+      - name: UAT - install (helmfile apply)
+        id: install
+        if: steps.prep.outcome == 'success'
+        timeout-minutes: 25
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run install "${TEST_CONFIG}"
+
+      - name: UAT - conformance (validate + emit signed evidence)
+        id: conformance
+        if: steps.install.outcome == 'success'
+        timeout-minutes: 20
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run conformance "${TEST_CONFIG}"
+
+      - name: UAT - train (TrainJob)
+        id: train
+        if: steps.conformance.outcome == 'success'
+        timeout-minutes: 25
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/aws/run train "${TEST_CONFIG}"
+
+      - name: UAT - verify (evidence verify)
+        id: verify
+        if: steps.conformance.outcome == 'success'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+          # Pin the expected Sigstore signer to this workflow's OIDC
+          # identity so verify only passes for bundles signed by this
+          # workflow — without these, any Fulcio identity would verify
+          # and the security check becomes a no-op.
+          EXPECTED_ISSUER: https://token.actions.githubusercontent.com
+          EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
+        run: ./tests/uat/aws/run verify "${TEST_CONFIG}"
+
+      # Artifacts + summary run BEFORE teardown so a slow or failing
+      # `Destroy Cluster` (which can take 10+ min) does not delay or
+      # consume the job-timeout budget needed to persist evidence.
+      #
+      # The signed evidence bundle itself is pushed to OCI by the
+      # conformance step (ghcr.io/nvidia/aicr-uat-eks-h100-training-${{
+      # github.run_id }}) and is the source of truth; here we attach the
+      # lightweight pointer so a reviewer can locate that bundle directly
+      # from the Actions UI. Org policy clamps retention at 90d.
+      - name: Upload evidence pointer
+        if: always() && steps.conformance.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-aws-evidence-pointer-${{ github.run_id }}
+          path: evidence/pointer.yaml
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload failure debug
+        if: failure() && steps.prep.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-aws-debug-${{ github.run_id }}
+          path: |
+            snapshot.yaml
+            recipe.yaml
+            dry-run.json
+            report.json
+            evidence-result.json
+            evidence/pointer.yaml
+            train-logs/**
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # Summary
+      - name: Test Summary
+        if: always()
+        run: |
+          {
+            echo "## UAT Results (AWS)"
+            echo ""
+            echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
+            echo ""
+            echo "| Phase | Status |"
+            echo "|-------|--------|"
+            echo "| Capacity | ${{ steps.capacity.outcome }} |"
+            echo "| Dependencies | ${{ steps.deps.outcome }} |"
+            echo "| Config | ${{ steps.config.outcome }} |"
+            echo "| Cluster | ${{ steps.infra.outcome }} |"
+            echo "| Connection | ${{ steps.client.outcome }} |"
+            echo "| Prep | ${{ steps.prep.outcome }} |"
+            echo "| Install | ${{ steps.install.outcome }} |"
+            echo "| Conformance | ${{ steps.conformance.outcome }} |"
+            echo "| Train | ${{ steps.train.outcome }} |"
+            echo "| Verify | ${{ steps.verify.outcome }} |"
+            if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then
+              echo ""
+              echo "**Evidence (OCI):** \`ghcr.io/nvidia/aicr-uat-eks-h100-training-${{ github.run_id }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Cleanup (after artifacts so a failed cleanup does not lose evidence).
+      - name: Cleanup validator image
+        if: always() && inputs.skip_tests != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete UAT-tagged validator images to avoid GHCR clutter
+          for phase in deployment performance conformance; do
+            VERSION_ID=$(gh api \
+              "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
+              --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
+            if [[ -n "${VERSION_ID}" ]]; then
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
+            fi
+          done
+
+      # Teardown (retry up to 3 times). Runs last so a slow destroy
+      # cannot block evidence upload or summary rendering.
       - name: Destroy Cluster
-        if: always() && steps.infra.outcome != 'skipped' && env.SKIP_DELETE != 'true'
+        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
         shell: bash
         run: |
           set -euxo pipefail
@@ -205,47 +344,3 @@ jobs:
             echo "Destroy attempt ${attempt} failed, retrying..."
             sleep 30
           done
-
-      # Cleanup
-      - name: Cleanup validator image
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Delete UAT-tagged validator images to avoid GHCR clutter
-          for phase in deployment performance conformance; do
-            VERSION_ID=$(gh api \
-              "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
-              --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
-            if [[ -n "${VERSION_ID}" ]]; then
-              gh api --method DELETE \
-                "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
-            fi
-          done
-
-      # Artifacts
-      - name: Upload Test Artifacts
-        if: always() && steps.tests.outcome != 'skipped'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: uat-aws-results
-          path: |
-            tests/uat/aws/tests/**/chainsaw-report*.xml
-          retention-days: 30
-
-      # Summary
-      - name: Test Summary
-        if: always()
-        run: |
-          echo "## UAT Results (AWS)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Phase | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Capacity | ${{ steps.capacity.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dependencies | ${{ steps.deps.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Config | ${{ steps.config.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cluster | ${{ steps.infra.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Connection | ${{ steps.client.outcome }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tests | ${{ steps.tests.outcome }} |" >> $GITHUB_STEP_SUMMARY

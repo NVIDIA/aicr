@@ -75,6 +75,15 @@ spec:
           enable: true
 
   validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v24.6.0"
     performance:
       checks:
         - nccl-all-reduce-bw

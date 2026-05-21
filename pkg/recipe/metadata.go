@@ -456,7 +456,12 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		return s.ComponentRefs[i].Name < s.ComponentRefs[j].Name
 	})
 
-	// Merge validation config - overlay phases take precedence
+	// Merge validation config - overlay phases take precedence. Phase
+	// pointers are cloned (not aliased) so successive merges cannot mutate
+	// the source's cached ValidationConfig — a previous version aliased
+	// other.Validation when s.Validation was nil, then later writes through
+	// s.Validation.Deployment etc. corrupted whichever overlay's cached
+	// metadata the alias pointed at.
 	if other.Validation != nil {
 		if s.Validation == nil {
 			s.Validation = cloneValidationConfig(other.Validation)

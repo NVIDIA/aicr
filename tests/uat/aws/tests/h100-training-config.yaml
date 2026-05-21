@@ -1,0 +1,82 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
+#
+# Drives the EKS H100 training UAT — codifies the workflow demonstrated in
+# `demos/cuj1-eks.md` against the cluster provisioned by
+# `../cluster-config.yaml`. Scheduling fields match that cluster's node
+# labels; tolerations defensively cover the NVIDIA device plugin's standard
+# GPU taint even though the cluster-level config declares no taints.
+#
+# `spec.validate.evidence.attestation.push` carries the stable repo prefix
+# only; `../run` appends `-${RUN_ID}` at runtime so each UAT execution
+# publishes evidence to a uniquely traceable OCI repo.
+kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: eks-h100-training-uat
+
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      nodeSelector:
+        nodeGroup: gpu-worker
+      tolerations:
+        - nvidia.com/gpu=present:NoSchedule
+
+  recipe:
+    criteria:
+      service: eks
+      accelerator: h100
+      os: ubuntu
+      intent: training
+      platform: kubeflow
+    output:
+      path: recipe.yaml
+
+  bundle:
+    input:
+      recipe: recipe.yaml
+    output:
+      target: ./bundle
+    deployment:
+      deployer: helmfile
+    scheduling:
+      acceleratedNodeSelector:
+        nodeGroup: gpu-worker
+      acceleratedNodeTolerations:
+        - nvidia.com/gpu=present:NoSchedule
+      systemNodeSelector:
+        nodeGroup: system-worker
+      # EKS default backed by the EBS CSI driver. Matches the UAT cluster.
+      storageClass: gp3
+
+  validate:
+    input:
+      recipe: recipe.yaml
+      snapshot: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      tolerations:
+        - nvidia.com/gpu=present:NoSchedule
+    evidence:
+      attestation:
+        # Setting `out` enables emit. The push target below is the stable
+        # repo prefix; ../run appends `-${RUN_ID}` for per-run isolation.
+        out: ./evidence
+        push: ghcr.io/nvidia/aicr-uat-eks-h100-training
