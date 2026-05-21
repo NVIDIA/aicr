@@ -209,7 +209,7 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 	}
 
 	if err := g.Wait(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "component discovery failed", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "component discovery failed")
 	}
 
 	// Sort results by original deployment order.
@@ -318,7 +318,7 @@ func setNestedValue(m map[string]any, path, value string) {
 func overridesByKey(lookup map[string]map[string]string, ref recipe.ComponentRef) (map[string]string, error) {
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "overridesByKey: failed to get component registry", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "overridesByKey: failed to get component registry")
 	}
 	if registry == nil {
 		return map[string]string{}, nil
