@@ -1624,6 +1624,100 @@ func initDataProvider(cmd *cli.Command) error {
 
 ---
 
+## Criteria Registry
+
+The criteria registry is a process-global cache of valid criteria values
+(`service`, `accelerator`, `intent`, `os`, `platform`) populated from
+loaded overlays. It is the mechanism by which a `--data` overlay can
+introduce a new criteria value (e.g., `service: ncp-internal`) and have
+it admitted by `ParseCriteriaServiceType` without a code change.
+
+### Why a registry
+
+Before the registry existed, each `ParseCriteria*Type` had a hardcoded
+`switch` of valid string values; an unknown value returned
+`ErrCodeInvalidRequest` before the overlay catalog was even consulted.
+That made it impossible to add a new criteria value via `--data` —
+internal/proprietary values required either a fork or an upstream
+contribution, neither of which scales for undisclosed NCPs or
+proprietary product overlays.
+
+The registry decouples *which values are valid* from *what the OSS
+binary knows about*. The fast-path switch arms remain for canonical
+aliases (`self-managed → any`, `al2 → amazonlinux`), and any value not
+matched there falls through to the registry, which is seeded by the
+overlay loader on catalog load.
+
+### Origin tracking
+
+Each registered value carries a `CriteriaOrigin`:
+
+- `OriginEmbedded` — declared in an overlay loaded from the binary's
+  embedded data filesystem (the OSS catalog).
+- `OriginExternal` — declared in an overlay loaded from `--data`.
+
+When the same value is registered from both sources, embedded wins —
+`Register` never downgrades an embedded value to external, so strict
+mode lookups remain stable across reloads.
+
+### Strict mode
+
+Strict mode hides external-origin entries from registry lookups,
+restoring the pre-registry behavior in which only OSS canonical values
+validate. Three sources can enable it (logical OR):
+
+1. `--criteria-strict` CLI flag (added on `aicr recipe`).
+2. `spec.recipe.criteriaStrict: true` in `--config`.
+3. `AICR_CRITERIA_STRICT=1` env var (read at `DefaultRegistry()` init).
+
+Strict mode is intended for **OSS CI gates** — `make qualify` exports
+`AICR_CRITERIA_STRICT=1` for the unit-test step so the upstream catalog
+cannot accidentally start depending on internal-only values that only
+exist in someone's `--data` directory.
+
+### Seeding the registry
+
+The metadata-store loader (`pkg/recipe/metadata_store.go`) walks every
+overlay during catalog load and stages each overlay's criteria for
+registration. The provider's `Source(path)` returns `"embedded"` /
+`"external"` / `"merged"`; the seed helper maps `"embedded"` to
+`OriginEmbedded` and every non-embedded source (including `"merged"`
+and any unknown future category) to `OriginExternal`. The registration
+is *deferred* until after all overlays parse cleanly, the base recipe
+is present, and dependency validation passes — partial catalog loads
+never leak into the registry.
+
+### Eager load via `LoadCatalog`
+
+The metadata store loads lazily on first read. Because criteria
+validation runs *before* the recipe build pulls the catalog, a fresh
+process with `--data` would otherwise reject a custom criteria value on
+the very first call — the registry would still be empty.
+
+`recipe.LoadCatalog(ctx)` forces an eager catalog parse, seeding the
+registry. The CLI `recipe` Action calls it right after
+`initDataProvider` so the registry is populated before any
+`ParseCriteria*Type` lookup. **Any future caller that wires its own
+`--data` (e.g., a new API server flag) must also call `LoadCatalog`
+right after `SetDataProvider` for the same reason.**
+
+### API surface
+
+| Function | Purpose |
+|---|---|
+| `DefaultRegistry()` | Returns the process-wide singleton (lazy-init). |
+| `(*CriteriaRegistry).Register(field, value, origin)` | Records a value; embedded never downgrades. |
+| `(*CriteriaRegistry).Has(field, value)` | Lookup; respects strict mode (external hidden when strict). |
+| `(*CriteriaRegistry).HasEmbedded(field, value)` | Embedded-only lookup, regardless of strict. |
+| `(*CriteriaRegistry).Values(field)` | Sorted union of known values for help / autocomplete. |
+| `(*CriteriaRegistry).SetStrict(bool)` | Toggle strict mode. Composes with `AICR_CRITERIA_STRICT`. |
+| `(*CriteriaRegistry).Reset()` | Test helper; re-reads `AICR_CRITERIA_STRICT` from env. |
+| `LoadCatalog(ctx)` | Eager catalog load — call after `SetDataProvider`. |
+| `AllCriteria{Service,Accelerator,Intent,OS,Platform}Types()` | Union of static OSS list + currently-registered values. |
+| `GetCriteria{Service,Accelerator,Intent,OS,Platform}Types()` | Static OSS list only (stable; not affected by `--data`). |
+
+---
+
 ## See Also
 
 - [Recipe Development Guide](../integrator/recipe-development.md) - Adding and modifying recipe data

@@ -58,6 +58,14 @@ type MetadataStore struct {
 	ValuesFiles map[string][]byte
 }
 
+// pendingRegistryEntry stages an overlay's criteria + provider source so the
+// loader can defer the actual seedCriteriaRegistry call until after the
+// full catalog passes validation.
+type pendingRegistryEntry struct {
+	criteria *Criteria
+	source   string
+}
+
 // loadMetadataStore loads and caches the metadata store from the data provider.
 // The cache is keyed by DataProvider generation, so SetDataProvider callers see
 // the new content on the next invocation rather than being stuck on the
@@ -85,6 +93,13 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 			Mixins:      make(map[string]*RecipeMixin),
 			ValuesFiles: make(map[string][]byte),
 		}
+
+		// Staged criteria registry entries. Each overlay's criteria are
+		// appended during the walk but only applied to the global registry
+		// after every later validation (walk completion, base presence,
+		// dependency validation) succeeds. Keeps the registry transactional
+		// with respect to catalog-load success.
+		var pendingRegistry []pendingRegistryEntry
 
 		provider := GetDataProvider()
 
@@ -179,6 +194,17 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 				store.Base = &metadata
 			} else {
 				store.Overlays[metadata.Metadata.Name] = &metadata
+				// Stage this overlay's criteria for registration; the
+				// actual call to seedCriteriaRegistry is deferred until
+				// after every overlay parses cleanly, the base recipe is
+				// found, and dependency validation passes — see the
+				// commit loop below the walk. This prevents a malformed
+				// file later in the walk from leaving partial criteria
+				// values in the package-global registry.
+				pendingRegistry = append(pendingRegistry, pendingRegistryEntry{
+					criteria: metadata.Spec.Criteria,
+					source:   provider.Source(path),
+				})
 			}
 
 			return nil
@@ -198,6 +224,13 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 		if err := store.Base.Spec.ValidateDependencies(); err != nil {
 			cachedMetadataErr = aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "base recipe validation failed", err)
 			return
+		}
+
+		// Catalog fully validated — commit staged criteria registrations
+		// to the global registry now. Any earlier `return` path above
+		// leaves the registry untouched.
+		for _, entry := range pendingRegistry {
+			seedCriteriaRegistry(entry.criteria, entry.source)
 		}
 
 		cachedMetadataStore = store
@@ -227,6 +260,19 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInternal, "metadata store not initialized")
 	}
 	return cachedMetadataStore, nil
+}
+
+// LoadCatalog eagerly loads the recipe catalog into the package cache,
+// which has the side effect of seeding the criteria registry from every
+// overlay's spec.criteria. Call this immediately after SetDataProvider
+// so that subsequent ParseCriteria*Type lookups see values contributed
+// by `--data` overlays. The CLI calls it at the top of `aicr recipe`
+// Action and the API server should call it at startup; if the catalog
+// is malformed, this surfaces the error before any criteria validation
+// runs (and before the registry is half-populated).
+func LoadCatalog(ctx context.Context) error {
+	_, err := loadMetadataStore(ctx)
+	return err
 }
 
 // ResetMetadataStoreForTesting clears the cached metadata store so that
