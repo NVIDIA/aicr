@@ -49,6 +49,8 @@ navigation:
         path: integrator/gke-tcpxo-networking.md
       - page: Recipe Development
         path: integrator/recipe-development.md
+      - page: Data Extension
+        path: integrator/data-extension.md
       - page: Validator Extension
         path: integrator/validator-extension.md
       - section: Components

@@ -179,6 +179,12 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 				store.Base = &metadata
 			} else {
 				store.Overlays[metadata.Metadata.Name] = &metadata
+				// Seed the criteria registry so ParseCriteria*Type can
+				// admit values introduced by this overlay (especially
+				// from external `--data` catalogs). Origin is keyed off
+				// the data provider's Source(path) so strict mode can
+				// later distinguish embedded vs external contributions.
+				seedCriteriaRegistry(metadata.Spec.Criteria, provider.Source(path))
 			}
 
 			return nil
@@ -227,6 +233,19 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInternal, "metadata store not initialized")
 	}
 	return cachedMetadataStore, nil
+}
+
+// LoadCatalog eagerly loads the recipe catalog into the package cache,
+// which has the side effect of seeding the criteria registry from every
+// overlay's spec.criteria. Call this immediately after SetDataProvider
+// so that subsequent ParseCriteria*Type lookups see values contributed
+// by `--data` overlays. The CLI calls it at the top of `aicr recipe`
+// Action and the API server should call it at startup; if the catalog
+// is malformed, this surfaces the error before any criteria validation
+// runs (and before the registry is half-populated).
+func LoadCatalog(ctx context.Context) error {
+	_, err := loadMetadataStore(ctx)
+	return err
 }
 
 // ResetMetadataStoreForTesting clears the cached metadata store so that

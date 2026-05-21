@@ -88,3 +88,15 @@ func (r *RecipeSpec) DataDir() string {
 	}
 	return r.Data
 }
+
+// IsCriteriaStrict returns spec.recipe.criteriaStrict flattened to a
+// plain bool (false when unset). Mirrors the --criteria-strict CLI
+// flag. The pointer-to-bool shape on RecipeSpec lets the spec
+// distinguish nil (absent) from &false (explicit opt-out); this
+// accessor is for callers that only care about the effective value.
+func (r *RecipeSpec) IsCriteriaStrict() bool {
+	if r == nil || r.CriteriaStrict == nil {
+		return false
+	}
+	return *r.CriteriaStrict
+}
