@@ -341,11 +341,9 @@ func overridesByKey(lookup map[string]map[string]string, ref recipe.ComponentRef
 // sortByIndex sorts componentResult slices by their original index
 // (deployment order).
 func sortByIndex(results []componentResult) {
-	for i := 1; i < len(results); i++ {
-		for j := i; j > 0 && results[j].index < results[j-1].index; j-- {
-			results[j], results[j-1] = results[j-1], results[j]
-		}
-	}
+	slices.SortFunc(results, func(a, b componentResult) int {
+		return a.index - b.index
+	})
 }
 
 // k8sConstraintName is the recipe constraint name for the Kubernetes
