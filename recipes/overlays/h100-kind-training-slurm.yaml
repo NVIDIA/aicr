@@ -29,17 +29,38 @@ spec:
     intent: training
     platform: slurm
 
-  mixins:
-    - platform-slurm
-    - platform-slurm-cluster
-
   # DRA (GA in K8s 1.34) — restated from the parent for clarity.
   constraints:
     - name: K8s.server.version
       value: ">= 1.34"
 
-  # Mixin-contributed components cannot be overridden from a leaf; use
-  # `--set slurmcluster:...` or a valuesFile at install time instead.
-  componentRefs: []
+  # The Slinky operator (CRDs + operator + cluster instance) is declared
+  # inline per slurm leaf, mirroring the dynamo-platform pattern in
+  # h100-*-inference-dynamo leaves. Inlining lets each leaf carry its
+  # own GPU/GRES tuning (Kind = CPU-only; H100 leaves = `Gres=gpu:h100:8`
+  # + `nvidia.com/gpu: 8`) without fighting the mixin-vs-leaf
+  # identity-field guard in mixinComponentRefSafeForMerge
+  # (pkg/recipe/metadata_store.go), and keeps base.yaml free of
+  # platform-specific components.
+  #
+  # Kind has no GPUs, so the NodeSet runs CPU-only: no `extraConfMap.Gres`,
+  # no `slurmd.resources.limits.nvidia.com/gpu`, no DCGM. This makes the
+  # leaf usable as a no-GPU CI smoke test for the operator + chart wiring.
+  componentRefs:
+    - name: slinky-slurm-operator-crds
+      type: Helm
+      valuesFile: components/slinky-slurm-operator-crds/values.yaml
 
-  # Validation is inherited from h100-kind-training.
+    - name: slinky-slurm-operator
+      type: Helm
+      valuesFile: components/slinky-slurm-operator/values.yaml
+      dependencyRefs:
+        - cert-manager
+        - slinky-slurm-operator-crds
+
+    - name: slinky-slurm
+      type: Helm
+      valuesFile: components/slinky-slurm/values.yaml
+      dependencyRefs:
+        - slinky-slurm-operator
+        - slinky-slurm-operator-crds
