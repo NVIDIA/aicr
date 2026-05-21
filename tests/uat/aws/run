@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# UAT runner. Codifies the workflow demonstrated in
+# demos/cuj1-gke-config.md and is invoked phase-by-phase from
+# .github/workflows/uat-gcp.yaml so per-phase failures surface in the
+# GitHub Actions UI.
+#
+# Usage:
+#   AICR_BIN=./aicr RUN_ID=12345 ./run <phase> <test-config.yaml>
+#
+# Phases:
+#   prep         snapshot + recipe + dry-run validate + bundle
+#   install      helmfile apply (deploys gpu-operator, kubeflow, ...)
+#   conformance  conformance validate + emit signed evidence bundle
+#   train        submit TrainJob, wait for completion, capture logs
+#   verify       aicr evidence verify against the signed bundle
+#   all          run every phase in order (for local reproduction)
+#
+# Required env:
+#   AICR_BIN    Path to the aicr binary
+#   RUN_ID      Per-run correlation suffix appended to the evidence push
+#               target (e.g. ${{ github.run_id }} in CI, or `local-$(date +%s)`)
+#
+# Working files are written to $PWD: snapshot.yaml, recipe.yaml, bundle/,
+# dry-run.json, report.json, evidence/, evidence-result.json, train-logs/.
+
+set -euo pipefail
+
+phase="${1:-}"
+config="${2:-}"
+
+if [[ -z "${phase}" || -z "${config}" ]]; then
+  echo "Usage: $0 <phase> <test-config.yaml>" >&2
+  echo "Phases: prep | install | conformance | train | verify | all" >&2
+  exit 2
+fi
+
+if [[ ! -f "${config}" ]]; then
+  echo "test-config not found: ${config}" >&2
+  exit 2
+fi
+
+: "${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+: "${RUN_ID:?Set RUN_ID (workflow passes \${{ github.run_id }}; locally use local-\$(date +%s))}"
+
+# Train-job knobs (overridable for local reproduction or future inference variant).
+TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
+TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
+TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
+TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
+HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
+
+# Per-run unique OCI repo suffix. The committed config carries the stable
+# prefix only; we append `-${RUN_ID}` once, idempotently, so re-running a
+# phase from the same workspace does not double-append.
+inject_push_target() {
+  local current expected
+  current="$(yq '.spec.validate.evidence.attestation.push' "${config}")"
+  expected="${current%-"${RUN_ID}"}-${RUN_ID}"
+  if [[ "${current}" != "${expected}" ]]; then
+    yq -i ".spec.validate.evidence.attestation.push = \"${expected}\"" "${config}"
+  fi
+  echo "evidence push target: $(yq '.spec.validate.evidence.attestation.push' "${config}")"
+}
+
+phase_prep() {
+  echo "::group::Snapshot live cluster"
+  "${AICR_BIN}" snapshot --config "${config}"
+  test -f snapshot.yaml
+  echo "::endgroup::"
+
+  echo "::group::Generate recipe"
+  "${AICR_BIN}" recipe --config "${config}"
+  test -f recipe.yaml
+  echo "::endgroup::"
+
+  echo "::group::Validate (dry-run, --no-cluster)"
+  "${AICR_BIN}" validate \
+    --config "${config}" \
+    --phase deployment \
+    --no-cluster \
+    --output dry-run.json
+  test -f dry-run.json
+  echo "::endgroup::"
+
+  echo "::group::Generate bundle"
+  "${AICR_BIN}" bundle --config "${config}"
+  test -f bundle/helmfile.yaml || {
+    echo "expected bundle/helmfile.yaml (deployer: helmfile) — got:" >&2
+    ls -la bundle >&2 || true
+    exit 1
+  }
+  echo "::endgroup::"
+}
+
+phase_install() {
+  command -v helmfile >/dev/null || { echo "helmfile not on PATH" >&2; exit 1; }
+  command -v helm     >/dev/null || { echo "helm not on PATH"     >&2; exit 1; }
+
+  echo "::group::Install helm-diff plugin (idempotent)"
+  if ! helm plugin list 2>/dev/null | awk '{print $1}' | grep -qx diff; then
+    helm plugin install https://github.com/databus23/helm-diff
+  else
+    echo "helm-diff already installed"
+  fi
+  echo "::endgroup::"
+
+  echo "::group::helmfile apply (timeout ${HELMFILE_TIMEOUT_SECONDS}s)"
+  (
+    cd bundle
+    timeout "${HELMFILE_TIMEOUT_SECONDS}" helmfile apply --skip-diff-on-install
+  )
+  echo "::endgroup::"
+
+  echo "::group::Cluster state post-install"
+  kubectl get nodes -o wide
+  kubectl get pods -A | grep -Ev '\s+Running\s+|\s+Completed\s+' || true
+  echo "::endgroup::"
+}
+
+phase_conformance() {
+  inject_push_target
+  echo "::group::Conformance validate + emit signed evidence"
+  "${AICR_BIN}" validate \
+    --config "${config}" \
+    --phase conformance \
+    --output report.json
+  echo "::endgroup::"
+
+  if [[ ! -f ./evidence/pointer.yaml ]]; then
+    echo "evidence pointer not emitted at ./evidence/pointer.yaml" >&2
+    ls -la ./evidence >&2 || true
+    exit 1
+  fi
+  echo "evidence pointer:"
+  cat ./evidence/pointer.yaml
+}
+
+phase_train() {
+  echo "::group::Submit TrainJob"
+  kubectl apply -f - <<EOF
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: ${TRAINJOB_NAME}
+  namespace: ${TRAINJOB_NAMESPACE}
+spec:
+  trainer:
+    numNodes: 1
+    image: ${TRAINJOB_IMAGE}
+    command:
+      - python3
+      - /opt/mnist/src/mnist.py
+      - --epochs=1
+    resourcesPerNode:
+      requests:
+        nvidia.com/gpu: 1
+      limits:
+        nvidia.com/gpu: 1
+  runtimeRef:
+    name: torch-distributed
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+EOF
+  echo "::endgroup::"
+
+  echo "::group::Wait for TrainJob completion (timeout ${TRAINJOB_TIMEOUT_SECONDS}s)"
+  local deadline=$(( SECONDS + TRAINJOB_TIMEOUT_SECONDS ))
+  local complete="" failed=""
+  while (( SECONDS < deadline )); do
+    complete="$(kubectl get trainjob "${TRAINJOB_NAME}" -n "${TRAINJOB_NAMESPACE}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)"
+    failed="$(kubectl get trainjob "${TRAINJOB_NAME}" -n "${TRAINJOB_NAMESPACE}" \
+      -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+    if [[ "${complete}" == "True" ]]; then
+      echo "TrainJob Complete=True"
+      break
+    fi
+    if [[ "${failed}" == "True" ]]; then
+      echo "TrainJob Failed=True" >&2
+      kubectl describe trainjob "${TRAINJOB_NAME}" -n "${TRAINJOB_NAMESPACE}" >&2 || true
+      mkdir -p train-logs
+      kubectl logs -n "${TRAINJOB_NAMESPACE}" -l "job-name=${TRAINJOB_NAME}-node-0" \
+        --all-containers --tail=-1 > train-logs/"${TRAINJOB_NAME}".log 2>&1 || true
+      exit 1
+    fi
+    sleep 15
+  done
+  if [[ "${complete}" != "True" ]]; then
+    echo "TrainJob did not complete within ${TRAINJOB_TIMEOUT_SECONDS}s" >&2
+    kubectl describe trainjob "${TRAINJOB_NAME}" -n "${TRAINJOB_NAMESPACE}" >&2 || true
+    exit 1
+  fi
+  echo "::endgroup::"
+
+  echo "::group::Capture TrainJob logs"
+  mkdir -p train-logs
+  kubectl logs -n "${TRAINJOB_NAMESPACE}" -l "job-name=${TRAINJOB_NAME}-node-0" \
+    --all-containers --tail=-1 > train-logs/"${TRAINJOB_NAME}".log 2>&1 || true
+  wc -l train-logs/"${TRAINJOB_NAME}".log || true
+  echo "::endgroup::"
+}
+
+phase_verify() {
+  echo "::group::Bootstrap Sigstore TUF root"
+  "${AICR_BIN}" trust update
+  echo "::endgroup::"
+
+  # Pin the expected signer when EXPECTED_ISSUER / EXPECTED_IDENTITY_REGEXP
+  # are set (CI sets them to the workflow's OIDC identity). Without pinning,
+  # any Fulcio-signed payload would pass verification — useful for local
+  # dev where the signing identity is the user, mandatory in CI.
+  local args=(evidence verify ./evidence/pointer.yaml)
+  if [[ -n "${EXPECTED_ISSUER:-}" ]]; then
+    args+=(--expected-issuer "${EXPECTED_ISSUER}")
+  fi
+  if [[ -n "${EXPECTED_IDENTITY_REGEXP:-}" ]]; then
+    args+=(--expected-identity-regexp "${EXPECTED_IDENTITY_REGEXP}")
+  fi
+  args+=(-o evidence-result.json -t json)
+
+  echo "::group::Verify signed evidence bundle"
+  "${AICR_BIN}" "${args[@]}"
+  echo "::endgroup::"
+
+  local exit_code
+  exit_code="$(jq -r '.exit' evidence-result.json)"
+  echo "evidence verify exit code: ${exit_code}"
+  if [[ "${exit_code}" != "0" ]]; then
+    cat evidence-result.json
+    exit 1
+  fi
+}
+
+case "${phase}" in
+  prep)        phase_prep ;;
+  install)     phase_install ;;
+  conformance) phase_conformance ;;
+  train)       phase_train ;;
+  verify)      phase_verify ;;
+  all)         phase_prep; phase_install; phase_conformance; phase_train; phase_verify ;;
+  *)
+    echo "unknown phase: ${phase}" >&2
+    echo "Phases: prep | install | conformance | train | verify | all" >&2
+    exit 2
+    ;;
+esac
