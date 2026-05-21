@@ -95,10 +95,24 @@ spec:
             content: |
               set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
-                -o /dev/null 2>&1
+              WORK="/tmp/chainsaw-criteria-registry"
+              ERR="${WORK}/ncp-rejected-without-data.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: expected non-zero exit, got success" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              # Assert the failure reason is criteria validation, not an
+              # incidental runtime error.
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
             check:
-              ($error != null): true
+              ($error == null): true
 
     - name: ncp-admitted-with-data
       description: --data overlay registers ncp-internal; CLI must admit it.
@@ -136,10 +150,21 @@ spec:
               set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-criteria-registry"
-              ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
-                --data "${WORK}" --criteria-strict -o /dev/null 2>&1
+              ERR="${WORK}/strict-flag-rejects-external.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   --data "${WORK}" --criteria-strict -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: --criteria-strict did not reject external value" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
             check:
-              ($error != null): true
+              ($error == null): true
 
     - name: strict-flag-admits-oss
       description: --criteria-strict must still admit canonical OSS values (eks, h100, training).
@@ -166,10 +191,21 @@ spec:
               set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-criteria-registry"
-              ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
-                --data "${WORK}" -o /dev/null 2>&1
+              ERR="${WORK}/strict-env-var-rejects-external.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   --data "${WORK}" -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: AICR_CRITERIA_STRICT=1 did not reject external value" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
             check:
-              ($error != null): true
+              ($error == null): true
 
     - name: strict-via-config-rejects-external
       description: spec.recipe.criteriaStrict=true in --config must reject ncp-internal too.
@@ -179,10 +215,21 @@ spec:
               set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-criteria-registry"
-              ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
-                --data "${WORK}" --config "${WORK}/strict-config.yaml" -o /dev/null 2>&1
+              ERR="${WORK}/strict-via-config-rejects-external.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   --data "${WORK}" --config "${WORK}/strict-config.yaml" -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: spec.recipe.criteriaStrict did not reject external value" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
             check:
-              ($error != null): true
+              ($error == null): true
       cleanup:
         - script:
             content: |

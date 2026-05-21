@@ -27,7 +27,7 @@ catalog content) or overrides (for component files) the embedded equivalent.
 The external directory mirrors AICR's embedded `recipes/` tree. Drop only the
 paths you need; AICR loads any subset.
 
-```
+```text
 my-external-data/
 ├── registry.yaml             # REQUIRED — your component definitions
 ├── mixins/                   # Optional — composable overlay fragments
@@ -48,7 +48,7 @@ The loader walks the tree recursively (`filepath.WalkDir`), so subdirectories
 inside `overlays/` are supported and useful for organizing by service / customer
 / team:
 
-```
+```text
 overlays/
 ├── ncp-customer-a/
 │   ├── h100-training.yaml

@@ -1678,10 +1678,14 @@ exist in someone's `--data` directory.
 ### Seeding the registry
 
 The metadata-store loader (`pkg/recipe/metadata_store.go`) walks every
-overlay during catalog load and calls `seedCriteriaRegistry(metadata.
-Spec.Criteria, provider.Source(path))`. The provider's `Source` returns
-`"embedded"` / `"external"` / `"merged"`; the seed helper maps the
-first to `OriginEmbedded` and the rest to `OriginEmbedded` (default-fail-safe).
+overlay during catalog load and stages each overlay's criteria for
+registration. The provider's `Source(path)` returns `"embedded"` /
+`"external"` / `"merged"`; the seed helper maps `"embedded"` to
+`OriginEmbedded` and every non-embedded source (including `"merged"`
+and any unknown future category) to `OriginExternal`. The registration
+is *deferred* until after all overlays parse cleanly, the base recipe
+is present, and dependency validation passes — partial catalog loads
+never leak into the registry.
 
 ### Eager load via `LoadCatalog`
 

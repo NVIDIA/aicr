@@ -15,6 +15,9 @@
 package recipe
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -203,6 +206,86 @@ func TestIsStrictModeFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadCatalog_DoesNotLeakRegistryOnFailure(t *testing.T) {
+	t.Setenv(strictModeEnvVar, "")
+
+	// Build an external data directory with a well-formed overlay that
+	// would introduce a custom service value, followed by a malformed
+	// overlay that fails YAML parsing. The well-formed overlay is
+	// processed first (lexical filepath.WalkDir order) — under the
+	// pre-fix behavior it would have seeded the registry before the
+	// second file's parse error aborted the load.
+	tmp := t.TempDir()
+	overlaysDir := filepath.Join(tmp, "overlays")
+	if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
+		t.Fatalf("mkdir overlays: %v", err)
+	}
+	writeFile := func(rel, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tmp, rel), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	writeFile("registry.yaml", `apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components: []
+`)
+	writeFile("overlays/01-good.yaml", `apiVersion: aicr.nvidia.com/v1alpha1
+kind: RecipeMetadata
+metadata:
+  name: pending-leak-overlay
+spec:
+  base: base
+  criteria:
+    service: pending-leak-service
+    accelerator: h100
+    intent: training
+  componentRefs: []
+`)
+	// Malformed YAML — fails decode, aborts the walk.
+	writeFile("overlays/02-bad.yaml", "this: : not yaml\n  ::\n")
+
+	layered, err := NewLayeredDataProvider(
+		NewEmbeddedDataProvider(GetEmbeddedFS(), ""),
+		LayeredProviderConfig{ExternalDir: tmp},
+	)
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+
+	// Snapshot + restore process globals so this test does not poison
+	// the singleton state observed by tests that run after it.
+	prev := GetDataProvider()
+	t.Cleanup(func() {
+		SetDataProvider(prev)
+		ResetMetadataStoreForTesting()
+		DefaultRegistry().Reset()
+	})
+	SetDataProvider(layered)
+	ResetMetadataStoreForTesting()
+	DefaultRegistry().Reset()
+
+	if loadErr := LoadCatalog(context.Background()); loadErr == nil {
+		t.Fatal("expected LoadCatalog to error on malformed overlay")
+	}
+	if DefaultRegistry().Has(FieldService, "pending-leak-service") {
+		t.Error("malformed catalog load leaked staged criteria into registry; " +
+			"deferred commit must skip registry mutation when validation fails")
+	}
+}
+
+func TestCriteriaRegistry_RegisterOnZeroValue(t *testing.T) {
+	// External callers may legally construct &CriteriaRegistry{} (the
+	// type is exported even though newCriteriaRegistry is not); Register
+	// must defensively initialize the inner map instead of panicking on
+	// nil-map assignment.
+	var r CriteriaRegistry
+	r.Register(FieldService, "ncp-zero", OriginExternal)
+	if !r.Has(FieldService, "ncp-zero") {
+		t.Error("Register on a zero-value CriteriaRegistry must succeed")
+	}
+}
+
 func TestDefaultRegistry_Singleton(t *testing.T) {
 	a := DefaultRegistry()
 	b := DefaultRegistry()
@@ -220,8 +303,8 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 	}{
 		{"embedded source", "embedded", OriginEmbedded},
 		{"external source", "external", OriginExternal},
-		{"merged falls back to embedded", "merged", OriginEmbedded},
-		{"unknown source falls back to embedded", "", OriginEmbedded},
+		{"merged is strict-safe external", "merged", OriginExternal},
+		{"unknown source is strict-safe external", "", OriginExternal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

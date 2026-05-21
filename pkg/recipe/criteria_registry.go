@@ -109,6 +109,13 @@ func (r *CriteriaRegistry) Register(field CriteriaField, value string, origin Cr
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Lazy-init the outer map so a zero-value or externally constructed
+	// CriteriaRegistry (i.e., one not built via newCriteriaRegistry /
+	// DefaultRegistry) does not panic on first Register.
+	if r.values == nil {
+		r.values = make(map[CriteriaField]map[string]CriteriaOrigin)
+	}
+
 	bucket, ok := r.values[field]
 	if !ok {
 		bucket = make(map[string]CriteriaOrigin)
@@ -244,14 +251,18 @@ func normalizeCriteriaValue(s string) string {
 //
 // source is the string returned by the DataProvider's Source(path); we
 // translate it to a CriteriaOrigin here so callers don't have to know
-// about the registry's internal enum.
+// about the registry's internal enum. Only the literal "embedded" sentinel
+// maps to OriginEmbedded — anything else (external, merged, or an unknown
+// future value) maps to OriginExternal so strict mode fails closed on
+// non-OSS contributions even if a new DataProvider source category is
+// introduced later.
 func seedCriteriaRegistry(c *Criteria, source string) {
 	if c == nil {
 		return
 	}
-	origin := OriginEmbedded
-	if source == sourceExternal {
-		origin = OriginExternal
+	origin := OriginExternal
+	if source == sourceEmbedded {
+		origin = OriginEmbedded
 	}
 	reg := DefaultRegistry()
 	reg.Register(FieldService, string(c.Service), origin)
