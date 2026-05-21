@@ -636,11 +636,13 @@ func (s *MetadataStore) buildMixinConstraintCandidateIndex(candidateOverlays []s
 }
 
 // initBaseMergedSpec creates a copy of the base spec for overlay merging.
+// Validation is deep-cloned so downstream Merge calls cannot reach back
+// into the cached base ValidationConfig and mutate it.
 func (s *MetadataStore) initBaseMergedSpec() (RecipeMetadataSpec, []string) {
 	mergedSpec := RecipeMetadataSpec{
 		Constraints:   make([]Constraint, len(s.Base.Spec.Constraints)),
 		ComponentRefs: make([]ComponentRef, len(s.Base.Spec.ComponentRefs)),
-		Validation:    s.Base.Spec.Validation,
+		Validation:    cloneValidationConfig(s.Base.Spec.Validation),
 	}
 	copy(mergedSpec.Constraints, s.Base.Spec.Constraints)
 	copy(mergedSpec.ComponentRefs, s.Base.Spec.ComponentRefs)

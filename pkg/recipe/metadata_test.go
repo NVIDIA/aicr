@@ -1027,6 +1027,39 @@ func TestMergeValidationConfig(t *testing.T) {
 			t.Fatal("validation should be preserved from base when overlay has nil")
 		}
 	})
+
+	// Regression: a prior version of Merge aliased other.Validation when the
+	// destination's was nil. Subsequent merges then wrote through that alias
+	// into whichever overlay's cached ValidationConfig the alias pointed at,
+	// polluting it across calls. The fix deep-copies via cloneValidationConfig.
+	t.Run("merge does not alias source validation", func(t *testing.T) {
+		source := &ValidationConfig{
+			Conformance: &ValidationPhase{Checks: []string{"check-from-source"}},
+		}
+		first := RecipeMetadataSpec{
+			Validation: source,
+		}
+		second := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{Checks: []string{"deployment-from-second"}},
+			},
+		}
+
+		// dest starts with nil Validation, so without the fix it would alias
+		// source. Merging second then plants Deployment via the alias into
+		// the source — corrupting subsequent reads of the source.
+		var dest RecipeMetadataSpec
+		dest.Merge(&first)
+		dest.Merge(&second)
+
+		if source.Deployment != nil {
+			t.Errorf("source.Deployment leaked to %v — Merge aliased the source ValidationConfig",
+				source.Deployment.Checks)
+		}
+		if dest.Validation.Conformance == source.Conformance {
+			t.Error("dest.Validation.Conformance aliases source.Conformance — phase pointers must be cloned")
+		}
+	})
 }
 
 func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {

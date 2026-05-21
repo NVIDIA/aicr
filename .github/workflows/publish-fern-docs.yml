@@ -100,12 +100,23 @@ jobs:
           else
             IS_RELEASE=true
           fi
+
+          # Skip registration when tag = latest release (Latest already covers it)
+          LATEST=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName -q .tagName 2>/dev/null || true)
+          if [ "$IS_RELEASE" = "true" ] && [ "$TAG" = "$LATEST" ]; then
+            SHOULD_REGISTER=false
+            echo "Tag $TAG is the current latest release — will be shown as 'Latest · $TAG', skipping version entry"
+          else
+            SHOULD_REGISTER=$IS_RELEASE
+          fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "is_release=$IS_RELEASE" >> "$GITHUB_OUTPUT"
-          echo "Resolved target tag: $TAG (is_release=$IS_RELEASE)"
+          echo "should_register=$SHOULD_REGISTER" >> "$GITHUB_OUTPUT"
+          echo "Resolved target tag: $TAG (is_release=$IS_RELEASE, should_register=$SHOULD_REGISTER)"
 
       - name: Register new version from tag
-        if: steps.resolve.outputs.is_release == 'true'
+        if: steps.resolve.outputs.should_register == 'true'
         env:
           TAG_VERSION: ${{ steps.resolve.outputs.tag }}
         run: |
@@ -129,11 +140,19 @@ jobs:
           EXPR+=' "slug": env(TAG_VERSION), "availability": "stable"}] + .[1:]'
           yq -i "$EXPR" fern/docs.yml
 
-          echo "--- docs.yml versions after insert ---"
+          # Sort versioned entries by semver descending (Latest stays at [0])
+          SORTED_SLUGS=$(yq '.products[0].versions[1:][].slug' fern/docs.yml | sort -rV)
+          yq -i '.products[0].versions = [.products[0].versions[0]]' fern/docs.yml
+          for slug in $SORTED_SLUGS; do
+            export slug
+            yq -i '.products[0].versions += [{"display-name": env(slug), "path": "versions/" + env(slug) + ".yml", "slug": env(slug), "availability": "stable"}]' fern/docs.yml
+          done
+
+          echo "--- docs.yml versions after insert + sort ---"
           yq '.products[0].versions[].display-name' fern/docs.yml
 
       - name: Prune old versions
-        if: steps.resolve.outputs.is_release == 'true'
+        if: steps.resolve.outputs.should_register == 'true'
         run: |
           set -eo pipefail
           KEEP=$((MAX_VERSIONS + 1))  # +1 for the Latest entry at index 0
@@ -226,11 +245,11 @@ jobs:
       # status check "gate", required signatures). PR via API is signed by
       # github-actions[bot] and routes through the standard PR/gate flow.
       - name: Restore unstamped docs.yml for persistence
-        if: steps.resolve.outputs.is_release == 'true'
+        if: steps.resolve.outputs.should_register == 'true'
         run: cp /tmp/docs.yml.preStamp fern/docs.yml
 
       - name: Open PR for version registry changes
-        if: steps.resolve.outputs.is_release == 'true'
+        if: steps.resolve.outputs.should_register == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           base: main
