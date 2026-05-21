@@ -13,6 +13,12 @@ values, scans embedded manifests, and produces a deduplicated list of container
 images and chart references. The output is available in four formats — two
 general-purpose (YAML, JSON) and two tool-specific (Hauler, Zarf).
 
+> **Trust boundary:** Discovery shells out to `helm template`, which executes
+> the full Go template engine (`tpl`, `include`, `lookup`). AICR recipes
+> reference trusted, pinned charts from known repositories. Do not run
+> `mirror list` against untrusted or unvetted recipe files — doing so executes
+> arbitrary template code from those charts.
+
 ```text
                       ┌────────────────────-──┐
   aicr recipe ───────▶│  aicr mirror list     │
@@ -165,6 +171,7 @@ aicr mirror list --recipe recipe.yaml --format zarf --output zarf.yaml
 The output is a `ZarfPackageConfig`:
 
 ```yaml
+apiVersion: zarf.dev/v1alpha1
 kind: ZarfPackageConfig
 metadata:
   name: aicr
