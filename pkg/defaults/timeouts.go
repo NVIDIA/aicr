@@ -631,6 +631,57 @@ const (
 	MaxSigstoreBundleSize = 10 * 1024 * 1024 // 10 MiB
 )
 
+// Mirror discovery timeouts and defaults.
+const (
+	// MirrorHelmTemplateTimeout is the per-component timeout for helm
+	// template rendering during mirror list discovery. Matches the
+	// defaultHelmTimeout used by tools/bom (90s).
+	MirrorHelmTemplateTimeout = 90 * time.Second
+
+	// MirrorDefaultKubeVersion is the Kubernetes version passed to
+	// `helm template --kube-version` when no version can be inferred from
+	// recipe constraints. Without this flag Helm uses its compiled-in
+	// default (currently v1.27.0 in Helm 3.x), which is too old for
+	// charts that declare a kubeVersion constraint (e.g., >=1.32.0-0).
+	// The value tracks the project's minimum supported Kubernetes version
+	// declared in recipes/overlays/base.yaml.
+	MirrorDefaultKubeVersion = "1.33.0"
+)
+
+// MirrorExtraAPIVersions lists API group/versions passed to
+// `helm template --api-versions` so that offline rendering succeeds for
+// charts that gate templates on `.Capabilities.APIVersions`.
+//
+// Helm's offline `template` command has no cluster to query, so
+// `.Capabilities.APIVersions` is empty by default. Charts that validate
+// the presence of specific APIs (e.g., nvidia-dra-driver-gpu checking
+// for resource.k8s.io) fail at template time unless we declare them.
+//
+// This list covers APIs checked by charts in recipes/registry.yaml.
+// Update it when a new chart adds an APIVersion gate.
+var MirrorExtraAPIVersions = []string{
+	// Dynamic Resource Allocation (DRA) — checked by nvidia-dra-driver-gpu.
+	// v1beta1 shipped in K8s 1.32, v1 went GA in K8s 1.34.
+	"resource.k8s.io/v1",
+	"resource.k8s.io/v1beta1",
+}
+
+// Shared Helm template rendering timeout. Used as the default deadline
+// fallback in pkg/helm.RenderChart when the caller's context carries no
+// deadline (or a deadline that exceeds this cap). Callers that need a
+// tighter or looser budget (e.g., MirrorHelmTemplateTimeout) should set
+// their own context.WithTimeout before calling RenderChart; this constant
+// serves as a safety net so the subprocess is never unbounded.
+const HelmTemplateTimeout = 90 * time.Second
+
+// HelmTemplateOutputLimit caps the bytes written to the stdout buffer of
+// a helm-template subprocess. --recipe accepts user-provided chart sources
+// with no allowlist, so the subprocess is not a trusted source. The 90s
+// context deadline bounds time but not memory; this limit bounds memory.
+// 100 MiB is generous — real charts are single-digit MB — while still
+// preventing a malicious or buggy chart from exhausting memory.
+const HelmTemplateOutputLimit int64 = 100 * 1024 * 1024 // 100 MiB
+
 // Helm chart-pull timeouts for the bundle-time --vendor-charts path.
 // Sized for one chart pull from a remote Helm or OCI registry, including
 // repo index fetch (HTTPS) or registry resolution (OCI), tarball download,

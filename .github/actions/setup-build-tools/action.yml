@@ -100,6 +100,30 @@ inputs:
     description: 'yq version (e.g. v4.52.4)'
     required: false
     default: 'v4.52.4'
+  install_hauler:
+    description: 'Install hauler (true/false)'
+    required: false
+    default: 'false'
+  hauler_version:
+    description: 'Hauler version (e.g. v1.4.3)'
+    required: false
+    default: ''
+  install_zarf:
+    description: 'Install zarf (true/false)'
+    required: false
+    default: 'false'
+  zarf_version:
+    description: 'Zarf version (e.g. v0.76.0)'
+    required: false
+    default: ''
+  install_ctlptl:
+    description: 'Install ctlptl (true/false)'
+    required: false
+    default: 'false'
+  ctlptl_version:
+    description: 'ctlptl version (e.g. 0.9.3)'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -344,3 +368,79 @@ runs:
         sudo mv "${TMP}/yq" /usr/local/bin/yq
         rm -rf "${TMP}"
         yq --version
+
+    - name: Install Hauler
+      if: inputs.install_hauler == 'true'
+      shell: bash
+      env:
+        HAULER_VERSION: ${{ inputs.hauler_version }}
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/hauler ]]; then echo "hauler already installed"; hauler version; exit 0; fi
+        VERSION="${HAULER_VERSION#v}"
+        BASE="https://github.com/hauler-dev/hauler/releases/download/v${VERSION}"
+        TAR="hauler_${VERSION}_linux_amd64.tar.gz"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/hauler_${VERSION}_checksums.txt"
+        EXPECTED=$(grep "${TAR}" "${TMP}/checksums.txt" | head -1 | awk '{print $1}')
+        ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::hauler checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
+        sudo mv "${TMP}/hauler" /usr/local/bin/hauler
+        sudo chmod +x /usr/local/bin/hauler
+        rm -rf "${TMP}"
+        hauler version
+
+    - name: Install Zarf
+      if: inputs.install_zarf == 'true'
+      shell: bash
+      env:
+        ZARF_VERSION: ${{ inputs.zarf_version }}
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/zarf ]]; then echo "zarf already installed"; zarf version; exit 0; fi
+        VERSION="${ZARF_VERSION#v}"
+        BASE="https://github.com/zarf-dev/zarf/releases/download/v${VERSION}"
+        BIN="zarf_v${VERSION}_Linux_amd64"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/zarf" "${BASE}/${BIN}"
+        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/checksums.txt"
+        EXPECTED=$(grep "  ${BIN}\$" "${TMP}/checksums.txt" | awk '{print $1}')
+        ACTUAL=$(sha256sum "${TMP}/zarf" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::zarf checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        chmod +x "${TMP}/zarf"
+        sudo mv "${TMP}/zarf" /usr/local/bin/zarf
+        rm -rf "${TMP}"
+        zarf version
+
+    - name: Install ctlptl
+      if: inputs.install_ctlptl == 'true'
+      shell: bash
+      env:
+        CTLPTL_VERSION: ${{ inputs.ctlptl_version }}
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/ctlptl ]]; then echo "ctlptl already installed"; ctlptl version; exit 0; fi
+        BASE="https://github.com/tilt-dev/ctlptl/releases/download/v${CTLPTL_VERSION}"
+        TAR="ctlptl.${CTLPTL_VERSION}.linux.x86_64.tar.gz"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/checksums.txt"
+        EXPECTED=$(grep "${TAR}" "${TMP}/checksums.txt" | head -1 | awk '{print $1}')
+        ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::ctlptl checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
+        sudo mv "${TMP}/ctlptl" /usr/local/bin/ctlptl
+        sudo chmod +x /usr/local/bin/ctlptl
+        rm -rf "${TMP}"
+        ctlptl version

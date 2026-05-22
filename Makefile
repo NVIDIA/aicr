@@ -228,6 +228,12 @@ e2e-tilt: ## Runs e2e tests with Tilt cluster (requires: make dev-env)
 	echo "Running e2e tests with Tilt cluster..."; \
 	tests/e2e/run.sh
 
+.PHONY: mirror-e2e
+mirror-e2e: build ## Tests mirror list output with Hauler and Zarf against local registry
+	@set -e; \
+	echo "Running mirror list e2e tests..."; \
+	tools/mirror-e2e
+
 .PHONY: scan
 scan: ## Scans for vulnerabilities with grype
 	@set -e; \

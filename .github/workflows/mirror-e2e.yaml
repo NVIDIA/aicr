@@ -1,0 +1,153 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Mirror E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pkg/mirror/**'
+      - 'pkg/helm/**'
+      - 'pkg/defaults/timeouts.go'
+      - 'pkg/cli/mirror.go'
+      - 'pkg/cli/mirror_test.go'
+      - 'recipes/**'
+      - 'tools/mirror-e2e'
+      - '.settings.yaml'
+      - '.github/actions/load-versions/**'
+      - '.github/workflows/mirror-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '!**.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pkg/mirror/**'
+      - 'pkg/helm/**'
+      - 'pkg/defaults/timeouts.go'
+      - 'pkg/cli/mirror.go'
+      - 'pkg/cli/mirror_test.go'
+      - 'recipes/**'
+      - 'tools/mirror-e2e'
+      - '.settings.yaml'
+      - '.github/actions/load-versions/**'
+      - '.github/workflows/mirror-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '!**.md'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# PR concurrency: cancel in-progress runs for the same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Mirror E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false  # vendor/ provides deps
+
+      - name: Prep runner for Kind
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Cache tools
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: |
+            /usr/local/bin/kind
+            /usr/local/bin/helm
+            /usr/local/bin/kubectl
+            /usr/local/bin/yq
+            /usr/local/bin/crane
+            /usr/local/bin/ctlptl
+            /usr/local/bin/hauler
+            /usr/local/bin/zarf
+          key: mirror-e2e-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.settings.yaml') }}
+
+      - name: Setup build tools
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_goreleaser: 'true'
+          goreleaser_version: '${{ steps.versions.outputs.goreleaser }}'
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+          install_crane: 'true'
+          crane_version: '${{ steps.versions.outputs.crane }}'
+          install_ctlptl: 'true'
+          ctlptl_version: '${{ steps.versions.outputs.ctlptl }}'
+          install_hauler: 'true'
+          hauler_version: '${{ steps.versions.outputs.hauler }}'
+          install_zarf: 'true'
+          zarf_version: '${{ steps.versions.outputs.zarf }}'
+
+      - name: Run mirror E2E
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          make mirror-e2e
+
+      - name: Collect debug artifacts
+        if: failure()
+        run: |
+          mkdir -p /tmp/mirror-e2e-debug
+          # Registry catalog
+          crane catalog localhost:5001 > /tmp/mirror-e2e-debug/registry-catalog.txt 2>&1 || true
+          # Kind cluster state
+          for cluster in $(kind get clusters 2>/dev/null); do
+            kind export kubeconfig --name "$cluster" 2>/dev/null || continue
+            kubectl get all --all-namespaces > "/tmp/mirror-e2e-debug/${cluster}-resources.txt" || true
+            kubectl get nodes -o wide > "/tmp/mirror-e2e-debug/${cluster}-nodes.txt" || true
+          done
+          # Docker state
+          docker ps -a > /tmp/mirror-e2e-debug/docker-ps.txt 2>&1 || true
+
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: mirror-e2e-debug-${{ github.run_id }}
+          path: /tmp/mirror-e2e-debug/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          for cluster in $(kind get clusters 2>/dev/null); do
+            kind delete cluster --name "$cluster" || true
+          done
+          docker system prune -f || true
