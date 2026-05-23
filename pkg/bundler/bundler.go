@@ -224,7 +224,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
 	enabledSet := make(map[string]struct{})
 	for _, ref := range recipeResult.ComponentRefs {
-		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name)
+		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
 		if overrideErr != nil {
 			return nil, overrideErr
 		}
@@ -297,7 +297,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// Copy external data files before deployer construction so the file list
 	// is available for both the deployer (checksum tracking) and post-generation
 	// attestation. This is a no-op when --data is not set.
-	dataFiles, err := b.copyDataFiles(dir)
+	dataFiles, err := b.copyDataFiles(dir, recipeResult.DataProvider())
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
@@ -317,7 +317,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 // buildDeployer constructs the appropriate deployer.Deployer based on config.
 // It handles deployer-specific pre-flight validation and data collection.
 func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dataFiles []string) (deployer.Deployer, error) {
-	dynamicValues, err := b.buildDynamicValuesMap()
+	dynamicValues, err := b.buildDynamicValuesMap(recipeResult.DataProvider())
 	if err != nil {
 		return nil, err
 	}
@@ -572,6 +572,7 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 // It loads base values from the recipe, applies user overrides, and applies node selectors.
 func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string]any, error) {
 	componentValues := make(map[string]map[string]any)
+	provider := recipeResult.DataProvider()
 
 	for _, ref := range recipeResult.ComponentRefs {
 		if err := ctx.Err(); err != nil {
@@ -590,7 +591,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 
 		// Apply user value overrides from --set flags.
 		// Strip "enabled" key — it controls component inclusion, not Helm chart values.
-		if overrides := b.getValueOverridesForComponent(ref.Name); len(overrides) > 0 {
+		if overrides := b.getValueOverridesForComponent(ref.Name, provider); len(overrides) > 0 {
 			if _, has := overrides["enabled"]; has {
 				filtered := make(map[string]string, len(overrides)-1)
 				for k, v := range overrides {
@@ -614,7 +615,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		}
 
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
-		b.applyNodeSchedulingOverrides(ref.Name, values)
+		b.applyNodeSchedulingOverrides(ref.Name, values, provider)
 
 		componentValues[ref.Name] = values
 	}
@@ -624,7 +625,9 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 
 // getValueOverridesForComponent returns value overrides for a specific component.
 // Uses the component registry to match both exact names and alternative override keys.
-func (b *DefaultBundler) getValueOverridesForComponent(componentName string) map[string]string {
+// The provider argument scopes the registry lookup to the recipe's bound DataProvider;
+// a nil provider falls back to the package-global registry via GetComponentRegistryFor.
+func (b *DefaultBundler) getValueOverridesForComponent(componentName string, provider recipe.DataProvider) map[string]string {
 	if b.Config == nil {
 		return nil
 	}
@@ -640,7 +643,7 @@ func (b *DefaultBundler) getValueOverridesForComponent(componentName string) map
 	}
 
 	// Use component registry to find component by any override key
-	registry, err := recipe.GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		// Fall back to non-hyphenated check if registry fails
 		nonHyphenated := removeHyphens(componentName)
@@ -675,8 +678,9 @@ func (b *DefaultBundler) getValueOverridesForComponent(componentName string) map
 // bundle whose enable/disable state doesn't match the operator's intent, which
 // is the canonical misconfigured-artifact scenario the project rule targets.
 // This allows --set awsebscsidriver:enabled=false to disable a component at bundle time.
-func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool, error) {
-	overrides := b.getValueOverridesForComponent(componentName)
+// The provider argument scopes the registry lookup to the recipe's bound DataProvider.
+func (b *DefaultBundler) getSetEnabledOverride(componentName string, provider recipe.DataProvider) (bool, bool, error) {
+	overrides := b.getValueOverridesForComponent(componentName, provider)
 	if overrides == nil {
 		return false, false, nil
 	}
@@ -695,13 +699,15 @@ func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool
 
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.
 // Uses the component registry to determine the correct paths for each component.
-func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, values map[string]any) {
+// The provider argument scopes the registry lookup to the recipe's bound DataProvider;
+// a nil provider falls back to the package-global registry via GetComponentRegistryFor.
+func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, values map[string]any, provider recipe.DataProvider) {
 	if b.Config == nil {
 		return
 	}
 
 	// Get component configuration from registry
-	registry, err := recipe.GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		slog.Debug("failed to load component registry for node scheduling",
 			"error", err,
@@ -791,7 +797,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 	// values map must not block injection; only CLI --set inputs take precedence.
 	if sc := b.Config.StorageClass(); sc != "" {
 		if paths := comp.GetStorageClassPaths(); len(paths) > 0 {
-			explicitOverrides := b.getValueOverridesForComponent(componentName)
+			explicitOverrides := b.getValueOverridesForComponent(componentName, provider)
 			overrides := make(map[string]string, len(paths))
 			for _, path := range paths {
 				if _, isExplicit := explicitOverrides[path]; !isExplicit {
@@ -818,7 +824,7 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 		return nil
 	}
 
-	registry, err := recipe.GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to load component registry for storage class warnings", err)
@@ -914,7 +920,7 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 	// Get component registry — required to know which validations to run.
 	// A registry-load failure produces an unvalidated bundle, which is the
 	// opposite of what this tool promises; surface the failure to the user.
-	registry, err := recipe.GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to load component registry for validations", err)
@@ -963,11 +969,14 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 
 // copyDataFiles copies external data files from the --data directory into the bundle.
 // Returns a list of relative paths to the copied files (e.g., "data/overrides.yaml").
-func (b *DefaultBundler) copyDataFiles(dir string) ([]string, error) {
-	provider := recipe.GetDataProvider() //nolint:staticcheck // tracked by #983 Stage 2
-
-	// Check if the provider is a LayeredDataProvider with external files
-	layered, ok := provider.(*recipe.LayeredDataProvider)
+// The provider argument supplies the LayeredDataProvider whose external directory is
+// the source of truth; a nil provider falls back to the package-global provider so
+// pre-WithDataProvider callers (legacy CLI path) still emit the same bundles.
+func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider) ([]string, error) {
+	// Check if the provider is a LayeredDataProvider with external files.
+	// EffectiveDataProvider falls back to the package-global provider when the
+	// caller did not bind one (pre-WithDataProvider CLI path).
+	layered, ok := recipe.EffectiveDataProvider(provider).(*recipe.LayeredDataProvider)
 	if !ok {
 		return nil, nil // No external data
 	}
@@ -1206,12 +1215,14 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 
 // buildDynamicValuesMap re-keys the config's dynamic values from user override keys
 // (e.g., "gpuoperator") to component names (e.g., "gpu-operator") using the registry.
-func (b *DefaultBundler) buildDynamicValuesMap() (map[string][]string, error) {
+// The provider argument scopes the registry lookup to the recipe's bound DataProvider;
+// a nil provider falls back to the package-global registry via GetComponentRegistryFor.
+func (b *DefaultBundler) buildDynamicValuesMap(provider recipe.DataProvider) (map[string][]string, error) {
 	if !b.Config.HasDynamicValues() {
 		return make(map[string][]string), nil
 	}
 
-	registry, err := recipe.GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load component registry for dynamic resolution", err)
 	}
@@ -1277,6 +1288,7 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 ) (map[string]map[string][]byte, error) {
 
 	result := make(map[string]map[string][]byte)
+	provider := recipeResult.DataProvider()
 
 	for _, ref := range recipeResult.ComponentRefs {
 		if err := ctx.Err(); err != nil {
@@ -1300,10 +1312,14 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 
 		componentManifests := make(map[string][]byte, len(paths))
 		for _, manifestPath := range paths {
-			content, err := recipe.GetManifestContent(manifestPath)
+			content, err := recipe.GetManifestContentWithProvider(provider, manifestPath)
 			if err != nil {
 				if stderrors.Is(err, fs.ErrNotExist) {
-					_, hasExternalData := recipe.GetDataProvider().(*recipe.LayeredDataProvider) //nolint:staticcheck // tracked by #983 Stage 2
+					// Honor bound provider for the type assertion when
+					// available; EffectiveDataProvider falls back to the
+					// package-global provider when no provider is bound
+					// (CLI today).
+					_, hasExternalData := recipe.EffectiveDataProvider(provider).(*recipe.LayeredDataProvider)
 					return nil, errors.New(errors.ErrCodeInvalidRequest,
 						missingManifestMessage(manifestPath, ref.Name, hasExternalData))
 				}
@@ -1393,7 +1409,7 @@ func (b *DefaultBundler) injectGKECriticalPriorityQuotas(
 		return pre, nil
 	}
 
-	registry, err := recipe.GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to load component registry for GKE quota synthesis", err)

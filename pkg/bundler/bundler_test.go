@@ -15,8 +15,10 @@
 package bundler
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -934,7 +936,7 @@ func TestGetValueOverridesForComponent(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			result := b.getValueOverridesForComponent(tt.componentName)
+			result := b.getValueOverridesForComponent(tt.componentName, nil)
 			if tt.wantOverrides && result == nil {
 				t.Error("expected overrides, got nil")
 			}
@@ -970,7 +972,7 @@ func TestApplyNodeSchedulingOverrides_EstimatedNodeCount(t *testing.T) {
 	}
 
 	values := make(map[string]any)
-	b.applyNodeSchedulingOverrides("nodewright-operator", values)
+	b.applyNodeSchedulingOverrides("nodewright-operator", values, nil)
 
 	// Path "estimatedNodeCount" is in nodewright-operator's nodeCountPaths; convertMapValue produces int64.
 	got, ok := values["estimatedNodeCount"]
@@ -1057,7 +1059,7 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 				}
 			}
 
-			b.applyNodeSchedulingOverrides("kube-prometheus-stack", values)
+			b.applyNodeSchedulingOverrides("kube-prometheus-stack", values, nil)
 
 			got, ok := component.GetValueByPath(values, scPath)
 			if ok != tt.wantPresent {
@@ -1067,6 +1069,221 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 				t.Errorf("storageClassName = %v, want %q", got, tt.wantValue)
 			}
 		})
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_BoundProvider verifies that
+// applyNodeSchedulingOverrides honors the bound provider parameter when
+// resolving the component registry. The bound provider exposes a component
+// whose name is absent from the embedded registry, so a positive assertion
+// on the injected nodeSelector path proves the helper used the supplied
+// provider rather than the package-global fallback.
+func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
+	const uniqueComponent = "task2-bound-provider-only"
+	const nodeSelectorPath = "scheduling.nodeSelector"
+
+	tmpDir := t.TempDir()
+	registryYAML := "apiVersion: aicr.nvidia.com/v1alpha1\n" +
+		"kind: ComponentRegistry\n" +
+		"components:\n" +
+		"  - name: " + uniqueComponent + "\n" +
+		"    displayName: Task 2 Bound Provider Only\n" +
+		"    nodeScheduling:\n" +
+		"      system:\n" +
+		"        nodeSelectorPaths:\n" +
+		"          - " + nodeSelectorPath + "\n"
+	if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryYAML), 0600); writeErr != nil {
+		t.Fatalf("write registry.yaml: %v", writeErr)
+	}
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if layeredErr != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", layeredErr)
+	}
+	// Drop any cached registry for this provider identity so the test
+	// registry YAML is the source of truth on first read.
+	recipe.EvictCachedRegistry(layered)
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+
+	// Sanity check: the embedded (global) registry must NOT know about the
+	// unique component, otherwise the assertion below cannot distinguish
+	// "honored the provider" from "fell back to the global".
+	globalRegistry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+	if globalRegistry.Get(uniqueComponent) != nil {
+		t.Fatalf("global registry unexpectedly contains %q; fixture cannot prove provider isolation", uniqueComponent)
+	}
+
+	cfg := config.NewConfig(
+		config.WithSystemNodeSelector(map[string]string{"role": "system"}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// With a nil provider the lookup must miss (component unknown to global registry).
+	nilValues := map[string]any{}
+	b.applyNodeSchedulingOverrides(uniqueComponent, nilValues, nil)
+	if got, ok := component.GetValueByPath(nilValues, nodeSelectorPath); ok {
+		t.Fatalf("nil-provider call unexpectedly populated %s = %v; component must be unknown to global registry", nodeSelectorPath, got)
+	}
+
+	// With the bound provider the lookup hits and the nodeSelector lands at the
+	// path the external registry declares.
+	values := map[string]any{}
+	b.applyNodeSchedulingOverrides(uniqueComponent, values, layered)
+
+	got, ok := component.GetValueByPath(values, nodeSelectorPath)
+	if !ok {
+		t.Fatalf("nodeSelector not injected at %s; bound provider was not consulted", nodeSelectorPath)
+	}
+	gotMap, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("nodeSelector at %s = %T %v; want map[string]any", nodeSelectorPath, got, got)
+	}
+	if gotMap["role"] != "system" {
+		t.Errorf("nodeSelector.role = %v, want %q", gotMap["role"], "system")
+	}
+}
+
+// TestBundler_Make_BoundProviderEndToEnd is the canonical end-to-end check for
+// the bundler-provider migration: build a recipe via WithDataProvider(layered)
+// against a real embedded overlay, run bundler.Make, and confirm the emitted
+// values.yaml carries a marker that lives ONLY in the layered (external)
+// provider. If the bundler silently fell back to the package-global embedded
+// data, the marker would be absent and this test would fail.
+//
+// Why this test exists:
+//   - PR #1015 made RecipeResult.GetValuesForComponent honor the bound
+//     provider; this test exercises that path through the bundler entry point
+//     (Make -> extractComponentValues -> GetValuesForComponent).
+//   - Tasks 1-5 of this PR threaded the bound provider through the bundler's
+//     internal helpers (applyNodeSchedulingOverrides, copyDataFiles, etc.).
+//     Those helpers are unit-tested at TestApplyNodeSchedulingOverrides_BoundProvider;
+//     this test is the integration backstop that proves the whole pipeline
+//     stays consistent when a layered provider replaces the global.
+func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
+	const markerVersion = "777.77.77-aicr-task6-marker"
+
+	// LayeredDataProvider over a tempdir that overrides exactly two files:
+	//   1. registry.yaml (required by NewLayeredDataProvider; merged into
+	//      embedded so all upstream components remain known).
+	//   2. components/gpu-operator/values.yaml (the base values that
+	//      h100-eks-ubuntu-training inherits via the eks-training overlay,
+	//      which pins valuesFile = components/gpu-operator/values-eks-training.yaml
+	//      and triggers the "base + overlay" merge in
+	//      RecipeResult.GetValuesForComponent — driver.version is only set
+	//      in the base, so our marker passes through into the emitted bundle).
+	tmpData := t.TempDir()
+
+	registryYAML := []byte("apiVersion: aicr.nvidia.com/v1alpha1\n" +
+		"kind: ComponentRegistry\n" +
+		"components: []\n")
+	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	componentsDir := filepath.Join(tmpData, "components", "gpu-operator")
+	if err := os.MkdirAll(componentsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	valuesContent := fmt.Appendf(nil, "driver:\n  version: %q\n", markerVersion)
+	if err := os.WriteFile(filepath.Join(componentsDir, "values.yaml"), valuesContent, 0o600); err != nil {
+		t.Fatalf("write values.yaml: %v", err)
+	}
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
+		ExternalDir: tmpData,
+	})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	// Drop any cached registry for this provider identity so the merged
+	// external registry is the source of truth on first read.
+	recipe.EvictCachedRegistry(layered)
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+
+	// Build a recipe through the bound provider. Criteria selects
+	// h100-eks-ubuntu-training, which inherits gpu-operator from eks-training.
+	b := recipe.NewBuilder(recipe.WithDataProvider(layered))
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		Intent:      recipe.CriteriaIntentTraining,
+		OS:          recipe.CriteriaOSUbuntu,
+	}
+	result, err := b.BuildFromCriteria(context.Background(), criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+
+	// Sanity check: the RecipeResult must carry the bound provider — otherwise
+	// the bundler will silently fall back to the package-global and the
+	// assertion below cannot distinguish "honored the provider" from "global
+	// happened to match".
+	if result.DataProvider() != layered {
+		t.Fatalf("result.DataProvider() did not return the layered provider; bound-provider plumbing is broken")
+	}
+
+	// Confirm gpu-operator is in the resolved component list — if criteria
+	// resolution silently dropped it, the marker assertion would vacuously
+	// pass with zero values.yaml files matched.
+	if result.GetComponentRef("gpu-operator") == nil {
+		t.Fatalf("gpu-operator not present in recipe component refs; criteria/overlay drift")
+	}
+
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("bundler.New: %v", err)
+	}
+
+	outDir := t.TempDir()
+	if _, makeErr := bundler.Make(context.Background(), result, outDir); makeErr != nil {
+		t.Fatalf("bundler.Make: %v", makeErr)
+	}
+
+	// Walk the output and locate the gpu-operator values.yaml. The bundler
+	// emits a numbered per-component directory whose suffix is the component
+	// name (e.g. "001-gpu-operator/values.yaml"), but the exact ordinal
+	// depends on the deployment graph for the resolved overlay — walking by
+	// suffix avoids hardcoding a brittle path.
+	var gpuValuesPath string
+	walkErr := filepath.Walk(outDir, func(p string, info os.FileInfo, innerErr error) error {
+		if innerErr != nil {
+			return innerErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if info.Name() != "values.yaml" {
+			return nil
+		}
+		if strings.HasSuffix(filepath.Dir(p), "-gpu-operator") {
+			gpuValuesPath = p
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk outDir: %v", walkErr)
+	}
+	if gpuValuesPath == "" {
+		t.Fatalf("gpu-operator values.yaml not found under %s; bundler did not emit expected per-component artifact", outDir)
+	}
+
+	data, err := os.ReadFile(gpuValuesPath)
+	if err != nil {
+		t.Fatalf("read emitted gpu-operator values.yaml: %v", err)
+	}
+	if !bytes.Contains(data, []byte(markerVersion)) {
+		t.Errorf("emitted %s missing marker %q — bundler did not honor bound provider\ncontent:\n%s",
+			gpuValuesPath, markerVersion, data)
 	}
 }
 

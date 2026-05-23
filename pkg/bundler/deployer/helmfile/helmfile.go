@@ -256,7 +256,7 @@ func (g *Generator) writeHelmfileLayout(
 	namespaceByComponent map[string]string,
 ) (bool, error) {
 
-	flags, err := componentFlagsByName(sortedRefs)
+	flags, err := componentFlagsByName(sortedRefs, g.RecipeResult.DataProvider())
 	if err != nil {
 		return false, errors.Wrap(errors.ErrCodeInternal,
 			"failed to load registry for component flags", err)
@@ -433,8 +433,12 @@ type componentFlags struct {
 // release-rendering step does a single registry round-trip.
 // Components not in the registry are absent from the map (treated as
 // all-false).
-func componentFlagsByName(refs []recipe.ComponentRef) (map[string]componentFlags, error) {
-	registry, err := recipe.GetComponentRegistry()
+//
+// provider is the recipe-bound DataProvider whose registry is consulted;
+// nil falls back to the deprecated process-global registry for callers
+// that pre-date per-recipe binding.
+func componentFlagsByName(refs []recipe.ComponentRef, provider recipe.DataProvider) (map[string]componentFlags, error) {
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		return nil, err
 	}

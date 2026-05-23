@@ -84,7 +84,7 @@ func TestGenerate(t *testing.T) {
 				}
 
 				// Root values.yaml should ONLY have dynamic stubs
-				key, keyErr := resolveOverrideKey("gpu-operator")
+				key, keyErr := resolveOverrideKey("gpu-operator", nil)
 				if keyErr != nil {
 					t.Fatalf("resolveOverrideKey failed: %v", keyErr)
 				}

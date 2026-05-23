@@ -330,7 +330,7 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		// so users see what value to override. When the path doesn't exist, an
 		// empty string stub is created.
 		if dynPaths, ok := g.DynamicValues[ref.Name]; ok {
-			overrideKey, keyErr := resolveOverrideKey(ref.Name)
+			overrideKey, keyErr := resolveOverrideKey(ref.Name, g.RecipeResult.DataProvider())
 			if keyErr != nil {
 				return nil, 0, nil, keyErr
 			}
@@ -502,7 +502,7 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 		output.Files = append(output.Files, copiedFiles...)
 		output.TotalSize += copySize
 
-		overrideKey, keyErr := resolveOverrideKey(parentComponent)
+		overrideKey, keyErr := resolveOverrideKey(parentComponent, g.RecipeResult.DataProvider())
 		if keyErr != nil {
 			return keyErr
 		}
@@ -963,7 +963,7 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	buf.WriteString("first for those cases.\n\n")
 	buf.WriteString("```bash\n# Local install (pure-Helm-only recipes)\nhelm install aicr-bundle . -n argocd \\\n  --set repoURL=oci://<your-registry>/<path>/aicr-bundle \\\n  --set targetRevision=<chart-version>")
 
-	dynamicSetFlags, flagsErr := buildDynamicSetFlags(g.DynamicValues)
+	dynamicSetFlags, flagsErr := buildDynamicSetFlags(g.DynamicValues, g.RecipeResult.DataProvider())
 	if flagsErr != nil {
 		return "", 0, flagsErr
 	}
@@ -980,7 +980,7 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 		}
 		sort.Strings(compNames)
 		for _, name := range compNames {
-			overrideKey, keyErr := resolveOverrideKey(name)
+			overrideKey, keyErr := resolveOverrideKey(name, g.RecipeResult.DataProvider())
 			if keyErr != nil {
 				return "", 0, keyErr
 			}
@@ -997,7 +997,7 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	return readmePath, int64(len(content)), nil
 }
 
-func buildDynamicSetFlags(dynamicValues map[string][]string) ([]string, error) {
+func buildDynamicSetFlags(dynamicValues map[string][]string, provider recipe.DataProvider) ([]string, error) {
 	if len(dynamicValues) == 0 {
 		return nil, nil
 	}
@@ -1008,7 +1008,7 @@ func buildDynamicSetFlags(dynamicValues map[string][]string) ([]string, error) {
 	}
 	sort.Strings(compNames)
 	for _, name := range compNames {
-		overrideKey, keyErr := resolveOverrideKey(name)
+		overrideKey, keyErr := resolveOverrideKey(name, provider)
 		if keyErr != nil {
 			return nil, keyErr
 		}
@@ -1022,8 +1022,12 @@ func buildDynamicSetFlags(dynamicValues map[string][]string) ([]string, error) {
 // resolveOverrideKey returns the valueOverrideKey for a component (e.g., "gpuOperator"
 // for "gpu-operator"). Returns an error if the registry is unavailable or the component
 // has no override keys — using the wrong key would produce a broken chart.
-func resolveOverrideKey(componentName string) (string, error) {
-	registry, err := recipe.GetComponentRegistry()
+//
+// provider is the recipe-bound DataProvider whose registry is consulted;
+// nil falls back to the deprecated process-global registry for callers
+// that pre-date per-recipe binding.
+func resolveOverrideKey(componentName string, provider recipe.DataProvider) (string, error) {
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal,
 			"failed to load component registry for override key resolution", err)

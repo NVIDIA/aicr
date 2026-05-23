@@ -695,3 +695,23 @@ func getDataProviderGeneration() int {
 	defer dataProviderMu.RUnlock()
 	return dataProviderGeneration
 }
+
+// EffectiveDataProvider returns dp when non-nil, otherwise the package-global
+// DataProvider (via GetDataProvider). This centralizes the bound-first /
+// global-fallback pattern used by callers that need raw provider access
+// (e.g., WalkDir, ReadFile, or type assertions) and cannot route through
+// the *For wrapper variants.
+//
+// Most callers should NOT use this — prefer GetComponentRegistryFor,
+// GetManifestContentWithProvider, or LoadMetadataStoreFor, which already
+// handle the nil-fallback internally.
+//
+// Deprecated note: this helper exists to consolidate the SetDataProvider /
+// GetDataProvider fallback path. When the deprecation completes (#983
+// Stage 3), this helper goes away alongside the global accessor.
+func EffectiveDataProvider(dp DataProvider) DataProvider {
+	if dp == nil {
+		return GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+	}
+	return dp
+}
