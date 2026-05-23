@@ -31,17 +31,24 @@ import (
 
 const baseRecipeName = "base"
 
-// Global metadata store cache, keyed by the DataProvider generation that
-// produced it. SetDataProvider increments the generation; the next call to
-// loadMetadataStore observes the change and rebuilds the cache so a
-// late-bound external data source actually takes effect. Mirrors the
-// invalidation pattern in components.go (GetComponentRegistry).
-var (
-	metadataStoreMu     sync.Mutex
-	cachedMetadataStore *MetadataStore
-	cachedMetadataErr   error
-	cachedMetadataGen   = -1
-)
+// storeCacheEntry holds a lazily-built MetadataStore (or load error) keyed by
+// the DataProvider identity. sync.Once guarantees that concurrent callers for
+// the same provider populate the entry exactly once and all observe the same
+// singleton; distinct providers populate distinct entries and never share
+// state. This is the in-process multi-tenant isolation primitive that
+// replaces the former package-global cachedMetadataStore/cachedMetadataGen
+// triple — see LoadMetadataStoreFor.
+type storeCacheEntry struct {
+	once  sync.Once
+	store *MetadataStore
+	err   error
+}
+
+// storeCache holds storeCacheEntry pointers keyed by DataProvider identity.
+// Two Builders bound to different DataProvider values populate distinct
+// entries; a single provider value yields a single shared store regardless
+// of caller goroutine count.
+var storeCache sync.Map // map[DataProvider]*storeCacheEntry
 
 // MetadataStore holds the base recipe and all overlays.
 type MetadataStore struct {
@@ -56,6 +63,13 @@ type MetadataStore struct {
 
 	// ValuesFiles contains embedded values file contents indexed by filename.
 	ValuesFiles map[string][]byte
+
+	// provider is the DataProvider that produced this store. Components and
+	// callers that need provider-bound lookups (component registry, manifest
+	// content) should consult this field rather than GetDataProvider() so
+	// per-provider isolation holds even when the package-global provider has
+	// since been swapped.
+	provider DataProvider
 }
 
 // pendingRegistryEntry stages an overlay's criteria + provider source so the
@@ -66,200 +80,218 @@ type pendingRegistryEntry struct {
 	source   string
 }
 
-// loadMetadataStore loads and caches the metadata store from the data provider.
-// The cache is keyed by DataProvider generation, so SetDataProvider callers see
-// the new content on the next invocation rather than being stuck on the
-// embedded-only snapshot captured by the first Init.
-func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
-	gen := getDataProviderGeneration()
-	metadataStoreMu.Lock()
-	defer metadataStoreMu.Unlock()
-	if cachedMetadataGen == gen && (cachedMetadataStore != nil || cachedMetadataErr != nil) {
-		if cachedMetadataErr != nil {
-			return nil, cachedMetadataErr
-		}
-		return cachedMetadataStore, nil
+// LoadMetadataStoreFor loads (and caches) the metadata store for the supplied
+// DataProvider. Concurrent callers with the same provider observe the same
+// singleton; distinct providers populate distinct cache entries and never
+// share state. This is the multi-tenant entry point used by Builders bound
+// via WithDataProvider.
+//
+// A nil provider falls back to GetDataProvider() so the legacy
+// loadMetadataStore(ctx) entry point — which consults the package-global
+// provider — continues to work transparently.
+//
+// Context cancellation that fires during the first build is surfaced but not
+// cached: the storeCacheEntry remains and any future caller for the same
+// provider will see the build-time error preserved by sync.Once. Callers that
+// need to retry after a transient cancellation must drop the entry via
+// EvictCachedStore first.
+//
+// Note: only the first caller's ctx governs the build. Subsequent callers that
+// arrive while the build is in flight block on the same sync.Once and do not
+// observe their own ctx until the first caller's build returns. Callers that
+// need strict per-request deadline enforcement (e.g., HTTP handlers bound by
+// ServerHandlerTimeout running alongside a slower CLI loader) should invoke
+// LoadMetadataStoreFor in a goroutine and select on their own ctx.Done() and
+// the result channel.
+func LoadMetadataStoreFor(ctx context.Context, dp DataProvider) (*MetadataStore, error) {
+	if dp == nil {
+		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
 	}
-	// Cache miss — rebuild against the current DataProvider generation.
-	cachedMetadataStore = nil
-	cachedMetadataErr = nil
-	cachedMetadataGen = gen
-	build := func() {
-		// Record cache miss on first load
-		recipeCacheMisses.Inc()
+	e, _ := storeCache.LoadOrStore(dp, &storeCacheEntry{})
+	entry := e.(*storeCacheEntry)
+	entry.once.Do(func() {
+		entry.store, entry.err = buildMetadataStore(ctx, dp)
+	})
+	return entry.store, entry.err
+}
 
-		store := &MetadataStore{
-			Overlays:    make(map[string]*RecipeMetadata),
-			Mixins:      make(map[string]*RecipeMixin),
-			ValuesFiles: make(map[string][]byte),
+// loadMetadataStore is the back-compat entry point that consults the
+// package-global DataProvider. New callers — especially those that need
+// per-tenant isolation — should use LoadMetadataStoreFor directly with a
+// caller-supplied provider.
+func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
+	return LoadMetadataStoreFor(ctx, GetDataProvider()) //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+}
+
+// buildMetadataStore performs the actual catalog walk against the supplied
+// provider. It is pure with respect to the package-global DataProvider — the
+// only side effect on package state is the call to seedCriteriaRegistry,
+// which intentionally seeds the package-global criteria registry from every
+// overlay's spec.criteria (Task 4 handles per-provider routing for the
+// component registry; criteria registry continues to use the package global
+// for now).
+//
+// The returned MetadataStore has its provider field set so downstream
+// lookups (e.g., applyRegistryDefaults in Task 4) can route through the
+// originating provider even when the package-global provider has since been
+// swapped.
+func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataStore, error) {
+	// Record cache miss on first load for the provider.
+	recipeCacheMisses.Inc()
+
+	store := &MetadataStore{
+		Overlays:    make(map[string]*RecipeMetadata),
+		Mixins:      make(map[string]*RecipeMixin),
+		ValuesFiles: make(map[string][]byte),
+		provider:    provider,
+	}
+
+	// Staged criteria registry entries. Each overlay's criteria are
+	// appended during the walk but only applied to the global registry
+	// after every later validation (walk completion, base presence,
+	// dependency validation) succeeds. Keeps the registry transactional
+	// with respect to catalog-load success.
+	var pendingRegistry []pendingRegistryEntry
+
+	// Load all YAML files from data directory.
+	walkErr := provider.WalkDir("", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk data directory", err)
+		}
+		if ctx.Err() != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context canceled during metadata load", ctx.Err())
+		}
+		if d.IsDir() {
+			return nil
 		}
 
-		// Staged criteria registry entries. Each overlay's criteria are
-		// appended during the walk but only applied to the global registry
-		// after every later validation (walk completion, base presence,
-		// dependency validation) succeeds. Keeps the registry transactional
-		// with respect to catalog-load success.
-		var pendingRegistry []pendingRegistryEntry
+		filename := filepath.Base(path)
 
-		provider := GetDataProvider()
+		// Skip health check assert files (not recipe metadata)
+		if strings.Contains(path, "checks/") {
+			return nil
+		}
 
-		// Load all YAML files from data directory
-		err := provider.WalkDir("", func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk data directory", err)
-			}
-			if ctx.Err() != nil {
-				return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context canceled during metadata load", ctx.Err())
-			}
-			if d.IsDir() {
-				return nil
-			}
-
-			filename := filepath.Base(path)
-
-			// Skip health check assert files (not recipe metadata)
-			if strings.Contains(path, "checks/") {
-				return nil
-			}
-
-			// Handle mixin files (files in the mixins/ directory)
-			if strings.HasPrefix(path, "mixins/") {
-				if !strings.HasSuffix(filename, ".yaml") {
-					return nil
-				}
-				content, readErr := provider.ReadFile(path)
-				if readErr != nil {
-					return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read mixin %s", path), readErr)
-				}
-				var mixin RecipeMixin
-				decoder := yaml.NewDecoder(bytes.NewReader(content))
-				decoder.KnownFields(true)
-				if parseErr := decoder.Decode(&mixin); parseErr != nil {
-					return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse mixin %s (unknown fields are not allowed)", path), parseErr)
-				}
-				if mixin.Kind != RecipeMixinKind {
-					return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-						fmt.Sprintf("mixin file %s has wrong kind %q, expected %q", path, mixin.Kind, RecipeMixinKind))
-				}
-				if _, exists := store.Mixins[mixin.Metadata.Name]; exists {
-					return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-						fmt.Sprintf("duplicate mixin name %q in %s", mixin.Metadata.Name, path))
-				}
-				store.Mixins[mixin.Metadata.Name] = &mixin
-				slog.Debug("loaded mixin", "name", mixin.Metadata.Name, "path", path)
-				return nil
-			}
-
-			// Handle component files (files in the components/ directory)
-			if strings.Contains(path, "components/") {
-				content, readErr := provider.ReadFile(path)
-				if readErr != nil {
-					return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read component file %s", path), readErr)
-				}
-				// Store with relative path (e.g., "components/cert-manager/values.yaml")
-				store.ValuesFiles[path] = content
-				return nil
-			}
-
-			// Skip non-YAML files
+		// Handle mixin files (files in the mixins/ directory)
+		if strings.HasPrefix(path, "mixins/") {
 			if !strings.HasSuffix(filename, ".yaml") {
 				return nil
 			}
-
-			// Skip old data-v1.yaml format and registry.yaml (handled separately)
-			if filename == "data-v1.yaml" || filename == "registry.yaml" {
-				return nil
-			}
-
-			// Read and parse metadata file
 			content, readErr := provider.ReadFile(path)
 			if readErr != nil {
-				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read %s", path), readErr)
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read mixin %s", path), readErr)
 			}
-
-			var metadata RecipeMetadata
-			if parseErr := yaml.Unmarshal(content, &metadata); parseErr != nil {
-				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse %s", path), parseErr)
+			var mixin RecipeMixin
+			decoder := yaml.NewDecoder(bytes.NewReader(content))
+			decoder.KnownFields(true)
+			if parseErr := decoder.Decode(&mixin); parseErr != nil {
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse mixin %s (unknown fields are not allowed)", path), parseErr)
 			}
-
-			// Skip files with a different kind (e.g., ValidatorCatalog).
-			if metadata.Kind != "" && metadata.Kind != RecipeMetadataKind {
-				slog.Debug("skipping non-recipe YAML", "path", path, "kind", metadata.Kind)
-				return nil
+			if mixin.Kind != RecipeMixinKind {
+				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("mixin file %s has wrong kind %q, expected %q", path, mixin.Kind, RecipeMixinKind))
 			}
-
-			// Categorize as base or overlay
-			// base.yaml is now in overlays/ directory but still identified by filename
-			if filename == "base.yaml" && strings.Contains(path, "overlays/") {
-				store.Base = &metadata
-			} else {
-				store.Overlays[metadata.Metadata.Name] = &metadata
-				// Stage this overlay's criteria for registration; the
-				// actual call to seedCriteriaRegistry is deferred until
-				// after every overlay parses cleanly, the base recipe is
-				// found, and dependency validation passes — see the
-				// commit loop below the walk. This prevents a malformed
-				// file later in the walk from leaving partial criteria
-				// values in the package-global registry.
-				pendingRegistry = append(pendingRegistry, pendingRegistryEntry{
-					criteria: metadata.Spec.Criteria,
-					source:   provider.Source(path),
-				})
+			if _, exists := store.Mixins[mixin.Metadata.Name]; exists {
+				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("duplicate mixin name %q in %s", mixin.Metadata.Name, path))
 			}
-
+			store.Mixins[mixin.Metadata.Name] = &mixin
+			slog.Debug("loaded mixin", "name", mixin.Metadata.Name, "path", path)
 			return nil
-		})
-
-		if err != nil {
-			cachedMetadataErr = err
-			return
 		}
 
-		if store.Base == nil {
-			cachedMetadataErr = aicrerrors.New(aicrerrors.ErrCodeInternal, "base.yaml not found")
-			return
+		// Handle component files (files in the components/ directory)
+		if strings.Contains(path, "components/") {
+			content, readErr := provider.ReadFile(path)
+			if readErr != nil {
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read component file %s", path), readErr)
+			}
+			// Store with relative path (e.g., "components/cert-manager/values.yaml")
+			store.ValuesFiles[path] = content
+			return nil
 		}
 
-		// Validate base recipe dependencies
-		if err := store.Base.Spec.ValidateDependencies(); err != nil {
-			cachedMetadataErr = aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "base recipe validation failed", err)
-			return
+		// Skip non-YAML files
+		if !strings.HasSuffix(filename, ".yaml") {
+			return nil
 		}
 
-		// Catalog fully validated — commit staged criteria registrations
-		// to the global registry now. Any earlier `return` path above
-		// leaves the registry untouched.
-		for _, entry := range pendingRegistry {
-			seedCriteriaRegistry(entry.criteria, entry.source)
+		// Skip old data-v1.yaml format and registry.yaml (handled separately)
+		if filename == "data-v1.yaml" || filename == "registry.yaml" {
+			return nil
 		}
 
-		cachedMetadataStore = store
+		// Read and parse metadata file
+		content, readErr := provider.ReadFile(path)
+		if readErr != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read %s", path), readErr)
+		}
+
+		var metadata RecipeMetadata
+		if parseErr := yaml.Unmarshal(content, &metadata); parseErr != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse %s", path), parseErr)
+		}
+
+		// Skip files with a different kind (e.g., ValidatorCatalog).
+		if metadata.Kind != "" && metadata.Kind != RecipeMetadataKind {
+			slog.Debug("skipping non-recipe YAML", "path", path, "kind", metadata.Kind)
+			return nil
+		}
+
+		// Categorize as base or overlay
+		// base.yaml is now in overlays/ directory but still identified by filename
+		if filename == "base.yaml" && strings.Contains(path, "overlays/") {
+			store.Base = &metadata
+		} else {
+			store.Overlays[metadata.Metadata.Name] = &metadata
+			// Stage this overlay's criteria for registration; the
+			// actual call to seedCriteriaRegistry is deferred until
+			// after every overlay parses cleanly, the base recipe is
+			// found, and dependency validation passes — see the
+			// commit loop below the walk. This prevents a malformed
+			// file later in the walk from leaving partial criteria
+			// values in the package-global registry.
+			pendingRegistry = append(pendingRegistry, pendingRegistryEntry{
+				criteria: metadata.Spec.Criteria,
+				source:   provider.Source(path),
+			})
+		}
+
+		return nil
+	})
+
+	if walkErr != nil {
+		return nil, walkErr
 	}
-	build()
 
-	// Caller-scoped cancellation must not poison the cache: a per-request
-	// timeout that fires during the first rebuild would otherwise mark this
-	// generation as permanently failed until SetDataProvider bumps it.
-	// Reset the generation so the next caller with a fresh context retries,
-	// and surface the cancel/timeout error without caching it.
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		buildErr := cachedMetadataErr
-		cachedMetadataStore = nil
-		cachedMetadataErr = nil
-		cachedMetadataGen = -1
-		if buildErr != nil {
-			return nil, buildErr
-		}
-		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "metadata load canceled", ctxErr)
+	if store.Base == nil {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInternal, "base.yaml not found")
 	}
 
-	if cachedMetadataErr != nil {
-		return nil, cachedMetadataErr
+	// Validate base recipe dependencies
+	if err := store.Base.Spec.ValidateDependencies(); err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "base recipe validation failed", err)
 	}
-	if cachedMetadataStore == nil {
-		return nil, aicrerrors.New(aicrerrors.ErrCodeInternal, "metadata store not initialized")
+
+	// Catalog fully validated — commit staged criteria registrations
+	// to the global registry now. Any earlier error return path above
+	// leaves the registry untouched.
+	for _, entry := range pendingRegistry {
+		seedCriteriaRegistry(entry.criteria, entry.source)
 	}
-	return cachedMetadataStore, nil
+
+	return store, nil
+}
+
+// EvictCachedStore drops the cached MetadataStore for the supplied provider.
+// No-op when the provider has no cache entry. Safe on nil — callers do not
+// need to guard. Used by tests that mutate a provider's backing data between
+// loads, and by Task 7's eviction tests.
+func EvictCachedStore(dp DataProvider) {
+	if dp == nil {
+		return
+	}
+	storeCache.Delete(dp)
 }
 
 // LoadCatalog eagerly loads the recipe catalog into the package cache,
@@ -275,14 +307,14 @@ func LoadCatalog(ctx context.Context) error {
 	return err
 }
 
-// ResetMetadataStoreForTesting clears the cached metadata store so that
-// tests can reload with different data. Must only be called from tests.
+// ResetMetadataStoreForTesting clears every cached metadata store so tests
+// can reload against fresh providers without leaking state across cases.
+// Must only be called from tests.
 func ResetMetadataStoreForTesting() {
-	metadataStoreMu.Lock()
-	defer metadataStoreMu.Unlock()
-	cachedMetadataStore = nil
-	cachedMetadataErr = nil
-	cachedMetadataGen = -1
+	storeCache.Range(func(k, _ any) bool {
+		storeCache.Delete(k)
+		return true
+	})
 }
 
 // GetValuesFile returns the content of a values file by filename.
@@ -728,7 +760,11 @@ func (s *MetadataStore) mergeOverlayChains(overlays []*RecipeMetadata, mergedSpe
 }
 
 // finalizeRecipeResult validates, sorts, and builds the final RecipeResult.
-func finalizeRecipeResult(criteria *Criteria, mergedSpec *RecipeMetadataSpec, appliedOverlays []string) (*RecipeResult, error) {
+// The provider is consulted when filling in ComponentRef defaults from the
+// component registry so per-provider isolation holds even when the
+// package-global provider has since been swapped. A nil provider falls back
+// to the package-global DataProvider.
+func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec *RecipeMetadataSpec, appliedOverlays []string) (*RecipeResult, error) {
 	if err := mergedSpec.ValidateDependencies(); err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "merged recipe validation failed", err)
 	}
@@ -738,7 +774,7 @@ func finalizeRecipeResult(criteria *Criteria, mergedSpec *RecipeMetadataSpec, ap
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to compute deployment order", err)
 	}
 
-	if err := applyRegistryDefaults(mergedSpec.ComponentRefs); err != nil {
+	if err := applyRegistryDefaults(provider, mergedSpec.ComponentRefs); err != nil {
 		return nil, err
 	}
 
@@ -750,6 +786,7 @@ func finalizeRecipeResult(criteria *Criteria, mergedSpec *RecipeMetadataSpec, ap
 		ComponentRefs:   mergedSpec.ComponentRefs,
 		DeploymentOrder: deployOrder,
 		Validation:      mergedSpec.Validation,
+		provider:        provider,
 	}
 	result.Metadata.AppliedOverlays = appliedOverlays
 
@@ -790,7 +827,7 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 			"hint", "recipe may not be optimized for your environment")
 	}
 
-	return finalizeRecipeResult(criteria, &mergedSpec, appliedOverlays)
+	return finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays)
 }
 
 // BuildRecipeResultWithEvaluator builds a RecipeResult by merging base with matching overlays,
@@ -900,7 +937,7 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 		}
 	}
 
-	result, err := finalizeRecipeResult(criteria, &mergedSpec, appliedOverlays)
+	result, err := finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays)
 	if err != nil {
 		return nil, err
 	}
@@ -1017,8 +1054,13 @@ func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 // that don't explicitly set them in recipes. Returns an error if the registry
 // cannot be loaded — silently no-op'ing would emit partial ComponentRefs that
 // downstream bundlers would reject far from the root cause.
-func applyRegistryDefaults(refs []ComponentRef) error {
-	registry, err := GetComponentRegistry()
+//
+// The provider parameter routes the registry lookup through a specific
+// DataProvider so per-provider isolation holds even when the package-global
+// provider has since been swapped. A nil provider falls back to the
+// package-global DataProvider via GetComponentRegistryFor.
+func applyRegistryDefaults(provider DataProvider, refs []ComponentRef) error {
+	registry, err := GetComponentRegistryFor(provider)
 	if err != nil {
 		return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "failed to get component registry for defaults")
 	}

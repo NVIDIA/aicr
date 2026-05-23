@@ -60,7 +60,7 @@ type (
 // Entries with explicit version tags (e.g., :v1.2.3) are never modified by
 // steps 1-2 but are replaced by step 3 if that env var is set.
 func Load(version, commit string) (*ValidatorCatalog, error) {
-	data, err := recipe.GetDataProvider().ReadFile("validators/catalog.yaml")
+	data, err := recipe.GetDataProvider().ReadFile("validators/catalog.yaml") //nolint:staticcheck // tracked by #983 Stage 2
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read catalog", err)
 	}
@@ -212,8 +212,8 @@ func replaceTag(image, newTag string) string {
 // image tags pushed by the on-push CI workflow.
 // Images with explicit version tags are not modified.
 func replaceLatestWithSHA(image, commit string) string {
-	if strings.HasSuffix(image, ":latest") {
-		return strings.TrimSuffix(image, ":latest") + ":sha-" + commit
+	if rest, ok := strings.CutSuffix(image, ":latest"); ok {
+		return rest + ":sha-" + commit
 	}
 	return image
 }

@@ -379,7 +379,7 @@ func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
 	}
 	if dataDir == "" {
 		// Reset to embedded so prior --data state does not leak across runs.
-		recipe.SetDataProvider(embedded)
+		recipe.SetDataProvider(embedded) //nolint:staticcheck // tracked by #983 Stage 2
 		return nil
 	}
 
@@ -393,7 +393,7 @@ func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize external data", err)
 	}
 
-	recipe.SetDataProvider(layered)
+	recipe.SetDataProvider(layered) //nolint:staticcheck // tracked by #983 Stage 2
 
 	slog.Info("external data provider initialized successfully", "directory", dataDir)
 	return nil

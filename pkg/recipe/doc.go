@@ -124,6 +124,45 @@
 //	builder := recipe.NewBuilder()
 //	http.HandleFunc("/v1/recipe", builder.HandleRecipes)
 //
+// # Builder-Bound DataProvider (Multi-Tenant)
+//
+// WithDataProvider attaches a DataProvider to the Builder so the metadata
+// store, component registry, and per-component values files all resolve
+// through the bound provider rather than the package-global one. This is
+// the canonical pattern for any caller that constructs more than one Builder
+// per process (multi-tenant servers, library users, test harnesses):
+//
+//	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+//	tenantA := recipe.NewBuilder(recipe.WithDataProvider(embedded))
+//	tenantB := recipe.NewBuilder(recipe.WithDataProvider(otherProvider))
+//	resA, _ := tenantA.BuildFromCriteria(ctx, criteriaA)
+//	resB, _ := tenantB.BuildFromCriteria(ctx, criteriaB)
+//	// resA.DataProvider() != resB.DataProvider()
+//
+// Caches are keyed by DataProvider identity, so concurrent builders against
+// distinct providers do not share metadata-store or component-registry state.
+// The new public surface for provider-bound builds:
+//
+//   - WithDataProvider(dp DataProvider) Option — binds the Builder to dp.
+//   - LoadMetadataStoreFor(ctx, dp) (*MetadataStore, error) — loads (and
+//     caches) the metadata store for the supplied provider.
+//   - GetComponentRegistryFor(dp) (*ComponentRegistry, error) — returns the
+//     component registry for dp, cached per provider.
+//   - EvictCachedStore(dp) — drops the cached MetadataStore for dp so the
+//     next LoadMetadataStoreFor rebuilds from source.
+//   - EvictCachedRegistry(dp) — drops the cached registry for dp; nil
+//     receiver is a no-op.
+//   - GetManifestContentWithProvider(dp, path) ([]byte, error) — reads a
+//     manifest file from dp; a nil provider falls back to GetDataProvider().
+//   - (*RecipeResult).DataProvider() DataProvider — recovers the bound
+//     provider that produced the result, or nil if the package-global was
+//     used. Nil-safe on the receiver.
+//
+// Single-tenant entry points (the CLI, the API server) may continue to use
+// SetDataProvider / GetDataProvider; those package-global accessors are
+// deprecated in favor of WithDataProvider but remain functional for
+// back-compat.
+//
 // Parse criteria from HTTP request:
 //
 //	criteria, err := recipe.ParseCriteriaFromRequest(r)

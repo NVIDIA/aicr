@@ -277,8 +277,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// Extract values for each component from the recipe
 	componentValues, err := b.extractComponentValues(ctx, recipeResult)
 	if err != nil {
-		var se *errors.StructuredError
-		if stderrors.As(err, &se) {
+		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal,
@@ -300,8 +299,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// attestation. This is a no-op when --data is not set.
 	dataFiles, err := b.copyDataFiles(dir)
 	if err != nil {
-		var se *errors.StructuredError
-		if stderrors.As(err, &se) {
+		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal,
@@ -479,8 +477,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, start time.Time) (*result.Output, error) {
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
-		var se *errors.StructuredError
-		if stderrors.As(err, &se) {
+		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
@@ -967,7 +964,7 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 // copyDataFiles copies external data files from the --data directory into the bundle.
 // Returns a list of relative paths to the copied files (e.g., "data/overrides.yaml").
 func (b *DefaultBundler) copyDataFiles(dir string) ([]string, error) {
-	provider := recipe.GetDataProvider()
+	provider := recipe.GetDataProvider() //nolint:staticcheck // tracked by #983 Stage 2
 
 	// Check if the provider is a LayeredDataProvider with external files
 	layered, ok := provider.(*recipe.LayeredDataProvider)
@@ -1306,7 +1303,7 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 			content, err := recipe.GetManifestContent(manifestPath)
 			if err != nil {
 				if stderrors.Is(err, fs.ErrNotExist) {
-					_, hasExternalData := recipe.GetDataProvider().(*recipe.LayeredDataProvider)
+					_, hasExternalData := recipe.GetDataProvider().(*recipe.LayeredDataProvider) //nolint:staticcheck // tracked by #983 Stage 2
 					return nil, errors.New(errors.ErrCodeInvalidRequest,
 						missingManifestMessage(manifestPath, ref.Name, hasExternalData))
 				}

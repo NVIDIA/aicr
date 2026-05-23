@@ -910,3 +910,108 @@ components:
 		t.Errorf("GetType() = %v, want %v", comp.GetType(), ComponentTypeKustomize)
 	}
 }
+
+// buildProviderWithRegistry returns an inMemoryDataProvider whose registry.yaml
+// declares a single component whose name is derived from the supplied tag
+// (e.g., "registry-alpha.yaml" -> component name "alpha-only"). This lets
+// isolation tests verify that the component registry cache keyed by
+// DataProvider populates distinct entries.
+func buildProviderWithRegistry(t *testing.T, tag string) DataProvider {
+	t.Helper()
+	// Derive a component name from the tag for unambiguous assertions.
+	var compName string
+	switch {
+	case strings.Contains(tag, "alpha"):
+		compName = "alpha-only"
+	case strings.Contains(tag, "beta"):
+		compName = "beta-only"
+	default:
+		compName = "evict-only"
+	}
+
+	registryYAML := []byte("apiVersion: aicr.nvidia.com/v1alpha1\n" +
+		"kind: ComponentRegistry\n" +
+		"components:\n" +
+		"  - name: " + compName + "\n" +
+		"    displayName: " + compName + "\n")
+
+	files := map[string][]byte{
+		"registry.yaml": registryYAML,
+	}
+	return newInMemoryProvider(tag, files)
+}
+
+func TestGetComponentRegistry_PerProviderIsolation(t *testing.T) {
+	dpA := buildProviderWithRegistry(t, "registry-alpha.yaml")
+	dpB := buildProviderWithRegistry(t, "registry-beta.yaml")
+
+	rA, err := GetComponentRegistryFor(dpA)
+	if err != nil {
+		t.Fatalf("registry A: %v", err)
+	}
+	rB, err := GetComponentRegistryFor(dpB)
+	if err != nil {
+		t.Fatalf("registry B: %v", err)
+	}
+
+	if rA == rB {
+		t.Fatal("expected distinct registries for distinct providers")
+	}
+	if rA.Get("alpha-only") == nil {
+		t.Errorf("registry A missing alpha-only component")
+	}
+	if rA.Get("beta-only") != nil {
+		t.Errorf("registry A leaked beta-only component")
+	}
+	if rB.Get("beta-only") == nil {
+		t.Errorf("registry B missing beta-only component")
+	}
+	if rB.Get("alpha-only") != nil {
+		t.Errorf("registry B leaked alpha-only component")
+	}
+}
+
+func TestEvictCachedRegistry_Refetches(t *testing.T) {
+	dp := buildProviderWithRegistry(t, "registry-evict.yaml")
+	first, err := GetComponentRegistryFor(dp)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	EvictCachedRegistry(dp)
+	second, err := GetComponentRegistryFor(dp)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first == second {
+		t.Errorf("expected fresh registry after evict")
+	}
+}
+
+func TestEvictCachedRegistry_NilIsNoOp(t *testing.T) {
+	dp := buildProviderWithRegistry(t, "registry-evict.yaml")
+	first, err := GetComponentRegistryFor(dp)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// Evicting nil must not disturb other providers' cached entries.
+	EvictCachedRegistry(nil)
+	second, err := GetComponentRegistryFor(dp)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first != second {
+		t.Errorf("expected same cached registry after nil evict, got fresh")
+	}
+}
+
+func TestGetComponentRegistryFor_NilProviderFallsBack(t *testing.T) {
+	// A nil provider routes through GetDataProvider(); the call should
+	// succeed and return the embedded registry without panicking.
+	r, err := GetComponentRegistryFor(nil)
+	if err != nil {
+		t.Fatalf("nil provider: %v", err)
+	}
+	if r == nil {
+		t.Fatal("expected non-nil registry for nil provider fallback")
+	}
+}

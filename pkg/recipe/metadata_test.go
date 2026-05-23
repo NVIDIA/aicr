@@ -1074,7 +1074,7 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 		},
 	}
 	criteria := NewCriteria()
-	result, err := finalizeRecipeResult(criteria, &spec, []string{"base"})
+	result, err := finalizeRecipeResult(nil, criteria, &spec, []string{"base"})
 	if err != nil {
 		t.Fatalf("finalizeRecipeResult() error: %v", err)
 	}

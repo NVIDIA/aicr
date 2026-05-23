@@ -421,9 +421,9 @@ validators:
 	}
 
 	// Save and restore global provider
-	originalProvider := recipe.GetDataProvider()
-	recipe.SetDataProvider(layered)
-	defer recipe.SetDataProvider(originalProvider)
+	originalProvider := recipe.GetDataProvider()   //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+	recipe.SetDataProvider(layered)                //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+	defer recipe.SetDataProvider(originalProvider) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
 
 	// Load catalog — should merge embedded + external
 	cat, err := Load("", "")

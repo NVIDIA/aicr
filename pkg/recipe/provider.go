@@ -605,12 +605,12 @@ func mergeRegistries(embedded, external *ComponentRegistry) *ComponentRegistry {
 // catalogForMerge is a minimal representation for catalog merge operations.
 // Uses generic map types to avoid importing pkg/validator/catalog (which would
 // create a circular dependency). All validator entry fields are preserved through
-// the map[string]interface{} round-trip.
+// the map[string]any round-trip.
 type catalogForMerge struct {
-	APIVersion string                   `yaml:"apiVersion"`
-	Kind       string                   `yaml:"kind"`
-	Metadata   map[string]interface{}   `yaml:"metadata"`
-	Validators []map[string]interface{} `yaml:"validators"`
+	APIVersion string           `yaml:"apiVersion"`
+	Kind       string           `yaml:"kind"`
+	Metadata   map[string]any   `yaml:"metadata"`
+	Validators []map[string]any `yaml:"validators"`
 }
 
 // getMergedCatalog returns the merged catalogFileName content.
@@ -644,7 +644,7 @@ func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
 		Kind:       embedded.Kind,
 		Metadata:   embedded.Metadata,
 		Validators: mergeByName(embedded.Validators, external.Validators,
-			func(v map[string]interface{}) string { s, _ := v["name"].(string); return s }),
+			func(v map[string]any) string { s, _ := v["name"].(string); return s }),
 	}
 }
 
@@ -659,16 +659,27 @@ var (
 // This should be called before any recipe operations if using external data.
 // Note: This invalidates cached data, so callers should ensure this is called
 // early in the application lifecycle.
+//
+// Deprecated: prefer recipe.NewBuilder(recipe.WithDataProvider(dp)) to bind
+// a provider to a specific Builder instance. The package-global provider is
+// retained for back-compat with the CLI and API server but will be removed
+// in a future release. See https://github.com/NVIDIA/aicr/issues/983 for the
+// migration plan.
 func SetDataProvider(provider DataProvider) {
 	dataProviderMu.Lock()
 	defer dataProviderMu.Unlock()
 	globalDataProvider = provider
-	dataProviderGeneration++
+	dataProviderGeneration++ // TODO(#983): remove with deprecation
 	slog.Info("data provider set", "generation", dataProviderGeneration)
 }
 
 // GetDataProvider returns the global data provider.
 // Returns the embedded provider if none was set.
+//
+// Deprecated: callers that need a specific provider should hold their own
+// reference (typically obtained from NewLayeredDataProvider or
+// NewEmbeddedDataProvider) and pass it via WithDataProvider rather than
+// relying on package state. See https://github.com/NVIDIA/aicr/issues/983.
 func GetDataProvider() DataProvider {
 	dataProviderMu.Lock()
 	defer dataProviderMu.Unlock()

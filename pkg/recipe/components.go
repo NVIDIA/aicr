@@ -201,46 +201,78 @@ type ComponentValidationConfig struct {
 	Message string `yaml:"message,omitempty"`
 }
 
-// Global component registry, keyed by the DataProvider generation that
-// produced it. SetDataProvider increments the generation; the next call to
-// GetComponentRegistry observes the change and rebuilds the cache so a
-// late-bound external data source actually takes effect.
-var (
-	registryCacheMu  sync.Mutex
-	registryCache    *ComponentRegistry
-	registryCacheErr error
-	registryCacheGen = -1
-)
+// registryCacheEntry holds the lazily-built ComponentRegistry for a single
+// DataProvider identity. sync.Once gates concurrent first-load callers onto
+// the same registry and the same error.
+type registryCacheEntry struct {
+	once     sync.Once
+	registry *ComponentRegistry
+	err      error
+}
 
-// GetComponentRegistry returns the global component registry. The registry is
-// cached, but the cache is invalidated whenever SetDataProvider is called so
-// callers that swap in an external data source see the new content.
-func GetComponentRegistry() (*ComponentRegistry, error) {
-	gen := getDataProviderGeneration()
-	registryCacheMu.Lock()
-	defer registryCacheMu.Unlock()
-	if registryCacheGen == gen && (registryCache != nil || registryCacheErr != nil) {
-		return registryCache, registryCacheErr
+// registryCache holds registryCacheEntry pointers keyed by DataProvider
+// identity. Two callers bound to different DataProvider values populate
+// distinct entries; a single provider value yields a single shared registry
+// regardless of caller goroutine count. EvictCachedRegistry drops a single
+// entry so callers can force a refetch after rotating provider content
+// without disturbing other providers.
+var registryCache sync.Map // map[DataProvider]*registryCacheEntry
+
+// GetComponentRegistryFor returns the component registry for the supplied
+// DataProvider. Concurrent callers with the same provider observe the same
+// singleton; distinct providers populate distinct cache entries and never
+// share state. A nil provider falls back to GetDataProvider() so the legacy
+// GetComponentRegistry entry point continues to work transparently.
+//
+// Note: a first-load error is preserved by sync.Once and returned to every
+// subsequent caller for the same provider until EvictCachedRegistry drops
+// the entry.
+func GetComponentRegistryFor(dp DataProvider) (*ComponentRegistry, error) {
+	if dp == nil {
+		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
 	}
-	registryCache, registryCacheErr = loadComponentRegistry()
-	registryCacheGen = gen
-	return registryCache, registryCacheErr
+	e, _ := registryCache.LoadOrStore(dp, &registryCacheEntry{})
+	entry := e.(*registryCacheEntry)
+	entry.once.Do(func() {
+		entry.registry, entry.err = loadComponentRegistryFor(dp)
+	})
+	return entry.registry, entry.err
 }
 
-// ResetComponentRegistryForTesting resets the cached registry so it will be
-// reloaded from the current DataProvider on the next call to
-// GetComponentRegistry. This must only be called from tests.
+// GetComponentRegistry returns the component registry for the package-global
+// DataProvider. New callers — especially those that need per-tenant
+// isolation — should use GetComponentRegistryFor directly with a
+// caller-supplied provider.
+func GetComponentRegistry() (*ComponentRegistry, error) {
+	return GetComponentRegistryFor(GetDataProvider()) //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+}
+
+// EvictCachedRegistry drops the cached registry for the supplied provider
+// so the next GetComponentRegistryFor call rebuilds from source. Passing a
+// nil provider is a no-op (callers handle that case explicitly to avoid
+// silently evicting the package-global registry).
+func EvictCachedRegistry(dp DataProvider) {
+	if dp == nil {
+		return
+	}
+	registryCache.Delete(dp)
+}
+
+// ResetComponentRegistryForTesting drops every cached registry so the next
+// GetComponentRegistryFor call rebuilds from source. This must only be
+// called from tests.
 func ResetComponentRegistryForTesting() {
-	registryCacheMu.Lock()
-	defer registryCacheMu.Unlock()
-	registryCache = nil
-	registryCacheErr = nil
-	registryCacheGen = -1
+	registryCache.Range(func(k, _ any) bool {
+		registryCache.Delete(k)
+		return true
+	})
 }
 
-// loadComponentRegistry loads the component registry from the data provider.
-func loadComponentRegistry() (*ComponentRegistry, error) {
-	provider := GetDataProvider()
+// loadComponentRegistryFor loads the component registry from the supplied
+// provider. It is pure with respect to the package-global DataProvider —
+// callers that need package-global semantics route through
+// GetComponentRegistry, which resolves the provider once at the entry point.
+func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error) {
 	data, err := provider.ReadFile("registry.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read registry.yaml", err)

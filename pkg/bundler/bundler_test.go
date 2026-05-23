@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -352,7 +353,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 	}{
 		{
 			name:           "recipe disabled + --set enabled=true => included",
-			recipeEnabled:  boolPtr(false),
+			recipeEnabled:  new(bool),
 			setEnabled:     "true",
 			expectIncluded: true,
 		},
@@ -364,7 +365,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 		},
 		{
 			name:           "recipe disabled + no --set => excluded",
-			recipeEnabled:  boolPtr(false),
+			recipeEnabled:  new(bool),
 			setEnabled:     "",
 			expectIncluded: false,
 		},
@@ -378,7 +379,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			// Fail closed: an unparseable --set enabled value must error
 			// out rather than silently ignore the operator's intent.
 			name:          "invalid --set value => error",
-			recipeEnabled: boolPtr(false),
+			recipeEnabled: new(bool),
 			setEnabled:    "ture",
 			expectErr:     true,
 		},
@@ -494,8 +495,6 @@ func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
 		t.Errorf("expected controller.replicaCount override in values, got:\n%s", valuesStr)
 	}
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 func TestMake_WithValueOverrides(t *testing.T) {
 	cfg := config.NewConfig(
@@ -1300,9 +1299,9 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 			t.Fatalf("NewLayeredDataProvider: %v", layeredErr)
 		}
 
-		original := recipe.GetDataProvider()
-		recipe.SetDataProvider(layered)
-		defer recipe.SetDataProvider(original)
+		original := recipe.GetDataProvider()   //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+		recipe.SetDataProvider(layered)        //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+		defer recipe.SetDataProvider(original) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
 
 		_, err := bundler.collectComponentManifests(context.Background(), recipeResult)
 		if err == nil {
@@ -1352,7 +1351,7 @@ func TestMake_Reproducible(t *testing.T) {
 	// Generate bundles twice in different directories
 	var fileHashes [2]map[string]string
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		bundler, err := New()
 		if err != nil {
 			t.Fatalf("iteration %d: New() error = %v", i, err)
@@ -1667,5 +1666,109 @@ func TestMake_PreservesTimeoutFromExtractValues(t *testing.T) {
 	if se.Code != errors.ErrCodeTimeout {
 		t.Errorf("expected error code %s, got %s (error: %v)",
 			errors.ErrCodeTimeout, se.Code, err)
+	}
+}
+
+// TestBundlerValueParity_WithRecipeResult pins the invariant that the
+// bundler's extractComponentValues produces values byte-identical (deep-equal)
+// to RecipeResult.GetValuesForComponent for every component in a representative
+// RecipeResult, when run with a vanilla bundler (no --set overrides, no node
+// scheduling configured, so applyNodeSchedulingOverrides is a no-op).
+//
+// This guards against silent drift between the two code paths as the cache
+// layer beneath them is refactored. If this test fails, the bundler has
+// started returning different values than the canonical RecipeResult adapter —
+// investigate before changing the test.
+func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
+	// Build a RecipeResult covering all three value-source shapes:
+	//   - ValuesFile only            → gpu-operator (loads from embedded data)
+	//   - Overrides only             → cert-manager (inline only)
+	//   - ValuesFile + Overrides     → network-operator (hybrid merge)
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:       "gpu-operator",
+				Version:    "v25.3.3",
+				Type:       "helm",
+				Source:     "https://helm.ngc.nvidia.com/nvidia",
+				ValuesFile: "components/gpu-operator/values.yaml",
+			},
+			{
+				Name:    "cert-manager",
+				Version: "v1.15.3",
+				Type:    "helm",
+				Source:  "https://charts.jetstack.io",
+				Overrides: map[string]any{
+					"installCRDs": true,
+					"resources": map[string]any{
+						"requests": map[string]any{
+							"cpu":    "100m",
+							"memory": "128Mi",
+						},
+					},
+				},
+			},
+			{
+				Name:       "network-operator",
+				Version:    "v25.4.0",
+				Type:       "helm",
+				Source:     "https://helm.ngc.nvidia.com/nvidia",
+				ValuesFile: "components/network-operator/values.yaml",
+				Overrides: map[string]any{
+					"deployCR": false,
+				},
+			},
+		},
+	}
+
+	// Vanilla bundler: default config (no --set overrides, no scheduling).
+	// Under these conditions applyNodeSchedulingOverrides is a no-op, so the
+	// two outputs must be deep-equal without any mirroring helper.
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	bundlerValues, err := b.extractComponentValues(context.Background(), recipeResult)
+	if err != nil {
+		t.Fatalf("extractComponentValues() error = %v", err)
+	}
+
+	// Sanity: every ref should have produced an entry; at least one must be
+	// non-empty so the test isn't trivially passing on empty-vs-empty.
+	if len(bundlerValues) != len(recipeResult.ComponentRefs) {
+		t.Fatalf("extractComponentValues returned %d entries, want %d",
+			len(bundlerValues), len(recipeResult.ComponentRefs))
+	}
+	var anyNonEmpty bool
+	for _, v := range bundlerValues {
+		if len(v) > 0 {
+			anyNonEmpty = true
+			break
+		}
+	}
+	if !anyNonEmpty {
+		t.Fatal("all bundler-extracted component values are empty; fixture is not exercising the merge paths")
+	}
+
+	for _, ref := range recipeResult.ComponentRefs {
+		t.Run(ref.Name, func(t *testing.T) {
+			adapted, err := recipeResult.GetValuesForComponent(ref.Name)
+			if err != nil {
+				t.Fatalf("GetValuesForComponent(%q): %v", ref.Name, err)
+			}
+
+			got, ok := bundlerValues[ref.Name]
+			if !ok {
+				t.Fatalf("extractComponentValues missing entry for %q", ref.Name)
+			}
+
+			if !reflect.DeepEqual(adapted, got) {
+				t.Errorf("value mismatch for %q:\n  RecipeResult.GetValuesForComponent: %#v\n  extractComponentValues:             %#v",
+					ref.Name, adapted, got)
+			}
+		})
 	}
 }

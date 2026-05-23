@@ -933,7 +933,7 @@ func TestDataProviderGeneration(t *testing.T) {
 
 	// Setting a provider should increment generation
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
-	SetDataProvider(embedded)
+	SetDataProvider(embedded) //nolint:staticcheck // tests legacy global-provider behavior; tracked by #983 Stage 2
 
 	newGen := getDataProviderGeneration()
 	if newGen != startGen+1 {
@@ -941,7 +941,7 @@ func TestDataProviderGeneration(t *testing.T) {
 	}
 
 	// Setting again should increment again
-	SetDataProvider(embedded)
+	SetDataProvider(embedded) //nolint:staticcheck // tests legacy global-provider behavior; tracked by #983 Stage 2
 	if getDataProviderGeneration() != startGen+2 {
 		t.Errorf("expected generation %d, got %d", startGen+2, getDataProviderGeneration())
 	}
