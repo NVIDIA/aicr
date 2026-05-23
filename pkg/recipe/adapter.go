@@ -17,7 +17,9 @@ package recipe
 
 import (
 	"embed"
+	stderrors "errors"
 	"fmt"
+	"io/fs"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/recipes"
@@ -53,7 +55,14 @@ func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error
 	if dp == nil {
 		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
 	}
-	return dp.ReadFile(path)
+	content, err := dp.ReadFile(path)
+	if err != nil {
+		if stderrors.Is(err, fs.ErrNotExist) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("manifest file not found: %q", path), err)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read manifest file %q", path), err)
+	}
+	return content, nil
 }
 
 // RecipeInput is an interface that both Recipe and RecipeResult implement.

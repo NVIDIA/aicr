@@ -1600,7 +1600,7 @@ process-global one. Each call site that builds recipes should construct its
 own provider and pass it through `WithDataProvider`:
 
 ```go
-embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "data")
+embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 builder := recipe.NewBuilder(
     recipe.WithVersion(version),
     recipe.WithDataProvider(embedded),
@@ -1663,7 +1663,7 @@ func initDataProvider(cmd *cli.Command) error {
         return nil  // Use default embedded provider
     }
 
-    embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "data")
+    embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
     layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
         ExternalDir:   dataDir,
         AllowSymlinks: false,

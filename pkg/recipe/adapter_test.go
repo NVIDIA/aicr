@@ -16,10 +16,13 @@ package recipe
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -800,5 +803,24 @@ func TestGetManifestContentWithProvider_NilFallback(t *testing.T) {
 	}
 	if len(content) == 0 {
 		t.Error("expected non-empty content from global fallback")
+	}
+}
+
+// TestGetManifestContentWithProvider_NotFound verifies that missing manifest
+// files surface as a structured pkg/errors error with ErrCodeNotFound while
+// preserving the underlying fs.ErrNotExist in the wrap chain — bundler
+// callers depend on stderrors.Is(err, fs.ErrNotExist) for distinguishing
+// missing-file errors from internal read failures.
+func TestGetManifestContentWithProvider_NotFound(t *testing.T) {
+	dp := newInMemoryProvider("empty", map[string][]byte{})
+	_, err := GetManifestContentWithProvider(dp, "components/missing/manifests/x.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing manifest, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("expected ErrCodeNotFound, got %v", err)
+	}
+	if !stderrors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected wrap chain to preserve fs.ErrNotExist, got %v", err)
 	}
 }
