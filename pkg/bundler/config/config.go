@@ -26,6 +26,11 @@ import (
 // DeployerType represents the type of deployment method used for generated bundles.
 type DeployerType string
 
+// DefaultFluxNamespace is the default Kubernetes namespace where Flux CRs
+// (HelmRelease, sources, ArtifactGenerator) are deployed. Overridable via
+// WithFluxNamespace / --flux-namespace.
+const DefaultFluxNamespace = "flux-system"
+
 // Supported deployer types.
 const (
 	// DeployerHelm generates Helm per-component bundles (default).
@@ -153,6 +158,17 @@ type Config struct {
 	// deployable. Off by default — non-vendored bundles preserve the
 	// CVE-yank fail-loud signal and avoid bundle-time network egress.
 	vendorCharts bool
+
+	// ociSourceName is the name of the outer OCIRepository that Flux
+	// sources the bundle from. When non-empty and deployer is flux,
+	// local-chart HelmReleases use ArtifactGenerator + ExternalArtifact
+	// (spec.chartRef) instead of GitRepository (spec.chart.spec.sourceRef).
+	// Empty preserves the existing GitRepository code path.
+	ociSourceName string
+
+	// fluxNamespace is the Kubernetes namespace where Flux CRs (HelmRelease,
+	// sources, ArtifactGenerator) are deployed. Defaults to DefaultFluxNamespace.
+	fluxNamespace string
 }
 
 // Getter methods for read-only access
@@ -318,6 +334,12 @@ func (c *Config) StorageClass() string {
 // --vendor-charts on the CLI or vendor-charts=true on the API.
 func (c *Config) VendorCharts() bool {
 	return c.vendorCharts
+}
+
+// OCISourceName returns the name of the outer OCIRepository for Flux
+// ArtifactGenerator mode. Empty means the feature is disabled.
+func (c *Config) OCISourceName() string {
+	return c.ociSourceName
 }
 
 // Validate checks if the Config has valid settings.
@@ -524,6 +546,32 @@ func WithStorageClass(storageClass string) Option {
 func WithVendorCharts(enabled bool) Option {
 	return func(c *Config) {
 		c.vendorCharts = enabled
+	}
+}
+
+// WithOCISourceName sets the outer OCIRepository name for Flux
+// ArtifactGenerator mode. When non-empty, local-chart HelmReleases
+// use ArtifactGenerator + ExternalArtifact instead of GitRepository.
+func WithOCISourceName(name string) Option {
+	return func(c *Config) {
+		c.ociSourceName = name
+	}
+}
+
+// FluxNamespace returns the Kubernetes namespace where Flux CRs are deployed.
+// Returns DefaultFluxNamespace when not explicitly set.
+func (c *Config) FluxNamespace() string {
+	if c.fluxNamespace == "" {
+		return DefaultFluxNamespace
+	}
+	return c.fluxNamespace
+}
+
+// WithFluxNamespace sets the namespace for generated Flux CRs. Must match
+// the namespace of the Flux installation in the target cluster.
+func WithFluxNamespace(ns string) Option {
+	return func(c *Config) {
+		c.fluxNamespace = ns
 	}
 }
 

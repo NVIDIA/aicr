@@ -1076,6 +1076,8 @@ aicr bundle [flags]
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
+| `--flux-oci-source-name` | | string | Name of the OCIRepository CR that Flux uses to pull the bundle (default: `aicr-bundle`). Used with `--deployer flux` and OCI output. Must match the OCIRepository deployed in the target cluster. See [Flux OCI Mode](#flux-oci-mode). |
+| `--flux-namespace` | | string | Kubernetes namespace where Flux CRs (HelmRelease, sources, ArtifactGenerator) are deployed (default: `flux-system`). Must match the namespace of the Flux installation in the target cluster. |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
@@ -1774,6 +1776,34 @@ Argo CD Applications use multi-source to:
 1. Pull Helm charts from upstream repositories
 2. Apply values.yaml from your GitOps repository
 3. Deploy additional manifests from component's manifests/ directory (if present)
+
+#### Flux OCI Mode
+
+When using `--deployer flux` with OCI output (`--output oci://...`), AICR generates ArtifactGenerator and ExternalArtifact CRs instead of GitRepository sources for local-chart components. This allows Flux to reconcile HelmReleases directly from OCI artifacts without a Git repository.
+
+**Prerequisites (Flux v2.7+):**
+
+- **source-watcher controller** must be deployed (`source.extensions.fluxcd.io`). This controller watches ArtifactGenerator CRs and creates ExternalArtifact objects.
+- **ExternalArtifact=true feature gate** must be enabled on helm-controller. This allows HelmRelease CRs to reference ExternalArtifact objects via `spec.chartRef`.
+
+Without both prerequisites, bundles generate successfully but HelmReleases will not reconcile at deploy time.
+
+**Configuration flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--flux-oci-source-name` | `aicr-bundle` | Name of the OCIRepository CR in the target cluster. Every generated ArtifactGenerator references this name in `spec.sources[0].name`. |
+| `--flux-namespace` | `flux-system` | Namespace where all Flux CRs (HelmRelease, sources, ArtifactGenerator) are placed. |
+
+```shell
+# Generate an OCI bundle with a custom OCIRepository name and namespace
+aicr bundle -r recipe.yaml --deployer flux \
+  --output oci://ghcr.io/my-org/aicr-bundle:v1.0.0 \
+  --flux-oci-source-name my-oci-repo \
+  --flux-namespace gitops
+```
+
+The generated ArtifactGenerator CRs extract per-component chart directories from the outer OCIRepository into ExternalArtifact objects. Each HelmRelease then references the ExternalArtifact via `spec.chartRef` instead of the traditional `spec.chart.spec.sourceRef` pointing at a GitRepository.
 
 #### Bundle Attestation
 

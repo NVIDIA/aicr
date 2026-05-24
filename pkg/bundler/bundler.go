@@ -440,6 +440,8 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPreManifests: componentPreManifests,
 			ComponentManifests:    componentManifests,
 			DynamicValues:         dynamicValues,
+			Namespace:             b.Config.FluxNamespace(),
+			OCISourceName:         b.Config.OCISourceName(),
 			VendorCharts:          b.Config.VendorCharts(),
 		}, nil
 

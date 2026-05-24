@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -37,11 +38,12 @@ import (
 
 // Output file names used across generation.
 const (
-	fileChart         = "Chart.yaml"
-	fileConfigMap     = "configmap-values.yaml"
-	fileHelmRelease   = "helmrelease.yaml"
-	fileKustomization = "kustomization.yaml"
-	fileReadme        = "README.md"
+	fileArtifactGenerator = "artifactgenerator.yaml"
+	fileChart             = "Chart.yaml"
+	fileConfigMap         = "configmap-values.yaml"
+	fileHelmRelease       = "helmrelease.yaml"
+	fileKustomization     = "kustomization.yaml"
+	fileReadme            = "README.md"
 )
 
 // summaryTypeHelmRelease is the value placed in ComponentSummary.Type for
@@ -70,8 +72,14 @@ var kustomizationTemplate string
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
 
+//go:embed templates/artifactgenerator.yaml.tmpl
+var artifactGeneratorTemplate string
+
+//go:embed templates/helmrelease-chartref.yaml.tmpl
+var helmReleaseChartRefTemplate string
+
 // DependsOnRef is a Flux dependsOn reference to another resource.
-// All HelmReleases live in flux-system, so no namespace is needed.
+// All HelmReleases share a single namespace, so no namespace is needed.
 type DependsOnRef struct {
 	Name string
 }
@@ -83,6 +91,7 @@ type RootKustomizationData struct {
 
 // ReadmeData carries data for the README.md template.
 type ReadmeData struct {
+	Namespace      string // Flux install namespace (e.g. "flux-system")
 	BundlerVersion string
 	Components     []ComponentSummary
 }
@@ -143,6 +152,21 @@ type Generator struct {
 	// ConfigMap and referenced via spec.valuesFrom in the HelmRelease.
 	DynamicValues map[string][]string
 
+	// Namespace is the Kubernetes namespace where Flux CRs (HelmRelease,
+	// sources, ArtifactGenerator) are deployed. Defaults to
+	// config.DefaultFluxNamespace ("flux-system") via resolveNamespace().
+	Namespace string
+
+	// OCISourceName is the name of the outer OCIRepository that Flux pulls
+	// the bundle from. When non-empty, local-chart components emit an
+	// ArtifactGenerator + ExternalArtifact pair and reference the
+	// ExternalArtifact via spec.chartRef in the HelmRelease (instead of
+	// spec.chart.spec with a GitRepository source). This eliminates the
+	// placeholder GitRepository URL that stalls helm-controller under OCI
+	// consumption.
+	// When empty, the generator falls back to the existing GitRepository path.
+	OCISourceName string
+
 	// VendorCharts pulls upstream Helm chart bytes into the bundle at
 	// bundle time so the resulting artifact is air-gap deployable.
 	// Off by default. With the flag set, vendorable Helm-typed components
@@ -160,6 +184,15 @@ type Generator struct {
 	// Captured here so provenance.yaml can be written after component
 	// generation without re-threading the slice through every helper.
 	vendorRecords []localformat.VendorRecord
+}
+
+// resolveNamespace returns the effective Flux install namespace,
+// defaulting to config.DefaultFluxNamespace ("flux-system").
+func (g *Generator) resolveNamespace() string {
+	if g.Namespace != "" {
+		return g.Namespace
+	}
+	return config.DefaultFluxNamespace
 }
 
 // resolveTargetRevision returns the effective target revision, defaulting to "main".
@@ -236,8 +269,17 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	// Collect and deduplicate sources. When vendoring, skip HelmRepository
 	// sources for components that will reference vendored local charts.
-	helmSources := collectHelmSources(sortedRefs, g.VendorCharts)
-	gitSources := collectGitSources(g.resolveRepoURL(), g.resolveTargetRevision())
+	// When OCISourceName is set, skip GitRepository sources entirely —
+	// local-chart HelmReleases use ArtifactGenerator + ExternalArtifact
+	// instead of the placeholder GitRepository (issue #964).
+	ns := g.resolveNamespace()
+	helmSources := collectHelmSources(sortedRefs, g.VendorCharts, ns)
+	var gitSources map[string]*GitRepoSourceData
+	if g.OCISourceName == "" {
+		gitSources = collectGitSources(g.resolveRepoURL(), g.resolveTargetRevision(), ns)
+	} else {
+		gitSources = make(map[string]*GitRepoSourceData)
+	}
 
 	// Write source CRs.
 	if err := g.writeSources(helmSources, gitSources, sourcesDir, output); err != nil {
@@ -274,6 +316,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	// Write README.md.
 	readmeData := ReadmeData{
+		Namespace:      ns,
 		BundlerVersion: deployer.NormalizeVersionWithDefault(g.Version),
 		Components:     buildComponentSummaries(sortedRefs, g.ComponentPreManifests, g.ComponentManifests),
 	}
@@ -372,7 +415,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to create pre directory %s", preName), mkErr)
 		}
-		preWroteCM, preErr := g.generateManifestHelmChart(ref.Name, preName, ref.Namespace, preDir,
+		preWroteCM, preExtra, preErr := g.generateManifestHelmChart(ref.Name, preName, ref.Namespace, preDir,
 			g.ComponentPreManifests[ref.Name], gitSources, primaryDependsOn, output)
 		if preErr != nil {
 			return nil, preErr
@@ -381,6 +424,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		if preWroteCM {
 			resources = append(resources, filepath.Join(preName, fileConfigMap))
 		}
+		resources = append(resources, preExtra...)
 		// Primary chart now waits for the pre release.
 		primaryDependsOn = []DependsOnRef{{Name: preName}}
 	}
@@ -390,7 +434,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// Manifest-only Helm component: no chart or source, only manifests.
 		// Package as a local Helm chart so Flux renders the templates natively.
 		if ref.Chart == "" && ref.Source == "" && hasManifests {
-			wroteCM, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir,
+			wroteCM, extra, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir,
 				g.ComponentManifests[ref.Name], gitSources, primaryDependsOn, output)
 			if genErr != nil {
 				return nil, genErr
@@ -399,6 +443,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			if wroteCM {
 				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
 			}
+			resources = append(resources, extra...)
 			return resources, nil
 		}
 
@@ -407,7 +452,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// components still produce a separate -post inline chart for
 		// manifests (the existing flow handles them correctly).
 		if g.VendorCharts && isVendorable(ref) {
-			wroteCM, rec, vendErr := g.generateVendoredHelmComponent(
+			wroteCM, rec, extra, vendErr := g.generateVendoredHelmComponent(
 				ctx, ref, compDir, primaryDependsOn, gitSources, puller, output)
 			if vendErr != nil {
 				return nil, vendErr
@@ -417,6 +462,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			if wroteCM {
 				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
 			}
+			resources = append(resources, extra...)
 			slog.Info("wrote vendored chart for flux",
 				"component", ref.Name,
 				"chart", rec.Chart, "version", rec.Version, "sha256", rec.SHA256)
@@ -447,7 +493,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			}
 
 			postDependsOn := []DependsOnRef{{Name: ref.Name}}
-			postWroteCM, postGenErr := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, postDir,
+			postWroteCM, postExtra, postGenErr := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, postDir,
 				g.ComponentManifests[ref.Name], gitSources, postDependsOn, output)
 			if postGenErr != nil {
 				return nil, postGenErr
@@ -456,6 +502,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			if postWroteCM {
 				resources = append(resources, filepath.Join(postName, fileConfigMap))
 			}
+			resources = append(resources, postExtra...)
 		}
 
 	default:

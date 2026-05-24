@@ -130,5 +130,14 @@ func helmFuncMap() template.FuncMap {
 			}
 			return val
 		},
+		"replace": func(old, new, src string) string {
+			return strings.ReplaceAll(src, old, new)
+		},
+		"trunc": func(c int, s string) string {
+			if c < 0 || c >= len(s) {
+				return s
+			}
+			return s[:c]
+		},
 	}
 }

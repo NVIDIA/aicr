@@ -1004,3 +1004,42 @@ func TestWorkloadSelectorOptions(t *testing.T) {
 		}
 	})
 }
+
+func TestWithOCISourceName(t *testing.T) {
+	t.Run("set value", func(t *testing.T) {
+		cfg := NewConfig(WithOCISourceName("aicr-bundle"))
+		if cfg.OCISourceName() != "aicr-bundle" {
+			t.Errorf("OCISourceName() = %q, want %q", cfg.OCISourceName(), "aicr-bundle")
+		}
+	})
+
+	t.Run("default empty", func(t *testing.T) {
+		cfg := NewConfig()
+		if cfg.OCISourceName() != "" {
+			t.Errorf("default OCISourceName() = %q, want empty", cfg.OCISourceName())
+		}
+	})
+}
+
+func TestWithFluxNamespace(t *testing.T) {
+	t.Run("set value", func(t *testing.T) {
+		cfg := NewConfig(WithFluxNamespace("gitops"))
+		if cfg.FluxNamespace() != "gitops" {
+			t.Errorf("FluxNamespace() = %q, want %q", cfg.FluxNamespace(), "gitops")
+		}
+	})
+
+	t.Run("default", func(t *testing.T) {
+		cfg := NewConfig()
+		if cfg.FluxNamespace() != DefaultFluxNamespace {
+			t.Errorf("default FluxNamespace() = %q, want %q", cfg.FluxNamespace(), DefaultFluxNamespace)
+		}
+	})
+
+	t.Run("empty string returns default", func(t *testing.T) {
+		cfg := NewConfig(WithFluxNamespace(""))
+		if cfg.FluxNamespace() != DefaultFluxNamespace {
+			t.Errorf("FluxNamespace() with empty = %q, want %q", cfg.FluxNamespace(), DefaultFluxNamespace)
+		}
+	})
+}
