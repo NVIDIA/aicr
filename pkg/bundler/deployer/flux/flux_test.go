@@ -1155,6 +1155,11 @@ func TestCollectHelmSources(t *testing.T) {
 	if len(sources) != 2 {
 		t.Errorf("collectHelmSources(vendorCharts=false) returned %d sources, want 2", len(sources))
 	}
+	for url, src := range sources {
+		if src.Namespace != "flux-system" {
+			t.Errorf("collectHelmSources(vendorCharts=false) source %q has Namespace=%q, want %q", url, src.Namespace, "flux-system")
+		}
+	}
 
 	// With vendoring: vendorable Helm components skip HelmRepository sources.
 	sources = collectHelmSources(refs, true, "flux-system")
@@ -1177,6 +1182,9 @@ func TestCollectGitSources(t *testing.T) {
 	}
 	if src.Branch != "main" {
 		t.Errorf("expected branch 'main', got %q", src.Branch)
+	}
+	if src.Namespace != "flux-system" {
+		t.Errorf("expected Namespace 'flux-system', got %q", src.Namespace)
 	}
 }
 

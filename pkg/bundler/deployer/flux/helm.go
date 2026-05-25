@@ -287,33 +287,10 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	// OCIRepository into an ExternalArtifact that helm-controller can
 	// consume via spec.chartRef.
 	if g.OCISourceName != "" {
-		agName := dirName + "-chart"
-		agData := ArtifactGeneratorData{
-			Name:          agName,
-			Namespace:     g.resolveNamespace(),
-			OCISourceName: g.OCISourceName,
-			ArtifactName:  agName,
-			ChartPath:     dirName,
+		extraResources, ociErr := g.writeOCIArtifactPair(dirName, namespace, dependsOn, valuesFrom, valuesYAML, compDir, output)
+		if ociErr != nil {
+			return false, nil, ociErr
 		}
-		if err := writeTemplate(output, artifactGeneratorTemplate, agData, compDir, fileArtifactGenerator,
-			fmt.Sprintf("failed to write %s for %s", fileArtifactGenerator, compName)); err != nil {
-			return false, nil, err
-		}
-
-		crData := ChartRefHelmReleaseData{
-			Name:            dirName,
-			Namespace:       g.resolveNamespace(),
-			TargetNamespace: namespace,
-			ChartRefName:    agName,
-			DependsOn:       dependsOn,
-			ValuesFrom:      valuesFrom,
-			ValuesYAML:      valuesYAML,
-		}
-		if err := writeTemplate(output, helmReleaseChartRefTemplate, crData, compDir, fileHelmRelease,
-			fmt.Sprintf("failed to write %s for %s", fileHelmRelease, compName)); err != nil {
-			return false, nil, err
-		}
-		extraResources := []string{filepath.Join(dirName, fileArtifactGenerator)}
 		return wroteConfigMap, extraResources, nil
 	}
 
@@ -446,33 +423,10 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 
 	// OCI mode: emit ArtifactGenerator + chartRef HelmRelease.
 	if g.OCISourceName != "" {
-		agName := ref.Name + "-chart"
-		agData := ArtifactGeneratorData{
-			Name:          agName,
-			Namespace:     g.resolveNamespace(),
-			OCISourceName: g.OCISourceName,
-			ArtifactName:  agName,
-			ChartPath:     ref.Name,
+		extraResources, ociErr := g.writeOCIArtifactPair(ref.Name, ref.Namespace, dependsOn, valuesFrom, valuesYAML, compDir, output)
+		if ociErr != nil {
+			return false, localformat.VendorRecord{}, nil, ociErr
 		}
-		if err := writeTemplate(output, artifactGeneratorTemplate, agData, compDir, fileArtifactGenerator,
-			fmt.Sprintf("failed to write %s for %s", fileArtifactGenerator, ref.Name)); err != nil {
-			return false, localformat.VendorRecord{}, nil, err
-		}
-
-		crData := ChartRefHelmReleaseData{
-			Name:            ref.Name,
-			Namespace:       g.resolveNamespace(),
-			TargetNamespace: ref.Namespace,
-			ChartRefName:    agName,
-			DependsOn:       dependsOn,
-			ValuesFrom:      valuesFrom,
-			ValuesYAML:      valuesYAML,
-		}
-		if err := writeTemplate(output, helmReleaseChartRefTemplate, crData, compDir, fileHelmRelease,
-			fmt.Sprintf("failed to write %s for %s", fileHelmRelease, ref.Name)); err != nil {
-			return false, localformat.VendorRecord{}, nil, err
-		}
-		extraResources := []string{filepath.Join(ref.Name, fileArtifactGenerator)}
 		return wroteConfigMap, rec, extraResources, nil
 	}
 
@@ -496,6 +450,44 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	}
 
 	return wroteConfigMap, rec, nil, nil
+}
+
+// writeOCIArtifactPair writes an ArtifactGenerator + chartRef HelmRelease pair
+// for OCI mode. It returns the extra resource paths to include in
+// kustomization.yaml. Both generateManifestHelmChart and
+// generateVendoredHelmComponent delegate to this helper to avoid drift.
+func (g *Generator) writeOCIArtifactPair(name, targetNamespace string,
+	dependsOn []DependsOnRef, valuesFrom []ValuesFromRef, valuesYAML string,
+	compDir string, output *deployer.Output) ([]string, error) {
+
+	agName := name + "-chart"
+	agData := ArtifactGeneratorData{
+		Name:          agName,
+		Namespace:     g.resolveNamespace(),
+		OCISourceName: g.OCISourceName,
+		ArtifactName:  agName,
+		ChartPath:     name,
+	}
+	if err := writeTemplate(output, artifactGeneratorTemplate, agData, compDir, fileArtifactGenerator,
+		fmt.Sprintf("failed to write %s for %s", fileArtifactGenerator, name)); err != nil {
+		return nil, err
+	}
+
+	crData := ChartRefHelmReleaseData{
+		Name:            name,
+		Namespace:       g.resolveNamespace(),
+		TargetNamespace: targetNamespace,
+		ChartRefName:    agName,
+		DependsOn:       dependsOn,
+		ValuesFrom:      valuesFrom,
+		ValuesYAML:      valuesYAML,
+	}
+	if err := writeTemplate(output, helmReleaseChartRefTemplate, crData, compDir, fileHelmRelease,
+		fmt.Sprintf("failed to write %s for %s", fileHelmRelease, name)); err != nil {
+		return nil, err
+	}
+
+	return []string{filepath.Join(name, fileArtifactGenerator)}, nil
 }
 
 // writeConfigMap writes a ConfigMap YAML file containing the given dynamic

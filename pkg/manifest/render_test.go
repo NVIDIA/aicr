@@ -53,7 +53,7 @@ func TestRender(t *testing.T) {
 		},
 		{
 			name:    "replace and trunc in chart label",
-			content: `helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" | trunc 63 }}`,
+			content: `helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}`,
 			input:   RenderInput{ComponentName: "test", ChartName: "gpu-operator-pre", ChartVersion: "0.1.0+09d01b0b4d7d"},
 			wantSub: "helm.sh/chart: gpu-operator-pre-0.1.0_09d01b0b4d7d",
 		},
@@ -193,8 +193,15 @@ func TestHelmFuncMapFunctions(t *testing.T) {
 		if got := fn(0, "test"); got != "" {
 			t.Errorf("trunc(0, 'test') = %q, want %q", got, "")
 		}
-		if got := fn(-1, "test"); got != "test" {
-			t.Errorf("trunc(-1, 'test') = %q, want %q", got, "test")
+		// Sprig semantics: negative c returns last |c| chars.
+		if got := fn(-1, "test"); got != "t" {
+			t.Errorf("trunc(-1, 'test') = %q, want %q", got, "t")
+		}
+		if got := fn(-5, "hello world"); got != "world" {
+			t.Errorf("trunc(-5, 'hello world') = %q, want %q", got, "world")
+		}
+		if got := fn(-20, "short"); got != "short" {
+			t.Errorf("trunc(-20, 'short') = %q, want %q", got, "short")
 		}
 	})
 }

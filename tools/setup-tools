@@ -444,7 +444,17 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             FLUX_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/${FLUX_TAR}"
             if verify_download_url "$FLUX_URL" "flux ${FLUX_VERSION} for ${FLUX_CLI_OS} ${FLUX_CLI_ARCH}"; then
                 FLUX_TMP=$(mktemp -d)
-                curl -fsSL "$FLUX_URL" | tar -xzC "$FLUX_TMP"
+                curl -fsSL -o "${FLUX_TMP}/${FLUX_TAR}" "$FLUX_URL"
+                # Verify checksum from the release checksums file
+                FLUX_CHECKSUMS_URL="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/flux_${FLUX_VER}_checksums.txt"
+                curl -fsSL -o "${FLUX_TMP}/checksums.txt" "$FLUX_CHECKSUMS_URL"
+                FLUX_EXPECTED=$(grep "  ${FLUX_TAR}$" "${FLUX_TMP}/checksums.txt" | awk '{print $1}')
+                if [[ -n "${FLUX_EXPECTED}" ]]; then
+                    verify_sha256 "${FLUX_TMP}/${FLUX_TAR}" "${FLUX_EXPECTED}"
+                else
+                    log_warning "Could not extract checksum for ${FLUX_TAR}; skipping verification"
+                fi
+                tar -xzC "$FLUX_TMP" -f "${FLUX_TMP}/${FLUX_TAR}"
                 sudo mv "$FLUX_TMP/flux" /usr/local/bin/flux
                 sudo chmod +x /usr/local/bin/flux
                 rm -rf "$FLUX_TMP"

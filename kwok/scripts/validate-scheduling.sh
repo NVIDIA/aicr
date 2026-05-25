@@ -60,7 +60,7 @@
 #                            resource. Default: 30.
 #   KWOK_FLUX_SYNC_TIMEOUT   Seconds to wait for the outer Kustomization +
 #                            all HelmReleases to reach a terminal state
-#                            before failing. Default: 300.
+#                            before failing. Default: 500.
 #   KWOK_FLUX_ROOT_GRACE     Seconds to wait for the outer Kustomization to
 #                            appear in the cluster before failing. A missing
 #                            Kustomization after the grace window indicates
@@ -1578,20 +1578,23 @@ wait_for_flux_sync() {
         # components), verify they reach Ready=True — proves source-watcher
         # could extract sub-directories from the OCI bundle into
         # ExternalArtifacts. This is the regression surface for issue #964.
-        local ag_json ag_total ag_not_ready
-        if ag_json=$(kubectl get artifactgenerator -A -o json 2>/dev/null); then
-            ag_total=$(echo "$ag_json" | jq '.items | length')
-            if [[ "$ag_total" -gt 0 ]]; then
-                ag_not_ready=$(echo "$ag_json" | jq '[.items[] | select(
-                    (.status.conditions // []) | map(select(.type == "Ready" and .status == "True")) | length == 0
-                )] | length')
-                if [[ "$ag_not_ready" -gt 0 ]]; then
-                    log_debug "${ag_not_ready}/${ag_total} ArtifactGenerators not Ready yet — waiting..."
-                    sleep 5
-                    continue
-                fi
-                log_info "All ${ag_total} ArtifactGenerators Ready (local-chart OCI extraction verified)"
+        local ag_json ag_total ag_not_ready ag_rc
+        ag_json=$(kubectl get artifactgenerator -A -o json 2>&1) && ag_rc=0 || ag_rc=$?
+        if (( ag_rc != 0 )); then
+            log_error "kubectl get artifactgenerator failed (rc=${ag_rc}): ${ag_json}"
+            return 1
+        fi
+        ag_total=$(echo "$ag_json" | jq '.items | length')
+        if [[ "$ag_total" -gt 0 ]]; then
+            ag_not_ready=$(echo "$ag_json" | jq '[.items[] | select(
+                (.status.conditions // []) | map(select(.type == "Ready" and .status == "True")) | length == 0
+            )] | length')
+            if [[ "$ag_not_ready" -gt 0 ]]; then
+                log_debug "${ag_not_ready}/${ag_total} ArtifactGenerators not Ready yet — waiting..."
+                sleep 5
+                continue
             fi
+            log_info "All ${ag_total} ArtifactGenerators Ready (local-chart OCI extraction verified)"
         fi
 
         log_info "Flux bundle-apply PASS: OCIRepository pulled (rev=$(echo "$oci_json" | jq -r '.status.artifact.revision // "unknown"')), Kustomization applied (rev=${applied_rev}), ${total}/${total} HelmReleases Ready"
@@ -1857,24 +1860,27 @@ main() {
     log_debug "Step 4: Generating bundle..."
     generate_bundle "$recipe"
 
-    # Exclude the Kind control-plane node from bundle DaemonSets. On KWOK
-    # nodes stage-fast fakes pods into Running; on the real Kind node,
+    # Exclude all real (non-KWOK) nodes from bundle DaemonSets. On KWOK
+    # nodes stage-fast fakes pods into Running; on real Kind nodes,
     # containers actually start and CrashLoop because cloud services
     # (AWS IMDS, GCP metadata, etc.) are unavailable.
     #
-    # Two exclusions are needed:
+    # Two exclusions are applied per node:
     #   1. eks.amazonaws.com/compute-type=hybrid  — the ebs-csi-driver
     #      DaemonSet uses a NotIn affinity that skips fargate/auto/hybrid
     #      nodes. Without this label the Kind node passes the NotIn check.
     #   2. nfd-excluded=true:NoSchedule taint — NFD worker DaemonSet
     #      respects this taint and will not schedule on tainted nodes.
-    local cp_node
-    cp_node=$(kubectl get nodes --selector='!kwok.x-k8s.io/node' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-    if [[ -n "$cp_node" ]]; then
-        log_info "Excluding Kind control-plane node ($cp_node) from bundle DaemonSets"
+    local cp_nodes
+    cp_nodes=$(kubectl get nodes --selector='!kwok.x-k8s.io/node' -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    if [[ -z "$cp_nodes" ]]; then
+        log_warn "No real (non-KWOK) nodes found to exclude — DaemonSet CrashLoops may occur"
+    fi
+    for cp_node in $cp_nodes; do
+        log_info "Excluding real node ($cp_node) from bundle DaemonSets"
         kubectl label node "$cp_node" eks.amazonaws.com/compute-type=hybrid --overwrite
         kubectl taint nodes "$cp_node" nfd-excluded=true:NoSchedule --overwrite
-    fi
+    done
 
     log_debug "Step 5: Deploying bundle..."
     deploy_bundle

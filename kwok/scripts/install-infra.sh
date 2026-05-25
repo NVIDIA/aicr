@@ -442,9 +442,14 @@ install_flux() {
     local max_attempts=5
     local delay=5
     local attempt=1
+    # Build the flux install command; include --context when KUBECTL_CONTEXT
+    # is set so Flux targets the same kube context used by kc()/hc().
+    local -a flux_cmd=(flux install --version="${version}" --components-extra=source-watcher)
+    if [[ -n "${KUBECTL_CONTEXT:-}" ]]; then
+        flux_cmd+=(--context "${KUBECTL_CONTEXT}")
+    fi
     while true; do
-        if flux install --version="${version}" \
-                --components-extra=source-watcher; then
+        if "${flux_cmd[@]}"; then
             break
         fi
         if (( attempt >= max_attempts )); then
@@ -472,18 +477,26 @@ install_flux() {
     # Enable ExternalArtifact feature gate on helm-controller so
     # HelmRelease.spec.chartRef can reference ExternalArtifact resources
     # produced by ArtifactGenerator CRs (issue #964).
-    log_info "Enabling ExternalArtifact feature gate on helm-controller..."
-    if ! kc patch deployment helm-controller -n "${FLUX_NAMESPACE}" \
-            --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--feature-gates=ExternalArtifact=true"}]'; then
-        log_error "Failed to patch helm-controller with ExternalArtifact feature gate"
-        dump_flux_diagnostics
-        exit 61
-    fi
-    if ! kc rollout status deployment/helm-controller \
-            -n "${FLUX_NAMESPACE}" --timeout=60s; then
-        log_error "helm-controller did not become Ready after feature gate patch"
-        dump_flux_diagnostics
-        exit 61
+    # Idempotent: skip the patch (and rollout wait) when the flag is already present.
+    local hc_args
+    hc_args=$(kc get deployment helm-controller -n "${FLUX_NAMESPACE}" \
+        -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null || true)
+    if [[ "$hc_args" == *"--feature-gates=ExternalArtifact=true"* ]]; then
+        log_info "ExternalArtifact feature gate already present on helm-controller — skipping patch"
+    else
+        log_info "Enabling ExternalArtifact feature gate on helm-controller..."
+        if ! kc patch deployment helm-controller -n "${FLUX_NAMESPACE}" \
+                --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--feature-gates=ExternalArtifact=true"}]'; then
+            log_error "Failed to patch helm-controller with ExternalArtifact feature gate"
+            dump_flux_diagnostics
+            exit 61
+        fi
+        if ! kc rollout status deployment/helm-controller \
+                -n "${FLUX_NAMESPACE}" --timeout=60s; then
+            log_error "helm-controller did not become Ready after feature gate patch"
+            dump_flux_diagnostics
+            exit 61
+        fi
     fi
 
     log_info "Waiting for Flux CRDs to be Established..."

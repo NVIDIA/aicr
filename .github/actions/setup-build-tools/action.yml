@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Setup Build Tools'
-description: 'Install build, release, and testing tools (ko, syft, crane, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq)'
+description: 'Install build, release, and testing tools (ko, syft, crane, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux)'
 
 inputs:
   install_ko:
@@ -114,6 +114,14 @@ inputs:
     default: 'false'
   zarf_version:
     description: 'Zarf version (e.g. v0.76.0)'
+    required: false
+    default: ''
+  install_flux:
+    description: 'Install flux CLI (true/false)'
+    required: false
+    default: 'false'
+  flux_version:
+    description: 'Flux CLI version (e.g. v2.8.7)'
     required: false
     default: ''
   install_ctlptl:
@@ -419,6 +427,36 @@ runs:
         sudo mv "${TMP}/zarf" /usr/local/bin/zarf
         rm -rf "${TMP}"
         zarf version
+
+    - name: Install Flux CLI
+      if: inputs.install_flux == 'true'
+      shell: bash
+      env:
+        FLUX_VERSION: ${{ inputs.flux_version }}
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/flux ]]; then echo "flux already installed"; flux --version; exit 0; fi
+        if [[ -z "${FLUX_VERSION}" ]]; then
+          echo "::error::flux_version is required when install_flux=true"
+          exit 1
+        fi
+        VERSION="${FLUX_VERSION#v}"
+        BASE="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}"
+        TAR="flux_${VERSION}_linux_amd64.tar.gz"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/flux_${VERSION}_checksums.txt"
+        EXPECTED=$(grep "${TAR}" "${TMP}/checksums.txt" | head -1 | awk '{print $1}')
+        ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::flux checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
+        sudo mv "${TMP}/flux" /usr/local/bin/flux
+        sudo chmod +x /usr/local/bin/flux
+        rm -rf "${TMP}"
+        flux --version
 
     - name: Install ctlptl
       if: inputs.install_ctlptl == 'true'

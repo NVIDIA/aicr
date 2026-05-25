@@ -203,6 +203,20 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.fluxNamespace = cmd.String("flux-namespace")
 	}
 
+	// Reject Flux-specific flags when deployer is not flux — a user who
+	// sets them on --deployer helm/argocd would otherwise not realize
+	// their config was silently ignored.
+	if opts.deployer != config.DeployerFlux {
+		if cmd.IsSet("flux-oci-source-name") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--flux-oci-source-name is only valid with --deployer flux")
+		}
+		if cmd.IsSet("flux-namespace") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--flux-namespace is only valid with --deployer flux")
+		}
+	}
+
 	// Derive target revision: use OCI tag when available
 	if opts.ociRef != nil && opts.ociRef.Tag != "" {
 		opts.targetRevision = opts.ociRef.Tag
@@ -318,7 +332,6 @@ Argo CD:
 
 Flux:
   - kustomization.yaml: Root Kustomize orchestration
-  - namespaces/: Namespace manifests for component namespaces
   - sources/: HelmRepository and GitRepository source CRs
   - <component>/helmrelease.yaml: Flux HelmRelease with inline values
   - README.md: Deployment instructions
@@ -475,7 +488,7 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name: "flux-oci-source-name",
 				Usage: "Name of the OCIRepository CR that Flux uses to pull the bundle " +
-					"(used with --deployer flux and OCI output). Must match the " +
+					"(--deployer flux only, OCI output). Must match the " +
 					"OCIRepository deployed in the target cluster.",
 				Value:    "aicr-bundle",
 				Category: catDeployment,
@@ -483,8 +496,8 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name: "flux-namespace",
 				Usage: "Kubernetes namespace where Flux CRs (HelmRelease, sources, " +
-					"ArtifactGenerator) are deployed. Must match the namespace of " +
-					"the Flux installation in the target cluster.",
+					"ArtifactGenerator) are deployed (--deployer flux only). Must " +
+					"match the namespace of the Flux installation in the target cluster.",
 				Value:    config.DefaultFluxNamespace,
 				Category: catDeployment,
 			},

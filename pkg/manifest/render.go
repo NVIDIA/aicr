@@ -134,10 +134,19 @@ func helmFuncMap() template.FuncMap {
 			return strings.ReplaceAll(src, old, new)
 		},
 		"trunc": func(c int, s string) string {
-			if c < 0 || c >= len(s) {
+			if c < 0 {
+				if -c >= len(s) {
+					return s
+				}
+				return s[len(s)+c:]
+			}
+			if c >= len(s) {
 				return s
 			}
 			return s[:c]
+		},
+		"trimSuffix": func(suffix, s string) string {
+			return strings.TrimSuffix(s, suffix)
 		},
 	}
 }
