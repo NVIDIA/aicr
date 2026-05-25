@@ -1872,7 +1872,7 @@ main() {
     #   2. nfd-excluded=true:NoSchedule taint — NFD worker DaemonSet
     #      respects this taint and will not schedule on tainted nodes.
     local cp_nodes
-    cp_nodes=$(kubectl get nodes --selector='!kwok.x-k8s.io/node' -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    cp_nodes=$(kubectl get nodes --selector='type!=kwok' -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
     if [[ -z "$cp_nodes" ]]; then
         log_warn "No real (non-KWOK) nodes found to exclude — DaemonSet CrashLoops may occur"
     fi
