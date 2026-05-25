@@ -452,7 +452,9 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 if [[ -n "${FLUX_EXPECTED}" ]]; then
                     verify_sha256 "${FLUX_TMP}/${FLUX_TAR}" "${FLUX_EXPECTED}"
                 else
-                    log_warning "Could not extract checksum for ${FLUX_TAR}; skipping verification"
+                    log_error "Could not extract checksum for ${FLUX_TAR} from checksums file; aborting install"
+                    rm -rf "$FLUX_TMP"
+                    exit 1
                 fi
                 tar -xzC "$FLUX_TMP" -f "${FLUX_TMP}/${FLUX_TAR}"
                 sudo mv "$FLUX_TMP/flux" /usr/local/bin/flux
@@ -756,7 +758,9 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 if [[ -n "${ZARF_EXPECTED}" ]]; then
                     verify_sha256 "${ZARF_TMP}/zarf" "${ZARF_EXPECTED}"
                 else
-                    log_warning "Could not extract checksum for ${ZARF_BIN}; skipping verification"
+                    log_error "Could not extract checksum for ${ZARF_BIN} from checksums file; aborting install"
+                    rm -rf "${ZARF_TMP}"
+                    exit 1
                 fi
                 sudo mv "${ZARF_TMP}/zarf" /usr/local/bin/zarf
                 sudo chmod +x /usr/local/bin/zarf
