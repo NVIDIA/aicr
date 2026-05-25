@@ -255,13 +255,13 @@ spec:
 
 	// Snapshot + restore process globals so this test does not poison
 	// the singleton state observed by tests that run after it.
-	prev := GetDataProvider()
+	prev := GetDataProvider() //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
 	t.Cleanup(func() {
-		SetDataProvider(prev)
+		SetDataProvider(prev) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
 		ResetMetadataStoreForTesting()
 		DefaultRegistry().Reset()
 	})
-	SetDataProvider(layered)
+	SetDataProvider(layered) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
 	ResetMetadataStoreForTesting()
 	DefaultRegistry().Reset()
 

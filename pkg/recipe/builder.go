@@ -62,6 +62,19 @@ func WithAllowLists(al *AllowLists) Option {
 	}
 }
 
+// WithDataProvider binds the Builder to a specific DataProvider, isolating
+// its metadata store and component registry from the process-global ones at
+// GetDataProvider().
+//
+// Use this from any caller that constructs more than one Builder per process.
+// When unset, the Builder falls back to the package-global DataProvider —
+// preserving the CLI and API server behavior.
+func WithDataProvider(dp DataProvider) Option {
+	return func(b *Builder) {
+		b.dp = dp
+	}
+}
+
 // NewBuilder creates a new Builder instance with the provided functional options.
 func NewBuilder(opts ...Option) *Builder {
 	b := &Builder{}
@@ -79,6 +92,16 @@ func NewBuilder(opts ...Option) *Builder {
 type Builder struct {
 	Version    string
 	AllowLists *AllowLists
+	dp         DataProvider // nil ⇒ fall back to package-global
+}
+
+// DataProvider returns the Builder's bound provider, or nil if none is set
+// and the package-global will be used.
+func (b *Builder) DataProvider() DataProvider {
+	if b == nil {
+		return nil
+	}
+	return b.dp
 }
 
 // BuildFromCriteria creates a RecipeResult payload for the provided criteria.
@@ -130,7 +153,7 @@ func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, buildFn func(
 		recipeBuiltDuration.Observe(time.Since(start).Seconds())
 	}()
 
-	store, err := loadMetadataStore(buildCtx)
+	store, err := LoadMetadataStoreFor(buildCtx, b.dp)
 	if err != nil {
 		return nil, aicrerrors.WrapWithContext(
 			aicrerrors.ErrCodeInternal,

@@ -1591,9 +1591,69 @@ Debug logs include:
 - Source resolution for each file (embedded vs external vs merged)
 - Component merge details (added, overridden, retained)
 
-### Implementation Details
+### Builder-bound providers
 
-The data provider is initialized early in CLI command execution:
+`WithDataProvider` is the canonical way to attach a `DataProvider` to a recipe
+build. The returned `Builder` resolves its metadata store, component registry,
+and per-component values files through the bound provider — never through the
+process-global one. Each call site that builds recipes should construct its
+own provider and pass it through `WithDataProvider`:
+
+```go
+embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+builder := recipe.NewBuilder(
+    recipe.WithVersion(version),
+    recipe.WithDataProvider(embedded),
+)
+result, err := builder.BuildFromCriteria(ctx, criteria)
+```
+
+The resulting `*RecipeResult` carries the same provider so downstream
+consumers (`GetValuesForComponent`, `GetManifestContentWithProvider`) resolve
+files against the build's provider rather than whatever global is currently
+installed. Recover it via `result.DataProvider()` — nil-safe on the receiver
+and returns nil when the result was built against the package-global fallback.
+
+### Per-Builder isolation
+
+Builders with distinct providers do not share cache state. `LoadMetadataStoreFor`
+and `GetComponentRegistryFor` key their caches by `DataProvider` identity, so a
+process can host multiple tenants concurrently without one tenant's `--data`
+overlay leaking into another's catalog. Use this pattern in multi-tenant
+servers, test harnesses that need clean state per case, or anywhere two
+`Builder` instances may evaluate different inputs at the same time:
+
+```go
+// Each tenant gets its own provider — no cache cross-pollution
+embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+tenantA := recipe.NewBuilder(recipe.WithDataProvider(embedded))
+tenantB := recipe.NewBuilder(recipe.WithDataProvider(otherProvider))
+
+resA, _ := tenantA.BuildFromCriteria(ctx, criteriaA)
+resB, _ := tenantB.BuildFromCriteria(ctx, criteriaB)
+// resA.DataProvider() != resB.DataProvider()
+// resA.GetValuesForComponent("gpu-operator") reads from embedded
+// resB.GetValuesForComponent("gpu-operator") reads from otherProvider
+```
+
+To force a rebuild on the next read (e.g., after rewriting an external
+overlay on disk), drop the entries for that provider:
+
+```go
+recipe.EvictCachedStore(provider)
+recipe.EvictCachedRegistry(provider)
+```
+
+`Evict*` is a no-op on a nil receiver, and concurrent builders against
+*other* providers are unaffected — eviction is scoped to the supplied
+provider only.
+
+### CLI initialization
+
+The CLI installs a single process-global provider so legacy entry points
+that have no `Builder` in scope (e.g., the criteria registry pre-load,
+manifest helpers without a `RecipeResult`) keep working without threading
+a provider through every call site:
 
 ```go
 // pkg/cli/root.go
@@ -1603,7 +1663,7 @@ func initDataProvider(cmd *cli.Command) error {
         return nil  // Use default embedded provider
     }
 
-    embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "data")
+    embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
     layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
         ExternalDir:   dataDir,
         AllowSymlinks: false,
@@ -1617,10 +1677,27 @@ func initDataProvider(cmd *cli.Command) error {
 }
 ```
 
-**Global Provider Pattern:**
-- `SetDataProvider()` sets the global data provider
-- `GetDataProvider()` returns the current provider (defaults to embedded)
-- `GetDataProviderGeneration()` returns a counter for cache invalidation
+Single-tenant CLIs and the API server can stay on this pattern. Library
+callers and multi-tenant servers should prefer `WithDataProvider`.
+
+### Back-compat: package-global accessors
+
+The following package-level accessors predate `WithDataProvider` and are
+retained for back-compat. New code should use `WithDataProvider`; see the
+godoc on each for the migration recommendation.
+
+- `SetDataProvider(dp)` — installs the process-global provider. Deprecated;
+  use `recipe.NewBuilder(recipe.WithDataProvider(dp))` instead.
+- `GetDataProvider()` — returns the current process-global provider
+  (embedded by default). Deprecated; recover the Builder-bound provider via
+  `(*RecipeResult).DataProvider()` or pass one explicitly.
+- `GetDataProviderGeneration()` — monotonic counter incremented by
+  `SetDataProvider` so caches keyed on the global can detect a swap.
+- `LoadMetadataStore(ctx)` — convenience wrapper around
+  `LoadMetadataStoreFor(ctx, GetDataProvider())`. Multi-tenant callers
+  should call `LoadMetadataStoreFor` directly with their bound provider.
+- `GetComponentRegistry()` — convenience wrapper around
+  `GetComponentRegistryFor(GetDataProvider())`. Same migration guidance.
 
 ---
 

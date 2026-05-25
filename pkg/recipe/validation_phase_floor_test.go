@@ -98,22 +98,32 @@ var knownGaps = map[string]map[string]bool{
 
 // classification captures the inputs that drive the per-intent floor.
 type classification struct {
-	Intent   CriteriaIntentType
-	Service  CriteriaServiceType
-	Platform CriteriaPlatformType
-	IsKind   bool
+	Intent      CriteriaIntentType
+	Service     CriteriaServiceType
+	Platform    CriteriaPlatformType
+	Accelerator CriteriaAcceleratorType
+	IsKind      bool
 }
 
 // String renders a classification for failure messages.
 func (c classification) String() string {
-	return fmt.Sprintf("intent=%s service=%s platform=%s kind=%t",
-		c.Intent, c.Service, c.Platform, c.IsKind)
+	return fmt.Sprintf("intent=%s service=%s accelerator=%s platform=%s kind=%t",
+		c.Intent, c.Service, c.Accelerator, c.Platform, c.IsKind)
 }
 
 // requiresPerformance reports whether the per-intent floor recommends
 // the performance phase for this classification.
+//
+// Accelerator-unbound intermediates (e.g., eks-training, gke-cos-training)
+// are exempt: their concrete-leaf descendants (h100-eks-training,
+// gb200-eks-training, etc.) carry the perf threshold via per-phase
+// replace, and the threshold value is accelerator-specific so no
+// meaningful constraint exists at the intent layer.
 func (c classification) requiresPerformance() bool {
 	if c.IsKind {
+		return false
+	}
+	if c.Accelerator == "" || c.Accelerator == CriteriaAcceleratorAny {
 		return false
 	}
 	if c.Intent == CriteriaIntentTraining {
@@ -126,10 +136,11 @@ func (c classification) requiresPerformance() bool {
 // classifyOverlay derives the classification from resolved criteria.
 func classifyOverlay(criteria *Criteria) classification {
 	return classification{
-		Intent:   criteria.Intent,
-		Service:  criteria.Service,
-		Platform: criteria.Platform,
-		IsKind:   criteria.Service == CriteriaServiceKind,
+		Intent:      criteria.Intent,
+		Service:     criteria.Service,
+		Platform:    criteria.Platform,
+		Accelerator: criteria.Accelerator,
+		IsKind:      criteria.Service == CriteriaServiceKind,
 	}
 }
 
@@ -299,27 +310,33 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 }
 
 // TestClassifyOverlay exercises the classification function across the
-// intent x service x platform matrix.
+// intent x service x platform x accelerator matrix.
 func TestClassifyOverlay(t *testing.T) {
 	tests := []struct {
 		name             string
 		intent           CriteriaIntentType
 		service          CriteriaServiceType
 		platform         CriteriaPlatformType
+		accelerator      CriteriaAcceleratorType
 		wantIsKind       bool
 		wantRequiresPerf bool
 	}{
-		{"training-eks-plain", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, false, true},
-		{"training-aks-kubeflow", CriteriaIntentTraining, CriteriaServiceAKS, CriteriaPlatformKubeflow, false, true},
-		{"training-kind", CriteriaIntentTraining, CriteriaServiceKind, CriteriaPlatformAny, true, false},
-		{"inference-eks-plain", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformAny, false, false},
-		{"inference-eks-dynamo", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, false, true},
-		{"inference-eks-nim", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformNIM, false, true},
-		{"inference-kind-dynamo", CriteriaIntentInference, CriteriaServiceKind, CriteriaPlatformDynamo, true, false},
+		{"training-eks-h100", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true},
+		{"training-aks-h100-kubeflow", CriteriaIntentTraining, CriteriaServiceAKS, CriteriaPlatformKubeflow, CriteriaAcceleratorH100, false, true},
+		{"training-kind-h100", CriteriaIntentTraining, CriteriaServiceKind, CriteriaPlatformAny, CriteriaAcceleratorH100, true, false},
+		{"inference-eks-h100-plain", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, false},
+		{"inference-eks-h100-dynamo", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, CriteriaAcceleratorH100, false, true},
+		{"inference-eks-h100-nim", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformNIM, CriteriaAcceleratorH100, false, true},
+		{"inference-kind-h100-dynamo", CriteriaIntentInference, CriteriaServiceKind, CriteriaPlatformDynamo, CriteriaAcceleratorH100, true, false},
+		// Accelerator-unbound intermediates: the per-intent floor exempts
+		// them because the perf threshold is accelerator-specific.
+		{"training-eks-no-accelerator", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, "", false, false},
+		{"training-gke-accelerator-any", CriteriaIntentTraining, CriteriaServiceGKE, CriteriaPlatformAny, CriteriaAcceleratorAny, false, false},
+		{"inference-eks-dynamo-no-accelerator", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &Criteria{Intent: tt.intent, Service: tt.service, Platform: tt.platform}
+			c := &Criteria{Intent: tt.intent, Service: tt.service, Platform: tt.platform, Accelerator: tt.accelerator}
 			class := classifyOverlay(c)
 			if class.IsKind != tt.wantIsKind {
 				t.Errorf("IsKind = %v, want %v", class.IsKind, tt.wantIsKind)
