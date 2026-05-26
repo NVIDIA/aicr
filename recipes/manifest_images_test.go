@@ -96,10 +96,10 @@ var imageDigestExemptions = map[string]string{
 
 	// Skyhook Package (nodewright-customizations): image/version sibling
 	// schema; no digest field.
-	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1":       "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
-	"ghcr.io/nvidia/skyhook-packages/nvidia-tuning-gke:0.1.1": "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
-	"ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.2.2":   "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
-	"ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.0":   "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
+	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1":          "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
+	"ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.2.2":      "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
+	"ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.0":      "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
+	"ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2": "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
 }
 
 // TestComponentManifestImagesAreDigestPinned asserts that every image
