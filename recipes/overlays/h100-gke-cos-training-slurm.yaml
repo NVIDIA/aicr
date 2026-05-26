@@ -15,29 +15,31 @@
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  name: h100-eks-ubuntu-training-slurm
+  name: h100-gke-cos-training-slurm
 
 spec:
-  # H100 + EKS + Ubuntu + training with the Slinky operator and a
-  # Slinky-managed Slurm cluster. H100 GPU GRES is declared inline below
-  # (pod-side limit + slurmd-side Gres= line); remaining EKS-specific
-  # tuning (gp3 storage, DCGM job-mapping) is layered at install time
-  # via `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
-  base: h100-eks-ubuntu-training
+  # H100 + GKE + COS + training with the Slinky operator and a
+  # Slinky-managed Slurm cluster. H100 GPU GRES is declared inline
+  # below; remaining GKE-specific tuning (single-replica login on RWO
+  # storage, DCGM job-mapping) is layered at install time via
+  # `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
+  base: h100-gke-cos-training
 
   criteria:
-    service: eks
+    service: gke
     accelerator: h100
-    os: ubuntu
+    os: cos
     intent: training
     platform: slurm
 
-  mixins:
-    - os-ubuntu
-
-  constraints:
-    - name: K8s.server.version
-      value: ">= 1.32.4"
+  # Unlike the EKS slurm leaf, no os-ubuntu / os-cos mixin is needed:
+  # gke-cos.yaml already disables GPU driver installation and pins
+  # DRA / nodewright paths for COS's read-only rootfs.
+  #
+  # K8s.server.version (>= 1.32) is inherited from h100-gke-cos-training.yaml;
+  # Slinky on GKE has no tighter floor than the parent leaf, so we don't
+  # restate it here (cf. the EKS slurm leaf, which restates >= 1.32.4 to
+  # match its parent).
 
   # The Slinky operator (CRDs + operator + cluster instance) is declared
   # inline per slurm leaf, mirroring the dynamo-platform pattern in
@@ -92,8 +94,9 @@ spec:
   # Slinky-managed cluster it bypasses slurmd entirely and measures the
   # wrong path. The equivalent signal here is a slurm-launched
   # `srun nccl-tests/all_reduce_perf` that goes through slurmd + the
-  # EFA libfabric stack already present on the parent EKS leaf.
-  # Deployment and conformance checks are inherited unchanged.
+  # GPUDirect TCPXO plugin already deployed by the parent leaf via
+  # gke-nccl-tcpxo. Deployment and conformance checks are inherited
+  # unchanged.
   validation:
     performance:
       checks: []
