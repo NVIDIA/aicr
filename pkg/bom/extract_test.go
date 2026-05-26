@@ -188,6 +188,40 @@ spec:
 			},
 		},
 		{
+			// Skyhook Package CRD carries the OCI digest in a sibling
+			// `containerSHA` scalar rather than splicing it into `image`.
+			// The extractor folds it onto the combined ref as `@<sha>`
+			// so digest-pin checks see the pinned reference.
+			name: "Skyhook Package with containerSHA sibling folds in as digest",
+			in: `spec:
+  packages:
+    nvidia-tuning-gke:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke
+      version: "0.1.2"
+      containerSHA: sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81
+`,
+			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81",
+			},
+		},
+		{
+			// An inline `@digest` in `image` wins over a sibling
+			// `containerSHA`; the extractor must not double-append or
+			// silently overwrite. This protects the case where someone
+			// pins via the image field directly and also leaves a stale
+			// containerSHA.
+			name: "inline @digest in image takes precedence over containerSHA sibling",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      containerSHA: sha256:0000000000000000000000000000000000000000000000000000000000000000
+`,
+			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7",
+			},
+		},
+		{
 			// Regression: previously the function bailed out of the
 			// repository prepend whenever `image` contained any slash,
 			// which silently dropped the registry when `image` was a

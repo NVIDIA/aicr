@@ -93,14 +93,16 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 	}
 	switch n.Kind {
 	case yaml.MappingNode:
-		// First pass: collect sibling scalars for `image`, `repository`, and
-		// `version` so we can recognize the CRD-style triplet pattern used
-		// by NicClusterPolicy, Skyhook, and similar operators where these
-		// three fields are siblings (not concatenated into a single
+		// First pass: collect sibling scalars for `image`, `repository`,
+		// `version`, and `containerSHA` so we can recognize the CRD-style
+		// pattern used by NicClusterPolicy, Skyhook, and similar operators
+		// where these fields are siblings (not concatenated into a single
 		// `image:` value). Without this, the bare `image: doca-driver` part
 		// looks like an untagged image when in fact `repository` and
-		// `version` siblings carry the registry and tag.
-		var imgScalar, repoScalar, verScalar string
+		// `version` siblings carry the registry and tag. A sibling
+		// `containerSHA` (Skyhook Package CRD; ghcr.io/nvidia/nodewright)
+		// supplies the OCI digest and is folded in as `@<sha>`.
+		var imgScalar, repoScalar, verScalar, shaScalar string
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
 			target := v
@@ -117,10 +119,13 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 				repoScalar = strings.TrimSpace(target.Value)
 			case "version":
 				verScalar = strings.TrimSpace(target.Value)
+			case "containerSHA":
+				shaScalar = strings.TrimSpace(target.Value)
 			}
 		}
 		if imgScalar != "" {
 			combined := combineCRDTriplet(imgScalar, repoScalar, verScalar)
+			combined = appendContainerSHA(combined, shaScalar)
 			if isLikelyImage(combined) {
 				seen[combined] = struct{}{}
 			}
@@ -175,6 +180,32 @@ func combineCRDTriplet(image, repository, version string) string {
 		out = out + ":" + version
 	}
 	return out
+}
+
+// appendContainerSHA folds a sibling `containerSHA` value onto a
+// CRD-style combined image ref as an `@<digest>` suffix. The Skyhook
+// Package CRD carries the OCI digest in a separate `containerSHA`
+// scalar (e.g., `containerSHA: sha256:<hex>`) rather than splicing it
+// into the `image` value, so the extractor has to merge them.
+//
+// Behavior:
+//   - Empty `sha` → returned image unchanged.
+//   - Image already carries an `@`-digest → returned unchanged (the
+//     in-line digest wins; we do not silently overwrite).
+//   - Otherwise the digest is appended as `image@sha`, preserving any
+//     tag already present (e.g., `repo:0.1.2@sha256:abc…`).
+//
+// The input `sha` is expected to be the digest payload itself (e.g.,
+// `sha256:<hex>`), matching the Skyhook CRD convention and the
+// `@<digest>` form ParseImageRef already understands.
+func appendContainerSHA(image, sha string) string {
+	if sha == "" {
+		return image
+	}
+	if strings.Contains(image, "@") {
+		return image
+	}
+	return image + "@" + sha
 }
 
 func isLikelyImage(v string) bool {

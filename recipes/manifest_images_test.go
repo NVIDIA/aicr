@@ -94,12 +94,12 @@ var imageDigestExemptions = map[string]string{
 	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0": "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
 	"nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host":                    "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
 
-	// Skyhook Package (nodewright-customizations): image/version sibling
-	// schema; no digest field.
-	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1":          "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
-	"ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.2.2":      "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
-	"ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.0":      "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
-	"ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2": "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
+	// Skyhook Package (nodewright-customizations no-op): shellscript package
+	// is pinned by tag only — `containerSHA` is not surfaced for this
+	// upstream image. nodewright-packages/* refs are digest-pinned via the
+	// Skyhook Package `containerSHA` field (issue #1031), folded into the
+	// extracted image ref as `@sha256:...` by pkg/bom.ExtractImagesFromYAML.
+	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1": "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
 }
 
 // TestComponentManifestImagesAreDigestPinned asserts that every image
