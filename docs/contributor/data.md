@@ -1591,9 +1591,69 @@ Debug logs include:
 - Source resolution for each file (embedded vs external vs merged)
 - Component merge details (added, overridden, retained)
 
-### Implementation Details
+### Builder-bound providers
 
-The data provider is initialized early in CLI command execution:
+`WithDataProvider` is the canonical way to attach a `DataProvider` to a recipe
+build. The returned `Builder` resolves its metadata store, component registry,
+and per-component values files through the bound provider — never through the
+process-global one. Each call site that builds recipes should construct its
+own provider and pass it through `WithDataProvider`:
+
+```go
+embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+builder := recipe.NewBuilder(
+    recipe.WithVersion(version),
+    recipe.WithDataProvider(embedded),
+)
+result, err := builder.BuildFromCriteria(ctx, criteria)
+```
+
+The resulting `*RecipeResult` carries the same provider so downstream
+consumers (`GetValuesForComponent`, `GetManifestContentWithProvider`) resolve
+files against the build's provider rather than whatever global is currently
+installed. Recover it via `result.DataProvider()` — nil-safe on the receiver
+and returns nil when the result was built against the package-global fallback.
+
+### Per-Builder isolation
+
+Builders with distinct providers do not share cache state. `LoadMetadataStoreFor`
+and `GetComponentRegistryFor` key their caches by `DataProvider` identity, so a
+process can host multiple tenants concurrently without one tenant's `--data`
+overlay leaking into another's catalog. Use this pattern in multi-tenant
+servers, test harnesses that need clean state per case, or anywhere two
+`Builder` instances may evaluate different inputs at the same time:
+
+```go
+// Each tenant gets its own provider — no cache cross-pollution
+embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+tenantA := recipe.NewBuilder(recipe.WithDataProvider(embedded))
+tenantB := recipe.NewBuilder(recipe.WithDataProvider(otherProvider))
+
+resA, _ := tenantA.BuildFromCriteria(ctx, criteriaA)
+resB, _ := tenantB.BuildFromCriteria(ctx, criteriaB)
+// resA.DataProvider() != resB.DataProvider()
+// resA.GetValuesForComponent("gpu-operator") reads from embedded
+// resB.GetValuesForComponent("gpu-operator") reads from otherProvider
+```
+
+To force a rebuild on the next read (e.g., after rewriting an external
+overlay on disk), drop the entries for that provider:
+
+```go
+recipe.EvictCachedStore(provider)
+recipe.EvictCachedRegistry(provider)
+```
+
+`Evict*` is a no-op on a nil receiver, and concurrent builders against
+*other* providers are unaffected — eviction is scoped to the supplied
+provider only.
+
+### CLI initialization
+
+The CLI installs a single process-global provider so legacy entry points
+that have no `Builder` in scope (e.g., the criteria registry pre-load,
+manifest helpers without a `RecipeResult`) keep working without threading
+a provider through every call site:
 
 ```go
 // pkg/cli/root.go
@@ -1603,7 +1663,7 @@ func initDataProvider(cmd *cli.Command) error {
         return nil  // Use default embedded provider
     }
 
-    embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "data")
+    embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
     layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
         ExternalDir:   dataDir,
         AllowSymlinks: false,
@@ -1617,10 +1677,121 @@ func initDataProvider(cmd *cli.Command) error {
 }
 ```
 
-**Global Provider Pattern:**
-- `SetDataProvider()` sets the global data provider
-- `GetDataProvider()` returns the current provider (defaults to embedded)
-- `GetDataProviderGeneration()` returns a counter for cache invalidation
+Single-tenant CLIs and the API server can stay on this pattern. Library
+callers and multi-tenant servers should prefer `WithDataProvider`.
+
+### Back-compat: package-global accessors
+
+The following package-level accessors predate `WithDataProvider` and are
+retained for back-compat. New code should use `WithDataProvider`; see the
+godoc on each for the migration recommendation.
+
+- `SetDataProvider(dp)` — installs the process-global provider. Deprecated;
+  use `recipe.NewBuilder(recipe.WithDataProvider(dp))` instead.
+- `GetDataProvider()` — returns the current process-global provider
+  (embedded by default). Deprecated; recover the Builder-bound provider via
+  `(*RecipeResult).DataProvider()` or pass one explicitly.
+- `GetDataProviderGeneration()` — monotonic counter incremented by
+  `SetDataProvider` so caches keyed on the global can detect a swap.
+- `LoadMetadataStore(ctx)` — convenience wrapper around
+  `LoadMetadataStoreFor(ctx, GetDataProvider())`. Multi-tenant callers
+  should call `LoadMetadataStoreFor` directly with their bound provider.
+- `GetComponentRegistry()` — convenience wrapper around
+  `GetComponentRegistryFor(GetDataProvider())`. Same migration guidance.
+
+---
+
+## Criteria Registry
+
+The criteria registry is a process-global cache of valid criteria values
+(`service`, `accelerator`, `intent`, `os`, `platform`) populated from
+loaded overlays. It is the mechanism by which a `--data` overlay can
+introduce a new criteria value (e.g., `service: ncp-internal`) and have
+it admitted by `ParseCriteriaServiceType` without a code change.
+
+### Why a registry
+
+Before the registry existed, each `ParseCriteria*Type` had a hardcoded
+`switch` of valid string values; an unknown value returned
+`ErrCodeInvalidRequest` before the overlay catalog was even consulted.
+That made it impossible to add a new criteria value via `--data` —
+internal/proprietary values required either a fork or an upstream
+contribution, neither of which scales for undisclosed NCPs or
+proprietary product overlays.
+
+The registry decouples *which values are valid* from *what the OSS
+binary knows about*. The fast-path switch arms remain for canonical
+aliases (`self-managed → any`, `al2 → amazonlinux`), and any value not
+matched there falls through to the registry, which is seeded by the
+overlay loader on catalog load.
+
+### Origin tracking
+
+Each registered value carries a `CriteriaOrigin`:
+
+- `OriginEmbedded` — declared in an overlay loaded from the binary's
+  embedded data filesystem (the OSS catalog).
+- `OriginExternal` — declared in an overlay loaded from `--data`.
+
+When the same value is registered from both sources, embedded wins —
+`Register` never downgrades an embedded value to external, so strict
+mode lookups remain stable across reloads.
+
+### Strict mode
+
+Strict mode hides external-origin entries from registry lookups,
+restoring the pre-registry behavior in which only OSS canonical values
+validate. Three sources can enable it (logical OR):
+
+1. `--criteria-strict` CLI flag (added on `aicr recipe`).
+2. `spec.recipe.criteriaStrict: true` in `--config`.
+3. `AICR_CRITERIA_STRICT=1` env var (read at `DefaultRegistry()` init).
+
+Strict mode is intended for **OSS CI gates** — `make qualify` exports
+`AICR_CRITERIA_STRICT=1` for the unit-test step so the upstream catalog
+cannot accidentally start depending on internal-only values that only
+exist in someone's `--data` directory.
+
+### Seeding the registry
+
+The metadata-store loader (`pkg/recipe/metadata_store.go`) walks every
+overlay during catalog load and stages each overlay's criteria for
+registration. The provider's `Source(path)` returns `"embedded"` /
+`"external"` / `"merged"`; the seed helper maps `"embedded"` to
+`OriginEmbedded` and every non-embedded source (including `"merged"`
+and any unknown future category) to `OriginExternal`. The registration
+is *deferred* until after all overlays parse cleanly, the base recipe
+is present, and dependency validation passes — partial catalog loads
+never leak into the registry.
+
+### Eager load via `LoadCatalog`
+
+The metadata store loads lazily on first read. Because criteria
+validation runs *before* the recipe build pulls the catalog, a fresh
+process with `--data` would otherwise reject a custom criteria value on
+the very first call — the registry would still be empty.
+
+`recipe.LoadCatalog(ctx)` forces an eager catalog parse, seeding the
+registry. The CLI `recipe` Action calls it right after
+`initDataProvider` so the registry is populated before any
+`ParseCriteria*Type` lookup. **Any future caller that wires its own
+`--data` (e.g., a new API server flag) must also call `LoadCatalog`
+right after `SetDataProvider` for the same reason.**
+
+### API surface
+
+| Function | Purpose |
+|---|---|
+| `DefaultRegistry()` | Returns the process-wide singleton (lazy-init). |
+| `(*CriteriaRegistry).Register(field, value, origin)` | Records a value; embedded never downgrades. |
+| `(*CriteriaRegistry).Has(field, value)` | Lookup; respects strict mode (external hidden when strict). |
+| `(*CriteriaRegistry).HasEmbedded(field, value)` | Embedded-only lookup, regardless of strict. |
+| `(*CriteriaRegistry).Values(field)` | Sorted union of known values for help / autocomplete. |
+| `(*CriteriaRegistry).SetStrict(bool)` | Toggle strict mode. Composes with `AICR_CRITERIA_STRICT`. |
+| `(*CriteriaRegistry).Reset()` | Test helper; re-reads `AICR_CRITERIA_STRICT` from env. |
+| `LoadCatalog(ctx)` | Eager catalog load — call after `SetDataProvider`. |
+| `AllCriteria{Service,Accelerator,Intent,OS,Platform}Types()` | Union of static OSS list + currently-registered values. |
+| `GetCriteria{Service,Accelerator,Intent,OS,Platform}Types()` | Static OSS list only (stable; not affected by `--data`). |
 
 ---
 

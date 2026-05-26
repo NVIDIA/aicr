@@ -59,6 +59,14 @@ type bundleCmdOptions struct {
 	// dynamicValues declares value paths provided at install time.
 	dynamicValues []config.ComponentPath
 
+	// ociSourceName is the name of the outer OCIRepository that Flux uses
+	// to pull the bundle. Set from --flux-oci-source-name when deployer=flux
+	// with OCI output.
+	ociSourceName string
+
+	// fluxNamespace is the Kubernetes namespace where Flux CRs are deployed.
+	fluxNamespace string
+
 	// vendorCharts pulls upstream Helm chart bytes into the bundle so
 	// the resulting artifact is self-contained and air-gap deployable.
 	vendorCharts bool
@@ -83,6 +91,16 @@ type bundleCmdOptions struct {
 	plainHTTP     bool
 	insecureTLS   bool
 	imageRefsPath string // Path to write published image references (like ko --image-refs)
+
+	// bundleChartName overrides the chart name written by the argocd-helm
+	// deployer. Derived from ociRef.ChartName() when --output is OCI; the
+	// deployer's "aicr-bundle" default is used when this is empty. See #1019.
+	bundleChartName string
+
+	// appName overrides the parent Argo Application's metadata.name. Empty
+	// means each deployer applies its own default ("aicr-stack" for
+	// argocd-helm, "nvidia-stack" for argocd). See #1011.
+	appName string
 }
 
 // parseBundleCmdOptions parses and validates command options. The wire
@@ -157,6 +175,13 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		}
 		// For OCI output, use current directory for bundle generation
 		opts.outputDir = "./bundle"
+		// Derive the Helm chart name from the OCI artifact path so the
+		// argocd-helm bundle's Chart.yaml and parent Application
+		// `source.chart` match what `helm push` actually publishes. Without
+		// this the parent App's `repoURL/chart:targetRevision` triple
+		// resolves against an artifact that doesn't exist in the registry
+		// when the user picks a non-default name. See #1019.
+		opts.bundleChartName = opts.ociRef.ChartName()
 	} else {
 		// Resolve local output path to absolute to ensure consistent behavior
 		// regardless of how the binary is invoked.
@@ -181,6 +206,46 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	// blurs the URL-portable contract of the deployer.
 	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
 		opts.repoURL = oci.EnsureScheme(opts.ociRef.Registry + "/" + opts.ociRef.Repository)
+	}
+
+	// When using --deployer flux with OCI output, set the OCIRepository
+	// source name so local-chart components emit ArtifactGenerator +
+	// ExternalArtifact pairs instead of placeholder GitRepository references.
+	if opts.deployer == config.DeployerFlux && opts.ociRef != nil {
+		opts.ociSourceName = cmd.String("flux-oci-source-name")
+	}
+
+	// Flux namespace applies to all Flux deployer output (Git and OCI).
+	if opts.deployer == config.DeployerFlux {
+		opts.fluxNamespace = cmd.String("flux-namespace")
+	}
+
+	// Reject Flux-specific flags when deployer is not flux — a user who
+	// sets them on --deployer helm/argocd would otherwise not realize
+	// their config was silently ignored.
+	if opts.deployer != config.DeployerFlux {
+		if cmd.IsSet("flux-oci-source-name") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--flux-oci-source-name is only valid with --deployer flux")
+		}
+		if cmd.IsSet("flux-namespace") {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--flux-namespace is only valid with --deployer flux")
+		}
+	}
+
+	// --app-name applies to argocd-helm and argocd only. Reject on other
+	// deployers so a user passing it on --deployer helm/flux gets a clear
+	// error instead of silent acceptance with no effect.
+	opts.appName = stringFlagOrConfig(cmd, "app-name", resolved.AppName)
+	if opts.appName != "" {
+		if opts.deployer != config.DeployerArgoCD && opts.deployer != config.DeployerArgoCDHelm {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--app-name is only valid with --deployer argocd or --deployer argocd-helm")
+		}
+		if validateErr := config.ValidateAppName(opts.appName); validateErr != nil {
+			return nil, validateErr
+		}
 	}
 
 	// Derive target revision: use OCI tag when available
@@ -298,11 +363,21 @@ Argo CD:
 
 Flux:
   - kustomization.yaml: Root Kustomize orchestration
-  - namespaces/: Namespace manifests for component namespaces
   - sources/: HelmRepository and GitRepository source CRs
   - <component>/helmrelease.yaml: Flux HelmRelease with inline values
   - README.md: Deployment instructions
   - checksums.txt: SHA256 checksums of generated files
+
+Flux with OCI output (--output oci://...):
+  When --output targets an OCI registry, local-chart components emit
+  ArtifactGenerator + ExternalArtifact CRs instead of GitRepository sources.
+  This requires Flux v2.7+ with:
+    - source-watcher controller deployed (source.extensions.fluxcd.io)
+    - ExternalArtifact=true feature gate enabled on helm-controller
+  Without both, bundles generate successfully but HelmReleases will not
+  reconcile. Use --flux-oci-source-name to match your OCIRepository CR name
+  (default: aicr-bundle). Use --flux-namespace to target a non-default Flux
+  installation namespace (default: flux-system).
 
 Helmfile:
   - helmfile.yaml: Declarative release graph (repositories + releases + needs)
@@ -429,6 +504,17 @@ Package with explicit tag (overrides CLI version):
 					"location is supplied at install time via `helm install --set repoURL=...`.",
 				Category: catDeployment,
 			},
+			&cli.StringFlag{
+				Name: "app-name",
+				Usage: "Parent Argo Application name (used by --deployer argocd and --deployer argocd-helm). " +
+					"Defaults: \"aicr-stack\" for argocd-helm, \"nvidia-stack\" for argocd. " +
+					"Override when deploying multiple non-overlapping AICR bundles to the same " +
+					"Argo CD namespace so the parent Applications do not collide. " +
+					"For --deployer argocd-helm, the value is the chart default and can be " +
+					"overridden at install time via `helm install --set appName=...`. " +
+					"Must be a DNS-1123 subdomain.",
+				Category: catDeployment,
+			},
 			&cli.BoolFlag{
 				Name: "vendor-charts",
 				Usage: `Pull upstream Helm chart bytes into the bundle at bundle time so the
@@ -440,6 +526,22 @@ Package with explicit tag (overrides CLI version):
 	install a frozen chart version even after upstream yank. Requires the
 	'helm' binary on PATH at bundle time.`,
 				Category: "Deployment",
+			},
+			&cli.StringFlag{
+				Name: "flux-oci-source-name",
+				Usage: "Name of the OCIRepository CR that Flux uses to pull the bundle " +
+					"(--deployer flux only, OCI output). Must match the " +
+					"OCIRepository deployed in the target cluster.",
+				Value:    "aicr-bundle",
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name: "flux-namespace",
+				Usage: "Kubernetes namespace where Flux CRs (HelmRelease, sources, " +
+					"ArtifactGenerator) are deployed (--deployer flux only). Must " +
+					"match the namespace of the Flux installation in the target cluster.",
+				Value:    config.DefaultFluxNamespace,
+				Category: catDeployment,
 			},
 			&cli.BoolFlag{
 				Name:     "attest",
@@ -491,7 +593,7 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class"); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name"); err != nil {
 		return err
 	}
 
@@ -563,6 +665,10 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 		config.WithStorageClass(opts.storageClass),
 		config.WithVendorCharts(opts.vendorCharts),
+		config.WithOCISourceName(opts.ociSourceName),
+		config.WithFluxNamespace(opts.fluxNamespace),
+		config.WithBundleChartName(opts.bundleChartName),
+		config.WithAppName(opts.appName),
 	)
 
 	// Note: binary attestation pre-flight check is handled by bundler.New().

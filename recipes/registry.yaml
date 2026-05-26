@@ -644,7 +644,9 @@ components:
 
   - name: slinky-slurm
     displayName: slinky-slurm
-    # Cluster instance chart; wired in via platform-slurm-cluster mixin.
+    # Cluster instance chart; declared inline per slurm leaf overlay so
+    # each leaf can carry its own GPU/GRES tuning (mirrors the
+    # dynamo-platform pattern in inference-dynamo leaves).
     valueOverrideKeys:
       - slinkyslurm
       - slurmcluster

@@ -666,6 +666,101 @@ func TestHasDynamicValues_Empty(t *testing.T) {
 	}
 }
 
+// TestWithAppName verifies the AppName override flows to the getter and
+// that the default (empty) preserves the deployer's own fallback.
+func TestWithAppName(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{"default is empty (deployer applies its own default)", nil, ""},
+		{"explicit override", []Option{WithAppName("gpu-runtime")}, "gpu-runtime"},
+		{"empty override is observable as empty", []Option{WithAppName("")}, ""},
+		{"later option wins", []Option{WithAppName("first"), WithAppName("second")}, "second"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig(tt.opts...)
+			if got := cfg.AppName(); got != tt.want {
+				t.Errorf("AppName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateAppName covers DNS-1123 subdomain validation. Empty is a
+// valid signal meaning "use the deployer's default"; anything non-empty
+// must be a DNS-1123 subdomain so the rendered Argo Application passes
+// apiserver admission.
+func TestValidateAppName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"empty is allowed (means use deployer default)", "", false},
+		{"valid single-label", "gpu-runtime", false},
+		{"valid multi-label subdomain", "gpu.runtime.example", false},
+		{"valid all lowercase digits", "bundle-2", false},
+		{"uppercase rejected", "GPU-Runtime", true},
+		{"underscore rejected", "gpu_runtime", true},
+		{"leading dash rejected", "-gpu", true},
+		{"trailing dash rejected", "gpu-", true},
+		{"empty label rejected", "gpu..runtime", true},
+		{"only-digits label allowed", "123", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAppName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateAppName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestWithBundleChartName verifies the override flows to BundleChartName,
+// that the default is empty (so the argocd-helm deployer falls back to
+// its own "aicr-bundle" default), and that the most-recent option wins
+// when both an explicit empty and a non-empty value are supplied.
+func TestWithBundleChartName(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{
+			name: "default is empty (deployer applies its own default)",
+			opts: nil,
+			want: "",
+		},
+		{
+			name: "explicit override",
+			opts: []Option{WithBundleChartName("my-custom-bundle")},
+			want: "my-custom-bundle",
+		},
+		{
+			name: "empty override is a no-op observable through getter",
+			opts: []Option{WithBundleChartName("")},
+			want: "",
+		},
+		{
+			name: "later option wins",
+			opts: []Option{WithBundleChartName("first"), WithBundleChartName("second")},
+			want: "second",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig(tt.opts...)
+			if got := cfg.BundleChartName(); got != tt.want {
+				t.Errorf("BundleChartName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseDynamicValues(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1001,6 +1096,45 @@ func TestWorkloadSelectorOptions(t *testing.T) {
 		}
 		if _, exists := fresh["new"]; exists {
 			t.Error("adding key to returned map affected config - not immutable")
+		}
+	})
+}
+
+func TestWithOCISourceName(t *testing.T) {
+	t.Run("set value", func(t *testing.T) {
+		cfg := NewConfig(WithOCISourceName("aicr-bundle"))
+		if cfg.OCISourceName() != "aicr-bundle" {
+			t.Errorf("OCISourceName() = %q, want %q", cfg.OCISourceName(), "aicr-bundle")
+		}
+	})
+
+	t.Run("default empty", func(t *testing.T) {
+		cfg := NewConfig()
+		if cfg.OCISourceName() != "" {
+			t.Errorf("default OCISourceName() = %q, want empty", cfg.OCISourceName())
+		}
+	})
+}
+
+func TestWithFluxNamespace(t *testing.T) {
+	t.Run("set value", func(t *testing.T) {
+		cfg := NewConfig(WithFluxNamespace("gitops"))
+		if cfg.FluxNamespace() != "gitops" {
+			t.Errorf("FluxNamespace() = %q, want %q", cfg.FluxNamespace(), "gitops")
+		}
+	})
+
+	t.Run("default", func(t *testing.T) {
+		cfg := NewConfig()
+		if cfg.FluxNamespace() != DefaultFluxNamespace {
+			t.Errorf("default FluxNamespace() = %q, want %q", cfg.FluxNamespace(), DefaultFluxNamespace)
+		}
+	})
+
+	t.Run("empty string returns default", func(t *testing.T) {
+		cfg := NewConfig(WithFluxNamespace(""))
+		if cfg.FluxNamespace() != DefaultFluxNamespace {
+			t.Errorf("FluxNamespace() with empty = %q, want %q", cfg.FluxNamespace(), DefaultFluxNamespace)
 		}
 	})
 }

@@ -907,6 +907,23 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: app-name
+          in: query
+          required: false
+          description: >
+            Parent Argo Application name for `deployer=argocd` and
+            `deployer=argocd-helm`. Defaults: `aicr-stack` for argocd-helm,
+            `nvidia-stack` for argocd. Required for multi-bundle installs that
+            share an Argo CD namespace — distinct names prevent the parent
+            Applications from overwriting each other. For `argocd-helm`, the
+            value is the chart default and can still be overridden at install
+            time via `helm install --set appName=...`. Must be a DNS-1123
+            subdomain; rejected on other deployers with 400.
+          schema:
+            type: string
+            pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
+            maxLength: 253
+          example: gpu-runtime
       requestBody:
         required: true
         description: The recipe (RecipeResult) to generate bundles from

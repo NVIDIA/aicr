@@ -59,6 +59,26 @@ spec:
         - kai-scheduler
 
   validation:
+    performance:
+      checks:
+        - inference-perf
+      # PLACEHOLDER NUMBERS — pending empirical tuning on GB200 with
+      # Qwen/Qwen3-0.6B (concurrency=16/GPU, 1× p6e-gb200.36xlarge node,
+      # 4 vllmDecodeWorkers, vllm-runtime:0.9.0, image+DRA caches warm).
+      # Reference baseline from the passing validation run that informed
+      # these thresholds: throughput ≈ 18,093 tok/s, TTFT p99 ≈ 219 ms.
+      # Run-to-run variance on the same node is ~7% on throughput and a
+      # few ms on TTFT. These floors sit well below the reference numbers
+      # to act as a smoke-test gate rather than a tight perf SLO.
+      # Tighten once a reference dataset is published — for the small
+      # Qwen3-0.6B model the per-GPU compute advantage of GB200 over
+      # H100 is not exercised, so TTFT lands higher than naive
+      # Blackwell-vs-Hopper intuition suggests.
+      constraints:
+        - name: inference-throughput
+          value: ">= 10000"
+        - name: inference-ttft-p99
+          value: "<= 500"
     conformance:
       checks:
         - platform-health

@@ -28,6 +28,8 @@ navigation:
         path: user/api-reference.md
       - page: Agent Deployment
         path: user/agent-deployment.md
+      - page: Air-Gapped Mirroring
+        path: user/air-gap-mirror.md
       - page: Component Catalog
         path: user/component-catalog.md
       - page: Validation
@@ -49,6 +51,8 @@ navigation:
         path: integrator/gke-tcpxo-networking.md
       - page: Recipe Development
         path: integrator/recipe-development.md
+      - page: Data Extension
+        path: integrator/data-extension.md
       - page: Validator Extension
         path: integrator/validator-extension.md
       - section: Components

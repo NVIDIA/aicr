@@ -51,6 +51,34 @@ the same Helm repo) produce a single HelmRepository source CR.
 OCI-based Helm repositories (prefixed with oci://) generate HelmRepository CRs
 with spec.type set to "oci". HTTPS repositories use the default type.
 
+# OCI Bundle Mode (ArtifactGenerator)
+
+When Generator.OCISourceName is set (auto-derived by the CLI when --deployer
+flux and --output oci://... are combined), local-chart components emit an
+ArtifactGenerator CR (source.extensions.fluxcd.io/v1beta1) that extracts the
+chart sub-directory from the outer OCIRepository into an ExternalArtifact. The
+HelmRelease then references this ExternalArtifact via spec.chartRef instead of
+the traditional spec.chart.spec.sourceRef pointing at a GitRepository.
+
+This eliminates the placeholder GitRepository URL
+(https://github.com/YOUR_ORG/YOUR_REPO.git) that is unreachable under OCI
+consumption, allowing Flux to fully reconcile all HelmReleases.
+
+**Prerequisites (OCI output only):** Flux v2.7+ with source-watcher controller
+deployed (source.extensions.fluxcd.io) and ExternalArtifact=true feature gate
+enabled on helm-controller. These are only required when --output targets an
+OCI registry. Without both, OCI bundles generate successfully but
+HelmReleases will not reconcile at deploy time. Git-based bundles
+(--output /path/to/dir) do not use ArtifactGenerator and have no additional
+prerequisites.
+
+**CLI flags:**
+  - --flux-oci-source-name: name of the OCIRepository CR that Flux uses to
+    pull the bundle (default: "aicr-bundle"). Must match the OCIRepository
+    deployed in the target cluster.
+  - --flux-namespace: Kubernetes namespace where Flux CRs are deployed
+    (default: "flux-system"). Must match the Flux installation namespace.
+
 # Component Type Support
 
 Only Helm components (type "helm") are currently supported. Kustomize
@@ -87,14 +115,16 @@ components produce an ErrCodeInvalidRequest error at generation time.
 	│   └── helmrelease.yaml            # HelmRelease (HelmRepository source)
 	├── gpu-operator-pre/               # Synthesized when PreManifestFiles is non-empty
 	│   ├── Chart.yaml                  # Local Helm chart for pre-phase manifest templates
-	│   ├── helmrelease.yaml            # HelmRelease (GitRepository source); the primary dependsOn this
+	│   ├── artifactgenerator.yaml      # ArtifactGenerator (OCI mode only)
+	│   ├── helmrelease.yaml            # HelmRelease (GitRepository or chartRef ExternalArtifact)
 	│   └── templates/
 	│       └── gke-critical-pods-quota.yaml  # e.g. synthesized GKE ResourceQuota (issue #915)
 	├── gpu-operator/
 	│   └── helmrelease.yaml            # HelmRelease (HelmRepository source); dependsOn gpu-operator-pre
 	└── nodewright-customizations/
 	    ├── Chart.yaml                  # Local Helm chart for manifest templates
-	    ├── helmrelease.yaml            # HelmRelease (GitRepository source)
+	    ├── artifactgenerator.yaml      # ArtifactGenerator (OCI mode only)
+	    ├── helmrelease.yaml            # HelmRelease (GitRepository or chartRef ExternalArtifact)
 	    └── templates/
 	        └── tuning.yaml             # Manifest template rendered by Helm controller
 */

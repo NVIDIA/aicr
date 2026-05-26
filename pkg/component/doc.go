@@ -65,8 +65,8 @@
 //	    }
 //	}
 //
-//	func (b *Bundler) Make(ctx context.Context, input recipe.RecipeInput, dir string) (*result.Result, error) {
-//	    return component.MakeBundle(ctx, b.BaseBundler, input, dir, componentConfig)
+//	func (b *Bundler) Make(ctx context.Context, input recipe.RecipeInput, dir string, provider recipe.DataProvider) (*result.Result, error) {
+//	    return component.MakeBundle(ctx, b.BaseBundler, input, dir, componentConfig, provider)
 //	}
 //
 // # Custom Metadata

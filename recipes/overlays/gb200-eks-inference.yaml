@@ -56,7 +56,6 @@ spec:
         gdrcopy:
           enabled: true
         driver:
-          version: 580.126.20
           kernelModuleConfig:
             name: nvidia-kernel-module-params
 

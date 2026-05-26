@@ -149,8 +149,13 @@ func GenerateBundleMetadataWithExtensions(config map[string]string, cfg Componen
 
 // enrichConfigFromRegistry enriches a ComponentConfig with values from the component registry.
 // This allows bundlers to omit fields that are already defined in the registry.
-func enrichConfigFromRegistry(cfg *ComponentConfig) {
-	registry, err := recipe.GetComponentRegistry()
+//
+// When provider is non-nil, the registry is loaded from the supplied DataProvider
+// for per-tenant isolation. When provider is nil, falls back to the package-global
+// registry for back-compat with callers that have not yet been migrated to the
+// provider-bound pattern.
+func enrichConfigFromRegistry(cfg *ComponentConfig, provider recipe.DataProvider) {
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		slog.Debug("component registry not available, using bundler config as-is",
 			"component", cfg.Name,
@@ -201,7 +206,11 @@ func enrichConfigFromRegistry(cfg *ComponentConfig) {
 // writing values.yaml, generating README, generating checksums, and finalizing.
 // Configuration is enriched from the component registry when values are not
 // explicitly set in the ComponentConfig.
-func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, outputDir string, cfg ComponentConfig) (*result.Result, error) {
+//
+// The provider parameter routes registry lookups through the supplied
+// DataProvider for per-tenant isolation. Pass nil to fall back to the
+// package-global registry.
+func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, outputDir string, cfg ComponentConfig, provider recipe.DataProvider) (*result.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
 	}
@@ -209,7 +218,7 @@ func MakeBundle(ctx context.Context, b *BaseBundler, input recipe.RecipeInput, o
 	start := time.Now()
 
 	// Enrich config from registry (fills in missing values)
-	enrichConfigFromRegistry(&cfg)
+	enrichConfigFromRegistry(&cfg, provider)
 
 	slog.Debug("generating bundle",
 		"component", cfg.Name,

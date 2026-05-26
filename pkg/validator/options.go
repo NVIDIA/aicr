@@ -90,3 +90,23 @@ func WithNodeSelector(nodeSelector map[string]string) Option {
 		v.NodeSelector = nodeSelector
 	}
 }
+
+// WithImageRegistryOverride sets the image registry prefix override for
+// validator container images. When non-empty, replaces the default registry
+// (e.g., ghcr.io/nvidia) with the specified prefix (e.g., localhost:5001).
+// Forwarded to validator Jobs via the AICR_VALIDATOR_IMAGE_REGISTRY env var.
+func WithImageRegistryOverride(override string) Option {
+	return func(v *Validator) {
+		v.ImageRegistryOverride = override
+	}
+}
+
+// WithImageTagOverride sets the image tag override for validator container
+// images. When non-empty, overrides the resolved tag on every validator image.
+// Intended for feature-branch dev builds whose commit SHA has no published
+// image. Forwarded to validator Jobs via the AICR_VALIDATOR_IMAGE_TAG env var.
+func WithImageTagOverride(override string) Option {
+	return func(v *Validator) {
+		v.ImageTagOverride = override
+	}
+}

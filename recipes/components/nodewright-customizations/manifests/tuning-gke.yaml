@@ -34,7 +34,7 @@ metadata:
     app.kubernetes.io/part-of: skyhook-operator
     app.kubernetes.io/created-by: aicr
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
   name: tuning
   namespace: {{ .Release.Namespace }}
 spec:
@@ -63,8 +63,8 @@ spec:
   # Tuning
   packages:
     tuning:
-      image: ghcr.io/nvidia/skyhook-packages/nvidia-tuning-gke
-      version: "0.1.1"
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke
+      version: "0.1.2"
       interrupt:
         type: service
         services:

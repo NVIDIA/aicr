@@ -1027,6 +1027,39 @@ func TestMergeValidationConfig(t *testing.T) {
 			t.Fatal("validation should be preserved from base when overlay has nil")
 		}
 	})
+
+	// Regression: a prior version of Merge aliased other.Validation when the
+	// destination's was nil. Subsequent merges then wrote through that alias
+	// into whichever overlay's cached ValidationConfig the alias pointed at,
+	// polluting it across calls. The fix deep-copies via cloneValidationConfig.
+	t.Run("merge does not alias source validation", func(t *testing.T) {
+		source := &ValidationConfig{
+			Conformance: &ValidationPhase{Checks: []string{"check-from-source"}},
+		}
+		first := RecipeMetadataSpec{
+			Validation: source,
+		}
+		second := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{Checks: []string{"deployment-from-second"}},
+			},
+		}
+
+		// dest starts with nil Validation, so without the fix it would alias
+		// source. Merging second then plants Deployment via the alias into
+		// the source — corrupting subsequent reads of the source.
+		var dest RecipeMetadataSpec
+		dest.Merge(&first)
+		dest.Merge(&second)
+
+		if source.Deployment != nil {
+			t.Errorf("source.Deployment leaked to %v — Merge aliased the source ValidationConfig",
+				source.Deployment.Checks)
+		}
+		if dest.Validation.Conformance == source.Conformance {
+			t.Error("dest.Validation.Conformance aliases source.Conformance — phase pointers must be cloned")
+		}
+	})
 }
 
 func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
@@ -1041,7 +1074,7 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 		},
 	}
 	criteria := NewCriteria()
-	result, err := finalizeRecipeResult(criteria, &spec, []string{"base"})
+	result, err := finalizeRecipeResult(nil, criteria, &spec, []string{"base"})
 	if err != nil {
 		t.Fatalf("finalizeRecipeResult() error: %v", err)
 	}
@@ -1827,6 +1860,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"h100-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
 		{"h100-eks-ubuntu-training-kubeflow", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"h100-eks-ubuntu-training-slurm", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-eks-ubuntu-inference-dynamo", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		{"h100-eks-ubuntu-inference-nim", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformNIM}, true},
 		// H100 AKS Ubuntu variants
@@ -1836,6 +1870,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-aks-ubuntu-inference-dynamo", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// H100 GKE COS platform variants (GKE uses COS, no Ubuntu variant)
 		{"h100-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"h100-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 EKS Ubuntu variants
 		{"gb200-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
@@ -1856,6 +1891,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-kind-inference", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentInference, ""}, false},
 		// Deeper kind leaves — platform variants must also stay OFF
 		{"h100-kind-training-kubeflow", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentTraining, CriteriaPlatformKubeflow}, false},
+		{"h100-kind-training-slurm", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentTraining, CriteriaPlatformSlurm}, false},
 		{"h100-kind-inference-dynamo", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentInference, CriteriaPlatformDynamo}, false},
 	}
 

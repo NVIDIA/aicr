@@ -61,10 +61,6 @@ spec:
         gdrcopy:
           enabled: true
         driver:
-          # 580.126.20 is NVIDIA's recommended floor for GB200+EFA; the global
-          # default (580.105.08 in components/gpu-operator/values.yaml) stays
-          # unchanged for H100/B200 and non-EKS GB200 recipes.
-          version: 580.126.20
           kernelModuleConfig:
             name: nvidia-kernel-module-params
 

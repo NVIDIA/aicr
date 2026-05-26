@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -55,6 +56,13 @@ const (
 )
 
 // ParseCriteriaServiceType parses a string into a CriteriaServiceType.
+//
+// The switch arms below are the canonical/aliased fast path for the
+// embedded OSS catalog. Any value not recognized here falls through to
+// the package criteria registry, which the data provider seeds from
+// loaded overlays (embedded + `--data`). This lets internal/proprietary
+// service values (e.g., undisclosed NCPs) be admitted at runtime via
+// `--data` without a binary rebuild.
 func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue, "self-managed", "self", "vanilla":
@@ -72,13 +80,28 @@ func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 	case "lke":
 		return CriteriaServiceLKE, nil
 	default:
+		if DefaultRegistry().Has(FieldService, s) {
+			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
+		}
 		return CriteriaServiceAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid service type: %s", s))
 	}
 }
 
-// GetCriteriaServiceTypes returns all supported service types sorted alphabetically.
+// GetCriteriaServiceTypes returns the static OSS-embedded service types
+// sorted alphabetically. This is the canonical OSS list and is stable
+// across `--data` configurations; for the union of static + registry
+// (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
 	return []string{"aks", "eks", "gke", "kind", "lke", "oke"}
+}
+
+// AllCriteriaServiceTypes returns the union of the static OSS list and
+// values currently registered in the package criteria registry, sorted
+// alphabetically. In strict mode the registry contributes only its
+// embedded-origin values, so the result matches GetCriteriaServiceTypes
+// (plus any aliases the catalog has explicitly registered).
+func AllCriteriaServiceTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaServiceTypes(), DefaultRegistry().Values(FieldService))
 }
 
 // CriteriaAcceleratorType represents the GPU/accelerator type.
@@ -96,6 +119,8 @@ const (
 )
 
 // ParseCriteriaAcceleratorType parses a string into a CriteriaAcceleratorType.
+// See ParseCriteriaServiceType for the registry-fallback contract that
+// also applies here.
 func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
@@ -113,13 +138,25 @@ func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 	case "rtx-pro-6000":
 		return CriteriaAcceleratorRTXPro6000, nil
 	default:
+		if DefaultRegistry().Has(FieldAccelerator, s) {
+			return CriteriaAcceleratorType(normalizeCriteriaValue(s)), nil
+		}
 		return CriteriaAcceleratorAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid accelerator type: %s", s))
 	}
 }
 
-// GetCriteriaAcceleratorTypes returns all supported accelerator types sorted alphabetically.
+// GetCriteriaAcceleratorTypes returns the static OSS-embedded accelerator
+// types sorted alphabetically. For the union of static + registry, use
+// AllCriteriaAcceleratorTypes.
 func GetCriteriaAcceleratorTypes() []string {
 	return []string{"a100", "b200", "gb200", "h100", "l40", "rtx-pro-6000"}
+}
+
+// AllCriteriaAcceleratorTypes returns the union of the static OSS list
+// and values currently registered in the package criteria registry,
+// sorted alphabetically.
+func AllCriteriaAcceleratorTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaAcceleratorTypes(), DefaultRegistry().Values(FieldAccelerator))
 }
 
 // CriteriaIntentType represents the workload intent.
@@ -133,6 +170,7 @@ const (
 )
 
 // ParseCriteriaIntentType parses a string into a CriteriaIntentType.
+// See ParseCriteriaServiceType for the registry-fallback contract.
 func ParseCriteriaIntentType(s string) (CriteriaIntentType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
@@ -142,13 +180,25 @@ func ParseCriteriaIntentType(s string) (CriteriaIntentType, error) {
 	case "inference":
 		return CriteriaIntentInference, nil
 	default:
+		if DefaultRegistry().Has(FieldIntent, s) {
+			return CriteriaIntentType(normalizeCriteriaValue(s)), nil
+		}
 		return CriteriaIntentAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid intent type: %s", s))
 	}
 }
 
-// GetCriteriaIntentTypes returns all supported intent types sorted alphabetically.
+// GetCriteriaIntentTypes returns the static OSS-embedded intent types
+// sorted alphabetically. For the union of static + registry, use
+// AllCriteriaIntentTypes.
 func GetCriteriaIntentTypes() []string {
 	return []string{"inference", "training"}
+}
+
+// AllCriteriaIntentTypes returns the union of the static OSS list and
+// values currently registered in the package criteria registry, sorted
+// alphabetically.
+func AllCriteriaIntentTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaIntentTypes(), DefaultRegistry().Values(FieldIntent))
 }
 
 // CriteriaOSType represents an operating system type.
@@ -167,6 +217,7 @@ const (
 )
 
 // ParseCriteriaOSType parses a string into a CriteriaOSType.
+// See ParseCriteriaServiceType for the registry-fallback contract.
 func ParseCriteriaOSType(s string) (CriteriaOSType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
@@ -182,15 +233,26 @@ func ParseCriteriaOSType(s string) (CriteriaOSType, error) {
 	case oskind.Talos:
 		return CriteriaOSTalos, nil
 	default:
+		if DefaultRegistry().Has(FieldOS, s) {
+			return CriteriaOSType(normalizeCriteriaValue(s)), nil
+		}
 		return CriteriaOSAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid os type: %s", s))
 	}
 }
 
-// GetCriteriaOSTypes returns all supported OS types sorted alphabetically.
-// Delegates to oskind.All so the list stays in sync with the canonical
-// constants without duplication.
+// GetCriteriaOSTypes returns the static OSS-embedded OS types sorted
+// alphabetically. Delegates to oskind.All so the list stays in sync
+// with the canonical constants without duplication. For the union of
+// static + registry, use AllCriteriaOSTypes.
 func GetCriteriaOSTypes() []string {
 	return oskind.All()
+}
+
+// AllCriteriaOSTypes returns the union of the static OSS list and
+// values currently registered in the package criteria registry, sorted
+// alphabetically.
+func AllCriteriaOSTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaOSTypes(), DefaultRegistry().Values(FieldOS))
 }
 
 // CriteriaPlatformType represents a platform/framework type.
@@ -207,6 +269,7 @@ const (
 )
 
 // ParseCriteriaPlatformType parses a string into a CriteriaPlatformType.
+// See ParseCriteriaServiceType for the registry-fallback contract.
 func ParseCriteriaPlatformType(s string) (CriteriaPlatformType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
@@ -222,13 +285,57 @@ func ParseCriteriaPlatformType(s string) (CriteriaPlatformType, error) {
 	case "slurm":
 		return CriteriaPlatformSlurm, nil
 	default:
+		if DefaultRegistry().Has(FieldPlatform, s) {
+			return CriteriaPlatformType(normalizeCriteriaValue(s)), nil
+		}
 		return CriteriaPlatformAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid platform type: %s", s))
 	}
 }
 
-// GetCriteriaPlatformTypes returns all supported platform types sorted alphabetically.
+// GetCriteriaPlatformTypes returns the static OSS-embedded platform
+// types sorted alphabetically. For the union of static + registry, use
+// AllCriteriaPlatformTypes.
 func GetCriteriaPlatformTypes() []string {
 	return []string{"dynamo", "kubeflow", "nim", "runai", "slurm"}
+}
+
+// AllCriteriaPlatformTypes returns the union of the static OSS list and
+// values currently registered in the package criteria registry, sorted
+// alphabetically.
+func AllCriteriaPlatformTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaPlatformTypes(), DefaultRegistry().Values(FieldPlatform))
+}
+
+// mergeCriteriaTypes returns the deduplicated, alphabetically-sorted
+// union of two value slices. Used by the AllCriteria*Types helpers to
+// combine the embedded OSS list with registry-discovered values.
+func mergeCriteriaTypes(staticTypes, registered []string) []string {
+	if len(registered) == 0 {
+		// Return a copy so callers cannot mutate the canonical static slice.
+		out := make([]string, len(staticTypes))
+		copy(out, staticTypes)
+		return out
+	}
+	seen := make(map[string]struct{}, len(staticTypes)+len(registered))
+	out := make([]string, 0, len(staticTypes)+len(registered))
+	for _, v := range staticTypes {
+		v = normalizeCriteriaValue(v)
+		if _, dup := seen[v]; dup || v == "" {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	for _, v := range registered {
+		v = normalizeCriteriaValue(v)
+		if _, dup := seen[v]; dup || v == "" {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Criteria represents the input parameters for recipe matching.

@@ -66,7 +66,7 @@ const (
 // recipe.GetManifestContent simultaneously. Calling it once here from the
 // test goroutine serializes the init.
 func TestMain(m *testing.M) {
-	_ = recipe.GetDataProvider()
+	_ = recipe.GetDataProvider() //nolint:staticcheck // forces global-provider init before parallel tests; tracked by #983 Stage 2
 	os.Exit(m.Run())
 }
 

@@ -50,6 +50,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -101,13 +102,29 @@ type AppOfAppsData struct {
 	RepoURL        string
 	TargetRevision string
 	Path           string
+	// AppName is the parent Application's `metadata.name`. The argocd
+	// deployer materializes a static manifest at bundle time, so the value
+	// is baked into app-of-apps.yaml and is not overridable at apply time.
+	// Defaults to DefaultAppName ("nvidia-stack"). See issue #1011.
+	AppName string
 }
+
+// DefaultAppName is the parent App-of-Apps `metadata.name` written into
+// the generated manifest when Generator.AppName is empty. Two AICR
+// bundles installed into the same Argo CD namespace must carry distinct
+// names so their parent Applications do not overwrite each other —
+// see issue #1011.
+const DefaultAppName = "nvidia-stack"
 
 // ReadmeData contains data for rendering the README.
 type ReadmeData struct {
 	RecipeVersion  string
 	BundlerVersion string
 	Components     []ApplicationData
+	// AppName mirrors AppOfAppsData.AppName — the rendered README cites
+	// the parent Application name in its `argocd app get/sync` examples,
+	// so the value must match what app-of-apps.yaml was templated with.
+	AppName string
 }
 
 // compile-time interface check
@@ -180,6 +197,13 @@ type Generator struct {
 	// vendoring shape.
 	VendorCharts bool
 
+	// AppName overrides the parent App-of-Apps `metadata.name`. Empty
+	// falls back to DefaultAppName ("nvidia-stack"). The value is baked
+	// into the rendered app-of-apps.yaml at bundle time — Argo CD's
+	// `argocd` deployer materializes a static manifest, not a Helm chart,
+	// so the choice cannot be deferred to apply time. See issue #1011.
+	AppName string
+
 	// InlineUpstreamValues replaces the multi-source $values pattern for
 	// KindUpstreamHelm Applications with a single source whose helm.valuesObject
 	// is inlined from ComponentValues. Required when RepoURL is OCI because
@@ -214,6 +238,17 @@ func (g *Generator) VendorRecords() []localformat.VendorRecord {
 	out := make([]localformat.VendorRecord, len(g.vendorRecords))
 	copy(out, g.vendorRecords)
 	return out
+}
+
+// appName returns the parent App-of-Apps `metadata.name` for this
+// Generator, applying the DefaultAppName fallback when the caller did
+// not set Generator.AppName. Centralized so the same value flows into
+// the rendered manifest, README examples, and any future audit fields.
+func (g *Generator) appName() string {
+	if g.AppName == "" {
+		return DefaultAppName
+	}
+	return g.AppName
 }
 
 // resolveRepoSettings returns the effective repoURL and targetRevision,
@@ -297,6 +332,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
+	}
+
+	// Defense-in-depth: validate AppName at the deployer boundary so a
+	// direct library caller (bypassing the CLI/API validation) cannot
+	// produce a manifest that fails at apiserver admission. Empty is
+	// accepted and resolves to DefaultAppName via appName().
+	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
+		return nil, err
 	}
 
 	// Reject DynamicValues at the library boundary unless the caller
@@ -419,10 +462,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// Generate app-of-apps.yaml
+	appName := g.appName()
 	appOfAppsData := AppOfAppsData{
 		RepoURL:        repoURL,
 		TargetRevision: targetRevision,
 		Path:           ".",
+		AppName:        appName,
 	}
 	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
 	if err != nil {
@@ -436,6 +481,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		RecipeVersion:  g.RecipeResult.Metadata.Version,
 		BundlerVersion: g.Version,
 		Components:     appDataList,
+		AppName:        appName,
 	}
 	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, readmeData, outputDir, "README.md")
 	if err != nil {

@@ -30,9 +30,9 @@ auto-discovery), see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/k
 | `helm` | n/a (filesystem) | ✅ (`helm install`) | ✅ pods scheduled |
 | `argocd-oci` | ✅ (repo-server OCI pull) | ✅ (Argo CD sync) | ✅ `Synced+Healthy` (or documented partial-pass states) |
 | `argocd-helm-oci` | ✅ (`helm pull` OCI) | ✅ (wrapper chart install) | ✅ `Synced+Healthy` (or documented partial-pass states) |
-| `flux-oci` | ✅ (source-controller OCI pull) | ✅ (kustomize-controller apply) | ⏳ **deferred** — see [#964](https://github.com/NVIDIA/aicr/issues/964) |
+| `flux-oci` | ✅ (source-controller OCI pull) | ✅ (kustomize-controller apply) | ✅ all HelmReleases `Ready=True` + ArtifactGenerators Ready (when present) |
 
-`flux-oci` intentionally stops at "bundle applied + HelmRelease CRs created" because the bundler's flux deployer emits local-chart HelmReleases with `GitRepository` sources pointing at the placeholder URL `https://github.com/YOUR_ORG/YOUR_REPO.git`. Under OCI consumption helm-controller cannot fetch these charts, and Flux's `dependsOn` cascade then stalls every downstream HelmRelease. Issue [#964](https://github.com/NVIDIA/aicr/issues/964) tracks the proper fix (render local-chart manifests at bundle time OR push each local chart as its own OCI helm artifact).
+`flux-oci` validates full reconciliation: OCIRepository pulled, Kustomization applied, all HelmReleases reach `Ready=True`, and when local-chart components are present, `ArtifactGenerator` CRs (`source.extensions.fluxcd.io/v1beta1`) reach `Ready=True`. ArtifactGenerators extract local-chart sub-directories from the outer `OCIRepository` into `ExternalArtifact` resources, which HelmReleases reference via `spec.chartRef`. This requires `source-watcher` (installed via `flux install --components-extra=source-watcher`) and the `ExternalArtifact=true` feature gate on helm-controller.
 
 For filesystem (Git-source) round-trip coverage of `argocd` / `flux`, see [#963](https://github.com/NVIDIA/aicr/issues/963).
 
@@ -139,7 +139,7 @@ deployer-specific reconciliation overhead.
 |----------|---------|---------|
 | `KWOK_ARGOCD_SYNC_TIMEOUT` | `300` (seconds) | Total deadline for all child Argo CD Applications to reach `Synced` + `Healthy` |
 | `KWOK_ARGOCD_ROOT_GRACE` | `30` (seconds) | Grace period for the root Application to appear before deadline accounting starts |
-| `KWOK_FLUX_SYNC_TIMEOUT` | `300` (seconds) | Total deadline for the outer `OCIRepository` to fetch + `Kustomization` to apply + `HelmRelease` CRs to be created. `flux-oci` does NOT wait for `HelmRelease` reconciliation to terminal state — see [issue #964](https://github.com/NVIDIA/aicr/issues/964) |
+| `KWOK_FLUX_SYNC_TIMEOUT` | `300` (seconds) | Total deadline for `OCIRepository` fetch + `Kustomization` apply + all `HelmRelease` CRs to reach `Ready=True` + `ArtifactGenerator` CRs Ready (when present) |
 | `KWOK_FLUX_ROOT_GRACE` | `30` (seconds) | Grace period for the outer Kustomization to appear before deadline accounting starts |
 
 On a clean local Kind cluster the Phase-0 spike observed
@@ -162,7 +162,7 @@ named `kwok-debug-<recipe>-<deployer>-<run_id>` containing:
 - `<cluster>-argo-apps.yaml` — `applications.argoproj.io` YAML in `argocd` namespace (argocd lanes only)
 - `<cluster>-argo-reposerver.log` — last 500 lines of `argocd-repo-server`
 - `<cluster>-argo-appcontroller.log` — last 500 lines of `argocd-application-controller`
-- `<cluster>-flux-resources.yaml` — YAML for `ocirepositories`, `kustomizations`, and `helmreleases` across all namespaces (flux-oci lane only)
+- `<cluster>-flux-resources.yaml` — YAML for `ocirepositories`, `kustomizations`, `helmreleases`, `artifactgenerators`, and `externalartifacts` across all namespaces (flux-oci lane only)
 - `<cluster>-flux-source-controller.log` — last 500 lines of `source-controller`
 - `<cluster>-flux-kustomize-controller.log` — last 500 lines of `kustomize-controller`
 - `<cluster>-flux-helm-controller.log` — last 500 lines of `helm-controller`

@@ -45,6 +45,9 @@ func TestAccessors_NilTolerant(t *testing.T) {
 	if got := nilRecipe.DataDir(); got != "" {
 		t.Errorf("nil RecipeSpec DataDir = %q, want empty", got)
 	}
+	if got := nilRecipe.IsCriteriaStrict(); got {
+		t.Errorf("nil RecipeSpec IsCriteriaStrict = %v, want false", got)
+	}
 }
 
 func TestAccessors_EmptyReturnsEmpty(t *testing.T) {
@@ -60,6 +63,30 @@ func TestAccessors_EmptyReturnsEmpty(t *testing.T) {
 	}
 	if got := r.DataDir(); got != "" {
 		t.Errorf("empty RecipeSpec DataDir = %q", got)
+	}
+	if got := r.IsCriteriaStrict(); got {
+		t.Errorf("empty RecipeSpec IsCriteriaStrict = %v, want false", got)
+	}
+}
+
+func TestRecipeSpec_IsCriteriaStrict(t *testing.T) {
+	tru, fls := true, false
+	tests := []struct {
+		name string
+		ptr  *bool
+		want bool
+	}{
+		{"nil pointer absent in YAML", nil, false},
+		{"explicit false opt-out", &fls, false},
+		{"explicit true opt-in", &tru, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &config.RecipeSpec{CriteriaStrict: tt.ptr}
+			if got := r.IsCriteriaStrict(); got != tt.want {
+				t.Errorf("IsCriteriaStrict() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
