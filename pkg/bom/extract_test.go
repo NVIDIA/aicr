@@ -16,6 +16,7 @@ package bom
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -293,6 +294,66 @@ spec:
 `))
 	if err == nil {
 		t.Fatal("expected decode error for malformed YAML")
+	}
+}
+
+// TestExtractImagesFromYAML_InvalidContainerSHA exercises the fail-loud
+// guard in appendContainerSHA: any sibling `containerSHA` that does not
+// match `^sha256:[a-f0-9]{64}$` must surface as an extraction error so
+// a typo, truncation, or value-override slip cannot silently ship a
+// malformed digest into the BOM/PURL output. The recipes/ digest-pin
+// test enforces the same shape downstream; rejecting here just moves
+// the failure earlier where the offending line is in scope.
+func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		wantSub string
+	}{
+		{
+			name: "non-sha256 prefix",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+      containerSHA: not-a-digest
+`,
+			wantSub: `invalid containerSHA "not-a-digest"`,
+		},
+		{
+			name: "sha256 prefix but short hex",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+      containerSHA: sha256:abc123
+`,
+			wantSub: `invalid containerSHA "sha256:abc123"`,
+		},
+		{
+			name: "sha256 prefix but uppercase hex (OCI digest is lowercase)",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+      containerSHA: sha256:CC99C8C0675F3752F5081F0978AE57174368952CA0BB5FCAC07640FE62C156C7
+`,
+			wantSub: `invalid containerSHA`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ExtractImagesFromYAML([]byte(tt.in))
+			if err == nil {
+				t.Fatal("expected error for malformed containerSHA")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+		})
 	}
 }
 

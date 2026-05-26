@@ -17,6 +17,7 @@ package bom
 import (
 	"bytes"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"regexp"
 	"sort"
@@ -77,7 +78,9 @@ func ExtractImagesFromYAML(data []byte) ([]string, error) {
 			}
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "decode yaml", err)
 		}
-		walkForImages(&node, seen)
+		if err := walkForImages(&node, seen); err != nil {
+			return nil, err
+		}
 	}
 	out := make([]string, 0, len(seen))
 	for img := range seen {
@@ -87,9 +90,9 @@ func ExtractImagesFromYAML(data []byte) ([]string, error) {
 	return out, nil
 }
 
-func walkForImages(n *yaml.Node, seen map[string]struct{}) {
+func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 	if n == nil {
-		return
+		return nil
 	}
 	switch n.Kind {
 	case yaml.MappingNode:
@@ -125,28 +128,36 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 		}
 		if imgScalar != "" {
 			combined := combineCRDTriplet(imgScalar, repoScalar, verScalar)
-			combined = appendContainerSHA(combined, shaScalar)
-			if isLikelyImage(combined) {
-				seen[combined] = struct{}{}
+			withSHA, err := appendContainerSHA(combined, shaScalar)
+			if err != nil {
+				return err
+			}
+			if isLikelyImage(withSHA) {
+				seen[withSHA] = struct{}{}
 			}
 		}
 
 		// Second pass: recurse into every value to catch image references
 		// nested deeper in the document.
 		for i := 0; i+1 < len(n.Content); i += 2 {
-			walkForImages(n.Content[i+1], seen)
+			if err := walkForImages(n.Content[i+1], seen); err != nil {
+				return err
+			}
 		}
 	case yaml.SequenceNode, yaml.DocumentNode:
 		for _, c := range n.Content {
-			walkForImages(c, seen)
+			if err := walkForImages(c, seen); err != nil {
+				return err
+			}
 		}
 	case yaml.AliasNode:
 		// Follow the anchor target so an `image:` value reached via *alias
 		// is still surveyed. Rare in K8s manifests but cheap to handle.
-		walkForImages(n.Alias, seen)
+		return walkForImages(n.Alias, seen)
 	case yaml.ScalarNode:
 		// Scalar leaf — no nested image references.
 	}
+	return nil
 }
 
 // combineCRDTriplet builds a fully-qualified image reference from
@@ -182,6 +193,13 @@ func combineCRDTriplet(image, repository, version string) string {
 	return out
 }
 
+// containerSHARE matches a well-formed sha256 OCI digest payload
+// (`sha256:` + 64 lowercase hex chars). The recipes/ digest-pin test
+// uses the same shape downstream; validating at extraction time means
+// a bogus `containerSHA` fails fast at BOM render rather than silently
+// shipping a malformed ref into the SBOM/PURL output.
+var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
 // appendContainerSHA folds a sibling `containerSHA` value onto a
 // CRD-style combined image ref as an `@<digest>` suffix. The Skyhook
 // Package CRD carries the OCI digest in a separate `containerSHA`
@@ -192,20 +210,24 @@ func combineCRDTriplet(image, repository, version string) string {
 //   - Empty `sha` → returned image unchanged.
 //   - Image already carries an `@`-digest → returned unchanged (the
 //     in-line digest wins; we do not silently overwrite).
+//   - `sha` does not match `^sha256:[a-f0-9]{64}$` → error. This is
+//     the fail-loud guard: a malformed digest (typo, truncation, or
+//     a user-supplied value override that lands in a Skyhook Package)
+//     must not silently propagate into the BOM, PURL, or SBOM output.
 //   - Otherwise the digest is appended as `image@sha`, preserving any
 //     tag already present (e.g., `repo:0.1.2@sha256:abc…`).
-//
-// The input `sha` is expected to be the digest payload itself (e.g.,
-// `sha256:<hex>`), matching the Skyhook CRD convention and the
-// `@<digest>` form ParseImageRef already understands.
-func appendContainerSHA(image, sha string) string {
+func appendContainerSHA(image, sha string) (string, error) {
 	if sha == "" {
-		return image
+		return image, nil
 	}
 	if strings.Contains(image, "@") {
-		return image
+		return image, nil
 	}
-	return image + "@" + sha
+	if !containerSHARE.MatchString(sha) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid containerSHA %q for image %q: expected sha256:<64 lowercase hex chars>", sha, image))
+	}
+	return image + "@" + sha, nil
 }
 
 func isLikelyImage(v string) bool {
