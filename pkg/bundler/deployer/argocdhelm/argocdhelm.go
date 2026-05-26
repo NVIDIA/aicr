@@ -101,7 +101,9 @@ const yamlStringTag = "!!str"
 // (typically when --output is a local directory). When --output is an OCI
 // reference, the chart name is derived from the last path segment of the
 // repository (e.g. "oci://ghcr.io/org/my-bundle:v1" → "my-bundle") so the
-// parent Application's `source.chart` matches the actual OCI artifact name.
+// parent Application's rendered source — `repoURL/<chart>:<tag>` for
+// native OCI, `repoURL + source.chart` for HTTPS Helm repos — points at
+// the actual chart artifact.
 const DefaultChartName = "aicr-bundle"
 
 // DefaultAppName is the parent Argo Application's `metadata.name` written
@@ -133,14 +135,16 @@ type Generator struct {
 	TargetRevision   string
 	IncludeChecksums bool
 
-	// ChartName is the Helm chart name written into Chart.yaml and used as
-	// the parent Application's `source.chart`. When empty, defaults to
-	// DefaultChartName ("aicr-bundle"). When the bundle is published to an
-	// OCI registry at a non-default artifact name, callers MUST set this
-	// to the registry's last path segment (e.g. "my-bundle" for
-	// "oci://ghcr.io/org/my-bundle:v1") — otherwise the parent App's
-	// `repoURL/chart:tag` assembly resolves to an artifact that does not
-	// exist in the registry. See issue #1019.
+	// ChartName is the Helm chart name written into Chart.yaml and used
+	// by the parent Application template — appended to `source.repoURL`
+	// for `oci://` repoURLs (native OCI), or emitted as `source.chart`
+	// alongside repoURL for HTTPS Helm repos. When empty, defaults to
+	// DefaultChartName ("aicr-bundle"). When the bundle is published to
+	// an OCI registry at a non-default artifact name, callers MUST set
+	// this to the registry's last path segment (e.g. "my-bundle" for
+	// "oci://ghcr.io/org/my-bundle:v1") — otherwise the assembled
+	// `<parent namespace>/<chart>:<tag>` resolves to an artifact that
+	// does not exist in the registry. See issue #1019.
 	ChartName string
 
 	// AppName overrides the parent Argo Application's `metadata.name`.
@@ -434,12 +438,36 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 // Argo subsequently renders the chart from OCI it sees the same per-
 // cluster overrides the user passed at helm install — keeping the
 // dynamic-values story working end-to-end.
-// The parent App's `source.chart` is set to `.Chart.Name` so it tracks the
-// chart name Helm renders the bundle under (which equals what `helm push`
-// publishes the artifact as). That keeps the parent App's `repoURL/chart:
-// targetRevision` triple resolvable against the actual OCI artifact even
-// when the user picks a non-default name via `--output oci://reg/path/<name>`.
-// Hardcoding `aicr-bundle` here was the bug in #1019.
+//
+// # Two render shapes, dispatched on repoURL scheme
+//
+// Argo CD has two distinct code paths for chart sources, and the parent
+// Application must declare the shape that matches the user-supplied
+// repoURL — they are NOT interchangeable:
+//
+//   - **Native OCI** (`oci://...`): the artifact at `repoURL:<tag>` is
+//     fetched and unpacked, then `path` is resolved inside the unpacked
+//     tree. `source.chart` is ignored. The template appends
+//     `.Chart.Name` to repoURL so the resolved reference is the actual
+//     OCI artifact (`oci://<namespace>/<chart>:<tag>`), and sets
+//     `path: "."` so the chart renders from the artifact root.
+//     User guide: https://argo-cd.readthedocs.io/en/stable/user-guide/oci/
+//
+//   - **Helm chart repository** (https://, http://, ChartMuseum,
+//     GitHub Pages, etc.): the Helm repo at `repoURL` is queried for
+//     the chart named in `source.chart`. The template emits the
+//     classic `repoURL + chart` pair (no `path`).
+//     User guide: https://argo-cd.readthedocs.io/en/stable/user-guide/helm/
+//
+// PR #1047 attempted a single-shape fix on the OCI path; that broke
+// the Helm-repo path. PR #1019 conflated the two with a hardcoded
+// chart name. Branching on the scheme here keeps both modes working.
+//
+// `.Chart.Name` resolves to the bundle chart's name in Chart.yaml,
+// which the generator sets from `--output oci://reg/path/<name>` (or
+// falls back to DefaultChartName "aicr-bundle"). In both shapes,
+// callers MUST omit the chart name from `--set repoURL`; the template
+// always assembles the full reference itself.
 const parentAppTemplate = `apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -448,9 +476,16 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: {{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; the parent App appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL | quote }}
+{{- $repoURL := required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path> or https://charts.example.com) — do NOT include the chart name; this template assembles the full reference itself" .Values.repoURL | trimSuffix "/" }}
+{{- if hasPrefix "oci://" $repoURL }}
+    repoURL: {{ printf "%s/%s" $repoURL .Chart.Name | quote }}
+    targetRevision: {{ .Values.targetRevision | default .Chart.Version | quote }}
+    path: "."
+{{- else }}
+    repoURL: {{ $repoURL | quote }}
     chart: {{ .Chart.Name | quote }}
     targetRevision: {{ .Values.targetRevision | default .Chart.Version | quote }}
+{{- end }}
     helm:
       valuesObject:
 {{ toYaml .Values | indent 8 }}
@@ -482,10 +517,11 @@ spec:
 //	helm push /tmp/aicr-bundle-*.tgz oci://ghcr.io/myorg
 //
 //	# install — --set repoURL is the PARENT NAMESPACE (no chart name).
-//	# The parent App appends .Chart.Name via source.chart, and path-based
-//	# children append it directly into their rendered source.repoURL —
-//	# including the chart name in --set repoURL double-suffixes both and
-//	# the children fail to resolve. See issues #1018 / #1034.
+//	# Both the parent App template and the path-based child templates
+//	# append `/<chart-name>` themselves so Argo CD's native-OCI lookup
+//	# resolves at `oci://<namespace>/<chart-name>:<tag>`. Including the
+//	# chart name in --set repoURL would double-suffix everything. See
+//	# issues #1018 / #1034 and PR #1047 (the regression).
 //	helm install aicr-bundle oci://ghcr.io/myorg/aicr-bundle --version <tag> \
 //	  -n argocd \
 //	  --set repoURL=oci://ghcr.io/myorg \
@@ -685,25 +721,32 @@ func transformApplication(srcDir, templatesDir, folderName, componentName, overr
 // The path field stays baked (it's the NNN-<name>/ folder name inside
 // the bundle, which is structural, not URL-dependent).
 //
-// # OCI publication and the path field
+// # Publication backends and the path field
 //
-// Argo CD's OCI source type has two distinct shapes that are easy to
-// conflate:
+// Argo CD has two distinct chart-source code paths:
 //
-//   - OCI **Helm chart** source (Application has `source.chart` set):
-//     the OCI artifact is pulled as a Helm chart and rendered. Per Argo's
-//     OCI docs, path must be "." for this shape.
-//   - OCI **generic artifact** source (Application has `source.path` set
-//     and no `source.chart`): the OCI artifact is unpacked and treated
-//     like a directory tree (similar to git), so path is meaningful and
-//     subdirectory references resolve correctly.
+//   - **Helm chart repository** (HTTPS / HTTP, ChartMuseum, GitHub
+//     Pages, etc.): repoURL is the registry, `source.chart` names the
+//     chart. The parent App template emits this shape when repoURL
+//     does not start with `oci://`. Pure-Helm bundles (no manifest-
+//     only or mixed components) can deploy from this mode. User guide:
+//     https://argo-cd.readthedocs.io/en/stable/user-guide/helm/
 //
-// The bundle relies on both shapes simultaneously against the *same*
-// published OCI artifact: the parent Application uses the Helm chart
-// shape (it pulls and renders this very chart), while child Applications
-// use the generic-artifact shape to read NNN-<name>/ subdirectories from
-// the same artifact bytes. Argo CD supports this because the Application
-// spec — not the registry-level repo configuration — determines how a
+//   - **Native OCI** (`oci://...`): the artifact at
+//     `repoURL:<targetRevision>` is fetched and unpacked, then `path`
+//     is resolved inside the unpacked tree. `source.chart` is silently
+//     ignored. The parent App template appends `.Chart.Name` to
+//     repoURL and sets `path: "."` so the chart renders from the
+//     artifact root; path-based child Applications resolve
+//     `NNN-<name>/` subdirectories inside the same artifact bytes.
+//     Bundles with manifest-only or mixed components REQUIRE this
+//     mode (the path-based source type is only meaningful under
+//     native OCI). User guide:
+//     https://argo-cd.readthedocs.io/en/stable/user-guide/oci/
+//
+// Argo CD supports this multi-source-per-artifact pattern in the OCI
+// case because the Application spec — not the registry-level repo
+// configuration — determines how a
 // given source is interpreted. (Generic OCI source support has been in
 // Argo CD since v2.13; older versions, or registries configured solely
 // as Helm chart repos with no OCI passthrough, will not work — that is
@@ -746,16 +789,21 @@ func injectValuesIntoSingleSource(app map[string]any, overrideKey string) error 
 	// which would corrupt Helm's parsing of the template.
 	//
 	// Path-based child Applications have no `chart` field — Argo CD's
-	// generic OCI source uses `repoURL` directly as the full artifact
+	// native OCI source uses `repoURL` directly as the full artifact
 	// reference and then resolves `path` inside it. We therefore append
 	// .Chart.Name here ourselves so the rendered value is
 	// `<parent namespace>/<chart name>` (e.g. `oci://reg/org/my-bundle`),
-	// matching the artifact the parent Application's `repoURL/chart:tag`
-	// triple resolves to. Without the append, --set repoURL=<parent
+	// matching the artifact `helm push` published the bundle as.
+	//
+	// The parent App template (parentAppTemplate above) uses the same
+	// append-`.Chart.Name`-here shape — both parent and child rely on
+	// Argo CD's native-OCI semantics, where `source.chart` is ignored
+	// for `oci://` repoURLs. Without the append, --set repoURL=<parent
 	// namespace> (the contract every other site in this file documents)
 	// produces a child source pointing at `oci://reg/org:tag` — an
 	// artifact that does not exist — and the child Application fails
-	// to sync. See issue #1034.
+	// to sync. See issue #1034 and PR #1047 / #1048 (parent-side
+	// regression that proved the same contract applies to the parent).
 	source["repoURL"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
 		Tag:   yamlStringTag,
