@@ -168,7 +168,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -220,7 +220,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
 
       - name: Create version-tagged manifests for validator images
         env:
@@ -328,7 +328,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba  # v4.35.5
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v4.36.0
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: 'anchore-image-${{ matrix.image }}'
