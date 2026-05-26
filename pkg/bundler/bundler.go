@@ -361,6 +361,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			VendorCharts:           b.Config.VendorCharts(),
+			ChartName:              b.Config.BundleChartName(),
 		}, nil
 
 	case config.DeployerArgoCD:

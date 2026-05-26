@@ -242,6 +242,69 @@ func TestReference_WithTag(t *testing.T) {
 	}
 }
 
+func TestReference_ChartName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ref  *Reference
+		want string
+	}{
+		{
+			name: "local path returns empty",
+			ref:  &Reference{IsOCI: false, LocalPath: "./bundle"},
+			want: "",
+		},
+		{
+			name: "OCI with two-segment repository",
+			ref: &Reference{
+				IsOCI:      true,
+				Registry:   "ghcr.io",
+				Repository: "myorg/my-bundle",
+				Tag:        "v1.0.0",
+			},
+			want: "my-bundle",
+		},
+		{
+			name: "OCI with deeply nested repository",
+			ref: &Reference{
+				IsOCI:      true,
+				Registry:   "ghcr.io",
+				Repository: "myorg/subteam/sub/my-bundle",
+			},
+			want: "my-bundle",
+		},
+		{
+			name: "OCI with single-segment repository",
+			ref: &Reference{
+				IsOCI:      true,
+				Registry:   "localhost:5000",
+				Repository: "my-bundle",
+				Tag:        "latest",
+			},
+			want: "my-bundle",
+		},
+		{
+			name: "OCI with empty repository returns empty",
+			ref: &Reference{
+				IsOCI:      true,
+				Registry:   "ghcr.io",
+				Repository: "",
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.ref.ChartName(); got != tt.want {
+				t.Errorf("Reference.ChartName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEnsureScheme(t *testing.T) {
 	t.Parallel()
 

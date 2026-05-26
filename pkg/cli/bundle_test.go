@@ -191,3 +191,49 @@ func TestParseBundleCmdOptions_OCIRepoURLDerivation(t *testing.T) {
 		})
 	}
 }
+
+// TestParseBundleCmdOptions_OCIChartNameDerivation verifies the bundle
+// chart name is derived from the OCI artifact's last path segment when
+// --output is OCI, and stays empty (deployer default applies) for local
+// directory output. Regression coverage for issue #1019.
+func TestParseBundleCmdOptions_OCIChartNameDerivation(t *testing.T) {
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		args          []string
+		wantChartName string
+	}{
+		{
+			name:          "OCI output derives chart name from last path segment",
+			args:          []string{"--recipe", recipePath, "--output", "oci://reg.example.com/myorg/my-bundle:v1", "--deployer", "argocd-helm"},
+			wantChartName: "my-bundle",
+		},
+		{
+			name:          "OCI output with deeply nested repo takes only the tail",
+			args:          []string{"--recipe", recipePath, "--output", "oci://reg.example.com/org/sub/team/custom-bundle:v1", "--deployer", "argocd-helm"},
+			wantChartName: "custom-bundle",
+		},
+		{
+			name:          "local directory output leaves chart name empty",
+			args:          []string{"--recipe", recipePath, "--output", filepath.Join(tmp, "out"), "--deployer", "argocd-helm"},
+			wantChartName: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := captureBundleOpts(t, tt.args)
+			if opts == nil {
+				t.Fatal("captureBundleOpts returned nil")
+			}
+			if opts.bundleChartName != tt.wantChartName {
+				t.Errorf("bundleChartName = %q, want %q", opts.bundleChartName, tt.wantChartName)
+			}
+		})
+	}
+}

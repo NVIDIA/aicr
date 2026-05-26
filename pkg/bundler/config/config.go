@@ -169,6 +169,15 @@ type Config struct {
 	// fluxNamespace is the Kubernetes namespace where Flux CRs (HelmRelease,
 	// sources, ArtifactGenerator) are deployed. Defaults to DefaultFluxNamespace.
 	fluxNamespace string
+
+	// bundleChartName overrides the Helm chart name written into Chart.yaml
+	// and used as `source.chart` in the parent Argo Application emitted by
+	// the argocd-helm deployer. Empty means "use the deployer's default"
+	// (currently "aicr-bundle"). For OCI output the CLI sets this to the
+	// last path segment of the published artifact (e.g. "my-bundle" for
+	// "oci://reg/org/my-bundle:v1") so the parent App's `repoURL/chart:
+	// targetRevision` triple resolves against the real artifact. See #1019.
+	bundleChartName string
 }
 
 // Getter methods for read-only access
@@ -340,6 +349,12 @@ func (c *Config) VendorCharts() bool {
 // ArtifactGenerator mode. Empty means the feature is disabled.
 func (c *Config) OCISourceName() string {
 	return c.ociSourceName
+}
+
+// BundleChartName returns the Helm chart name override for the argocd-helm
+// deployer. Empty means "use the deployer's default". See #1019.
+func (c *Config) BundleChartName() string {
+	return c.bundleChartName
 }
 
 // Validate checks if the Config has valid settings.
@@ -572,6 +587,18 @@ func (c *Config) FluxNamespace() string {
 func WithFluxNamespace(ns string) Option {
 	return func(c *Config) {
 		c.fluxNamespace = ns
+	}
+}
+
+// WithBundleChartName sets the Helm chart name written into the argocd-helm
+// bundle's Chart.yaml (and used as `source.chart` in the generated parent
+// Argo Application). Empty leaves the deployer's default in place. The CLI
+// derives this from the OCI `--output` reference's last path segment so
+// the parent App's `repoURL/chart:targetRevision` triple resolves against
+// the actual published artifact. See #1019.
+func WithBundleChartName(name string) Option {
+	return func(c *Config) {
+		c.bundleChartName = name
 	}
 }
 

@@ -1093,8 +1093,8 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 	if parent.Spec.Source.RepoURL != wantRepoURL {
 		t.Errorf("parent App repoURL: got %q, want %q", parent.Spec.Source.RepoURL, wantRepoURL)
 	}
-	if parent.Spec.Source.Chart != "aicr-bundle" {
-		t.Errorf("parent App chart: got %q, want \"aicr-bundle\"", parent.Spec.Source.Chart)
+	if parent.Spec.Source.Chart != DefaultChartName {
+		t.Errorf("parent App chart: got %q, want %q", parent.Spec.Source.Chart, DefaultChartName)
 	}
 	if parent.Spec.Source.TargetRevision != wantTagName {
 		t.Errorf("parent App targetRevision: got %q, want %q", parent.Spec.Source.TargetRevision, wantTagName)
@@ -1123,6 +1123,87 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 	}
 	if upstream.Spec.Source.RepoURL != "https://charts.jetstack.io" {
 		t.Errorf("upstream-helm child repoURL should be the upstream chart registry, got %q", upstream.Spec.Source.RepoURL)
+	}
+}
+
+// TestGenerate_CustomChartName verifies the Generator's ChartName field
+// flows into both Chart.yaml's `name:` and the parent Application's
+// `source.chart` at install time. Regression coverage for issue #1019:
+// when a user passes `--output oci://reg/path/my-bundle:tag`, the OCI
+// repository's last segment (`my-bundle`) must propagate so the parent
+// App's `repoURL/chart:targetRevision` triple resolves against the
+// actual published artifact instead of the literal `aicr-bundle`.
+func TestGenerate_CustomChartName(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	const customName = "my-custom-bundle"
+	outputDir := t.TempDir()
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.20.2", Type: recipe.ComponentTypeHelm,
+			Source: "https://charts.jetstack.io",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager"}
+
+	g := &Generator{
+		RecipeResult:    rr,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v0.0.0-test",
+		ChartName:       customName,
+	}
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	chartBytes, err := os.ReadFile(filepath.Join(outputDir, "Chart.yaml"))
+	if err != nil {
+		t.Fatalf("read Chart.yaml: %v", err)
+	}
+	if !strings.Contains(string(chartBytes), "name: "+customName+"\n") {
+		t.Errorf("Chart.yaml missing custom name %q; got:\n%s", customName, chartBytes)
+	}
+
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+		"--set", "repoURL=oci://example.test/myorg",
+		"--set", "targetRevision=v1.0.0",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+	}
+
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	type appLite struct {
+		Metadata struct{ Name string } `yaml:"metadata"`
+		Spec     struct {
+			Source struct {
+				Chart string `yaml:"chart"`
+			} `yaml:"source"`
+		} `yaml:"spec"`
+	}
+	var foundParentChart string
+	for {
+		var a appLite
+		decErr := dec.Decode(&a)
+		if errors.Is(decErr, io.EOF) {
+			break
+		}
+		if decErr != nil {
+			t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
+		}
+		if a.Metadata.Name == "aicr-stack" {
+			foundParentChart = a.Spec.Source.Chart
+		}
+	}
+	if foundParentChart != customName {
+		t.Errorf("parent App chart: got %q, want %q (rendered chart must match Chart.yaml name)",
+			foundParentChart, customName)
 	}
 }
 
