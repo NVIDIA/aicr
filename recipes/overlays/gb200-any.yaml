@@ -1,0 +1,54 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Cross-cutting overlay applied via criteria-wildcard matching.
+#
+# Companion to gb200-any-training.yaml — that overlay contributes only the
+# NCCL performance floor and is scoped to `intent: training`. This overlay
+# carries the deployment-phase floor (the 4 standard checks plus the
+# gpu-operator version pin) and applies to every GB200 query regardless
+# of intent, so inference recipes (e.g., gb200-eks-ubuntu-inference-dynamo,
+# gb200-oke-ubuntu-inference) inherit the version pin too.
+#
+# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
+# that declare their own `deployment:` block (e.g., gb200-eks-training,
+# gb200-eks-inference) continue to win — their constraint values match
+# the floor here so the override is a no-op.
+#
+# See docs/contributor/data.md#criteria-wildcard-overlays for details.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: gb200-any
+
+spec:
+  base: base
+
+  criteria:
+    service: any
+    accelerator: gb200
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # GB200 support stabilized in gpu-operator v25.10. Concrete leaves
+        # can tighten if they pin to a later working version.
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
