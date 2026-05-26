@@ -412,6 +412,80 @@ func TestBundleRequestQueryParamParsing(t *testing.T) {
 	}
 }
 
+// TestBundleRequestAppNameParam verifies the `app-name` query parameter:
+//   - accepted on argocd-helm deployer
+//   - rejected with 400 on the helm deployer (silent acceptance would
+//     mislead operators expecting their flag to take effect)
+//   - rejected with 400 on invalid DNS-1123 names
+//
+// Regression coverage for issue #1011.
+func TestBundleRequestAppNameParam(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	const validRecipe = `{"apiVersion": "v1", "kind": "Recipe", "componentRefs": [{"name": "gpu-operator", "version": "v1"}]}`
+
+	tests := []struct {
+		name       string
+		query      string
+		wantStatus int
+		wantInBody string
+	}{
+		{
+			name:       "valid app-name on argocd-helm",
+			query:      "deployer=argocd-helm&app-name=gpu-runtime",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "valid app-name on argocd",
+			query:      "deployer=argocd&app-name=ops-runtime",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "app-name rejected on helm deployer",
+			query:      "deployer=helm&app-name=gpu-runtime",
+			wantStatus: http.StatusBadRequest,
+			wantInBody: "only valid with deployer=argocd",
+		},
+		{
+			name:       "app-name rejected when deployer omitted (defaults to helm)",
+			query:      "app-name=gpu-runtime",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid DNS-1123 name rejected",
+			query:      "deployer=argocd-helm&app-name=GPU_Runtime",
+			wantStatus: http.StatusBadRequest,
+			wantInBody: "DNS-1123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/bundle?"+tt.query, strings.NewReader(validRecipe))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			b.HandleBundles(w, req)
+
+			// 4xx codes must match exactly; for OK we tolerate 500 (the
+			// recipe is too sparse to bundle cleanly, but parsing succeeded).
+			if tt.wantStatus == http.StatusOK {
+				if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
+					t.Errorf("status = %d, want %d or %d. Body: %s", w.Code, http.StatusOK, http.StatusInternalServerError, w.Body.String())
+				}
+			} else if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d. Body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantInBody != "" && !strings.Contains(w.Body.String(), tt.wantInBody) {
+				t.Errorf("response body missing %q, got: %s", tt.wantInBody, w.Body.String())
+			}
+		})
+	}
+}
+
 // TestZipResponseContainsExpectedFiles validates zip structure for per-component bundle.
 func TestZipResponseContainsExpectedFiles(t *testing.T) {
 	b, err := New()

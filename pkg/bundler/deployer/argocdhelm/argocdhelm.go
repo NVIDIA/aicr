@@ -84,6 +84,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -102,6 +103,22 @@ const yamlStringTag = "!!str"
 // repository (e.g. "oci://ghcr.io/org/my-bundle:v1" → "my-bundle") so the
 // parent Application's `source.chart` matches the actual OCI artifact name.
 const DefaultChartName = "aicr-bundle"
+
+// DefaultAppName is the parent Argo Application's `metadata.name` written
+// into the chart when Generator.AppName is empty. Two AICR bundles
+// installed into the same Argo CD namespace must carry distinct names —
+// see issue #1011. The constant value is also referenced from the chart's
+// rendered Helm template (`{{ .Values.appName | default "aicr-stack" }}`)
+// so an operator who installs without --set appName still gets a working
+// Application, just one that collides with any other bundle using the
+// default.
+const DefaultAppName = "aicr-stack"
+
+// rootValuesAppNameKey is the .Values key that the parent Application
+// template reads to assemble its metadata.name. Centralized so the
+// constant name flows consistently into the rendered template, the
+// root values.yaml, and any documentation that references it.
+const rootValuesAppNameKey = "appName"
 
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
@@ -125,6 +142,15 @@ type Generator struct {
 	// `repoURL/chart:tag` assembly resolves to an artifact that does not
 	// exist in the registry. See issue #1019.
 	ChartName string
+
+	// AppName overrides the parent Argo Application's `metadata.name`.
+	// When empty, the rendered chart falls back to DefaultAppName
+	// ("aicr-stack") via `{{ .Values.appName | default ... }}`. When set,
+	// the value is written into the bundle's root values.yaml so it is
+	// the chart's default at install time; operators can still override
+	// it on the command line with `helm install --set appName=...`. This
+	// is the multi-bundle collision fix — see issue #1011.
+	AppName string
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
@@ -161,6 +187,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
+	}
+
+	// Defense-in-depth: validate AppName at the deployer boundary so a
+	// direct library caller (bypassing CLI/API validation) cannot ship a
+	// chart whose rendered Application would be rejected by apiserver
+	// admission. Empty resolves to DefaultAppName via the template's
+	// `.Values.appName | default` fallback at render time.
+	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
+		return nil, err
 	}
 
 	// Step 1: Generate flat Argo CD output to a temp directory
@@ -227,6 +262,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	output.Files = append(output.Files, staticFiles...)
 	output.TotalSize += staticSize
+
+	// Inject appName at the root of values.yaml when the caller chose a
+	// non-default name. The parent App template reads `.Values.appName`
+	// with the DefaultAppName fallback, so omitting the key on default
+	// bundles keeps values.yaml empty when no other dynamic values exist.
+	// Install-time `helm install --set appName=...` still overrides this.
+	if g.AppName != "" {
+		dynamicOnlyValues[rootValuesAppNameKey] = g.AppName
+	}
 
 	valuesPath, valuesSize, err := deployer.WriteValuesFile(dynamicOnlyValues, outputDir, "values.yaml")
 	if err != nil {
@@ -399,7 +443,7 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 const parentAppTemplate = `apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: aicr-stack
+  name: {{ .Values.appName | default "aicr-stack" | quote }}
   namespace: argocd
 spec:
   project: default
@@ -696,11 +740,23 @@ func injectValuesIntoSingleSource(app map[string]any, overrideKey string) error 
 	// in single quotes — that's the only YAML scalar style that doesn't
 	// require escaping the embedded double quotes inside `required "..."`,
 	// which would corrupt Helm's parsing of the template.
+	//
+	// Path-based child Applications have no `chart` field — Argo CD's
+	// generic OCI source uses `repoURL` directly as the full artifact
+	// reference and then resolves `path` inside it. We therefore append
+	// .Chart.Name here ourselves so the rendered value is
+	// `<parent namespace>/<chart name>` (e.g. `oci://reg/org/my-bundle`),
+	// matching the artifact the parent Application's `repoURL/chart:tag`
+	// triple resolves to. Without the append, --set repoURL=<parent
+	// namespace> (the contract every other site in this file documents)
+	// produces a child source pointing at `oci://reg/org:tag` — an
+	// artifact that does not exist — and the child Application fails
+	// to sync. See issue #1034.
 	source["repoURL"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
 		Tag:   yamlStringTag,
 		Style: yaml.SingleQuotedStyle,
-		Value: `{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; the parent App appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL }}`,
+		Value: `{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; this template appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL }}/{{ .Chart.Name }}`,
 	}
 	source["targetRevision"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
@@ -939,12 +995,20 @@ func writeChartYAML(outputDir, name, version string) (string, int64, error) {
 		return "", 0, err
 	}
 
+	// Quote name and version so OCI artifact paths whose last segment is
+	// a YAML reserved scalar ("null", "true", "false", "yes", "no",
+	// "123", etc.) round-trip as strings instead of getting reinterpreted
+	// by Helm's YAML parser as the underlying scalar type and producing
+	// a chart with an empty Metadata.Name (or a type-mismatch error).
+	// fmt %q emits a Go-quoted string that is also valid YAML for all
+	// printable ASCII; OCI artifact path segments are constrained to
+	// that charset by the docker reference grammar. See issue #1034.
 	var buf strings.Builder
 	buf.WriteString("apiVersion: v2\n")
-	fmt.Fprintf(&buf, "name: %s\n", name)
+	fmt.Fprintf(&buf, "name: %q\n", name)
 	buf.WriteString("description: AICR deployment bundle with dynamic install-time values\n")
 	buf.WriteString("type: application\n")
-	fmt.Fprintf(&buf, "version: %s\n", version)
+	fmt.Fprintf(&buf, "version: %q\n", version)
 
 	content := buf.String()
 	if writeErr := os.WriteFile(chartPath, []byte(content), 0600); writeErr != nil {

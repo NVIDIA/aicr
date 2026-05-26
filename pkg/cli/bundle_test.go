@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
@@ -236,4 +237,77 @@ func TestParseBundleCmdOptions_OCIChartNameDerivation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParseBundleCmdOptions_AppName verifies --app-name parsing:
+//   - empty default
+//   - flows into opts.appName for argocd and argocd-helm
+//   - rejected with ErrCodeInvalidRequest on non-Argo deployers
+//   - rejected with ErrCodeInvalidRequest on invalid DNS-1123 names
+//
+// Regression coverage for issue #1011.
+func TestParseBundleCmdOptions_AppName(t *testing.T) {
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	out := filepath.Join(tmp, "out")
+
+	t.Run("default empty for argocd-helm", func(t *testing.T) {
+		opts := captureBundleOpts(t, []string{"--recipe", recipePath, "--output", out, "--deployer", "argocd-helm"})
+		if opts == nil {
+			t.Fatal("captureBundleOpts returned nil")
+		}
+		if opts.appName != "" {
+			t.Errorf("appName = %q, want empty (deployer default applies)", opts.appName)
+		}
+	})
+
+	t.Run("flows to opts.appName for argocd-helm", func(t *testing.T) {
+		opts := captureBundleOpts(t, []string{"--recipe", recipePath, "--output", out, "--deployer", "argocd-helm", "--app-name", "gpu-runtime"})
+		if opts == nil {
+			t.Fatal("captureBundleOpts returned nil")
+		}
+		if opts.appName != "gpu-runtime" {
+			t.Errorf("appName = %q, want %q", opts.appName, "gpu-runtime")
+		}
+	})
+
+	t.Run("flows to opts.appName for argocd", func(t *testing.T) {
+		opts := captureBundleOpts(t, []string{"--recipe", recipePath, "--output", out, "--deployer", "argocd", "--app-name", "ops-runtime"})
+		if opts == nil {
+			t.Fatal("captureBundleOpts returned nil")
+		}
+		if opts.appName != "ops-runtime" {
+			t.Errorf("appName = %q, want %q", opts.appName, "ops-runtime")
+		}
+	})
+
+	t.Run("rejected on helm deployer", func(t *testing.T) {
+		opts, err := tryCaptureBundleOpts(t, []string{"--recipe", recipePath, "--output", out, "--deployer", "helm", "--app-name", "gpu-runtime"})
+		if err == nil {
+			t.Fatalf("expected error rejecting --app-name on helm deployer, got opts=%+v", opts)
+		}
+		if !strings.Contains(err.Error(), "only valid with") {
+			t.Errorf("error should mention deployer restriction, got: %v", err)
+		}
+	})
+
+	t.Run("rejected on flux deployer", func(t *testing.T) {
+		opts, err := tryCaptureBundleOpts(t, []string{"--recipe", recipePath, "--output", out, "--deployer", "flux", "--app-name", "gpu-runtime"})
+		if err == nil {
+			t.Fatalf("expected error rejecting --app-name on flux deployer, got opts=%+v", opts)
+		}
+	})
+
+	t.Run("rejected on invalid DNS-1123 name", func(t *testing.T) {
+		opts, err := tryCaptureBundleOpts(t, []string{"--recipe", recipePath, "--output", out, "--deployer", "argocd-helm", "--app-name", "GPU_Runtime"})
+		if err == nil {
+			t.Fatalf("expected error rejecting invalid DNS name, got opts=%+v", opts)
+		}
+		if !strings.Contains(err.Error(), "DNS-1123") {
+			t.Errorf("error should mention DNS-1123, got: %v", err)
+		}
+	})
 }
