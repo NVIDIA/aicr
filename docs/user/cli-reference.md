@@ -1606,7 +1606,7 @@ The chart's `templates/aicr-stack.yaml` renders the parent Argo Application with
 - Argo CD **≥ v2.13** on the target cluster.
 - A registry that serves Helm-pushed OCI artifacts through the generic OCI manifest fetch path (most modern registries — ECR, GHCR, GAR, Harbor, Artifactory, plain `oras`-compatible registries — support this).
 
-If the cluster runs Argo CD < v2.13 *or* the recipe is pure-Helm (no manifest-only / mixed components), the path-based children are not exercised and the bundle works on older Argo versions too. See the troubleshooting section below if `Failed to load target state` appears on `aicr-stack` or any `<component>-pre` / `<component>-post` Application.
+If the recipe is pure-Helm (no manifest-only / mixed components), path-based children are not exercised and the bundle can work on Argo CD versions older than v2.13. If path-based children are present, Argo CD v2.13+ is required. See the troubleshooting section below if `Failed to load target state` appears on `aicr-stack` or any `<component>-pre` / `<component>-post` Application.
 
 **`helm install ./bundle` from a local directory** *also* works, but with a caveat: child Applications whose source is path-based require Argo's repo-server to fetch the bundle from a remote (git or OCI) — there is no local-filesystem source type for an Argo Application. Local `helm install` is therefore end-to-end only when the recipe contains pure-Helm components. For everything else, publish first.
 
