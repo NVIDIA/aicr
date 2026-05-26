@@ -103,6 +103,22 @@ const yamlStringTag = "!!str"
 // parent Application's `source.chart` matches the actual OCI artifact name.
 const DefaultChartName = "aicr-bundle"
 
+// DefaultAppName is the parent Argo Application's `metadata.name` written
+// into the chart when Generator.AppName is empty. Two AICR bundles
+// installed into the same Argo CD namespace must carry distinct names —
+// see issue #1011. The constant value is also referenced from the chart's
+// rendered Helm template (`{{ .Values.appName | default "aicr-stack" }}`)
+// so an operator who installs without --set appName still gets a working
+// Application, just one that collides with any other bundle using the
+// default.
+const DefaultAppName = "aicr-stack"
+
+// rootValuesAppNameKey is the .Values key that the parent Application
+// template reads to assemble its metadata.name. Centralized so the
+// constant name flows consistently into the rendered template, the
+// root values.yaml, and any documentation that references it.
+const rootValuesAppNameKey = "appName"
+
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
@@ -125,6 +141,15 @@ type Generator struct {
 	// `repoURL/chart:tag` assembly resolves to an artifact that does not
 	// exist in the registry. See issue #1019.
 	ChartName string
+
+	// AppName overrides the parent Argo Application's `metadata.name`.
+	// When empty, the rendered chart falls back to DefaultAppName
+	// ("aicr-stack") via `{{ .Values.appName | default ... }}`. When set,
+	// the value is written into the bundle's root values.yaml so it is
+	// the chart's default at install time; operators can still override
+	// it on the command line with `helm install --set appName=...`. This
+	// is the multi-bundle collision fix — see issue #1011.
+	AppName string
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
@@ -227,6 +252,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	output.Files = append(output.Files, staticFiles...)
 	output.TotalSize += staticSize
+
+	// Inject appName at the root of values.yaml when the caller chose a
+	// non-default name. The parent App template reads `.Values.appName`
+	// with the DefaultAppName fallback, so omitting the key on default
+	// bundles keeps values.yaml empty when no other dynamic values exist.
+	// Install-time `helm install --set appName=...` still overrides this.
+	if g.AppName != "" {
+		dynamicOnlyValues[rootValuesAppNameKey] = g.AppName
+	}
 
 	valuesPath, valuesSize, err := deployer.WriteValuesFile(dynamicOnlyValues, outputDir, "values.yaml")
 	if err != nil {
@@ -399,7 +433,7 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 const parentAppTemplate = `apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: aicr-stack
+  name: {{ .Values.appName | default "aicr-stack" | quote }}
   namespace: argocd
 spec:
   project: default
