@@ -1369,6 +1369,143 @@ func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
 	}
 }
 
+// TestHelmTemplate_MixedComponentPreChildResolvesFromOCI is the live-render
+// regression test for issue #1018: a recipe with a Helm component AND
+// ComponentPreManifests for that same component (the gke-cos / EKS GB200
+// shape from the bug report) produces a synthetic NNN-<name>-pre folder
+// rendered into a path-based child Application. Before the post-#1035
+// contract, the path-based child's `source.repoURL` did not append
+// `.Chart.Name`, so when the user `--set repoURL=oci://<registry>/<org>`
+// (the parent namespace) Argo CD's generic OCI source resolved
+// `<registry>/<org>:<tag>` — an artifact that does not exist — and the
+// child stuck at `Unknown / Failed to load target state`.
+//
+// This test exercises the full chain: generator → helm template render
+// → rendered child Application asserts. It pins both the parent and the
+// `-pre` child to the same expected `<parent-namespace>/<chart-name>:
+// <tag>` OCI artifact reference. The sibling upstream-helm child
+// (`gpu-operator`) is also asserted to confirm its `repoURL` stays as
+// the upstream Helm chart registry (not templated from .Values.repoURL).
+func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	outputDir := t.TempDir()
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+			Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+			Source: "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version: "v0.0.0-test",
+		// Pre-manifest in the gke-cos / EKS GB200 shape from #1018 — a
+		// Namespace primer that must apply before the gpu-operator chart.
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/kernel-module-params.yaml": []byte(
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: nvidia-kernel-module-params\n  namespace: gpu-operator\n",
+				),
+			},
+		},
+	}
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	const setRepoURL = "oci://example.test/myorg"
+	const wantPathChildRepoURL = setRepoURL + "/" + DefaultChartName // post-#1035 fix
+	const wantTagName = "v9.9.9-issue-1018"
+
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+		"--set", "repoURL="+setRepoURL,
+		"--set", "targetRevision="+wantTagName,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+	}
+
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	type appLite struct {
+		Kind     string                `yaml:"kind"`
+		Metadata struct{ Name string } `yaml:"metadata"`
+		Spec     struct {
+			Source struct {
+				RepoURL        string `yaml:"repoURL"`
+				Chart          string `yaml:"chart"`
+				TargetRevision string `yaml:"targetRevision"`
+				Path           string `yaml:"path"`
+			} `yaml:"source"`
+		} `yaml:"spec"`
+	}
+	found := map[string]appLite{}
+	for {
+		var a appLite
+		decErr := dec.Decode(&a)
+		if errors.Is(decErr, io.EOF) {
+			break
+		}
+		if decErr != nil {
+			t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
+		}
+		if a.Kind == "Application" && a.Metadata.Name != "" {
+			found[a.Metadata.Name] = a
+		}
+	}
+
+	// Parent: uses Helm chart shape (source.chart = .Chart.Name).
+	parent, ok := found["aicr-stack"]
+	if !ok {
+		t.Fatalf("rendered output missing parent Application 'aicr-stack'\noutput:\n%s", out)
+	}
+	if parent.Spec.Source.RepoURL != setRepoURL {
+		t.Errorf("parent App repoURL: got %q, want %q (parent namespace, no chart name)", parent.Spec.Source.RepoURL, setRepoURL)
+	}
+	if parent.Spec.Source.Chart != DefaultChartName {
+		t.Errorf("parent App chart: got %q, want %q", parent.Spec.Source.Chart, DefaultChartName)
+	}
+
+	// The path-based -pre child is the #1018 regression target. Argo CD's
+	// generic OCI source treats `repoURL` as the full artifact, so the
+	// rendered value MUST equal `<parent-namespace>/<chart-name>` for the
+	// `<reg>/<org>/<chart>:<tag>` lookup to resolve.
+	preChild, ok := found["gpu-operator-pre"]
+	if !ok {
+		t.Fatalf("rendered output missing path-based child 'gpu-operator-pre'\noutput:\n%s", out)
+	}
+	if preChild.Spec.Source.RepoURL != wantPathChildRepoURL {
+		t.Errorf("gpu-operator-pre child repoURL: got %q, want %q (issue #1018: must be parent-namespace + chart-name so the generic OCI source resolves to the published artifact)", preChild.Spec.Source.RepoURL, wantPathChildRepoURL)
+	}
+	if preChild.Spec.Source.Path != "001-gpu-operator-pre" {
+		t.Errorf("gpu-operator-pre path: got %q, want %q (NNN-folder name is structural; must not be templated)", preChild.Spec.Source.Path, "001-gpu-operator-pre")
+	}
+	if preChild.Spec.Source.TargetRevision != wantTagName {
+		t.Errorf("gpu-operator-pre child targetRevision: got %q, want %q", preChild.Spec.Source.TargetRevision, wantTagName)
+	}
+
+	// The sibling upstream-helm child must keep the upstream chart
+	// registry — its source.repoURL is NOT templated from .Values.repoURL.
+	// Guards against accidentally widening the path-based template change.
+	upstream, ok := found["gpu-operator"]
+	if !ok {
+		t.Fatalf("rendered output missing upstream-helm child 'gpu-operator'\noutput:\n%s", out)
+	}
+	if upstream.Spec.Source.RepoURL != "https://helm.ngc.nvidia.com/nvidia" {
+		t.Errorf("gpu-operator upstream-helm child repoURL: got %q, want upstream Helm registry (must not be templated from .Values.repoURL)", upstream.Spec.Source.RepoURL)
+	}
+}
+
 // TestHelmTemplate_FailsWithoutRepoURL verifies the `required` directive
 // in the parent App template fires when the user omits --set repoURL. This
 // is the safety net that prevents users from accidentally publishing a
