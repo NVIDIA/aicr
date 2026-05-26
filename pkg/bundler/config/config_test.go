@@ -666,6 +666,60 @@ func TestHasDynamicValues_Empty(t *testing.T) {
 	}
 }
 
+// TestWithAppName verifies the AppName override flows to the getter and
+// that the default (empty) preserves the deployer's own fallback.
+func TestWithAppName(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{"default is empty (deployer applies its own default)", nil, ""},
+		{"explicit override", []Option{WithAppName("gpu-runtime")}, "gpu-runtime"},
+		{"empty override is observable as empty", []Option{WithAppName("")}, ""},
+		{"later option wins", []Option{WithAppName("first"), WithAppName("second")}, "second"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig(tt.opts...)
+			if got := cfg.AppName(); got != tt.want {
+				t.Errorf("AppName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateAppName covers DNS-1123 subdomain validation. Empty is a
+// valid signal meaning "use the deployer's default"; anything non-empty
+// must be a DNS-1123 subdomain so the rendered Argo Application passes
+// apiserver admission.
+func TestValidateAppName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"empty is allowed (means use deployer default)", "", false},
+		{"valid single-label", "gpu-runtime", false},
+		{"valid multi-label subdomain", "gpu.runtime.example", false},
+		{"valid all lowercase digits", "bundle-2", false},
+		{"uppercase rejected", "GPU-Runtime", true},
+		{"underscore rejected", "gpu_runtime", true},
+		{"leading dash rejected", "-gpu", true},
+		{"trailing dash rejected", "gpu-", true},
+		{"empty label rejected", "gpu..runtime", true},
+		{"only-digits label allowed", "123", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAppName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateAppName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestWithBundleChartName verifies the override flows to BundleChartName,
 // that the default is empty (so the argocd-helm deployer falls back to
 // its own "aicr-bundle" default), and that the most-recent option wins

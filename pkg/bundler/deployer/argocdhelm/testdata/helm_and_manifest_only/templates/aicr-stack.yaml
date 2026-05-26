@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: aicr-stack
+  name: {{ .Values.appName | default "aicr-stack" | quote }}
   namespace: argocd
 spec:
   project: default

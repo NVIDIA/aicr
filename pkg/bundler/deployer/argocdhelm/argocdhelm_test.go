@@ -1219,6 +1219,156 @@ func TestGenerate_CustomChartName(t *testing.T) {
 	}
 }
 
+// TestHelmTemplate_AppNameOverride verifies the parent App's
+// metadata.name is templated from .Values.appName so an operator can
+// run two AICR bundles in the same Argo CD namespace by passing
+// --set appName=<distinct> at install time. Bundle-time --app-name
+// (Generator.AppName) is the chart default; install-time --set wins.
+//
+// Regression coverage for issue #1011 — without templating, the parent
+// Application's metadata.name was the literal "aicr-stack" and the
+// second bundle silently overwrote the first.
+func TestHelmTemplate_AppNameOverride(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	tests := []struct {
+		name              string
+		bundleTimeAppName string
+		installTimeSet    string
+		wantParentName    string
+	}{
+		{
+			name:           "default (no override) renders DefaultAppName",
+			wantParentName: DefaultAppName,
+		},
+		{
+			name:              "bundle-time AppName flows into values.yaml as the default",
+			bundleTimeAppName: "gpu-runtime",
+			wantParentName:    "gpu-runtime",
+		},
+		{
+			name:              "install-time --set appName overrides the bundle-time default",
+			bundleTimeAppName: "gpu-runtime",
+			installTimeSet:    "ops-runtime",
+			wantParentName:    "ops-runtime",
+		},
+		{
+			name:           "install-time --set appName works without a bundle-time default",
+			installTimeSet: "tenant-a",
+			wantParentName: "tenant-a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+				{
+					Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+					Version: "v1.20.2", Type: recipe.ComponentTypeHelm,
+					Source: "https://charts.jetstack.io",
+				},
+			})
+			rr.DeploymentOrder = []string{"cert-manager"}
+
+			g := &Generator{
+				RecipeResult:    rr,
+				ComponentValues: map[string]map[string]any{"cert-manager": {}},
+				Version:         "v0.0.0-test",
+				AppName:         tt.bundleTimeAppName,
+			}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			helmArgs := []string{"template", "test-release", outputDir,
+				"--set", "repoURL=oci://example.test/myorg",
+				"--set", "targetRevision=v1.0.0",
+			}
+			if tt.installTimeSet != "" {
+				helmArgs = append(helmArgs, "--set", "appName="+tt.installTimeSet)
+			}
+
+			cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(cmdCtx, "helm", helmArgs...) //nolint:gosec // controlled args
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+			}
+
+			dec := yaml.NewDecoder(strings.NewReader(string(out)))
+			type appLite struct {
+				Kind     string `yaml:"kind"`
+				Metadata struct {
+					Name      string `yaml:"name"`
+					Namespace string `yaml:"namespace"`
+				} `yaml:"metadata"`
+				Spec struct {
+					Source struct {
+						RepoURL string `yaml:"repoURL"`
+						Chart   string `yaml:"chart"`
+					} `yaml:"source"`
+				} `yaml:"spec"`
+			}
+			var parentName string
+			for {
+				var a appLite
+				decErr := dec.Decode(&a)
+				if errors.Is(decErr, io.EOF) {
+					break
+				}
+				if decErr != nil {
+					t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
+				}
+				// Heuristic for "parent App": Kind=Application with no spec.source.chart (child apps have chart set).
+				// Be defensive — for default app name we'd otherwise pick the child if a child happened to
+				// have an empty chart field. Use the namespace=argocd + has source.repoURL signal too.
+				if a.Kind == "Application" && a.Metadata.Namespace == "argocd" && a.Spec.Source.Chart != "" && strings.HasPrefix(a.Spec.Source.RepoURL, "oci://example.test/myorg") {
+					parentName = a.Metadata.Name
+				}
+			}
+			if parentName != tt.wantParentName {
+				t.Errorf("parent App metadata.name: got %q, want %q\noutput:\n%s",
+					parentName, tt.wantParentName, out)
+			}
+		})
+	}
+}
+
+// TestGenerate_AppNameValidatedAtBoundary verifies the deployer boundary
+// rejects an invalid AppName even when callers bypass the CLI/API
+// validation layer (e.g. direct library use). Failing here keeps the
+// invalid name from reaching the rendered chart's values.yaml and the
+// parent App template, where it would only surface as a cryptic
+// apiserver admission error at `helm install`.
+func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.20.2", Type: recipe.ComponentTypeHelm,
+			Source: "https://charts.jetstack.io",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager"}
+
+	g := &Generator{
+		RecipeResult:    rr,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v0.0.0-test",
+		AppName:         "GPU_Runtime", // uppercase + underscore both reject as DNS-1123
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("Generate() should reject invalid DNS-1123 AppName, got nil")
+	}
+	if !strings.Contains(err.Error(), "DNS-1123") {
+		t.Errorf("error should mention DNS-1123 validation, got: %v", err)
+	}
+}
+
 // TestHelmTemplate_FailsWithoutRepoURL verifies the `required` directive
 // in the parent App template fires when the user omits --set repoURL. This
 // is the safety net that prevents users from accidentally publishing a

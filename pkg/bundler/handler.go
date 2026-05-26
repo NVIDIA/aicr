@@ -166,6 +166,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 			config.WithDeployer(params.deployer),
 			config.WithRepoURL(params.repoURL),
 			config.WithVendorCharts(params.vendorCharts),
+			config.WithAppName(params.appName),
 		)),
 	)
 	if err != nil {
@@ -293,6 +294,7 @@ type bundleParams struct {
 	deployer                   config.DeployerType
 	repoURL                    string
 	vendorCharts               bool
+	appName                    string
 }
 
 // parseQueryParams extracts and validates all query parameters from the request
@@ -384,6 +386,20 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 				"vendor-charts must be a boolean (true/false)", parseErr)
 		}
 		params.vendorCharts = b
+	}
+
+	// Parse app-name (parent Argo Application name for argocd / argocd-helm).
+	// Reject on other deployers so a typo on a helm-deployer request fails
+	// loudly rather than being silently ignored.
+	if v := query.Get("app-name"); v != "" {
+		if params.deployer != config.DeployerArgoCD && params.deployer != config.DeployerArgoCDHelm {
+			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				"app-name is only valid with deployer=argocd or deployer=argocd-helm")
+		}
+		if validateErr := config.ValidateAppName(v); validateErr != nil {
+			return nil, validateErr
+		}
+		params.appName = v
 	}
 
 	return params, nil

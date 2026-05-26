@@ -96,6 +96,11 @@ type bundleCmdOptions struct {
 	// deployer. Derived from ociRef.ChartName() when --output is OCI; the
 	// deployer's "aicr-bundle" default is used when this is empty. See #1019.
 	bundleChartName string
+
+	// appName overrides the parent Argo Application's metadata.name. Empty
+	// means each deployer applies its own default ("aicr-stack" for
+	// argocd-helm, "nvidia-stack" for argocd). See #1011.
+	appName string
 }
 
 // parseBundleCmdOptions parses and validates command options. The wire
@@ -226,6 +231,20 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		if cmd.IsSet("flux-namespace") {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--flux-namespace is only valid with --deployer flux")
+		}
+	}
+
+	// --app-name applies to argocd-helm and argocd only. Reject on other
+	// deployers so a user passing it on --deployer helm/flux gets a clear
+	// error instead of silent acceptance with no effect.
+	opts.appName = stringFlagOrConfig(cmd, "app-name", resolved.AppName)
+	if opts.appName != "" {
+		if opts.deployer != config.DeployerArgoCD && opts.deployer != config.DeployerArgoCDHelm {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--app-name is only valid with --deployer argocd or --deployer argocd-helm")
+		}
+		if validateErr := config.ValidateAppName(opts.appName); validateErr != nil {
+			return nil, validateErr
 		}
 	}
 
@@ -485,6 +504,17 @@ Package with explicit tag (overrides CLI version):
 					"location is supplied at install time via `helm install --set repoURL=...`.",
 				Category: catDeployment,
 			},
+			&cli.StringFlag{
+				Name: "app-name",
+				Usage: "Parent Argo Application name (used by --deployer argocd and --deployer argocd-helm). " +
+					"Defaults: \"aicr-stack\" for argocd-helm, \"nvidia-stack\" for argocd. " +
+					"Override when deploying multiple non-overlapping AICR bundles to the same " +
+					"Argo CD namespace so the parent Applications do not collide. " +
+					"For --deployer argocd-helm, the value is the chart default and can be " +
+					"overridden at install time via `helm install --set appName=...`. " +
+					"Must be a DNS-1123 subdomain.",
+				Category: catDeployment,
+			},
 			&cli.BoolFlag{
 				Name: "vendor-charts",
 				Usage: `Pull upstream Helm chart bytes into the bundle at bundle time so the
@@ -563,7 +593,7 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class"); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name"); err != nil {
 		return err
 	}
 
@@ -638,6 +668,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),
+		config.WithAppName(opts.appName),
 	)
 
 	// Note: binary attestation pre-flight check is handled by bundler.New().
