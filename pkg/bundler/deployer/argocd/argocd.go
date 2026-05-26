@@ -50,6 +50,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -331,6 +332,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
+	}
+
+	// Defense-in-depth: validate AppName at the deployer boundary so a
+	// direct library caller (bypassing the CLI/API validation) cannot
+	// produce a manifest that fails at apiserver admission. Empty is
+	// accepted and resolves to DefaultAppName via appName().
+	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
+		return nil, err
 	}
 
 	// Reject DynamicValues at the library boundary unless the caller

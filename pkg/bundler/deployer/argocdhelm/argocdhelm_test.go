@@ -1326,6 +1326,37 @@ func TestHelmTemplate_AppNameOverride(t *testing.T) {
 	}
 }
 
+// TestGenerate_AppNameValidatedAtBoundary verifies the deployer boundary
+// rejects an invalid AppName even when callers bypass the CLI/API
+// validation layer (e.g. direct library use). Failing here keeps the
+// invalid name from reaching the rendered chart's values.yaml and the
+// parent App template, where it would only surface as a cryptic
+// apiserver admission error at `helm install`.
+func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.20.2", Type: recipe.ComponentTypeHelm,
+			Source: "https://charts.jetstack.io",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager"}
+
+	g := &Generator{
+		RecipeResult:    rr,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v0.0.0-test",
+		AppName:         "GPU_Runtime", // uppercase + underscore both reject as DNS-1123
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("Generate() should reject invalid DNS-1123 AppName, got nil")
+	}
+	if !strings.Contains(err.Error(), "DNS-1123") {
+		t.Errorf("error should mention DNS-1123 validation, got: %v", err)
+	}
+}
+
 // TestHelmTemplate_FailsWithoutRepoURL verifies the `required` directive
 // in the parent App template fires when the user omits --set repoURL. This
 // is the safety net that prevents users from accidentally publishing a

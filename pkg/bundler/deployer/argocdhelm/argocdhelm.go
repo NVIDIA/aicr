@@ -84,6 +84,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -186,6 +187,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
+	}
+
+	// Defense-in-depth: validate AppName at the deployer boundary so a
+	// direct library caller (bypassing CLI/API validation) cannot ship a
+	// chart whose rendered Application would be rejected by apiserver
+	// admission. Empty resolves to DefaultAppName via the template's
+	// `.Values.appName | default` fallback at render time.
+	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
+		return nil, err
 	}
 
 	// Step 1: Generate flat Argo CD output to a temp directory

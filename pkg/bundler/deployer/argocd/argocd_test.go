@@ -211,6 +211,38 @@ func TestGenerate_AppName(t *testing.T) {
 	}
 }
 
+// TestGenerate_AppNameValidatedAtBoundary verifies the deployer boundary
+// rejects an invalid AppName even when callers bypass the CLI/API
+// validation layer (e.g. direct library use). Failing here keeps the
+// invalid name from reaching the rendered manifest, where it would only
+// surface as a cryptic apiserver admission error at apply time.
+func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.17.2", Type: "helm",
+			Source: "https://charts.jetstack.io",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v0.9.0",
+		AppName:         "GPU_Runtime", // uppercase + underscore both reject as DNS-1123
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("Generate() should reject invalid DNS-1123 AppName, got nil")
+	}
+	if !strings.Contains(err.Error(), "DNS-1123") {
+		t.Errorf("error should mention DNS-1123 validation, got: %v", err)
+	}
+}
+
 // snippetAround returns up to 120 chars of haystack around the first occurrence
 // of needle, used for compact failure messages in TestGenerate_AppName.
 func snippetAround(haystack, needle string) string {

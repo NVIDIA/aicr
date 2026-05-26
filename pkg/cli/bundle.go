@@ -593,7 +593,7 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class"); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name"); err != nil {
 		return err
 	}
 
