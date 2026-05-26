@@ -199,8 +199,11 @@ func TestGenerate(t *testing.T) {
 				if err != nil {
 					t.Fatalf("failed to read Chart.yaml: %v", err)
 				}
-				if !strings.Contains(string(content), "version: 2.5.0") {
-					t.Error("Chart.yaml should contain version: 2.5.0")
+				// writeChartYAML quotes the version scalar so YAML
+				// reserved scalars (e.g. "1.0", "null") round-trip as
+				// strings; see issue #1034.
+				if !strings.Contains(string(content), `version: "2.5.0"`) {
+					t.Errorf("Chart.yaml should contain version: \"2.5.0\", got:\n%s", string(content))
 				}
 			},
 		},
@@ -1044,12 +1047,19 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	const wantRepoURL = "oci://example.test/myorg/aicr-bundle"
+	// Under the post-#1032 contract, --set repoURL carries the parent
+	// namespace only — the parent App appends .Chart.Name via its
+	// source.chart field, and (per #1034) the path-based child template
+	// appends /<chart-name> directly into its source.repoURL so Argo
+	// CD's generic OCI source resolves to the same artifact.
+	const setRepoURL = "oci://example.test/myorg"
+	const wantParentRepoURL = setRepoURL
+	const wantChildRepoURL = setRepoURL + "/" + DefaultChartName
 	const wantTagName = "v9.9.9-render-test"
 	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
-		"--set", "repoURL="+wantRepoURL,
+		"--set", "repoURL="+setRepoURL,
 		"--set", "targetRevision="+wantTagName,
 	)
 	out, err := cmd.CombinedOutput()
@@ -1090,8 +1100,8 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 	if !ok {
 		t.Fatalf("rendered output missing parent Application 'aicr-stack'\noutput:\n%s", out)
 	}
-	if parent.Spec.Source.RepoURL != wantRepoURL {
-		t.Errorf("parent App repoURL: got %q, want %q", parent.Spec.Source.RepoURL, wantRepoURL)
+	if parent.Spec.Source.RepoURL != wantParentRepoURL {
+		t.Errorf("parent App repoURL: got %q, want %q", parent.Spec.Source.RepoURL, wantParentRepoURL)
 	}
 	if parent.Spec.Source.Chart != DefaultChartName {
 		t.Errorf("parent App chart: got %q, want %q", parent.Spec.Source.Chart, DefaultChartName)
@@ -1104,8 +1114,8 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 	if !ok {
 		t.Fatalf("rendered output missing path-based child 'nodewright-customizations'")
 	}
-	if child.Spec.Source.RepoURL != wantRepoURL {
-		t.Errorf("child path-based repoURL: got %q, want %q", child.Spec.Source.RepoURL, wantRepoURL)
+	if child.Spec.Source.RepoURL != wantChildRepoURL {
+		t.Errorf("child path-based repoURL: got %q, want %q (parent namespace + chart name; see #1034)", child.Spec.Source.RepoURL, wantChildRepoURL)
 	}
 	if child.Spec.Source.TargetRevision != wantTagName {
 		t.Errorf("child path-based targetRevision: got %q, want %q", child.Spec.Source.TargetRevision, wantTagName)
@@ -1163,8 +1173,10 @@ func TestGenerate_CustomChartName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Chart.yaml: %v", err)
 	}
-	if !strings.Contains(string(chartBytes), "name: "+customName+"\n") {
-		t.Errorf("Chart.yaml missing custom name %q; got:\n%s", customName, chartBytes)
+	// writeChartYAML quotes the name so OCI artifact paths whose last
+	// segment is a YAML reserved scalar round-trip as strings; see #1034.
+	if !strings.Contains(string(chartBytes), `name: "`+customName+"\"\n") {
+		t.Errorf("Chart.yaml missing quoted custom name %q; got:\n%s", customName, chartBytes)
 	}
 
 	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1270,5 +1282,102 @@ func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
 	}
 	if string(got) != string(want) {
 		t.Errorf("%s differs from golden:\n--- got ---\n%s\n--- want ---\n%s", relPath, got, want)
+	}
+}
+
+// TestInjectValuesIntoSingleSource_AppendsChartName pins the
+// post-#1032 path-based-children fix from issue #1034: path-based
+// child Applications have no `chart` field, so Argo CD's generic OCI
+// source uses `repoURL` directly as the full artifact reference. The
+// rendered template must therefore append .Chart.Name to the
+// install-time --set repoURL value so the assembled URL matches the
+// artifact the parent Application's `repoURL/chart:tag` triple
+// resolves to. Without the append, --set repoURL=oci://reg/org (the
+// contract documented elsewhere in this file) produces a child
+// source pointing at `oci://reg/org:tag` — an artifact that does not
+// exist — and the child Application fails to sync.
+func TestInjectValuesIntoSingleSource_AppendsChartName(t *testing.T) {
+	app := map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"spec": map[string]any{
+			"source": map[string]any{
+				"repoURL":        "https://github.com/myorg/myrepo.git",
+				"targetRevision": "main",
+				"path":           "003-nodewright-customizations",
+			},
+		},
+	}
+
+	if err := injectValuesIntoSingleSource(app, "nodewrightcustomizations"); err != nil {
+		t.Fatalf("injectValuesIntoSingleSource error: %v", err)
+	}
+
+	out, err := yaml.Marshal(app)
+	if err != nil {
+		t.Fatalf("yaml.Marshal error: %v", err)
+	}
+	str := string(out)
+
+	if !strings.Contains(str, `.Values.repoURL }}/{{ .Chart.Name }}`) {
+		t.Errorf("path-based child repoURL should append /{{ .Chart.Name }} after .Values.repoURL so the rendered value is the full OCI artifact reference; got:\n%s", str)
+	}
+	// The error message must direct callers to pass the parent
+	// namespace (the same contract the parent Application uses) so
+	// users don't try to bake the chart name into --set repoURL.
+	if !strings.Contains(str, "do NOT include the chart name") {
+		t.Errorf("required-message must instruct callers not to include the chart name in --set repoURL; got:\n%s", str)
+	}
+}
+
+// TestWriteChartYAML_QuotesYAMLReservedScalarsAsName documents the
+// chart-name quoting fix from issue #1034. Valid OCI artifact paths
+// whose last segment is a YAML reserved scalar ("null", "true",
+// "false", numeric strings, etc.) must round-trip as strings; if
+// emitted unquoted, Helm's YAML parser reinterprets `name: null` as
+// YAML null, chart.Metadata.Name becomes empty, and the chart is
+// rejected by `helm package` / `helm push` with "chart.metadata.name
+// is required".
+func TestWriteChartYAML_QuotesYAMLReservedScalarsAsName(t *testing.T) {
+	tests := []struct {
+		name        string
+		chartName   string
+		wantUnmarsh string
+	}{
+		{"YAML null literal", "null", "null"},
+		{"YAML true literal", "true", "true"},
+		{"YAML false literal", "false", "false"},
+		{"numeric-looking", "123", "123"},
+		{"YAML yes literal", "yes", "yes"},
+		{"hyphenated normal name", "my-bundle", "my-bundle"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			if _, _, err := writeChartYAML(outputDir, tt.chartName, "1.0.0"); err != nil {
+				t.Fatalf("writeChartYAML: %v", err)
+			}
+			content, err := os.ReadFile(filepath.Join(outputDir, "Chart.yaml"))
+			if err != nil {
+				t.Fatalf("read Chart.yaml: %v", err)
+			}
+			var parsed struct {
+				APIVersion string `yaml:"apiVersion"`
+				Name       string `yaml:"name"`
+				Version    string `yaml:"version"`
+			}
+			if err := yaml.Unmarshal(content, &parsed); err != nil {
+				t.Fatalf("Chart.yaml does not unmarshal cleanly for name=%q:\n%s\nerror: %v",
+					tt.chartName, content, err)
+			}
+			if parsed.Name != tt.wantUnmarsh {
+				t.Errorf("Chart.yaml name = %q (after YAML unmarshal), want %q\nraw:\n%s",
+					parsed.Name, tt.wantUnmarsh, content)
+			}
+			if parsed.Version != "1.0.0" {
+				t.Errorf("Chart.yaml version = %q, want \"1.0.0\"\nraw:\n%s",
+					parsed.Version, content)
+			}
+		})
 	}
 }

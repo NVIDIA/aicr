@@ -696,11 +696,23 @@ func injectValuesIntoSingleSource(app map[string]any, overrideKey string) error 
 	// in single quotes — that's the only YAML scalar style that doesn't
 	// require escaping the embedded double quotes inside `required "..."`,
 	// which would corrupt Helm's parsing of the template.
+	//
+	// Path-based child Applications have no `chart` field — Argo CD's
+	// generic OCI source uses `repoURL` directly as the full artifact
+	// reference and then resolves `path` inside it. We therefore append
+	// .Chart.Name here ourselves so the rendered value is
+	// `<parent namespace>/<chart name>` (e.g. `oci://reg/org/my-bundle`),
+	// matching the artifact the parent Application's `repoURL/chart:tag`
+	// triple resolves to. Without the append, --set repoURL=<parent
+	// namespace> (the contract every other site in this file documents)
+	// produces a child source pointing at `oci://reg/org:tag` — an
+	// artifact that does not exist — and the child Application fails
+	// to sync. See issue #1034.
 	source["repoURL"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
 		Tag:   yamlStringTag,
 		Style: yaml.SingleQuotedStyle,
-		Value: `{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; the parent App appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL }}`,
+		Value: `{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; this template appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL }}/{{ .Chart.Name }}`,
 	}
 	source["targetRevision"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
@@ -939,12 +951,20 @@ func writeChartYAML(outputDir, name, version string) (string, int64, error) {
 		return "", 0, err
 	}
 
+	// Quote name and version so OCI artifact paths whose last segment is
+	// a YAML reserved scalar ("null", "true", "false", "yes", "no",
+	// "123", etc.) round-trip as strings instead of getting reinterpreted
+	// by Helm's YAML parser as the underlying scalar type and producing
+	// a chart with an empty Metadata.Name (or a type-mismatch error).
+	// fmt %q emits a Go-quoted string that is also valid YAML for all
+	// printable ASCII; OCI artifact path segments are constrained to
+	// that charset by the docker reference grammar. See issue #1034.
 	var buf strings.Builder
 	buf.WriteString("apiVersion: v2\n")
-	fmt.Fprintf(&buf, "name: %s\n", name)
+	fmt.Fprintf(&buf, "name: %q\n", name)
 	buf.WriteString("description: AICR deployment bundle with dynamic install-time values\n")
 	buf.WriteString("type: application\n")
-	fmt.Fprintf(&buf, "version: %s\n", version)
+	fmt.Fprintf(&buf, "version: %q\n", version)
 
 	content := buf.String()
 	if writeErr := os.WriteFile(chartPath, []byte(content), 0600); writeErr != nil {
