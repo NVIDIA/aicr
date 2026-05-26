@@ -77,8 +77,31 @@ inject_push_target() {
 }
 
 phase_prep() {
+  # Capture cluster state on snapshot failure so the post-mortem has
+  # actual pod scheduling / image pull / event data instead of just the
+  # generic "pod did not become ready" timeout the aicr CLI prints.
+  local snapshot_ns
+  snapshot_ns="$(yq '.spec.snapshot.agent.namespace // "aicr-validation"' "${config}")"
   echo "::group::Snapshot live cluster"
-  "${AICR_BIN}" snapshot --config "${config}"
+  if ! "${AICR_BIN}" snapshot --config "${config}"; then
+    echo "::endgroup::"
+    echo "::group::Snapshot failure debug"
+    echo "--- nodes ---"
+    kubectl get nodes -o wide --show-labels 2>&1 || true
+    echo "--- node taints ---"
+    kubectl get nodes -o json 2>/dev/null | \
+      jq -r '.items[] | "\(.metadata.name)\n  taints: \(.spec.taints // [])\n  conditions: \([.status.conditions[] | select(.type == "Ready") | .status])"' || true
+    echo "--- pods in ${snapshot_ns} ---"
+    kubectl get pods -n "${snapshot_ns}" -o wide 2>&1 || true
+    for p in $(kubectl get pods -n "${snapshot_ns}" -o name 2>/dev/null); do
+      echo "--- describe ${p} ---"
+      kubectl describe -n "${snapshot_ns}" "${p}" 2>&1 || true
+      echo "--- logs ${p} (all containers, last 50 lines) ---"
+      kubectl logs -n "${snapshot_ns}" "${p#pod/}" --all-containers --tail=50 2>&1 || true
+    done
+    echo "::endgroup::"
+    exit 1
+  fi
   test -f snapshot.yaml
   echo "::endgroup::"
 
@@ -118,12 +141,30 @@ phase_install() {
   fi
   echo "::endgroup::"
 
-  echo "::group::helmfile apply (timeout ${HELMFILE_TIMEOUT_SECONDS}s)"
-  (
-    cd bundle
-    timeout "${HELMFILE_TIMEOUT_SECONDS}" helmfile apply --skip-diff-on-install
-  )
-  echo "::endgroup::"
+  # Retry helmfile apply on transient cluster-API errors (control-plane
+  # warmup, throttling, etc.). helmfile is idempotent — re-running on a
+  # partial-install state converges on the desired set. Each attempt has
+  # its own per-attempt HELMFILE_TIMEOUT_SECONDS budget; the workflow's
+  # step `timeout-minutes` bounds total wall time.
+  local success=false
+  for attempt in 1 2 3; do
+    echo "::group::helmfile apply attempt ${attempt}/3 (timeout ${HELMFILE_TIMEOUT_SECONDS}s)"
+    if ( cd bundle && timeout "${HELMFILE_TIMEOUT_SECONDS}" helmfile apply --skip-diff-on-install ); then
+      success=true
+      echo "::endgroup::"
+      break
+    fi
+    echo "helmfile apply attempt ${attempt} failed"
+    echo "::endgroup::"
+    if (( attempt < 3 )); then
+      echo "waiting 30s before retry"
+      sleep 30
+    fi
+  done
+  if [[ "${success}" != "true" ]]; then
+    echo "::error::helmfile apply failed after 3 attempts" >&2
+    exit 1
+  fi
 
   echo "::group::Cluster state post-install"
   kubectl get nodes -o wide

@@ -387,6 +387,9 @@ Generate recipes using direct system parameters:
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-f` | string | Format: json, yaml (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
+| `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
+
+> **Service / Accelerator / OS / Intent / Platform value listings above are the OSS-embedded set.** When `--data` registers additional values (e.g., undisclosed providers, proprietary platforms), the CLI admits them at runtime through the criteria registry — see [Data Extension](../integrator/data-extension.md). `--criteria-strict` restores the OSS-only set regardless of what `--data` contributes.
 
 **Examples:**
 ```shell
@@ -1073,6 +1076,8 @@ aicr bundle [flags]
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
+| `--flux-oci-source-name` | | string | Name of the OCIRepository CR that Flux uses to pull the bundle (default: `aicr-bundle`). Used with `--deployer flux` and OCI output. Must match the OCIRepository deployed in the target cluster. See [Flux OCI Mode](#flux-oci-mode). |
+| `--flux-namespace` | | string | Kubernetes namespace where Flux CRs (HelmRelease, sources, ArtifactGenerator) are deployed (default: `flux-system`). Must match the namespace of the Flux installation in the target cluster. |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
@@ -1772,6 +1777,34 @@ Argo CD Applications use multi-source to:
 2. Apply values.yaml from your GitOps repository
 3. Deploy additional manifests from component's manifests/ directory (if present)
 
+#### Flux OCI Mode
+
+When using `--deployer flux` with OCI output (`--output oci://...`), AICR generates ArtifactGenerator and ExternalArtifact CRs instead of GitRepository sources for local-chart components. This allows Flux to reconcile HelmReleases directly from OCI artifacts without a Git repository.
+
+**Prerequisites (Flux v2.7+):**
+
+- **source-watcher controller** must be deployed (`source.extensions.fluxcd.io`). This controller watches ArtifactGenerator CRs and creates ExternalArtifact objects.
+- **ExternalArtifact=true feature gate** must be enabled on helm-controller. This allows HelmRelease CRs to reference ExternalArtifact objects via `spec.chartRef`.
+
+Without both prerequisites, bundles generate successfully but HelmReleases will not reconcile at deploy time.
+
+**Configuration flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--flux-oci-source-name` | `aicr-bundle` | Name of the OCIRepository CR in the target cluster. Every generated ArtifactGenerator references this name in `spec.sources[0].name`. |
+| `--flux-namespace` | `flux-system` | Namespace where all Flux CRs (HelmRelease, sources, ArtifactGenerator) are placed. |
+
+```shell
+# Generate an OCI bundle with a custom OCIRepository name and namespace
+aicr bundle -r recipe.yaml --deployer flux \
+  --output oci://ghcr.io/my-org/aicr-bundle:v1.0.0 \
+  --flux-oci-source-name my-oci-repo \
+  --flux-namespace gitops
+```
+
+The generated ArtifactGenerator CRs extract per-component chart directories from the outer OCIRepository into ExternalArtifact objects. Each HelmRelease then references the ExternalArtifact via `spec.chartRef` instead of the traditional `spec.chart.spec.sourceRef` pointing at a GitRepository.
+
 #### Bundle Attestation
 
 > **Prerequisite:** The `--attest` flag requires a binary installed using the install script, which includes a cryptographic attestation from NVIDIA. Binaries installed via `go install` or manual download do not include this file and cannot use `--attest`.
@@ -1915,6 +1948,54 @@ If a Helm release is in a `pending-install` or `pending-upgrade` state (from an 
 **Orphaned webhook cleanup:**
 
 After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
+
+---
+
+### aicr mirror list
+
+Discover container images and Helm charts referenced by a recipe for air-gapped
+mirroring. Renders each component's Helm chart with recipe-resolved values and
+scans embedded manifests to produce a deduplicated image and chart list.
+
+For an end-to-end walkthrough covering Hauler and Zarf workflows, see
+[Air-Gapped Mirroring](air-gap-mirror.md).
+
+**Synopsis:**
+```shell
+aicr mirror list [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--recipe` | `-r` | string | | Path/URI to a previously generated recipe. Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (`cm://namespace/name`). |
+| `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`). Alternative to `--recipe`. |
+| `--accelerator` | | string | | GPU accelerator (e.g., `h100`, `gb200`). Alternative to `--recipe`. |
+| `--intent` | | string | | Workload intent (`training` or `inference`). Alternative to `--recipe`. |
+| `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
+| `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
+| `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
+| `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
+| `--output` | `-o` | string | stdout | Output file path |
+
+**Examples:**
+
+```shell
+# List images from a recipe file (YAML to stdout)
+aicr mirror list --recipe recipe.yaml
+
+# Resolve recipe from query parameters
+aicr mirror list --service eks --accelerator h100 --intent training --os ubuntu
+
+# Generate Hauler manifest
+aicr mirror list --recipe recipe.yaml --format hauler --output hauler-manifest.yaml
+
+# Generate Zarf package config
+aicr mirror list --recipe recipe.yaml --format zarf --output zarf.yaml
+
+# Override a value that affects image discovery
+aicr mirror list --recipe recipe.yaml --set gpuoperator:driver.enabled=false
+```
 
 ---
 
@@ -2251,6 +2332,7 @@ AICR respects standard environment variables:
 | `AICR_LOG_PREFIX` | Override the CLI logger prefix | `cli` |
 | `AICR_REQUESTS` | Default for `aicr snapshot --requests`. Comma-separated `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. | unset |
 | `AICR_LIMITS` | Default for `aicr snapshot --limits`. Comma-separated `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when this list does not already contain that key — explicit `nvidia.com/gpu=N` wins. | unset |
+| `AICR_CRITERIA_STRICT` | When set to `1` / `true` / `yes` / `on`, equivalent to `--criteria-strict` on every `aicr recipe` invocation: rejects criteria values not in the embedded OSS catalog regardless of `--data` contributions. Intended for OSS CI gates; `make qualify` exports it automatically for the unit-test step. | unset |
 | `NO_COLOR` | Suppress ANSI color codes in CLI logger output (de-facto standard, see [no-color.org](https://no-color.org/)) | unset |
 
 ## Exit Codes

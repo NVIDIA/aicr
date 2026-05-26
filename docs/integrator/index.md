@@ -22,6 +22,7 @@ This section is for integrators who:
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
+| [Data Extension](data-extension.md) | Extending the embedded catalog via `--data` — overlays, components, and runtime criteria values without a rebuild |
 | [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
 | [NodeWright Component](components/nodewright.md) | NodeWright component reference and configuration |
 

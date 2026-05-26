@@ -17,8 +17,12 @@ package recipe
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // TestBuilder_BuildFromCriteria_ContextCancellation tests context cancellation
@@ -262,6 +266,27 @@ func TestWithAllowLists(t *testing.T) {
 	})
 }
 
+// TestNewBuilder_WithDataProvider verifies that WithDataProvider binds the
+// provided DataProvider to the Builder, isolating it from the package-global
+// provider at GetDataProvider().
+func TestNewBuilder_WithDataProvider(t *testing.T) {
+	dp := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+	b := NewBuilder(WithDataProvider(dp))
+	if got := b.DataProvider(); got != dp {
+		t.Errorf("Builder.DataProvider() = %v, want %v", got, dp)
+	}
+}
+
+// TestNewBuilder_DataProviderNilFallback verifies that when WithDataProvider
+// is not set, Builder.DataProvider() returns nil so callers fall back to the
+// package-global DataProvider — preserving CLI and API server behavior.
+func TestNewBuilder_DataProviderNilFallback(t *testing.T) {
+	b := NewBuilder() // no option set
+	if b.DataProvider() != nil {
+		t.Error("expected nil provider when WithDataProvider not used")
+	}
+}
+
 // TestGetEmbeddedFS tests that the embedded filesystem is accessible.
 func TestGetEmbeddedFS(t *testing.T) {
 	fs := GetEmbeddedFS()
@@ -317,6 +342,9 @@ func TestConstraintEvalResult(t *testing.T) {
 	if passed.Actual != "ubuntu" {
 		t.Errorf("expected actual ubuntu, got %q", passed.Actual)
 	}
+	if passed.Error != nil {
+		t.Errorf("expected Error to be nil, got %v", passed.Error)
+	}
 
 	// Test failed result
 	failed := ConstraintEvalResult{
@@ -327,6 +355,12 @@ func TestConstraintEvalResult(t *testing.T) {
 	if failed.Passed {
 		t.Error("expected Passed to be false")
 	}
+	if failed.Actual != "rhel" {
+		t.Errorf("expected actual rhel, got %q", failed.Actual)
+	}
+	if failed.Error != nil {
+		t.Errorf("expected Error to be nil, got %v", failed.Error)
+	}
 
 	// Test error result
 	errResult := ConstraintEvalResult{
@@ -334,7 +368,186 @@ func TestConstraintEvalResult(t *testing.T) {
 		Actual: "",
 		Error:  errors.New("value not found"),
 	}
+	if errResult.Passed {
+		t.Error("expected Passed to be false")
+	}
+	if errResult.Actual != "" {
+		t.Errorf("expected actual to be empty, got %q", errResult.Actual)
+	}
 	if errResult.Error == nil {
 		t.Error("expected error to be set")
+	}
+}
+
+// buildIsolationProvider returns an inMemoryDataProvider seeded with a
+// minimal registry.yaml, an empty base recipe, and a single leaf overlay
+// whose metadata name is derived from `overlayName`. The overlay declares
+// `criteria.service: eks` and a uniquely-named componentRef
+// (`<overlayName>-component`) so isolation tests can detect both presence
+// (correct provider routing) and leak (wrong provider routing).
+//
+// The componentRef carries minimal Type/Source/Chart fields so
+// finalizeRecipeResult's dependency validation and topological sort pass
+// without a registry hit; applyRegistryDefaults will find no matching
+// entry in the empty registry and leave the ref untouched, which is
+// exactly what these tests want — they care about which overlays land
+// in the result, not registry merging.
+func buildIsolationProvider(t *testing.T, overlayName string) DataProvider {
+	t.Helper()
+
+	registryYAML := []byte(`components: []
+`)
+	baseYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`)
+	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: %[1]s
+spec:
+  base: base
+  criteria:
+    service: eks
+  componentRefs:
+    - name: %[1]s-component
+      type: Helm
+      chart: example
+      source: https://charts.example.com
+      version: 0.1.0
+`, overlayName)
+
+	files := map[string][]byte{
+		"registry.yaml":                     registryYAML,
+		"overlays/base.yaml":                baseYAML,
+		"overlays/" + overlayName + ".yaml": overlayYAML,
+	}
+	return newInMemoryProvider(overlayName, files)
+}
+
+// componentNames extracts the ordered set of ComponentRef.Name from a
+// RecipeResult. Used by isolation tests to assert which components landed
+// in the merged result.
+func componentNames(r *RecipeResult) []string {
+	if r == nil {
+		return nil
+	}
+	names := make([]string, 0, len(r.ComponentRefs))
+	for _, c := range r.ComponentRefs {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
+// TestBuilder_WithDataProvider_UsesBoundProvider verifies that a Builder
+// constructed with WithDataProvider routes BuildFromCriteria through the
+// bound provider end-to-end, and that the resulting RecipeResult carries
+// the same provider via DataProvider() so downstream consumers (e.g.,
+// GetValuesForComponent in Task 6) honor per-tenant isolation.
+func TestBuilder_WithDataProvider_UsesBoundProvider(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetComponentRegistryForTesting)
+
+	dp := buildIsolationProvider(t, "isolated")
+	b := NewBuilder(WithDataProvider(dp))
+
+	criteria := &Criteria{Service: "eks"}
+	result, err := b.BuildFromCriteria(context.Background(), criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	// Provider should propagate to the result so GetValuesForComponent
+	// (Task 6) honors it.
+	if result.DataProvider() != dp {
+		t.Errorf("RecipeResult.DataProvider() = %v, want bound provider %v", result.DataProvider(), dp)
+	}
+
+	// And the overlay's unique component must land in the result —
+	// proving the bound provider was actually walked, not the global.
+	if got := componentNames(result); !slices.Contains(got, "isolated-component") {
+		t.Errorf("expected isolated-component in result, got %v", got)
+	}
+}
+
+// TestBuilder_DataProvider_NilSafe verifies the nil-safety contract of
+// RecipeResult.DataProvider() — call sites must be able to chain off a
+// possibly-nil result without panicking.
+func TestBuilder_DataProvider_NilSafe(t *testing.T) {
+	var r *RecipeResult
+	if got := r.DataProvider(); got != nil {
+		t.Errorf("nil RecipeResult.DataProvider() = %v, want nil", got)
+	}
+}
+
+// TestBuilder_TwoProviders_ConcurrentBuild verifies that two Builders
+// bound to different providers produce isolated results under concurrent
+// load. With 8 goroutines per provider, the -race detector also catches
+// any shared-state slip introduced by the per-provider caches.
+func TestBuilder_TwoProviders_ConcurrentBuild(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetComponentRegistryForTesting)
+
+	dpA := buildIsolationProvider(t, "alpha-only")
+	dpB := buildIsolationProvider(t, "beta-only")
+	bA := NewBuilder(WithDataProvider(dpA))
+	bB := NewBuilder(WithDataProvider(dpB))
+
+	const fanout = 8
+	resultsA := make([]*RecipeResult, fanout)
+	resultsB := make([]*RecipeResult, fanout)
+
+	g, gctx := errgroup.WithContext(context.Background())
+	for i := range fanout {
+		g.Go(func() error {
+			r, err := bA.BuildFromCriteria(gctx, &Criteria{Service: "eks"})
+			resultsA[i] = r
+			return err
+		})
+		g.Go(func() error {
+			r, err := bB.BuildFromCriteria(gctx, &Criteria{Service: "eks"})
+			resultsB[i] = r
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		t.Fatalf("concurrent build: %v", err)
+	}
+
+	for i, r := range resultsA {
+		if r == nil {
+			t.Fatalf("resultsA[%d] is nil", i)
+		}
+		if r.DataProvider() != dpA {
+			t.Errorf("resultsA[%d].DataProvider() = %v, want %v", i, r.DataProvider(), dpA)
+		}
+		names := componentNames(r)
+		if !slices.Contains(names, "alpha-only-component") {
+			t.Errorf("resultsA[%d] missing alpha-only-component: %v", i, names)
+		}
+		if slices.Contains(names, "beta-only-component") {
+			t.Errorf("resultsA[%d] leaked beta-only-component: %v", i, names)
+		}
+	}
+	for i, r := range resultsB {
+		if r == nil {
+			t.Fatalf("resultsB[%d] is nil", i)
+		}
+		if r.DataProvider() != dpB {
+			t.Errorf("resultsB[%d].DataProvider() = %v, want %v", i, r.DataProvider(), dpB)
+		}
+		names := componentNames(r)
+		if !slices.Contains(names, "beta-only-component") {
+			t.Errorf("resultsB[%d] missing beta-only-component: %v", i, names)
+		}
+		if slices.Contains(names, "alpha-only-component") {
+			t.Errorf("resultsB[%d] leaked alpha-only-component: %v", i, names)
+		}
 	}
 }

@@ -196,6 +196,7 @@ test: ## Runs unit tests with race detector and coverage (use -short to skip int
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
+	AICR_CRITERIA_STRICT=1 \
 	GOFLAGS="-mod=vendor" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.out $$(go list ./... | grep -v -e /tests/chainsaw/ -e /validators) || exit 1; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
@@ -226,6 +227,12 @@ e2e-tilt: ## Runs e2e tests with Tilt cluster (requires: make dev-env)
 	@set -e; \
 	echo "Running e2e tests with Tilt cluster..."; \
 	tests/e2e/run.sh
+
+.PHONY: mirror-e2e
+mirror-e2e: build ## Tests mirror list output with Hauler and Zarf against local registry
+	@set -e; \
+	echo "Running mirror list e2e tests..."; \
+	tools/mirror-e2e
 
 .PHONY: scan
 scan: ## Scans for vulnerabilities with grype

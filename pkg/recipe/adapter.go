@@ -17,7 +17,9 @@ package recipe
 
 import (
 	"embed"
+	stderrors "errors"
 	"fmt"
+	"io/fs"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/recipes"
@@ -30,11 +32,37 @@ func GetEmbeddedFS() embed.FS {
 	return recipes.FS
 }
 
-// GetManifestContent retrieves a manifest file from the data provider.
-// Path should be relative to data directory (e.g., "components/network-operator/manifests/nfd-network-rule.yaml").
+// GetManifestContent retrieves a manifest file from the package-global
+// DataProvider. Path should be relative to data directory (e.g.,
+// "components/network-operator/manifests/nfd-network-rule.yaml").
+//
+// This entry point is preserved for back-compat with callers that have no
+// RecipeResult-bound provider available. Callers operating against a
+// per-tenant Builder should prefer GetManifestContentWithProvider so the
+// lookup honors the bound provider.
 func GetManifestContent(path string) ([]byte, error) {
-	provider := GetDataProvider()
-	return provider.ReadFile(path)
+	return GetManifestContentWithProvider(nil, path)
+}
+
+// GetManifestContentWithProvider reads a manifest file from the supplied
+// DataProvider. A nil provider falls back to GetDataProvider() so callers
+// that thread a possibly-nil RecipeResult.DataProvider() through can rely on
+// the global-provider fallback without an explicit nil check.
+//
+// Path should be relative to the data root (e.g.,
+// "components/network-operator/manifests/nfd-network-rule.yaml").
+func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error) {
+	if dp == nil {
+		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+	}
+	content, err := dp.ReadFile(path)
+	if err != nil {
+		if stderrors.Is(err, fs.ErrNotExist) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("manifest file not found: %q", path), err)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read manifest file %q", path), err)
+	}
+	return content, nil
 }
 
 // RecipeInput is an interface that both Recipe and RecipeResult implement.
@@ -116,6 +144,11 @@ func (r *RecipeResult) GetComponentRef(name string) *ComponentRef {
 //  1. ValuesFile only: Traditional separate file approach
 //  2. Overrides only: Fully self-contained recipe with inline overrides
 //  3. ValuesFile + Overrides: Hybrid - reusable base with recipe-specific tweaks
+//
+// File lookups route through the DataProvider bound to this result (set when
+// the result was built by a Builder via WithDataProvider). When no provider
+// is bound (legacy global-provider path), falls back to GetDataProvider() so
+// existing callers keep working.
 func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error) {
 	ref := r.GetComponentRef(name)
 	if ref == nil {
@@ -130,10 +163,16 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 		return result, nil
 	}
 
+	// Resolve provider once: prefer the result-bound provider (per-tenant
+	// isolation), fall back to the package-global for back-compat with
+	// results built before WithDataProvider was wired through.
+	provider := r.provider
+	if provider == nil {
+		provider = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+	}
+
 	// Step 1: Load base and/or overlay values from files (if ValuesFile specified)
 	if ref.ValuesFile != "" {
-		provider := GetDataProvider()
-
 		// Determine if this is an overlay values file (not the base values.yaml)
 		baseValuesFile := fmt.Sprintf("components/%s/values.yaml", name)
 		isOverlay := ref.ValuesFile != baseValuesFile

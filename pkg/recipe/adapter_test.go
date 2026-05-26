@@ -16,7 +16,14 @@ package recipe
 
 import (
 	"context"
+	stderrors "errors"
+	"fmt"
+	"io/fs"
+	"maps"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"gopkg.in/yaml.v3"
 )
 
 const testVersionV2 = "v2.0"
@@ -153,9 +160,7 @@ func TestMergeValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a copy of base to avoid modifying the test data
 			dst := make(map[string]any)
-			for k, v := range tt.base {
-				dst[k] = v
-			}
+			maps.Copy(dst, tt.base)
 
 			// Merge overlay into dst
 			mergeValues(dst, tt.overlay)
@@ -607,4 +612,215 @@ func Test_hasComponentRefs(t *testing.T) {
 			t.Error("expected false for Recipe")
 		}
 	})
+}
+
+// buildIsolatedCriteria returns a Criteria matching the leaf overlay seeded
+// by buildProviderWithValues — keeps the test focused on the bound-provider
+// routing and not on criteria matching.
+func buildIsolatedCriteria(t *testing.T) *Criteria {
+	t.Helper()
+	return &Criteria{Service: "eks"}
+}
+
+// buildProviderWithValues returns an inMemoryDataProvider whose values for
+// the gpu-operator component live only in the bound provider. It seeds:
+//   - an empty registry.yaml
+//   - a base overlay
+//   - a leaf overlay (criteria.service=eks) whose single componentRef points
+//     at gpu-operator with valuesFile = components/gpu-operator/values.yaml
+//   - that values.yaml at the expected path, containing the supplied content
+//
+// Together these let BuildFromCriteria succeed against the bound provider and
+// let RecipeResult.GetValuesForComponent("gpu-operator") read the seeded
+// values exclusively from the bound provider. The valuesPath argument is
+// retained for symmetry with buildProviderWithManifest (so callers can
+// document the path they expect to be read) but is not load-bearing — the
+// component always references components/gpu-operator/values.yaml.
+func buildProviderWithValues(t *testing.T, valuesPath string, values map[string]any) DataProvider {
+	t.Helper()
+
+	valuesBytes, err := yaml.Marshal(values)
+	if err != nil {
+		t.Fatalf("marshal values: %v", err)
+	}
+
+	registryYAML := []byte(`components: []
+`)
+	baseYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`)
+	overlayYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: bound-values
+spec:
+  base: base
+  criteria:
+    service: eks
+  componentRefs:
+    - name: gpu-operator
+      type: Helm
+      chart: gpu-operator
+      source: https://helm.ngc.nvidia.com/nvidia
+      version: v25.3.4
+      valuesFile: components/gpu-operator/values.yaml
+`)
+
+	files := map[string][]byte{
+		"registry.yaml":                       registryYAML,
+		"overlays/base.yaml":                  baseYAML,
+		"overlays/bound-values.yaml":          overlayYAML,
+		"components/gpu-operator/values.yaml": valuesBytes,
+	}
+	// valuesPath only documents the expected lookup; the recipe always
+	// references the canonical components/gpu-operator/values.yaml. Sanity-
+	// check that the helper isn't being asked for a non-canonical path
+	// (which would hide a test mistake silently).
+	if valuesPath != "components/gpu-operator/values.yaml" {
+		t.Logf("buildProviderWithValues: note - valuesPath %q is documentation only; component reads components/gpu-operator/values.yaml", valuesPath)
+	}
+	return newInMemoryProvider("bound-values", files)
+}
+
+// buildProviderWithManifest returns an inMemoryDataProvider seeded with a
+// single manifest file at the supplied path. Used to verify that
+// GetManifestContentWithProvider reads from the supplied provider rather
+// than the package-global.
+func buildProviderWithManifest(t *testing.T, path string, content []byte) DataProvider {
+	t.Helper()
+	files := map[string][]byte{
+		path: content,
+	}
+	return newInMemoryProvider(fmt.Sprintf("manifest-%s", path), files)
+}
+
+// TestRecipeResult_GetValuesForComponent_HonorsBoundProvider verifies that
+// when a RecipeResult was built from a Builder bound via WithDataProvider,
+// GetValuesForComponent reads the component's valuesFile from that bound
+// provider — not from the package-global DataProvider. This closes the
+// silent-fallback-to-global path flagged in reviewer feedback on Tasks 4/5.
+func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetComponentRegistryForTesting)
+
+	dp := buildProviderWithValues(t, "components/gpu-operator/values.yaml", map[string]any{
+		"driver": map[string]any{"version": "999.99.99"},
+	})
+	b := NewBuilder(WithDataProvider(dp))
+	result, err := b.BuildFromCriteria(context.Background(), buildIsolatedCriteria(t))
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+
+	// values.yaml exists in the BOUND provider only; the package-global
+	// embedded values.yaml has different content (no driver.version key at
+	// all). If GetValuesForComponent reaches for the global, the type
+	// assertion below will fail.
+	vals, err := result.GetValuesForComponent("gpu-operator")
+	if err != nil {
+		t.Fatalf("GetValuesForComponent: %v", err)
+	}
+
+	driver, ok := vals["driver"].(map[string]any)
+	if !ok {
+		t.Fatalf("driver not a map: %#v", vals["driver"])
+	}
+	if got := driver["version"]; got != "999.99.99" {
+		t.Errorf("driver.version = %v, want from bound provider (999.99.99)", got)
+	}
+}
+
+// TestRecipeResult_GetValuesForComponent_BoundProviderSurvivesGlobalSwap
+// pins the invariant that RecipeResult.provider defeats post-build mutations
+// of the package-global DataProvider. After building a recipe against dpA,
+// swapping the global to dpB (with different values content) must not change
+// what GetValuesForComponent returns — the bound provider wins.
+func TestRecipeResult_GetValuesForComponent_BoundProviderSurvivesGlobalSwap(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetComponentRegistryForTesting)
+
+	// Build a recipe with bound provider dpA carrying driver.version=111.11.11.
+	dpA := buildProviderWithValues(t, "components/gpu-operator/values.yaml", map[string]any{
+		"driver": map[string]any{"version": "111.11.11"},
+	})
+	b := NewBuilder(WithDataProvider(dpA))
+	result, err := b.BuildFromCriteria(context.Background(), buildIsolatedCriteria(t))
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+
+	// Now swap the global to dpB with a DIFFERENT version, AFTER build.
+	dpB := buildProviderWithValues(t, "components/gpu-operator/values.yaml", map[string]any{
+		"driver": map[string]any{"version": "222.22.22"},
+	})
+	saved := GetDataProvider() //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+	t.Cleanup(func() {
+		SetDataProvider(saved) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+		ResetMetadataStoreForTesting()
+		ResetComponentRegistryForTesting()
+	})
+	SetDataProvider(dpB) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+
+	// result.GetValuesForComponent MUST read from dpA (the bound provider),
+	// not from dpB which is now the package-global.
+	vals, err := result.GetValuesForComponent("gpu-operator")
+	if err != nil {
+		t.Fatalf("GetValuesForComponent: %v", err)
+	}
+	driver, ok := vals["driver"].(map[string]any)
+	if !ok {
+		t.Fatalf("driver not a map: %#v", vals["driver"])
+	}
+	if got := driver["version"]; got != "111.11.11" {
+		t.Errorf("driver.version = %v, want 111.11.11 (bound provider must beat global swap)", got)
+	}
+}
+
+// TestGetManifestContentWithProvider verifies the explicit-provider variant
+// reads from the supplied DataProvider rather than the package-global.
+func TestGetManifestContentWithProvider(t *testing.T) {
+	dp := buildProviderWithManifest(t, "components/x/manifests/special.yaml", []byte("from-bound\n"))
+	got, err := GetManifestContentWithProvider(dp, "components/x/manifests/special.yaml")
+	if err != nil {
+		t.Fatalf("GetManifestContentWithProvider: %v", err)
+	}
+	if string(got) != "from-bound\n" {
+		t.Errorf("content = %q, want %q", got, "from-bound\n")
+	}
+}
+
+// TestGetManifestContentWithProvider_NilFallback verifies that passing a nil
+// DataProvider falls back to the package-global provider — preserving
+// back-compat for callers that don't have a RecipeResult-bound provider.
+func TestGetManifestContentWithProvider_NilFallback(t *testing.T) {
+	content, err := GetManifestContentWithProvider(nil, "components/network-operator/manifests/nfd-network-rule.yaml")
+	if err != nil {
+		t.Fatalf("GetManifestContentWithProvider(nil): %v", err)
+	}
+	if len(content) == 0 {
+		t.Error("expected non-empty content from global fallback")
+	}
+}
+
+// TestGetManifestContentWithProvider_NotFound verifies that missing manifest
+// files surface as a structured pkg/errors error with ErrCodeNotFound while
+// preserving the underlying fs.ErrNotExist in the wrap chain — bundler
+// callers depend on stderrors.Is(err, fs.ErrNotExist) for distinguishing
+// missing-file errors from internal read failures.
+func TestGetManifestContentWithProvider_NotFound(t *testing.T) {
+	dp := newInMemoryProvider("empty", map[string][]byte{})
+	_, err := GetManifestContentWithProvider(dp, "components/missing/manifests/x.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing manifest, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("expected ErrCodeNotFound, got %v", err)
+	}
+	if !stderrors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected wrap chain to preserve fs.ErrNotExist, got %v", err)
+	}
 }

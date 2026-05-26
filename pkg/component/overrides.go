@@ -89,14 +89,15 @@ func setMapValueByPath(target map[string]any, path, value string) error {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to resolve override path", err)
 	}
 
-	parent[key] = convertMapValue(value)
+	parent[key] = ConvertMapValue(value)
 
 	return nil
 }
 
-// convertMapValue converts a string value to an appropriate Go type.
-// Handles bools ("true"/"false") and numbers.
-func convertMapValue(value string) any {
+// ConvertMapValue converts a string value to an appropriate Go type.
+// Handles bools ("true"/"false") and numbers (int64, float64).
+// Returns the original string if no conversion applies.
+func ConvertMapValue(value string) any {
 	// Try bool conversion
 	if value == StrTrue {
 		return true

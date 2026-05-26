@@ -1,0 +1,236 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-criteria-registry
+spec:
+  description: |
+    End-to-end coverage for issue #998 — extensible criteria values via the
+    catalog-driven runtime registry. Verifies that an overlay loaded from
+    `--data` with a non-OSS criteria value (e.g., service=ncp-internal,
+    platform=nvmesh) becomes a valid CLI input without rebuilding the
+    binary, and that `--criteria-strict` (and the AICR_CRITERIA_STRICT
+    env var, and spec.recipe.criteriaStrict in --config) reject it again.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup-fixtures
+      description: Create an external --data dir with overlays carrying non-OSS criteria values.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              rm -rf "${WORK}" && mkdir -p "${WORK}/overlays"
+
+              # Minimal registry.yaml (required by the data provider).
+              cat > "${WORK}/registry.yaml" << 'EOF'
+              apiVersion: aicr.nvidia.com/v1alpha1
+              kind: ComponentRegistry
+              components: []
+              EOF
+
+              # Overlay declaring an internal-only service value.
+              cat > "${WORK}/overlays/ncp-internal-overlay.yaml" << 'EOF'
+              apiVersion: aicr.nvidia.com/v1alpha1
+              kind: RecipeMetadata
+              metadata:
+                name: ncp-internal-h100-training
+              spec:
+                base: base
+                criteria:
+                  service: ncp-internal
+                  accelerator: h100
+                  intent: training
+                componentRefs: []
+              EOF
+
+              # Overlay declaring a proprietary platform value (e.g., nvmesh).
+              cat > "${WORK}/overlays/nvmesh-overlay.yaml" << 'EOF'
+              apiVersion: aicr.nvidia.com/v1alpha1
+              kind: RecipeMetadata
+              metadata:
+                name: eks-h100-nvmesh
+              spec:
+                base: base
+                criteria:
+                  service: eks
+                  accelerator: h100
+                  intent: training
+                  platform: nvmesh
+                componentRefs: []
+              EOF
+
+              # AICRConfig that toggles criteriaStrict via --config (separate
+              # from the --criteria-strict CLI flag).
+              cat > "${WORK}/strict-config.yaml" << 'EOF'
+              kind: AICRConfig
+              apiVersion: aicr.nvidia.com/v1alpha1
+              metadata:
+                name: strict
+              spec:
+                recipe:
+                  criteriaStrict: true
+              EOF
+
+    - name: ncp-rejected-without-data
+      description: Internal service value must be rejected without --data (no overlay registers it).
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              ERR="${WORK}/ncp-rejected-without-data.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: expected non-zero exit, got success" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              # Assert the failure reason is criteria validation, not an
+              # incidental runtime error.
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
+            check:
+              ($error == null): true
+
+    - name: ncp-admitted-with-data
+      description: --data overlay registers ncp-internal; CLI must admit it.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                --data "${WORK}" -o "${WORK}/ncp-recipe.yaml"
+              test -f "${WORK}/ncp-recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: nvmesh-platform-admitted-with-data
+      description: --data overlay registers platform=nvmesh; CLI must admit it.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --intent training --platform nvmesh \
+                --data "${WORK}" -o "${WORK}/nvmesh-recipe.yaml"
+              test -f "${WORK}/nvmesh-recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: strict-flag-rejects-external
+      description: --criteria-strict must hide external values and reject ncp-internal.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              ERR="${WORK}/strict-flag-rejects-external.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   --data "${WORK}" --criteria-strict -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: --criteria-strict did not reject external value" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
+            check:
+              ($error == null): true
+
+    - name: strict-flag-admits-oss
+      description: --criteria-strict must still admit canonical OSS values (eks, h100, training).
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --intent training \
+                --data "${WORK}" --criteria-strict -o "${WORK}/oss-recipe.yaml"
+              test -f "${WORK}/oss-recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: strict-env-var-rejects-external
+      description: AICR_CRITERIA_STRICT=1 must compose with --data and reject external values.
+      try:
+        - script:
+            env:
+              - name: AICR_CRITERIA_STRICT
+                value: "1"
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              ERR="${WORK}/strict-env-var-rejects-external.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   --data "${WORK}" -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: AICR_CRITERIA_STRICT=1 did not reject external value" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
+            check:
+              ($error == null): true
+
+    - name: strict-via-config-rejects-external
+      description: spec.recipe.criteriaStrict=true in --config must reject ncp-internal too.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-criteria-registry"
+              ERR="${WORK}/strict-via-config-rejects-external.err"
+              if ${AICR_BIN} recipe --service ncp-internal --accelerator h100 --intent training \
+                   --data "${WORK}" --config "${WORK}/strict-config.yaml" -o /dev/null 2>"${ERR}"; then
+                echo "FAIL: spec.recipe.criteriaStrict did not reject external value" >&2
+                cat "${ERR}" >&2
+                exit 1
+              fi
+              grep -qi "invalid service type" "${ERR}" || {
+                echo "FAIL: expected 'invalid service type' in error, got:" >&2
+                cat "${ERR}" >&2
+                exit 1
+              }
+              grep -q "ncp-internal" "${ERR}"
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-criteria-registry

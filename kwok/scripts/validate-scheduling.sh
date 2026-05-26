@@ -60,7 +60,7 @@
 #                            resource. Default: 30.
 #   KWOK_FLUX_SYNC_TIMEOUT   Seconds to wait for the outer Kustomization +
 #                            all HelmReleases to reach a terminal state
-#                            before failing. Default: 300.
+#                            before failing. Default: 500.
 #   KWOK_FLUX_ROOT_GRACE     Seconds to wait for the outer Kustomization to
 #                            appear in the cluster before failing. A missing
 #                            Kustomization after the grace window indicates
@@ -1453,45 +1453,32 @@ wait_for_flux_root_app() {
     return 1
 }
 
-# Validate the flux-oci bundle was successfully APPLIED. Intentionally
-# narrower than wait_for_argocd_sync: we do NOT wait for HelmReleases to
-# reach a terminal Ready/Released state, because the bundler's flux deployer
-# currently emits local-chart HelmReleases with sourceRef.kind=GitRepository
-# pointing at the placeholder URL `https://github.com/YOUR_ORG/YOUR_REPO.git`.
-# Under OCI consumption helm-controller cannot fetch these charts, so those
-# HelmReleases stall — AND any HelmRelease downstream in the Flux dependsOn
-# chain stays "dependency not ready", cascading the stall through the entire
-# bundle.
+# Validate the flux-oci bundle was successfully applied and all HelmReleases
+# reconciled. Local-chart components (manifest-only, pre-manifests, vendored
+# wrappers) use Flux's ArtifactGenerator to extract sub-directories from the
+# outer OCIRepository into ExternalArtifacts, referenced via HelmRelease
+# spec.chartRef. This eliminates the former placeholder GitRepository URL
+# and allows full reconciliation.
 #
-# Flux's HelmRelease v2 API blocks the obvious fix: spec.chart.spec.sourceRef
-# rejects OCIRepository ("supported values: HelmRepository, GitRepository,
-# Bucket"), and spec.chartRef points at the whole OCI artifact with no path
-# support — so a single wrapper OCIRepository cannot address inner local
-# charts. Proper fixes (render local-chart manifests at bundle time OR push
-# each local chart as its own helm OCI artifact) are out of scope here and
-# tracked in a follow-up issue referenced from the PR description.
-#
-# What this lane DOES validate (the bundle-format regression surface this
-# PR is meant to catch):
+# What this lane validates:
 #   1. Flux source-controller could PULL the AICR bundle artifact (the layer
 #      mediaType + insecure HTTP wiring is correct).
 #   2. Flux kustomize-controller could PARSE the bundle's root
 #      kustomization.yaml and APPLY all manifests (no template-render bugs,
 #      no missing files, no schema violations).
-#   3. The applied resources include per-component HelmRelease CRs (the
-#      flux deployer produced the expected GitOps shape).
-#
-# What this lane does NOT validate (deferred):
-#   - HelmRelease reconciliation to Ready / Released
-#   - Helm install success
-#   - Pod-Running for the workloads the bundle declares
+#   3. All HelmRelease CRs reach Ready=True — helm-controller could resolve
+#      chart sources (ExternalArtifact for local charts, HelmRepository for
+#      upstream charts) and reconcile each release.
+#   4. When present, ArtifactGenerator CRs reach Ready=True — proves
+#      source-watcher extracted local-chart sub-directories from the OCI
+#      bundle into ExternalArtifacts that helm-controller can consume.
 #
 # Returns 0 on success, EXIT_ARGOCD_SYNC_TIMEOUT (50) on deadline (reused so
 # run-all-recipes.sh's 3-strike rule fires symmetrically across argocd-* and
 # flux-oci), and 1 on hard errors (CRD missing, RBAC denial, apiserver
 # unreachable).
 wait_for_flux_sync() {
-    local deadline="${KWOK_FLUX_SYNC_TIMEOUT:-300}"
+    local deadline="${KWOK_FLUX_SYNC_TIMEOUT:-500}"
     local start=$SECONDS
 
     if ! wait_for_flux_root_app; then
@@ -1556,10 +1543,10 @@ wait_for_flux_sync() {
         applied_rev=$(echo "$kust_json" \
             | jq -r '.status.lastAppliedRevision // ""')
 
-        # 3. Per-component HelmRelease CRs must exist (the bundle declared
-        # the expected GitOps shape). We do NOT wait for them to reach
-        # terminal state — see function docstring for the dependsOn-cascade
-        # rationale.
+        # 3. All HelmRelease CRs must reach Ready=True — proves
+        # helm-controller could reconcile each release (chart sources
+        # resolved via ExternalArtifact/HelmRepository, values applied,
+        # install/upgrade succeeded).
         if hr_json=$(kubectl get helmrelease -A -o json 2>/dev/null); then
             apps_rc=0
         else
@@ -1577,8 +1564,40 @@ wait_for_flux_sync() {
             continue
         fi
 
-        log_info "Flux bundle-apply PASS: OCIRepository pulled (rev=$(echo "$oci_json" | jq -r '.status.artifact.revision // "unknown"')), Kustomization applied (rev=${applied_rev}), ${total} HelmReleases created"
-        log_info "(flux-oci validates bundle-format application only; HelmRelease reconciliation is deferred — see follow-up issue)"
+        local hr_not_ready
+        hr_not_ready=$(echo "$hr_json" | jq '[.items[] | select(
+            (.status.conditions // []) | map(select(.type == "Ready" and .status == "True")) | length == 0
+        )] | length')
+        if [[ "$hr_not_ready" -gt 0 ]]; then
+            log_debug "${hr_not_ready}/${total} HelmReleases not Ready yet — waiting..."
+            sleep 5
+            continue
+        fi
+
+        # 4. When ArtifactGenerator CRs are present (OCI mode with local-chart
+        # components), verify they reach Ready=True — proves source-watcher
+        # could extract sub-directories from the OCI bundle into
+        # ExternalArtifacts. This is the regression surface for issue #964.
+        local ag_json ag_total ag_not_ready ag_rc
+        ag_json=$(kubectl get artifactgenerator -A -o json 2>&1) && ag_rc=0 || ag_rc=$?
+        if (( ag_rc != 0 )); then
+            log_error "kubectl get artifactgenerator failed (rc=${ag_rc}): ${ag_json}"
+            return 1
+        fi
+        ag_total=$(echo "$ag_json" | jq '.items | length')
+        if [[ "$ag_total" -gt 0 ]]; then
+            ag_not_ready=$(echo "$ag_json" | jq '[.items[] | select(
+                (.status.conditions // []) | map(select(.type == "Ready" and .status == "True")) | length == 0
+            )] | length')
+            if [[ "$ag_not_ready" -gt 0 ]]; then
+                log_debug "${ag_not_ready}/${ag_total} ArtifactGenerators not Ready yet — waiting..."
+                sleep 5
+                continue
+            fi
+            log_info "All ${ag_total} ArtifactGenerators Ready (local-chart OCI extraction verified)"
+        fi
+
+        log_info "Flux bundle-apply PASS: OCIRepository pulled (rev=$(echo "$oci_json" | jq -r '.status.artifact.revision // "unknown"')), Kustomization applied (rev=${applied_rev}), ${total}/${total} HelmReleases Ready"
         return 0
     done
 
@@ -1618,12 +1637,29 @@ dump_flux_failures() {
             stalled: ((.status.conditions // []) | map(select(.type == "Stalled")) | .[0].status),
             history: (.status.history // [])[0]
           }' 2>&1 || true
+    log_error "--- Flux ArtifactGenerators ---"
+    kubectl get artifactgenerator -A -o json 2>/dev/null \
+        | jq -r '.items[] | {
+            namespace: .metadata.namespace,
+            name: .metadata.name,
+            ready: ((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status)
+          }' 2>&1 || true
+    log_error "--- Flux ExternalArtifacts ---"
+    kubectl get externalartifact -A -o json 2>/dev/null \
+        | jq -r '.items[] | {
+            namespace: .metadata.namespace,
+            name: .metadata.name,
+            ready: ((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status),
+            artifact: .status.artifact.revision
+          }' 2>&1 || true
     log_error "--- source-controller (tail=200) ---"
     kubectl logs -n flux-system deploy/source-controller --tail=200 2>&1 || true
     log_error "--- kustomize-controller (tail=200) ---"
     kubectl logs -n flux-system deploy/kustomize-controller --tail=200 2>&1 || true
     log_error "--- helm-controller (tail=200) ---"
     kubectl logs -n flux-system deploy/helm-controller --tail=200 2>&1 || true
+    log_error "--- source-watcher (tail=200) ---"
+    kubectl logs -n flux-system deploy/source-watcher --tail=200 2>&1 || true
 }
 
 # Verify pod scheduling
@@ -1823,6 +1859,28 @@ main() {
 
     log_debug "Step 4: Generating bundle..."
     generate_bundle "$recipe"
+
+    # Exclude all real (non-KWOK) nodes from bundle DaemonSets. On KWOK
+    # nodes stage-fast fakes pods into Running; on real Kind nodes,
+    # containers actually start and CrashLoop because cloud services
+    # (AWS IMDS, GCP metadata, etc.) are unavailable.
+    #
+    # Two exclusions are applied per node:
+    #   1. eks.amazonaws.com/compute-type=hybrid  — the ebs-csi-driver
+    #      DaemonSet uses a NotIn affinity that skips fargate/auto/hybrid
+    #      nodes. Without this label the Kind node passes the NotIn check.
+    #   2. nfd-excluded=true:NoSchedule taint — NFD worker DaemonSet
+    #      respects this taint and will not schedule on tainted nodes.
+    local cp_nodes
+    cp_nodes=$(kubectl get nodes --selector='type!=kwok' -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    if [[ -z "$cp_nodes" ]]; then
+        log_warn "No real (non-KWOK) nodes found to exclude — DaemonSet CrashLoops may occur"
+    fi
+    for cp_node in $cp_nodes; do
+        log_info "Excluding real node ($cp_node) from bundle DaemonSets"
+        kubectl label node "$cp_node" eks.amazonaws.com/compute-type=hybrid --overwrite
+        kubectl taint nodes "$cp_node" nfd-excluded=true:NoSchedule --overwrite
+    done
 
     log_debug "Step 5: Deploying bundle..."
     deploy_bundle

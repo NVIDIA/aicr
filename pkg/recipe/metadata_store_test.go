@@ -20,10 +20,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"reflect"
+	"slices"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
 
@@ -755,14 +758,7 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 		if c.Namespace != w.namespace {
 			t.Errorf("%s: Namespace = %q, want %q", name, c.Namespace, w.namespace)
 		}
-		foundManifest := false
-		for _, p := range c.PreManifestFiles {
-			if p == w.manifestPath {
-				foundManifest = true
-				break
-			}
-		}
-		if !foundManifest {
+		if !slices.Contains(c.PreManifestFiles, w.manifestPath) {
 			t.Errorf("%s: PreManifestFiles = %v, want to contain %q", name, c.PreManifestFiles, w.manifestPath)
 		}
 	}
@@ -1532,5 +1528,208 @@ func TestBuildMixinConstraintWarningReason(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+// inMemoryDataProvider is a minimal DataProvider backed by an in-memory
+// map[path]content. Used to construct distinct DataProvider identities in
+// isolation tests without touching the filesystem or the embedded FS.
+type inMemoryDataProvider struct {
+	files map[string][]byte
+	tag   string
+}
+
+func newInMemoryProvider(tag string, files map[string][]byte) *inMemoryDataProvider {
+	return &inMemoryDataProvider{files: files, tag: tag}
+}
+
+func (p *inMemoryDataProvider) ReadFile(path string) ([]byte, error) {
+	content, ok := p.files[path]
+	if !ok {
+		return nil, fs.ErrNotExist
+	}
+	return content, nil
+}
+
+func (p *inMemoryDataProvider) WalkDir(_ string, fn fs.WalkDirFunc) error {
+	for path := range p.files {
+		if err := fn(path, inMemoryDirEntry{name: path}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *inMemoryDataProvider) Source(path string) string {
+	return p.tag + ":" + path
+}
+
+// inMemoryDirEntry is a minimal fs.DirEntry for in-memory files.
+// All entries are files (IsDir returns false).
+type inMemoryDirEntry struct{ name string }
+
+func (e inMemoryDirEntry) Name() string               { return e.name }
+func (e inMemoryDirEntry) IsDir() bool                { return false }
+func (e inMemoryDirEntry) Type() fs.FileMode          { return 0 }
+func (e inMemoryDirEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrNotExist }
+
+// buildProviderWithOverlays returns an inMemoryDataProvider that contains a
+// minimal base recipe plus one overlay whose metadata name is derived from the
+// supplied filename (e.g., "alpha-only.yaml" → overlay metadata name
+// "alpha-only"). This lets isolation tests verify that the metadata store
+// cache keyed by DataProvider populates distinct entries.
+func buildProviderWithOverlays(t *testing.T, overlayFileName string) DataProvider {
+	t.Helper()
+	overlayName := overlayFileName
+	if len(overlayName) > len(".yaml") && overlayName[len(overlayName)-len(".yaml"):] == ".yaml" {
+		overlayName = overlayName[:len(overlayName)-len(".yaml")]
+	}
+
+	baseYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`)
+
+	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: %s
+spec:
+  criteria:
+    service: eks
+  componentRefs: []
+`, overlayName)
+
+	files := map[string][]byte{
+		"overlays/base.yaml":                baseYAML,
+		"overlays/" + overlayName + ".yaml": overlayYAML,
+	}
+	return newInMemoryProvider(overlayName, files)
+}
+
+// TestLoadMetadataStore_PerProviderIsolation verifies that distinct
+// DataProviders populate distinct cache entries. Two Builders against
+// different providers must never share metadata state.
+func TestLoadMetadataStore_PerProviderIsolation(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	dpA := buildProviderWithOverlays(t, "alpha-only.yaml")
+	dpB := buildProviderWithOverlays(t, "beta-only.yaml")
+
+	ctx := context.Background()
+	storeA, err := LoadMetadataStoreFor(ctx, dpA)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor(A): %v", err)
+	}
+	storeB, err := LoadMetadataStoreFor(ctx, dpB)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor(B): %v", err)
+	}
+
+	if storeA == storeB {
+		t.Fatal("expected distinct stores for distinct providers")
+	}
+	if _, ok := storeA.GetRecipeByName("alpha-only"); !ok {
+		t.Errorf("store A missing alpha-only")
+	}
+	if _, ok := storeB.GetRecipeByName("beta-only"); !ok {
+		t.Errorf("store B missing beta-only")
+	}
+	if _, ok := storeA.GetRecipeByName("beta-only"); ok {
+		t.Errorf("store A leaked beta-only")
+	}
+}
+
+// TestEvictCachedStore_Refetches verifies that EvictCachedStore drops the
+// cached entry so the next LoadMetadataStoreFor call rebuilds a fresh store
+// (distinct pointer) for the same provider.
+func TestEvictCachedStore_Refetches(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	dp := buildProviderWithOverlays(t, "evict-store.yaml")
+	ctx := context.Background()
+	first, err := LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	EvictCachedStore(dp)
+	second, err := LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first == second {
+		t.Errorf("expected fresh store after evict")
+	}
+}
+
+// TestEvictCachedStore_NilIsNoOp verifies that EvictCachedStore(nil) is a
+// no-op: it must not panic and must not clobber any existing cache entries
+// for other providers.
+func TestEvictCachedStore_NilIsNoOp(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	dp := buildProviderWithOverlays(t, "noop-evict.yaml")
+	ctx := context.Background()
+	before, err := LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Evicting nil must not panic, must not clobber the seeded entry.
+	EvictCachedStore(nil)
+
+	after, err := LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		t.Fatalf("re-fetch: %v", err)
+	}
+	if before != after {
+		t.Errorf("EvictCachedStore(nil) clobbered an unrelated entry")
+	}
+}
+
+// TestLoadMetadataStoreFor_NilProviderFallsBack verifies that passing a nil
+// DataProvider routes through GetDataProvider() instead of panicking, and
+// returns a non-nil store via the global fallback path.
+func TestLoadMetadataStoreFor_NilProviderFallsBack(t *testing.T) {
+	// No identity assertion on the returned store — the global may have been
+	// populated by other tests. Only verify nil dp does not panic and returns
+	// a non-nil store via the global fallback.
+	store, err := LoadMetadataStoreFor(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor(nil): %v", err)
+	}
+	if store == nil {
+		t.Error("expected non-nil store via global fallback")
+	}
+}
+
+// TestLoadMetadataStore_ConcurrentSameProviderIsCached verifies the
+// sync.Once-per-entry guarantee: concurrent LoadMetadataStoreFor calls for
+// the same provider all receive the same singleton pointer.
+func TestLoadMetadataStore_ConcurrentSameProviderIsCached(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	dp := buildProviderWithOverlays(t, "concurrent.yaml")
+	ctx := context.Background()
+
+	g, gctx := errgroup.WithContext(ctx)
+	results := make([]*MetadataStore, 8)
+	for i := range results {
+		g.Go(func() error {
+			s, err := LoadMetadataStoreFor(gctx, dp)
+			results[i] = s
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		t.Fatalf("concurrent load: %v", err)
+	}
+	for i := 1; i < len(results); i++ {
+		if results[i] != results[0] {
+			t.Errorf("result[%d] is not the cached singleton (got %p, want %p)", i, results[i], results[0])
+		}
 	}
 }

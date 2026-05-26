@@ -53,7 +53,10 @@ jobs:
       DEPLOYMENT_ID: "aicr-uat-${{ github.run_id }}"
       CLUSTER_CONFIG: tests/uat/aws/cluster-config.yaml
       TEST_CONFIG: tests/uat/aws/tests/h100-training-config.yaml
-      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:c631e2bebf605690c6cfbb072cb2116023fd0f6b43c2c4c6ead0416ee586635d"
+      # v0.4.23 — required for the .eks-nested cluster-config schema; the
+      # prior pin (v0.2.6) read .compute.nodeGroups.* directly and failed
+      # Terraform parse with "object with 1 attribute eks".
+      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:57fd2bf77055f8e0090bd7b8e099e7f11fd874f0b5764057439d11f1cd32a8b1"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
 
@@ -111,14 +114,25 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-UAT-AICR
 
-      # Capacity check (reads desired count and reservation ID from cluster config)
+      # Capacity check (reads desired count and reservation ID from cluster config).
+      # Uses the runner-preinstalled yq because Install tools runs later; if the
+      # cluster-config schema ever drifts, the explicit empty-value guard below
+      # surfaces the mismatch immediately instead of letting yq return empty
+      # silently and the AWS API reject a malformed reservation ID.
       - name: Check EC2 capacity reservation
         id: capacity
         run: |
           set -euo pipefail
-          GPU_WORKER='.compute.nodeGroups.workers[] | select(.name == "gpu-worker")'
+          GPU_WORKER='.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker")'
           DESIRED=$(yq eval "${GPU_WORKER} | .capacity.desired" "$CLUSTER_CONFIG")
           RESERVATION=$(yq eval "${GPU_WORKER} | .capacity.reservation.target" "$CLUSTER_CONFIG")
+          if [[ -z "${DESIRED}" || "${DESIRED}" == "null" || \
+                -z "${RESERVATION}" || "${RESERVATION}" == "null" ]]; then
+            echo "::error::Could not extract gpu-worker capacity from ${CLUSTER_CONFIG}." \
+                 "Check the .compute.eks.nodeGroups.workers schema." \
+                 "yq returned: desired='${DESIRED}', reservation='${RESERVATION}'"
+            exit 1
+          fi
           echo "Reservation: ${RESERVATION}, desired: ${DESIRED}"
 
           AVAILABLE=$(aws ec2 describe-capacity-reservations \
@@ -147,13 +161,15 @@ jobs:
           helmfile_version: '${{ steps.versions.outputs.helmfile }}'
           helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
 
-      # Config
+      # Config — v0.4.23+ of the EKS actuator derives the cluster name from
+      # .deployment.id (same as GKE); the previous yq write to .cluster.name
+      # is now an invalid sibling of the typed cluster.eks ProviderConfig
+      # and rejected at YAML unmarshal.
       - name: Update Config
         id: config
         run: |
           set -euox pipefail
           yq -i '.deployment.id = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
-          yq -i '.cluster.name = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
 
       # Bringup

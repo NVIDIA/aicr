@@ -259,6 +259,7 @@ jobs:
           kwok_version: ${{ steps.versions.outputs.kwok }}
           kubectl_version: ${{ steps.versions.outputs.kubectl }}
           yq_version: ${{ steps.versions.outputs.yq }}
+          flux_version: ${{ steps.versions.outputs.flux }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   # ── Tier 2: diff-aware accelerator tests (PR only, conditional) ──
@@ -296,6 +297,7 @@ jobs:
           kwok_version: ${{ steps.versions.outputs.kwok }}
           kubectl_version: ${{ steps.versions.outputs.kubectl }}
           yq_version: ${{ steps.versions.outputs.yq }}
+          flux_version: ${{ steps.versions.outputs.flux }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   # ── Tier 3: full matrix (push to main + nightly schedule) ──
@@ -340,6 +342,7 @@ jobs:
           kwok_version: ${{ steps.versions.outputs.kwok }}
           kubectl_version: ${{ steps.versions.outputs.kubectl }}
           yq_version: ${{ steps.versions.outputs.yq }}
+          flux_version: ${{ steps.versions.outputs.flux }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   # ── Summary: aggregate all tiers ──

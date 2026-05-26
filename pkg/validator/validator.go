@@ -296,6 +296,7 @@ func (v *Validator) runPhase(
 		deployer := job.NewDeployer(
 			clientset, factory, v.Namespace, v.RunID, v.Version, v.Commit, entry,
 			v.ImagePullSecrets, v.Tolerations, v.NodeSelector,
+			v.ImageRegistryOverride, v.ImageTagOverride,
 		)
 
 		// Deploy

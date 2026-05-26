@@ -933,7 +933,7 @@ func TestDataProviderGeneration(t *testing.T) {
 
 	// Setting a provider should increment generation
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
-	SetDataProvider(embedded)
+	SetDataProvider(embedded) //nolint:staticcheck // tests legacy global-provider behavior; tracked by #983 Stage 2
 
 	newGen := getDataProviderGeneration()
 	if newGen != startGen+1 {
@@ -941,7 +941,7 @@ func TestDataProviderGeneration(t *testing.T) {
 	}
 
 	// Setting again should increment again
-	SetDataProvider(embedded)
+	SetDataProvider(embedded) //nolint:staticcheck // tests legacy global-provider behavior; tracked by #983 Stage 2
 	if getDataProviderGeneration() != startGen+2 {
 		t.Errorf("expected generation %d, got %d", startGen+2, getDataProviderGeneration())
 	}
@@ -1309,5 +1309,28 @@ validators:
 	firstImage, _ := cat.Validators[0]["image"].(string)
 	if firstImage != "example.com/custom/deployment:v2.0.0" {
 		t.Errorf("operator-health image = %q, want %q", firstImage, "example.com/custom/deployment:v2.0.0")
+	}
+}
+
+func TestEffectiveDataProvider(t *testing.T) {
+	// Save / restore global state used by the nil-fallback branch.
+	originalProvider := globalDataProvider
+	originalGen := dataProviderGeneration
+	t.Cleanup(func() {
+		globalDataProvider = originalProvider
+		dataProviderGeneration = originalGen
+	})
+
+	// With non-nil provider: returns dp unchanged.
+	dp := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+	if got := EffectiveDataProvider(dp); got != dp {
+		t.Errorf("EffectiveDataProvider(dp) = %p, want %p", got, dp)
+	}
+
+	// With nil: falls back to the package-global provider.
+	fallback := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+	SetDataProvider(fallback) //nolint:staticcheck // test exercises legacy global-provider fallback; tracked by #983 Stage 2
+	if got := EffectiveDataProvider(nil); got != fallback {
+		t.Errorf("EffectiveDataProvider(nil) = %p, want global %p", got, fallback)
 	}
 }

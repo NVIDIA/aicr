@@ -407,6 +407,26 @@ type RecipeResult struct {
 	// Validation defines multi-phase validation configuration.
 	// Inherited from recipe metadata during merging.
 	Validation *ValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+
+	// provider is the DataProvider that produced this result. Threaded
+	// through finalizeRecipeResult from the originating MetadataStore so
+	// downstream consumers (e.g., GetValuesForComponent in Task 6) can
+	// route file lookups through the same provider — preserving per-tenant
+	// isolation even when the package-global DataProvider has since been
+	// swapped. Nil when the result was built against the package-global
+	// provider, in which case DataProvider() returns nil and callers fall
+	// back to GetDataProvider().
+	provider DataProvider
+}
+
+// DataProvider returns the DataProvider that produced this result, or nil
+// when the result was built against the package-global provider. Nil-safe
+// on the receiver so call sites can chain freely off a possibly-nil result.
+func (r *RecipeResult) DataProvider() DataProvider {
+	if r == nil {
+		return nil
+	}
+	return r.provider
 }
 
 // Merge merges another RecipeMetadataSpec into this one.

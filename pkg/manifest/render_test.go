@@ -52,6 +52,12 @@ func TestRender(t *testing.T) {
 			wantSub: "svc: Helm",
 		},
 		{
+			name:    "replace and trunc in chart label",
+			content: `helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}`,
+			input:   RenderInput{ComponentName: "test", ChartName: "gpu-operator-pre", ChartVersion: "0.1.0+09d01b0b4d7d"},
+			wantSub: "helm.sh/chart: gpu-operator-pre-0.1.0_09d01b0b4d7d",
+		},
+		{
 			name:    "toYaml function",
 			content: "config: {{ toYaml .Values.mycomp }}",
 			input:   RenderInput{ComponentName: "mycomp", Values: map[string]any{"key": "value"}},
@@ -158,6 +164,44 @@ func TestHelmFuncMapFunctions(t *testing.T) {
 		}
 		if got := fn("fallback", "actual"); got != "actual" {
 			t.Errorf("default('fallback', 'actual') = %v, want 'actual'", got)
+		}
+	})
+
+	t.Run("replace", func(t *testing.T) {
+		fn := funcs["replace"].(func(string, string, string) string)
+
+		if got := fn("+", "_", "1.0.0+build"); got != "1.0.0_build" {
+			t.Errorf("replace('+', '_', '1.0.0+build') = %q, want %q", got, "1.0.0_build")
+		}
+		if got := fn("a", "b", "aaa"); got != "bbb" {
+			t.Errorf("replace('a', 'b', 'aaa') = %q, want %q", got, "bbb")
+		}
+		if got := fn("x", "y", "no match"); got != "no match" {
+			t.Errorf("replace('x', 'y', 'no match') = %q, want %q", got, "no match")
+		}
+	})
+
+	t.Run("trunc", func(t *testing.T) {
+		fn := funcs["trunc"].(func(int, string) string)
+
+		if got := fn(5, "hello world"); got != "hello" {
+			t.Errorf("trunc(5, 'hello world') = %q, want %q", got, "hello")
+		}
+		if got := fn(63, "short"); got != "short" {
+			t.Errorf("trunc(63, 'short') = %q, want %q", got, "short")
+		}
+		if got := fn(0, "test"); got != "" {
+			t.Errorf("trunc(0, 'test') = %q, want %q", got, "")
+		}
+		// Sprig semantics: negative c returns last |c| chars.
+		if got := fn(-1, "test"); got != "t" {
+			t.Errorf("trunc(-1, 'test') = %q, want %q", got, "t")
+		}
+		if got := fn(-5, "hello world"); got != "world" {
+			t.Errorf("trunc(-5, 'hello world') = %q, want %q", got, "world")
+		}
+		if got := fn(-20, "short"); got != "short" {
+			t.Errorf("trunc(-20, 'short') = %q, want %q", got, "short")
 		}
 	})
 }
