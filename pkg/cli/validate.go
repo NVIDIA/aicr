@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -293,6 +294,10 @@ type validationConfig struct {
 	nodeSelector map[string]string
 	tolerations  []corev1.Toleration
 
+	// Image overrides
+	imageRegistryOverride string
+	imageTagOverride      string
+
 	// Behavior
 	failOnError bool
 
@@ -322,6 +327,8 @@ func runValidation(
 		validator.WithNoCluster(cfg.noCluster),
 		validator.WithTolerations(cfg.tolerations),
 		validator.WithNodeSelector(cfg.nodeSelector),
+		validator.WithImageRegistryOverride(cfg.imageRegistryOverride),
+		validator.WithImageTagOverride(cfg.imageTagOverride),
 	)
 
 	validationInput := v1.ToValidationInput(rec)
@@ -731,18 +738,20 @@ Run validation without failing on check errors (informational mode):
 			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
 
 			return runValidation(ctx, rec, snap, validationConfig{
-				phases:              phases,
-				output:              cmd.String("output"),
-				outFormat:           serializer.FormatJSON,
-				failOnError:         failOnError,
-				validationNamespace: shared.namespace,
-				cleanup:             !shared.noCleanup,
-				imagePullSecrets:    shared.imagePullSecrets,
-				noCluster:           noCluster,
-				nodeSelector:        shared.nodeSelector,
-				tolerations:         shared.tolerations,
-				evidenceDir:         evidenceDir,
-				evidence:            evidenceCfg,
+				phases:                phases,
+				output:                cmd.String("output"),
+				outFormat:             serializer.FormatJSON,
+				failOnError:           failOnError,
+				validationNamespace:   shared.namespace,
+				cleanup:               !shared.noCleanup,
+				imagePullSecrets:      shared.imagePullSecrets,
+				noCluster:             noCluster,
+				nodeSelector:          shared.nodeSelector,
+				tolerations:           shared.tolerations,
+				imageRegistryOverride: os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"),
+				imageTagOverride:      os.Getenv("AICR_VALIDATOR_IMAGE_TAG"),
+				evidenceDir:           evidenceDir,
+				evidence:              evidenceCfg,
 			})
 		},
 	}
