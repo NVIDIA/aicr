@@ -96,6 +96,13 @@ import (
 // template placeholders that would otherwise be misparsed).
 const yamlStringTag = "!!str"
 
+// DefaultChartName is the Helm chart name used when ChartName is not set
+// (typically when --output is a local directory). When --output is an OCI
+// reference, the chart name is derived from the last path segment of the
+// repository (e.g. "oci://ghcr.io/org/my-bundle:v1" → "my-bundle") so the
+// parent Application's `source.chart` matches the actual OCI artifact name.
+const DefaultChartName = "aicr-bundle"
+
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
@@ -108,6 +115,16 @@ type Generator struct {
 	RepoURL          string
 	TargetRevision   string
 	IncludeChecksums bool
+
+	// ChartName is the Helm chart name written into Chart.yaml and used as
+	// the parent Application's `source.chart`. When empty, defaults to
+	// DefaultChartName ("aicr-bundle"). When the bundle is published to an
+	// OCI registry at a non-default artifact name, callers MUST set this
+	// to the registry's last path segment (e.g. "my-bundle" for
+	// "oci://ghcr.io/org/my-bundle:v1") — otherwise the parent App's
+	// `repoURL/chart:tag` assembly resolves to an artifact that does not
+	// exist in the registry. See issue #1019.
+	ChartName string
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
@@ -194,7 +211,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output := &deployer.Output{Files: make([]string, 0)}
 
 	// Write Chart.yaml
-	chartPath, chartSize, err := writeChartYAML(outputDir, deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version))
+	chartName := g.chartName()
+	chartPath, chartSize, err := writeChartYAML(outputDir, chartName,
+		deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write Chart.yaml", err)
 	}
@@ -283,7 +302,7 @@ func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output,
 	output.Duration = time.Since(start)
 	output.DeploymentSteps = []string{
 		fmt.Sprintf("cd %s", outputDir),
-		"helm install aicr-bundle .",
+		fmt.Sprintf("helm install %s .", g.chartName()),
 	}
 	return nil
 }
@@ -371,6 +390,12 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 // Argo subsequently renders the chart from OCI it sees the same per-
 // cluster overrides the user passed at helm install — keeping the
 // dynamic-values story working end-to-end.
+// The parent App's `source.chart` is set to `.Chart.Name` so it tracks the
+// chart name Helm renders the bundle under (which equals what `helm push`
+// publishes the artifact as). That keeps the parent App's `repoURL/chart:
+// targetRevision` triple resolvable against the actual OCI artifact even
+// when the user picks a non-default name via `--output oci://reg/path/<name>`.
+// Hardcoding `aicr-bundle` here was the bug in #1019.
 const parentAppTemplate = `apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -379,8 +404,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: {{ required "repoURL is required: pass --set repoURL=<published bundle URL> (e.g., oci://<registry>/<path>/aicr-bundle)" .Values.repoURL | quote }}
-    chart: aicr-bundle
+    repoURL: {{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; the parent App appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL | quote }}
+    chart: {{ .Chart.Name | quote }}
     targetRevision: {{ .Values.targetRevision | default .Chart.Version | quote }}
     helm:
       valuesObject:
@@ -675,7 +700,7 @@ func injectValuesIntoSingleSource(app map[string]any, overrideKey string) error 
 		Kind:  yaml.ScalarNode,
 		Tag:   yamlStringTag,
 		Style: yaml.SingleQuotedStyle,
-		Value: `{{ required "repoURL is required: pass --set repoURL=<published bundle URL> (e.g., oci://<registry>/<path>/aicr-bundle)" .Values.repoURL }}`,
+		Value: `{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; the parent App appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL }}`,
 	}
 	source["targetRevision"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
@@ -908,7 +933,7 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 	return nil
 }
 
-func writeChartYAML(outputDir, version string) (string, int64, error) {
+func writeChartYAML(outputDir, name, version string) (string, int64, error) {
 	chartPath, err := deployer.SafeJoin(outputDir, "Chart.yaml")
 	if err != nil {
 		return "", 0, err
@@ -916,7 +941,7 @@ func writeChartYAML(outputDir, version string) (string, int64, error) {
 
 	var buf strings.Builder
 	buf.WriteString("apiVersion: v2\n")
-	buf.WriteString("name: aicr-bundle\n")
+	fmt.Fprintf(&buf, "name: %s\n", name)
 	buf.WriteString("description: AICR deployment bundle with dynamic install-time values\n")
 	buf.WriteString("type: application\n")
 	fmt.Fprintf(&buf, "version: %s\n", version)
@@ -928,11 +953,23 @@ func writeChartYAML(outputDir, version string) (string, int64, error) {
 	return chartPath, int64(len(content)), nil
 }
 
+// chartName returns the Helm chart name for this Generator, applying the
+// "aicr-bundle" default when ChartName is unset. Centralized so the value
+// flows consistently into Chart.yaml, the README, and the finalize step.
+func (g *Generator) chartName() string {
+	if g.ChartName == "" {
+		return DefaultChartName
+	}
+	return g.ChartName
+}
+
 func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	readmePath, err := deployer.SafeJoin(outputDir, "README.md")
 	if err != nil {
 		return "", 0, err
 	}
+
+	chartName := g.chartName()
 
 	var buf strings.Builder
 	buf.WriteString("# Argo CD Helm Chart Deployment Bundle\n\n")
@@ -943,16 +980,24 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	buf.WriteString("repoURL=...`, not baked into the chart bytes.\n\n")
 
 	buf.WriteString("## Deploy\n\n")
+	buf.WriteString("`<your-registry>/<path>` below is the **parent namespace** you\n")
+	buf.WriteString("publish into. The chart name (`")
+	buf.WriteString(chartName)
+	buf.WriteString("`) is appended by Helm at\n")
+	buf.WriteString("push time and by the parent Application at sync time — do NOT\n")
+	buf.WriteString("include the chart name in `--set repoURL` or it will be appended\n")
+	buf.WriteString("twice and the parent Application will fail to resolve.\n\n")
 	buf.WriteString("```bash\n")
 	buf.WriteString("# 1. Publish to your chart registry (any HTTPS OCI / Helm chart repo).\n")
 	buf.WriteString("helm package . --destination /tmp/\n")
-	buf.WriteString("helm push /tmp/aicr-bundle-*.tgz oci://<your-registry>/<path>\n\n")
-	buf.WriteString("# 2. Install from the published chart — supply repoURL and\n")
+	fmt.Fprintf(&buf, "helm push /tmp/%s-*.tgz oci://<your-registry>/<path>\n\n", chartName)
+	buf.WriteString("# 2. Install from the published chart — supply repoURL (the\n")
+	buf.WriteString("#    parent namespace, NOT including the chart name) and\n")
 	buf.WriteString("#    targetRevision so the parent Application and path-based child\n")
 	buf.WriteString("#    Applications can pull from the registry you pushed to.\n")
-	buf.WriteString("helm install aicr-bundle oci://<your-registry>/<path>/aicr-bundle \\\n")
+	fmt.Fprintf(&buf, "helm install %s oci://<your-registry>/<path>/%s \\\n", chartName, chartName)
 	buf.WriteString("  --version <chart-version> -n argocd \\\n")
-	buf.WriteString("  --set repoURL=oci://<your-registry>/<path>/aicr-bundle \\\n")
+	buf.WriteString("  --set repoURL=oci://<your-registry>/<path> \\\n")
 	buf.WriteString("  --set targetRevision=<chart-version>\n")
 	buf.WriteString("```\n\n")
 
@@ -961,7 +1006,7 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	buf.WriteString("source is path-based (manifest-only, mixed `-post`) need Argo's\n")
 	buf.WriteString("repo-server to fetch from a remote, so the chart must be published\n")
 	buf.WriteString("first for those cases.\n\n")
-	buf.WriteString("```bash\n# Local install (pure-Helm-only recipes)\nhelm install aicr-bundle . -n argocd \\\n  --set repoURL=oci://<your-registry>/<path>/aicr-bundle \\\n  --set targetRevision=<chart-version>")
+	fmt.Fprintf(&buf, "```bash\n# Local install (pure-Helm-only recipes)\nhelm install %s . -n argocd \\\n  --set repoURL=oci://<your-registry>/<path> \\\n  --set targetRevision=<chart-version>", chartName)
 
 	dynamicSetFlags, flagsErr := buildDynamicSetFlags(g.DynamicValues, g.RecipeResult.DataProvider())
 	if flagsErr != nil {

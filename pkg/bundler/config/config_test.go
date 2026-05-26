@@ -666,6 +666,47 @@ func TestHasDynamicValues_Empty(t *testing.T) {
 	}
 }
 
+// TestWithBundleChartName verifies the override flows to BundleChartName,
+// that the default is empty (so the argocd-helm deployer falls back to
+// its own "aicr-bundle" default), and that the most-recent option wins
+// when both an explicit empty and a non-empty value are supplied.
+func TestWithBundleChartName(t *testing.T) {
+	tests := []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{
+			name: "default is empty (deployer applies its own default)",
+			opts: nil,
+			want: "",
+		},
+		{
+			name: "explicit override",
+			opts: []Option{WithBundleChartName("my-custom-bundle")},
+			want: "my-custom-bundle",
+		},
+		{
+			name: "empty override is a no-op observable through getter",
+			opts: []Option{WithBundleChartName("")},
+			want: "",
+		},
+		{
+			name: "later option wins",
+			opts: []Option{WithBundleChartName("first"), WithBundleChartName("second")},
+			want: "second",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewConfig(tt.opts...)
+			if got := cfg.BundleChartName(); got != tt.want {
+				t.Errorf("BundleChartName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseDynamicValues(t *testing.T) {
 	tests := []struct {
 		name    string

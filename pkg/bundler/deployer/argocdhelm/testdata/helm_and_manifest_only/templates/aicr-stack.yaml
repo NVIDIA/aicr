@@ -6,8 +6,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: {{ required "repoURL is required: pass --set repoURL=<published bundle URL> (e.g., oci://<registry>/<path>/aicr-bundle)" .Values.repoURL | quote }}
-    chart: aicr-bundle
+    repoURL: {{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; the parent App appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL | quote }}
+    chart: {{ .Chart.Name | quote }}
     targetRevision: {{ .Values.targetRevision | default .Chart.Version | quote }}
     helm:
       valuesObject:

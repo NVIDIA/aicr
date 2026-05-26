@@ -91,6 +91,11 @@ type bundleCmdOptions struct {
 	plainHTTP     bool
 	insecureTLS   bool
 	imageRefsPath string // Path to write published image references (like ko --image-refs)
+
+	// bundleChartName overrides the chart name written by the argocd-helm
+	// deployer. Derived from ociRef.ChartName() when --output is OCI; the
+	// deployer's "aicr-bundle" default is used when this is empty. See #1019.
+	bundleChartName string
 }
 
 // parseBundleCmdOptions parses and validates command options. The wire
@@ -165,6 +170,13 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		}
 		// For OCI output, use current directory for bundle generation
 		opts.outputDir = "./bundle"
+		// Derive the Helm chart name from the OCI artifact path so the
+		// argocd-helm bundle's Chart.yaml and parent Application
+		// `source.chart` match what `helm push` actually publishes. Without
+		// this the parent App's `repoURL/chart:targetRevision` triple
+		// resolves against an artifact that doesn't exist in the registry
+		// when the user picks a non-default name. See #1019.
+		opts.bundleChartName = opts.ociRef.ChartName()
 	} else {
 		// Resolve local output path to absolute to ensure consistent behavior
 		// regardless of how the binary is invoked.
@@ -625,6 +637,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
+		config.WithBundleChartName(opts.bundleChartName),
 	)
 
 	// Note: binary attestation pre-flight check is handled by bundler.New().
