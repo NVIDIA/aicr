@@ -1211,8 +1211,15 @@ wait_for_argocd_sync() {
     # letting the bash driver vary the deadline by env var without forking
     # the chainsaw test file per deployer. --no-color keeps the CI log
     # readable; the kwok-test composite action does not interpret ANSI.
+    #
+    # --set is the inline override flag in chainsaw — it populates the
+    # $values binding from the command line. --values is YAML-only
+    # (file/stdin/heredoc); passing "key=value" to it silently leaves
+    # the binding undefined, so the bindings: defaults take effect
+    # regardless of the value supplied here. Use --set for inline
+    # overrides.
     if "$chainsaw_bin" test "$test_dir" \
-            --values "rootApp=${ARGOCD_ROOT_APP}" \
+            --set "rootApp=${ARGOCD_ROOT_APP}" \
             --assert-timeout "$sync_timeout" \
             --no-color; then
         log_info "Argo CD sync PASS (chainsaw)"
@@ -1246,9 +1253,11 @@ wait_for_flux_sync() {
 
     log_info "Flux sync gate (chainsaw): ociRepository=${FLUX_OCIREPOSITORY_NAME} kustomization=${FLUX_KUSTOMIZATION_NAME} timeout=${sync_timeout}"
 
+    # See the argocd shim's comment for the --set vs --values choice;
+    # --values requires YAML, --set takes inline key=value pairs.
     if "$chainsaw_bin" test "$test_dir" \
-            --values "ociRepositoryName=${FLUX_OCIREPOSITORY_NAME}" \
-            --values "kustomizationName=${FLUX_KUSTOMIZATION_NAME}" \
+            --set "ociRepositoryName=${FLUX_OCIREPOSITORY_NAME}" \
+            --set "kustomizationName=${FLUX_KUSTOMIZATION_NAME}" \
             --assert-timeout "$sync_timeout" \
             --no-color; then
         log_info "Flux sync PASS (chainsaw)"

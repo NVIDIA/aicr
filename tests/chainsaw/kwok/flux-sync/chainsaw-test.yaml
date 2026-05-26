@@ -104,16 +104,24 @@ spec:
 
     - name: assert-all-helmreleases-ready
       description: |
-        All HelmReleases must reach Ready=True. Proves helm-controller
-        reconciled each release (chart sources resolved via ExternalArtifact
-        / HelmRepository, values applied, install or upgrade succeeded).
+        All HelmReleases must reach a terminal pass state. The accepted
+        pass set mirrors the bash wait_for_flux_sync contract:
+          1. Ready=True
+                — canonical pass.
+          2. Released=True + history[0].status=='deployed' + Stalled!=True
+                — terminal fallback for KWOK lanes where helm-controller
+                installed the chart successfully but the Ready condition
+                lags (KWOK pod readiness sim gap, mirroring the argocd
+                Progressing arm). The Stalled gate prevents masking a
+                genuinely failed reconcile that left a stale Released
+                from a prior revision.
       try:
         - assert:
             resource:
               apiVersion: helm.toolkit.fluxcd.io/v2
               kind: HelmRelease
               status:
-                (conditions[?type=='Ready']|[0].status == 'True'): true
+                ((conditions[?type=='Ready']|[0].status == 'True') || ((conditions[?type=='Released']|[0].status == 'True') && (history|[0].status == 'deployed') && (conditions[?type=='Stalled']|[0].status != 'True'))): true
       catch:
         - script:
             content: |
@@ -138,8 +146,14 @@ spec:
         resource matcher with no items returns success).
       try:
         - assert:
+            # ArtifactGenerator lives under source.extensions.fluxcd.io
+            # (an extension API), NOT source.toolkit.fluxcd.io. The
+            # bundler emits this same group/version at
+            # pkg/bundler/deployer/flux/templates/artifactgenerator.yaml.tmpl;
+            # mismatching here would make the selector match zero
+            # CRs and silently no-op the stage 4 check.
             resource:
-              apiVersion: source.toolkit.fluxcd.io/v1beta2
+              apiVersion: source.extensions.fluxcd.io/v1beta1
               kind: ArtifactGenerator
               status:
                 (conditions[?type=='Ready']|[0].status == 'True'): true
