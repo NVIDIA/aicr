@@ -755,7 +755,18 @@ generate_bundle() {
             # Script-global so deploy_bundle's argocd-helm-oci branch can
             # pass it through to `helm install --set repoURL=…` without
             # duplicating the runner→service-DNS rewrite rule.
-            OCI_IN_CLUSTER_REF="oci://registry.aicr-registry.svc.cluster.local:5000/aicr/${recipe}"
+            #
+            # Per PR #1032's contract change (and #1035's enforcement on the
+            # parent App template), --set repoURL must carry the PARENT
+            # NAMESPACE ONLY — without the per-recipe chart name. The
+            # argocd-helm parent Application appends .Chart.Name via its
+            # separate `source.chart` field; path-based child Applications
+            # append /{{ .Chart.Name }} via their template, so both halves
+            # resolve to the same artifact regardless of which Argo source
+            # type the cluster picks. The pushed artifact lives at
+            # oci://…/aicr/<recipe>:<tag>; the recipe segment is the chart
+            # name, which Argo appends itself.
+            OCI_IN_CLUSTER_REF="oci://registry.aicr-registry.svc.cluster.local:5000/aicr"
             local in_cluster_repo="$OCI_IN_CLUSTER_REF"
 
             # Map our deployer-matrix name to aicr's --deployer value.
@@ -763,7 +774,7 @@ generate_bundle() {
             [[ "$DEPLOYER" == "argocd-helm-oci" ]] && deployer_arg="argocd-helm"
 
             log_info "Bundling for ${deployer_arg}, pushing to ${OCI_REF}"
-            log_info "Argo CD will pull from ${in_cluster_repo}:${tag}"
+            log_info "Argo CD will pull from ${in_cluster_repo}/${recipe}:${tag} (parent namespace + .Chart.Name appended by the parent App)"
             # When --output is an oci:// reference, `aicr bundle` writes the
             # local bundle to ./bundle (relative to CWD) — there's no way to
             # redirect it to an absolute path. cd into WORK_DIR so the local

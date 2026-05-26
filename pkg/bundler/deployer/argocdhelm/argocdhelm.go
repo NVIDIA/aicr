@@ -481,10 +481,14 @@ spec:
 //	helm package ./bundle -d /tmp/
 //	helm push /tmp/aicr-bundle-*.tgz oci://ghcr.io/myorg
 //
-//	# install — same URL passed once, used for parent + children
+//	# install — --set repoURL is the PARENT NAMESPACE (no chart name).
+//	# The parent App appends .Chart.Name via source.chart, and path-based
+//	# children append it directly into their rendered source.repoURL —
+//	# including the chart name in --set repoURL double-suffixes both and
+//	# the children fail to resolve. See issues #1018 / #1034.
 //	helm install aicr-bundle oci://ghcr.io/myorg/aicr-bundle --version <tag> \
 //	  -n argocd \
-//	  --set repoURL=oci://ghcr.io/myorg/aicr-bundle \
+//	  --set repoURL=oci://ghcr.io/myorg \
 //	  --set targetRevision=<tag>
 //
 // The user could also `kubectl apply` the rendered parent App directly
