@@ -366,6 +366,7 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `nvsentinel` | GPU health monitoring and automated remediation |
 | `prometheus-adapter` | Custom metrics for HPA scaling |
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
+| `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |
 | `slinky-slurm-operator` | SchedMD Slinky Slurm operator and admission webhook |
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
 
