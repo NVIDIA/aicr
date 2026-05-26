@@ -748,7 +748,7 @@ func TestInjectValuesIntoSingleSource(t *testing.T) {
 	if !strings.Contains(str, `repoURL: '{{ required `) {
 		t.Errorf("source.repoURL should be rewritten to single-quoted Helm directive, got:\n%s", str)
 	}
-	if !strings.Contains(str, `.Values.repoURL }}`) {
+	if !strings.Contains(str, `.Values.repoURL`) {
 		t.Errorf("source.repoURL Helm directive should reference .Values.repoURL, got:\n%s", str)
 	}
 	if !strings.Contains(str, `targetRevision: '{{ .Values.targetRevision | default .Chart.Version }}'`) {
@@ -1469,8 +1469,13 @@ func TestInjectValuesIntoSingleSource_AppendsChartName(t *testing.T) {
 	}
 	str := string(out)
 
-	if !strings.Contains(str, `.Values.repoURL }}/{{ .Chart.Name }}`) {
-		t.Errorf("path-based child repoURL should append /{{ .Chart.Name }} after .Values.repoURL so the rendered value is the full OCI artifact reference; got:\n%s", str)
+	// The .Values.repoURL expression may be wrapped in a trimSuffix
+	// pipeline (defense-in-depth against operator-supplied trailing
+	// slashes); the load-bearing assertion is that .Chart.Name is
+	// appended directly so the assembled URL matches the artifact the
+	// parent App's repoURL/chart:tag triple resolves to.
+	if !strings.Contains(str, `}}/{{ .Chart.Name }}`) {
+		t.Errorf("path-based child repoURL should append /{{ .Chart.Name }} after the .Values.repoURL expression so the rendered value is the full OCI artifact reference; got:\n%s", str)
 	}
 	// The error message must direct callers to pass the parent
 	// namespace (the same contract the parent Application uses) so
@@ -1490,21 +1495,26 @@ func TestInjectValuesIntoSingleSource_AppendsChartName(t *testing.T) {
 // is required".
 func TestWriteChartYAML_QuotesYAMLReservedScalarsAsName(t *testing.T) {
 	tests := []struct {
-		name        string
-		chartName   string
-		wantUnmarsh string
+		name         string
+		chartName    string
+		chartVersion string
 	}{
-		{"YAML null literal", "null", "null"},
-		{"YAML true literal", "true", "true"},
-		{"YAML false literal", "false", "false"},
-		{"numeric-looking", "123", "123"},
-		{"YAML yes literal", "yes", "yes"},
-		{"hyphenated normal name", "my-bundle", "my-bundle"},
+		{"YAML null literal name", "null", "1.0.0"},
+		{"YAML true literal name", "true", "1.0.0"},
+		{"YAML false literal name", "false", "1.0.0"},
+		{"numeric-looking name", "123", "1.0.0"},
+		{"YAML yes literal name", "yes", "1.0.0"},
+		// Versions like "1.0" reparse as the YAML float 1 without quoting,
+		// so the %q wrap on version is load-bearing, not cosmetic. Exercise
+		// that branch with the same round-trip assertion as for name.
+		{"float-looking version", "aicr-bundle", "1.0"},
+		{"numeric-looking version", "aicr-bundle", "123"},
+		{"hyphenated normal pair", "my-bundle", "1.2.3"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			outputDir := t.TempDir()
-			if _, _, err := writeChartYAML(outputDir, tt.chartName, "1.0.0"); err != nil {
+			if _, _, err := writeChartYAML(outputDir, tt.chartName, tt.chartVersion); err != nil {
 				t.Fatalf("writeChartYAML: %v", err)
 			}
 			content, err := os.ReadFile(filepath.Join(outputDir, "Chart.yaml"))
@@ -1517,16 +1527,16 @@ func TestWriteChartYAML_QuotesYAMLReservedScalarsAsName(t *testing.T) {
 				Version    string `yaml:"version"`
 			}
 			if err := yaml.Unmarshal(content, &parsed); err != nil {
-				t.Fatalf("Chart.yaml does not unmarshal cleanly for name=%q:\n%s\nerror: %v",
-					tt.chartName, content, err)
+				t.Fatalf("Chart.yaml does not unmarshal cleanly for name=%q version=%q:\n%s\nerror: %v",
+					tt.chartName, tt.chartVersion, content, err)
 			}
-			if parsed.Name != tt.wantUnmarsh {
+			if parsed.Name != tt.chartName {
 				t.Errorf("Chart.yaml name = %q (after YAML unmarshal), want %q\nraw:\n%s",
-					parsed.Name, tt.wantUnmarsh, content)
+					parsed.Name, tt.chartName, content)
 			}
-			if parsed.Version != "1.0.0" {
-				t.Errorf("Chart.yaml version = %q, want \"1.0.0\"\nraw:\n%s",
-					parsed.Version, content)
+			if parsed.Version != tt.chartVersion {
+				t.Errorf("Chart.yaml version = %q (after YAML unmarshal), want %q\nraw:\n%s",
+					parsed.Version, tt.chartVersion, content)
 			}
 		})
 	}

@@ -756,7 +756,7 @@ func injectValuesIntoSingleSource(app map[string]any, overrideKey string) error 
 		Kind:  yaml.ScalarNode,
 		Tag:   yamlStringTag,
 		Style: yaml.SingleQuotedStyle,
-		Value: `{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; this template appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL }}/{{ .Chart.Name }}`,
+		Value: `{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; this template appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL | trimSuffix "/" }}/{{ .Chart.Name }}`,
 	}
 	source["targetRevision"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
