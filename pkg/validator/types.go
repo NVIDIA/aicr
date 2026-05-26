@@ -59,6 +59,18 @@ type Validator struct {
 	// to override platform-specific node selectors. Use when GPU nodes have
 	// non-standard labels. Does not affect the orchestrator Job itself.
 	NodeSelector map[string]string
+
+	// ImageRegistryOverride, when non-empty, replaces the registry prefix
+	// of all validator container images. Forwarded to the validator Job's
+	// container env as AICR_VALIDATOR_IMAGE_REGISTRY so inner workloads
+	// (e.g., AIPerf benchmark images) resolve from the same registry.
+	ImageRegistryOverride string
+
+	// ImageTagOverride, when non-empty, overrides the resolved image tag
+	// of all validator container images. Forwarded to the validator Job's
+	// container env as AICR_VALIDATOR_IMAGE_TAG. Intended for feature-branch
+	// dev builds whose commit SHA has no published image; typical value: "latest".
+	ImageTagOverride string
 }
 
 // PhaseResult is the outcome of running all validators in a single phase.
