@@ -65,6 +65,7 @@ spec:
     tuning:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke
       version: "0.1.2"
+      containerSHA: sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81
       interrupt:
         type: service
         services:

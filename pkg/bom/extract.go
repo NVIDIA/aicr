@@ -17,6 +17,7 @@ package bom
 import (
 	"bytes"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"regexp"
 	"sort"
@@ -77,7 +78,9 @@ func ExtractImagesFromYAML(data []byte) ([]string, error) {
 			}
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "decode yaml", err)
 		}
-		walkForImages(&node, seen)
+		if err := walkForImages(&node, seen); err != nil {
+			return nil, err
+		}
 	}
 	out := make([]string, 0, len(seen))
 	for img := range seen {
@@ -87,20 +90,22 @@ func ExtractImagesFromYAML(data []byte) ([]string, error) {
 	return out, nil
 }
 
-func walkForImages(n *yaml.Node, seen map[string]struct{}) {
+func walkForImages(n *yaml.Node, seen map[string]struct{}) error {
 	if n == nil {
-		return
+		return nil
 	}
 	switch n.Kind {
 	case yaml.MappingNode:
-		// First pass: collect sibling scalars for `image`, `repository`, and
-		// `version` so we can recognize the CRD-style triplet pattern used
-		// by NicClusterPolicy, Skyhook, and similar operators where these
-		// three fields are siblings (not concatenated into a single
+		// First pass: collect sibling scalars for `image`, `repository`,
+		// `version`, and `containerSHA` so we can recognize the CRD-style
+		// pattern used by NicClusterPolicy, Skyhook, and similar operators
+		// where these fields are siblings (not concatenated into a single
 		// `image:` value). Without this, the bare `image: doca-driver` part
 		// looks like an untagged image when in fact `repository` and
-		// `version` siblings carry the registry and tag.
-		var imgScalar, repoScalar, verScalar string
+		// `version` siblings carry the registry and tag. A sibling
+		// `containerSHA` (Skyhook Package CRD; ghcr.io/nvidia/nodewright)
+		// supplies the OCI digest and is folded in as `@<sha>`.
+		var imgScalar, repoScalar, verScalar, shaScalar string
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
 			target := v
@@ -117,31 +122,42 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 				repoScalar = strings.TrimSpace(target.Value)
 			case "version":
 				verScalar = strings.TrimSpace(target.Value)
+			case "containerSHA":
+				shaScalar = strings.TrimSpace(target.Value)
 			}
 		}
 		if imgScalar != "" {
 			combined := combineCRDTriplet(imgScalar, repoScalar, verScalar)
-			if isLikelyImage(combined) {
-				seen[combined] = struct{}{}
+			withSHA, err := appendContainerSHA(combined, shaScalar)
+			if err != nil {
+				return err
+			}
+			if isLikelyImage(withSHA) {
+				seen[withSHA] = struct{}{}
 			}
 		}
 
 		// Second pass: recurse into every value to catch image references
 		// nested deeper in the document.
 		for i := 0; i+1 < len(n.Content); i += 2 {
-			walkForImages(n.Content[i+1], seen)
+			if err := walkForImages(n.Content[i+1], seen); err != nil {
+				return err
+			}
 		}
 	case yaml.SequenceNode, yaml.DocumentNode:
 		for _, c := range n.Content {
-			walkForImages(c, seen)
+			if err := walkForImages(c, seen); err != nil {
+				return err
+			}
 		}
 	case yaml.AliasNode:
 		// Follow the anchor target so an `image:` value reached via *alias
 		// is still surveyed. Rare in K8s manifests but cheap to handle.
-		walkForImages(n.Alias, seen)
+		return walkForImages(n.Alias, seen)
 	case yaml.ScalarNode:
 		// Scalar leaf — no nested image references.
 	}
+	return nil
 }
 
 // combineCRDTriplet builds a fully-qualified image reference from
@@ -175,6 +191,43 @@ func combineCRDTriplet(image, repository, version string) string {
 		out = out + ":" + version
 	}
 	return out
+}
+
+// containerSHARE matches a well-formed sha256 OCI digest payload
+// (`sha256:` + 64 lowercase hex chars). The recipes/ digest-pin test
+// uses the same shape downstream; validating at extraction time means
+// a bogus `containerSHA` fails fast at BOM render rather than silently
+// shipping a malformed ref into the SBOM/PURL output.
+var containerSHARE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+// appendContainerSHA folds a sibling `containerSHA` value onto a
+// CRD-style combined image ref as an `@<digest>` suffix. The Skyhook
+// Package CRD carries the OCI digest in a separate `containerSHA`
+// scalar (e.g., `containerSHA: sha256:<hex>`) rather than splicing it
+// into the `image` value, so the extractor has to merge them.
+//
+// Behavior:
+//   - Empty `sha` → returned image unchanged.
+//   - Image already carries an `@`-digest → returned unchanged (the
+//     in-line digest wins; we do not silently overwrite).
+//   - `sha` does not match `^sha256:[a-f0-9]{64}$` → error. This is
+//     the fail-loud guard: a malformed digest (typo, truncation, or
+//     a user-supplied value override that lands in a Skyhook Package)
+//     must not silently propagate into the BOM, PURL, or SBOM output.
+//   - Otherwise the digest is appended as `image@sha`, preserving any
+//     tag already present (e.g., `repo:0.1.2@sha256:abc…`).
+func appendContainerSHA(image, sha string) (string, error) {
+	if sha == "" {
+		return image, nil
+	}
+	if strings.Contains(image, "@") {
+		return image, nil
+	}
+	if !containerSHARE.MatchString(sha) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid containerSHA %q for image %q: expected sha256:<64 lowercase hex chars>", sha, image))
+	}
+	return image + "@" + sha, nil
 }
 
 func isLikelyImage(v string) bool {
