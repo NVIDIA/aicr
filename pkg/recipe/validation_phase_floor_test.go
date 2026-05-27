@@ -35,10 +35,11 @@
 // Azure/OCI performance testbeds land.
 //
 // knownGaps allowlist: keyed by (overlay, phase) so a regression in a
-// different phase is not silently masked. The deployment-phase data gap
-// from #969 closed; the map is intentionally empty. Add entries only as
-// a tracked, time-bounded escape hatch when a new gap is uncovered and a
-// follow-up issue is filed to close it.
+// different phase is not silently masked. Add entries only as a tracked,
+// time-bounded escape hatch when a new gap is uncovered and a follow-up
+// issue is filed to close it; the stale-entry guard catches drift when
+// the gap closes. See the in-file comment above the `knownGaps` map
+// declaration for current entries and the issues that drain them.
 
 package recipe
 
@@ -55,12 +56,23 @@ const strictEnvVar = "AICR_VALIDATION_FLOOR_STRICT"
 
 // knownGaps lists (overlay, phase) pairs that fail the floor today.
 // Each entry downgrades an Errorf to a Logf prefixed with "KNOWN GAP:"
-// and is paired with a tracking issue. The map is intentionally empty
-// after #969 closed the deployment-phase gap — new (overlay, phase)
-// failures not in this map block CI. Reserve future entries as a tracked,
+// and is paired with a tracking issue. Reserve entries as a tracked,
 // time-bounded escape hatch only when a follow-up issue exists to drain
 // them; the stale-entry guard at the end of TestOverlayValidationPhaseFloor
 // catches drift.
+//
+// Pending data gap (intentionally not listed here): #1052 retired the
+// `gb200-any-training.yaml` criteria-wildcard in favor of per-leaf NCCL
+// thresholds. The EKS GB200 training leaves carry their own perf blocks;
+// the OKE chain (`gb200-oke-training`, `gb200-oke-ubuntu-training`,
+// `gb200-oke-ubuntu-training-kubeflow`) currently ships without one and
+// is reported as a default-mode WARN ("WARN recommended performance ..."),
+// not a hard failure. A knownGaps entry would be stale-flagged because
+// performance is warn-only in non-strict mode. When the OCI GB200 testbed
+// lands (#1007) `gb200-oke-training` will ship its own
+// `nccl-all-reduce-bw` constraint and the WARN drains. If a future change
+// toggles AICR_VALIDATION_FLOOR_STRICT=1 in CI before that, add three
+// performance entries here referencing #1007.
 var knownGaps = map[string]map[string]bool{}
 
 // classification captures the inputs that drive the per-intent floor.
