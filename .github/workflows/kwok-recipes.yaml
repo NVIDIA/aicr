@@ -21,6 +21,7 @@ on:
     paths:
       - 'recipes/**'
       - 'kwok/**'
+      - 'tests/chainsaw/kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/actions/kwok-test/**'
       - '!**.md'
@@ -30,6 +31,7 @@ on:
     paths:
       - 'recipes/**'
       - 'kwok/**'
+      - 'tests/chainsaw/kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/actions/kwok-test/**'
       - '!**.md'

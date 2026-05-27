@@ -114,12 +114,25 @@ spec:
                 # The 4-arm OR is encoded as a single JMESPath expression
                 # because YAML doesn't accept multi-line mapping keys.
                 # Field paths are relative to `status:` here (e.g.,
-                # `sync.status` not `status.sync.status`). Arms:
-                #   1. Synced + Healthy                                — canonical pass
-                #   2. Synced + Progressing                            — KWOK pod-readiness sim gap (ADR-008)
-                #   3. OutOfSync + Healthy + op.phase == 'Succeeded'   — operator mutation (ClusterPolicy, DeviceClass)
-                #   4. Synced + Degraded + op.phase == 'Succeeded'     — health controller divergence after a successful op
-                ((sync.status == 'Synced' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Progressing') || (sync.status == 'OutOfSync' && health.status == 'Healthy' && operationState.phase == 'Succeeded') || (sync.status == 'Synced' && health.status == 'Degraded' && operationState.phase == 'Succeeded')): true
+                # `sync.status` not `status.sync.status`). All four arms
+                # require `operationState.phase == 'Succeeded'` so that
+                # an Application can only count as passing AFTER Argo
+                # CD has completed at least one sync operation. For an
+                # App-of-Apps, that's the gate ensuring the child
+                # Applications have been materialized before the
+                # selector's "every Application in argocd ns" sweep
+                # accepts the root alone — otherwise the assertion
+                # races ahead and passes on the root's transient
+                # Synced state, returning before children even exist.
+                # See #1061 (and #1050 for the migration that
+                # introduced the race).
+                #
+                # Arms:
+                #   1. Synced + Healthy        — canonical pass
+                #   2. Synced + Progressing    — KWOK pod-readiness sim gap (ADR-008)
+                #   3. OutOfSync + Healthy     — operator mutation (ClusterPolicy, DeviceClass)
+                #   4. Synced + Degraded       — health controller divergence after a successful op
+                (operationState.phase == 'Succeeded' && ((sync.status == 'Synced' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Progressing') || (sync.status == 'OutOfSync' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Degraded'))): true
       catch:
         - script:
             content: |
