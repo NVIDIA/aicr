@@ -750,7 +750,7 @@ func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
 //
 //   - Single-file: helmfile.yaml IS a leaf with releases/helmDefaults.
 //   - Split (issue #914): helmfile.yaml is a TopHelmfile carrying a
-//     helmfiles: list pointing at crds.yaml + releases.yaml siblings.
+//     helmfiles: list pointing at level-0 ... level-N.yaml siblings.
 //
 // In the split case the top-level file is validated for the helmfiles:
 // list shape and each leaf sub-helmfile is recursively checked.
@@ -787,8 +787,9 @@ func assertHelmfileShape(t *testing.T, path string) {
 }
 
 // assertHelmfileLeafShape verifies the structural invariants of a leaf
-// helmfile.yaml or sub-helmfile (crds.yaml / releases.yaml in the split
-// layout): non-zero helmDefaults.timeout and per-release sanity checks.
+// helmfile.yaml or sub-helmfile (level-0.yaml ... level-N.yaml in the
+// split layout): non-zero helmDefaults.timeout and per-release sanity
+// checks.
 func assertHelmfileLeafShape(t *testing.T, path string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

@@ -1,0 +1,144 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+#
+# KWOK argocd-* sync gate. Replaces the bash `wait_for_argocd_sync` +
+# `wait_for_argocd_root_app` + `dump_argocd_failures` functions previously
+# in kwok/scripts/validate-scheduling.sh. Driven by the `validate-scheduling.sh`
+# argocd-* deployer branches; see issue #962 for the migration rationale.
+#
+# The test takes one binding via `chainsaw test --values rootApp=<name>`:
+#   - rootApp: the parent App-of-Apps name (`nvidia-stack` for --deployer
+#     argocd, `aicr-stack` for --deployer argocd-helm). The bash driver
+#     selects the right name from DEPLOYER.
+#
+# Pass predicate — every Application in the `argocd` namespace must match
+# one of these 4 terminal-pass states (mirroring the pre-migration jq
+# disjunction at validate-scheduling.sh:~1378):
+#
+#   1. Synced + Healthy                                   — canonical pass
+#   2. Synced + Progressing                               — KWOK pod-readiness gap (ADR-008)
+#   3. OutOfSync + Healthy + operationState=Succeeded     — operator mutation (ClusterPolicy, DeviceClass, etc.)
+#   4. Synced + Degraded + operationState=Succeeded       — health controller divergence after successful op
+#
+# The 4-arm disjunction is encoded as a single JMESPath expression that
+# Chainsaw re-evaluates per Application matched by the resource selector.
+# Chainsaw polls until ALL matched Applications satisfy the expression
+# (or the assert timeout fires).
+#
+# On failure, the catch block dumps per-App status + repo-server and
+# application-controller logs. The StatefulSet/Deployment fallback for
+# application-controller matches Argo CD chart 9.x (StatefulSet) and
+# older chart layouts (Deployment).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kwok-argocd-sync
+spec:
+  description: |
+    Wait for Argo CD reconciliation to converge on the KWOK deployer matrix.
+    Asserts that the root Application is present and every Application in
+    the argocd namespace reaches one of the 4 terminal-pass states.
+  bindings:
+    # rootApp is overridden via `chainsaw test --set rootApp=<name>`.
+    # The CLI's `--set key=value` populates the implicit `$values`
+    # binding; we surface it here as a top-level `$rootApp` binding so
+    # callers can leave the test invocable without arguments (defaulting
+    # to argocd-helm-oci's root App). The `$values.rootApp || 'aicr-stack'`
+    # fallback handles the no-arg case for ad-hoc local invocation.
+    - name: rootApp
+      value: ($values.rootApp || 'aicr-stack')
+  timeouts:
+    # KWOK_ARGOCD_SYNC_TIMEOUT default. The argocd-helm-oci wrapper takes
+    # slightly longer to converge than argocd-oci because the parent
+    # Application has to render the child Apps before they begin
+    # reconciling. 5 minutes is conservative for KWOK pod-readiness sim.
+    assert: 5m
+  # Skip namespace and resource deletion during cleanup. The test creates
+  # no resources of its own (it only asserts on Application CRs in the
+  # argocd namespace), so there's nothing to clean. Chainsaw's default
+  # cleanup deletes the auto-created per-test namespace, which on KWOK
+  # gets stuck in Terminating forever — there's no kube-controller-manager
+  # to finalize the `kubernetes` namespace finalizer — and the 30s
+  # cleanup timeout fires, reporting the test as failed even when every
+  # assertion passed. See PR #1050.
+  skipDelete: true
+  steps:
+    - name: assert-root-app-present
+      description: |
+        The root Application must exist within the grace period. If it
+        doesn't, the bundle apply step (helm install / kubectl apply)
+        either failed silently or produced no Application resource.
+      try:
+        - assert:
+            timeout: 30s
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: ($rootApp)
+                namespace: argocd
+      catch:
+        - script:
+            content: |
+              echo "--- argocd namespace events (last 20) ---"
+              kubectl get events -n argocd --sort-by=.lastTimestamp 2>&1 | tail -20 || true
+              echo "--- Applications in argocd namespace ---"
+              kubectl get applications -n argocd 2>&1 || true
+
+    - name: assert-all-applications-pass
+      description: |
+        Every Application in the argocd namespace must satisfy the 4-arm
+        terminal-pass predicate. Chainsaw polls until convergence or the
+        spec.timeouts.assert deadline fires.
+      try:
+        - assert:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                namespace: argocd
+              status:
+                # The 4-arm OR is encoded as a single JMESPath expression
+                # because YAML doesn't accept multi-line mapping keys.
+                # Field paths are relative to `status:` here (e.g.,
+                # `sync.status` not `status.sync.status`). Arms:
+                #   1. Synced + Healthy                                — canonical pass
+                #   2. Synced + Progressing                            — KWOK pod-readiness sim gap (ADR-008)
+                #   3. OutOfSync + Healthy + op.phase == 'Succeeded'   — operator mutation (ClusterPolicy, DeviceClass)
+                #   4. Synced + Degraded + op.phase == 'Succeeded'     — health controller divergence after a successful op
+                ((sync.status == 'Synced' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Progressing') || (sync.status == 'OutOfSync' && health.status == 'Healthy' && operationState.phase == 'Succeeded') || (sync.status == 'Synced' && health.status == 'Degraded' && operationState.phase == 'Succeeded')): true
+      catch:
+        - script:
+            content: |
+              echo "--- Argo CD Applications (name / sync / health / conditions / op.message) ---"
+              kubectl get applications -n argocd -o json 2>/dev/null \
+                | jq -r '.items[] | {
+                    name: .metadata.name,
+                    sync: .status.sync.status,
+                    health: .status.health.status,
+                    conditions: .status.conditions,
+                    operation: .status.operationState.message
+                  }' \
+                2>&1 || true
+              echo "--- argocd-repo-server (tail=200) ---"
+              kubectl logs -n argocd deploy/argocd-repo-server --tail=200 2>&1 || true
+              echo "--- argocd-application-controller (tail=200) ---"
+              # Argo CD chart 9.x ships application-controller as a StatefulSet.
+              # Older charts use a Deployment. Try StatefulSet first to avoid
+              # a misleading "Deployment not found" in the diagnostic dump.
+              kubectl logs -n argocd statefulset/argocd-application-controller --tail=200 2>&1 \
+                || kubectl logs -n argocd deploy/argocd-application-controller --tail=200 2>&1 \
+                || true
