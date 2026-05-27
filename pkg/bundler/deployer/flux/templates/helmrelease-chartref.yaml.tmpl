@@ -10,17 +10,10 @@ spec:
   targetNamespace: {{ .TargetNamespace }}
   install:
     createNamespace: true
-  chart:
-    spec:
-      chart: {{ .Chart }}
-{{- if .Version }}
-      version: {{ .Version }}
-{{- end }}
-      sourceRef:
-        kind: {{ .SourceKind }}
-        name: {{ .SourceName }}
-        namespace: {{ .Namespace }}
-      interval: 5m
+  chartRef:
+    kind: ExternalArtifact
+    name: {{ .ChartRefName }}
+    namespace: {{ .Namespace }}
 {{- if .DependsOn }}
   dependsOn:
 {{- range .DependsOn }}

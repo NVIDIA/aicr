@@ -19,7 +19,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
@@ -37,17 +36,19 @@ import (
 
 // Deployer manages the lifecycle of a single validator Job.
 type Deployer struct {
-	clientset        kubernetes.Interface
-	factory          informers.SharedInformerFactory
-	namespace        string
-	runID            string
-	cliVersion       string // CLI version — forwarded to validator containers via AICR_CLI_VERSION for inner-image resolution
-	cliCommit        string // CLI commit SHA — forwarded via AICR_CLI_COMMIT for dev-build image resolution
-	entry            catalog.ValidatorEntry
-	jobName          string // Unique name generated client-side (set by DeployJob)
-	imagePullSecrets []string
-	tolerations      []corev1.Toleration
-	nodeSelector     map[string]string // passed through to inner workloads via AICR_NODE_SELECTOR env var
+	clientset             kubernetes.Interface
+	factory               informers.SharedInformerFactory
+	namespace             string
+	runID                 string
+	cliVersion            string // CLI version — forwarded to validator containers via AICR_CLI_VERSION for inner-image resolution
+	cliCommit             string // CLI commit SHA — forwarded via AICR_CLI_COMMIT for dev-build image resolution
+	entry                 catalog.ValidatorEntry
+	jobName               string // Unique name generated client-side (set by DeployJob)
+	imagePullSecrets      []string
+	tolerations           []corev1.Toleration
+	nodeSelector          map[string]string // passed through to inner workloads via AICR_NODE_SELECTOR env var
+	imageRegistryOverride string            // overrides the image registry prefix for validator containers
+	imageTagOverride      string            // overrides the resolved image tag for validator containers
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -66,19 +67,23 @@ func NewDeployer(
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
 	nodeSelector map[string]string,
+	imageRegistryOverride string,
+	imageTagOverride string,
 ) *Deployer {
 
 	return &Deployer{
-		clientset:        clientset,
-		factory:          factory,
-		namespace:        namespace,
-		runID:            runID,
-		cliVersion:       cliVersion,
-		cliCommit:        cliCommit,
-		entry:            entry,
-		imagePullSecrets: imagePullSecrets,
-		tolerations:      tolerations,
-		nodeSelector:     nodeSelector,
+		clientset:             clientset,
+		factory:               factory,
+		namespace:             namespace,
+		runID:                 runID,
+		cliVersion:            cliVersion,
+		cliCommit:             cliCommit,
+		entry:                 entry,
+		imagePullSecrets:      imagePullSecrets,
+		tolerations:           tolerations,
+		nodeSelector:          nodeSelector,
+		imageRegistryOverride: imageRegistryOverride,
+		imageTagOverride:      imageTagOverride,
 	}
 }
 
@@ -102,8 +107,8 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 		d.imagePullSecrets,
 		d.tolerations,
 		d.nodeSelector,
-		os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"),
-		os.Getenv("AICR_VALIDATOR_IMAGE_TAG"),
+		d.imageRegistryOverride,
+		d.imageTagOverride,
 	)
 
 	// Use the job name from the plan

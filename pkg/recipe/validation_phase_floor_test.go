@@ -31,12 +31,14 @@
 //   Kind (any intent)                 : deployment + conformance
 //
 // Strict toggle: AICR_VALIDATION_FLOOR_STRICT=1 promotes the recommended
-// performance phase from warn-only to required. Default OFF until #969
-// closes the data gap and Azure/OCI performance testbeds land.
+// performance phase from warn-only to required. Default OFF until the
+// Azure/OCI performance testbeds land.
 //
 // knownGaps allowlist: keyed by (overlay, phase) so a regression in a
-// different phase is not silently masked. Drain as #969 lands; new
-// overlay/phase failures that are not allowlisted block CI.
+// different phase is not silently masked. The deployment-phase data gap
+// from #969 closed; the map is intentionally empty. Add entries only as
+// a tracked, time-bounded escape hatch when a new gap is uncovered and a
+// follow-up issue is filed to close it.
 
 package recipe
 
@@ -51,50 +53,15 @@ import (
 
 const strictEnvVar = "AICR_VALIDATION_FLOOR_STRICT"
 
-// knownGaps lists (overlay, phase) pairs that fail the floor today and
-// are tracked under #969. Each entry downgrades an Errorf to a Logf
-// prefixed with "KNOWN GAP (#969):". Drain this map as #969 lands per-
-// overlay fixes; delete the map entirely once empty. New (overlay, phase)
-// failures not in this map block CI.
-var knownGaps = map[string]map[string]bool{
-	"aks":                                {"deployment": true},
-	"aks-inference":                      {"deployment": true},
-	"aks-training":                       {"deployment": true},
-	"eks":                                {"deployment": true},
-	"eks-inference":                      {"deployment": true},
-	"eks-training":                       {"deployment": true},
-	"gb200-oke-inference":                {"deployment": true},
-	"gb200-oke-training":                 {"deployment": true},
-	"gb200-oke-ubuntu-inference":         {"deployment": true},
-	"gb200-oke-ubuntu-inference-dynamo":  {"deployment": true},
-	"gb200-oke-ubuntu-training":          {"deployment": true},
-	"gb200-oke-ubuntu-training-kubeflow": {"deployment": true},
-	"gke-cos":                            {"deployment": true},
-	"gke-cos-inference":                  {"deployment": true},
-	"gke-cos-training":                   {"deployment": true},
-	"h100-aks-inference":                 {"deployment": true},
-	"h100-aks-ubuntu-inference":          {"deployment": true},
-	"h100-eks-inference":                 {"deployment": true},
-	"h100-eks-ubuntu-inference":          {"deployment": true},
-	"h100-gke-cos-inference":             {"deployment": true},
-	"h100-kind-inference":                {"deployment": true},
-	"h100-kind-inference-dynamo":         {"deployment": true},
-	"h100-kind-training":                 {"deployment": true},
-	"h100-kind-training-kubeflow":        {"deployment": true},
-	"h100-kind-training-slurm":           {"deployment": true},
-	"kind":                               {"deployment": true},
-	"kind-inference":                     {"deployment": true},
-	"lke":                                {"deployment": true},
-	"lke-inference":                      {"deployment": true},
-	"lke-training":                       {"deployment": true},
-	"oke":                                {"deployment": true},
-	"oke-inference":                      {"deployment": true},
-	"oke-training":                       {"deployment": true},
-	"rtx-pro-6000-lke-inference":         {"deployment": true},
-	"rtx-pro-6000-lke-training":          {"deployment": true},
-	"rtx-pro-6000-lke-ubuntu-inference":  {"deployment": true},
-	"rtx-pro-6000-lke-ubuntu-training":   {"deployment": true},
-}
+// knownGaps lists (overlay, phase) pairs that fail the floor today.
+// Each entry downgrades an Errorf to a Logf prefixed with "KNOWN GAP:"
+// and is paired with a tracking issue. The map is intentionally empty
+// after #969 closed the deployment-phase gap — new (overlay, phase)
+// failures not in this map block CI. Reserve future entries as a tracked,
+// time-bounded escape hatch only when a follow-up issue exists to drain
+// them; the stale-entry guard at the end of TestOverlayValidationPhaseFloor
+// catches drift.
+var knownGaps = map[string]map[string]bool{}
 
 // classification captures the inputs that drive the per-intent floor.
 type classification struct {
@@ -111,19 +78,26 @@ func (c classification) String() string {
 		c.Intent, c.Service, c.Accelerator, c.Platform, c.IsKind)
 }
 
+// isAcceleratorBound reports whether the classification corresponds to
+// an accelerator-bound query. Accelerator-unbound classifications
+// (intermediates without an `accelerator:` criterion) are exempt from
+// the deployment + performance floors because both phases carry
+// accelerator-specific values (gpu-operator version pin, NCCL bandwidth
+// threshold) that live on accelerator-bound wildcards or concrete leaves.
+func (c classification) isAcceleratorBound() bool {
+	return c.Accelerator != "" && c.Accelerator != CriteriaAcceleratorAny
+}
+
+// requiresDeployment reports whether the per-intent floor requires the
+// deployment phase for this classification.
+func (c classification) requiresDeployment() bool {
+	return c.isAcceleratorBound()
+}
+
 // requiresPerformance reports whether the per-intent floor recommends
 // the performance phase for this classification.
-//
-// Accelerator-unbound intermediates (e.g., eks-training, gke-cos-training)
-// are exempt: their concrete-leaf descendants (h100-eks-training,
-// gb200-eks-training, etc.) carry the perf threshold via per-phase
-// replace, and the threshold value is accelerator-specific so no
-// meaningful constraint exists at the intent layer.
 func (c classification) requiresPerformance() bool {
-	if c.IsKind {
-		return false
-	}
-	if c.Accelerator == "" || c.Accelerator == CriteriaAcceleratorAny {
+	if c.IsKind || !c.isAcceleratorBound() {
 		return false
 	}
 	if c.Intent == CriteriaIntentTraining {
@@ -142,6 +116,44 @@ func classifyOverlay(criteria *Criteria) classification {
 		Accelerator: criteria.Accelerator,
 		IsKind:      criteria.Service == CriteriaServiceKind,
 	}
+}
+
+// hasGPUOperatorVersionCheck reports whether the deployment phase
+// declares the `gpu-operator-version` check by name. Without the
+// check entry, the validator never runs the version assertion no
+// matter what constraints are declared — the resolved recipe ships
+// with a constraint that no runtime path evaluates.
+func hasGPUOperatorVersionCheck(p *ValidationPhase) bool {
+	if p == nil {
+		return false
+	}
+	for _, name := range p.Checks {
+		if name == "gpu-operator-version" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasGPUOperatorVersionConstraint reports whether the deployment phase
+// declares a `Deployment.gpu-operator.version` constraint. Without it
+// the gpu-operator-version check at runtime is a no-op (it skips when
+// no constraint targets that path), so the resolved recipe ships with
+// the check name but no version assertion. See #969.
+//
+// Note: the two helpers are independent — a leaf can declare either
+// in isolation. The floor test asserts both are present so neither
+// half of the gate can silently no-op.
+func hasGPUOperatorVersionConstraint(p *ValidationPhase) bool {
+	if p == nil {
+		return false
+	}
+	for _, c := range p.Constraints {
+		if c.Name == "Deployment.gpu-operator.version" {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvedPhases returns the names of phases that are set on v.
@@ -216,7 +228,7 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 
 	strict := os.Getenv(strictEnvVar) == "1"
 	t.Logf("strict mode (%s=1): %t", strictEnvVar, strict)
-	t.Logf("knownGaps allowlist entries (#969): %d", knownGapEntries())
+	t.Logf("knownGaps allowlist entries: %d", knownGapEntries())
 
 	overlays := enumerateGateableOverlays(store)
 	t.Logf("gateable overlays discovered: %d", len(overlays))
@@ -263,15 +275,35 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 						triggered[name] = map[string]bool{}
 					}
 					triggered[name][phase] = true
-					t.Logf("KNOWN GAP (#969): %s", msg)
+					t.Logf("KNOWN GAP: %s", msg)
 					return
 				}
 				t.Error(msg)
 			}
 
-			// Required: deployment + conformance for every classification.
-			if result.Validation == nil || result.Validation.Deployment == nil {
-				fail("deployment")
+			// Required: deployment for accelerator-bound classifications;
+			// conformance for every classification.
+			//
+			// For deployment, the gate has two independent halves and
+			// both must be present — either half missing turns the
+			// version assertion into a no-op:
+			//   • `gpu-operator-version` in deployment.checks (the
+			//     validator only runs the check if its name is
+			//     declared).
+			//   • `Deployment.gpu-operator.version` in
+			//     deployment.constraints (the check skips at runtime
+			//     when no constraint targets that path).
+			if class.requiresDeployment() {
+				if result.Validation == nil || result.Validation.Deployment == nil {
+					fail("deployment")
+				} else {
+					if !hasGPUOperatorVersionCheck(result.Validation.Deployment) {
+						fail("deployment.checks.gpu-operator-version")
+					}
+					if !hasGPUOperatorVersionConstraint(result.Validation.Deployment) {
+						fail("deployment.constraints.Deployment.gpu-operator.version")
+					}
+				}
 			}
 			if result.Validation == nil || result.Validation.Conformance == nil {
 				fail("conformance")
@@ -313,26 +345,29 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 // intent x service x platform x accelerator matrix.
 func TestClassifyOverlay(t *testing.T) {
 	tests := []struct {
-		name             string
-		intent           CriteriaIntentType
-		service          CriteriaServiceType
-		platform         CriteriaPlatformType
-		accelerator      CriteriaAcceleratorType
-		wantIsKind       bool
-		wantRequiresPerf bool
+		name               string
+		intent             CriteriaIntentType
+		service            CriteriaServiceType
+		platform           CriteriaPlatformType
+		accelerator        CriteriaAcceleratorType
+		wantIsKind         bool
+		wantRequiresDeploy bool
+		wantRequiresPerf   bool
 	}{
-		{"training-eks-h100", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true},
-		{"training-aks-h100-kubeflow", CriteriaIntentTraining, CriteriaServiceAKS, CriteriaPlatformKubeflow, CriteriaAcceleratorH100, false, true},
-		{"training-kind-h100", CriteriaIntentTraining, CriteriaServiceKind, CriteriaPlatformAny, CriteriaAcceleratorH100, true, false},
-		{"inference-eks-h100-plain", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, false},
-		{"inference-eks-h100-dynamo", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, CriteriaAcceleratorH100, false, true},
-		{"inference-eks-h100-nim", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformNIM, CriteriaAcceleratorH100, false, true},
-		{"inference-kind-h100-dynamo", CriteriaIntentInference, CriteriaServiceKind, CriteriaPlatformDynamo, CriteriaAcceleratorH100, true, false},
-		// Accelerator-unbound intermediates: the per-intent floor exempts
-		// them because the perf threshold is accelerator-specific.
-		{"training-eks-no-accelerator", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, "", false, false},
-		{"training-gke-accelerator-any", CriteriaIntentTraining, CriteriaServiceGKE, CriteriaPlatformAny, CriteriaAcceleratorAny, false, false},
-		{"inference-eks-dynamo-no-accelerator", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, "", false, false},
+		// Accelerator-bound: deployment required; perf depends on intent/platform.
+		{"training-eks-h100", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, true},
+		{"training-aks-h100-kubeflow", CriteriaIntentTraining, CriteriaServiceAKS, CriteriaPlatformKubeflow, CriteriaAcceleratorH100, false, true, true},
+		{"training-kind-h100", CriteriaIntentTraining, CriteriaServiceKind, CriteriaPlatformAny, CriteriaAcceleratorH100, true, true, false},
+		{"inference-eks-h100-plain", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, false},
+		{"inference-eks-h100-dynamo", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, CriteriaAcceleratorH100, false, true, true},
+		{"inference-eks-h100-nim", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformNIM, CriteriaAcceleratorH100, false, true, true},
+		{"inference-kind-h100-dynamo", CriteriaIntentInference, CriteriaServiceKind, CriteriaPlatformDynamo, CriteriaAcceleratorH100, true, true, false},
+		// Accelerator-unbound intermediates: both deployment and perf
+		// are exempt — version pins and NCCL thresholds live on
+		// accelerator-bound wildcards and concrete leaves.
+		{"training-eks-no-accelerator", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, "", false, false, false},
+		{"training-gke-accelerator-any", CriteriaIntentTraining, CriteriaServiceGKE, CriteriaPlatformAny, CriteriaAcceleratorAny, false, false, false},
+		{"inference-eks-dynamo-no-accelerator", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, "", false, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -341,9 +376,89 @@ func TestClassifyOverlay(t *testing.T) {
 			if class.IsKind != tt.wantIsKind {
 				t.Errorf("IsKind = %v, want %v", class.IsKind, tt.wantIsKind)
 			}
+			if class.requiresDeployment() != tt.wantRequiresDeploy {
+				t.Errorf("requiresDeployment() = %v, want %v",
+					class.requiresDeployment(), tt.wantRequiresDeploy)
+			}
 			if class.requiresPerformance() != tt.wantRequiresPerf {
 				t.Errorf("requiresPerformance() = %v, want %v",
 					class.requiresPerformance(), tt.wantRequiresPerf)
+			}
+		})
+	}
+}
+
+// TestGPUOperatorVersionGateHelpers exercises both halves of the
+// deployment-phase gpu-operator-version gate independently. Each helper
+// must return true only when its half is present so the floor test can
+// surface a precise failure when only one half is declared.
+func TestGPUOperatorVersionGateHelpers(t *testing.T) {
+	tests := []struct {
+		name           string
+		phase          *ValidationPhase
+		wantCheck      bool
+		wantConstraint bool
+	}{
+		{
+			name:           "nil phase",
+			phase:          nil,
+			wantCheck:      false,
+			wantConstraint: false,
+		},
+		{
+			name:           "empty phase",
+			phase:          &ValidationPhase{},
+			wantCheck:      false,
+			wantConstraint: false,
+		},
+		{
+			name: "check only — false-green scenario",
+			phase: &ValidationPhase{
+				Checks: []string{"operator-health", "gpu-operator-version"},
+			},
+			wantCheck:      true,
+			wantConstraint: false,
+		},
+		{
+			name: "constraint only — false-green scenario CodeRabbit flagged",
+			phase: &ValidationPhase{
+				Constraints: []Constraint{
+					{Name: "Deployment.gpu-operator.version", Value: ">= v24.6.0"},
+				},
+			},
+			wantCheck:      false,
+			wantConstraint: true,
+		},
+		{
+			name: "both present — passes the gate",
+			phase: &ValidationPhase{
+				Checks: []string{"operator-health", "gpu-operator-version", "check-nvidia-smi"},
+				Constraints: []Constraint{
+					{Name: "Deployment.gpu-operator.version", Value: ">= v24.6.0"},
+				},
+			},
+			wantCheck:      true,
+			wantConstraint: true,
+		},
+		{
+			name: "unrelated check and constraint",
+			phase: &ValidationPhase{
+				Checks: []string{"operator-health", "expected-resources"},
+				Constraints: []Constraint{
+					{Name: "K8s.server.version", Value: ">= 1.32"},
+				},
+			},
+			wantCheck:      false,
+			wantConstraint: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasGPUOperatorVersionCheck(tt.phase); got != tt.wantCheck {
+				t.Errorf("hasGPUOperatorVersionCheck() = %v, want %v", got, tt.wantCheck)
+			}
+			if got := hasGPUOperatorVersionConstraint(tt.phase); got != tt.wantConstraint {
+				t.Errorf("hasGPUOperatorVersionConstraint() = %v, want %v", got, tt.wantConstraint)
 			}
 		})
 	}

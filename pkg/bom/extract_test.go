@@ -16,6 +16,7 @@ package bom
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -188,6 +189,40 @@ spec:
 			},
 		},
 		{
+			// Skyhook Package CRD carries the OCI digest in a sibling
+			// `containerSHA` scalar rather than splicing it into `image`.
+			// The extractor folds it onto the combined ref as `@<sha>`
+			// so digest-pin checks see the pinned reference.
+			name: "Skyhook Package with containerSHA sibling folds in as digest",
+			in: `spec:
+  packages:
+    nvidia-tuning-gke:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke
+      version: "0.1.2"
+      containerSHA: sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81
+`,
+			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81",
+			},
+		},
+		{
+			// An inline `@digest` in `image` wins over a sibling
+			// `containerSHA`; the extractor must not double-append or
+			// silently overwrite. This protects the case where someone
+			// pins via the image field directly and also leaves a stale
+			// containerSHA.
+			name: "inline @digest in image takes precedence over containerSHA sibling",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      containerSHA: sha256:0000000000000000000000000000000000000000000000000000000000000000
+`,
+			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-tuned@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7",
+			},
+		},
+		{
 			// Regression: previously the function bailed out of the
 			// repository prepend whenever `image` contained any slash,
 			// which silently dropped the registry when `image` was a
@@ -259,6 +294,66 @@ spec:
 `))
 	if err == nil {
 		t.Fatal("expected decode error for malformed YAML")
+	}
+}
+
+// TestExtractImagesFromYAML_InvalidContainerSHA exercises the fail-loud
+// guard in appendContainerSHA: any sibling `containerSHA` that does not
+// match `^sha256:[a-f0-9]{64}$` must surface as an extraction error so
+// a typo, truncation, or value-override slip cannot silently ship a
+// malformed digest into the BOM/PURL output. The recipes/ digest-pin
+// test enforces the same shape downstream; rejecting here just moves
+// the failure earlier where the offending line is in scope.
+func TestExtractImagesFromYAML_InvalidContainerSHA(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		wantSub string
+	}{
+		{
+			name: "non-sha256 prefix",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+      containerSHA: not-a-digest
+`,
+			wantSub: `invalid containerSHA "not-a-digest"`,
+		},
+		{
+			name: "sha256 prefix but short hex",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+      containerSHA: sha256:abc123
+`,
+			wantSub: `invalid containerSHA "sha256:abc123"`,
+		},
+		{
+			name: "sha256 prefix but uppercase hex (OCI digest is lowercase)",
+			in: `spec:
+  packages:
+    pkg:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+      containerSHA: sha256:CC99C8C0675F3752F5081F0978AE57174368952CA0BB5FCAC07640FE62C156C7
+`,
+			wantSub: `invalid containerSHA`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ExtractImagesFromYAML([]byte(tt.in))
+			if err == nil {
+				t.Fatal("expected error for malformed containerSHA")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+		})
 	}
 }
 

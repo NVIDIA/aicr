@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -131,6 +132,36 @@ func (r *Reference) String() string {
 		return fmt.Sprintf("%s%s/%s", uriScheme, r.Registry, r.Repository)
 	}
 	return fmt.Sprintf("%s%s/%s:%s", uriScheme, r.Registry, r.Repository, r.Tag)
+}
+
+// ChartName returns the last path segment of Repository, which is the
+// chart name a Helm consumer (or ArgoCD's `source.chart`) sees when pulling
+// the artifact at `registry/repository:tag`. For non-OCI references and
+// references whose Repository is empty, the empty string is returned;
+// callers should treat that as "no derived chart name available" and
+// apply their own default.
+//
+// Example: oci://ghcr.io/myorg/my-bundle-name:v1
+//   - Registry = "ghcr.io"
+//   - Repository = "myorg/my-bundle-name"
+//   - ChartName() = "my-bundle-name"
+//
+// This is consumed by the argocd-helm bundler so the generated Chart.yaml
+// and parent Application's `source.chart` match what `helm push` actually
+// publishes — see issue #1019.
+func (r *Reference) ChartName() string {
+	if !r.IsOCI || r.Repository == "" {
+		return ""
+	}
+	// path.Base treats Repository as a slash-separated path; the docker
+	// reference parser already normalized separators so a literal Base is
+	// safe. Reject path.Base's sentinel returns ("." and "/") so callers
+	// see an empty string rather than a nonsense chart name.
+	base := path.Base(r.Repository)
+	if base == "." || base == "/" {
+		return ""
+	}
+	return base
 }
 
 // WithTag returns a copy of the reference with the specified tag.

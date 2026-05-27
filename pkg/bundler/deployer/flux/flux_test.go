@@ -1151,20 +1151,25 @@ func TestCollectHelmSources(t *testing.T) {
 	}
 
 	// Without vendoring: all Helm sources collected.
-	sources := collectHelmSources(refs, false)
+	sources := collectHelmSources(refs, false, "flux-system")
 	if len(sources) != 2 {
 		t.Errorf("collectHelmSources(vendorCharts=false) returned %d sources, want 2", len(sources))
 	}
+	for url, src := range sources {
+		if src.Namespace != "flux-system" {
+			t.Errorf("collectHelmSources(vendorCharts=false) source %q has Namespace=%q, want %q", url, src.Namespace, "flux-system")
+		}
+	}
 
 	// With vendoring: vendorable Helm components skip HelmRepository sources.
-	sources = collectHelmSources(refs, true)
+	sources = collectHelmSources(refs, true, "flux-system")
 	if len(sources) != 0 {
 		t.Errorf("collectHelmSources(vendorCharts=true) returned %d sources, want 0 (all vendorable)", len(sources))
 	}
 }
 
 func TestCollectGitSources(t *testing.T) {
-	sources := collectGitSources("https://github.com/default/repo.git", "main")
+	sources := collectGitSources("https://github.com/default/repo.git", "main", "flux-system")
 
 	// Should have 1: the default repo.
 	if len(sources) != 1 {
@@ -1177,6 +1182,9 @@ func TestCollectGitSources(t *testing.T) {
 	}
 	if src.Branch != "main" {
 		t.Errorf("expected branch 'main', got %q", src.Branch)
+	}
+	if src.Namespace != "flux-system" {
+		t.Errorf("expected Namespace 'flux-system', got %q", src.Namespace)
 	}
 }
 
@@ -2024,5 +2032,598 @@ func TestGenerate_PostManifestsCollision(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `would inject "foo"-post`) {
 		t.Errorf("expected collision error to name the offending pair, got: %v", err)
+	}
+}
+
+// ---------- OCI mode (ArtifactGenerator) tests ----------
+
+// TestGenerate_OCISourceName_ManifestOnly verifies that manifest-only
+// components emit an ArtifactGenerator CR and a chartRef HelmRelease
+// (instead of a GitRepository-based HelmRelease) when OCISourceName is set.
+func TestGenerate_OCISourceName_ManifestOnly(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"configmap.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		OCISourceName:      "aicr-bundle",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify ArtifactGenerator CR exists.
+	agPath := filepath.Join(outputDir, "custom-manifests", "artifactgenerator.yaml")
+	if _, statErr := os.Stat(agPath); os.IsNotExist(statErr) {
+		t.Fatal("expected custom-manifests/artifactgenerator.yaml to exist")
+	}
+	agContent := readFile(t, agPath)
+	assertValidYAML(t, agPath)
+	if !strings.Contains(agContent, "kind: ArtifactGenerator") {
+		t.Error("expected ArtifactGenerator kind")
+	}
+	if !strings.Contains(agContent, "name: aicr-bundle") {
+		t.Error("expected OCISourceName reference in ArtifactGenerator")
+	}
+	if !strings.Contains(agContent, "custom-manifests") {
+		t.Error("expected chart path reference in ArtifactGenerator")
+	}
+
+	// Verify HelmRelease uses chartRef (ExternalArtifact), not sourceRef (GitRepository).
+	hrPath := filepath.Join(outputDir, "custom-manifests", "helmrelease.yaml")
+	hrContent := readFile(t, hrPath)
+	assertValidYAML(t, hrPath)
+	if !strings.Contains(hrContent, "chartRef:") {
+		t.Error("expected chartRef in HelmRelease")
+	}
+	if !strings.Contains(hrContent, "kind: ExternalArtifact") {
+		t.Error("expected ExternalArtifact kind in chartRef")
+	}
+	if strings.Contains(hrContent, "kind: GitRepository") {
+		t.Error("HelmRelease should NOT reference GitRepository in OCI mode")
+	}
+
+	// Verify kustomization.yaml includes the ArtifactGenerator resource.
+	kustomization := readFile(t, filepath.Join(outputDir, "kustomization.yaml"))
+	if !strings.Contains(kustomization, "custom-manifests/artifactgenerator.yaml") {
+		t.Error("kustomization.yaml should include custom-manifests/artifactgenerator.yaml")
+	}
+}
+
+// TestGenerate_OCISourceName_SkipsGitSource verifies that no GitRepository
+// source CR is emitted when OCISourceName is set (the placeholder
+// GitRepository is unnecessary because local charts are served via
+// ArtifactGenerator/ExternalArtifact).
+func TestGenerate_OCISourceName_SkipsGitSource(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"configmap.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		OCISourceName:      "aicr-bundle",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// No gitrepo source files should exist.
+	sourcesDir := filepath.Join(outputDir, "sources")
+	gitRepoFiles := listFilesWithPrefix(t, sourcesDir, "gitrepo-")
+	if len(gitRepoFiles) != 0 {
+		t.Errorf("expected 0 gitrepo source files when OCISourceName is set, got %d", len(gitRepoFiles))
+	}
+}
+
+// TestGenerate_OCISourceName_PreManifests verifies that pre-manifest
+// components also use the ArtifactGenerator path in OCI mode.
+func TestGenerate_OCISourceName_PreManifests(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	preManifests := map[string]map[string][]byte{
+		"gpu-operator": {
+			"quota.yaml": []byte("apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: q\n  namespace: gpu-operator\n"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:          recipeResult,
+		ComponentValues:       map[string]map[string]any{"gpu-operator": {"driver": map[string]any{"enabled": true}}},
+		ComponentPreManifests: preManifests,
+		Version:               "v0.9.0",
+		OCISourceName:         "aicr-bundle",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Pre folder should have ArtifactGenerator + chartRef HelmRelease.
+	preDir := filepath.Join(outputDir, "gpu-operator-pre")
+
+	agPath := filepath.Join(preDir, "artifactgenerator.yaml")
+	if _, statErr := os.Stat(agPath); os.IsNotExist(statErr) {
+		t.Fatal("expected gpu-operator-pre/artifactgenerator.yaml to exist")
+	}
+	agContent := readFile(t, agPath)
+	if !strings.Contains(agContent, "kind: ArtifactGenerator") {
+		t.Error("expected ArtifactGenerator kind in pre directory")
+	}
+
+	preHR := readFile(t, filepath.Join(preDir, "helmrelease.yaml"))
+	if !strings.Contains(preHR, "chartRef:") {
+		t.Error("expected chartRef in pre HelmRelease")
+	}
+	if !strings.Contains(preHR, "kind: ExternalArtifact") {
+		t.Error("expected ExternalArtifact kind in pre HelmRelease chartRef")
+	}
+
+	// Primary HelmRelease (upstream chart) should still use HelmRepository,
+	// not ArtifactGenerator — OCISourceName only affects local-chart paths.
+	primaryHR := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(primaryHR, "kind: HelmRepository") {
+		t.Error("primary upstream HelmRelease should still reference HelmRepository")
+	}
+	if strings.Contains(primaryHR, "chartRef:") {
+		t.Error("primary upstream HelmRelease should NOT use chartRef")
+	}
+}
+
+// TestGenerate_OCISourceName_MixedComponent verifies that a mixed component
+// (upstream chart + post-manifests) uses HelmRepository for the primary
+// and ArtifactGenerator for the -post local chart.
+func TestGenerate_OCISourceName_MixedComponent(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	manifests := map[string]map[string][]byte{
+		"gpu-operator": {
+			"dcgm-exporter.yaml": []byte("apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: dcgm-exporter"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentValues:    map[string]map[string]any{"gpu-operator": {"driver": map[string]any{"enabled": true}}},
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		OCISourceName:      "aicr-bundle",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Primary uses HelmRepository (upstream chart).
+	primaryHR := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(primaryHR, "kind: HelmRepository") {
+		t.Error("primary HelmRelease should reference HelmRepository")
+	}
+
+	// Post uses ArtifactGenerator + ExternalArtifact.
+	postDir := filepath.Join(outputDir, "gpu-operator-post")
+	agPath := filepath.Join(postDir, "artifactgenerator.yaml")
+	if _, statErr := os.Stat(agPath); os.IsNotExist(statErr) {
+		t.Fatal("expected gpu-operator-post/artifactgenerator.yaml to exist")
+	}
+
+	postHR := readFile(t, filepath.Join(postDir, "helmrelease.yaml"))
+	if !strings.Contains(postHR, "chartRef:") {
+		t.Error("post HelmRelease should use chartRef")
+	}
+	if !strings.Contains(postHR, "kind: ExternalArtifact") {
+		t.Error("post HelmRelease should reference ExternalArtifact")
+	}
+	if strings.Contains(postHR, "kind: GitRepository") {
+		t.Error("post HelmRelease should NOT reference GitRepository in OCI mode")
+	}
+}
+
+// TestGenerate_OCISourceName_VendoredChart verifies that vendored
+// components also emit ArtifactGenerator + chartRef when OCISourceName
+// is set.
+func TestGenerate_OCISourceName_VendoredChart(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"cert-manager": {"crds": map[string]any{"enabled": true}}},
+		Version:         "v0.9.0",
+		VendorCharts:    true,
+		Puller:          &stubChartPuller{},
+		OCISourceName:   "aicr-bundle",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Vendored chart still has wrapper Chart.yaml + charts/ tarball.
+	chartPath := filepath.Join(outputDir, "cert-manager", "Chart.yaml")
+	if _, statErr := os.Stat(chartPath); os.IsNotExist(statErr) {
+		t.Error("expected wrapper Chart.yaml for vendored chart")
+	}
+
+	// Verify ArtifactGenerator CR exists.
+	agPath := filepath.Join(outputDir, "cert-manager", "artifactgenerator.yaml")
+	if _, statErr := os.Stat(agPath); os.IsNotExist(statErr) {
+		t.Fatal("expected cert-manager/artifactgenerator.yaml to exist")
+	}
+	agContent := readFile(t, agPath)
+	if !strings.Contains(agContent, "kind: ArtifactGenerator") {
+		t.Error("expected ArtifactGenerator kind")
+	}
+	if !strings.Contains(agContent, "name: aicr-bundle") {
+		t.Error("expected OCISourceName reference in ArtifactGenerator")
+	}
+
+	// Verify HelmRelease uses chartRef.
+	hrContent := readFile(t, filepath.Join(outputDir, "cert-manager", "helmrelease.yaml"))
+	if !strings.Contains(hrContent, "chartRef:") {
+		t.Error("vendored HelmRelease should use chartRef in OCI mode")
+	}
+	if !strings.Contains(hrContent, "kind: ExternalArtifact") {
+		t.Error("vendored HelmRelease should reference ExternalArtifact")
+	}
+	if strings.Contains(hrContent, "kind: GitRepository") {
+		t.Error("vendored HelmRelease should NOT reference GitRepository in OCI mode")
+	}
+}
+
+// TestGenerate_OCISourceName_Empty_Preserves verifies that an empty
+// OCISourceName preserves the existing behavior (GitRepository-based
+// HelmRelease, no ArtifactGenerator).
+func TestGenerate_OCISourceName_Empty_Preserves(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"configmap.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		RepoURL:            "https://github.com/my-org/gitops.git",
+		OCISourceName:      "", // empty = existing behavior
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// No ArtifactGenerator should be emitted.
+	agPath := filepath.Join(outputDir, "custom-manifests", "artifactgenerator.yaml")
+	if _, statErr := os.Stat(agPath); !os.IsNotExist(statErr) {
+		t.Error("expected NO artifactgenerator.yaml when OCISourceName is empty")
+	}
+
+	// HelmRelease should reference GitRepository (existing behavior).
+	hrContent := readFile(t, filepath.Join(outputDir, "custom-manifests", "helmrelease.yaml"))
+	if !strings.Contains(hrContent, "kind: GitRepository") {
+		t.Error("HelmRelease should reference GitRepository when OCISourceName is empty")
+	}
+	if strings.Contains(hrContent, "chartRef:") {
+		t.Error("HelmRelease should NOT use chartRef when OCISourceName is empty")
+	}
+}
+
+// TestGenerate_OCISourceName_DynamicValues verifies that ConfigMap
+// splitting works correctly with the chartRef path.
+func TestGenerate_OCISourceName_DynamicValues(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"configmap.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ index .Values \"custom-manifests\" \"mykey\" }}"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		ComponentValues: map[string]map[string]any{
+			"custom-manifests": {"mykey": "default-value", "otherkey": "keep-me"},
+		},
+		DynamicValues: map[string][]string{
+			"custom-manifests": {"mykey"},
+		},
+		Version:       "v0.9.0",
+		OCISourceName: "aicr-bundle",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify ConfigMap file exists.
+	cmPath := filepath.Join(outputDir, "custom-manifests", "configmap-values.yaml")
+	if _, statErr := os.Stat(cmPath); os.IsNotExist(statErr) {
+		t.Error("expected ConfigMap file for dynamic values in OCI mode")
+	}
+
+	// Verify HelmRelease uses chartRef AND has valuesFrom.
+	hrContent := readFile(t, filepath.Join(outputDir, "custom-manifests", "helmrelease.yaml"))
+	if !strings.Contains(hrContent, "chartRef:") {
+		t.Error("expected chartRef in HelmRelease")
+	}
+	if !strings.Contains(hrContent, "valuesFrom") {
+		t.Error("expected valuesFrom in HelmRelease")
+	}
+	if !strings.Contains(hrContent, "custom-manifests-values") {
+		t.Error("expected ConfigMap reference in HelmRelease")
+	}
+
+	// Verify ArtifactGenerator exists.
+	agPath := filepath.Join(outputDir, "custom-manifests", "artifactgenerator.yaml")
+	if _, statErr := os.Stat(agPath); os.IsNotExist(statErr) {
+		t.Error("expected artifactgenerator.yaml with dynamic values in OCI mode")
+	}
+}
+
+// TestGenerate_CustomNamespace verifies that setting Generator.Namespace
+// propagates through all generated CRs instead of the default "flux-system".
+func TestGenerate_CustomNamespace(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+		},
+	}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+		},
+		Version:   "v0.9.0",
+		Namespace: "gitops",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// HelmRelease must use custom namespace.
+	hrContent := readFile(t, filepath.Join(outputDir, "cert-manager", "helmrelease.yaml"))
+	if !strings.Contains(hrContent, "namespace: gitops\n") {
+		t.Error("HelmRelease metadata.namespace should be 'gitops'")
+	}
+	if strings.Contains(hrContent, "namespace: flux-system") {
+		t.Error("HelmRelease should NOT contain 'flux-system' with custom namespace")
+	}
+
+	// HelmRepository source must use custom namespace.
+	sourcesDir := filepath.Join(outputDir, "sources")
+	entries, readErr := os.ReadDir(sourcesDir)
+	if readErr != nil {
+		t.Fatalf("failed to read sources dir: %v", readErr)
+	}
+	for _, entry := range entries {
+		content := readFile(t, filepath.Join(sourcesDir, entry.Name()))
+		if strings.Contains(content, "namespace: flux-system") {
+			t.Errorf("source %s should use namespace 'gitops', not 'flux-system'", entry.Name())
+		}
+		if !strings.Contains(content, "namespace: gitops") {
+			t.Errorf("source %s should contain namespace 'gitops'", entry.Name())
+		}
+	}
+}
+
+// TestGenerate_CustomNamespace_OCIMode verifies that a custom namespace
+// propagates through ArtifactGenerator and chartRef HelmRelease CRs.
+func TestGenerate_CustomNamespace_OCIMode(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"cm.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		Namespace:          "custom-ns",
+		OCISourceName:      "my-oci-repo",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// ArtifactGenerator must use custom namespace and source name.
+	agContent := readFile(t, filepath.Join(outputDir, "custom-manifests", "artifactgenerator.yaml"))
+	if !strings.Contains(agContent, "namespace: custom-ns") {
+		t.Error("ArtifactGenerator should use namespace 'custom-ns'")
+	}
+	if !strings.Contains(agContent, "name: my-oci-repo") {
+		t.Error("ArtifactGenerator should reference OCISourceName 'my-oci-repo'")
+	}
+
+	// chartRef HelmRelease must use custom namespace in both metadata and chartRef.
+	hrContent := readFile(t, filepath.Join(outputDir, "custom-manifests", "helmrelease.yaml"))
+	if !strings.Contains(hrContent, "namespace: custom-ns") {
+		t.Error("HelmRelease should use namespace 'custom-ns'")
+	}
+	if strings.Contains(hrContent, "flux-system") {
+		t.Error("no CR should contain 'flux-system' with custom namespace")
+	}
+}
+
+// TestGenerate_CustomOCISourceName verifies that a custom OCISourceName
+// appears in all ArtifactGenerator CRs.
+func TestGenerate_CustomOCISourceName(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"cm.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		OCISourceName:      "my-custom-oci-repo",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	agContent := readFile(t, filepath.Join(outputDir, "custom-manifests", "artifactgenerator.yaml"))
+	if !strings.Contains(agContent, "name: my-custom-oci-repo") {
+		t.Error("ArtifactGenerator should reference custom OCISourceName")
+	}
+	if strings.Contains(agContent, "aicr-bundle") {
+		t.Error("ArtifactGenerator should NOT contain default 'aicr-bundle'")
 	}
 }

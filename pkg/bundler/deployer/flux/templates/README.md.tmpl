@@ -54,7 +54,7 @@ components reference paths relative to the repository root
    kind: GitRepository
    metadata:
      name: aicr-stack
-     namespace: flux-system
+     namespace: {{ .Namespace }}
    spec:
      url: https://github.com/<your-org>/<your-gitops-repo>.git
      ref:
@@ -65,7 +65,7 @@ components reference paths relative to the repository root
    kind: Kustomization
    metadata:
      name: aicr-stack
-     namespace: flux-system
+     namespace: {{ .Namespace }}
    spec:
      sourceRef:
        kind: GitRepository

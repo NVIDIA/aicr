@@ -4,7 +4,7 @@ apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
   name: {{ .Name }}
-  namespace: flux-system
+  namespace: {{ .Namespace }}
 spec:
   url: {{ .URL }}
   ref:

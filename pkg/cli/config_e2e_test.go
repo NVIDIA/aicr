@@ -152,6 +152,19 @@ func TestBundleCmd_FlagsAloneStillWork(t *testing.T) {
 // expensive bundler.Make() path.
 func captureBundleOpts(t *testing.T, args []string) *bundleCmdOptions {
 	t.Helper()
+	opts, err := tryCaptureBundleOpts(t, args)
+	if err != nil {
+		t.Fatalf("bundle run: %v", err)
+	}
+	return opts
+}
+
+// tryCaptureBundleOpts is the error-returning sibling of captureBundleOpts,
+// used by tests that intentionally exercise the parsing/validation reject
+// path (e.g. --app-name on a non-Argo deployer, or an invalid DNS-1123 name).
+// Returns the parsed options when parsing succeeds and the error otherwise.
+func tryCaptureBundleOpts(t *testing.T, args []string) (*bundleCmdOptions, error) {
+	t.Helper()
 	var captured *bundleCmdOptions
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
@@ -167,9 +180,9 @@ func captureBundleOpts(t *testing.T, args []string) *bundleCmdOptions {
 		return nil
 	}
 	if err := cmd.Run(context.Background(), append([]string{"bundle"}, args...)); err != nil {
-		t.Fatalf("bundle run: %v", err)
+		return nil, err
 	}
-	return captured
+	return captured, nil
 }
 
 // === All-bundle-options exhaustive coverage ===

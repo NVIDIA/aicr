@@ -35,7 +35,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 spec:
   rules:
   - name: nfd-network-rule

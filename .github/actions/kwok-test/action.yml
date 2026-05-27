@@ -49,6 +49,10 @@ inputs:
     description: 'yq version to install'
     required: false
     default: 'v4.52.4'
+  flux_version:
+    description: 'Flux CLI version to install (required for flux-oci deployer)'
+    required: false
+    default: ''
   kind_node_image:
     description: 'Kind node image for testing'
     required: false
@@ -79,6 +83,7 @@ runs:
           /usr/local/bin/helm
           /usr/local/bin/kubectl
           /usr/local/bin/yq
+          /usr/local/bin/flux
         key: kwok-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.settings.yaml') }}
 
     - name: Prep runner for Kind
@@ -95,6 +100,8 @@ runs:
         kubectl_version: '${{ inputs.kubectl_version }}'
         install_yq: 'true'
         yq_version: '${{ inputs.yq_version }}'
+        install_flux: 'true'
+        flux_version: '${{ inputs.flux_version }}'
         install_goreleaser: 'true'
         goreleaser_version: '${{ inputs.goreleaser_version }}'
 

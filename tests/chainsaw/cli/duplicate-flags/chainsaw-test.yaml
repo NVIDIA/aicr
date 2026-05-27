@@ -69,6 +69,20 @@ spec:
               ${AICR_BIN} recipe --service eks --service gke --accelerator h100 --intent training 2>&1 || true
             check:
               (contains($stderr, 'can only be specified once') || contains($stdout, 'can only be specified once')): true
+
+    - name: duplicate-bundle-app-name
+      description: Duplicate --app-name flag on bundle must fail.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-duplicate-flags"
+              ${AICR_BIN} bundle --recipe "${WORK}/recipe.yaml" \
+                --deployer argocd-helm \
+                --app-name first --app-name second \
+                -o "${WORK}/out" 2>&1 || true
+            check:
+              (contains($stderr, 'can only be specified once') || contains($stdout, 'can only be specified once')): true
       cleanup:
         - script:
             content: |
