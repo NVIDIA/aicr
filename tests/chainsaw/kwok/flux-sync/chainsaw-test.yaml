@@ -1,0 +1,200 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+#
+# KWOK flux-oci sync gate. Replaces the bash `wait_for_flux_sync` +
+# `wait_for_flux_root_app` + `dump_flux_failures` functions previously in
+# kwok/scripts/validate-scheduling.sh. Driven by the validate-scheduling.sh
+# flux-oci deployer branch; see issue #962 for the migration rationale.
+#
+# Bindings passed via `chainsaw test --values <key>=<value>`:
+#   - ociRepositoryName: name of the outer OCIRepository CR (default
+#     "aicr-bundle", set by the bundler at push time).
+#   - kustomizationName: name of the root Kustomization the bundle applies
+#     (`aicr-<recipe>`, set by the validate-scheduling.sh driver).
+#
+# Flux reconciliation is a 4-stage pipeline; each stage is its own step
+# so failure diagnostics name the stage that broke:
+#
+#   1. OCIRepository Ready  — source-controller pulled the artifact.
+#   2. Kustomization Ready  — kustomize-controller parsed and applied the bundle's manifests.
+#   3. HelmRelease Ready    — helm-controller reconciled each release.
+#   4. ArtifactGenerator    — source-watcher extracted local-chart subdirectories
+#      (only when present; OCIRepository-only bundles skip this stage).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kwok-flux-sync
+spec:
+  description: |
+    Wait for Flux reconciliation to converge on the KWOK deployer matrix.
+    Asserts each stage of the pipeline reaches Ready=True in sequence.
+  bindings:
+    # See the argocd-sync test for the $values vs bindings pattern.
+    # CLI `--set <key>=<value>` populates `$values.<key>`; the bindings
+    # below pull that through with a default fallback for ad-hoc runs.
+    - name: ociRepositoryName
+      value: ($values.ociRepositoryName || 'aicr-bundle')
+    - name: kustomizationName
+      value: ($values.kustomizationName || 'aicr-bundle')
+  timeouts:
+    # KWOK_FLUX_SYNC_TIMEOUT default (500s in the bash gate). Flux's
+    # reconcile loop has longer default intervals than Argo CD's
+    # controller; 8 minutes accommodates the additional latency.
+    assert: 8m
+  # See the comment on the argocd-sync test: chainsaw's default cleanup
+  # deletes the auto-created per-test namespace, which on KWOK stalls
+  # in Terminating because there's no kube-controller-manager to
+  # finalize the namespace. We create no resources ourselves, so
+  # skipDelete is safe.
+  skipDelete: true
+  steps:
+    - name: assert-ocirepository-ready
+      description: |
+        OCIRepository must reach Ready=True. Proves source-controller
+        could PULL the bundle artifact (mediaType, insecure-HTTP wiring,
+        layer selector all correct). This is the artifact-shape regression
+        surface — argocd-* catches the same class of bug via repo-server.
+      try:
+        - assert:
+            # Flux v2.x stabilized OCIRepository under v1 (the bundler
+            # templates at pkg/bundler/deployer/flux/templates/ emit
+            # this version). v1beta2 is the older API and may not be
+            # served by the cluster's source-controller.
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: OCIRepository
+              metadata:
+                name: ($ociRepositoryName)
+                namespace: flux-system
+              status:
+                (conditions[?type=='Ready']|[0].status == 'True'): true
+      catch:
+        - script:
+            content: |
+              echo "--- OCIRepositories ---"
+              kubectl get ocirepository -A 2>&1 || true
+              kubectl get ocirepository -n flux-system -o yaml 2>&1 || true
+              echo "--- source-controller (tail=200) ---"
+              kubectl logs -n flux-system deploy/source-controller --tail=200 2>&1 || true
+
+    - name: assert-kustomization-ready
+      description: |
+        Kustomization must reach Ready=True. Proves kustomize-controller
+        could PARSE the bundle's root kustomization.yaml and APPLY all
+        manifests (no template-render bugs, no missing files, no schema
+        violations).
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: ($kustomizationName)
+                namespace: flux-system
+              status:
+                (conditions[?type=='Ready']|[0].status == 'True'): true
+      catch:
+        - script:
+            content: |
+              echo "--- Kustomizations ---"
+              kubectl get kustomization -A 2>&1 || true
+              kubectl get kustomization -n flux-system -o yaml 2>&1 || true
+              echo "--- kustomize-controller (tail=200) ---"
+              kubectl logs -n flux-system deploy/kustomize-controller --tail=200 2>&1 || true
+
+    - name: assert-all-helmreleases-ready
+      description: |
+        All HelmReleases must reach a terminal pass state. The accepted
+        pass set mirrors the bash wait_for_flux_sync contract:
+          1. Ready=True
+                — canonical pass.
+          2. Released=True + history[0].status=='deployed' + Stalled!=True
+                — terminal fallback for KWOK lanes where helm-controller
+                installed the chart successfully but the Ready condition
+                lags (KWOK pod readiness sim gap, mirroring the argocd
+                Progressing arm). The Stalled gate prevents masking a
+                genuinely failed reconcile that left a stale Released
+                from a prior revision.
+      try:
+        - assert:
+            # Without metadata.namespace chainsaw scopes the resource
+            # selector to the auto-created per-test temp namespace
+            # (where no HelmReleases exist). The bundler places every
+            # HelmRelease in the Flux install namespace — flux-system
+            # by default, set via the Generator's Namespace field at
+            # pkg/bundler/deployer/flux/flux.go.
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                namespace: flux-system
+              status:
+                ((conditions[?type=='Ready']|[0].status == 'True') || ((conditions[?type=='Released']|[0].status == 'True') && (history|[0].status == 'deployed') && (conditions[?type=='Stalled']|[0].status != 'True'))): true
+      catch:
+        - script:
+            content: |
+              echo "--- HelmReleases (name / namespace / Ready) ---"
+              kubectl get helmrelease -A -o json 2>/dev/null \
+                | jq -r '.items[] | {
+                    name: .metadata.name,
+                    namespace: .metadata.namespace,
+                    ready: (.status.conditions // [] | map(select(.type=="Ready")) | .[0] // {})
+                  }' \
+                2>&1 || true
+              echo "--- helm-controller (tail=200) ---"
+              kubectl logs -n flux-system deploy/helm-controller --tail=200 2>&1 || true
+
+    - name: assert-all-artifactgenerators-ready
+      description: |
+        When ArtifactGenerator CRs exist (local-chart bundles), they must
+        reach Ready=True. Proves source-watcher extracted local-chart
+        sub-directories from the OCI bundle into ExternalArtifacts that
+        helm-controller can consume. Regression surface for issue #964.
+        Step is a no-op when zero ArtifactGenerators exist (Chainsaw's
+        resource matcher with no items returns success).
+      try:
+        # Inverted polarity vs assert: error matches if ANY resource
+        # satisfies the predicate. We want "no ArtifactGenerator in a
+        # non-Ready state", which:
+        #   - PASSES on zero AGs (pure-Helm bundles don't emit them).
+        #   - PASSES when every AG is Ready=True.
+        #   - FAILS when any AG is missing the Ready=True condition.
+        # Chainsaw's `assert:` fails on zero-match, so we'd need a
+        # pre-existence check to make it conditional — `error:` is
+        # the cleaner expression of the same semantics.
+        #
+        # ArtifactGenerator lives under source.extensions.fluxcd.io
+        # (extension API). The bundler emits this group/version at
+        # pkg/bundler/deployer/flux/templates/artifactgenerator.yaml.tmpl;
+        # namespace is the Flux install namespace (flux-system).
+        - error:
+            resource:
+              apiVersion: source.extensions.fluxcd.io/v1beta1
+              kind: ArtifactGenerator
+              metadata:
+                namespace: flux-system
+              status:
+                (conditions[?type=='Ready']|[0].status != 'True'): true
+      catch:
+        - script:
+            content: |
+              echo "--- ArtifactGenerators ---"
+              kubectl get artifactgenerator -A 2>&1 || true
+              kubectl get artifactgenerator -A -o yaml 2>&1 || true
+              echo "--- source-watcher (tail=200) ---"
+              kubectl logs -n flux-system deploy/source-watcher --tail=200 2>&1 \
+                || kubectl logs -n flux-system statefulset/source-watcher --tail=200 2>&1 \
+                || true
