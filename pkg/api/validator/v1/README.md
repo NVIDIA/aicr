@@ -316,8 +316,10 @@ Generates JobPlans for all validators across all phases matching the ValidationI
 - `tolerations` - Tolerations for inner workloads (forwarded via `AICR_TOLERATIONS` env var; validator Pod uses tolerate-all)
 - `nodeSelector` - Node selector for inner workloads (forwarded via `AICR_NODE_SELECTOR` env var; validator Pod has no node selector)
 
-**`BuildJobPlan(entry, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector) JobPlan`**
+**`BuildJobPlan(entry, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector, imageRegistryOverride, imageTagOverride, componentRefs) (JobPlan, error)`**
 Builds a JobPlan from a single validator catalog entry. Used for custom scenarios.
+
+`componentRefs` is the resolved recipe's component list, used to resolve `dependencyAffinity.componentRef` to a namespace so the orchestrator pod can be co-located with the dependency. The function returns `ErrCodeInvalidRequest` when a `required` componentRef is not present in componentRefs. Pass `nil` when dependencyAffinity is not used or the recipe is not available; this preserves backward-compatible behavior (prefer-CPU NodeAffinity only, no PodAffinity).
 
 ### Job Rendering
 
