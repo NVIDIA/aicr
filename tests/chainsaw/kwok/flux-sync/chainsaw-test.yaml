@@ -130,9 +130,17 @@ spec:
                 from a prior revision.
       try:
         - assert:
+            # Without metadata.namespace chainsaw scopes the resource
+            # selector to the auto-created per-test temp namespace
+            # (where no HelmReleases exist). The bundler places every
+            # HelmRelease in the Flux install namespace — flux-system
+            # by default, set via the Generator's Namespace field at
+            # pkg/bundler/deployer/flux/flux.go.
             resource:
               apiVersion: helm.toolkit.fluxcd.io/v2
               kind: HelmRelease
+              metadata:
+                namespace: flux-system
               status:
                 ((conditions[?type=='Ready']|[0].status == 'True') || ((conditions[?type=='Released']|[0].status == 'True') && (history|[0].status == 'deployed') && (conditions[?type=='Stalled']|[0].status != 'True'))): true
       catch:
@@ -158,18 +166,28 @@ spec:
         Step is a no-op when zero ArtifactGenerators exist (Chainsaw's
         resource matcher with no items returns success).
       try:
-        - assert:
-            # ArtifactGenerator lives under source.extensions.fluxcd.io
-            # (an extension API), NOT source.toolkit.fluxcd.io. The
-            # bundler emits this same group/version at
-            # pkg/bundler/deployer/flux/templates/artifactgenerator.yaml.tmpl;
-            # mismatching here would make the selector match zero
-            # CRs and silently no-op the stage 4 check.
+        # Inverted polarity vs assert: error matches if ANY resource
+        # satisfies the predicate. We want "no ArtifactGenerator in a
+        # non-Ready state", which:
+        #   - PASSES on zero AGs (pure-Helm bundles don't emit them).
+        #   - PASSES when every AG is Ready=True.
+        #   - FAILS when any AG is missing the Ready=True condition.
+        # Chainsaw's `assert:` fails on zero-match, so we'd need a
+        # pre-existence check to make it conditional — `error:` is
+        # the cleaner expression of the same semantics.
+        #
+        # ArtifactGenerator lives under source.extensions.fluxcd.io
+        # (extension API). The bundler emits this group/version at
+        # pkg/bundler/deployer/flux/templates/artifactgenerator.yaml.tmpl;
+        # namespace is the Flux install namespace (flux-system).
+        - error:
             resource:
               apiVersion: source.extensions.fluxcd.io/v1beta1
               kind: ArtifactGenerator
+              metadata:
+                namespace: flux-system
               status:
-                (conditions[?type=='Ready']|[0].status == 'True'): true
+                (conditions[?type=='Ready']|[0].status != 'True'): true
       catch:
         - script:
             content: |
