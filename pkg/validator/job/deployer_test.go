@@ -857,3 +857,140 @@ func TestDeployer_BuildJobPlanRequiredMissing(t *testing.T) {
 		t.Errorf("error message should name the missing componentRef, got %v", sErr)
 	}
 }
+
+func TestScanMissingPodAffinityDeps(t *testing.T) {
+	prometheusPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "prometheus-0",
+			Namespace: "monitoring",
+			Labels:    map[string]string{"app.kubernetes.io/name": "prometheus"},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		pa           *corev1.PodAffinity
+		existingPods []*corev1.Pod
+		wantCount    int
+		wantContains string
+	}{
+		{
+			name:      "nil PodAffinity returns nil",
+			pa:        nil,
+			wantCount: 0,
+		},
+		{
+			name:      "empty terms returns nil",
+			pa:        &corev1.PodAffinity{},
+			wantCount: 0,
+		},
+		{
+			name: "required term matched by existing pod returns no warning",
+			pa: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"}},
+					Namespaces:    []string{"monitoring"},
+					TopologyKey:   "kubernetes.io/hostname",
+				}},
+			},
+			existingPods: []*corev1.Pod{prometheusPod},
+			wantCount:    0,
+		},
+		{
+			name: "required term with no matching pods emits warning",
+			pa: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"}},
+					Namespaces:    []string{"monitoring"},
+					TopologyKey:   "kubernetes.io/hostname",
+				}},
+			},
+			wantCount:    1,
+			wantContains: `selector matched zero pods`,
+		},
+		{
+			name: "preferred term with no matching pods emits warning",
+			pa: &corev1.PodAffinity{
+				PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+					Weight: 100,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"}},
+						Namespaces:    []string{"monitoring"},
+						TopologyKey:   "kubernetes.io/hostname",
+					},
+				}},
+			},
+			wantCount:    1,
+			wantContains: `selector matched zero pods`,
+		},
+		{
+			name: "mixed required+preferred where preferred has no match",
+			pa: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"}},
+					Namespaces:    []string{"monitoring"},
+					TopologyKey:   "kubernetes.io/hostname",
+				}},
+				PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+					Weight: 100,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "dcgm-exporter"}},
+						Namespaces:    []string{"gpu-operator"},
+						TopologyKey:   "kubernetes.io/hostname",
+					},
+				}},
+			},
+			existingPods: []*corev1.Pod{prometheusPod}, // matches required, not preferred
+			wantCount:    1,
+			wantContains: `app=dcgm-exporter`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := make([]runtime.Object, 0, len(tt.existingPods))
+			for _, p := range tt.existingPods {
+				objs = append(objs, p)
+			}
+			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			cs := fake.NewSimpleClientset(objs...)
+			got := scanMissingPodAffinityDeps(context.Background(), cs, tt.pa)
+			if len(got) != tt.wantCount {
+				t.Fatalf("expected %d warnings, got %d: %v", tt.wantCount, len(got), got)
+			}
+			if tt.wantContains != "" {
+				found := false
+				for _, w := range got {
+					if strings.Contains(w, tt.wantContains) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected a warning containing %q, got %v", tt.wantContains, got)
+				}
+			}
+		})
+	}
+}
+
+func TestScanMissingPodAffinityDeps_ListErrorReturnsWarning(t *testing.T) {
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("list", "pods", func(_ clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver flaky")
+	})
+	pa := &corev1.PodAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"}},
+			Namespaces:    []string{"monitoring"},
+			TopologyKey:   "kubernetes.io/hostname",
+		}},
+	}
+	got := scanMissingPodAffinityDeps(context.Background(), cs, pa)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 warning on List error, got %d: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "selector lookup failed") {
+		t.Errorf("expected lookup-failed warning, got %v", got[0])
+	}
+}

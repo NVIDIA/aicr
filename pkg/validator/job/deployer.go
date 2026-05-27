@@ -122,6 +122,17 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 	// Use the job name from the plan
 	d.jobName = plan.JobName
 
+	// Best-effort: warn if any dependencyAffinity selector matches zero
+	// pods at deploy time. Catches silent label drift on dependency-chart
+	// bumps (e.g., kube-prometheus-stack relabels its Prometheus pods).
+	// Logging only — we don't block deploy, because the scheduler will
+	// surface a hard match miss as Pending if the affinity is `required`.
+	if plan.Affinity != nil && plan.Affinity.PodAffinity != nil {
+		for _, w := range scanMissingPodAffinityDeps(ctx, d.clientset, plan.Affinity.PodAffinity) {
+			slog.Warn(w, "validator", d.entry.Name)
+		}
+	}
+
 	// Render Job ApplyConfiguration from plan
 	jobApply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
 
@@ -141,6 +152,65 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 		"namespace", d.namespace)
 
 	return nil
+}
+
+// scanMissingPodAffinityDeps lists pods for each PodAffinityTerm in pa and
+// returns a warning string per term whose selector matched zero pods in the
+// listed namespace at deploy time. The returned slice is nil when every term
+// matches at least one pod or when pa has no terms.
+//
+// This is a defensive check against silent dependency-chart label drift —
+// if e.g. kube-prometheus-stack changes its pod labels in a future chart
+// release, the affinity term becomes a no-op (preferred) or blocks scheduling
+// (required) without an actionable error. The warning is intended for log
+// grep / triage. We do NOT fail closed because:
+//   - preferred affinity is best-effort by design; the orchestrator schedules
+//     wherever the scheduler picks if no match exists,
+//   - required affinity already surfaces a mismatch as Pending via the
+//     scheduler, which is more authoritative than this point-in-time list.
+//
+// Each List uses a short per-namespace timeout (defaults.PodAffinitySelectorLookupTimeout)
+// so a slow or unreachable apiserver doesn't delay Job deploy.
+func scanMissingPodAffinityDeps(ctx context.Context, client kubernetes.Interface, pa *corev1.PodAffinity) []string {
+	if pa == nil {
+		return nil
+	}
+
+	terms := make([]corev1.PodAffinityTerm, 0,
+		len(pa.RequiredDuringSchedulingIgnoredDuringExecution)+
+			len(pa.PreferredDuringSchedulingIgnoredDuringExecution))
+	terms = append(terms, pa.RequiredDuringSchedulingIgnoredDuringExecution...)
+	for _, w := range pa.PreferredDuringSchedulingIgnoredDuringExecution {
+		terms = append(terms, w.PodAffinityTerm)
+	}
+
+	var warnings []string
+	for _, term := range terms {
+		if term.LabelSelector == nil || len(term.Namespaces) == 0 {
+			continue
+		}
+		selector := metav1.FormatLabelSelector(term.LabelSelector)
+		for _, ns := range term.Namespaces {
+			listCtx, cancel := context.WithTimeout(ctx, defaults.PodAffinitySelectorLookupTimeout)
+			pods, err := client.CoreV1().Pods(ns).List(listCtx, metav1.ListOptions{
+				LabelSelector: selector,
+				Limit:         1,
+			})
+			cancel()
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf(
+					"dependencyAffinity selector lookup failed; affinity may not behave as intended: namespace=%q selector=%q error=%v",
+					ns, selector, err))
+				continue
+			}
+			if len(pods.Items) == 0 {
+				warnings = append(warnings, fmt.Sprintf(
+					"dependencyAffinity selector matched zero pods at deploy time; affinity term will be a no-op until matching pods appear: namespace=%q selector=%q",
+					ns, selector))
+			}
+		}
+	}
+	return warnings
 }
 
 // CleanupJob deletes the validator Job with foreground propagation
