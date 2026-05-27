@@ -15,19 +15,18 @@
 # Workflow 2 of 2 for the warning-only recipe-evidence gate.
 #
 # Triggered by workflow_run after "Recipe Evidence: Verify" completes.
-# Downloads the report artifact and posts a sticky PR comment. This
-# workflow never checks out the PR branch directly, keeping any future
-# secrets (none today) isolated from untrusted code on fork PRs.
+# Downloads the report.md artifact and posts/updates a sticky PR
+# comment. This workflow never checks out the PR branch, keeping any
+# future secrets isolated from untrusted PR code. Mirrors the pattern
+# established by fern-docs-preview-build + fern-docs-preview-comment.
 #
-# Fork-PR safety notes:
-#   * The pr_number written by workflow 1 into the artifact is attacker-
-#     controllable on fork PRs (the fork can modify the workflow it runs
-#     under). We do NOT trust it: the PR association is re-derived here
-#     from the trusted workflow_run.head_sha via the commits/<sha>/pulls
-#     API, and cross-checked against workflow_run.head_repository.
-#   * report.md is also attacker-controlled, but we only post it (no
-#     parsing). GitHub renders it as Markdown under the bot identity;
-#     keep that in mind when interpreting the comment's content.
+# The PR association is re-derived here from the trusted
+# workflow_run.head_sha (via commits/<sha>/pulls) rather than read
+# from the artifact, since the artifact is produced by the build
+# workflow on the PR branch (fork-attacker-controllable contents).
+# report.md itself is also fork-influenced (its row contents come from
+# PR-supplied overlay filenames and the verify output), but we only
+# post it as Markdown under the bot identity — no parsing.
 
 name: "Recipe Evidence: Comment"
 
@@ -50,10 +49,10 @@ jobs:
   comment:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Run on completed verify regardless of conclusion: workflow 1
-    # uploads with `if: always()` so partial reports (build failed,
-    # discovery errored) still reach the contributor. The report.md
-    # existence check below is the real gate.
+    # Run regardless of build conclusion: workflow 1 uploads partial
+    # reports with `if: always()`. Filter to PR-triggered runs only so
+    # unrelated workflow_run firings (e.g., manual reruns from other
+    # contexts) don't try to post on a non-existent PR.
     if: ${{ github.event.workflow_run.event == 'pull_request' }}
     steps:
       - name: Download evidence report
@@ -73,15 +72,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Ask the GitHub API which PR(s) contain this head SHA. This is
-          # the trusted source — the artifact's pr_number file is fork-
-          # writable and not used here.
+          # Ask GitHub which open PR(s) contain this head SHA. This is
+          # the trusted source — never trust an artifact-supplied number.
           pulls=$(gh api "repos/${BASE_REPO}/commits/${HEAD_SHA}/pulls" \
             --jq '[.[] | select(.state == "open")]')
 
-          # Cross-check that the PR's head repo owner matches the
-          # workflow_run's head_repository owner. This blocks the case
-          # where two PRs share a head SHA across forks.
+          # Cross-check the PR's head-repo owner against the workflow_run's
+          # head_repository owner so two PRs sharing a head SHA across
+          # forks don't get confused.
           pr_number=$(echo "$pulls" | jq -r --arg owner "$HEAD_OWNER" \
             '.[] | select(.head.repo.owner.login == $owner) | .number' | head -1)
 
@@ -93,7 +91,7 @@ jobs:
           echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      - name: Post or update PR comment
+      - name: Post or update sticky PR comment
         if: ${{ steps.metadata.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -111,9 +109,8 @@ jobs:
 
           BODY=$(printf '%s\n\n%s\n' "$(cat report.md)" "$MARKER")
 
-          # GitHub caps issue-comment bodies at ~65536 characters. Truncate
-          # defensively so the API call doesn't 422 on broad-impact runs.
-          # The build workflow already truncates the per-row table; this is
+          # GitHub caps issue-comment bodies at ~65536 characters. The
+          # build script already truncates the per-row table; this is
           # belt-and-braces for the trailer + any future report growth.
           max=65000
           if (( ${#BODY} > max )); then
@@ -121,10 +118,10 @@ jobs:
               "${BODY:0:max}" "$MARKER")
           fi
 
-          # --paginate scans every page of the comments list so the marker
-          # is found even on long-running PRs (default page size is 30).
+          # --paginate so the marker is found on PRs with >30 comments.
           COMMENT_ID=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
-            --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | tr -d '\r' | head -1)
+            --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" \
+            | tr -d '\r' | head -1)
 
           if [[ -n "$COMMENT_ID" ]]; then
             gh api "repos/${REPO}/issues/comments/${COMMENT_ID}" \
