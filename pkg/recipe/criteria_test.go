@@ -39,6 +39,8 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"oke", "oke", CriteriaServiceOKE, false},
 		{"lke", "lke", CriteriaServiceLKE, false},
 		{"LKE uppercase", "LKE", CriteriaServiceLKE, false},
+		{"bcm", "bcm", CriteriaServiceBCM, false},
+		{"BCM uppercase", "BCM", CriteriaServiceBCM, false},
 		{"self-managed", "self-managed", CriteriaServiceAny, false},
 		{"self", "self", CriteriaServiceAny, false},
 		{"vanilla", "vanilla", CriteriaServiceAny, false},
@@ -699,7 +701,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "eks", "gke", "kind", "lke", "oke"}
+	expected := []string{"aks", "bcm", "eks", "gke", "kind", "lke", "oke"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}

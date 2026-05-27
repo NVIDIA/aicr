@@ -284,6 +284,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			"failed to extract component values", err)
 	}
 
+	// Bundler-derived annotations that must reflect the final resolved
+	// recipe state, applied AFTER extractComponentValues so that user
+	// --set overrides cannot defeat them. Every deployer (Helm,
+	// helmfile, Flux, Argo CD, argocd-helm) sees the same final map.
+	// See issue #973.
+	b.injectDRAChartVersionAnnotation(componentValues, recipeResult)
+
 	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
@@ -1502,4 +1509,136 @@ func renderGKECriticalPriorityQuota(namespace string, pods int) ([]byte, error) 
 		},
 	}
 	return serializer.MarshalYAMLDeterministic(quota)
+}
+
+// draChartVersionAnnotation is the key written onto the
+// nvidia-dra-driver-gpu controller and kubelet-plugin pod templates.
+// Its value mirrors the resolved gpu-operator componentRef version
+// so that any gpu-operator chart bump produces a rendered pod-template
+// diff that forces helm upgrade (and every other deployer) to re-roll
+// the DaemonSet — clearing the kubelet plugin's stale NVML handle that
+// would otherwise pin to the pre-migration driver state.
+const draChartVersionAnnotation = "aicr.nvidia.com/gpu-operator-chart-version"
+
+// draComponentName / gpuOperatorComponentName are the registry-level
+// component names this injection couples together. Both must be
+// enabled in the filtered resolved recipe before the annotation is
+// written; recipes that disable either remain untouched.
+const (
+	draComponentName         = "nvidia-dra-driver-gpu"
+	gpuOperatorComponentName = "gpu-operator"
+)
+
+// injectDRAChartVersionAnnotation writes the resolved gpu-operator
+// chart version into the nvidia-dra-driver-gpu controller and
+// kubelet-plugin podAnnotations on the bundler's componentValues map.
+// Replaces the prior hand-maintained value in
+// recipes/components/nvidia-dra-driver-gpu/values.yaml — see #973.
+//
+// Why this exists:
+//
+// PR #965 mitigated the stale-NVML class of bug (gpu-operator chart
+// bump → k8s-driver-manager reloads kernel modules async → DRA kubelet
+// plugin's NVML handle goes stale → CDI spec generation fails) by
+// hard-coding the gpu-operator chart version into the DRA pod-template
+// annotation. The annotation works as long as it stays in lockstep
+// with the chart pin, but the coupling depends on a maintainer
+// remembering to bump both in the same PR. A future PR that bumps
+// gpu-operator and forgets the annotation produces identical rendered
+// DaemonSet manifests, so helm upgrade skips the re-roll and stale
+// NVML returns silently. Bundler-derived injection removes the manual
+// step entirely.
+//
+// Trigger gating: BOTH gpu-operator and nvidia-dra-driver-gpu must be
+// enabled in the filtered recipe. The caller has already removed
+// disabled components from recipeResult.ComponentRefs at this point,
+// so iterating the filtered slice gives the right gating for free.
+// Recipes that disable either component leave componentValues
+// untouched.
+//
+// Injection point: called from DefaultBundler.Make AFTER
+// extractComponentValues (so the values map is populated and user
+// --set overrides have already been applied) and BEFORE buildDeployer
+// (so every deployer — Helm, helmfile, Flux, Argo CD, argocd-helm —
+// receives the same final map). Placing the call after --set means a
+// user override of this specific annotation key is intentionally NOT
+// honored; the annotation must always reflect the actual resolved
+// gpu-operator chart version, or the rollout-trigger semantics break.
+//
+// Mutates componentValues in place; nested controller / kubeletPlugin
+// / podAnnotations maps are created lazily so existing values under
+// either path (priorityClassName, other annotations, etc.) are
+// preserved.
+func (b *DefaultBundler) injectDRAChartVersionAnnotation(
+	componentValues map[string]map[string]any,
+	recipeResult *recipe.RecipeResult,
+) {
+
+	if componentValues == nil || recipeResult == nil {
+		return
+	}
+
+	var gpuOperatorEnabled, draEnabled bool
+	var gpuOperatorVersion string
+	for _, ref := range recipeResult.ComponentRefs {
+		switch ref.Name {
+		case gpuOperatorComponentName:
+			gpuOperatorEnabled = true
+			gpuOperatorVersion = ref.Version
+		case draComponentName:
+			draEnabled = true
+		}
+	}
+	if !draEnabled || !gpuOperatorEnabled {
+		// Either component disabled: nothing to mirror. Silent skip
+		// matches the "no chart pin, no rollout trigger" semantic and
+		// is exercised by the disabled-component unit tests.
+		return
+	}
+	if gpuOperatorVersion == "" {
+		// gpu-operator is enabled but the resolver produced an empty
+		// Version string. This shouldn't happen in normal recipe
+		// resolution; if it does the rollout-trigger semantics break
+		// silently — the same drift class this helper exists to
+		// eliminate. Warn so operators have a debugging signal, then
+		// skip injection rather than write an empty annotation value
+		// that itself would lock the DaemonSet to a meaningless pin.
+		slog.Warn("gpu-operator enabled with empty Version, skipping DRA chart-version annotation injection",
+			"component", gpuOperatorComponentName,
+			"draComponent", draComponentName)
+		return
+	}
+
+	draValues := componentValues[draComponentName]
+	if draValues == nil {
+		draValues = make(map[string]any)
+		componentValues[draComponentName] = draValues
+	}
+
+	// Both pod templates carry the same annotation. The controller is
+	// a Deployment (one replica per chart) and the kubeletPlugin is the
+	// DaemonSet whose NVML handle is at risk; rolling both keeps the
+	// two halves of the chart consistent across upgrades.
+	//
+	// The `, _` on the type assertions below is deliberate: values come
+	// from `extractComponentValues`, which produces `map[string]any` via
+	// yaml.v3 decoding, so a wrong-type value at `controller` /
+	// `kubeletPlugin` / `podAnnotations` cannot happen in practice. If
+	// it ever did (e.g., a hand-crafted unit test or a malformed
+	// override that's also broken for the DRA chart itself), the helper
+	// silently replaces the wrong-type value with a fresh map and lands
+	// the annotation on top.
+	for _, podPath := range []string{"controller", "kubeletPlugin"} {
+		section, _ := draValues[podPath].(map[string]any)
+		if section == nil {
+			section = make(map[string]any)
+			draValues[podPath] = section
+		}
+		annotations, _ := section["podAnnotations"].(map[string]any)
+		if annotations == nil {
+			annotations = make(map[string]any)
+			section["podAnnotations"] = annotations
+		}
+		annotations[draChartVersionAnnotation] = gpuOperatorVersion
+	}
 }

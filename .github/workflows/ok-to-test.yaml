@@ -14,7 +14,14 @@
 
 # Allows maintainers to run the full qualification suite on fork PRs
 # by commenting "/ok-to-test" on the PR. This runs in the base repo
-# context, so id-token: write and other elevated permissions are available.
+# context, but only grants the minimum permissions needed because the
+# called qualification workflow checks out and runs fork-controlled
+# local actions (`./.github/actions/*`). Privileged grants
+# (id-token: write, security-events: write) are deliberately withheld
+# here so a malicious fork cannot mint OIDC tokens or upload to code
+# scanning. Steps that need those tokens are either already gated to
+# non-fork PRs (e.g. SLSA predicate) or degrade gracefully on permission
+# denial (e.g. SARIF upload via continue-on-error).
 
 name: OK to Test
 
@@ -75,7 +82,5 @@ jobs:
     permissions:
       actions: read
       contents: read
-      id-token: write
-      security-events: write
     with:
       ref: ${{ needs.authorize.outputs.ref }}
