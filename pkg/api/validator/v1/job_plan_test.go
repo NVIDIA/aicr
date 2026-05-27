@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestGenerateJobName(t *testing.T) {
@@ -777,5 +778,104 @@ func TestBuildJobPlan_NilComponentRefsBackwardCompat(t *testing.T) {
 	}
 	if plan.Affinity.PodAffinity != nil {
 		t.Errorf("expected nil PodAffinity for entry with no DependencyAffinity")
+	}
+}
+
+func TestAffinityToApplyConfig_RoundTripsAllFields(t *testing.T) {
+	cpuKey := "cpu"
+	in := &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: "kubernetes.io/arch", Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+						},
+						MatchFields: []corev1.NodeSelectorRequirement{
+							{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-a"}},
+						},
+					},
+				},
+			},
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+				{
+					Weight: 50,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: cpuKey, Operator: corev1.NodeSelectorOpExists},
+						},
+					},
+				},
+			},
+		},
+		PodAffinity: &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+				{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "prom"},
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "tier", Operator: metav1.LabelSelectorOpIn, Values: []string{"backend"}},
+						},
+					},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "obs"}},
+					Namespaces:        []string{"monitoring"},
+					TopologyKey:       "kubernetes.io/hostname",
+				},
+			},
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+				{
+					Weight: 90,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "dcgm"}},
+						Namespaces:    []string{"gpu-operator"},
+						TopologyKey:   "kubernetes.io/hostname",
+					},
+				},
+			},
+		},
+		PodAntiAffinity: &corev1.PodAntiAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+				{
+					Weight: 10,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "noisy"}},
+						TopologyKey:   "kubernetes.io/hostname",
+					},
+				},
+			},
+		},
+	}
+
+	got := affinityToApplyConfig(in)
+	if got == nil {
+		t.Fatal("expected non-nil apply config")
+	}
+	if got.NodeAffinity == nil {
+		t.Fatal("NodeAffinity missing")
+	}
+	if got.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		t.Error("NodeAffinity.Required dropped")
+	}
+	if len(got.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Errorf("expected 1 preferred node term, got %d", len(got.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution))
+	}
+	if got.PodAffinity == nil {
+		t.Fatal("PodAffinity missing")
+	}
+	if len(got.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Errorf("expected 1 required pod term, got %d", len(got.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution))
+	}
+	req := got.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+	if req.LabelSelector == nil {
+		t.Fatal("PodAffinity required term LabelSelector dropped")
+	}
+	if len(req.LabelSelector.MatchExpressions) != 1 {
+		t.Error("PodAffinity required term LabelSelector.MatchExpressions dropped")
+	}
+	if req.NamespaceSelector == nil {
+		t.Error("PodAffinity required term NamespaceSelector dropped")
+	}
+	if got.PodAntiAffinity == nil {
+		t.Fatal("PodAntiAffinity dropped entirely")
 	}
 }

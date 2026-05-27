@@ -66,15 +66,34 @@ func BuildOrchestratorAffinity(
 	var preferred []corev1.WeightedPodAffinityTerm
 
 	for _, dep := range deps {
+		if err := dep.Validate(); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid dependencyAffinity", err)
+		}
+
 		ref, found := refByName[dep.ComponentRef]
-		hasNamespace := found && ref.Namespace != ""
+		// Skip if the component is in the recipe but disabled or unresolved
+		// (no namespace). Without this check, "required" would block the
+		// orchestrator forever waiting for a pod that never deploys.
+		resolved := found && ref.IsEnabled() && ref.Namespace != ""
 		req := dep.RequirementOrDefault()
 
-		if !hasNamespace {
+		if !resolved {
 			if req == DependencyRequirementRequired {
+				var reason string
+				switch {
+				case !found:
+					reason = "is not in the recipe's componentRefs"
+				case !ref.IsEnabled():
+					reason = "is disabled (overrides.enabled=false)"
+				case ref.Namespace == "":
+					reason = "has no resolved namespace"
+				default:
+					reason = "is unresolved"
+				}
 				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("required dependencyAffinity component %q is not present in the resolved recipe; either add the component to the recipe or remove this validator from the validation phase",
-						dep.ComponentRef))
+					fmt.Sprintf("required dependencyAffinity component %q %s; either fix the recipe or remove this validator from the validation phase",
+						dep.ComponentRef, reason))
 			}
 			slog.Warn("preferred dependencyAffinity component not present in recipe; skipping affinity term",
 				"componentRef", dep.ComponentRef)

@@ -279,6 +279,18 @@ func (v *Validator) runPhase(
 
 	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
 
+	// Pre-flight: validate all dependencyAffinity for required components
+	// resolve before any Job is deployed. This honors the per-validator
+	// contract (BuildOrchestratorAffinity returns ErrCodeInvalidRequest for
+	// missing required components) at phase scope, so a single misconfigured
+	// entry doesn't strand a partial deploy of earlier entries.
+	for _, entry := range entries {
+		if _, err := v1.BuildOrchestratorAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("dependencyAffinity pre-flight failed for validator %q", entry.Name), err)
+		}
+	}
+
 	// TODO(perf): entries within a phase are independent Jobs and can be
 	// fan-out with errgroup + a small worker pool. Deferred from the
 	// principal-review sweep because parallelism interacts with shared-

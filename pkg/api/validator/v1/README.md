@@ -64,7 +64,7 @@ if err != nil {
 serviceAccount := "my-validator-sa-" + runID
 
 // Generate job plans for all validators
-plans := v1.Plan(
+plans, err := v1.Plan(
     cat,
     validationInput,
     runID,
@@ -75,7 +75,13 @@ plans := v1.Plan(
     nil,            // imagePullSecrets (empty slice if not needed)
     nil,            // tolerations
     nil,            // nodeSelector
+    "",             // imageRegistryOverride
+    "",             // imageTagOverride
+    nil,            // componentRefs
 )
+if err != nil {
+    return err
+}
 ```
 
 **Important:** The `serviceAccount` parameter allows you to use your own service account naming strategy. AICR uses `"aicr-validator-" + runID` internally, but external controllers can use any naming convention.
@@ -180,7 +186,7 @@ You can customize a JobPlan before rendering:
 
 ```go
 // Build a plan for a specific validator
-plan := v1.BuildJobPlan(
+plan, err := v1.BuildJobPlan(
     entry,
     runID,
     namespace,
@@ -190,7 +196,13 @@ plan := v1.BuildJobPlan(
     nil,            // imagePullSecrets
     tolerations,
     nodeSelector,
+    "",             // imageRegistryOverride
+    "",             // imageTagOverride
+    nil,            // componentRefs
 )
+if err != nil {
+    // handle error
+}
 
 // Customize the plan
 plan.Timeout = 600  // Override timeout to 10 minutes
@@ -255,7 +267,7 @@ func RunValidation(
 
     serviceAccount := "my-validator-sa-" + runID
 
-    plans := v1.Plan(
+    plans, err := v1.Plan(
         cat,
         validationInput,
         runID,
@@ -266,7 +278,13 @@ func RunValidation(
         nil,           // imagePullSecrets
         nil,           // tolerations
         nil,           // nodeSelector
+        "",            // imageRegistryOverride
+        "",            // imageTagOverride
+        nil,           // componentRefs
     )
+    if err != nil {
+        return err
+    }
 
     // 4. Deploy Jobs using server-side apply
     for _, plan := range plans {
@@ -301,7 +319,7 @@ Format: `{timestamp}-{random-hex}` (e.g., "20260514-123045-abc123def456")
 
 ### Job Planning
 
-**`Plan(cat, validationInput, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector) []JobPlan`**
+**`Plan(cat, validationInput, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector, imageRegistryOverride, imageTagOverride, componentRefs) ([]JobPlan, error)`**
 Generates JobPlans for all validators across all phases matching the ValidationInput filters.
 
 **Parameters:**
@@ -332,7 +350,7 @@ Typically called with `plan.JobName` as the jobName parameter.
 
 ### Image Utilities
 
-**`ImagePullPolicy(image string) corev1.PullPolicy`**
+**`ImagePullPolicy(image string, imageTagOverride string) corev1.PullPolicy`**
 Determines the appropriate pull policy for a container image based on its reference.
 
 Rules:

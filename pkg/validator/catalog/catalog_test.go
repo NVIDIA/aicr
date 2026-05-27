@@ -1023,7 +1023,9 @@ validators:
 }
 
 func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
-	cat, err := Load("v0.0.0-test", "")
+	// "-next" suffix bypasses the release-version image-tag rewrite path,
+	// matching how goreleaser snapshots stamp dev binaries.
+	cat, err := Load("v0.0.0-next", "")
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}

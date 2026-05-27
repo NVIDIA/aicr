@@ -443,13 +443,12 @@ func affinityForPlan(plan JobPlan) *corev1.Affinity {
 
 // affinityToApplyConfig converts a *corev1.Affinity to the
 // applyconfigurations/core/v1 type used by server-side apply. We hand-write the
-// walk because client-go does not expose a generated converter for this pair
-// and we only emit the subset of fields we actually populate
-// (NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution and
-// PodAffinity.{Required,Preferred}DuringSchedulingIgnoredDuringExecution).
+// walk because client-go does not expose a generated converter for this pair.
+// A nil or empty Affinity falls back to preferCPUNodeAffinity() to preserve
+// pre-PR behavior for external callers that construct a JobPlan manually.
 func affinityToApplyConfig(a *corev1.Affinity) *applycorev1.AffinityApplyConfiguration {
-	if a == nil {
-		return nil
+	if a == nil || (a.NodeAffinity == nil && a.PodAffinity == nil && a.PodAntiAffinity == nil) {
+		return affinityToApplyConfig(preferCPUNodeAffinity())
 	}
 	out := applycorev1.Affinity()
 	if a.NodeAffinity != nil {
@@ -458,11 +457,22 @@ func affinityToApplyConfig(a *corev1.Affinity) *applycorev1.AffinityApplyConfigu
 	if a.PodAffinity != nil {
 		out = out.WithPodAffinity(podAffinityToApplyConfig(a.PodAffinity))
 	}
+	if a.PodAntiAffinity != nil {
+		out = out.WithPodAntiAffinity(podAntiAffinityToApplyConfig(a.PodAntiAffinity))
+	}
 	return out
 }
 
 func nodeAffinityToApplyConfig(na *corev1.NodeAffinity) *applycorev1.NodeAffinityApplyConfiguration {
 	out := applycorev1.NodeAffinity()
+	if na.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		req := applycorev1.NodeSelector()
+		for _, term := range na.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			t := term
+			req = req.WithNodeSelectorTerms(nodeSelectorTermToApplyConfig(&t))
+		}
+		out = out.WithRequiredDuringSchedulingIgnoredDuringExecution(req)
+	}
 	for _, term := range na.PreferredDuringSchedulingIgnoredDuringExecution {
 		t := term
 		out = out.WithPreferredDuringSchedulingIgnoredDuringExecution(
@@ -486,6 +496,16 @@ func nodeSelectorTermToApplyConfig(t *corev1.NodeSelectorTerm) *applycorev1.Node
 		}
 		out = out.WithMatchExpressions(req)
 	}
+	for _, expr := range t.MatchFields {
+		e := expr
+		req := applycorev1.NodeSelectorRequirement().
+			WithKey(e.Key).
+			WithOperator(e.Operator)
+		for _, v := range e.Values {
+			req = req.WithValues(v)
+		}
+		out = out.WithMatchFields(req)
+	}
 	return out
 }
 
@@ -506,14 +526,67 @@ func podAffinityToApplyConfig(pa *corev1.PodAffinity) *applycorev1.PodAffinityAp
 	return out
 }
 
+func podAntiAffinityToApplyConfig(paa *corev1.PodAntiAffinity) *applycorev1.PodAntiAffinityApplyConfiguration {
+	out := applycorev1.PodAntiAffinity()
+	for _, term := range paa.RequiredDuringSchedulingIgnoredDuringExecution {
+		t := term
+		out = out.WithRequiredDuringSchedulingIgnoredDuringExecution(podAffinityTermToApplyConfig(&t))
+	}
+	for _, w := range paa.PreferredDuringSchedulingIgnoredDuringExecution {
+		wt := w
+		out = out.WithPreferredDuringSchedulingIgnoredDuringExecution(
+			applycorev1.WeightedPodAffinityTerm().
+				WithWeight(wt.Weight).
+				WithPodAffinityTerm(podAffinityTermToApplyConfig(&wt.PodAffinityTerm)),
+		)
+	}
+	return out
+}
+
 func podAffinityTermToApplyConfig(t *corev1.PodAffinityTerm) *applycorev1.PodAffinityTermApplyConfiguration {
 	out := applycorev1.PodAffinityTerm().WithTopologyKey(t.TopologyKey)
 	if t.LabelSelector != nil {
-		ls := applymetav1.LabelSelector().WithMatchLabels(t.LabelSelector.MatchLabels)
+		ls := applymetav1.LabelSelector()
+		if len(t.LabelSelector.MatchLabels) > 0 {
+			ls = ls.WithMatchLabels(t.LabelSelector.MatchLabels)
+		}
+		for _, expr := range t.LabelSelector.MatchExpressions {
+			e := expr
+			req := applymetav1.LabelSelectorRequirement().
+				WithKey(e.Key).
+				WithOperator(e.Operator)
+			for _, v := range e.Values {
+				req = req.WithValues(v)
+			}
+			ls = ls.WithMatchExpressions(req)
+		}
 		out = out.WithLabelSelector(ls)
+	}
+	if t.NamespaceSelector != nil {
+		ns := applymetav1.LabelSelector()
+		if len(t.NamespaceSelector.MatchLabels) > 0 {
+			ns = ns.WithMatchLabels(t.NamespaceSelector.MatchLabels)
+		}
+		for _, expr := range t.NamespaceSelector.MatchExpressions {
+			e := expr
+			req := applymetav1.LabelSelectorRequirement().
+				WithKey(e.Key).
+				WithOperator(e.Operator)
+			for _, v := range e.Values {
+				req = req.WithValues(v)
+			}
+			ns = ns.WithMatchExpressions(req)
+		}
+		out = out.WithNamespaceSelector(ns)
 	}
 	for _, ns := range t.Namespaces {
 		out = out.WithNamespaces(ns)
+	}
+	for _, key := range t.MatchLabelKeys {
+		out = out.WithMatchLabelKeys(key)
+	}
+	for _, key := range t.MismatchLabelKeys {
+		out = out.WithMismatchLabelKeys(key)
 	}
 	return out
 }
