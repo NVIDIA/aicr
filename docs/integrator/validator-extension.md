@@ -106,9 +106,9 @@ Service.
   label whose value defines co-location. The default pins to the same node;
   use `topology.kubernetes.io/zone` for zone-level locality.
 
-When in doubt, prefer `preferred`. The high weight (100) dominates the
-scheduler's image-locality scoring on the first run, after which image
-locality reinforces (rather than counteracts) the affinity. Use `required`
+When in doubt, prefer `preferred`. The high weight (100) has a strong
+influence on the scheduler's scoring on the first run, after which image
+locality can support (rather than oppose) the affinity. Use `required`
 only when the check has no chance of succeeding without exact co-location.
 
 See [#933](https://github.com/NVIDIA/aicr/issues/933) for the motivating case:

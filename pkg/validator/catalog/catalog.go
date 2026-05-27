@@ -277,8 +277,8 @@ func validate(c *ValidatorCatalog) error {
 		}
 		for j, dep := range v.DependencyAffinity {
 			if err := dep.Validate(); err != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("validator %q: dependencyAffinity[%d]", v.Name, j), err)
+				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("validator %q: dependencyAffinity[%d]", v.Name, j))
 			}
 		}
 	}

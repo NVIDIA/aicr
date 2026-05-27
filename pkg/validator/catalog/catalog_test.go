@@ -960,7 +960,7 @@ validators:
         requirement: required
 `,
 			wantErr:       true,
-			wantErrSubstr: `validator "ai-service-metrics": dependencyAffinity[0]`,
+			wantErrSubstr: `componentRef is required`,
 		},
 		{
 			name: "invalid empty selector",
@@ -981,7 +981,7 @@ validators:
         requirement: required
 `,
 			wantErr:       true,
-			wantErrSubstr: `validator "ai-service-metrics": dependencyAffinity[0]`,
+			wantErrSubstr: `podLabelSelector is required`,
 		},
 		{
 			name: "invalid requirement value",
@@ -1004,7 +1004,7 @@ validators:
         requirement: soft
 `,
 			wantErr:       true,
-			wantErrSubstr: `validator "ai-service-metrics": dependencyAffinity[0]`,
+			wantErrSubstr: `invalid requirement "soft"`,
 		},
 	}
 	for _, tt := range tests {

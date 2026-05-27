@@ -285,9 +285,14 @@ func (v *Validator) runPhase(
 	// missing required components) at phase scope, so a single misconfigured
 	// entry doesn't strand a partial deploy of earlier entries.
 	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during dependencyAffinity pre-flight", ctx.Err())
+		default:
+		}
 		if _, err := v1.BuildOrchestratorAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("dependencyAffinity pre-flight failed for validator %q", entry.Name), err)
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("dependencyAffinity pre-flight failed for validator %q", entry.Name))
 		}
 	}
 

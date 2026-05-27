@@ -67,8 +67,8 @@ func BuildOrchestratorAffinity(
 
 	for _, dep := range deps {
 		if err := dep.Validate(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-				"invalid dependencyAffinity", err)
+			return nil, errors.PropagateOrWrap(err,
+				errors.ErrCodeInvalidRequest, "invalid dependencyAffinity")
 		}
 
 		ref, found := refByName[dep.ComponentRef]
