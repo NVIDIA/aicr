@@ -52,11 +52,14 @@ spec:
     Asserts that the root Application is present and every Application in
     the argocd namespace reaches one of the 4 terminal-pass states.
   bindings:
-    # rootApp is overridden via `chainsaw test --values rootApp=<name>`.
-    # Default matches argocd-helm-oci so this test is invocable for ad-hoc
-    # checks against argocd-helm bundles without arguments.
+    # rootApp is overridden via `chainsaw test --set rootApp=<name>`.
+    # The CLI's `--set key=value` populates the implicit `$values`
+    # binding; we surface it here as a top-level `$rootApp` binding so
+    # callers can leave the test invocable without arguments (defaulting
+    # to argocd-helm-oci's root App). The `$values.rootApp || 'aicr-stack'`
+    # fallback handles the no-arg case for ad-hoc local invocation.
     - name: rootApp
-      value: aicr-stack
+      value: ($values.rootApp || 'aicr-stack')
   timeouts:
     # KWOK_ARGOCD_SYNC_TIMEOUT default. The argocd-helm-oci wrapper takes
     # slightly longer to converge than argocd-oci because the parent

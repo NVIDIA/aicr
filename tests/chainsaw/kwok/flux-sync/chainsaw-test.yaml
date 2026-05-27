@@ -42,10 +42,13 @@ spec:
     Wait for Flux reconciliation to converge on the KWOK deployer matrix.
     Asserts each stage of the pipeline reaches Ready=True in sequence.
   bindings:
+    # See the argocd-sync test for the $values vs bindings pattern.
+    # CLI `--set <key>=<value>` populates `$values.<key>`; the bindings
+    # below pull that through with a default fallback for ad-hoc runs.
     - name: ociRepositoryName
-      value: aicr-bundle
+      value: ($values.ociRepositoryName || 'aicr-bundle')
     - name: kustomizationName
-      value: aicr-bundle
+      value: ($values.kustomizationName || 'aicr-bundle')
   timeouts:
     # KWOK_FLUX_SYNC_TIMEOUT default (500s in the bash gate). Flux's
     # reconcile loop has longer default intervals than Argo CD's
@@ -66,8 +69,12 @@ spec:
         surface — argocd-* catches the same class of bug via repo-server.
       try:
         - assert:
+            # Flux v2.x stabilized OCIRepository under v1 (the bundler
+            # templates at pkg/bundler/deployer/flux/templates/ emit
+            # this version). v1beta2 is the older API and may not be
+            # served by the cluster's source-controller.
             resource:
-              apiVersion: source.toolkit.fluxcd.io/v1beta2
+              apiVersion: source.toolkit.fluxcd.io/v1
               kind: OCIRepository
               metadata:
                 name: ($ociRepositoryName)
