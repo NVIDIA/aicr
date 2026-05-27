@@ -1,0 +1,383 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Workflow 1 of 2 for the warning-only recipe-evidence gate.
+#
+# Discovers leaf overlays affected by the PR diff (reusing the kwok-recipes
+# Tier 2 base-chain walk), then for each affected recipe:
+#
+#   1. Checks for recipes/evidence/<slug>.yaml (the pointer file produced
+#      by `aicr validate --emit-attestation`).
+#   2. Computes the canonical digest of the current resolved recipe with
+#      `aicr evidence digest -r recipes/overlays/<file>.yaml`.
+#   3. If a pointer exists, runs `aicr evidence verify` to validate the
+#      bundle and extract the signed `predicate.recipe.digest`, then
+#      compares it against the current digest to detect drift.
+#
+# All results aggregate into a single Markdown report uploaded as an
+# artifact. This workflow has no write permissions and never blocks
+# merge — its sole job is to produce the report. The companion
+# recipe-evidence-comment.yaml posts the sticky PR comment.
+#
+# Known limitations (tracked as follow-ups, not blockers for v1):
+#   * `go build` here compiles aicr from PR-supplied source. On fork PRs
+#     that's an arbitrary-code-execution surface — read-only token limits
+#     blast radius, but a hardened version should build from origin/main
+#     (or pull a pinned release binary) and run that against PR recipes.
+#   * `aicr evidence verify` fetches OCI artifacts from URLs the PR's
+#     pointer file can choose, which is an SSRF / ambient-creds surface.
+#     A future revision should constrain registries via an allow-list.
+#   * The pointer file name is computed as `basename overlay .yaml`,
+#     while `aicr validate --emit-attestation` writes pointers named
+#     after the criteria-derived slug (RecipeNameFor). For overlay files
+#     not following the canonical naming, pointers will be reported as
+#     missing even when valid evidence exists.
+#   * Discovery walks `spec.base` ancestors but not `spec.mixins`; mixin
+#     edits and changes under `recipes/checks/`, `recipes/components/`
+#     (outside literal valuesFile refs) won't promote affected leaves.
+#     Parity with the existing kwok-recipes Tier 2 classifier.
+
+name: "Recipe Evidence: Verify"
+
+on:
+  pull_request:
+    paths:
+      - 'recipes/**'
+      - '!**.md'
+      - '.github/workflows/recipe-evidence.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evidence-check:
+    name: Verify recipe evidence (warning-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+          # Full history needed for `git diff base..head` in discovery.
+          fetch-depth: 0
+
+      - name: Prepare report directory
+        # The companion workflow derives the PR number from the trusted
+        # workflow_run.head_sha (via the commits/<sha>/pulls API), so we
+        # don't write pr_number into the artifact here — it would be
+        # fork-attacker-controlled and ignored anyway.
+        run: |
+          mkdir -p evidence-report
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Build aicr
+        run: |
+          set -euo pipefail
+          go build -o ./bin/aicr ./cmd/aicr
+          ./bin/aicr --version
+
+      - name: Discover affected leaf overlays
+        id: discover
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Compute the diff between PR base and head. Fail closed if git
+          # can't produce a diff — silently empty output would hide
+          # affected-recipe drift. Use three-dot range so we only see what
+          # the PR actually changed (relative to the merge base), not main
+          # commits that landed after the PR was opened.
+          if ! changed_files=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>&1); then
+            echo "::error::git diff failed — cannot compute affected overlays"
+            echo "git diff output: ${changed_files}"
+            exit 1
+          fi
+
+          # If registry.yaml or base.yaml changed, every leaf is potentially
+          # affected — broad-impact path. Walking each leaf's base chain to
+          # confirm would be exact but expensive; for a warning-only gate we
+          # promote the full leaf set and let the comment flag the breadth.
+          promote_all=false
+          if echo "$changed_files" | grep -qE '^recipes/(registry\.yaml|overlays/base\.yaml)$'; then
+            promote_all=true
+            echo "registry.yaml or base.yaml changed — promoting all leaf overlays"
+          fi
+
+          affected="[]"
+          for overlay in recipes/overlays/*.yaml; do
+            name=$(basename "$overlay" .yaml)
+            service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
+            accel=$(yq eval '.spec.criteria.accelerator // ""' "$overlay" 2>/dev/null || true)
+
+            # Leaf filter: skip intermediates and wildcards. Evidence is
+            # only meaningful for user-selectable, hardware-bound recipes.
+            if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+              continue
+            fi
+            if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
+              continue
+            fi
+
+            if [[ "$promote_all" == "true" ]]; then
+              affected=$(echo "$affected" | jq -c --arg r "$name" '. + [$r]')
+              continue
+            fi
+
+            include=false
+
+            # Rule 1: overlay file itself changed.
+            if echo "$changed_files" | grep -qF "recipes/overlays/${name}.yaml"; then
+              include=true
+            fi
+
+            # Rule 2: an ancestor overlay in the base chain changed.
+            if [[ "$include" == "false" ]]; then
+              current="$overlay"
+              while true; do
+                parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
+                if [[ -z "$parent" || "$parent" == "null" ]]; then
+                  break
+                fi
+                if echo "$changed_files" | grep -qF "recipes/overlays/${parent}.yaml"; then
+                  include=true
+                  break
+                fi
+                current="recipes/overlays/${parent}.yaml"
+                if [[ ! -f "$current" ]]; then
+                  break
+                fi
+              done
+            fi
+
+            # Rule 3: a component values file referenced by this overlay
+            # or any ancestor changed.
+            if [[ "$include" == "false" ]]; then
+              values_files=""
+              current="$overlay"
+              while true; do
+                vf=$(yq eval '.spec.componentRefs[].valuesFile // ""' "$current" 2>/dev/null | grep -v '^$' || true)
+                if [[ -n "$vf" ]]; then
+                  values_files="${values_files}"$'\n'"${vf}"
+                fi
+                parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
+                if [[ -z "$parent" || "$parent" == "null" ]]; then
+                  break
+                fi
+                current="recipes/overlays/${parent}.yaml"
+                if [[ ! -f "$current" ]]; then
+                  break
+                fi
+              done
+              for vf in $values_files; do
+                if echo "$changed_files" | grep -qF "recipes/${vf}"; then
+                  include=true
+                  break
+                fi
+              done
+            fi
+
+            if [[ "$include" == "true" ]]; then
+              affected=$(echo "$affected" | jq -c --arg r "$name" '. + [$r]')
+            fi
+          done
+
+          count=$(echo "$affected" | jq 'length')
+          echo "affected=${affected}" >> "$GITHUB_OUTPUT"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "promote_all=${promote_all}" >> "$GITHUB_OUTPUT"
+          echo "Affected leaf overlays: ${count}"
+
+      - name: Build evidence report
+        env:
+          AFFECTED: ${{ steps.discover.outputs.affected }}
+          PROMOTE_ALL: ${{ steps.discover.outputs.promote_all }}
+        run: |
+          set -euo pipefail
+
+          AICR=./bin/aicr
+          report=evidence-report/report.md
+
+          : > "$report"
+          {
+            echo "## Recipe evidence check"
+            echo
+            if [[ "$PROMOTE_ALL" == "true" ]]; then
+              echo "> **Broad impact:** \`recipes/registry.yaml\` or \`recipes/overlays/base.yaml\` changed;"
+              echo "> every leaf recipe is potentially affected. The list below covers all of them — each"
+              echo "> one would ideally have refreshed evidence before merge."
+              echo
+            fi
+          } >> "$report"
+
+          count=$(echo "$AFFECTED" | jq 'length')
+          warnings=0
+
+          if [[ "$count" -eq 0 ]]; then
+            {
+              echo "No leaf overlays affected by this PR."
+              echo
+              echo "_This gate is warning-only and never blocks merge._"
+            } >> "$report"
+            echo "Warnings: 0 (no affected overlays)"
+            exit 0
+          fi
+
+          {
+            echo "Affected leaf overlays: **${count}**"
+            echo
+            echo "| Recipe | Pointer | Verify | Digest match |"
+            echo "|---|---|---|---|"
+          } >> "$report"
+
+          # Track how many table rows we've written so we can truncate
+          # before the report exceeds GitHub's ~65KB comment-body cap on
+          # broad-impact PRs (registry/base edits → every leaf listed).
+          max_rows=80
+          rows_written=0
+          rows_truncated=0
+
+          # Iterate via `while read` (not `for x in $(...)`) so slugs
+          # containing shell metachars don't word-split or glob-expand.
+          while IFS= read -r slug; do
+            if [[ -z "$slug" ]]; then continue; fi
+            if [[ "$rows_written" -ge "$max_rows" ]]; then
+              rows_truncated=$((rows_truncated + 1))
+              continue
+            fi
+            overlay="recipes/overlays/${slug}.yaml"
+            pointer="recipes/evidence/${slug}.yaml"
+
+            current_digest=""
+            if ! current_digest=$("$AICR" evidence digest -r "$overlay" 2>/tmp/digest.err); then
+              echo "| \`${slug}\` | — | — | :warning: could not compute current digest |" >> "$report"
+              warnings=$((warnings + 1))
+              rows_written=$((rows_written + 1))
+              continue
+            fi
+
+            if [[ ! -f "$pointer" ]]; then
+              echo "| \`${slug}\` | :warning: missing | — | — |" >> "$report"
+              warnings=$((warnings + 1))
+              rows_written=$((rows_written + 1))
+              continue
+            fi
+
+            verify_json=/tmp/verify-${slug}.json
+            set +e
+            "$AICR" evidence verify "$pointer" --format json > "$verify_json" 2>/tmp/verify-${slug}.err
+            verify_exit=$?
+            set -e
+
+            # aicr maps both ErrCodeConflict (phase failures recorded;
+            # bundle valid) and ErrCodeInvalidRequest (bundle invalid) to
+            # OS exit 2 — see pkg/errors/exitcode.go. Disambiguate by
+            # whether the JSON payload contains a parseable predicate:
+            # phase-failure runs still write the full verify JSON, while
+            # invalid-bundle runs typically don't.
+            signed_digest=""
+            if [[ -s "$verify_json" ]]; then
+              signed_digest=$(jq -r '.predicate.recipe.digest // empty' "$verify_json" 2>/dev/null || true)
+            fi
+
+            case "$verify_exit" in
+              0)
+                verify_cell=":white_check_mark: passed"
+                ;;
+              2)
+                if [[ -n "$signed_digest" ]]; then
+                  verify_cell=":warning: phase failures recorded (informational)"
+                else
+                  verify_cell=":x: bundle invalid"
+                fi
+                ;;
+              *)
+                verify_cell=":x: verify error (exit ${verify_exit})"
+                ;;
+            esac
+
+            digest_cell="—"
+            if [[ -n "$signed_digest" ]]; then
+              if [[ "$signed_digest" == "$current_digest" ]]; then
+                digest_cell=":white_check_mark: matches"
+              else
+                digest_cell=":warning: stale (\`${signed_digest:0:12}…\` vs current \`${current_digest:0:12}…\`)"
+                warnings=$((warnings + 1))
+              fi
+            else
+              # No signed digest extractable (bundle invalid, schema
+              # mismatch, or future predicate shape we don't recognize).
+              # Attribute the warning to this row instead of leaving a
+              # bare em dash that looks like "not checked."
+              digest_cell=":warning: skipped (verify did not surface a signed digest)"
+              warnings=$((warnings + 1))
+            fi
+
+            echo "| \`${slug}\` | :white_check_mark: present | ${verify_cell} | ${digest_cell} |" >> "$report"
+            rows_written=$((rows_written + 1))
+          done < <(echo "$AFFECTED" | jq -r '.[]')
+
+          if [[ "$rows_truncated" -gt 0 ]]; then
+            {
+              echo "| _… +${rows_truncated} more (truncated to fit GitHub's comment-body cap)_ | | | |"
+            } >> "$report"
+          fi
+
+          {
+            echo
+            if [[ "$warnings" -gt 0 ]]; then
+              echo "### How to refresh evidence"
+              echo
+              echo "Run on a cluster matching the recipe's \`criteria\`:"
+              echo
+              echo '```shell'
+              echo "aicr snapshot -o snapshot.yaml"
+              echo "aicr validate \\"
+              echo "  -r recipes/overlays/<slug>.yaml \\"
+              echo "  -s snapshot.yaml \\"
+              echo "  --emit-attestation ./out \\"
+              echo "  --push ghcr.io/<your-fork>/aicr-evidence"
+              echo "cp ./out/pointer.yaml recipes/evidence/<slug>.yaml"
+              echo '```'
+              echo
+            fi
+            echo "_This gate is warning-only and never blocks merge. See [ADR-007](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/design/007-recipe-evidence.md) for the trust model._"
+          } >> "$report"
+
+          echo "Warnings: ${warnings}"
+
+      - name: Upload evidence report
+        # Always upload so even a partial report (e.g., aicr build failed
+        # mid-loop) reaches the comment workflow.
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: recipe-evidence-report
+          path: evidence-report/
+          retention-days: 7
