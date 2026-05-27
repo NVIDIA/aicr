@@ -66,7 +66,7 @@ type OSDimension struct {
 // criteria matched the cluster on which validate ran.
 type Fingerprint struct {
 	// Service is the Kubernetes service / cloud platform
-	// (eks, gke, aks, oke, kind, lke). Sourced from
+	// (eks, gke, aks, oke, kind, lke, bcm). Sourced from
 	// k8s.node.provider (parsed from spec.providerID).
 	Service Dimension `json:"service" yaml:"service"`
 
