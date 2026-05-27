@@ -1703,7 +1703,7 @@ mkdir -p "$OUTPUT_DIR"
 GPU_TYPES=("h100" "gb200" "b200" "a100" "l40" "rtx-pro-6000")
 
 # Kubernetes services
-K8S_SERVICES=("eks" "gke" "aks" "oke" "kind" "lke")
+K8S_SERVICES=("eks" "gke" "aks" "oke" "kind" "lke" "bcm")
 
 # OS distributions
 OS_TYPES=("ubuntu" "rhel" "cos")

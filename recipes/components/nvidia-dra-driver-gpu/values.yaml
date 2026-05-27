@@ -56,25 +56,17 @@ resources:
   gpus:
     enabled: true
 
-# gpu-operator-chart-version annotation forces a DaemonSet re-roll when
-# the gpu-operator chart (and its managed driver) bumps. The DRA
-# kubelet plugin loads libnvidia-ml.so at pod start and pins to the
-# driver version running at that moment; gpu-operator's k8s-driver-manager
-# reloads the host kernel modules during a driver bump but does NOT
-# restart the sibling DRA DaemonSet (its chart template hasn't changed),
-# leaving the kubelet plugin's NVML handle stale. CDI spec generation
-# then fails with "Driver/library version mismatch" and DRA-allocated
-# pods stay in ContainerCreating.
-#
-# Bumping this annotation value on every gpu-operator chart bump (here:
-# v26.3.1) changes the rendered pod template and forces helm upgrade to
-# roll the DaemonSet, picking up a fresh NVML handle against the
-# now-running driver. Track follow-up to automate this in #973.
+# The aicr.nvidia.com/gpu-operator-chart-version annotation that forces
+# a DaemonSet re-roll on every gpu-operator chart bump (stale-NVML
+# mitigation; see PR #965 for the underlying class of bug) is no longer
+# hand-maintained here. As of #973 it is injected by the bundler from
+# the resolved gpu-operator componentRef version after
+# extractComponentValues and before buildDeployer in
+# pkg/bundler/bundler.go (see injectDRAChartVersionAnnotation), so the
+# annotation can never drift from the actual chart pin. Recipes that
+# disable either gpu-operator or nvidia-dra-driver-gpu leave the
+# rendered values untouched.
 controller:
   priorityClassName: ""
-  podAnnotations:
-    aicr.nvidia.com/gpu-operator-chart-version: v26.3.1
 kubeletPlugin:
   priorityClassName: ""
-  podAnnotations:
-    aicr.nvidia.com/gpu-operator-chart-version: v26.3.1

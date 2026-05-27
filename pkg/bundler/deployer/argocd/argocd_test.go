@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
@@ -191,8 +193,8 @@ func TestGenerate_AppName(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read app-of-apps.yaml: %v", err)
 			}
-			if !strings.Contains(string(appOfApps), "name: "+tt.wantName+"\n") {
-				t.Errorf("app-of-apps.yaml missing %q metadata.name; got:\n%s", tt.wantName, appOfApps)
+			if !strings.Contains(string(appOfApps), `name: "`+tt.wantName+`"`+"\n") {
+				t.Errorf("app-of-apps.yaml missing quoted %q metadata.name; got:\n%s", tt.wantName, appOfApps)
 			}
 
 			readme, err := os.ReadFile(filepath.Join(outputDir, "README.md"))
@@ -206,6 +208,64 @@ func TestGenerate_AppName(t *testing.T) {
 			if !strings.Contains(string(readme), "argocd app sync "+tt.wantName) {
 				t.Errorf("README missing `argocd app sync %s`; got snippet:\n%s",
 					tt.wantName, snippetAround(string(readme), "argocd app sync"))
+			}
+		})
+	}
+}
+
+// TestGenerate_AppName_YAMLReservedScalars verifies the rendered
+// app-of-apps.yaml survives a kubectl-equivalent decode when AppName is a
+// DNS-1123-valid scalar that YAML would otherwise interpret as a non-string
+// type (integer, boolean, null, float). ValidateAppName accepts these
+// because DNS-1123 subdomain literally allows them, so the template — not
+// the validator — is responsible for forcing a string scalar.
+//
+// Decode path mirrors what kubectl does: sigs.k8s.io/yaml.YAMLToJSON →
+// unstructured.UnmarshalJSON → GetName(). Without the template's
+// `printf "%q"`, GetName() returns "" for non-string scalars because of
+// the val.(string) type assertion inside getNestedString.
+func TestGenerate_AppName_YAMLReservedScalars(t *testing.T) {
+	tests := []string{"123", "true", "false", "null", "1e3"}
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.17.2", Type: "helm",
+			Source: "https://charts.jetstack.io",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager"}
+
+	for _, appName := range tests {
+		t.Run(appName, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := &Generator{
+				RecipeResult:    recipeResult,
+				ComponentValues: map[string]map[string]any{"cert-manager": {}},
+				Version:         "v0.9.0",
+				AppName:         appName,
+			}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			raw, err := os.ReadFile(filepath.Join(outputDir, "app-of-apps.yaml"))
+			if err != nil {
+				t.Fatalf("read app-of-apps.yaml: %v", err)
+			}
+
+			jsonBytes, err := sigsyaml.YAMLToJSON(raw)
+			if err != nil {
+				t.Fatalf("YAMLToJSON: %v\nraw:\n%s", err, raw)
+			}
+			u := &unstructured.Unstructured{}
+			if err := u.UnmarshalJSON(jsonBytes); err != nil {
+				t.Fatalf("UnmarshalJSON: %v\njson: %s", err, jsonBytes)
+			}
+			if got := u.GetName(); got != appName {
+				t.Errorf("unstructured.GetName() = %q, want %q; rendered manifest treated metadata.name as a non-string YAML scalar.\nraw:\n%s", got, appName, raw)
 			}
 		})
 	}

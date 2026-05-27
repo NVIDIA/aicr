@@ -154,7 +154,7 @@ _No images extracted._
 
 ### network-operator
 
-- `busybox:1.37@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e`
+- `busybox:1.37@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`

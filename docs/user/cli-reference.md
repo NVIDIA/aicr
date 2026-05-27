@@ -378,7 +378,7 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke |
+| `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke, bcm |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, talos |
@@ -2063,6 +2063,48 @@ aicr verify ./my-bundle --format json
 ```
 
 > **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
+
+---
+
+### aicr evidence digest
+
+Print the canonical sha256 of a resolved recipe — byte-for-byte the same value recorded in `predicate.recipe.digest` by `aicr validate --emit-attestation`. The input is resolved through the same recipe builder path as `aicr validate -r`, so overlays and mixins are hydrated before hashing.
+
+Use this to detect drift between a signed evidence pointer and the current recipe on a PR branch without pulling the OCI artifact.
+
+**Synopsis:**
+
+```shell
+aicr evidence digest -r <recipe-or-overlay> [flags]
+```
+
+**Flags:**
+
+| Flag | Alias | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--recipe` | `-r` | string | | Path/URI to a recipe or overlay file (file, HTTP/HTTPS, or `cm://namespace/name`). Required. |
+| `--kubeconfig` | | string | | Kubeconfig path; consulted only when the input is a `cm://` URI. |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Digest printed to stdout. |
+| non-zero | Input could not be loaded, hydrated, or canonicalized. |
+
+**Examples:**
+
+```shell
+# Print the digest of a hydrated overlay.
+aicr evidence digest -r recipes/overlays/h100-eks-ubuntu-training.yaml
+
+# CI drift gate: compare the digest pinned in a signed evidence bundle
+# against the recipe currently on the PR branch.
+signed=$(aicr evidence verify recipes/evidence/<slug>.yaml --format json \
+         | jq -r .predicate.recipe.digest)
+current=$(aicr evidence digest -r recipes/overlays/<file>.yaml)
+[[ "$signed" == "$current" ]] || echo "evidence is stale"
+```
 
 ---
 

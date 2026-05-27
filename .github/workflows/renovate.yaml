@@ -112,6 +112,15 @@ jobs:
           RENOVATE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RENOVATE_REPOSITORIES: '["${{ github.repository }}"]'
           RENOVATE_ONBOARDING: "false"
-          # Allow the chainsaw post-upgrade hook (refreshes per-arch SHA256s).
-          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^\\./tools/update-chainsaw-checksums "]'
+          # Allow the per-arch SHA256 checksum refresh hooks. Renovate refuses
+          # to run any postUpgradeTask command that does not match an entry in
+          # this allowlist — silently, with only a warn-level log line. Keep
+          # the regex broad enough to cover every tools/update-*-checksums
+          # script so adding a new checksum-pinned dependency (see the
+          # postUpgradeTasks entries in .github/renovate.json5) does not
+          # require a parallel edit here. Symptom of a mismatch is stale
+          # checksums getting committed alongside a version bump (the version
+          # changes but the helmfile_checksums/chainsaw_checksums block does
+          # not), which then breaks E2E/CLI E2E at the sha256 verify step.
+          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^\\./tools/update-[a-z]+-checksums "]'
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
