@@ -22,8 +22,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // evidenceDigestCmd implements `aicr evidence digest -r <recipe-or-overlay>`.
@@ -79,17 +77,7 @@ func runEvidenceDigestCmd(ctx context.Context, cmd *cli.Command) error {
 			"--recipe is required: aicr evidence digest -r <recipe-or-overlay>")
 	}
 
-	rec, err := recipe.LoadFromFile(ctx, path, cmd.String("kubeconfig"), version)
-	if err != nil {
-		return err
-	}
-
-	recipeYAML, err := serializer.MarshalYAMLDeterministic(rec)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for digest", err)
-	}
-
-	digest, err := attestation.SubjectDigest(recipeYAML)
+	digest, err := attestation.ComputeRecipeDigest(ctx, path, cmd.String("kubeconfig"), version)
 	if err != nil {
 		return err
 	}

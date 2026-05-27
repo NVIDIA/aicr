@@ -2073,11 +2073,13 @@ Print the canonical sha256 of a resolved recipe — byte-for-byte the same value
 Use this to detect drift between a signed evidence pointer and the current recipe on a PR branch without pulling the OCI artifact.
 
 **Synopsis:**
+
 ```shell
 aicr evidence digest -r <recipe-or-overlay> [flags]
 ```
 
 **Flags:**
+
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a recipe or overlay file (file, HTTP/HTTPS, or `cm://namespace/name`). Required. |
@@ -2091,6 +2093,7 @@ aicr evidence digest -r <recipe-or-overlay> [flags]
 | non-zero | Input could not be loaded, hydrated, or canonicalized. |
 
 **Examples:**
+
 ```shell
 # Print the digest of a hydrated overlay.
 aicr evidence digest -r recipes/overlays/h100-eks-ubuntu-training.yaml
