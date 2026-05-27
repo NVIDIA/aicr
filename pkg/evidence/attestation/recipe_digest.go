@@ -41,7 +41,7 @@ func ComputeRecipeDigest(ctx context.Context, path, kubeconfig, version string) 
 
 	recipeYAML, err := serializer.MarshalYAMLDeterministic(rec)
 	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for digest", err)
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to marshal recipe for digest")
 	}
 
 	return SubjectDigest(recipeYAML)
