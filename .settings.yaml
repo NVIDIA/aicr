@@ -62,7 +62,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.2.0'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.5.1'
+  helmfile: 'v1.5.2'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
@@ -97,7 +97,7 @@ testing_tools:
   # kustomize-controller and helm-controller are the only controllers the
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
-  flux_version: 'v2.8.7'
+  flux_version: 'v2.8.8'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v1.4.3'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
