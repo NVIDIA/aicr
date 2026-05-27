@@ -471,7 +471,7 @@ The gpu-operator version pin from `gb200-any` lands in the hydrated recipe witho
 
 **Naming convention.** The `-any` (or `-any-<intent>`) segment signals this pattern: the static segments indicate the fixed criteria dimensions (accelerator, optionally intent), and `any` marks the wildcard dimension. Examples: `gb200-any.yaml`, `h100-any.yaml`, `rtx-pro-6000-any.yaml`.
 
-**Don't carry per-fabric values here.** Cross-service-uniform content (gpu-operator version pin, standard health checks) is a good fit. Per-fabric content (NCCL bandwidth thresholds across services with different network fabrics — EFA, TCPXO, RoCE) is not — declare those in each service-specific leaf instead. The intent-scoped `gb200-any-training.yaml` overlay that previously carried a cross-service NCCL threshold was retired in #1052 for this reason; its B200 sibling (`b200-any-training.yaml`) is retired by #1004 (PR #1053) as a natural consequence of adding the first concrete B200 leaf.
+**Don't carry per-fabric values here.** Cross-service-uniform content (gpu-operator version pin, standard health checks) is a good fit. Per-fabric content (NCCL bandwidth thresholds across services with different network fabrics — EFA, TCPXO, RoCE) is not — declare those in each service-specific leaf instead. The intent-scoped `gb200-any-training.yaml` and `b200-any-training.yaml` overlays that previously carried cross-service NCCL thresholds were retired for this reason (`gb200-any-training` in #1052, `b200-any-training` in #1053).
 
 **When to use a criteria-wildcard overlay vs a mixin:**
 
