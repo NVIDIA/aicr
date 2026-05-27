@@ -207,7 +207,6 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		}
 
 		// Registry-driven per-release flags. HasSelfRefCRDs emits
-		// Registry-driven per-release flags. HasSelfRefCRDs emits
 		// disableValidation: true so helm-diff skips the live-cluster
 		// mapper check for charts whose own templates reference CRDs
 		// they ship in `crds/` (e.g., gpu-operator's clusterpolicy

@@ -260,6 +260,8 @@ jobs:
           kubectl_version: ${{ steps.versions.outputs.kubectl }}
           yq_version: ${{ steps.versions.outputs.yq }}
           flux_version: ${{ steps.versions.outputs.flux }}
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   # ── Tier 2: diff-aware accelerator tests (PR only, conditional) ──
@@ -298,6 +300,8 @@ jobs:
           kubectl_version: ${{ steps.versions.outputs.kubectl }}
           yq_version: ${{ steps.versions.outputs.yq }}
           flux_version: ${{ steps.versions.outputs.flux }}
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   # ── Tier 3: full matrix (push to main + nightly schedule) ──
@@ -343,6 +347,8 @@ jobs:
           kubectl_version: ${{ steps.versions.outputs.kubectl }}
           yq_version: ${{ steps.versions.outputs.yq }}
           flux_version: ${{ steps.versions.outputs.flux }}
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   # ── Summary: aggregate all tiers ──
