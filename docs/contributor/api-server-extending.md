@@ -1088,7 +1088,7 @@ type RecipeRequest struct {
     OS       string `validate:"required,oneof=ubuntu rhel cos"`
     OSVersion string `validate:"omitempty,semver"`
     GPU      string `validate:"required,oneof=h100 gb200 b200 a100 l40 rtx-pro-6000"`
-    Service  string `validate:"omitempty,oneof=eks gke aks oke kind lke"`
+    Service  string `validate:"omitempty,oneof=eks gke aks oke kind lke bcm"`
 }
 
 func handleRecipe(w http.ResponseWriter, r *http.Request) {

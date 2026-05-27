@@ -67,6 +67,7 @@
 //   - CriteriaServiceOKE: Oracle OKE
 //   - CriteriaServiceKind: kind (local clusters)
 //   - CriteriaServiceLKE: Linode LKE
+//   - CriteriaServiceBCM: NVIDIA Base Command Manager
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:

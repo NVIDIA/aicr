@@ -165,7 +165,7 @@ func TestAllCriteriaServiceTypes_UnionWithRegistry(t *testing.T) {
 		DefaultRegistry().Register(FieldService, "ncp-x", OriginExternal)
 		DefaultRegistry().Register(FieldService, "eks", OriginExternal) // already in static — must dedupe
 		got := AllCriteriaServiceTypes()
-		want := []string{"aks", "eks", "gke", "kind", "lke", "ncp-x", "oke"}
+		want := []string{"aks", "bcm", "eks", "gke", "kind", "lke", "ncp-x", "oke"}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("AllCriteriaServiceTypes = %v, want %v", got, want)
 		}
