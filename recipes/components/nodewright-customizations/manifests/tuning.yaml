@@ -67,6 +67,7 @@ spec:
     nvidia-setup-kernel:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
       version: "0.2.2"
+      containerSHA: sha256:76913a5deff9513f348dd4b7d66cbca9ea1dd22df63baa4ac2f6b2fa7e93664e
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}
@@ -86,6 +87,7 @@ spec:
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
       version: "0.3.0"
+      containerSHA: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
       interrupt:
         type: reboot
       env:
@@ -106,6 +108,7 @@ spec:
     nvidia-setup-full:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
       version: "0.2.2"
+      containerSHA: sha256:76913a5deff9513f348dd4b7d66cbca9ea1dd22df63baa4ac2f6b2fa7e93664e
       interrupt:
         type: reboot
       resources:

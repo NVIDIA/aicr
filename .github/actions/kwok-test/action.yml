@@ -53,6 +53,12 @@ inputs:
     description: 'Flux CLI version to install (required for flux-oci deployer)'
     required: false
     default: ''
+  chainsaw_version:
+    description: 'Chainsaw version to install (required — used by kwok/scripts/validate-scheduling.sh sync gate)'
+    required: true
+  chainsaw_sha256:
+    description: 'Chainsaw SHA256 checksum for linux/amd64'
+    required: true
   kind_node_image:
     description: 'Kind node image for testing'
     required: false
@@ -84,6 +90,7 @@ runs:
           /usr/local/bin/kubectl
           /usr/local/bin/yq
           /usr/local/bin/flux
+          /usr/local/bin/chainsaw
         key: kwok-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.settings.yaml') }}
 
     - name: Prep runner for Kind
@@ -104,6 +111,11 @@ runs:
         flux_version: '${{ inputs.flux_version }}'
         install_goreleaser: 'true'
         goreleaser_version: '${{ inputs.goreleaser_version }}'
+        # chainsaw drives the argocd-* / flux-oci sync gates from
+        # kwok/scripts/validate-scheduling.sh (issue #962 migration).
+        install_chainsaw: 'true'
+        chainsaw_version: '${{ inputs.chainsaw_version }}'
+        chainsaw_sha256: '${{ inputs.chainsaw_sha256 }}'
 
     - name: Build aicr binary
       shell: bash
