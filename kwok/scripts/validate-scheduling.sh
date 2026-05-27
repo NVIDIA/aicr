@@ -1148,544 +1148,126 @@ EOF
     log_info "Bundle deployed successfully"
 }
 
-# Assert the deployer's root Argo CD Application exists within
-# KWOK_ARGOCD_ROOT_GRACE seconds (default 30). Without this gate the script
-# treats "kubectl apply / helm install silently produced no Application"
-# (webhook reject, CRD scope mismatch, RBAC denial) as a slow controller
-# and burns the full KWOK_ARGOCD_SYNC_TIMEOUT before failing with a
-# misleading "deadline hit" message.
+# Chainsaw-based sync gate for the argocd-* and flux-oci deployer lanes.
+# Replaces the ~500-line bash + jq machinery (wait_for_argocd_root_app,
+# wait_for_argocd_sync, dump_argocd_failures, and their flux-* peers) with
+# thin shims that invoke the canonical chainsaw scenarios under
+# tests/chainsaw/kwok/{argocd,flux}-sync/. See issue #962.
 #
-# On failure, dumps recent events in the argocd namespace and returns 1.
-wait_for_argocd_root_app() {
+# The bash side still owns:
+#
+#   1. Per-deployer binding selection (ARGOCD_ROOT_APP shape, Flux CR
+#      names) — set in the matrix-shape preamble at the top of this file.
+#   2. Exit-code translation. Chainsaw collapses pass / fail to 0 / 1;
+#      run-all-recipes.sh's 3-strike rule needs EXIT_ARGOCD_SYNC_TIMEOUT
+#      (50) on the retryable path. The shim maps chainsaw exit 1 to 50
+#      unconditionally — hard errors (CRD missing, RBAC denial) thus
+#      consume strike budget instead of failing fast. Three consecutive
+#      hard errors still bail the matrix job; the behavior difference
+#      vs. the old bash gate is that they take three attempts instead
+#      of one. Accept the tradeoff for the ~500 LOC reduction.
+#   3. Failure-class logging. Chainsaw emits its own assertion report;
+#      the shim adds a one-line log_info on PASS and log_error on FAIL
+#      so the run-all-recipes.sh transcript still has a single grep-able
+#      summary line per recipe.
+#
+# Chainsaw provides:
+#
+#   - Polling loop with deadline (spec.timeouts.assert overridden via
+#     --assert-timeout from KWOK_*_SYNC_TIMEOUT).
+#   - Per-resource assertion that ALL Applications / HelmReleases / etc.
+#     match the terminal-pass predicate.
+#   - catch: blocks that dump per-resource status + controller log tails
+#     on assertion failure (parity with the prior dump_*_failures bash).
+#
+# Diagnostic-parity audit:
+#
+#   - dump_argocd_failures bash               → argocd-sync test's catch block
+#   - dump_flux_failures bash                 → flux-sync test's per-step catch blocks
+#   - StatefulSet/Deployment fallback for     → preserved verbatim in the
+#     argocd-application-controller logs       argocd-sync catch script
+#   - Flux source-watcher Deployment/         → preserved verbatim in the
+#     StatefulSet fallback                     flux-sync ArtifactGenerator catch
+
+wait_for_argocd_sync() {
     if [[ -z "$ARGOCD_ROOT_APP" ]]; then
         log_error "ARGOCD_ROOT_APP is empty (DEPLOYER=${DEPLOYER})"
         return 1
     fi
 
-    local grace="${KWOK_ARGOCD_ROOT_GRACE:-30}"
-    local start=$SECONDS
-
-    log_info "Waiting for root Application ${ARGOCD_ROOT_APP} to appear (grace ${grace}s)..."
-
-    while (( SECONDS - start < grace )); do
-        if kubectl get application "$ARGOCD_ROOT_APP" -n argocd \
-                >/dev/null 2>&1; then
-            log_info "Root Application ${ARGOCD_ROOT_APP} present"
-            return 0
-        fi
-        sleep 2
-    done
-
-    log_error "Root Application ${ARGOCD_ROOT_APP} not present after ${grace}s"
-    log_error "kubectl apply / helm install for DEPLOYER=${DEPLOYER} produced no Application resource."
-    log_error "--- argocd namespace events (last 20) ---"
-    kubectl get events -n argocd --sort-by=.lastTimestamp 2>&1 | tail -20 || true
-    return 1
-}
-
-# Wait until every Argo CD Application in the argocd namespace reaches a
-# terminal pass state. The pass set is intentionally broader than just
-# "Synced + Healthy" so KWOK simulation gaps and the real-world
-# operator-mutation-after-sync pattern do not mask a healthy deployment:
-#
-#   1. Synced + Healthy ........................ canonical pass
-#   2. Synced + Progressing .................... KWOK fake pods often sit in
-#                                                Progressing because the
-#                                                health controller wants a
-#                                                deeper readiness signal
-#                                                that stage-fast cannot
-#                                                simulate (DaemonSet pods,
-#                                                Prometheus StatefulSet
-#                                                under the operator,
-#                                                etc.); accepted per
-#                                                ADR-008.
-#   3. OutOfSync + Healthy + last op succeeded . Operator-mutation drift:
-#                                                charts like gpu-operator
-#                                                and nvidia-dra-driver-gpu
-#                                                ship CRs that their own
-#                                                controller updates post-
-#                                                sync. Argo CD initiates
-#                                                the sync, the operation
-#                                                completes ("successfully
-#                                                synced (all tasks run)"),
-#                                                resources are Healthy,
-#                                                then drift reappears as
-#                                                the operator reconciles.
-#                                                In production these are
-#                                                handled with per-App
-#                                                ignoreDifferences; for
-#                                                KWOK we accept the
-#                                                Healthy-post-success
-#                                                state as a real pass and
-#                                                rely on operationState
-#                                                .phase=Succeeded to
-#                                                distinguish it from a
-#                                                still-broken OutOfSync.
-#   4. Synced + Degraded + last op succeeded ... Chart applied but health
-#                                                controller marks at
-#                                                least one managed
-#                                                resource Degraded —
-#                                                typically a Pod whose
-#                                                Ready signal KWOK cannot
-#                                                produce (leader election
-#                                                like kai-scheduler,
-#                                                charts with strict probe
-#                                                semantics) or a Deployment
-#                                                that cannot reach
-#                                                desired replicas under
-#                                                stage-fast. The sync
-#                                                operation succeeded — the
-#                                                bundle was applied. The
-#                                                health gradient is the
-#                                                chart's runtime contract
-#                                                + KWOK fidelity, not a
-#                                                bundle defect. Same
-#                                                operationState.phase=
-#                                                Succeeded guard as #3
-#                                                prevents masking a
-#                                                still-broken sync.
-#
-# Returns 0 on success. On deadline hit OR on a `kubectl get applications`
-# hard error (CRD missing, RBAC denied, apiserver unreachable), calls
-# dump_argocd_failures and returns 1.
-#
-# Guards (issue #843 follow-up review):
-#
-#   MUST-FIX 1 — Asserts the deployer's root Application exists (call site
-#   pre-checks via wait_for_argocd_root_app). Then derives the expected
-#   set of child Applications from the root's status.resources so a
-#   root-only "Synced + Healthy" state cannot masquerade as a true pass
-#   (the chart wrapping in argocd-helm-oci can land just the root
-#   Application without children if the OCI pull silently degrades).
-#
-#   MUST-FIX 2 — Distinguishes a `kubectl get applications` non-zero exit
-#   (CRD missing, permission denied, apiserver unreachable) from a
-#   well-formed empty list. A hard error fails the loop immediately
-#   instead of spinning to the deadline.
-#
-# Deadline: KWOK_ARGOCD_SYNC_TIMEOUT env var (default 300s).
-wait_for_argocd_sync() {
-    if ! wait_for_argocd_root_app; then
-        dump_argocd_failures
+    local chainsaw_bin="${CHAINSAW_BIN:-chainsaw}"
+    if ! command -v "$chainsaw_bin" &>/dev/null; then
+        log_error "chainsaw not found on PATH: ${chainsaw_bin}"
+        log_error "Install with: make tools-setup (chainsaw is pinned in .settings.yaml)"
         return 1
     fi
 
-    local deadline="${KWOK_ARGOCD_SYNC_TIMEOUT:-300}"
-    local start=$SECONDS
+    local test_dir="${REPO_ROOT}/tests/chainsaw/kwok/argocd-sync"
+    local sync_timeout="${KWOK_ARGOCD_SYNC_TIMEOUT:-300}s"
 
-    log_info "Waiting for Argo CD Applications to sync (deadline ${deadline}s)..."
+    log_info "Argo CD sync gate (chainsaw): rootApp=${ARGOCD_ROOT_APP} timeout=${sync_timeout}"
 
-    while (( SECONDS - start < deadline )); do
-        local apps_json apps_rc total pending root_sync root_health
-        # MUST-FIX 2: distinguish a hard error from an empty list. We
-        # cannot use command substitution + `|| echo '{"items":[]}'`
-        # because that swallows the exit code.
-        #
-        # Subtle bash semantics: a bare `apps_json=$(kubectl ...)`
-        # assignment under `set -euo pipefail` (line 72) DOES trip
-        # set -e when the substituted command exits non-zero — bash
-        # exits before the next line's `apps_rc=$?` can capture the
-        # status. Wrap in an `if cmd; then ok; else capture; fi`
-        # block: command-substitution failures inside an `if`
-        # condition are exempt from set -e (per the manual), so we
-        # get the exit code into `apps_rc` safely.
-        if apps_json=$(kubectl get applications -n argocd -o json 2>/dev/null); then
-            apps_rc=0
-        else
-            apps_rc=$?
-        fi
-        if (( apps_rc != 0 )); then
-            log_error "kubectl get applications -n argocd failed (rc=${apps_rc})"
-            log_error "Likely cause: applications.argoproj.io CRD missing, RBAC denied, or apiserver unreachable."
-            log_error "--- kubectl get applications stderr ---"
-            kubectl get applications -n argocd 2>&1 | tail -20 || true
-            dump_argocd_failures
-            return 1
-        fi
-
-        total=$(echo "$apps_json" | jq '.items | length')
-
-        # MUST-FIX 1: root must be Synced+Healthy AND its expected
-        # children (status.resources[].name) must all be reconciled. We
-        # use status.resources because it self-adjusts per recipe — no
-        # static min-count env var to maintain.
-        root_sync=$(echo "$apps_json" \
-            | jq -r --arg n "$ARGOCD_ROOT_APP" \
-                '.items[] | select(.metadata.name == $n) | .status.sync.status // "Unknown"')
-        root_health=$(echo "$apps_json" \
-            | jq -r --arg n "$ARGOCD_ROOT_APP" \
-                '.items[] | select(.metadata.name == $n) | .status.health.status // "Unknown"')
-
-        if [[ "$root_sync" != "Synced" || \
-                ( "$root_health" != "Healthy" && "$root_health" != "Progressing" ) ]]; then
-            log_debug "Root ${ARGOCD_ROOT_APP} not ready yet (sync=${root_sync} health=${root_health}; total=${total})..."
-            sleep 5
-            continue
-        fi
-
-        # Children expected (per the root's status.resources). For the
-        # argocd-oci app-of-apps shape, status.resources lists the child
-        # Applications by name. For argocd-helm-oci the wrapper App
-        # references chart subresources — fall back to "any non-root
-        # Application is a child" if status.resources is empty.
-        local expected_children
-        expected_children=$(echo "$apps_json" \
-            | jq -r --arg n "$ARGOCD_ROOT_APP" '
-                .items[]
-                | select(.metadata.name == $n)
-                | (.status.resources // [])
-                | map(select(.kind == "Application"))
-                | length')
-
-        # Documented fallback: when status.resources does not list any
-        # Application children but other Applications exist in the
-        # namespace, treat the count of non-root Applications as the
-        # observed-children count. The argocd-helm-oci wrapper's
-        # status.resources can take a moment to populate while the
-        # children it created are already reconciling; without this
-        # fallback the loop sleeps to the deadline even when every
-        # child is Synced+Healthy.
-        if [[ "$expected_children" -eq 0 ]]; then
-            local observed_children
-            observed_children=$(echo "$apps_json" \
-                | jq -r --arg n "$ARGOCD_ROOT_APP" \
-                    '[.items[] | select(.metadata.name != $n)] | length')
-            if [[ "$observed_children" -gt 0 ]]; then
-                expected_children="$observed_children"
-            fi
-        fi
-
-        if [[ "$expected_children" -eq 0 ]]; then
-            # No children declared by the root yet. If we're the only
-            # Application in the namespace and the controller has been
-            # given a chance to reconcile, treat as root-only success
-            # only when status.resources has resolved (controller has
-            # observed the source). Otherwise keep waiting.
-            local resources_populated
-            resources_populated=$(echo "$apps_json" \
-                | jq --arg n "$ARGOCD_ROOT_APP" '
-                    .items[]
-                    | select(.metadata.name == $n)
-                    | (.status.resources // []) | length > 0')
-            if [[ "$total" -eq 1 && "$resources_populated" == "true" ]]; then
-                log_warn "Root Application ${ARGOCD_ROOT_APP} reconciled with zero child Applications"
-                log_warn "Bundle may have been wrapped-only (no expansion). total=${total}"
-                # Surfacing as success would mask the bug from MUST-FIX 1.
-                # Fail closed: a child-less root is never a real PASS for
-                # the deployer matrix (every recipe ships >= 1 component).
-                dump_argocd_failures
-                return 1
-            fi
-            log_debug "Root Application present but children not yet declared (total=${total})..."
-            sleep 5
-            continue
-        fi
-
-        # Pending = NOT one of the four terminal-pass states described
-        # in the function docstring. Arms 3 & 4 are the load-bearing
-        # ones for KWOK: they distinguish "bundle applied; chart-side
-        # runtime gap" (pass) from "bundle never applied" (fail) via
-        # operationState.phase=Succeeded.
-        pending=$(echo "$apps_json" \
-            | jq '[.items[]
-                  | . as $app
-                  | select(
-                      # NOT (Synced + Healthy)
-                      ($app.status.sync.status != "Synced"
-                       or $app.status.health.status != "Healthy")
-                      # AND NOT (Synced + Progressing)
-                      and ($app.status.sync.status != "Synced"
-                           or $app.status.health.status != "Progressing")
-                      # AND NOT (OutOfSync + Healthy + last op Succeeded)
-                      and ($app.status.sync.status != "OutOfSync"
-                           or $app.status.health.status != "Healthy"
-                           or ($app.status.operationState.phase // "") != "Succeeded")
-                      # AND NOT (Synced + Degraded + last op Succeeded)
-                      and ($app.status.sync.status != "Synced"
-                           or $app.status.health.status != "Degraded"
-                           or ($app.status.operationState.phase // "") != "Succeeded")
-                    )]
-                  | length')
-        if [[ "$pending" == "0" ]]; then
-            # MUST-FIX 1: log observed counts so a low total is auditable.
-            log_info "Argo CD sync PASS: ${total} Applications reached terminal pass state (root=${ARGOCD_ROOT_APP}, expected_children=${expected_children})"
-            return 0
-        fi
-        log_debug "Argo CD sync progress: ${pending}/${total} Applications still pending (expected_children=${expected_children})..."
-        sleep 5
-    done
-
-    log_error "Argo CD sync deadline (${deadline}s) hit"
-    dump_argocd_failures
-    # Distinct rc so run-all-recipes.sh can apply the 3-strike rule without
-    # parsing stderr. Other failure paths in this function still return 1.
-    return "$EXIT_ARGOCD_SYNC_TIMEOUT"
-}
-
-# Dump diagnostics on Argo CD sync failure: per-Application status fields
-# plus repo-server and application-controller log tails.
-dump_argocd_failures() {
-    log_error "--- Argo CD Applications (name / sync / health / conditions / op.message) ---"
-    kubectl get applications -n argocd -o json 2>/dev/null \
-        | jq -r '.items[] | {
-            name: .metadata.name,
-            sync: .status.sync.status,
-            health: .status.health.status,
-            conditions: .status.conditions,
-            operation: .status.operationState.message
-          }' \
-        2>&1 || true
-    log_error "--- argocd-repo-server (tail=200) ---"
-    kubectl logs -n argocd deploy/argocd-repo-server --tail=200 2>&1 || true
-    log_error "--- argocd-application-controller (tail=200) ---"
-    # Argo CD chart 9.x ships application-controller as a StatefulSet. Try
-    # StatefulSet first to avoid emitting a misleading "Deployment not
-    # found" error into the diagnostic dump on the common case; fall back
-    # to Deployment for older chart versions.
-    kubectl logs -n argocd statefulset/argocd-application-controller --tail=200 2>&1 \
-        || kubectl logs -n argocd deploy/argocd-application-controller --tail=200 2>&1 \
-        || true
-}
-
-# Assert the outer Flux Kustomization exists within KWOK_FLUX_ROOT_GRACE
-# seconds (default 30). Mirrors wait_for_argocd_root_app: a silently-missing
-# Kustomization (RBAC denial, CRD scope mismatch, webhook reject) gets
-# surfaced fast instead of burning the KWOK_FLUX_SYNC_TIMEOUT budget.
-wait_for_flux_root_app() {
-    if [[ -z "$FLUX_KUSTOMIZATION_NAME" ]]; then
-        log_error "FLUX_KUSTOMIZATION_NAME is empty (DEPLOYER=${DEPLOYER})"
-        return 1
-    fi
-
-    local grace="${KWOK_FLUX_ROOT_GRACE:-30}"
-    local start=$SECONDS
-
-    log_info "Waiting for Flux Kustomization ${FLUX_KUSTOMIZATION_NAME} to appear (grace ${grace}s)..."
-
-    while (( SECONDS - start < grace )); do
-        if kubectl get kustomization "$FLUX_KUSTOMIZATION_NAME" -n flux-system \
-                >/dev/null 2>&1; then
-            log_info "Kustomization ${FLUX_KUSTOMIZATION_NAME} present"
-            return 0
-        fi
-        sleep 2
-    done
-
-    log_error "Kustomization ${FLUX_KUSTOMIZATION_NAME} not present after ${grace}s"
-    log_error "kubectl apply for DEPLOYER=${DEPLOYER} produced no Kustomization resource."
-    log_error "--- flux-system namespace events (last 20) ---"
-    kubectl get events -n flux-system --sort-by=.lastTimestamp 2>&1 | tail -20 || true
-    return 1
-}
-
-# Validate the flux-oci bundle was successfully applied and all HelmReleases
-# reconciled. Local-chart components (manifest-only, pre-manifests, vendored
-# wrappers) use Flux's ArtifactGenerator to extract sub-directories from the
-# outer OCIRepository into ExternalArtifacts, referenced via HelmRelease
-# spec.chartRef. This eliminates the former placeholder GitRepository URL
-# and allows full reconciliation.
-#
-# What this lane validates:
-#   1. Flux source-controller could PULL the AICR bundle artifact (the layer
-#      mediaType + insecure HTTP wiring is correct).
-#   2. Flux kustomize-controller could PARSE the bundle's root
-#      kustomization.yaml and APPLY all manifests (no template-render bugs,
-#      no missing files, no schema violations).
-#   3. All HelmRelease CRs reach Ready=True — helm-controller could resolve
-#      chart sources (ExternalArtifact for local charts, HelmRepository for
-#      upstream charts) and reconcile each release.
-#   4. When present, ArtifactGenerator CRs reach Ready=True — proves
-#      source-watcher extracted local-chart sub-directories from the OCI
-#      bundle into ExternalArtifacts that helm-controller can consume.
-#
-# Returns 0 on success, EXIT_ARGOCD_SYNC_TIMEOUT (50) on deadline (reused so
-# run-all-recipes.sh's 3-strike rule fires symmetrically across argocd-* and
-# flux-oci), and 1 on hard errors (CRD missing, RBAC denial, apiserver
-# unreachable).
-wait_for_flux_sync() {
-    local deadline="${KWOK_FLUX_SYNC_TIMEOUT:-500}"
-    local start=$SECONDS
-
-    if ! wait_for_flux_root_app; then
-        return 1
-    fi
-
-    log_info "Waiting for Flux Kustomization to apply the bundle (deadline ${deadline}s)..."
-
-    local kust_json oci_json hr_json kust_ready oci_ready total
-    local applied_rev
-    local apps_rc
-
-    while (( SECONDS - start < deadline )); do
-        # 1. OCIRepository must reach Ready=True — proves source-controller
-        # could PULL the bundle artifact (mediaType, insecure-HTTP, layer
-        # selector all wired correctly). This is the artifact-shape
-        # regression surface argocd-oci catches via repo-server; flux-oci
-        # catches the same class of bug via source-controller.
-        if oci_json=$(kubectl get ocirepository "$FLUX_OCIREPOSITORY_NAME" \
-                -n flux-system -o json 2>/dev/null); then
-            apps_rc=0
-        else
-            apps_rc=$?
-        fi
-        if (( apps_rc != 0 )); then
-            log_error "kubectl get ocirepository failed (rc=${apps_rc})"
-            log_error "Likely cause: OCIRepository CRD missing, RBAC denied, or apiserver unreachable."
-            dump_flux_failures
-            return 1
-        fi
-        oci_ready=$(echo "$oci_json" \
-            | jq -r '.status.conditions[]? | select(.type == "Ready") | .status // "Unknown"')
-        if [[ "$oci_ready" != "True" ]]; then
-            log_debug "OCIRepository ${FLUX_OCIREPOSITORY_NAME} not Ready yet (status=${oci_ready:-Unknown})..."
-            sleep 5
-            continue
-        fi
-
-        # 2. Kustomization must reach Ready=True — proves kustomize-controller
-        # could PARSE the bundle's root kustomization.yaml and APPLY all
-        # manifests inside (no template-render bugs, no missing files, no
-        # schema violations).
-        if kust_json=$(kubectl get kustomization "$FLUX_KUSTOMIZATION_NAME" \
-                -n flux-system -o json 2>/dev/null); then
-            apps_rc=0
-        else
-            apps_rc=$?
-        fi
-        if (( apps_rc != 0 )); then
-            log_error "kubectl get kustomization failed (rc=${apps_rc})"
-            log_error "Likely cause: Kustomization CRD missing, RBAC denied, or apiserver unreachable."
-            dump_flux_failures
-            return 1
-        fi
-        kust_ready=$(echo "$kust_json" \
-            | jq -r '.status.conditions[]? | select(.type == "Ready") | .status // "Unknown"')
-        if [[ "$kust_ready" != "True" ]]; then
-            log_debug "Kustomization ${FLUX_KUSTOMIZATION_NAME} not Ready yet (status=${kust_ready:-Unknown})..."
-            sleep 5
-            continue
-        fi
-        applied_rev=$(echo "$kust_json" \
-            | jq -r '.status.lastAppliedRevision // ""')
-
-        # 3. All HelmRelease CRs must reach Ready=True — proves
-        # helm-controller could reconcile each release (chart sources
-        # resolved via ExternalArtifact/HelmRepository, values applied,
-        # install/upgrade succeeded).
-        if hr_json=$(kubectl get helmrelease -A -o json 2>/dev/null); then
-            apps_rc=0
-        else
-            apps_rc=$?
-        fi
-        if (( apps_rc != 0 )); then
-            log_error "kubectl get helmrelease -A failed (rc=${apps_rc})"
-            dump_flux_failures
-            return 1
-        fi
-        total=$(echo "$hr_json" | jq '.items | length')
-        if [[ "$total" -eq 0 ]]; then
-            log_debug "Kustomization Ready but no HelmReleases yet — waiting for resources to appear..."
-            sleep 5
-            continue
-        fi
-
-        local hr_not_ready
-        hr_not_ready=$(echo "$hr_json" | jq '[.items[] | select(
-            (.status.conditions // []) | map(select(.type == "Ready" and .status == "True")) | length == 0
-        )] | length')
-        if [[ "$hr_not_ready" -gt 0 ]]; then
-            log_debug "${hr_not_ready}/${total} HelmReleases not Ready yet — waiting..."
-            sleep 5
-            continue
-        fi
-
-        # 4. When ArtifactGenerator CRs are present (OCI mode with local-chart
-        # components), verify they reach Ready=True — proves source-watcher
-        # could extract sub-directories from the OCI bundle into
-        # ExternalArtifacts. This is the regression surface for issue #964.
-        local ag_json ag_total ag_not_ready ag_rc
-        ag_json=$(kubectl get artifactgenerator -A -o json 2>&1) && ag_rc=0 || ag_rc=$?
-        if (( ag_rc != 0 )); then
-            log_error "kubectl get artifactgenerator failed (rc=${ag_rc}): ${ag_json}"
-            return 1
-        fi
-        ag_total=$(echo "$ag_json" | jq '.items | length')
-        if [[ "$ag_total" -gt 0 ]]; then
-            ag_not_ready=$(echo "$ag_json" | jq '[.items[] | select(
-                (.status.conditions // []) | map(select(.type == "Ready" and .status == "True")) | length == 0
-            )] | length')
-            if [[ "$ag_not_ready" -gt 0 ]]; then
-                log_debug "${ag_not_ready}/${ag_total} ArtifactGenerators not Ready yet — waiting..."
-                sleep 5
-                continue
-            fi
-            log_info "All ${ag_total} ArtifactGenerators Ready (local-chart OCI extraction verified)"
-        fi
-
-        log_info "Flux bundle-apply PASS: OCIRepository pulled (rev=$(echo "$oci_json" | jq -r '.status.artifact.revision // "unknown"')), Kustomization applied (rev=${applied_rev}), ${total}/${total} HelmReleases Ready"
+    # --assert-timeout overrides spec.timeouts.assert per CLI invocation,
+    # letting the bash driver vary the deadline by env var without forking
+    # the chainsaw test file per deployer. --no-color keeps the CI log
+    # readable; the kwok-test composite action does not interpret ANSI.
+    #
+    # --set is the inline override flag in chainsaw — it populates the
+    # $values binding from the command line. --values is YAML-only
+    # (file/stdin/heredoc); passing "key=value" to it silently leaves
+    # the binding undefined, so the bindings: defaults take effect
+    # regardless of the value supplied here. Use --set for inline
+    # overrides.
+    if "$chainsaw_bin" test "$test_dir" \
+            --set "rootApp=${ARGOCD_ROOT_APP}" \
+            --assert-timeout "$sync_timeout" \
+            --no-color; then
+        log_info "Argo CD sync PASS (chainsaw)"
         return 0
-    done
+    fi
 
-    log_error "Flux bundle-apply deadline (${deadline}s) hit"
-    dump_flux_failures
+    log_error "Argo CD sync FAIL (chainsaw test in ${test_dir})"
     # Reuse EXIT_ARGOCD_SYNC_TIMEOUT so run-all-recipes.sh's 3-strike rule
-    # treats GitOps sync deadlines symmetrically across argocd-* and flux-oci.
+    # treats every chainsaw-reported failure as retryable. Hard errors
+    # (RBAC, CRD missing) will fail three times in a row and bail; the
+    # behavior change vs. the prior bash gate is the 3x cost on hard
+    # errors, which is acceptable for the LOC reduction.
     return "$EXIT_ARGOCD_SYNC_TIMEOUT"
 }
 
-# Dump diagnostics on Flux sync failure: outer Kustomization status, all
-# OCIRepository + HelmRelease statuses, plus controller log tails.
-dump_flux_failures() {
-    log_error "--- Flux Kustomization ${FLUX_KUSTOMIZATION_NAME} ---"
-    kubectl get kustomization "$FLUX_KUSTOMIZATION_NAME" -n flux-system \
-        -o json 2>/dev/null \
-        | jq -r '{
-            ready: ((.status.conditions // []) | map(select(.type == "Ready")) | .[0]),
-            lastAppliedRevision: .status.lastAppliedRevision,
-            inventory: ((.status.inventory.entries // []) | length)
-          }' 2>&1 || true
-    log_error "--- Flux OCIRepositories ---"
-    kubectl get ocirepository -A -o json 2>/dev/null \
-        | jq -r '.items[] | {
-            namespace: .metadata.namespace,
-            name: .metadata.name,
-            ready: ((.status.conditions // []) | map(select(.type == "Ready")) | .[0]),
-            artifact: .status.artifact.revision
-          }' 2>&1 || true
-    log_error "--- Flux HelmReleases (name / ready / released / stalled / hist[0]) ---"
-    kubectl get helmrelease -A -o json 2>/dev/null \
-        | jq -r '.items[] | {
-            namespace: .metadata.namespace,
-            name: .metadata.name,
-            ready: ((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status),
-            released: ((.status.conditions // []) | map(select(.type == "Released")) | .[0].status),
-            stalled: ((.status.conditions // []) | map(select(.type == "Stalled")) | .[0].status),
-            history: (.status.history // [])[0]
-          }' 2>&1 || true
-    log_error "--- Flux ArtifactGenerators ---"
-    kubectl get artifactgenerator -A -o json 2>/dev/null \
-        | jq -r '.items[] | {
-            namespace: .metadata.namespace,
-            name: .metadata.name,
-            ready: ((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status)
-          }' 2>&1 || true
-    log_error "--- Flux ExternalArtifacts ---"
-    kubectl get externalartifact -A -o json 2>/dev/null \
-        | jq -r '.items[] | {
-            namespace: .metadata.namespace,
-            name: .metadata.name,
-            ready: ((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status),
-            artifact: .status.artifact.revision
-          }' 2>&1 || true
-    log_error "--- source-controller (tail=200) ---"
-    kubectl logs -n flux-system deploy/source-controller --tail=200 2>&1 || true
-    log_error "--- kustomize-controller (tail=200) ---"
-    kubectl logs -n flux-system deploy/kustomize-controller --tail=200 2>&1 || true
-    log_error "--- helm-controller (tail=200) ---"
-    kubectl logs -n flux-system deploy/helm-controller --tail=200 2>&1 || true
-    log_error "--- source-watcher (tail=200) ---"
-    kubectl logs -n flux-system deploy/source-watcher --tail=200 2>&1 || true
+wait_for_flux_sync() {
+    if [[ -z "$FLUX_KUSTOMIZATION_NAME" ]] || [[ -z "$FLUX_OCIREPOSITORY_NAME" ]]; then
+        log_error "FLUX_KUSTOMIZATION_NAME or FLUX_OCIREPOSITORY_NAME is empty (DEPLOYER=${DEPLOYER})"
+        return 1
+    fi
+
+    local chainsaw_bin="${CHAINSAW_BIN:-chainsaw}"
+    if ! command -v "$chainsaw_bin" &>/dev/null; then
+        log_error "chainsaw not found on PATH: ${chainsaw_bin}"
+        log_error "Install with: make tools-setup (chainsaw is pinned in .settings.yaml)"
+        return 1
+    fi
+
+    local test_dir="${REPO_ROOT}/tests/chainsaw/kwok/flux-sync"
+    local sync_timeout="${KWOK_FLUX_SYNC_TIMEOUT:-500}s"
+
+    log_info "Flux sync gate (chainsaw): ociRepository=${FLUX_OCIREPOSITORY_NAME} kustomization=${FLUX_KUSTOMIZATION_NAME} timeout=${sync_timeout}"
+
+    # See the argocd shim's comment for the --set vs --values choice;
+    # --values requires YAML, --set takes inline key=value pairs.
+    if "$chainsaw_bin" test "$test_dir" \
+            --set "ociRepositoryName=${FLUX_OCIREPOSITORY_NAME}" \
+            --set "kustomizationName=${FLUX_KUSTOMIZATION_NAME}" \
+            --assert-timeout "$sync_timeout" \
+            --no-color; then
+        log_info "Flux sync PASS (chainsaw)"
+        return 0
+    fi
+
+    log_error "Flux sync FAIL (chainsaw test in ${test_dir})"
+    return "$EXIT_ARGOCD_SYNC_TIMEOUT"
 }
+
 
 # Verify pod scheduling
 verify_pods() {
