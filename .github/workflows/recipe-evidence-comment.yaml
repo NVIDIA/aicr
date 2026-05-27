@@ -79,12 +79,22 @@ jobs:
 
           # Cross-check the PR's head-repo owner against the workflow_run's
           # head_repository owner so two PRs sharing a head SHA across
-          # forks don't get confused.
-          pr_number=$(echo "$pulls" | jq -r --arg owner "$HEAD_OWNER" \
-            '.[] | select(.head.repo.owner.login == $owner) | .number' | head -1)
+          # forks don't get confused. Require exactly one match — if a
+          # single fork-owner has somehow opened multiple open PRs from
+          # the same head SHA, refuse to guess.
+          matches=$(echo "$pulls" | jq -r --arg owner "$HEAD_OWNER" \
+            '[.[] | select(.head.repo.owner.login == $owner) | .number]')
+          match_count=$(echo "$matches" | jq 'length')
 
+          if [[ "$match_count" -ne 1 ]]; then
+            echo "::warning::expected exactly 1 open PR for head ${HEAD_SHA} from ${HEAD_OWNER}; got ${match_count}; skipping comment"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pr_number=$(echo "$matches" | jq -r '.[0]')
           if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
-            echo "::warning::could not resolve a unique open PR for head ${HEAD_SHA} from ${HEAD_OWNER}; skipping comment"
+            echo "::warning::resolved PR number ${pr_number} is not a positive integer; skipping comment"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi

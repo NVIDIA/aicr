@@ -91,11 +91,20 @@ for overlay in recipes/overlays/*.yaml; do
   fi
 
   # Rule 2: an ancestor overlay in the base chain changed.
+  # Cycle guard: track visited overlays so a malformed `A→B→A` chain
+  # doesn't hang the step. The aicr recipe builder would also reject
+  # such a graph, but discovery runs before any aicr invocation.
   if [[ "$include" == "false" ]]; then
     current="$overlay"
+    declare -A visited_r2=()
     while true; do
       parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
       if [[ -z "$parent" || "$parent" == "null" ]]; then break; fi
+      if [[ -n "${visited_r2[$parent]:-}" ]]; then
+        echo "::warning::cyclic base chain detected at overlay '${name}' (re-visited '${parent}')"
+        break
+      fi
+      visited_r2[$parent]=1
       if echo "$changed_files" | grep -qF "recipes/overlays/${parent}.yaml"; then
         include=true
         break
@@ -103,6 +112,7 @@ for overlay in recipes/overlays/*.yaml; do
       current="recipes/overlays/${parent}.yaml"
       if [[ ! -f "$current" ]]; then break; fi
     done
+    unset visited_r2
   fi
 
   # Rule 3: a component values file referenced by this overlay or any
@@ -110,6 +120,7 @@ for overlay in recipes/overlays/*.yaml; do
   if [[ "$include" == "false" ]]; then
     values_files=""
     current="$overlay"
+    declare -A visited_r3=()
     while true; do
       vf=$(yq eval '.spec.componentRefs[].valuesFile // ""' "$current" 2>/dev/null | grep -v '^$' || true)
       if [[ -n "$vf" ]]; then
@@ -117,9 +128,15 @@ for overlay in recipes/overlays/*.yaml; do
       fi
       parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
       if [[ -z "$parent" || "$parent" == "null" ]]; then break; fi
+      if [[ -n "${visited_r3[$parent]:-}" ]]; then
+        echo "::warning::cyclic base chain detected at overlay '${name}' (re-visited '${parent}')"
+        break
+      fi
+      visited_r3[$parent]=1
       current="recipes/overlays/${parent}.yaml"
       if [[ ! -f "$current" ]]; then break; fi
     done
+    unset visited_r3
     while IFS= read -r vf; do
       if [[ -z "$vf" ]]; then continue; fi
       if echo "$changed_files" | grep -qF "recipes/${vf}"; then
