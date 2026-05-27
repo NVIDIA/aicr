@@ -83,4 +83,5 @@ jobs:
       actions: read
       contents: read
     with:
+      privileged_ci: false
       ref: ${{ needs.authorize.outputs.ref }}

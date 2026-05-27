@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      privileged_ci:
+        description: 'Whether jobs that require elevated permissions should run'
+        type: boolean
+        required: false
+        default: true
       ref:
         description: 'Git ref to checkout (defaults to triggering ref)'
         type: string
@@ -85,6 +90,7 @@ jobs:
 
   cli-e2e:
     name: CLI E2E
+    if: inputs.privileged_ci
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -135,6 +141,9 @@ jobs:
 
   security-scan:
     name: Security Scan
+    # Intentional: unprivileged fork runs skip this job entirely so fork-derived
+    # SARIF is never uploaded under the base repository's identity.
+    if: inputs.privileged_ci
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
