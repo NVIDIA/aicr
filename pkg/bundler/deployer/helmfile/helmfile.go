@@ -361,8 +361,8 @@ func toLocalformatComponents(
 // directly to YAML (not via text/template) so field order is anchored to
 // the Helmfile struct and round-trip-stable across runs. The filename is
 // parameterized so the same writer powers the single-file layout
-// (helmfile.yaml) and the split layout's sub-helmfiles (crds.yaml,
-// releases.yaml).
+// (helmfile.yaml) and the split layout's sub-helmfiles (level-0.yaml,
+// ... level-N.yaml).
 func writeHelmfileYAMLAs(outputDir string, doc Helmfile, filename string) (string, int64, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
