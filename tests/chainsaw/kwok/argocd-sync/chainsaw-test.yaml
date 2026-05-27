@@ -63,6 +63,15 @@ spec:
     # Application has to render the child Apps before they begin
     # reconciling. 5 minutes is conservative for KWOK pod-readiness sim.
     assert: 5m
+  # Skip namespace and resource deletion during cleanup. The test creates
+  # no resources of its own (it only asserts on Application CRs in the
+  # argocd namespace), so there's nothing to clean. Chainsaw's default
+  # cleanup deletes the auto-created per-test namespace, which on KWOK
+  # gets stuck in Terminating forever — there's no kube-controller-manager
+  # to finalize the `kubernetes` namespace finalizer — and the 30s
+  # cleanup timeout fires, reporting the test as failed even when every
+  # assertion passed. See PR #1050.
+  skipDelete: true
   steps:
     - name: assert-root-app-present
       description: |

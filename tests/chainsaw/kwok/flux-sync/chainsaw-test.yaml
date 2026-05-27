@@ -51,6 +51,12 @@ spec:
     # reconcile loop has longer default intervals than Argo CD's
     # controller; 8 minutes accommodates the additional latency.
     assert: 8m
+  # See the comment on the argocd-sync test: chainsaw's default cleanup
+  # deletes the auto-created per-test namespace, which on KWOK stalls
+  # in Terminating because there's no kube-controller-manager to
+  # finalize the namespace. We create no resources ourselves, so
+  # skipDelete is safe.
+  skipDelete: true
   steps:
     - name: assert-ocirepository-ready
       description: |
