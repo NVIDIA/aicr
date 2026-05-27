@@ -206,3 +206,15 @@ func convertNodeSelection(ns *recipe.NodeSelection) *NodeSelection {
 		ExcludeNodes: ns.ExcludeNodes,
 	}
 }
+
+// GetComponentRefs returns the resolved recipe's component refs in a nil-safe
+// way. Callers can invoke this on a nil *ValidationInput and receive nil rather
+// than panicking — used by the validator deployer to resolve dependencyAffinity
+// componentRefs to namespaces. When the input is nil, deployers fall back to
+// the default (no podAffinity).
+func (i *ValidationInput) GetComponentRefs() []recipe.ComponentRef {
+	if i == nil {
+		return nil
+	}
+	return i.ComponentRefs
+}

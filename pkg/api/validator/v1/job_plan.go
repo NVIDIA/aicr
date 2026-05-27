@@ -22,12 +22,14 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	applybatchv1 "k8s.io/client-go/applyconfigurations/batch/v1"
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
+	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // JobPlan contains all components needed to build a validator Job.
@@ -78,6 +80,12 @@ type JobPlan struct {
 
 	// Labels are labels to apply to the Job and Pod
 	Labels map[string]string
+
+	// Affinity is the orchestrator pod's full affinity (NodeAffinity for
+	// prefer-CPU plus any PodAffinity terms derived from the catalog entry's
+	// DependencyAffinity). If nil, the renderer falls back to the default
+	// prefer-CPU NodeAffinity.
+	Affinity *corev1.Affinity
 }
 
 // GenerateRunID creates a unique run identifier for validation sessions.
@@ -142,13 +150,14 @@ func Plan(
 	nodeSelector map[string]string,
 	imageRegistryOverride string,
 	imageTagOverride string,
-) []JobPlan {
+	componentRefs []recipe.ComponentRef,
+) ([]JobPlan, error) {
 
 	var plans []JobPlan
 
 	// Guard against nil catalog
 	if cat == nil {
-		return plans
+		return plans, nil
 	}
 
 	// Iterate through all phases
@@ -162,14 +171,17 @@ func Plan(
 
 		// Create a plan for each entry
 		for _, entry := range entries {
-			plan := BuildJobPlan(entry, runID, namespace, version, commit,
+			plan, err := BuildJobPlan(entry, runID, namespace, version, commit,
 				serviceAccount, imagePullSecrets, tolerations, nodeSelector,
-				imageRegistryOverride, imageTagOverride)
+				imageRegistryOverride, imageTagOverride, componentRefs)
+			if err != nil {
+				return nil, err
+			}
 			plans = append(plans, plan)
 		}
 	}
 
-	return plans
+	return plans, nil
 }
 
 // BuildJobPlan creates a JobPlan from a validator entry.
@@ -179,7 +191,13 @@ func Plan(
 // by validators (e.g., GPU benchmarks, NCCL tests) and are forwarded via
 // AICR_TOLERATIONS and AICR_NODE_SELECTOR environment variables. The orchestrator
 // Job Pod itself always uses tolerate-all scheduling ({Operator: TolerationOpExists})
-// and no node selector to ensure it can schedule on any available CPU node.
+// and gets affinity from BuildOrchestratorAffinity (prefer-CPU NodeAffinity, plus
+// PodAffinity per entry.DependencyAffinity if any). componentRefs is the resolved
+// recipe's component list and is used to resolve dependencyAffinity componentRefs
+// to namespaces.
+//
+// Returns ErrCodeInvalidRequest when entry.DependencyAffinity declares a
+// "required" component that is not present in componentRefs.
 func BuildJobPlan(
 	entry ValidatorEntry,
 	runID string,
@@ -192,7 +210,13 @@ func BuildJobPlan(
 	nodeSelector map[string]string,
 	imageRegistryOverride string,
 	imageTagOverride string,
-) JobPlan {
+	componentRefs []recipe.ComponentRef,
+) (JobPlan, error) {
+
+	affinity, err := BuildOrchestratorAffinity(entry.DependencyAffinity, componentRefs)
+	if err != nil {
+		return JobPlan{}, err
+	}
 
 	timeout := entry.Timeout
 	if timeout == 0 {
@@ -239,7 +263,8 @@ func BuildJobPlan(
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: imagePullSecrets,
 		Labels:           jobLabels,
-	}
+		Affinity:         affinity,
+	}, nil
 }
 
 // RenderPlan renders a complete Kubernetes Job from a JobPlan.
@@ -279,7 +304,7 @@ func RenderPlan(plan JobPlan) *batchv1.Job {
 					TerminationGracePeriodSeconds: int64Ptr(int64(defaults.ValidatorTerminationGracePeriod.Seconds())),
 					ImagePullSecrets:              imagePullSecrets,
 					Tolerations:                   plan.Tolerations,
-					Affinity:                      preferCPUNodeAffinity(),
+					Affinity:                      affinityForPlan(plan),
 					Containers: []corev1.Container{
 						{
 							Name:                     "validator",
@@ -363,21 +388,9 @@ func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobAppl
 		tolerationsApply = append(tolerationsApply, toleration)
 	}
 
-	// Build affinity (prefer CPU nodes)
-	affinityApply := applycorev1.Affinity().
-		WithNodeAffinity(applycorev1.NodeAffinity().
-			WithPreferredDuringSchedulingIgnoredDuringExecution(
-				applycorev1.PreferredSchedulingTerm().
-					WithWeight(100).
-					WithPreference(applycorev1.NodeSelectorTerm().
-						WithMatchExpressions(
-							applycorev1.NodeSelectorRequirement().
-								WithKey("nvidia.com/gpu.present").
-								WithOperator(corev1.NodeSelectorOpDoesNotExist),
-						),
-					),
-			),
-		)
+	// Convert the plan's full affinity (NodeAffinity + any PodAffinity for
+	// dependency co-location) into the apply-config types.
+	affinityApply := affinityToApplyConfig(affinityForPlan(plan))
 
 	// Build the Job ApplyConfiguration
 	return applybatchv1.Job(jobName, plan.Namespace).
@@ -415,4 +428,165 @@ func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobAppl
 				),
 			),
 		)
+}
+
+// affinityForPlan returns the orchestrator pod's affinity. When plan.Affinity
+// is set (the common case after BuildJobPlan), it is used directly. When nil
+// (external callers that constructed a JobPlan manually pre-Task-4), we fall
+// back to the default prefer-CPU NodeAffinity to preserve behavior.
+func affinityForPlan(plan JobPlan) *corev1.Affinity {
+	if plan.Affinity != nil {
+		return plan.Affinity
+	}
+	return preferCPUNodeAffinity()
+}
+
+// affinityToApplyConfig converts a *corev1.Affinity to the
+// applyconfigurations/core/v1 type used by server-side apply. We hand-write the
+// walk because client-go does not expose a generated converter for this pair.
+// A nil or empty Affinity falls back to preferCPUNodeAffinity() to preserve
+// pre-PR behavior for external callers that construct a JobPlan manually.
+func affinityToApplyConfig(a *corev1.Affinity) *applycorev1.AffinityApplyConfiguration {
+	if a == nil || (a.NodeAffinity == nil && a.PodAffinity == nil && a.PodAntiAffinity == nil) {
+		return affinityToApplyConfig(preferCPUNodeAffinity())
+	}
+	out := applycorev1.Affinity()
+	if a.NodeAffinity != nil {
+		out = out.WithNodeAffinity(nodeAffinityToApplyConfig(a.NodeAffinity))
+	}
+	if a.PodAffinity != nil {
+		out = out.WithPodAffinity(podAffinityToApplyConfig(a.PodAffinity))
+	}
+	if a.PodAntiAffinity != nil {
+		out = out.WithPodAntiAffinity(podAntiAffinityToApplyConfig(a.PodAntiAffinity))
+	}
+	return out
+}
+
+func nodeAffinityToApplyConfig(na *corev1.NodeAffinity) *applycorev1.NodeAffinityApplyConfiguration {
+	out := applycorev1.NodeAffinity()
+	if na.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		req := applycorev1.NodeSelector()
+		for _, term := range na.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			t := term
+			req = req.WithNodeSelectorTerms(nodeSelectorTermToApplyConfig(&t))
+		}
+		out = out.WithRequiredDuringSchedulingIgnoredDuringExecution(req)
+	}
+	for _, term := range na.PreferredDuringSchedulingIgnoredDuringExecution {
+		t := term
+		out = out.WithPreferredDuringSchedulingIgnoredDuringExecution(
+			applycorev1.PreferredSchedulingTerm().
+				WithWeight(t.Weight).
+				WithPreference(nodeSelectorTermToApplyConfig(&t.Preference)),
+		)
+	}
+	return out
+}
+
+func nodeSelectorTermToApplyConfig(t *corev1.NodeSelectorTerm) *applycorev1.NodeSelectorTermApplyConfiguration {
+	out := applycorev1.NodeSelectorTerm()
+	for _, expr := range t.MatchExpressions {
+		e := expr
+		req := applycorev1.NodeSelectorRequirement().
+			WithKey(e.Key).
+			WithOperator(e.Operator)
+		for _, v := range e.Values {
+			req = req.WithValues(v)
+		}
+		out = out.WithMatchExpressions(req)
+	}
+	for _, expr := range t.MatchFields {
+		e := expr
+		req := applycorev1.NodeSelectorRequirement().
+			WithKey(e.Key).
+			WithOperator(e.Operator)
+		for _, v := range e.Values {
+			req = req.WithValues(v)
+		}
+		out = out.WithMatchFields(req)
+	}
+	return out
+}
+
+func podAffinityToApplyConfig(pa *corev1.PodAffinity) *applycorev1.PodAffinityApplyConfiguration {
+	out := applycorev1.PodAffinity()
+	for _, term := range pa.RequiredDuringSchedulingIgnoredDuringExecution {
+		t := term
+		out = out.WithRequiredDuringSchedulingIgnoredDuringExecution(podAffinityTermToApplyConfig(&t))
+	}
+	for _, w := range pa.PreferredDuringSchedulingIgnoredDuringExecution {
+		wt := w
+		out = out.WithPreferredDuringSchedulingIgnoredDuringExecution(
+			applycorev1.WeightedPodAffinityTerm().
+				WithWeight(wt.Weight).
+				WithPodAffinityTerm(podAffinityTermToApplyConfig(&wt.PodAffinityTerm)),
+		)
+	}
+	return out
+}
+
+func podAntiAffinityToApplyConfig(paa *corev1.PodAntiAffinity) *applycorev1.PodAntiAffinityApplyConfiguration {
+	out := applycorev1.PodAntiAffinity()
+	for _, term := range paa.RequiredDuringSchedulingIgnoredDuringExecution {
+		t := term
+		out = out.WithRequiredDuringSchedulingIgnoredDuringExecution(podAffinityTermToApplyConfig(&t))
+	}
+	for _, w := range paa.PreferredDuringSchedulingIgnoredDuringExecution {
+		wt := w
+		out = out.WithPreferredDuringSchedulingIgnoredDuringExecution(
+			applycorev1.WeightedPodAffinityTerm().
+				WithWeight(wt.Weight).
+				WithPodAffinityTerm(podAffinityTermToApplyConfig(&wt.PodAffinityTerm)),
+		)
+	}
+	return out
+}
+
+func podAffinityTermToApplyConfig(t *corev1.PodAffinityTerm) *applycorev1.PodAffinityTermApplyConfiguration {
+	out := applycorev1.PodAffinityTerm().WithTopologyKey(t.TopologyKey)
+	if t.LabelSelector != nil {
+		ls := applymetav1.LabelSelector()
+		if len(t.LabelSelector.MatchLabels) > 0 {
+			ls = ls.WithMatchLabels(t.LabelSelector.MatchLabels)
+		}
+		for _, expr := range t.LabelSelector.MatchExpressions {
+			e := expr
+			req := applymetav1.LabelSelectorRequirement().
+				WithKey(e.Key).
+				WithOperator(e.Operator)
+			for _, v := range e.Values {
+				req = req.WithValues(v)
+			}
+			ls = ls.WithMatchExpressions(req)
+		}
+		out = out.WithLabelSelector(ls)
+	}
+	if t.NamespaceSelector != nil {
+		ns := applymetav1.LabelSelector()
+		if len(t.NamespaceSelector.MatchLabels) > 0 {
+			ns = ns.WithMatchLabels(t.NamespaceSelector.MatchLabels)
+		}
+		for _, expr := range t.NamespaceSelector.MatchExpressions {
+			e := expr
+			req := applymetav1.LabelSelectorRequirement().
+				WithKey(e.Key).
+				WithOperator(e.Operator)
+			for _, v := range e.Values {
+				req = req.WithValues(v)
+			}
+			ns = ns.WithMatchExpressions(req)
+		}
+		out = out.WithNamespaceSelector(ns)
+	}
+	for _, ns := range t.Namespaces {
+		out = out.WithNamespaces(ns)
+	}
+	for _, key := range t.MatchLabelKeys {
+		out = out.WithMatchLabelKeys(key)
+	}
+	for _, key := range t.MismatchLabelKeys {
+		out = out.WithMismatchLabelKeys(key)
+	}
+	return out
 }

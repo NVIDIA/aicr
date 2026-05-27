@@ -15,12 +15,16 @@
 package v1
 
 import (
+	stderrors "errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestGenerateJobName(t *testing.T) {
@@ -167,7 +171,7 @@ func TestBuildJobPlan(t *testing.T) {
 		{Key: "gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 	}
 
-	plan := BuildJobPlan(
+	plan, err := BuildJobPlan(
 		entry,
 		"test-run-123",
 		"test-ns",
@@ -177,9 +181,13 @@ func TestBuildJobPlan(t *testing.T) {
 		[]string{"my-secret"},
 		tolerations,
 		nodeSelector,
-		"", // imageRegistryOverride
-		"", // imageTagOverride
+		"",  // imageRegistryOverride
+		"",  // imageTagOverride
+		nil, // componentRefs
 	)
+	if err != nil {
+		t.Fatalf("unexpected error from BuildJobPlan: %v", err)
+	}
 
 	// Verify basic fields
 	if plan.ValidatorName != "test-validator" {
@@ -291,7 +299,10 @@ func TestBuildJobPlanWithDefaults(t *testing.T) {
 		Image: "minimal-image:latest",
 	}
 
-	plan := BuildJobPlan(entry, "run-456", "ns", "", "", "sa", nil, nil, nil, "", "")
+	plan, err := BuildJobPlan(entry, "run-456", "ns", "", "", "sa", nil, nil, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error from BuildJobPlan: %v", err)
+	}
 
 	// Should have default resources (buildResources default path)
 	if plan.Resources.Requests.Cpu().Cmp(resource.MustParse("1")) != 0 {
@@ -603,8 +614,11 @@ func TestPlan(t *testing.T) {
 	}
 
 	// Generate plans
-	plans := Plan(cat, validationInput, "test-run-123", "test-ns", "1.0.0", "abc123",
-		"test-service-account", []string{"my-secret"}, nil, nil, "", "")
+	plans, err := Plan(cat, validationInput, "test-run-123", "test-ns", "1.0.0", "abc123",
+		"test-service-account", []string{"my-secret"}, nil, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("Plan() returned unexpected error: %v", err)
+	}
 
 	// Should have exactly one plan for deployment phase (operator-health)
 	if len(plans) != 1 {
@@ -658,7 +672,10 @@ func TestPlanMultiplePhases(t *testing.T) {
 		},
 	}
 
-	plans := Plan(cat, validationInput, "run-1", "ns", "1.0", "abc", "sa", nil, nil, nil, "", "")
+	plans, err := Plan(cat, validationInput, "run-1", "ns", "1.0", "abc", "sa", nil, nil, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("Plan() returned unexpected error: %v", err)
+	}
 
 	// Should have 3 plans total (2 deployment + 1 performance)
 	if len(plans) != 3 {
@@ -681,5 +698,184 @@ func TestPlanMultiplePhases(t *testing.T) {
 	}
 	if perfCount != 1 {
 		t.Errorf("Got %d performance plans, want 1", perfCount)
+	}
+}
+
+func TestBuildJobPlan_PropagatesDependencyAffinity(t *testing.T) {
+	entry := ValidatorEntry{
+		Name:        "ai-service-metrics",
+		Phase:       "conformance",
+		Description: "x",
+		Image:       "ghcr.io/x:latest",
+		Timeout:     5 * time.Minute,
+		DependencyAffinity: []DependencyAffinity{{
+			ComponentRef:     "kube-prometheus-stack",
+			PodLabelSelector: map[string]string{"app.kubernetes.io/name": "prometheus"},
+			Requirement:      DependencyRequirementRequired,
+		}},
+	}
+	refs := []recipe.ComponentRef{
+		{Name: "kube-prometheus-stack", Namespace: "monitoring"},
+	}
+
+	plan, err := BuildJobPlan(entry, "run-1", "ns", "", "", "sa", nil, nil, nil, "", "", refs)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if plan.Affinity == nil || plan.Affinity.PodAffinity == nil {
+		t.Fatal("expected PodAffinity on plan.Affinity")
+	}
+	if len(plan.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Errorf("expected 1 required term, got %d",
+			len(plan.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution))
+	}
+	term := plan.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+	if len(term.Namespaces) != 1 || term.Namespaces[0] != "monitoring" {
+		t.Errorf("expected term.Namespaces = [monitoring], got %v", term.Namespaces)
+	}
+	if term.LabelSelector == nil || term.LabelSelector.MatchLabels["app.kubernetes.io/name"] != "prometheus" {
+		t.Errorf("expected app.kubernetes.io/name=prometheus selector, got %+v", term.LabelSelector)
+	}
+}
+
+func TestBuildJobPlan_RequiredMissingReturnsError(t *testing.T) {
+	entry := ValidatorEntry{
+		Name:        "ai-service-metrics",
+		Phase:       "conformance",
+		Description: "x",
+		Image:       "ghcr.io/x:latest",
+		Timeout:     5 * time.Minute,
+		DependencyAffinity: []DependencyAffinity{{
+			ComponentRef:     "kube-prometheus-stack",
+			PodLabelSelector: map[string]string{"app.kubernetes.io/name": "prometheus"},
+			Requirement:      DependencyRequirementRequired,
+		}},
+	}
+
+	_, err := BuildJobPlan(entry, "run-1", "ns", "", "", "sa", nil, nil, nil, "", "", nil)
+	if err == nil {
+		t.Fatal("expected error when required component is missing")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+}
+
+func TestBuildJobPlan_NilComponentRefsBackwardCompat(t *testing.T) {
+	entry := ValidatorEntry{
+		Name:        "operator-health",
+		Phase:       "deployment",
+		Description: "x",
+		Image:       "ghcr.io/x:latest",
+		Timeout:     2 * time.Minute,
+	}
+	plan, err := BuildJobPlan(entry, "run-1", "ns", "", "", "sa", nil, nil, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if plan.Affinity == nil || plan.Affinity.NodeAffinity == nil {
+		t.Fatal("backward compat: prefer-CPU NodeAffinity must remain on every plan")
+	}
+	if plan.Affinity.PodAffinity != nil {
+		t.Errorf("expected nil PodAffinity for entry with no DependencyAffinity")
+	}
+}
+
+func TestAffinityToApplyConfig_RoundTripsAllFields(t *testing.T) {
+	cpuKey := "cpu"
+	in := &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: "kubernetes.io/arch", Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+						},
+						MatchFields: []corev1.NodeSelectorRequirement{
+							{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-a"}},
+						},
+					},
+				},
+			},
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+				{
+					Weight: 50,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{Key: cpuKey, Operator: corev1.NodeSelectorOpExists},
+						},
+					},
+				},
+			},
+		},
+		PodAffinity: &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+				{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "prom"},
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "tier", Operator: metav1.LabelSelectorOpIn, Values: []string{"backend"}},
+						},
+					},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "obs"}},
+					Namespaces:        []string{"monitoring"},
+					TopologyKey:       "kubernetes.io/hostname",
+				},
+			},
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+				{
+					Weight: 90,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "dcgm"}},
+						Namespaces:    []string{"gpu-operator"},
+						TopologyKey:   "kubernetes.io/hostname",
+					},
+				},
+			},
+		},
+		PodAntiAffinity: &corev1.PodAntiAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+				{
+					Weight: 10,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "noisy"}},
+						TopologyKey:   "kubernetes.io/hostname",
+					},
+				},
+			},
+		},
+	}
+
+	got := affinityToApplyConfig(in)
+	if got == nil {
+		t.Fatal("expected non-nil apply config")
+	}
+	if got.NodeAffinity == nil {
+		t.Fatal("NodeAffinity missing")
+	}
+	if got.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		t.Error("NodeAffinity.Required dropped")
+	}
+	if len(got.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Errorf("expected 1 preferred node term, got %d", len(got.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution))
+	}
+	if got.PodAffinity == nil {
+		t.Fatal("PodAffinity missing")
+	}
+	if len(got.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 1 {
+		t.Errorf("expected 1 required pod term, got %d", len(got.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution))
+	}
+	req := got.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+	if req.LabelSelector == nil {
+		t.Fatal("PodAffinity required term LabelSelector dropped")
+	}
+	if len(req.LabelSelector.MatchExpressions) != 1 {
+		t.Error("PodAffinity required term LabelSelector.MatchExpressions dropped")
+	}
+	if req.NamespaceSelector == nil {
+		t.Error("PodAffinity required term NamespaceSelector dropped")
+	}
+	if got.PodAntiAffinity == nil {
+		t.Fatal("PodAntiAffinity dropped entirely")
 	}
 }

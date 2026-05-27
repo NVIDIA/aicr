@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	corev1 "k8s.io/api/core/v1"
@@ -46,9 +47,10 @@ type Deployer struct {
 	jobName               string // Unique name generated client-side (set by DeployJob)
 	imagePullSecrets      []string
 	tolerations           []corev1.Toleration
-	nodeSelector          map[string]string // passed through to inner workloads via AICR_NODE_SELECTOR env var
-	imageRegistryOverride string            // overrides the image registry prefix for validator containers
-	imageTagOverride      string            // overrides the resolved image tag for validator containers
+	nodeSelector          map[string]string     // passed through to inner workloads via AICR_NODE_SELECTOR env var
+	imageRegistryOverride string                // overrides the image registry prefix for validator containers
+	imageTagOverride      string                // overrides the resolved image tag for validator containers
+	componentRefs         []recipe.ComponentRef // resolved recipe components, used for dependencyAffinity resolution
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -69,6 +71,7 @@ func NewDeployer(
 	nodeSelector map[string]string,
 	imageRegistryOverride string,
 	imageTagOverride string,
+	componentRefs []recipe.ComponentRef,
 ) *Deployer {
 
 	return &Deployer{
@@ -84,6 +87,7 @@ func NewDeployer(
 		nodeSelector:          nodeSelector,
 		imageRegistryOverride: imageRegistryOverride,
 		imageTagOverride:      imageTagOverride,
+		componentRefs:         componentRefs,
 	}
 }
 
@@ -97,7 +101,7 @@ func (d *Deployer) JobName() string {
 // A unique name is generated and the Job is applied with the aicr-validator field manager.
 func (d *Deployer) DeployJob(ctx context.Context) error {
 	// Build JobPlan from deployer configuration
-	plan := v1.BuildJobPlan(
+	plan, err := v1.BuildJobPlan(
 		d.entry,
 		d.runID,
 		d.namespace,
@@ -109,7 +113,11 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 		d.nodeSelector,
 		d.imageRegistryOverride,
 		d.imageTagOverride,
+		d.componentRefs,
 	)
+	if err != nil {
+		return err
+	}
 
 	// Use the job name from the plan
 	d.jobName = plan.JobName

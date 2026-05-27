@@ -227,7 +227,7 @@ func preferCPUNodeAffinity() *corev1.Affinity {
 		NodeAffinity: &corev1.NodeAffinity{
 			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
 				{
-					Weight: 100,
+					Weight: preferredAffinityWeight,
 					Preference: corev1.NodeSelectorTerm{
 						MatchExpressions: []corev1.NodeSelectorRequirement{
 							{
