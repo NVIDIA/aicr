@@ -332,6 +332,7 @@ Generate deployment bundles from a recipe.
 | `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH` and registry credentials configured for any private upstream repos (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` for HTTP(S); docker config for OCI). If prerequisites are missing the request fails with HTTP 500 and a structured error code (`UNAVAILABLE` for missing helm, `UNAUTHORIZED` for credentials). |
 | `deployer` | string | helm | Deployment method: `helm`, `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=flux`; ignored by `deployer=argocd-helm`) |
+| `app-name` | string | | Parent Argo Application name (default: `aicr-stack` for `deployer=argocd-helm`, `nvidia-stack` for `deployer=argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `deployer=argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected with HTTP 400 on other deployers. |
 
 **Request Body:**
 
@@ -366,6 +367,7 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `nvsentinel` | GPU health monitoring and automated remediation |
 | `prometheus-adapter` | Custom metrics for HPA scaling |
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
+| `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |
 | `slinky-slurm-operator` | SchedMD Slinky Slurm operator and admission webhook |
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
 

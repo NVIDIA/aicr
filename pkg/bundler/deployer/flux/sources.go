@@ -22,19 +22,21 @@ import (
 
 // GitRepoSourceData carries data for GitRepository source CRs.
 type GitRepoSourceData struct {
-	Name   string
-	URL    string
-	Branch string
+	Name      string
+	Namespace string // Flux install namespace (e.g. "flux-system")
+	URL       string
+	Branch    string
 }
 
 // collectGitSources collects unique GitRepository sources.
 // The default repoURL is always added so manifest components have a source.
-func collectGitSources(defaultRepoURL, targetRevision string) map[string]*GitRepoSourceData {
+func collectGitSources(defaultRepoURL, targetRevision, namespace string) map[string]*GitRepoSourceData {
 	sources := make(map[string]*GitRepoSourceData)
 	sources[defaultRepoURL] = &GitRepoSourceData{
-		Name:   sanitizeSourceName(defaultRepoURL),
-		URL:    defaultRepoURL,
-		Branch: targetRevision,
+		Name:      sanitizeSourceName(defaultRepoURL),
+		Namespace: namespace,
+		URL:       defaultRepoURL,
+		Branch:    targetRevision,
 	}
 	return sources
 }
@@ -47,7 +49,7 @@ func gitSourceName(sourceURL string, sources map[string]*GitRepoSourceData) stri
 // collectHelmSources collects unique HelmRepository sources from components.
 // When vendorCharts is true, components that will be vendored are skipped
 // because their HelmRelease CRs reference GitRepository instead.
-func collectHelmSources(refs []recipe.ComponentRef, vendorCharts bool) map[string]*HelmRepoSourceData {
+func collectHelmSources(refs []recipe.ComponentRef, vendorCharts bool, namespace string) map[string]*HelmRepoSourceData {
 	sources := make(map[string]*HelmRepoSourceData)
 	for _, ref := range refs {
 		if ref.Type != recipe.ComponentTypeHelm || ref.Source == "" {
@@ -60,9 +62,10 @@ func collectHelmSources(refs []recipe.ComponentRef, vendorCharts bool) map[strin
 			continue
 		}
 		sources[ref.Source] = &HelmRepoSourceData{
-			Name:  sanitizeSourceName(ref.Source),
-			URL:   ref.Source,
-			IsOCI: strings.HasPrefix(ref.Source, "oci://"),
+			Name:      sanitizeSourceName(ref.Source),
+			Namespace: namespace,
+			URL:       ref.Source,
+			IsOCI:     strings.HasPrefix(ref.Source, "oci://"),
 		}
 	}
 	return sources

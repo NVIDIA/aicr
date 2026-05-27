@@ -137,6 +137,123 @@ func TestGenerate_Success(t *testing.T) {
 	}
 }
 
+// TestGenerate_AppName verifies the parent App-of-Apps `metadata.name`
+// and the rendered README `argocd app get/sync` examples both pick up
+// Generator.AppName, with DefaultAppName ("nvidia-stack") as the fallback
+// when AppName is empty. Regression coverage for issue #1011: a hardcoded
+// parent name silently overwrote the first bundle when two non-overlapping
+// AICR bundles shared an Argo CD namespace.
+func TestGenerate_AppName(t *testing.T) {
+	tests := []struct {
+		name         string
+		appNameField string
+		wantName     string
+	}{
+		{
+			name:         "default falls back to DefaultAppName",
+			appNameField: "",
+			wantName:     DefaultAppName,
+		},
+		{
+			name:         "explicit AppName flows into manifest and README",
+			appNameField: "gpu-runtime",
+			wantName:     "gpu-runtime",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = []recipe.ComponentRef{
+				{
+					Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+					Version: "v1.17.2", Type: "helm",
+					Source: "https://charts.jetstack.io",
+				},
+			}
+			recipeResult.DeploymentOrder = []string{"cert-manager"}
+
+			g := &Generator{
+				RecipeResult:    recipeResult,
+				ComponentValues: map[string]map[string]any{"cert-manager": {}},
+				Version:         "v0.9.0",
+				AppName:         tt.appNameField,
+			}
+			if _, err := g.Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			appOfApps, err := os.ReadFile(filepath.Join(outputDir, "app-of-apps.yaml"))
+			if err != nil {
+				t.Fatalf("read app-of-apps.yaml: %v", err)
+			}
+			if !strings.Contains(string(appOfApps), "name: "+tt.wantName+"\n") {
+				t.Errorf("app-of-apps.yaml missing %q metadata.name; got:\n%s", tt.wantName, appOfApps)
+			}
+
+			readme, err := os.ReadFile(filepath.Join(outputDir, "README.md"))
+			if err != nil {
+				t.Fatalf("read README.md: %v", err)
+			}
+			if !strings.Contains(string(readme), "argocd app get "+tt.wantName) {
+				t.Errorf("README missing `argocd app get %s`; got snippet:\n%s",
+					tt.wantName, snippetAround(string(readme), "argocd app get"))
+			}
+			if !strings.Contains(string(readme), "argocd app sync "+tt.wantName) {
+				t.Errorf("README missing `argocd app sync %s`; got snippet:\n%s",
+					tt.wantName, snippetAround(string(readme), "argocd app sync"))
+			}
+		})
+	}
+}
+
+// TestGenerate_AppNameValidatedAtBoundary verifies the deployer boundary
+// rejects an invalid AppName even when callers bypass the CLI/API
+// validation layer (e.g. direct library use). Failing here keeps the
+// invalid name from reaching the rendered manifest, where it would only
+// surface as a cryptic apiserver admission error at apply time.
+func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.17.2", Type: "helm",
+			Source: "https://charts.jetstack.io",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v0.9.0",
+		AppName:         "GPU_Runtime", // uppercase + underscore both reject as DNS-1123
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("Generate() should reject invalid DNS-1123 AppName, got nil")
+	}
+	if !strings.Contains(err.Error(), "DNS-1123") {
+		t.Errorf("error should mention DNS-1123 validation, got: %v", err)
+	}
+}
+
+// snippetAround returns up to 120 chars of haystack around the first occurrence
+// of needle, used for compact failure messages in TestGenerate_AppName.
+func snippetAround(haystack, needle string) string {
+	i := strings.Index(haystack, needle)
+	if i < 0 {
+		return "<not found>"
+	}
+	end := min(i+len(needle)+80, len(haystack))
+	return haystack[i:end]
+}
+
 func TestGenerate_NilRecipeResult(t *testing.T) {
 	g := &Generator{
 		Version: "v0.9.0",

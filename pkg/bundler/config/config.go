@@ -21,10 +21,16 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // DeployerType represents the type of deployment method used for generated bundles.
 type DeployerType string
+
+// DefaultFluxNamespace is the default Kubernetes namespace where Flux CRs
+// (HelmRelease, sources, ArtifactGenerator) are deployed. Overridable via
+// WithFluxNamespace / --flux-namespace.
+const DefaultFluxNamespace = "flux-system"
 
 // Supported deployer types.
 const (
@@ -81,6 +87,24 @@ func GetDeployerTypes() []string {
 // String returns the string representation of the DeployerType.
 func (d DeployerType) String() string {
 	return string(d)
+}
+
+// ValidateAppName reports whether name is a valid parent Argo Application
+// name. The empty string is allowed (means "use the deployer's default"
+// — see WithAppName); non-empty values must be a DNS-1123 subdomain so
+// the rendered Application passes apiserver admission. Rejecting invalid
+// names at bundle/parse time surfaces the error before publish/install
+// rather than as a cryptic apiserver rejection at apply time. See #1011.
+func ValidateAppName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid app name %q: must be a DNS-1123 subdomain (%s)",
+				name, strings.Join(errs, "; ")))
+	}
+	return nil
 }
 
 // Config provides immutable configuration options for bundlers.
@@ -153,6 +177,34 @@ type Config struct {
 	// deployable. Off by default — non-vendored bundles preserve the
 	// CVE-yank fail-loud signal and avoid bundle-time network egress.
 	vendorCharts bool
+
+	// ociSourceName is the name of the outer OCIRepository that Flux
+	// sources the bundle from. When non-empty and deployer is flux,
+	// local-chart HelmReleases use ArtifactGenerator + ExternalArtifact
+	// (spec.chartRef) instead of GitRepository (spec.chart.spec.sourceRef).
+	// Empty preserves the existing GitRepository code path.
+	ociSourceName string
+
+	// fluxNamespace is the Kubernetes namespace where Flux CRs (HelmRelease,
+	// sources, ArtifactGenerator) are deployed. Defaults to DefaultFluxNamespace.
+	fluxNamespace string
+
+	// bundleChartName overrides the Helm chart name written into Chart.yaml
+	// and used as `source.chart` in the parent Argo Application emitted by
+	// the argocd-helm deployer. Empty means "use the deployer's default"
+	// (currently "aicr-bundle"). For OCI output the CLI sets this to the
+	// last path segment of the published artifact (e.g. "my-bundle" for
+	// "oci://reg/org/my-bundle:v1") so the parent App's `repoURL/chart:
+	// targetRevision` triple resolves against the real artifact. See #1019.
+	bundleChartName string
+
+	// appName overrides the parent Argo Application's `metadata.name` for
+	// the argocd-helm and argocd deployers. Empty means each deployer
+	// applies its own default ("aicr-stack" / "nvidia-stack"). When two
+	// non-overlapping bundles are deployed to the same Argo CD namespace,
+	// each must supply a distinct appName so the parent Applications do not
+	// collide. See #1011.
+	appName string
 }
 
 // Getter methods for read-only access
@@ -318,6 +370,24 @@ func (c *Config) StorageClass() string {
 // --vendor-charts on the CLI or vendor-charts=true on the API.
 func (c *Config) VendorCharts() bool {
 	return c.vendorCharts
+}
+
+// OCISourceName returns the name of the outer OCIRepository for Flux
+// ArtifactGenerator mode. Empty means the feature is disabled.
+func (c *Config) OCISourceName() string {
+	return c.ociSourceName
+}
+
+// BundleChartName returns the Helm chart name override for the argocd-helm
+// deployer. Empty means "use the deployer's default". See #1019.
+func (c *Config) BundleChartName() string {
+	return c.bundleChartName
+}
+
+// AppName returns the parent Application name override for the argocd-helm
+// and argocd deployers. Empty means "use the deployer's default". See #1011.
+func (c *Config) AppName() string {
+	return c.appName
 }
 
 // Validate checks if the Config has valid settings.
@@ -524,6 +594,56 @@ func WithStorageClass(storageClass string) Option {
 func WithVendorCharts(enabled bool) Option {
 	return func(c *Config) {
 		c.vendorCharts = enabled
+	}
+}
+
+// WithOCISourceName sets the outer OCIRepository name for Flux
+// ArtifactGenerator mode. When non-empty, local-chart HelmReleases
+// use ArtifactGenerator + ExternalArtifact instead of GitRepository.
+func WithOCISourceName(name string) Option {
+	return func(c *Config) {
+		c.ociSourceName = name
+	}
+}
+
+// FluxNamespace returns the Kubernetes namespace where Flux CRs are deployed.
+// Returns DefaultFluxNamespace when not explicitly set.
+func (c *Config) FluxNamespace() string {
+	if c.fluxNamespace == "" {
+		return DefaultFluxNamespace
+	}
+	return c.fluxNamespace
+}
+
+// WithFluxNamespace sets the namespace for generated Flux CRs. Must match
+// the namespace of the Flux installation in the target cluster.
+func WithFluxNamespace(ns string) Option {
+	return func(c *Config) {
+		c.fluxNamespace = ns
+	}
+}
+
+// WithBundleChartName sets the Helm chart name written into the argocd-helm
+// bundle's Chart.yaml (and used as `source.chart` in the generated parent
+// Argo Application). Empty leaves the deployer's default in place. The CLI
+// derives this from the OCI `--output` reference's last path segment so
+// the parent App's `repoURL/chart:targetRevision` triple resolves against
+// the actual published artifact. See #1019.
+func WithBundleChartName(name string) Option {
+	return func(c *Config) {
+		c.bundleChartName = name
+	}
+}
+
+// WithAppName sets the parent Argo Application's `metadata.name` for the
+// argocd-helm and argocd deployers. Empty leaves the deployer's default
+// in place. Required by operators deploying multiple non-overlapping
+// AICR bundles to the same Argo CD namespace; without distinct names the
+// parent Applications silently overwrite each other and orphan the
+// previous bundle's children. See #1011.
+func WithAppName(name string) Option {
+	return func(c *Config) {
+		c.appName = name
 	}
 }
 

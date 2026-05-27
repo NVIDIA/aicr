@@ -387,6 +387,9 @@ Generate recipes using direct system parameters:
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-f` | string | Format: json, yaml (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
+| `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
+
+> **Service / Accelerator / OS / Intent / Platform value listings above are the OSS-embedded set.** When `--data` registers additional values (e.g., undisclosed providers, proprietary platforms), the CLI admits them at runtime through the criteria registry — see [Data Extension](../integrator/data-extension.md). `--criteria-strict` restores the OSS-only set regardless of what `--data` contributes.
 
 **Examples:**
 ```shell
@@ -1073,6 +1076,9 @@ aicr bundle [flags]
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
+| `--flux-oci-source-name` | | string | Name of the OCIRepository CR that Flux uses to pull the bundle (default: `aicr-bundle`). Used with `--deployer flux` and OCI output. Must match the OCIRepository deployed in the target cluster. See [Flux OCI Mode](#flux-oci-mode). |
+| `--flux-namespace` | | string | Kubernetes namespace where Flux CRs (HelmRelease, sources, ArtifactGenerator) are deployed (default: `flux-system`). Must match the namespace of the Flux installation in the target cluster. |
+| `--app-name` | | string | Parent Argo Application name (default: `aicr-stack` for `--deployer argocd-helm`, `nvidia-stack` for `--deployer argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `--deployer argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected on other deployers (`helm`, `flux`, `helmfile`). |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
@@ -1583,13 +1589,24 @@ helm package ./bundle -d /tmp/
 helm push /tmp/aicr-bundle-*.tgz oci://<your-registry>/<path>
 
 # 3. Install — the URL is supplied here, not at bundle time
+#    `--set repoURL` is the PARENT NAMESPACE (no trailing chart name).
+#    The parent Application appends `.Chart.Name` via its `source.chart`
+#    field, and path-based children append it directly into their
+#    rendered `source.repoURL`. Including the chart name in --set
+#    repoURL double-appends it and the children fail to resolve.
 helm install aicr-bundle oci://<your-registry>/<path>/aicr-bundle --version <chart-version> \
   -n argocd \
-  --set repoURL=oci://<your-registry>/<path>/aicr-bundle \
+  --set repoURL=oci://<your-registry>/<path> \
   --set targetRevision=<chart-version>
 ```
 
-The chart's `templates/aicr-stack.yaml` renders the parent Argo Application with `.Values.repoURL` and `.Values.targetRevision` substituted in. The parent Application then triggers Argo to render the chart again from the OCI source, creating the per-component child Applications with sync-wave ordering preserved. Child Applications whose source is path-based (manifest-only and mixed-component `-post` folders) inherit `.Values.repoURL` so they too pull from the same published location.
+The chart's `templates/aicr-stack.yaml` renders the parent Argo Application with `.Values.repoURL` and `.Values.targetRevision` substituted in. The parent Application then triggers Argo to render the chart again from the OCI source, creating the per-component child Applications with sync-wave ordering preserved. Child Applications whose source is path-based (manifest-only and mixed-component `-pre` / `-post` folders) inherit `.Values.repoURL` and append `.Chart.Name` so they pull from the same published artifact as the parent.
+
+**Argo CD OCI prerequisites.** Path-based child Applications use Argo CD's generic OCI artifact source type (introduced in Argo CD v2.13). The argocd-helm bundle therefore requires:
+- Argo CD **≥ v2.13** on the target cluster.
+- A registry that serves Helm-pushed OCI artifacts through the generic OCI manifest fetch path (most modern registries — ECR, GHCR, GAR, Harbor, Artifactory, plain `oras`-compatible registries — support this).
+
+If the recipe is pure-Helm (no manifest-only / mixed components), path-based children are not exercised and the bundle can work on Argo CD versions older than v2.13. If path-based children are present, Argo CD v2.13+ is required. See the troubleshooting section below if `Failed to load target state` appears on `aicr-stack` or any `<component>-pre` / `<component>-post` Application.
 
 **`helm install ./bundle` from a local directory** *also* works, but with a caveat: child Applications whose source is path-based require Argo's repo-server to fetch the bundle from a remote (git or OCI) — there is no local-filesystem source type for an Argo Application. Local `helm install` is therefore end-to-end only when the recipe contains pure-Helm components. For everything else, publish first.
 
@@ -1772,6 +1789,34 @@ Argo CD Applications use multi-source to:
 2. Apply values.yaml from your GitOps repository
 3. Deploy additional manifests from component's manifests/ directory (if present)
 
+#### Flux OCI Mode
+
+When using `--deployer flux` with OCI output (`--output oci://...`), AICR generates ArtifactGenerator and ExternalArtifact CRs instead of GitRepository sources for local-chart components. This allows Flux to reconcile HelmReleases directly from OCI artifacts without a Git repository.
+
+**Prerequisites (Flux v2.7+):**
+
+- **source-watcher controller** must be deployed (`source.extensions.fluxcd.io`). This controller watches ArtifactGenerator CRs and creates ExternalArtifact objects.
+- **ExternalArtifact=true feature gate** must be enabled on helm-controller. This allows HelmRelease CRs to reference ExternalArtifact objects via `spec.chartRef`.
+
+Without both prerequisites, bundles generate successfully but HelmReleases will not reconcile at deploy time.
+
+**Configuration flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--flux-oci-source-name` | `aicr-bundle` | Name of the OCIRepository CR in the target cluster. Every generated ArtifactGenerator references this name in `spec.sources[0].name`. |
+| `--flux-namespace` | `flux-system` | Namespace where all Flux CRs (HelmRelease, sources, ArtifactGenerator) are placed. |
+
+```shell
+# Generate an OCI bundle with a custom OCIRepository name and namespace
+aicr bundle -r recipe.yaml --deployer flux \
+  --output oci://ghcr.io/my-org/aicr-bundle:v1.0.0 \
+  --flux-oci-source-name my-oci-repo \
+  --flux-namespace gitops
+```
+
+The generated ArtifactGenerator CRs extract per-component chart directories from the outer OCIRepository into ExternalArtifact objects. Each HelmRelease then references the ExternalArtifact via `spec.chartRef` instead of the traditional `spec.chart.spec.sourceRef` pointing at a GitRepository.
+
 #### Bundle Attestation
 
 > **Prerequisite:** The `--attest` flag requires a binary installed using the install script, which includes a cryptographic attestation from NVIDIA. Binaries installed via `go install` or manual download do not include this file and cannot use `--attest`.
@@ -1915,6 +1960,54 @@ If a Helm release is in a `pending-install` or `pending-upgrade` state (from an 
 **Orphaned webhook cleanup:**
 
 After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
+
+---
+
+### aicr mirror list
+
+Discover container images and Helm charts referenced by a recipe for air-gapped
+mirroring. Renders each component's Helm chart with recipe-resolved values and
+scans embedded manifests to produce a deduplicated image and chart list.
+
+For an end-to-end walkthrough covering Hauler and Zarf workflows, see
+[Air-Gapped Mirroring](air-gap-mirror.md).
+
+**Synopsis:**
+```shell
+aicr mirror list [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--recipe` | `-r` | string | | Path/URI to a previously generated recipe. Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (`cm://namespace/name`). |
+| `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`). Alternative to `--recipe`. |
+| `--accelerator` | | string | | GPU accelerator (e.g., `h100`, `gb200`). Alternative to `--recipe`. |
+| `--intent` | | string | | Workload intent (`training` or `inference`). Alternative to `--recipe`. |
+| `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
+| `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
+| `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
+| `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
+| `--output` | `-o` | string | stdout | Output file path |
+
+**Examples:**
+
+```shell
+# List images from a recipe file (YAML to stdout)
+aicr mirror list --recipe recipe.yaml
+
+# Resolve recipe from query parameters
+aicr mirror list --service eks --accelerator h100 --intent training --os ubuntu
+
+# Generate Hauler manifest
+aicr mirror list --recipe recipe.yaml --format hauler --output hauler-manifest.yaml
+
+# Generate Zarf package config
+aicr mirror list --recipe recipe.yaml --format zarf --output zarf.yaml
+
+# Override a value that affects image discovery
+aicr mirror list --recipe recipe.yaml --set gpuoperator:driver.enabled=false
+```
 
 ---
 
@@ -2290,6 +2383,7 @@ AICR respects standard environment variables:
 | `AICR_LOG_PREFIX` | Override the CLI logger prefix | `cli` |
 | `AICR_REQUESTS` | Default for `aicr snapshot --requests`. Comma-separated `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. | unset |
 | `AICR_LIMITS` | Default for `aicr snapshot --limits`. Comma-separated `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when this list does not already contain that key — explicit `nvidia.com/gpu=N` wins. | unset |
+| `AICR_CRITERIA_STRICT` | When set to `1` / `true` / `yes` / `on`, equivalent to `--criteria-strict` on every `aicr recipe` invocation: rejects criteria values not in the embedded OSS catalog regardless of `--data` contributions. Intended for OSS CI gates; `make qualify` exports it automatically for the unit-test step. | unset |
 | `NO_COLOR` | Suppress ANSI color codes in CLI logger output (de-facto standard, see [no-color.org](https://no-color.org/)) | unset |
 
 ## Exit Codes
@@ -2383,6 +2477,12 @@ aicr --debug bundle -r recipe.yaml
 **"helm CLI not found on PATH" with `--vendor-charts`** — the bundle-time vendoring path shells out to `helm pull`. Install Helm v3 or later (`brew install helm` / package manager) and re-run, or drop `--vendor-charts` for a registry-referencing bundle. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap).
 
 **"failed to load manifest \<path\> for component \<name\>"** — the recipe references a manifest path that does not exist in the current AICR binary's embedded data. This usually means the recipe was generated by an older binary and a referenced manifest has since been removed or relocated. Regenerate the recipe with the current binary (`aicr recipe ...`) and re-bundle. AICR recipes are a point-in-time artifact of the binary that produced them; bundling a stale recipe against a newer binary is not supported.
+
+**`--deployer argocd-helm`: `aicr-stack` or `<component>-pre` / `<component>-post` Application stuck at `Unknown` sync status / "Failed to load target state: ... `<registry>/<path>:<tag>: not found`"** — Argo CD cannot resolve the OCI artifact the parent or path-based child Application points at. Three common causes, in order of likelihood:
+
+1. **Chart name doubled in `--set repoURL`.** Under the current contract, `--set repoURL` carries the **parent namespace only** (e.g., `oci://ghcr.io/myorg`). The parent Application appends `.Chart.Name` via its `source.chart` field, and path-based children append it directly into their rendered `source.repoURL`. Passing `--set repoURL=oci://ghcr.io/myorg/aicr-bundle` produces a double-suffixed reference (`.../aicr-bundle/aicr-bundle:<tag>`) that does not exist. Drop the trailing chart segment.
+2. **Argo CD older than v2.13.** Path-based children rely on Argo CD's generic OCI artifact source type, added in v2.13. Older Argo treats the source as Git and fails to resolve. Check with `kubectl -n argocd get deploy argocd-repo-server -o jsonpath='{.spec.template.spec.containers[0].image}'`. Upgrade Argo, or use `--deployer helm` if Argo upgrade is not an option.
+3. **Tag missing from the registry.** Verify the published artifact exists at the exact tag the parent expects: `oras manifest fetch <registry>/<path>/<chart>:<tag>`. If `aicr bundle` is invoked without a tag (`oci://<registry>/<path>/<chart>` with no `:<tag>` suffix), the CLI version is used as the default — make sure `--set targetRevision=<chart-version>` at install time matches.
 
 ## External Data Directory
 

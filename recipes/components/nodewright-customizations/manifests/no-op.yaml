@@ -34,7 +34,7 @@ metadata:
     app.kubernetes.io/part-of: skyhook-operator
     app.kubernetes.io/created-by: aicr
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
   name: no-op
   namespace: {{ .Release.Namespace }}
 spec:

@@ -407,6 +407,26 @@ type RecipeResult struct {
 	// Validation defines multi-phase validation configuration.
 	// Inherited from recipe metadata during merging.
 	Validation *ValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+
+	// provider is the DataProvider that produced this result. Threaded
+	// through finalizeRecipeResult from the originating MetadataStore so
+	// downstream consumers (e.g., GetValuesForComponent in Task 6) can
+	// route file lookups through the same provider — preserving per-tenant
+	// isolation even when the package-global DataProvider has since been
+	// swapped. Nil when the result was built against the package-global
+	// provider, in which case DataProvider() returns nil and callers fall
+	// back to GetDataProvider().
+	provider DataProvider
+}
+
+// DataProvider returns the DataProvider that produced this result, or nil
+// when the result was built against the package-global provider. Nil-safe
+// on the receiver so call sites can chain freely off a possibly-nil result.
+func (r *RecipeResult) DataProvider() DataProvider {
+	if r == nil {
+		return nil
+	}
+	return r.provider
 }
 
 // Merge merges another RecipeMetadataSpec into this one.
@@ -456,22 +476,27 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		return s.ComponentRefs[i].Name < s.ComponentRefs[j].Name
 	})
 
-	// Merge validation config - overlay phases take precedence
+	// Merge validation config - overlay phases take precedence. Phase
+	// pointers are cloned (not aliased) so successive merges cannot mutate
+	// the source's cached ValidationConfig — a previous version aliased
+	// other.Validation when s.Validation was nil, then later writes through
+	// s.Validation.Deployment etc. corrupted whichever overlay's cached
+	// metadata the alias pointed at.
 	if other.Validation != nil {
 		if s.Validation == nil {
-			s.Validation = other.Validation
+			s.Validation = cloneValidationConfig(other.Validation)
 		} else {
 			if other.Validation.Readiness != nil {
-				s.Validation.Readiness = other.Validation.Readiness
+				s.Validation.Readiness = cloneValidationPhase(other.Validation.Readiness)
 			}
 			if other.Validation.Deployment != nil {
-				s.Validation.Deployment = other.Validation.Deployment
+				s.Validation.Deployment = cloneValidationPhase(other.Validation.Deployment)
 			}
 			if other.Validation.Performance != nil {
-				s.Validation.Performance = other.Validation.Performance
+				s.Validation.Performance = cloneValidationPhase(other.Validation.Performance)
 			}
 			if other.Validation.Conformance != nil {
-				s.Validation.Conformance = other.Validation.Conformance
+				s.Validation.Conformance = cloneValidationPhase(other.Validation.Conformance)
 			}
 		}
 	}

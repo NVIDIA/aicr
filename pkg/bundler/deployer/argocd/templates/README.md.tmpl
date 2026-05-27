@@ -76,10 +76,10 @@ kubectl apply -f app-of-apps.yaml
 argocd app list
 
 # Get detailed status for a specific application
-argocd app get nvidia-stack
+argocd app get {{ .AppName }}
 
 # Watch sync progress
-argocd app sync nvidia-stack --watch
+argocd app sync {{ .AppName }} --watch
 ```
 
 ## Directory Structure

@@ -132,11 +132,13 @@ ARGOCD_HELM_TIMEOUT="5m"
 # flux-oci lane, but the upstream manifest also installs notification-
 # controller and image-reflector-controller — they're tolerated.
 FLUX_NAMESPACE="flux-system"
-FLUX_CONTROLLERS=(source-controller kustomize-controller helm-controller)
+FLUX_CONTROLLERS=(source-controller kustomize-controller helm-controller source-watcher)
 FLUX_REQUIRED_CRDS=(
     ocirepositories.source.toolkit.fluxcd.io
     kustomizations.kustomize.toolkit.fluxcd.io
     helmreleases.helm.toolkit.fluxcd.io
+    artifactgenerators.source.extensions.fluxcd.io
+    externalartifacts.source.toolkit.fluxcd.io
 )
 
 # Selected deployer (env var). Branches controller install in main().
@@ -203,6 +205,8 @@ dump_flux_diagnostics() {
     kc get events -n "${FLUX_NAMESPACE}" --sort-by=.lastTimestamp 2>&1 | tail -20 || true
     log_error "--- flux CRDs ---"
     kc get crd -l app.kubernetes.io/instance=flux-system 2>&1 || true
+    log_error "--- source-watcher logs (last 50) ---"
+    kc logs -n "${FLUX_NAMESPACE}" deploy/source-watcher --tail=50 2>&1 || true
 }
 
 # -------------------------------------------------------------------
@@ -424,35 +428,42 @@ EOF
 # -------------------------------------------------------------------
 install_flux() {
     local version="$1"
-    local install_url="https://github.com/fluxcd/flux2/releases/download/${version}/install.yaml"
 
-    log_info "Installing Flux ${version} from ${install_url}..."
-    # GitHub releases CDN occasionally returns transient 502s on
-    # release-asset fetches (same flake class that motivated the
-    # kwok-stage-fast retry hardening in run-all-recipes.sh). install-
-    # infra.sh runs in its own bash and doesn't import the retry helper,
-    # so retry inline. 5 attempts with doubling backoff (5+10+20+40s
-    # cumulative sleep = 75s) covers the 30-60s typical CDN hiccup
-    # without slowing the happy path.
+    if ! command -v flux &>/dev/null; then
+        log_error "flux CLI not found in PATH. Install it via: make tools-setup"
+        exit 60
+    fi
+
+    log_info "Installing Flux ${version} with source-watcher via flux CLI..."
+    # GitHub releases CDN occasionally returns transient 502s (same flake
+    # class that motivated the kwok-stage-fast retry hardening in
+    # run-all-recipes.sh). 5 attempts with doubling backoff (5+10+20+40s
+    # cumulative sleep = 75s) covers the 30-60s typical CDN hiccup.
     local max_attempts=5
     local delay=5
     local attempt=1
+    # Build the flux install command; include --context when KUBECTL_CONTEXT
+    # is set so Flux targets the same kube context used by kc()/hc().
+    local -a flux_cmd=(flux install --version="${version}" --components-extra=source-watcher)
+    if [[ -n "${KUBECTL_CONTEXT:-}" ]]; then
+        flux_cmd+=(--context "${KUBECTL_CONTEXT}")
+    fi
     while true; do
-        if kc apply -f "${install_url}"; then
+        if "${flux_cmd[@]}"; then
             break
         fi
         if (( attempt >= max_attempts )); then
-            log_error "Failed to apply Flux install manifest after ${attempt} attempt(s)"
+            log_error "flux install failed after ${attempt} attempt(s)"
             dump_flux_diagnostics
             exit 60
         fi
-        log_warn "Flux install manifest apply failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
+        log_warn "flux install failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
         sleep "${delay}"
         attempt=$(( attempt + 1 ))
         delay=$(( delay * 2 ))
     done
 
-    log_info "Waiting for Flux controllers (source/kustomize/helm) to roll out (timeout 180s each)..."
+    log_info "Waiting for Flux controllers to roll out (timeout 180s each)..."
     local ctrl
     for ctrl in "${FLUX_CONTROLLERS[@]}"; do
         if ! kc rollout status deployment/"${ctrl}" \
@@ -463,7 +474,32 @@ install_flux() {
         fi
     done
 
-    log_info "Waiting for Flux CRDs (OCIRepository / Kustomization / HelmRelease) to be Established..."
+    # Enable ExternalArtifact feature gate on helm-controller so
+    # HelmRelease.spec.chartRef can reference ExternalArtifact resources
+    # produced by ArtifactGenerator CRs (issue #964).
+    # Idempotent: skip the patch (and rollout wait) when the flag is already present.
+    local hc_args
+    hc_args=$(kc get deployment helm-controller -n "${FLUX_NAMESPACE}" \
+        -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null || true)
+    if [[ "$hc_args" == *"--feature-gates=ExternalArtifact=true"* ]]; then
+        log_info "ExternalArtifact feature gate already present on helm-controller — skipping patch"
+    else
+        log_info "Enabling ExternalArtifact feature gate on helm-controller..."
+        if ! kc patch deployment helm-controller -n "${FLUX_NAMESPACE}" \
+                --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--feature-gates=ExternalArtifact=true"}]'; then
+            log_error "Failed to patch helm-controller with ExternalArtifact feature gate"
+            dump_flux_diagnostics
+            exit 61
+        fi
+        if ! kc rollout status deployment/helm-controller \
+                -n "${FLUX_NAMESPACE}" --timeout=60s; then
+            log_error "helm-controller did not become Ready after feature gate patch"
+            dump_flux_diagnostics
+            exit 61
+        fi
+    fi
+
+    log_info "Waiting for Flux CRDs to be Established..."
     local crd
     for crd in "${FLUX_REQUIRED_CRDS[@]}"; do
         if ! kc wait --for=condition=Established \
@@ -474,7 +510,7 @@ install_flux() {
         fi
     done
 
-    log_info "Flux ready"
+    log_info "Flux ready (source-watcher + ExternalArtifact enabled)"
 }
 
 # -------------------------------------------------------------------

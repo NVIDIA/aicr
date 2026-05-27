@@ -34,7 +34,7 @@ func TestEnrichConfigFromRegistry(t *testing.T) {
 			Name: "gpu-operator",
 		}
 
-		enrichConfigFromRegistry(&cfg)
+		enrichConfigFromRegistry(&cfg, nil)
 
 		// Verify values were populated from registry
 		comp := registry.Get("gpu-operator")
@@ -70,7 +70,7 @@ func TestEnrichConfigFromRegistry(t *testing.T) {
 			SystemNodeSelectorPaths: []string{"custom.path"},
 		}
 
-		enrichConfigFromRegistry(&cfg)
+		enrichConfigFromRegistry(&cfg, nil)
 
 		// Verify existing values were preserved
 		if cfg.DisplayName != "Custom Display Name" {
@@ -96,7 +96,7 @@ func TestEnrichConfigFromRegistry(t *testing.T) {
 			DisplayName: "",
 		}
 
-		enrichConfigFromRegistry(&cfg)
+		enrichConfigFromRegistry(&cfg, nil)
 
 		// Verify nothing changed
 		if cfg.DisplayName != "" {
@@ -109,7 +109,7 @@ func TestEnrichConfigFromRegistry(t *testing.T) {
 			Name: "gpu-operator",
 		}
 
-		enrichConfigFromRegistry(&cfg)
+		enrichConfigFromRegistry(&cfg, nil)
 
 		// gpu-operator should have scheduling paths
 		if len(cfg.SystemNodeSelectorPaths) == 0 {

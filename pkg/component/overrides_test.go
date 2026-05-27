@@ -358,9 +358,9 @@ func TestConvertMapValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := convertMapValue(tt.input)
+			got := ConvertMapValue(tt.input)
 			if got != tt.want {
-				t.Errorf("convertMapValue(%q) = %v (%T), want %v (%T)", tt.input, got, got, tt.want, tt.want)
+				t.Errorf("ConvertMapValue(%q) = %v (%T), want %v (%T)", tt.input, got, got, tt.want, tt.want)
 			}
 		})
 	}

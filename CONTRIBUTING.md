@@ -219,6 +219,13 @@ Trust is established through evidence, not assertions. Every released artifact c
 
 4. **Merge**: Once approved and CI passes, a maintainer will merge
 
+### AI-Assisted Contributions Policy
+
+We welcome the use of AI tools (e.g., GitHub Copilot, ChatGPT, Claude) to help you write code, brainstorm, or refactor. However, we maintain a strict human-in-the-loop policy for all submissions:
+
+- **Full accountability**: By submitting a PR, you (the human author) accept full responsibility for the code — its correctness, security, maintainability, and license compliance. "The AI wrote it" is not an acceptable explanation for bugs or security flaws.
+- **Understand what you submit**: Do not submit AI-generated code you do not fully understand. Reviewers expect you to explain and defend every line of code in your PR.
+
 ### Issue and PR Lifecycle
 
 Automated bots manage the lifecycle of issues and pull requests:

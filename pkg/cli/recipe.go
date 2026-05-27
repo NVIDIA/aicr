@@ -29,36 +29,52 @@ import (
 )
 
 func recipeCmdFlags() []cli.Flag {
+	// Help text + shell completions draw from AllCriteria*Types so values
+	// introduced by --data overlays are discoverable. Before --data is
+	// processed the registry is empty, so the listed values match the
+	// embedded OSS set; once a data provider is initialized later in the
+	// Action the registry is populated, but flag Usage strings have
+	// already been formatted by then — discoverability in --help is on
+	// a best-effort basis when --data is co-resident on disk for an
+	// interactive `aicr recipe --data X --help`. The registry-aware
+	// validation still works regardless.
 	return []cli.Flag{
 		withCompletions(&cli.StringFlag{
 			Name:     "service",
-			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.GetCriteriaServiceTypes(), ", ")),
+			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.AllCriteriaServiceTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.GetCriteriaServiceTypes),
+		}, recipe.AllCriteriaServiceTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "accelerator",
 			Aliases:  []string{"gpu"},
-			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", ")),
+			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.AllCriteriaAcceleratorTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.GetCriteriaAcceleratorTypes),
+		}, recipe.AllCriteriaAcceleratorTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "intent",
-			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.GetCriteriaIntentTypes(), ", ")),
+			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.AllCriteriaIntentTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.GetCriteriaIntentTypes),
+		}, recipe.AllCriteriaIntentTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "os",
-			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
+			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.AllCriteriaOSTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.GetCriteriaOSTypes),
+		}, recipe.AllCriteriaOSTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "platform",
-			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
+			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.AllCriteriaPlatformTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.GetCriteriaPlatformTypes),
+		}, recipe.AllCriteriaPlatformTypes),
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
+			Category: catQueryParameters,
+		},
+		&cli.BoolFlag{
+			Name: "criteria-strict",
+			Usage: `Reject criteria values not in the embedded OSS catalog (ignore --data contributions).
+	Use in CI gates so the upstream catalog cannot accidentally depend on internal-only values.
+	Also honored via AICR_CRITERIA_STRICT=1.`,
 			Category: catQueryParameters,
 		},
 		&cli.StringFlag{
@@ -127,6 +143,35 @@ Override snapshot-detected criteria:
 
 			if err = initDataProvider(cmd, cfg); err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+			}
+
+			// Eagerly load the catalog so the criteria registry is
+			// populated before any ParseCriteria*Type call. The metadata
+			// store cache is otherwise lazy and the first call would not
+			// run until inside buildRecipeFromCmdWithConfig — after
+			// criteria validation, when the registry-based fallback
+			// can't help yet.
+			//
+			// PropagateOrWrap preserves the inner error code so YAML
+			// parse failures surface as ErrCodeInvalidRequest instead of
+			// being masked as ErrCodeInternal.
+			if err = recipe.LoadCatalog(ctx); err != nil {
+				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load recipe catalog")
+			}
+
+			// Apply criteria-strict AFTER the catalog has loaded —
+			// LoadCatalog populated the registry from every overlay's
+			// spec.criteria; strict mode then hides external-origin
+			// entries from subsequent ParseCriteria*Type lookups.
+			//
+			// Three sources can enable strict mode (logical OR):
+			//   1. --criteria-strict CLI flag
+			//   2. spec.recipe.criteriaStrict in --config
+			//   3. AICR_CRITERIA_STRICT env var (honored at registry init)
+			// AICR_CRITERIA_STRICT is read when DefaultRegistry() is first
+			// constructed, so we only need to apply the flag + config here.
+			if cmd.Bool("criteria-strict") || cfg.Recipe().IsCriteriaStrict() {
+				recipe.DefaultRegistry().SetStrict(true)
 			}
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)

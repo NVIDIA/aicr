@@ -115,6 +115,10 @@ type BundleResolved struct {
 	// upstream Helm chart bytes are pulled into the bundle at bundle time
 	// so the resulting artifact is air-gap deployable. Off by default.
 	VendorCharts bool
+
+	// AppName is spec.bundle.deployment.appName, validated as a DNS-1123
+	// subdomain. Empty means each deployer applies its own default. See #1011.
+	AppName string
 }
 
 // Resolve converts a BundleSpec from the wire-string form to a typed
@@ -175,6 +179,13 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 			out.DynamicValues = paths
 		}
 		out.VendorCharts = b.Deployment.VendorCharts
+		if b.Deployment.AppName != "" {
+			if err := bundlercfg.ValidateAppName(b.Deployment.AppName); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					"invalid spec.bundle.deployment.appName", err)
+			}
+			out.AppName = b.Deployment.AppName
+		}
 	}
 
 	if b.Scheduling != nil {
