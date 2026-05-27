@@ -1047,13 +1047,13 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// Under the post-#1032 contract, --set repoURL carries the parent
-	// namespace only — the parent App appends .Chart.Name via its
-	// source.chart field, and (per #1034) the path-based child template
-	// appends /<chart-name> directly into its source.repoURL so Argo
-	// CD's generic OCI source resolves to the same artifact.
+	// --set repoURL carries the parent namespace only. Both the parent
+	// App template and the path-based child template append /<chart-name>
+	// themselves so Argo CD's native-OCI lookup resolves at
+	// `<namespace>/<chart>:<tag>` — see parentAppTemplate and
+	// injectValuesIntoSingleSource in argocdhelm.go.
 	const setRepoURL = "oci://example.test/myorg"
-	const wantParentRepoURL = setRepoURL
+	const wantParentRepoURL = setRepoURL + "/" + DefaultChartName
 	const wantChildRepoURL = setRepoURL + "/" + DefaultChartName
 	const wantTagName = "v9.9.9-render-test"
 	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1101,10 +1101,13 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 		t.Fatalf("rendered output missing parent Application 'aicr-stack'\noutput:\n%s", out)
 	}
 	if parent.Spec.Source.RepoURL != wantParentRepoURL {
-		t.Errorf("parent App repoURL: got %q, want %q", parent.Spec.Source.RepoURL, wantParentRepoURL)
+		t.Errorf("parent App repoURL: got %q, want %q (must be parent-namespace + chart-name; see parentAppTemplate)", parent.Spec.Source.RepoURL, wantParentRepoURL)
 	}
-	if parent.Spec.Source.Chart != DefaultChartName {
-		t.Errorf("parent App chart: got %q, want %q", parent.Spec.Source.Chart, DefaultChartName)
+	if parent.Spec.Source.Chart != "" {
+		t.Errorf("parent App chart: got %q, want empty (native-OCI mode ignores source.chart; see PR #1047 regression)", parent.Spec.Source.Chart)
+	}
+	if parent.Spec.Source.Path != "." {
+		t.Errorf("parent App path: got %q, want %q (native-OCI source renders chart from artifact root)", parent.Spec.Source.Path, ".")
 	}
 	if parent.Spec.Source.TargetRevision != wantTagName {
 		t.Errorf("parent App targetRevision: got %q, want %q", parent.Spec.Source.TargetRevision, wantTagName)
@@ -1136,13 +1139,110 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 	}
 }
 
+// TestHelmTemplate_RendersWithHelmRepoRepoURL verifies the parent App
+// template renders the HTTPS Helm-repo shape (repoURL + source.chart,
+// no path) when .Values.repoURL is not an oci:// URL. The bundle is
+// pure-Helm (only upstream-helm children, no path-based children), so
+// installation from ChartMuseum / GitHub Pages-style repos is the
+// supported use case. See PR #1051's Codex P2 review.
+func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.20.2", Type: recipe.ComponentTypeHelm,
+			Source: "https://charts.jetstack.io",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager"}
+
+	g := &Generator{
+		RecipeResult:    rr,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v0.0.0-helm-repo-test",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	const setRepoURL = "https://charts.example.com"
+	const wantTagName = "v9.9.9-helm-repo-test"
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+		"--set", "repoURL="+setRepoURL,
+		"--set", "targetRevision="+wantTagName,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+	}
+
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	type appLite struct {
+		Metadata struct{ Name string } `yaml:"metadata"`
+		Spec     struct {
+			Source struct {
+				RepoURL        string `yaml:"repoURL"`
+				Chart          string `yaml:"chart"`
+				TargetRevision string `yaml:"targetRevision"`
+				Path           string `yaml:"path"`
+			} `yaml:"source"`
+		} `yaml:"spec"`
+	}
+	var parent appLite
+	var found bool
+	for {
+		var a appLite
+		decErr := dec.Decode(&a)
+		if errors.Is(decErr, io.EOF) {
+			break
+		}
+		if decErr != nil {
+			t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
+		}
+		if a.Metadata.Name == "aicr-stack" {
+			parent = a
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("rendered output missing parent Application 'aicr-stack'\noutput:\n%s", out)
+	}
+
+	// HTTPS Helm-repo shape: repoURL is the registry as-is, chart is
+	// the chart name, and path is NOT set (path is a native-OCI-only
+	// field). Mirror these three assertions exactly — silently
+	// regressing any one of them puts the parent App back into the
+	// broken shape that #1047 / #1048 / #1051 chased.
+	if parent.Spec.Source.RepoURL != setRepoURL {
+		t.Errorf("parent App repoURL: got %q, want %q (HTTPS Helm-repo mode: repoURL stays as-is, chart name is in source.chart)", parent.Spec.Source.RepoURL, setRepoURL)
+	}
+	if parent.Spec.Source.Chart != DefaultChartName {
+		t.Errorf("parent App chart: got %q, want %q (HTTPS Helm-repo mode requires source.chart)", parent.Spec.Source.Chart, DefaultChartName)
+	}
+	if parent.Spec.Source.Path != "" {
+		t.Errorf("parent App path: got %q, want empty (path is a native-OCI-only field; emitting it on a Helm-repo source confuses Argo CD)", parent.Spec.Source.Path)
+	}
+	if parent.Spec.Source.TargetRevision != wantTagName {
+		t.Errorf("parent App targetRevision: got %q, want %q", parent.Spec.Source.TargetRevision, wantTagName)
+	}
+}
+
 // TestGenerate_CustomChartName verifies the Generator's ChartName field
 // flows into both Chart.yaml's `name:` and the parent Application's
-// `source.chart` at install time. Regression coverage for issue #1019:
-// when a user passes `--output oci://reg/path/my-bundle:tag`, the OCI
-// repository's last segment (`my-bundle`) must propagate so the parent
-// App's `repoURL/chart:targetRevision` triple resolves against the
-// actual published artifact instead of the literal `aicr-bundle`.
+// `source.repoURL` (parent namespace + `/` + .Chart.Name) at install
+// time. Regression coverage for issue #1019: when a user passes
+// `--output oci://reg/path/my-bundle:tag`, the OCI repository's last
+// segment (`my-bundle`) must propagate so the assembled
+// `<namespace>/<chart>:<targetRevision>` resolves against the actual
+// published artifact instead of the literal `aicr-bundle`.
 func TestGenerate_CustomChartName(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not available; skipping live-render test")
@@ -1195,11 +1295,11 @@ func TestGenerate_CustomChartName(t *testing.T) {
 		Metadata struct{ Name string } `yaml:"metadata"`
 		Spec     struct {
 			Source struct {
-				Chart string `yaml:"chart"`
+				RepoURL string `yaml:"repoURL"`
 			} `yaml:"source"`
 		} `yaml:"spec"`
 	}
-	var foundParentChart string
+	var foundParentRepoURL string
 	for {
 		var a appLite
 		decErr := dec.Decode(&a)
@@ -1210,12 +1310,13 @@ func TestGenerate_CustomChartName(t *testing.T) {
 			t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
 		}
 		if a.Metadata.Name == "aicr-stack" {
-			foundParentChart = a.Spec.Source.Chart
+			foundParentRepoURL = a.Spec.Source.RepoURL
 		}
 	}
-	if foundParentChart != customName {
-		t.Errorf("parent App chart: got %q, want %q (rendered chart must match Chart.yaml name)",
-			foundParentChart, customName)
+	wantParentRepoURL := "oci://example.test/myorg/" + customName
+	if foundParentRepoURL != wantParentRepoURL {
+		t.Errorf("parent App repoURL: got %q, want %q (rendered repoURL must end with the Chart.yaml chart name; see #1019)",
+			foundParentRepoURL, wantParentRepoURL)
 	}
 }
 
@@ -1309,7 +1410,7 @@ func TestHelmTemplate_AppNameOverride(t *testing.T) {
 				Spec struct {
 					Source struct {
 						RepoURL string `yaml:"repoURL"`
-						Chart   string `yaml:"chart"`
+						Path    string `yaml:"path"`
 					} `yaml:"source"`
 				} `yaml:"spec"`
 			}
@@ -1323,10 +1424,10 @@ func TestHelmTemplate_AppNameOverride(t *testing.T) {
 				if decErr != nil {
 					t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
 				}
-				// Heuristic for "parent App": Kind=Application with no spec.source.chart (child apps have chart set).
-				// Be defensive — for default app name we'd otherwise pick the child if a child happened to
-				// have an empty chart field. Use the namespace=argocd + has source.repoURL signal too.
-				if a.Kind == "Application" && a.Metadata.Namespace == "argocd" && a.Spec.Source.Chart != "" && strings.HasPrefix(a.Spec.Source.RepoURL, "oci://example.test/myorg") {
+				// Parent App heuristic: Kind=Application in argocd namespace
+				// with path="." (parent renders chart at artifact root;
+				// path-based children use path=NNN-<name>).
+				if a.Kind == "Application" && a.Metadata.Namespace == "argocd" && a.Spec.Source.Path == "." && strings.HasPrefix(a.Spec.Source.RepoURL, "oci://example.test/myorg") {
 					parentName = a.Metadata.Name
 				}
 			}
@@ -1464,16 +1565,21 @@ func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
 		}
 	}
 
-	// Parent: uses Helm chart shape (source.chart = .Chart.Name).
+	// Parent: native-OCI source shape (repoURL = namespace + "/" + chart,
+	// no source.chart, path = ".").
 	parent, ok := found["aicr-stack"]
 	if !ok {
 		t.Fatalf("rendered output missing parent Application 'aicr-stack'\noutput:\n%s", out)
 	}
-	if parent.Spec.Source.RepoURL != setRepoURL {
-		t.Errorf("parent App repoURL: got %q, want %q (parent namespace, no chart name)", parent.Spec.Source.RepoURL, setRepoURL)
+	wantParentRepoURL := setRepoURL + "/" + DefaultChartName
+	if parent.Spec.Source.RepoURL != wantParentRepoURL {
+		t.Errorf("parent App repoURL: got %q, want %q (parent namespace + chart name; native-OCI source)", parent.Spec.Source.RepoURL, wantParentRepoURL)
 	}
-	if parent.Spec.Source.Chart != DefaultChartName {
-		t.Errorf("parent App chart: got %q, want %q", parent.Spec.Source.Chart, DefaultChartName)
+	if parent.Spec.Source.Chart != "" {
+		t.Errorf("parent App chart: got %q, want empty (native-OCI mode ignores source.chart)", parent.Spec.Source.Chart)
+	}
+	if parent.Spec.Source.Path != "." {
+		t.Errorf("parent App path: got %q, want %q", parent.Spec.Source.Path, ".")
 	}
 
 	// The path-based -pre child is the #1018 regression target. Argo CD's

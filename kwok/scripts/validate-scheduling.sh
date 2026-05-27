@@ -756,22 +756,22 @@ generate_bundle() {
             # pass it through to `helm install --set repoURL=…` without
             # duplicating the runner→service-DNS rewrite rule.
             #
-            # Per-lane assignment — the two lanes resolve the in-cluster
-            # OCI URL differently:
+            # Per-lane assignment — the two deployers consume repoURL
+            # differently:
             #
-            #   - argocd-oci: the bundle's `nvidia-stack` root application
-            #     references the artifact by its full path. Pass the full
-            #     "aicr/<recipe>" form here so `--repo` and the root app's
-            #     `repoURL` both match the pushed artifact at
+            #   - argocd-oci: the rendered `nvidia-stack` root application
+            #     bakes the full artifact path into its `source.repoURL`.
+            #     Pass the full "aicr/<recipe>" form so `--repo` and the
+            #     baked URL both match the pushed artifact at
             #     oci://…/aicr/<recipe>:<tag>.
             #
-            #   - argocd-helm-oci: per PR #1032's contract change (and
-            #     #1035's enforcement on the parent App template), --set
-            #     repoURL must carry the PARENT NAMESPACE ONLY — without
-            #     the per-recipe chart name. The argocd-helm parent
-            #     Application appends .Chart.Name via its separate
-            #     `source.chart` field; passing the full path here would
-            #     resolve to oci://…/aicr/<recipe>/<recipe>:<tag> and 404.
+            #   - argocd-helm-oci: the bundler's parent App template
+            #     appends `/{{ .Chart.Name }}` to .Values.repoURL at helm
+            #     render time (mirroring the path-based child template).
+            #     Pass the PARENT NAMESPACE ONLY here so both halves of
+            #     the rendered URL resolve to oci://…/aicr/<recipe>:<tag>.
+            #     See pkg/bundler/deployer/argocdhelm/argocdhelm.go's
+            #     `parentAppTemplate`.
             if [[ "$DEPLOYER" == "argocd-helm-oci" ]]; then
                 OCI_IN_CLUSTER_REF="oci://registry.aicr-registry.svc.cluster.local:5000/aicr"
             else
@@ -785,7 +785,7 @@ generate_bundle() {
 
             log_info "Bundling for ${deployer_arg}, pushing to ${OCI_REF}"
             if [[ "$DEPLOYER" == "argocd-helm-oci" ]]; then
-                log_info "Argo CD will pull from ${in_cluster_repo}/${recipe}:${tag} (parent namespace + .Chart.Name appended by the parent App)"
+                log_info "Argo CD will pull from ${in_cluster_repo}/${recipe}:${tag} (parent App template appends .Chart.Name at helm render time)"
             else
                 log_info "Argo CD will pull from ${in_cluster_repo}:${tag}"
             fi
