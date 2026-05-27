@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: nvidia-stack
+  name: "nvidia-stack"
   namespace: argocd
 spec:
   project: default
