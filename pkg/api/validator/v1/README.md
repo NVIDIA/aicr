@@ -334,7 +334,7 @@ Generates JobPlans for all validators across all phases matching the ValidationI
 - `tolerations` - Tolerations for inner workloads (forwarded via `AICR_TOLERATIONS` env var; validator Pod uses tolerate-all)
 - `nodeSelector` - Node selector for inner workloads (forwarded via `AICR_NODE_SELECTOR` env var; validator Pod has no node selector)
 - `imageRegistryOverride` - Optional registry host that replaces the registry prefix on every validator image (matches the `AICR_VALIDATOR_IMAGE_REGISTRY` env var). Empty string disables the override.
-- `imageTagOverride` - Optional tag that replaces every validator image's tag, including digest-pinned references (matches the `AICR_VALIDATOR_IMAGE_TAG` env var). Empty string disables the override.
+- `imageTagOverride` - Optional tag that replaces the tag on every tag-based validator image reference (matches the `AICR_VALIDATOR_IMAGE_TAG` env var). Digest-pinned references (`name@sha256:…`) are left untouched — the digest is the authoritative pin. Empty string disables the override.
 - `componentRefs` - Resolved recipe component list used to resolve `dependencyAffinity.componentRef` entries to namespaces when building the orchestrator pod's affinity. Pass `nil` when dependencyAffinity is not used or the recipe is not available.
 
 **`BuildJobPlan(entry, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector, imageRegistryOverride, imageTagOverride, componentRefs) (JobPlan, error)`**
