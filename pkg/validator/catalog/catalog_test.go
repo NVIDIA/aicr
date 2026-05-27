@@ -1022,6 +1022,36 @@ validators:
 	}
 }
 
+func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
+	cat, err := Load("v0.0.0-test", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	var entry *v1.ValidatorEntry
+	for i, v := range cat.Validators {
+		if v.Name == "ai-service-metrics" {
+			entry = &cat.Validators[i]
+			break
+		}
+	}
+	if entry == nil {
+		t.Fatal("ai-service-metrics not found in embedded catalog")
+	}
+	if len(entry.DependencyAffinity) != 1 {
+		t.Fatalf("expected 1 dependencyAffinity, got %d", len(entry.DependencyAffinity))
+	}
+	dep := entry.DependencyAffinity[0]
+	if dep.ComponentRef != "kube-prometheus-stack" {
+		t.Errorf("componentRef = %q, want kube-prometheus-stack", dep.ComponentRef)
+	}
+	if dep.PodLabelSelector["app.kubernetes.io/name"] != "prometheus" {
+		t.Errorf("podLabelSelector = %v, expected app.kubernetes.io/name=prometheus", dep.PodLabelSelector)
+	}
+	if dep.RequirementOrDefault() != v1.DependencyRequirementPreferred {
+		t.Errorf("requirement = %q, want preferred", dep.RequirementOrDefault())
+	}
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {

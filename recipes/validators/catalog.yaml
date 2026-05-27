@@ -107,6 +107,15 @@ validators:
     timeout: 5m
     args: ["ai-service-metrics"]
     env: []
+    # Co-locate the orchestrator pod with Prometheus so the dial is loopback
+    # / same-node, not subject to cross-Security-Group ingress rules. Required
+    # for determinism on multi-SG clusters (e.g., DGXC EKS with separate
+    # customer/system ENI subnets). See https://github.com/NVIDIA/aicr/issues/933.
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        podLabelSelector:
+          app.kubernetes.io/name: prometheus
+        requirement: preferred
   - name: inference-gateway
     phase: conformance
     description: "Verify inference gateway (agentgateway) is operational"
