@@ -1,0 +1,51 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Run:ai Cluster Helm values
+#
+# Chart: runai/runai-cluster (private — runai.jfrog.io/.../run-ai-charts)
+# Namespace: runai
+#
+# Two values must be provided at deploy-time and cannot be precomputed by
+# AICR — the cluster registers itself with the Control Plane via REST and
+# receives a UUID + clientSecret. The chart accepts either inline values
+# or a pre-created Secret:
+#
+#   --set runaicluster:controlPlane.url=<fqdn>
+#   --set runaicluster:cluster.url=<fqdn>
+#   --set runaicluster:cluster.uid=<uuid-from-CP-API>
+#   --set runaicluster:controlPlane.clientSecret=<secret-from-CP-API>
+#
+# Or, recommended, use existingSecret (so the bundle stays declarative and
+# only the post-install handoff Job/script writes the runtime values):
+#
+#   --set runaicluster:controlPlane.existingSecret=runai-cluster-client-secret
+#
+# Other commonly-overridden values:
+#   --set runaicluster:global.customCA.enabled=true
+#   --set runaicluster:clusterConfig.global.subdomainSupport=true     (host-routing)
+#   --set runaicluster:openShift.mode=Enabled                          (ArgoCD on OCP)
+#
+# `openShift.mode` is `AutoDetect` by default, which uses Helm `lookup`
+# at render time to detect OpenShift via the clusterversions.config.openshift.io
+# CRD. ArgoCD's render path returns empty for `lookup`, so set
+# `openShift.mode=Enabled` explicitly when bundling for OCP + ArgoCD.
+#
+# Pre-created secrets the chart consumes (must exist before deploy in ns
+# runai):
+#   runai-reg-creds                      dockerconfigjson  NGC pull credentials
+#   runai-cluster-domain-tls-secret      tls               cluster domain cert
+#   runai-cluster-domain-star-tls-secret tls               wildcard cert (host-routing only)
+#   runai-ca-cert                        Opaque            optional custom CA chain
+#   runai-cluster-client-secret          Opaque            client-secret key (when using existingSecret)

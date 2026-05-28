@@ -676,3 +676,65 @@ components:
           - nodesets.slinky.podSpec.nodeSelector
         tolerationPaths:
           - nodesets.slinky.podSpec.tolerations
+
+  - name: runai-control-plane
+    displayName: Run:ai Control Plane
+    valueOverrideKeys:
+      - runaicp
+      - runai-control-plane
+    healthCheck:
+      assertFile: checks/runai-control-plane/health-check.yaml
+    helm:
+      # Private repository — credentials must be added out-of-band via
+      # `helm repo add runai https://... --username ... --password ...`
+      # before the bundle is applied. AICR does not manage repo auth.
+      defaultRepository: https://runai.jfrog.io/artifactory/api/helm/cp-charts-prod
+      defaultChart: runai/control-plane
+      defaultVersion: "2.25.9"
+      defaultNamespace: runai-backend
+    nodeScheduling:
+      system:
+        # The CP chart exposes only `global.tolerations` for cluster-wide
+        # scheduling; `global.nodeSelector` does not exist in the chart.
+        # Per-service tolerations append to global.tolerations at render time.
+        tolerationPaths:
+          - global.tolerations
+
+  - name: runai-cluster
+    displayName: Run:ai Cluster
+    valueOverrideKeys:
+      - runaicluster
+      - runai-cluster
+    healthCheck:
+      assertFile: checks/runai-cluster/health-check.yaml
+    helm:
+      # Private repository — credentials must be added out-of-band via
+      # `helm repo add runai https://... --username ... --password ...`
+      # before the bundle is applied. AICR does not manage repo auth.
+      defaultRepository: https://runai.jfrog.io/artifactory/api/helm/run-ai-charts
+      defaultChart: runai/runai-cluster
+      defaultVersion: "2.25.9"
+      defaultNamespace: runai
+    nodeScheduling:
+      system:
+        # global.tolerations applies cluster-wide; global.affinity exists
+        # for affinity-based scheduling but not a top-level nodeSelector.
+        tolerationPaths:
+          - global.tolerations
+
+  - name: fake-gpu-operator
+    displayName: Fake GPU Operator
+    valueOverrideKeys:
+      - fakegpu
+      - fake-gpu-operator
+      - fakegpuoperator
+    # Mutually exclusive with the `gpu-operator` component above — both
+    # target the gpu-operator namespace and provide nvidia.com/gpu
+    # advertisement. Pick one in your overlay/mixin, never both.
+    healthCheck:
+      assertFile: checks/fake-gpu-operator/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/run-ai/fake-gpu-operator
+      defaultChart: fake-gpu-operator
+      defaultVersion: "0.0.62"
+      defaultNamespace: gpu-operator
