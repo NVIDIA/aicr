@@ -12,16 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Run:ai Control Plane on Kind with the fake GPU Operator.
+# Run:ai Control Plane on Kind.
 #
-# Minimal-delta leaf overlay used for local development:
-#   * Inherits everything from `kind` (which inherits `base`)
-#   * Swaps the real gpu-operator out for the fake-gpu-operator
-#   * Adds runai-control-plane on top
-#   * Disables base components that assume real GPU hardware or conflict
-#     with the Run:ai stack (kai-scheduler conflicts with Run:ai's own
-#     scheduler; nvsentinel/nodewright/dra-driver/network-operator all
-#     target real GPU nodes that do not exist on Kind in fake mode).
+# Stage 1 of the two-bundle install — CP-only, no cluster agent and no
+# GPU simulation. The CP is a centralized backend (UI, API, Postgres,
+# Keycloak, etc.) that does not care whether GPUs exist on the cluster
+# it runs on, so fake-gpu-operator + the real gpu-operator stack are
+# both excluded here. They live in `kind-runai-cluster` (stage 2),
+# alongside runai-cluster.
+#
+# Disables base components that target real GPU hardware or conflict
+# with the Run:ai stack (kai-scheduler conflicts with Run:ai's own
+# scheduler; nvsentinel/nodewright/dra-driver/network-operator all
+# need real GPU nodes that do not exist in fake mode).
 #
 # Selection: `aicr recipe --service kind --platform runai`.
 #
@@ -116,15 +119,6 @@ spec:
       type: Helm
       overrides:
         enabled: false
-
-    # Run:ai expects a fake-GPU advertisement on each worker. The chart
-    # is mutually exclusive with gpu-operator (same namespace).
-    # Pre-deploy step: label nodes once before sync —
-    #   kubectl label nodes -l '!node-role.kubernetes.io/control-plane' \
-    #     run.ai/simulated-gpu-node-pool=default --overwrite
-    - name: fake-gpu-operator
-      type: Helm
-      valuesFile: components/fake-gpu-operator/values.yaml
 
     # Run:ai Control Plane. Cluster-side runai-cluster chart is
     # intentionally NOT included here — bring it in via a follow-up
