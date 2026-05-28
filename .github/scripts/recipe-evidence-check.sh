@@ -85,8 +85,10 @@ for overlay in recipes/overlays/*.yaml; do
 
   include=false
 
-  # Rule 1: overlay file itself changed.
-  if echo "$changed_files" | grep -qF "recipes/overlays/${name}.yaml"; then
+  # Rule 1: overlay file itself changed. `grep -qxF` (eXact, Fixed
+  # string) matches whole lines, so `recipes/overlays/foo.yaml.bak`
+  # in the diff doesn't trigger the rule for `foo.yaml`.
+  if printf '%s\n' "$changed_files" | grep -qxF "recipes/overlays/${name}.yaml"; then
     include=true
   fi
 
@@ -105,7 +107,7 @@ for overlay in recipes/overlays/*.yaml; do
         break
       fi
       visited_r2[$parent]=1
-      if echo "$changed_files" | grep -qF "recipes/overlays/${parent}.yaml"; then
+      if printf '%s\n' "$changed_files" | grep -qxF "recipes/overlays/${parent}.yaml"; then
         include=true
         break
       fi
@@ -139,7 +141,7 @@ for overlay in recipes/overlays/*.yaml; do
     unset visited_r3
     while IFS= read -r vf; do
       if [[ -z "$vf" ]]; then continue; fi
-      if echo "$changed_files" | grep -qF "recipes/${vf}"; then
+      if printf '%s\n' "$changed_files" | grep -qxF "recipes/${vf}"; then
         include=true
         break
       fi
@@ -204,13 +206,23 @@ while IFS= read -r slug; do
   overlay="recipes/overlays/${slug}.yaml"
   pointer="recipes/evidence/${slug}.yaml"
 
+  # Wall-clock cap on aicr invocations so a hung / tarpit OCI registry
+  # behind a PR-controlled pointer URL can't burn the whole job budget.
+  # `timeout` exits 124 on timeout; the existing verify-exit default
+  # branch catches that without a code change.
+  : "${AICR_TIMEOUT:=30s}"
+
+  digest_err=$(mktemp)
   current_digest=""
-  if ! current_digest=$("$AICR" evidence digest -r "$overlay" 2>/dev/null); then
+  if ! current_digest=$(timeout "$AICR_TIMEOUT" "$AICR" evidence digest -r "$overlay" 2>"$digest_err"); then
+    echo "::warning::digest failed for ${overlay}: $(head -c 500 "$digest_err")"
     echo "| \`${slug}\` | — | — | :warning: could not compute current digest |" >> "$REPORT_OUT"
     warnings=$((warnings + 1))
     rows_written=$((rows_written + 1))
+    rm -f "$digest_err"
     continue
   fi
+  rm -f "$digest_err"
 
   if [[ ! -f "$pointer" ]]; then
     echo "| \`${slug}\` | :warning: missing | — | — |" >> "$REPORT_OUT"
@@ -220,10 +232,15 @@ while IFS= read -r slug; do
   fi
 
   verify_json=$(mktemp)
+  verify_err=$(mktemp)
   set +e
-  "$AICR" evidence verify "$pointer" --format json >"$verify_json" 2>/dev/null
+  timeout "$AICR_TIMEOUT" "$AICR" evidence verify "$pointer" --format json >"$verify_json" 2>"$verify_err"
   verify_exit=$?
   set -e
+  if [[ "$verify_exit" -ne 0 && -s "$verify_err" ]]; then
+    echo "::warning::verify exit ${verify_exit} for ${pointer}: $(head -c 500 "$verify_err")"
+  fi
+  rm -f "$verify_err"
 
   # aicr maps both ErrCodeConflict (phase failures recorded; bundle
   # valid) and ErrCodeInvalidRequest (bundle invalid) to OS exit 2 —

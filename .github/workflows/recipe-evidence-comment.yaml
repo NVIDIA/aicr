@@ -117,16 +117,23 @@ jobs:
             exit 0
           fi
 
-          BODY=$(printf '%s\n\n%s\n' "$(cat report.md)" "$MARKER")
+          # Build the body without the marker first, then append the
+          # marker exactly once after the size check — avoids the
+          # double-marker edge case where the marker fits inside the
+          # initial body but the truncation slice cuts before it.
+          REPORT_BODY=$(cat report.md)
 
           # GitHub caps issue-comment bodies at ~65536 characters. The
           # build script already truncates the per-row table; this is
           # belt-and-braces for the trailer + any future report growth.
-          max=65000
-          if (( ${#BODY} > max )); then
-            BODY=$(printf '%s\n\n_(comment truncated to fit GitHub 65KB cap)_\n\n%s\n' \
-              "${BODY:0:max}" "$MARKER")
+          # Reserve headroom for the trailer + marker we append below.
+          max=64800
+          if (( ${#REPORT_BODY} > max )); then
+            REPORT_BODY=$(printf '%s\n\n_(comment truncated to fit GitHub 65KB cap)_' \
+              "${REPORT_BODY:0:max}")
           fi
+
+          BODY=$(printf '%s\n\n%s\n' "$REPORT_BODY" "$MARKER")
 
           # --paginate so the marker is found on PRs with >30 comments.
           COMMENT_ID=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
