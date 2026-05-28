@@ -47,6 +47,7 @@ func TestGrubCollector_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}
@@ -109,6 +110,7 @@ func TestGrubCollector_ValidatesParsing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}

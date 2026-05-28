@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -711,6 +712,15 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		if err := pushOCIBundle(ctx, opts, out); err != nil {
 			return err
 		}
+		// argocd-helm is the only deployer that publishes a Helm chart
+		// artifact consumers run `helm install` against; for everyone
+		// else the OCI artifact is a generic AICR bundle with its own
+		// distribution path. Surface the canonical install line so
+		// users don't have to derive it from the registry URL + the
+		// chart's {{ required }} error. See issue #1020.
+		if opts.deployer == config.DeployerArgoCDHelm {
+			printArgoCDHelmOCIInstructions(cmd.Root().Writer, opts.ociRef)
+		}
 	}
 
 	return nil
@@ -822,4 +832,43 @@ func printDeploymentInstructions(w io.Writer, out *result.Output) {
 			fmt.Fprintf(w, "  %d. %s\n", i+1, step)
 		}
 	}
+}
+
+// printArgoCDHelmOCIInstructions emits the canonical `helm install` line
+// for an argocd-helm bundle pushed to OCI. The post-#1051 contract is:
+//
+//   - `helm install` targets the full OCI artifact reference
+//     (oci://<registry>/<repo>:<tag>, including the chart name).
+//   - `--set repoURL` carries the PARENT namespace only — the chart's
+//     parent App template appends .Chart.Name itself to assemble the
+//     final reference, so the chart name must NOT be included in
+//     `repoURL`.
+//
+// Skips silently for non-OCI references; the OCI-mode call site in
+// runBundleCmd already gates on opts.ociRef != nil, this guard is
+// defense-in-depth for callers that may construct ociRef differently.
+func printArgoCDHelmOCIInstructions(w io.Writer, ref *oci.Reference) {
+	if ref == nil || !ref.IsOCI {
+		return
+	}
+
+	chartRef := fmt.Sprintf("%s%s/%s:%s", oci.URIScheme, ref.Registry, ref.Repository, ref.Tag)
+
+	// Parent namespace: the registry + repository path with the chart
+	// (last) segment stripped. path.Dir returns "." for a single-segment
+	// repo (e.g., "aicr-bundle"); in that case the parent is just the
+	// registry, with no path component.
+	parentPath := path.Dir(ref.Repository)
+	var repoURL string
+	if parentPath == "." || parentPath == "/" {
+		repoURL = oci.URIScheme + ref.Registry
+	} else {
+		repoURL = oci.URIScheme + ref.Registry + "/" + parentPath
+	}
+
+	fmt.Fprintf(w, "\nargocd-helm bundle pushed: %s\n", chartRef)
+	fmt.Fprintln(w, "\nTo install:")
+	fmt.Fprintf(w, "  helm install <release> %s \\\n", chartRef)
+	fmt.Fprintln(w, "    --namespace argocd \\")
+	fmt.Fprintf(w, "    --set repoURL=%s\n", repoURL)
 }

@@ -74,9 +74,12 @@ base
 ├── gke-cos (same structure with H100 only, COS instead of Ubuntu)
 ├── kind (minimal, H100 only)
 ├── monitoring-hpa
-├── b200-any-training
-└── gb200-any-training
+├── b200-any-training        # retired by #1004 (PR #1053, in flight)
+├── gb200-any
+└── h100-any
 ```
+
+(Earlier revisions of this document also listed `gb200-any-training` here — an intent-scoped wildcard that carried a cross-service NCCL performance threshold. It was retired by #1052 because per-service network fabrics (EFA, TCPXO, RoCE) make a single cross-service threshold misleading. Its B200 sibling `b200-any-training` is the next to go: PR #1053 retires it as a natural consequence of adding the first concrete B200 GKE leaf, after which `b200-any.yaml` will sit alongside `gb200-any.yaml` / `h100-any.yaml` as the accelerator-wildcard deployment-phase floor. NCCL thresholds now live per-leaf, while the fabric-independent deployment-phase floor (gpu-operator version pin + 4 standard health checks) lives on the accelerator-wildcard `<accel>-any.yaml` overlays.)
 
 ### Current resolver behavior
 
