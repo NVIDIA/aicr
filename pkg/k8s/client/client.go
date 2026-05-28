@@ -17,6 +17,7 @@ package client
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -35,7 +36,28 @@ var (
 	cachedClient *kubernetes.Clientset
 	cachedConfig *rest.Config
 	clientErr    error
+
+	// Per-kubeconfig-path cache used by GetKubeClientWithConfig so a single
+	// CLI invocation (e.g., validate: recipe read + snapshot read + ConfigMap
+	// write) builds at most one client per distinct kubeconfig path instead
+	// of N fresh TLS handshakes.
+	//
+	// Sized for CLI lifetime (a handful of entries, process exits in seconds).
+	// Do NOT reach for this from long-lived daemon paths (`aicrd` server) without
+	// revisiting bounds (max entries / TTL / eviction); the map is unbounded by
+	// design here.
+	pathClientMu    sync.Mutex
+	pathClientCache = map[string]*cachedPathClient{}
 )
+
+// cachedPathClient holds a successfully-built client for a kubeconfig path.
+// Errors are deliberately NOT cached: a transient EAGAIN, brief filesystem
+// hiccup, or first-call token-rotation race must not pin the failure for the
+// entire process lifetime. The cache is an optimization, not a circuit breaker.
+type cachedPathClient struct {
+	client Interface
+	config *rest.Config
+}
 
 // GetKubeClient returns a singleton Kubernetes client, creating it on first call.
 // Subsequent calls return the cached client for connection reuse and reduced overhead.
@@ -82,8 +104,13 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 	var config *rest.Config
 	var err error
 
+	// Treat whitespace-only paths as unset so a stray space in a CLI flag
+	// or env var doesn't bypass the default discovery chain into a guaranteed
+	// "stat   : no such file" error from clientcmd.
+	kubeconfig = strings.TrimSpace(kubeconfig)
+
 	if kubeconfig == "" {
-		kubeconfig = os.Getenv("KUBECONFIG")
+		kubeconfig = strings.TrimSpace(os.Getenv("KUBECONFIG"))
 
 		if kubeconfig == "" {
 			kubeconfig = filepath.Join(homedir.HomeDir(), ".kube", "config")
@@ -117,17 +144,41 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 	return client, config, nil
 }
 
-// GetKubeClientWithConfig is a convenience wrapper around BuildKubeClient
-// that returns the Interface type for compatibility with agent.Deployer.
-// This is the recommended function for CLI commands that need custom kubeconfig paths.
+// GetKubeClientWithConfig returns a Kubernetes client for the given kubeconfig
+// path, caching successful results per distinct path so repeated calls within a
+// single process (e.g., one CLI run that reads recipe + snapshot and writes a
+// ConfigMap against the same kubeconfig) share one client and TLS handshake.
+//
+// Empty or whitespace-only paths delegate to GetKubeClient (the default-discovery
+// singleton).
+//
+// Errors are NOT cached: a transient kubeconfig read failure or token-rotation
+// race on first call must not pin the failure for the entire process lifetime.
+// Callers retry naturally on the next invocation.
 //
 // Parameters:
-//   - kubeconfig: Path to kubeconfig file
+//   - kubeconfig: Path to kubeconfig file. Empty or whitespace-only falls back to
+//     default discovery via the singleton.
 //
 // Returns:
 //   - Interface: The Kubernetes client interface
 //   - *rest.Config: The rest configuration
-//   - error: Any error encountered
+//   - error: Any error encountered (recomputed every call until the first success)
 func GetKubeClientWithConfig(kubeconfig string) (Interface, *rest.Config, error) {
-	return BuildKubeClient(kubeconfig)
+	key := strings.TrimSpace(kubeconfig)
+	if key == "" {
+		return GetKubeClient()
+	}
+
+	pathClientMu.Lock()
+	defer pathClientMu.Unlock()
+	if entry, ok := pathClientCache[key]; ok {
+		return entry.client, entry.config, nil
+	}
+	client, config, err := BuildKubeClient(key)
+	if err != nil {
+		return nil, nil, err
+	}
+	pathClientCache[key] = &cachedPathClient{client: client, config: config}
+	return client, config, nil
 }

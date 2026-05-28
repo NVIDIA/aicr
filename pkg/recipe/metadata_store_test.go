@@ -1665,6 +1665,61 @@ func TestEvictCachedStore_Refetches(t *testing.T) {
 	}
 }
 
+// TestLoadMetadataStoreFor_TransientErrorIsNotCached locks in that a
+// context cancellation during the first load does NOT permanently
+// poison the cache. With sync.Once semantics, the first caller's
+// canceled ctx would otherwise propagate to every later caller for
+// the same DataProvider — a transient reconcile timeout turning into
+// a permanently-broken Client. The fix in LoadMetadataStoreFor drops
+// the cache entry when entry.err is a context cancellation, so a
+// follow-up call with a healthy ctx loads from scratch.
+//
+// Acceptance criteria: the second call succeeds without a manual
+// EvictCachedStore. The error from the first call carries the
+// structured ErrCodeTimeout code (preserved by PropagateOrWrap in
+// builder.go callers).
+func TestLoadMetadataStoreFor_TransientErrorIsNotCached(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+
+	dp := buildProviderWithOverlays(t, "transient-cancel.yaml")
+
+	// First call with a pre-canceled context. The WalkDir guard
+	// inside buildMetadataStore returns aicrerrors.Wrap(ErrCodeTimeout,
+	// ctx.Err()); LoadMetadataStoreFor then CompareAndDeletes the
+	// poisoned entry so subsequent calls don't see the canceled state.
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, firstErr := LoadMetadataStoreFor(canceledCtx, dp)
+	if firstErr == nil {
+		t.Fatal("first call: expected error from canceled context, got nil")
+	}
+	// Pin the structured code so a regression to a bare context.Canceled
+	// or a wrong fallback (e.g., ErrCodeInternal) is caught. The
+	// transient-eviction logic in LoadMetadataStoreFor keys on
+	// stderrors.Is(err, context.Canceled), which still works for any
+	// wrap chain that keeps the cancellation, but downstream callers
+	// (builder.BuildFromCriteria) depend on the ErrCodeTimeout shape
+	// for their own retry/timeout signaling.
+	var firstSE *aicrerrors.StructuredError
+	if !errors.As(firstErr, &firstSE) {
+		t.Fatalf("first call: expected structured error, got %T: %v", firstErr, firstErr)
+	}
+	if firstSE.Code != aicrerrors.ErrCodeTimeout {
+		t.Fatalf("first call: expected ErrCodeTimeout, got %s", firstSE.Code)
+	}
+
+	// Second call with a healthy context must succeed — if the
+	// poisoned entry hadn't been evicted, sync.Once would lock all
+	// subsequent calls into the same cancellation error.
+	store, err := LoadMetadataStoreFor(context.Background(), dp)
+	if err != nil {
+		t.Fatalf("second call (healthy ctx) after transient cancel: %v", err)
+	}
+	if store == nil {
+		t.Fatal("second call: expected non-nil store after retry")
+	}
+}
+
 // TestEvictCachedStore_NilIsNoOp verifies that EvictCachedStore(nil) is a
 // no-op: it must not panic and must not clobber any existing cache entries
 // for other providers.

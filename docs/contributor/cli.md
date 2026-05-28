@@ -1700,7 +1700,7 @@ OUTPUT_DIR="recipes"
 mkdir -p "$OUTPUT_DIR"
 
 # GPU types from NVIDIA product line
-GPU_TYPES=("h100" "gb200" "b200" "a100" "l40" "rtx-pro-6000")
+GPU_TYPES=("h100" "h200" "gb200" "b200" "a100" "l40" "rtx-pro-6000")
 
 # Kubernetes services
 K8S_SERVICES=("eks" "gke" "aks" "oke" "kind" "lke" "bcm")

@@ -28,6 +28,13 @@ var gpuSKURegistry = []struct {
 	{"GB200", "gb200"},
 	{"B200", "b200"},
 	{"H100", "h100"},
+	// GH200 (Grace Hopper Superchip) contains the substring "H200" but is a
+	// distinct Grace-Hopper SKU, not the discrete H200 GPU. It has no
+	// first-class accelerator enum, so match it explicitly before the "H200"
+	// rule and leave it unresolved ("") rather than mislabeling it as h200 —
+	// same reason "GB200" precedes "B200" above.
+	{"GH200", ""},
+	{"H200", "h200"},
 	{"A100", "a100"},
 	{"RTX PRO 6000", "rtx-pro-6000"},
 	{"L40", "l40"},

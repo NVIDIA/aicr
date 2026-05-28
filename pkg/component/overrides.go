@@ -171,6 +171,49 @@ func ApplyTolerationsOverrides(values map[string]any, tolerations []corev1.Toler
 	}
 }
 
+// AppendTolerationsOverrides appends CLI tolerations to whatever list is
+// already at each path, instead of replacing it. Used when a recipe overlay
+// has populated the path with a non-empty list (e.g., bcm.yaml's BCM-master
+// `controller.tolerations`): the overlay's intent is "ALSO tolerate these",
+// not "use only these", so the CLI flag's tolerations must augment the
+// overlay list rather than clobber it.
+//
+// If the path is absent or holds an empty/non-slice value, the behavior is
+// identical to ApplyTolerationsOverrides (CLI tolerations become the full
+// list at the path).
+func AppendTolerationsOverrides(values map[string]any, tolerations []corev1.Toleration, paths ...string) {
+	if len(tolerations) == 0 || values == nil {
+		return
+	}
+	if len(paths) == 0 {
+		paths = []string{"tolerations"}
+	}
+	tolList := TolerationsToPodSpec(tolerations)
+	for _, path := range paths {
+		appendTolerationsAtPath(values, tolList, path)
+	}
+}
+
+// appendTolerationsAtPath appends tolerations to the slice at the given
+// dot-notation path. If the path is missing or not a slice, the path is set
+// to the new tolerations list (i.e. identical to setTolerationsAtPath in
+// that case).
+func appendTolerationsAtPath(values map[string]any, tolerations []map[string]any, path string) {
+	parent, key, _ := getOrCreateNestedMap(values, path, false)
+
+	newEntries := make([]any, len(tolerations))
+	for i, t := range tolerations {
+		newEntries[i] = t
+	}
+
+	existing, ok := parent[key].([]any)
+	if !ok {
+		parent[key] = newEntries
+		return
+	}
+	parent[key] = append(existing, newEntries...)
+}
+
 // setTolerationsAtPath sets the tolerations at the specified dot-notation path.
 func setTolerationsAtPath(values map[string]any, tolerations []map[string]any, path string) {
 	parent, key, _ := getOrCreateNestedMap(values, path, false)

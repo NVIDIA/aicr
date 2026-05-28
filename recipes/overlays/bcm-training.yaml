@@ -25,4 +25,14 @@ spec:
     service: bcm
     intent: training
 
-  componentRefs: []
+  # Enable GPUDirect Storage (GDS) for BCM training workloads. BCM-provisioned
+  # nodes typically ship NVIDIA-validated NVMe + ConnectX hardware where GDS
+  # delivers a meaningful training I/O perf win (most pronounced on H200 NVL
+  # given its 141GB HBM3e per device). On nodes without compatible hardware
+  # the nvidia-fs DaemonSet is benign — it logs a warning and stays inert.
+  componentRefs:
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        gds:
+          enabled: true

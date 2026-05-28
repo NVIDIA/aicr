@@ -16,10 +16,12 @@ package v1
 
 import (
 	stderrors "errors"
+	"reflect"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestBuildOrchestratorAffinity_NoDeps(t *testing.T) {
@@ -192,5 +194,118 @@ func TestBuildOrchestratorAffinity_ExplicitTopologyKeyPreserved(t *testing.T) {
 	term := got.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
 	if term.TopologyKey != "topology.kubernetes.io/zone" {
 		t.Errorf("expected explicit topology key preserved, got %q", term.TopologyKey)
+	}
+}
+
+// TestAffinityTypeFieldCountInvariant guards the hand-rolled
+// affinityToApplyConfig walker in job_plan.go against silent field drops on
+// k8s API bumps. If a k8s vendor bump adds a field to one of these structs
+// (e.g., MatchLabelKeys / MismatchLabelKeys were added to PodAffinityTerm in
+// v1.29-v1.30), this test fails and forces an audit of the apply-config
+// converter so the new field is either propagated or intentionally excluded.
+//
+// Update the expected count only after confirming the converter handles (or
+// has deliberately skipped) every new field.
+func TestAffinityTypeFieldCountInvariant(t *testing.T) {
+	cases := []struct {
+		name string
+		t    reflect.Type
+		want int
+	}{
+		{"Affinity", reflect.TypeOf(corev1.Affinity{}), 3},
+		{"NodeAffinity", reflect.TypeOf(corev1.NodeAffinity{}), 2},
+		{"NodeSelectorTerm", reflect.TypeOf(corev1.NodeSelectorTerm{}), 2},
+		{"PodAffinity", reflect.TypeOf(corev1.PodAffinity{}), 2},
+		{"PodAntiAffinity", reflect.TypeOf(corev1.PodAntiAffinity{}), 2},
+		{"PodAffinityTerm", reflect.TypeOf(corev1.PodAffinityTerm{}), 6},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.t.NumField(); got != c.want {
+				t.Fatalf("corev1.%s has %d fields, expected %d. K8s API has added/removed a field; audit the apply-config converter in pkg/api/validator/v1/job_plan.go and update this test only after confirming the new field is handled or intentionally excluded.",
+					c.name, got, c.want)
+			}
+		})
+	}
+}
+
+// TestValidateDependencyAffinity_MatchesBuildSemantics ensures the
+// pre-flight validator returns the same error class as the full build path
+// for every resolution failure mode, since both share resolveDeps.
+func TestValidateDependencyAffinity_MatchesBuildSemantics(t *testing.T) {
+	cases := []struct {
+		name    string
+		deps    []DependencyAffinity
+		refs    []recipe.ComponentRef
+		wantErr bool
+	}{
+		{
+			name:    "nil deps returns nil",
+			wantErr: false,
+		},
+		{
+			name: "valid required resolves",
+			deps: []DependencyAffinity{{
+				ComponentRef:     "kube-prometheus-stack",
+				PodLabelSelector: map[string]string{"app.kubernetes.io/name": "prometheus"},
+				Requirement:      DependencyRequirementRequired,
+			}},
+			refs:    []recipe.ComponentRef{{Name: "kube-prometheus-stack", Namespace: "monitoring"}},
+			wantErr: false,
+		},
+		{
+			name: "required missing returns error",
+			deps: []DependencyAffinity{{
+				ComponentRef:     "kube-prometheus-stack",
+				PodLabelSelector: map[string]string{"app.kubernetes.io/name": "prometheus"},
+				Requirement:      DependencyRequirementRequired,
+			}},
+			wantErr: true,
+		},
+		{
+			name: "preferred missing returns nil",
+			deps: []DependencyAffinity{{
+				ComponentRef:     "kube-prometheus-stack",
+				PodLabelSelector: map[string]string{"app.kubernetes.io/name": "prometheus"},
+				Requirement:      DependencyRequirementPreferred,
+			}},
+			wantErr: false,
+		},
+		{
+			name: "invalid dep (empty selector) returns error",
+			deps: []DependencyAffinity{{
+				ComponentRef: "kube-prometheus-stack",
+				Requirement:  DependencyRequirementPreferred,
+			}},
+			wantErr: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			validateErr := ValidateDependencyAffinity(c.deps, c.refs)
+			_, buildErr := BuildOrchestratorAffinity(c.deps, c.refs)
+			if (validateErr != nil) != c.wantErr {
+				t.Errorf("ValidateDependencyAffinity err=%v, wantErr=%v", validateErr, c.wantErr)
+			}
+			// Validate and Build must agree on error/no-error.
+			if (validateErr == nil) != (buildErr == nil) {
+				t.Errorf("validate/build disagree: validateErr=%v, buildErr=%v", validateErr, buildErr)
+			}
+			// When both error, they must share the same StructuredError.Code
+			// so the pre-flight gate and the build path classify failures
+			// consistently — a future refactor that downgrades one path's
+			// code (e.g., to ErrCodeInternal) must not slip through.
+			if validateErr != nil && buildErr != nil {
+				var vErr, bErr *errors.StructuredError
+				switch {
+				case !stderrors.As(validateErr, &vErr):
+					t.Errorf("validate err is not a *StructuredError: %T (%v)", validateErr, validateErr)
+				case !stderrors.As(buildErr, &bErr):
+					t.Errorf("build err is not a *StructuredError: %T (%v)", buildErr, buildErr)
+				case vErr.Code != bErr.Code:
+					t.Errorf("error code mismatch: validate=%s build=%s", vErr.Code, bErr.Code)
+				}
+			}
+		})
 	}
 }

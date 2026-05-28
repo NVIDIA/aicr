@@ -301,6 +301,144 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			wantDRAConstraint: false,
 		},
 		{
+			name: "rtx-pro-6000-eks-inference",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.Intent = CriteriaIntentInference
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			name: "rtx-pro-6000-eks-ubuntu-inference",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			name: "rtx-pro-6000-eks-ubuntu-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+				"grove",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: true,
+		},
+		{
+			name: "rtx-pro-6000-eks-ubuntu-inference-nim",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformNIM
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+				"k8s-nim-operator",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: true,
+		},
+		{
 			name: "h100-gke-cos-inference-dynamo",
 			criteria: func() *Criteria {
 				c := NewCriteria()

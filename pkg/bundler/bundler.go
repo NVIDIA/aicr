@@ -603,18 +603,19 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 
 		// Apply user value overrides from --set flags.
 		// Strip "enabled" key — it controls component inclusion, not Helm chart values.
-		if overrides := b.getValueOverridesForComponent(ref.Name, provider); len(overrides) > 0 {
-			if _, has := overrides["enabled"]; has {
-				filtered := make(map[string]string, len(overrides)-1)
-				for k, v := range overrides {
+		setOverrides := b.getValueOverridesForComponent(ref.Name, provider)
+		if len(setOverrides) > 0 {
+			if _, has := setOverrides["enabled"]; has {
+				filtered := make(map[string]string, len(setOverrides)-1)
+				for k, v := range setOverrides {
 					if k == "enabled" {
 						continue
 					}
 					filtered[k] = v
 				}
-				overrides = filtered
+				setOverrides = filtered
 			}
-			if applyErr := component.ApplyMapOverrides(values, overrides); applyErr != nil {
+			if applyErr := component.ApplyMapOverrides(values, setOverrides); applyErr != nil {
 				// User-supplied --set overrides must produce the values the
 				// user asked for; silently dropping them ships a bundle
 				// that doesn't reflect the CLI inputs. Fail loudly so the
@@ -626,8 +627,15 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			}
 		}
 
+		// Compute the set of scheduling paths the user explicitly populated
+		// (recipe overlay's inline overrides + CLI --set). These take
+		// precedence over CLI/config defaults inside
+		// applyNodeSchedulingOverrides. Component default valuesFile values
+		// are intentionally excluded — see authoritativeSchedulingPaths godoc.
+		policy := b.computeSchedulingPathPolicy(&ref, provider, setOverrides)
+
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
-		b.applyNodeSchedulingOverrides(ref.Name, values, provider)
+		b.applyNodeSchedulingOverrides(ref.Name, values, provider, policy)
 
 		componentValues[ref.Name] = values
 	}
@@ -709,11 +717,147 @@ func (b *DefaultBundler) getSetEnabledOverride(componentName string, provider re
 	return parsed, true, nil
 }
 
+// schedulingPathPolicy is the per-path policy the bundler applies during
+// node-scheduling injection. It is derived from the recipe overlay's
+// inline overrides (componentRefs[].overrides) and CLI --set values; the
+// component's default valuesFile is intentionally NOT consulted so a
+// chart-default toleration shipped in values.yaml (e.g., kueue's
+// `controllerManager.tolerations: [{Exists}]`) does not silently turn
+// --system-node-toleration into a no-op.
+type schedulingPathPolicy struct {
+	// optOut paths are populated by the overlay/--set with an explicitly
+	// empty value (empty slice for tolerations, empty map for selectors).
+	// Injection is skipped entirely — e.g. kind.yaml's
+	// `daemonsets.tolerations: []` keeps GPU operands off the
+	// control-plane by letting the chart default kick in.
+	optOut map[string]struct{}
+	// appendMode paths are populated by the overlay/--set with a
+	// NON-empty toleration list — the overlay's intent is "ALSO tolerate
+	// these", so CLI tolerations augment the overlay list rather than
+	// replace it (e.g. bcm.yaml's `controller.tolerations` for the
+	// BCM-master taints must coexist with the KWOK system-pool taint
+	// passed via --system-node-toleration).
+	appendMode map[string]struct{}
+}
+
+// computeSchedulingPathPolicy classifies every registry-declared scheduling
+// path for the component into optOut / appendMode / (implicit) replace.
+func (b *DefaultBundler) computeSchedulingPathPolicy(ref *recipe.ComponentRef, provider recipe.DataProvider, setOverrides map[string]string) schedulingPathPolicy {
+	if ref == nil {
+		return schedulingPathPolicy{}
+	}
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		return schedulingPathPolicy{}
+	}
+	comp := registry.Get(ref.Name)
+	if comp == nil {
+		return schedulingPathPolicy{}
+	}
+	allPaths := make([]string, 0, 16)
+	allPaths = append(allPaths, comp.GetSystemNodeSelectorPaths()...)
+	allPaths = append(allPaths, comp.GetSystemTolerationPaths()...)
+	allPaths = append(allPaths, comp.GetAcceleratedNodeSelectorPaths()...)
+	allPaths = append(allPaths, comp.GetAcceleratedTolerationPaths()...)
+	allPaths = append(allPaths, comp.GetWorkloadSelectorPaths()...)
+	return classifySchedulingPaths(ref.Overrides, setOverrides, allPaths)
+}
+
+// classifySchedulingPaths returns the opt-out / append classification for
+// the given dot-notation paths. A path is opt-out when the overlay or --set
+// resolves it to an empty slice/map; append when it resolves to a non-empty
+// value; otherwise unclassified (treated as replace by the caller).
+func classifySchedulingPaths(overrides map[string]any, setOverrides map[string]string, paths []string) schedulingPathPolicy {
+	policy := schedulingPathPolicy{
+		optOut:     make(map[string]struct{}),
+		appendMode: make(map[string]struct{}),
+	}
+	for _, p := range paths {
+		val, hasOverlay := overlayValueAt(overrides, p)
+		_, hasSet := setOverrides[p]
+		if !hasOverlay && !hasSet {
+			continue
+		}
+		// Opt-out is gated on the OVERLAY only: --set passes string values
+		// that cannot meaningfully represent a "no tolerations" sentinel
+		// (an empty-list overlay literal is the canonical opt-out gesture).
+		if hasOverlay && isEmptyOverlayValue(val) {
+			policy.optOut[p] = struct{}{}
+			continue
+		}
+		policy.appendMode[p] = struct{}{}
+	}
+	return policy
+}
+
+// overlayValueAt returns the value at the dot-notation path in the recipe
+// overlay's inline overrides, plus whether the path resolved.
+func overlayValueAt(overrides map[string]any, path string) (any, bool) {
+	if overrides == nil {
+		return nil, false
+	}
+	return component.GetValueByPath(overrides, path)
+}
+
+// isEmptyOverlayValue reports whether v is the recipe author's deliberate
+// "no value here" sentinel — an empty slice/map, an explicit nil, or any
+// representation that yields zero entries. Used to detect opt-out semantics
+// (kind.yaml's `daemonsets.tolerations: []`).
+func isEmptyOverlayValue(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case []any:
+		return len(x) == 0
+	case map[string]any:
+		return len(x) == 0
+	case map[any]any:
+		return len(x) == 0
+	default:
+		return false
+	}
+}
+
+// filterPaths returns paths not present in skip.
+func filterPaths(paths []string, skip map[string]struct{}) []string {
+	if len(paths) == 0 || len(skip) == 0 {
+		return paths
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if _, blocked := skip[p]; !blocked {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitPaths partitions paths into (append-mode, replace-mode) based on
+// policy.appendMode. Opt-out paths must already be filtered out by the caller.
+func splitPaths(paths []string, appendMode map[string]struct{}) (appendPaths, replacePaths []string) {
+	for _, p := range paths {
+		if _, ok := appendMode[p]; ok {
+			appendPaths = append(appendPaths, p)
+		} else {
+			replacePaths = append(replacePaths, p)
+		}
+	}
+	return
+}
+
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.
 // Uses the component registry to determine the correct paths for each component.
 // The provider argument scopes the registry lookup to the recipe's bound DataProvider;
 // a nil provider falls back to the package-global registry via GetComponentRegistryFor.
-func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, values map[string]any, provider recipe.DataProvider) {
+//
+// The policy argument carries the per-path opt-out / append classification
+// computed once at the top of extractComponentValues. opt-out paths are
+// skipped entirely; append-mode paths receive CLI tolerations appended to
+// whatever the overlay already wrote (so bcm.yaml's BCM-master tolerations
+// coexist with --system-node-toleration); other paths use REPLACE semantics
+// so the documented system → accelerated overwrite for shared paths like
+// NFD's worker.tolerations still produces "accelerated wins".
+func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, values map[string]any, provider recipe.DataProvider, policy schedulingPathPolicy) {
 	if b.Config == nil {
 		return
 	}
@@ -733,37 +877,52 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		return // Unknown component, skip
 	}
 
-	// Apply system node selector
+	// Apply system node selector. NodeSelector uses REPLACE semantics even
+	// for overlay-set non-empty values — no current overlay sets selector
+	// paths, and the cuj1-training contract assumes CLI replaces.
 	if nodeSelector := b.Config.SystemNodeSelector(); len(nodeSelector) > 0 {
-		if paths := comp.GetSystemNodeSelectorPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetSystemNodeSelectorPaths(), policy.optOut); len(paths) > 0 {
 			component.ApplyNodeSelectorOverrides(values, nodeSelector, paths...)
 		}
 	}
 
-	// Apply system tolerations
+	// Apply system tolerations — split into append-mode (overlay had a
+	// non-empty list, e.g. bcm) and replace-mode (no overlay).
 	if tolerations := b.Config.SystemNodeTolerations(); len(tolerations) > 0 {
-		if paths := comp.GetSystemTolerationPaths(); len(paths) > 0 {
-			component.ApplyTolerationsOverrides(values, tolerations, paths...)
+		if paths := filterPaths(comp.GetSystemTolerationPaths(), policy.optOut); len(paths) > 0 {
+			appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
+			if len(replacePaths) > 0 {
+				component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
+			}
+			if len(appendPaths) > 0 {
+				component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
+			}
 		}
 	}
 
 	// Apply accelerated node selector
 	if nodeSelector := b.Config.AcceleratedNodeSelector(); len(nodeSelector) > 0 {
-		if paths := comp.GetAcceleratedNodeSelectorPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetAcceleratedNodeSelectorPaths(), policy.optOut); len(paths) > 0 {
 			component.ApplyNodeSelectorOverrides(values, nodeSelector, paths...)
 		}
 	}
 
 	// Apply accelerated tolerations
 	if tolerations := b.Config.AcceleratedNodeTolerations(); len(tolerations) > 0 {
-		if paths := comp.GetAcceleratedTolerationPaths(); len(paths) > 0 {
-			component.ApplyTolerationsOverrides(values, tolerations, paths...)
+		if paths := filterPaths(comp.GetAcceleratedTolerationPaths(), policy.optOut); len(paths) > 0 {
+			appendPaths, replacePaths := splitPaths(paths, policy.appendMode)
+			if len(replacePaths) > 0 {
+				component.ApplyTolerationsOverrides(values, tolerations, replacePaths...)
+			}
+			if len(appendPaths) > 0 {
+				component.AppendTolerationsOverrides(values, tolerations, appendPaths...)
+			}
 		}
 	}
 
 	// Apply workload selector
 	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {
-		if paths := comp.GetWorkloadSelectorPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetWorkloadSelectorPaths(), policy.optOut); len(paths) > 0 {
 			component.ApplyNodeSelectorOverrides(values, workloadSelector, paths...)
 		}
 	}

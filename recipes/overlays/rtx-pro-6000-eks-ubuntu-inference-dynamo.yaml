@@ -1,0 +1,98 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: rtx-pro-6000-eks-ubuntu-inference-dynamo
+
+spec:
+  # Inherits from rtx-pro-6000-eks-ubuntu-inference (RTX PRO 6000 + EKS + Ubuntu inference settings)
+  # Adds Dynamo inference platform components.
+  base: rtx-pro-6000-eks-ubuntu-inference
+
+  criteria:
+    service: eks
+    accelerator: rtx-pro-6000
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+
+  # DRA requires Kubernetes 1.34+ (GA)
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        gpuResourcesEnabledOverride: true
+
+    - name: grove
+      type: Helm
+      source: oci://ghcr.io/ai-dynamo/grove
+      version: "v0.1.0-alpha.6"
+      valuesFile: components/grove/values.yaml
+
+    - name: dynamo-platform
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      version: "1.0.2"
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - grove
+        - cert-manager
+        - kube-prometheus-stack
+        - gpu-operator
+        - kai-scheduler
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # RTX PRO 6000 Blackwell needs the Blackwell-era gpu-operator floor.
+        # Match the rtx-pro-6000-any.yaml wildcard so the per-phase replace
+        # semantics keep the version pin intact.
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
+    performance:
+      checks:
+        - inference-perf
+      # Placeholder thresholds — pending empirical tuning on RTX PRO 6000
+      # Blackwell Server Edition (g7e.48xlarge, 8x). Current values are
+      # loose smoke-test floors derived from the H100 reference; tighten
+      # once reference runs are published.
+      constraints:
+        - name: inference-throughput
+          value: ">= 5000"
+        - name: inference-ttft-p99
+          value: "<= 200"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - inference-gateway
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

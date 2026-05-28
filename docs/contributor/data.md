@@ -124,10 +124,10 @@ Criteria define when a recipe matches a user query:
 | Field | Type | Description | Example Values |
 |-------|------|-------------|----------------|
 | `service` | String | Kubernetes platform | `eks`, `gke`, `aks`, `oke`, `kind`, `lke`, `bcm` |
-| `accelerator` | String | GPU hardware type | `h100`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000` |
+| `accelerator` | String | GPU hardware type | `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000` |
 | `os` | String | Operating system | `ubuntu`, `rhel`, `cos`, `amazonlinux` |
 | `intent` | String | Workload purpose | `training`, `inference` |
-| `platform` | String | Platform/framework type | `kubeflow` |
+| `platform` | String | Platform/framework type | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
 | `nodes` | Integer | Node count (0 = any) | `8`, `16` |
 
 **All fields are optional.** Unpopulated fields act as wildcards (match any value).
@@ -471,7 +471,7 @@ The gpu-operator version pin from `gb200-any` lands in the hydrated recipe witho
 
 **Naming convention.** The `-any` (or `-any-<intent>`) segment signals this pattern: the static segments indicate the fixed criteria dimensions (accelerator, optionally intent), and `any` marks the wildcard dimension. Examples: `gb200-any.yaml`, `h100-any.yaml`, `rtx-pro-6000-any.yaml`.
 
-**Don't carry per-fabric values here.** Cross-service-uniform content (gpu-operator version pin, standard health checks) is a good fit. Per-fabric content (NCCL bandwidth thresholds across services with different network fabrics — EFA, TCPXO, RoCE) is not — declare those in each service-specific leaf instead. The intent-scoped `gb200-any-training.yaml` overlay that previously carried a cross-service NCCL threshold was retired in #1052 for this reason; its B200 sibling (`b200-any-training.yaml`) is retired by #1004 (PR #1053) as a natural consequence of adding the first concrete B200 leaf.
+**Don't carry per-fabric values here.** Cross-service-uniform content (gpu-operator version pin, standard health checks) is a good fit. Per-fabric content (NCCL bandwidth thresholds across services with different network fabrics — EFA, TCPXO, RoCE) is not — declare those in each service-specific leaf instead. The intent-scoped `gb200-any-training.yaml` and `b200-any-training.yaml` overlays that previously carried cross-service NCCL thresholds were retired for this reason (`gb200-any-training` in #1052, `b200-any-training` in #1053).
 
 **When to use a criteria-wildcard overlay vs a mixin:**
 
@@ -801,7 +801,7 @@ fingerprint:
     value: eks                       # eks | gke | aks | oke | kind | lke | bcm
     source: k8s.node.provider
   accelerator:
-    value: h100                      # h100 | gb200 | b200 | a100 | l40 | rtx-pro-6000
+    value: h100                      # h100 | h200 | gb200 | b200 | a100 | l40 | rtx-pro-6000
     source: gpu.smi.gpu.model
   os:
     value: ubuntu                    # ubuntu | rhel | cos | amazonlinux | talos
