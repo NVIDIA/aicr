@@ -64,6 +64,38 @@ const (
 	RecipeCacheTTL = 10 * time.Minute
 )
 
+// Library facade timeouts for the top-level aicr.Client entry points.
+// Each Client method context.WithTimeouts against these defaults so a
+// caller passing context.Background() can't hang a controller reconcile
+// on stuck I/O. Callers passing a tighter context deadline keep theirs
+// (context.WithTimeout honors the smaller of the two).
+const (
+	// RecipeOperationTimeout is the upper bound for a single
+	// Client.ResolveRecipe or Client.BundleComponents call when the
+	// caller's context has no deadline. Sized for embedded + on-disk
+	// recipe reads with cache misses; not appropriate for OCI fetches
+	// (those will need a separate network-bound timeout once OCI sources
+	// are implemented).
+	RecipeOperationTimeout = 30 * time.Second
+
+	// SnapshotOperationTimeout is the facade-level upper bound for
+	// Client.CollectSnapshot when neither the caller's context nor
+	// AgentConfig.Timeout supplies one. Matches CLISnapshotTimeout so
+	// library and CLI consumers see the same ceiling. Callers driving
+	// long-running custom collectors should pass an explicit
+	// AgentConfig.Timeout — that wins so long as it's smaller than any
+	// deadline already on the parent context.
+	SnapshotOperationTimeout = 5 * time.Minute
+
+	// ValidationOperationTimeout is the facade-level upper bound for
+	// Client.ValidateState when the caller's context has no deadline.
+	// Sized to comfortably exceed CheckExecutionTimeout (45m) so the
+	// inner per-check Job timeout fires before the orchestration cap —
+	// that ordering surfaces a stuck check as a per-check error rather
+	// than as the wrapping context's deadline-exceeded.
+	ValidationOperationTimeout = 60 * time.Minute
+)
+
 // Server timeouts for HTTP server configuration.
 const (
 	// ServerReadTimeout is the maximum duration for reading request headers.

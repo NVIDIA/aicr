@@ -258,6 +258,41 @@ func EvictCachedRegistry(dp DataProvider) {
 	registryCache.Delete(dp)
 }
 
+// CachedRegistryCountForTesting returns the number of distinct
+// DataProvider entries currently held in the registry cache. Exposed
+// for tests in the aicr facade that assert Client.Close evicts the
+// cached registry — without this, the only way to observe eviction
+// from outside the recipe package would be to reach into unexported
+// state via reflection.
+//
+// Test-only by convention (the _ForTesting suffix); never call from
+// production code.
+//
+// NOTE: global count across every DataProvider. Tests that need a
+// stable signal scoped to a specific DataProvider should prefer
+// CachedRegistryContainsForTesting.
+func CachedRegistryCountForTesting() int {
+	n := 0
+	registryCache.Range(func(_, _ any) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// CachedRegistryContainsForTesting reports whether the registry cache
+// has an entry for the supplied DataProvider. Pair with
+// CachedStoreContainsForTesting in pkg/recipe/metadata_store.go to
+// verify a single Client's caches are released without depending on
+// the global count.
+//
+// Test-only by convention (the _ForTesting suffix); never call from
+// production code.
+func CachedRegistryContainsForTesting(dp DataProvider) bool {
+	_, ok := registryCache.Load(dp)
+	return ok
+}
+
 // ResetComponentRegistryForTesting drops every cached registry so the next
 // GetComponentRegistryFor call rebuilds from source. This must only be
 // called from tests.
