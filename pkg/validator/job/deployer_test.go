@@ -994,3 +994,32 @@ func TestScanMissingPodAffinityDeps_ListErrorReturnsWarning(t *testing.T) {
 		t.Errorf("expected lookup-failed warning, got %v", got[0])
 	}
 }
+
+// TestScanMissingPodAffinityDeps_StopsOnCancellation verifies the scan
+// returns early once the parent ctx is canceled instead of emitting one
+// "selector lookup failed; context canceled" warning per remaining
+// (term, namespace) pair.
+func TestScanMissingPodAffinityDeps_StopsOnCancellation(t *testing.T) {
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	cs := fake.NewSimpleClientset()
+	pa := &corev1.PodAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+			{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "a"}},
+				Namespaces:    []string{"ns-a-1", "ns-a-2"},
+				TopologyKey:   "kubernetes.io/hostname",
+			},
+			{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "b"}},
+				Namespaces:    []string{"ns-b-1", "ns-b-2"},
+				TopologyKey:   "kubernetes.io/hostname",
+			},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel so the outer-loop guard trips before any List runs
+	got := scanMissingPodAffinityDeps(ctx, cs, pa)
+	if len(got) != 0 {
+		t.Errorf("expected no warnings after pre-canceled ctx, got %d: %v", len(got), got)
+	}
+}

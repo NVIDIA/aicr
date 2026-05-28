@@ -291,6 +291,21 @@ func TestValidateDependencyAffinity_MatchesBuildSemantics(t *testing.T) {
 			if (validateErr == nil) != (buildErr == nil) {
 				t.Errorf("validate/build disagree: validateErr=%v, buildErr=%v", validateErr, buildErr)
 			}
+			// When both error, they must share the same StructuredError.Code
+			// so the pre-flight gate and the build path classify failures
+			// consistently — a future refactor that downgrades one path's
+			// code (e.g., to ErrCodeInternal) must not slip through.
+			if validateErr != nil && buildErr != nil {
+				var vErr, bErr *errors.StructuredError
+				switch {
+				case !stderrors.As(validateErr, &vErr):
+					t.Errorf("validate err is not a *StructuredError: %T (%v)", validateErr, validateErr)
+				case !stderrors.As(buildErr, &bErr):
+					t.Errorf("build err is not a *StructuredError: %T (%v)", buildErr, buildErr)
+				case vErr.Code != bErr.Code:
+					t.Errorf("error code mismatch: validate=%s build=%s", vErr.Code, bErr.Code)
+				}
+			}
 		})
 	}
 }

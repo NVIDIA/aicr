@@ -186,11 +186,21 @@ func scanMissingPodAffinityDeps(ctx context.Context, client kubernetes.Interface
 
 	var warnings []string
 	for _, term := range terms {
+		// Stop early on cancellation. Continuing here would only emit a
+		// "selector lookup failed; error=context canceled" warning per
+		// remaining (term, namespace) pair, turning one cancellation into
+		// N misleading apiserver-flake warnings.
+		if ctx.Err() != nil {
+			return warnings
+		}
 		if term.LabelSelector == nil || len(term.Namespaces) == 0 {
 			continue
 		}
 		selector := metav1.FormatLabelSelector(term.LabelSelector)
 		for _, ns := range term.Namespaces {
+			if ctx.Err() != nil {
+				return warnings
+			}
 			listCtx, cancel := context.WithTimeout(ctx, defaults.PodAffinitySelectorLookupTimeout)
 			pods, err := client.CoreV1().Pods(ns).List(listCtx, metav1.ListOptions{
 				LabelSelector: selector,
