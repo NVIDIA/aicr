@@ -131,6 +131,7 @@ func TestSysctlCollector_ExcludesNet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}
@@ -315,6 +316,7 @@ func TestSysctlCollector_MixedContent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}
