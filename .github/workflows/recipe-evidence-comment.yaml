@@ -1,0 +1,149 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Workflow 2 of 2 for the warning-only recipe-evidence gate.
+#
+# Triggered by workflow_run after "Recipe Evidence: Verify" completes.
+# Downloads the report.md artifact and posts/updates a sticky PR
+# comment. This workflow never checks out the PR branch, keeping any
+# future secrets isolated from untrusted PR code. Mirrors the pattern
+# established by fern-docs-preview-build + fern-docs-preview-comment.
+#
+# The PR association is re-derived here from the trusted
+# workflow_run.head_sha (via commits/<sha>/pulls) rather than read
+# from the artifact, since the artifact is produced by the build
+# workflow on the PR branch (fork-attacker-controllable contents).
+# report.md itself is also fork-influenced (its row contents come from
+# PR-supplied overlay filenames and the verify output), but we only
+# post it as Markdown under the bot identity — no parsing.
+
+name: "Recipe Evidence: Comment"
+
+on:
+  workflow_run:
+    workflows: ["Recipe Evidence: Verify"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  actions: read
+
+concurrency:
+  # Include head repository identity so fork branches with the same name
+  # don't share a group key and cancel unrelated runs.
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Run regardless of build conclusion: workflow 1 uploads partial
+    # reports with `if: always()`. Filter to PR-triggered runs only so
+    # unrelated workflow_run firings (e.g., manual reruns from other
+    # contexts) don't try to post on a non-existent PR.
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    steps:
+      - name: Download evidence report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: recipe-evidence-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve PR number from trusted workflow_run metadata
+        id: metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Ask GitHub which open PR(s) contain this head SHA. This is
+          # the trusted source — never trust an artifact-supplied number.
+          pulls=$(gh api "repos/${BASE_REPO}/commits/${HEAD_SHA}/pulls" \
+            --jq '[.[] | select(.state == "open")]')
+
+          # Cross-check the PR's head-repo owner against the workflow_run's
+          # head_repository owner so two PRs sharing a head SHA across
+          # forks don't get confused. Require exactly one match — if a
+          # single fork-owner has somehow opened multiple open PRs from
+          # the same head SHA, refuse to guess.
+          matches=$(echo "$pulls" | jq -r --arg owner "$HEAD_OWNER" \
+            '[.[] | select(.head.repo.owner.login == $owner) | .number]')
+          match_count=$(echo "$matches" | jq 'length')
+
+          if [[ "$match_count" -ne 1 ]]; then
+            echo "::warning::expected exactly 1 open PR for head ${HEAD_SHA} from ${HEAD_OWNER}; got ${match_count}; skipping comment"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pr_number=$(echo "$matches" | jq -r '.[0]')
+          if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+            echo "::warning::resolved PR number ${pr_number} is not a positive integer; skipping comment"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr_number=${pr_number}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Post or update sticky PR comment
+        if: ${{ steps.metadata.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          MARKER="<!-- recipe-evidence-gate -->"
+
+          if [[ ! -s report.md ]]; then
+            echo "No report.md produced; skipping comment."
+            exit 0
+          fi
+
+          # Build the body without the marker first, then append the
+          # marker exactly once after the size check — avoids the
+          # double-marker edge case where the marker fits inside the
+          # initial body but the truncation slice cuts before it.
+          REPORT_BODY=$(cat report.md)
+
+          # GitHub caps issue-comment bodies at ~65536 characters. The
+          # build script already truncates the per-row table; this is
+          # belt-and-braces for the trailer + any future report growth.
+          # Reserve headroom for the trailer + marker we append below.
+          max=64800
+          if (( ${#REPORT_BODY} > max )); then
+            REPORT_BODY=$(printf '%s\n\n_(comment truncated to fit GitHub 65KB cap)_' \
+              "${REPORT_BODY:0:max}")
+          fi
+
+          BODY=$(printf '%s\n\n%s\n' "$REPORT_BODY" "$MARKER")
+
+          # --paginate so the marker is found on PRs with >30 comments.
+          COMMENT_ID=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" \
+            | tr -d '\r' | head -1)
+
+          if [[ -n "$COMMENT_ID" ]]; then
+            gh api "repos/${REPO}/issues/comments/${COMMENT_ID}" \
+              -X PATCH -f body="$BODY"
+          else
+            gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              -f body="$BODY"
+          fi
