@@ -126,7 +126,7 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 		slog.Int("removed", result.Summary.Removed),
 		slog.Int("modified", result.Summary.Modified))
 
-	if err := writeDiffResult(ctx, cmd, outFormat, result); err != nil {
+	if err := writeDiffResult(ctx, cmd, outFormat, kubeconfig, result); err != nil {
 		return err
 	}
 
@@ -142,7 +142,10 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 // when the output format is table. Uses a named return so Close() failures
 // on writable handles are merged with any earlier error via errors.Join —
 // data-loss on flush must surface even when the write itself also failed.
-func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer.Format, result *diff.Result) (err error) {
+//
+// kubeconfig is propagated through to ConfigMap writers so multi-cluster
+// workflows write back to the same cluster the snapshots were read from.
+func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer.Format, kubeconfig string, result *diff.Result) (err error) {
 	output := cmd.String("output")
 
 	// Use custom table writer for human-readable output
@@ -167,8 +170,9 @@ func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer
 		return diff.WriteTable(w, result)
 	}
 
-	// JSON/YAML use standard serializer
-	ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
+	// JSON/YAML use standard serializer; thread kubeconfig so ConfigMap
+	// writes target the same cluster as the reads above.
+	ser, err := serializer.NewFileWriterOrStdoutWithKubeconfig(outFormat, output, kubeconfig)
 	if err != nil {
 		return err
 	}

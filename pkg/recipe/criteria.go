@@ -356,7 +356,7 @@ type Criteria struct {
 	// OS is the worker node operating system type.
 	OS CriteriaOSType `json:"os,omitempty" yaml:"os,omitempty"`
 
-	// Platform is the platform/framework type (kubeflow).
+	// Platform is the platform/framework type (dynamo, kubeflow, nim, runai, slurm).
 	Platform CriteriaPlatformType `json:"platform,omitempty" yaml:"platform,omitempty"`
 
 	// Nodes is the number of worker nodes (0 means any/unspecified).

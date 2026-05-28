@@ -127,7 +127,7 @@ Criteria define when a recipe matches a user query:
 | `accelerator` | String | GPU hardware type | `h100`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000` |
 | `os` | String | Operating system | `ubuntu`, `rhel`, `cos`, `amazonlinux` |
 | `intent` | String | Workload purpose | `training`, `inference` |
-| `platform` | String | Platform/framework type | `kubeflow` |
+| `platform` | String | Platform/framework type | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
 | `nodes` | Integer | Node count (0 = any) | `8`, `16` |
 
 **All fields are optional.** Unpopulated fields act as wildcards (match any value).

@@ -148,6 +148,46 @@ func TestNewConfigMapWriter(t *testing.T) {
 			if writer.format != tt.wantFormat {
 				t.Errorf("NewConfigMapWriter() format = %v, want %v", writer.format, tt.wantFormat)
 			}
+			if writer.kubeconfig != "" {
+				t.Errorf("NewConfigMapWriter() kubeconfig = %q, want \"\" (default discovery)", writer.kubeconfig)
+			}
 		})
+	}
+}
+
+// TestNewConfigMapWriterWithKubeconfig verifies the kubeconfig path is stored
+// on the writer so it can be used for client construction at Serialize() time.
+func TestNewConfigMapWriterWithKubeconfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		kubeconfig string
+	}{
+		{"explicit kubeconfig path", "/tmp/custom-kubeconfig.yaml"},
+		{"empty kubeconfig falls back to default discovery", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := NewConfigMapWriterWithKubeconfig("default", "test", tt.kubeconfig, FormatYAML)
+			if writer.kubeconfig != tt.kubeconfig {
+				t.Errorf("kubeconfig = %q, want %q", writer.kubeconfig, tt.kubeconfig)
+			}
+			if writer.format != FormatYAML {
+				t.Errorf("format = %v, want FormatYAML", writer.format)
+			}
+		})
+	}
+}
+
+// TestNewConfigMapWriter_PreservesFormatCoercion locks in the contract that the
+// back-compat wrapper does not regress the IsUnknown -> JSON coercion when the
+// underlying helper changes.
+func TestNewConfigMapWriter_PreservesFormatCoercion(t *testing.T) {
+	writer := NewConfigMapWriter("default", "test", Format("garbage"))
+	if writer.format != FormatJSON {
+		t.Errorf("format = %v, want FormatJSON (coerced from unknown)", writer.format)
+	}
+	if writer.kubeconfig != "" {
+		t.Errorf("kubeconfig = %q, want empty (default discovery)", writer.kubeconfig)
 	}
 }
