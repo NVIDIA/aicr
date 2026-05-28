@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/oci"
 )
 
 // TestParseOutputTarget is now in pkg/oci/reference_test.go
@@ -310,4 +312,112 @@ func TestParseBundleCmdOptions_AppName(t *testing.T) {
 			t.Errorf("error should mention DNS-1123, got: %v", err)
 		}
 	})
+}
+
+// TestPrintArgoCDHelmOCIInstructions exercises the post-#1051 install-hint
+// contract: `helm install` against the full OCI artifact reference, and
+// `--set repoURL` carrying only the parent namespace (chart name omitted
+// — the chart template appends .Chart.Name itself). See issue #1020.
+func TestPrintArgoCDHelmOCIInstructions(t *testing.T) {
+	tests := []struct {
+		name        string
+		ref         *oci.Reference
+		wantContain []string
+		wantSkip    bool // true means no output expected
+	}{
+		{
+			name: "registry with nested namespace",
+			ref: &oci.Reference{
+				IsOCI:      true,
+				Registry:   "ghcr.io",
+				Repository: "nvidia/aicr-bundle",
+				Tag:        "v1.0.0",
+			},
+			wantContain: []string{
+				"oci://ghcr.io/nvidia/aicr-bundle:v1.0.0",
+				"--set repoURL=oci://ghcr.io/nvidia",
+				"--namespace argocd",
+			},
+		},
+		{
+			name: "deeply nested namespace",
+			ref: &oci.Reference{
+				IsOCI:      true,
+				Registry:   "registry.example.com",
+				Repository: "team/platform/aicr-bundle",
+				Tag:        "0.42.0",
+			},
+			wantContain: []string{
+				"oci://registry.example.com/team/platform/aicr-bundle:0.42.0",
+				"--set repoURL=oci://registry.example.com/team/platform",
+			},
+		},
+		{
+			name: "single-segment repo: parent collapses to registry-only",
+			ref: &oci.Reference{
+				IsOCI:      true,
+				Registry:   "localhost:5000",
+				Repository: "aicr-bundle",
+				Tag:        "dev",
+			},
+			wantContain: []string{
+				"oci://localhost:5000/aicr-bundle:dev",
+				"--set repoURL=oci://localhost:5000",
+			},
+		},
+		{
+			name:     "nil ref skips silently",
+			ref:      nil,
+			wantSkip: true,
+		},
+		{
+			name: "non-OCI ref skips silently",
+			ref: &oci.Reference{
+				IsOCI:     false,
+				LocalPath: "./bundle",
+			},
+			wantSkip: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printArgoCDHelmOCIInstructions(&buf, tt.ref)
+			got := buf.String()
+
+			if tt.wantSkip {
+				if got != "" {
+					t.Errorf("expected no output, got: %q", got)
+				}
+				return
+			}
+			for _, want := range tt.wantContain {
+				if !strings.Contains(got, want) {
+					t.Errorf("output missing %q\nfull output:\n%s", want, got)
+				}
+			}
+			// Sanity check: the repoURL line must NOT include the chart
+			// name segment — the chart template appends .Chart.Name itself,
+			// and a chart-name-bearing repoURL would cause double-append at
+			// render time.
+			if tt.ref != nil && tt.ref.IsOCI {
+				chartName := tt.ref.ChartName()
+				if chartName != "" {
+					// The repoURL line is the last one; isolate it to avoid
+					// false positives from the chartRef line above.
+					var repoURLLine string
+					for line := range strings.SplitSeq(got, "\n") {
+						if strings.Contains(line, "--set repoURL=") {
+							repoURLLine = line
+							break
+						}
+					}
+					if strings.Contains(repoURLLine, "/"+chartName) {
+						t.Errorf("repoURL must not include chart name %q; got line: %q", chartName, repoURLLine)
+					}
+				}
+			}
+		})
+	}
 }
