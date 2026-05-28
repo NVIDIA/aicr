@@ -709,6 +709,40 @@ func (b *DefaultBundler) getSetEnabledOverride(componentName string, provider re
 	return parsed, true, nil
 }
 
+// preExistingSchedulingPaths returns the subset of dot-notation paths that
+// were already populated in values when scheduling injection began. The
+// bundler captures this snapshot once at the top of applyNodeSchedulingOverrides
+// so a path set by a recipe overlay or --set (e.g., kind.yaml's
+// daemonsets.tolerations: [], bcm.yaml's controller.tolerations) is treated
+// as authoritative for the entire injection chain. Crucially, paths written
+// by an earlier injection step within the same call (e.g., system writing
+// worker.tolerations before accelerated overwrites it) are NOT in the
+// snapshot, so the documented system → accelerated overwrite for shared
+// paths still works.
+func preExistingSchedulingPaths(values map[string]any, paths []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		if _, found := component.GetValueByPath(values, p); found {
+			set[p] = struct{}{}
+		}
+	}
+	return set
+}
+
+// filterPaths returns paths not present in skip.
+func filterPaths(paths []string, skip map[string]struct{}) []string {
+	if len(paths) == 0 || len(skip) == 0 {
+		return paths
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if _, blocked := skip[p]; !blocked {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.
 // Uses the component registry to determine the correct paths for each component.
 // The provider argument scopes the registry lookup to the recipe's bound DataProvider;
@@ -733,37 +767,54 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		return // Unknown component, skip
 	}
 
+	// Snapshot the set of scheduling paths that were populated BEFORE any
+	// injection ran — i.e. by the recipe overlay or by --set values that
+	// have already been merged into the values map. These paths are
+	// authoritative and must not be overwritten by CLI/config defaults
+	// (e.g., kind.yaml's `daemonsets.tolerations: []`, bcm.yaml's careful
+	// BCM-master `controller.tolerations`). Internal writes during this
+	// function (system → accelerated for shared paths like NFD's
+	// worker.tolerations) are NOT in the snapshot, so the documented
+	// "accelerated overrides system" behavior is preserved.
+	allPaths := make([]string, 0, 16)
+	allPaths = append(allPaths, comp.GetSystemNodeSelectorPaths()...)
+	allPaths = append(allPaths, comp.GetSystemTolerationPaths()...)
+	allPaths = append(allPaths, comp.GetAcceleratedNodeSelectorPaths()...)
+	allPaths = append(allPaths, comp.GetAcceleratedTolerationPaths()...)
+	allPaths = append(allPaths, comp.GetWorkloadSelectorPaths()...)
+	recipeSet := preExistingSchedulingPaths(values, allPaths)
+
 	// Apply system node selector
 	if nodeSelector := b.Config.SystemNodeSelector(); len(nodeSelector) > 0 {
-		if paths := comp.GetSystemNodeSelectorPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetSystemNodeSelectorPaths(), recipeSet); len(paths) > 0 {
 			component.ApplyNodeSelectorOverrides(values, nodeSelector, paths...)
 		}
 	}
 
 	// Apply system tolerations
 	if tolerations := b.Config.SystemNodeTolerations(); len(tolerations) > 0 {
-		if paths := comp.GetSystemTolerationPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetSystemTolerationPaths(), recipeSet); len(paths) > 0 {
 			component.ApplyTolerationsOverrides(values, tolerations, paths...)
 		}
 	}
 
 	// Apply accelerated node selector
 	if nodeSelector := b.Config.AcceleratedNodeSelector(); len(nodeSelector) > 0 {
-		if paths := comp.GetAcceleratedNodeSelectorPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetAcceleratedNodeSelectorPaths(), recipeSet); len(paths) > 0 {
 			component.ApplyNodeSelectorOverrides(values, nodeSelector, paths...)
 		}
 	}
 
 	// Apply accelerated tolerations
 	if tolerations := b.Config.AcceleratedNodeTolerations(); len(tolerations) > 0 {
-		if paths := comp.GetAcceleratedTolerationPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetAcceleratedTolerationPaths(), recipeSet); len(paths) > 0 {
 			component.ApplyTolerationsOverrides(values, tolerations, paths...)
 		}
 	}
 
 	// Apply workload selector
 	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {
-		if paths := comp.GetWorkloadSelectorPaths(); len(paths) > 0 {
+		if paths := filterPaths(comp.GetWorkloadSelectorPaths(), recipeSet); len(paths) > 0 {
 			component.ApplyNodeSelectorOverrides(values, workloadSelector, paths...)
 		}
 	}

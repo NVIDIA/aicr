@@ -1072,6 +1072,206 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 	}
 }
 
+// TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths verifies the
+// precedence rule that recipe-overlay-set scheduling paths are NOT
+// overwritten by CLI/config defaults. This is the fix for #982: kind.yaml
+// sets `daemonsets.tolerations: []` to keep gpu-operator daemons off the
+// control-plane, and bcm.yaml sets `controller.tolerations` to the
+// BCM-master toleration list. Without this guard the bundler-injected
+// default `{Operator: Exists}` would silently replace those values.
+func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	gpuOp := registry.Get("gpu-operator")
+	if gpuOp == nil || len(gpuOp.GetAcceleratedTolerationPaths()) == 0 {
+		t.Fatalf("registry missing gpu-operator or accelerated toleration paths")
+	}
+	const tolPath = "daemonsets.tolerations"
+
+	tests := []struct {
+		name        string
+		initial     map[string]any
+		cliTols     []corev1.Toleration
+		wantValue   any
+		description string
+	}{
+		{
+			name: "recipe-set empty slice is preserved (opt-out)",
+			initial: map[string]any{
+				"daemonsets": map[string]any{
+					"tolerations": []any{},
+				},
+			},
+			cliTols:     []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+			wantValue:   []any{},
+			description: "kind.yaml: explicit empty list must defeat the default {Exists} injection",
+		},
+		{
+			name: "recipe-set non-empty list is preserved",
+			initial: map[string]any{
+				"daemonsets": map[string]any{
+					"tolerations": []any{
+						map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"},
+					},
+				},
+			},
+			cliTols: []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+			wantValue: []any{
+				map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"},
+			},
+			description: "bcm-style: deliberate toleration list must not be replaced by CLI default",
+		},
+		{
+			name:    "unset path receives CLI injection",
+			initial: map[string]any{},
+			cliTols: []corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
+			},
+			wantValue: []any{
+				map[string]any{"key": "nvidia.com/gpu", "operator": "Equal", "value": "present", "effect": "NoSchedule"},
+			},
+			description: "default flow (eks/gke/etc.): no overlay value, CLI toleration is injected as before",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(config.WithAcceleratedNodeTolerations(tt.cliTols))
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			b.applyNodeSchedulingOverrides("gpu-operator", tt.initial, nil)
+
+			got, ok := component.GetValueByPath(tt.initial, tolPath)
+			if !ok {
+				t.Fatalf("%s: %s not present after injection", tt.description, tolPath)
+			}
+			gotList, ok := got.([]any)
+			if !ok {
+				t.Fatalf("%s: %s has wrong type %T (want []any)", tt.description, tolPath, got)
+			}
+			wantList, _ := tt.wantValue.([]any)
+			if !reflect.DeepEqual(gotList, wantList) {
+				t.Errorf("%s:\n  got  = %#v\n  want = %#v", tt.description, gotList, wantList)
+			}
+		})
+	}
+}
+
+// TestPreExistingSchedulingPaths verifies the snapshot helper that records
+// which paths were populated before any scheduling injection ran. The
+// resulting set blocks subsequent overwrites for recipe-set paths while
+// allowing the documented system → accelerated overwrite for shared paths
+// (where the system-pass write is NOT in the snapshot).
+func TestPreExistingSchedulingPaths(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]any
+		paths  []string
+		want   []string // expected set members (order-independent)
+	}{
+		{
+			name:   "empty paths returns empty set",
+			values: map[string]any{"a": "x"},
+			paths:  nil,
+			want:   nil,
+		},
+		{
+			name: "set top-level path is captured",
+			values: map[string]any{
+				"tolerations": []any{},
+			},
+			paths: []string{"tolerations"},
+			want:  []string{"tolerations"},
+		},
+		{
+			name: "set nested path is captured (empty slice counts as set)",
+			values: map[string]any{
+				"daemonsets": map[string]any{"tolerations": []any{}},
+			},
+			paths: []string{"daemonsets.tolerations", "daemonsets.nodeSelector"},
+			want:  []string{"daemonsets.tolerations"},
+		},
+		{
+			name:   "unset path is not captured",
+			values: map[string]any{},
+			paths:  []string{"daemonsets.tolerations"},
+			want:   nil,
+		},
+		{
+			name: "intermediate non-map is treated as unset",
+			values: map[string]any{
+				"daemonsets": "scalar",
+			},
+			paths: []string{"daemonsets.tolerations"},
+			want:  nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := preExistingSchedulingPaths(tt.values, tt.paths)
+			if len(got) != len(tt.want) {
+				t.Fatalf("preExistingSchedulingPaths() size = %d, want %d (got=%v)", len(got), len(tt.want), got)
+			}
+			for _, p := range tt.want {
+				if _, ok := got[p]; !ok {
+					t.Errorf("expected %q in set, got %v", p, got)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterPaths verifies the helper that removes pre-existing paths from
+// an injection target list.
+func TestFilterPaths(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+		skip  map[string]struct{}
+		want  []string
+	}{
+		{
+			name:  "empty paths returns nil",
+			paths: nil,
+			skip:  map[string]struct{}{"x": {}},
+			want:  nil,
+		},
+		{
+			name:  "empty skip returns input unchanged",
+			paths: []string{"a", "b"},
+			skip:  nil,
+			want:  []string{"a", "b"},
+		},
+		{
+			name:  "single blocked path removed",
+			paths: []string{"a", "b", "c"},
+			skip:  map[string]struct{}{"b": {}},
+			want:  []string{"a", "c"},
+		},
+		{
+			name:  "all paths blocked returns empty slice",
+			paths: []string{"a", "b"},
+			skip:  map[string]struct{}{"a": {}, "b": {}},
+			want:  []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterPaths(tt.paths, tt.skip)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("filterPaths() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestApplyNodeSchedulingOverrides_BoundProvider verifies that
 // applyNodeSchedulingOverrides honors the bound provider parameter when
 // resolving the component registry. The bound provider exposes a component
