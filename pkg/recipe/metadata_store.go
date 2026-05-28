@@ -17,6 +17,7 @@ package recipe
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -90,11 +91,20 @@ type pendingRegistryEntry struct {
 // loadMetadataStore(ctx) entry point — which consults the package-global
 // provider — continues to work transparently.
 //
-// Context cancellation that fires during the first build is surfaced but not
-// cached: the storeCacheEntry remains and any future caller for the same
-// provider will see the build-time error preserved by sync.Once. Callers that
-// need to retry after a transient cancellation must drop the entry via
-// EvictCachedStore first.
+// Context cancellation that fires during the first build is surfaced AND
+// auto-evicted: when entry.err is context.Canceled or context.DeadlineExceeded
+// (per isTransientLoadError), the cache entry is removed via
+// storeCache.CompareAndDelete so the next caller for the same provider loads
+// from scratch with its own ctx. Without the auto-eviction the sync.Once
+// semantics would otherwise lock every subsequent caller into the first
+// caller's cancellation error. Non-transient errors (file-not-found, schema
+// invalid, dependency cycle) ARE preserved by sync.Once — they're
+// deterministic for the provider and concurrent callers shouldn't all re-run
+// the same broken walk.
+//
+// Callers no longer need to drop the entry via EvictCachedStore for a
+// transient retry; EvictCachedStore remains for tests that mutate the
+// provider's backing data between loads.
 //
 // Note: only the first caller's ctx governs the build. Subsequent callers that
 // arrive while the build is in flight block on the same sync.Once and do not
@@ -112,7 +122,28 @@ func LoadMetadataStoreFor(ctx context.Context, dp DataProvider) (*MetadataStore,
 	entry.once.Do(func() {
 		entry.store, entry.err = buildMetadataStore(ctx, dp)
 	})
+	if entry.err != nil && isTransientLoadError(entry.err) {
+		// Don't permanently cache a transient ctx cancellation. With
+		// sync.Once semantics the first caller's cancellation would
+		// poison every later caller for this dp, even those whose
+		// own contexts are healthy. Drop the entry so the next call
+		// retries from scratch with the new caller's ctx.
+		//
+		// CompareAndDelete only removes the entry if it still matches
+		// this *storeCacheEntry — a concurrent retry that already
+		// stored a fresh entry is left undisturbed.
+		storeCache.CompareAndDelete(dp, e)
+	}
 	return entry.store, entry.err
+}
+
+// isTransientLoadError reports whether err is a context cancellation
+// or deadline-exceeded — the failure classes that should not be
+// permanently cached. A "real" config error (file not found, schema
+// invalid) is deterministic for a given DataProvider and stays cached
+// so concurrent callers don't all re-run the same broken walk.
+func isTransientLoadError(err error) bool {
+	return stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded)
 }
 
 // loadMetadataStore is the back-compat entry point that consults the
@@ -292,6 +323,42 @@ func EvictCachedStore(dp DataProvider) {
 		return
 	}
 	storeCache.Delete(dp)
+}
+
+// CachedStoreCountForTesting returns the number of distinct DataProvider
+// entries currently held in the metadata-store cache. Exposed for tests
+// in the aicr facade that assert Client.Close evicts the cached store —
+// paired with CachedRegistryCountForTesting in components.go so a single
+// test can verify both halves of the per-Client cache are released.
+//
+// Test-only by convention (the _ForTesting suffix); never call from
+// production code.
+//
+// NOTE: this returns the GLOBAL count across every DataProvider in the
+// package. A parallel test in another package using its own
+// DataProvider will perturb the count. Tests that need a stable signal
+// scoped to a specific DataProvider should prefer
+// CachedStoreContainsForTesting.
+func CachedStoreCountForTesting() int {
+	n := 0
+	storeCache.Range(func(_, _ any) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// CachedStoreContainsForTesting reports whether the metadata-store
+// cache has an entry for the supplied DataProvider. Unlike the count
+// helper, this is robust under parallel test execution: each test that
+// uses a distinct DataProvider can observe ONLY its own entry's
+// presence/absence.
+//
+// Test-only by convention (the _ForTesting suffix); never call from
+// production code.
+func CachedStoreContainsForTesting(dp DataProvider) bool {
+	_, ok := storeCache.Load(dp)
+	return ok
 }
 
 // LoadCatalog eagerly loads the recipe catalog into the package cache,
