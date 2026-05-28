@@ -973,7 +973,7 @@ func TestApplyNodeSchedulingOverrides_EstimatedNodeCount(t *testing.T) {
 	}
 
 	values := make(map[string]any)
-	b.applyNodeSchedulingOverrides("nodewright-operator", values, nil, nil)
+	b.applyNodeSchedulingOverrides("nodewright-operator", values, nil, schedulingPathPolicy{})
 
 	// Path "estimatedNodeCount" is in nodewright-operator's nodeCountPaths; convertMapValue produces int64.
 	got, ok := values["estimatedNodeCount"]
@@ -1060,7 +1060,7 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 				}
 			}
 
-			b.applyNodeSchedulingOverrides("kube-prometheus-stack", values, nil, nil)
+			b.applyNodeSchedulingOverrides("kube-prometheus-stack", values, nil, schedulingPathPolicy{})
 
 			got, ok := component.GetValueByPath(values, scPath)
 			if ok != tt.wantPresent {
@@ -1110,12 +1110,12 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		initial       map[string]any
-		authoritative map[string]struct{}
-		cliTols       []corev1.Toleration
-		wantValue     any
-		description   string
+		name        string
+		initial     map[string]any
+		policy      schedulingPathPolicy
+		cliTols     []corev1.Toleration
+		wantValue   any
+		description string
 	}{
 		{
 			name: "overlay-set empty slice is preserved (opt-out)",
@@ -1124,31 +1124,34 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 					"tolerations": []any{},
 				},
 			},
-			authoritative: map[string]struct{}{tolPath: {}},
-			cliTols:       []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-			wantValue:     []any{},
-			description:   "kind.yaml: overlay-set empty list must defeat the default {Exists} injection",
+			policy:      schedulingPathPolicy{optOut: map[string]struct{}{tolPath: {}}},
+			cliTols:     []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+			wantValue:   []any{},
+			description: "kind.yaml: overlay-set empty list must defeat the default {Exists} injection",
 		},
 		{
-			name: "overlay-set non-empty list is preserved",
+			name: "overlay-set non-empty list — CLI tolerations APPEND",
 			initial: map[string]any{
 				"daemonsets": map[string]any{
 					"tolerations": []any{
-						map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"},
+						map[string]any{"key": "node-role.kubernetes.io/master", "operator": "Exists", "effect": "NoSchedule"},
 					},
 				},
 			},
-			authoritative: map[string]struct{}{tolPath: {}},
-			cliTols:       []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-			wantValue: []any{
-				map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"},
+			policy: schedulingPathPolicy{appendMode: map[string]struct{}{tolPath: {}}},
+			cliTols: []corev1.Toleration{
+				{Key: "kwok.x-k8s.io/node", Operator: corev1.TolerationOpEqual, Value: "fake", Effect: corev1.TaintEffectNoSchedule},
 			},
-			description: "bcm-style: deliberate toleration list from overlay must not be replaced by CLI default",
+			wantValue: []any{
+				map[string]any{"key": "node-role.kubernetes.io/master", "operator": "Exists", "effect": "NoSchedule"},
+				map[string]any{"key": "kwok.x-k8s.io/node", "operator": "Equal", "value": "fake", "effect": "NoSchedule"},
+			},
+			description: "bcm-style: overlay tolerations must coexist with CLI tolerations (UNION), not be replaced",
 		},
 		{
-			name:          "unset path receives CLI injection",
-			initial:       map[string]any{},
-			authoritative: nil,
+			name:    "unset path receives CLI injection",
+			initial: map[string]any{},
+			policy:  schedulingPathPolicy{},
 			cliTols: []corev1.Toleration{
 				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
 			},
@@ -1158,12 +1161,12 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 			description: "default flow (eks/gke/etc.): no overlay value, CLI toleration is injected as before",
 		},
 		{
-			// REGRESSION GUARD for the review feedback on PR #1082: component
-			// default values files (kai-scheduler, kueue, network-operator,
-			// aws-efa) ship tolerations in their values.yaml that overlap with
-			// registry scheduling paths. They land in `values` via the values
-			// file load — not via overlay overrides or --set — so the
-			// authoritative set is empty and the CLI default MUST still win.
+			// REGRESSION GUARD for PR #1082 review feedback: component default
+			// values files (kai-scheduler, kueue, network-operator, aws-efa)
+			// ship tolerations in their values.yaml that overlap with registry
+			// scheduling paths. They land in `values` via the values-file load
+			// — not via overlay overrides or --set — so the policy is empty
+			// and the CLI default MUST still win (REPLACE).
 			name: "values-file default does not lock the path",
 			initial: map[string]any{
 				"daemonsets": map[string]any{
@@ -1172,7 +1175,7 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 					},
 				},
 			},
-			authoritative: nil, // empty — values file is not authoritative
+			policy: schedulingPathPolicy{}, // values-file is not authoritative
 			cliTols: []corev1.Toleration{
 				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpEqual, Value: "present", Effect: corev1.TaintEffectNoSchedule},
 			},
@@ -1191,7 +1194,7 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			b.applyNodeSchedulingOverrides("gpu-operator", tt.initial, nil, tt.authoritative)
+			b.applyNodeSchedulingOverrides("gpu-operator", tt.initial, nil, tt.policy)
 
 			got, ok := component.GetValueByPath(tt.initial, tolPath)
 			if !ok {
@@ -1209,94 +1212,102 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 	}
 }
 
-// TestAuthoritativeSchedulingPaths covers the helper that decides which
-// scheduling paths the user explicitly populated (recipe overlay
-// `componentRefs[].overrides` or CLI `--set`). Component default values
-// files are deliberately NOT consulted.
-func TestAuthoritativeSchedulingPaths(t *testing.T) {
+// TestClassifySchedulingPaths covers the helper that splits scheduling
+// paths into opt-out vs append based on the recipe overlay's inline
+// overrides and CLI --set. Component default values files are deliberately
+// NOT consulted — see the godoc on classifySchedulingPaths.
+func TestClassifySchedulingPaths(t *testing.T) {
 	tests := []struct {
 		name         string
 		overrides    map[string]any
 		setOverrides map[string]string
 		paths        []string
-		want         []string // expected set members (order-independent)
+		wantOptOut   []string
+		wantAppend   []string
 	}{
 		{
-			name:  "empty paths returns empty set",
+			name:  "empty paths returns empty policy",
 			paths: nil,
-			want:  nil,
 		},
 		{
-			name: "overlay override (nested map) captures the path",
+			name: "overlay empty slice → opt-out (kind.yaml semantics)",
 			overrides: map[string]any{
 				"daemonsets": map[string]any{
 					"tolerations": []any{},
 				},
 			},
-			paths: []string{"daemonsets.tolerations", "daemonsets.nodeSelector"},
-			want:  []string{"daemonsets.tolerations"},
+			paths:      []string{"daemonsets.tolerations", "daemonsets.nodeSelector"},
+			wantOptOut: []string{"daemonsets.tolerations"},
 		},
 		{
-			name: "empty slice in overlay counts as set (opt-out semantics)",
+			name: "overlay non-empty slice → append (bcm.yaml semantics)",
 			overrides: map[string]any{
-				"daemonsets": map[string]any{
-					"tolerations": []any{},
+				"controller": map[string]any{
+					"tolerations": []any{
+						map[string]any{"key": "node-role.kubernetes.io/master"},
+					},
 				},
 			},
-			paths: []string{"daemonsets.tolerations"},
-			want:  []string{"daemonsets.tolerations"},
+			paths:      []string{"controller.tolerations"},
+			wantAppend: []string{"controller.tolerations"},
 		},
 		{
-			name: "explicit nil leaf counts as set",
-			// GetValueByPath returns (nil, true) for an explicit nil. We
-			// capture the path so a deliberate `tolerations: ~` opt-out is
-			// honored, matching the empty-slice semantics. Helm collapses
-			// nil to "unset" downstream.
+			name: "explicit nil leaf → opt-out (matches empty-slice semantics)",
+			// GetValueByPath returns (nil, true) for an explicit nil leaf,
+			// e.g. `tolerations: ~` in YAML. Helm collapses nil to "unset",
+			// so this is a deliberate opt-out gesture.
 			overrides: map[string]any{
 				"daemonsets": map[string]any{
 					"tolerations": nil,
 				},
 			},
-			paths: []string{"daemonsets.tolerations"},
-			want:  []string{"daemonsets.tolerations"},
+			paths:      []string{"daemonsets.tolerations"},
+			wantOptOut: []string{"daemonsets.tolerations"},
 		},
 		{
-			name:         "--set with exact path match captures the path",
-			setOverrides: map[string]string{"daemonsets.tolerations": "..."},
+			name:         "--set with exact path match → append",
+			setOverrides: map[string]string{"daemonsets.tolerations": "non-empty-string"},
 			paths:        []string{"daemonsets.tolerations"},
-			want:         []string{"daemonsets.tolerations"},
+			wantAppend:   []string{"daemonsets.tolerations"},
 		},
 		{
-			name: "overlay and --set both empty — nothing captured (values-file values ignored)",
-			// This simulates the kai-scheduler/kueue/network-operator/aws-efa
-			// scenario: the values file populates the path but the overlay
-			// and --set don't. authoritativeSchedulingPaths must NOT capture
-			// it; CLI defaults will then overwrite the values-file value.
+			// Simulates kai-scheduler / kueue / network-operator / aws-efa:
+			// the values file populates the path but the overlay and --set
+			// do not. The policy must be empty so the CLI default (REPLACE)
+			// applies — addresses PR #1082 reviewer concern that the CLI
+			// flag would silently become a no-op for those components.
+			name:  "overlay and --set both empty — empty policy (values-file ignored)",
 			paths: []string{"global.tolerations"},
-			want:  nil,
 		},
 		{
-			name: "intermediate non-map is treated as unset",
+			name: "intermediate non-map → unclassified",
 			overrides: map[string]any{
 				"daemonsets": "scalar",
 			},
 			paths: []string{"daemonsets.tolerations"},
-			want:  nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := authoritativeSchedulingPaths(tt.overrides, tt.setOverrides, tt.paths)
-			if len(got) != len(tt.want) {
-				t.Fatalf("authoritativeSchedulingPaths() size = %d, want %d (got=%v)", len(got), len(tt.want), got)
-			}
-			for _, p := range tt.want {
-				if _, ok := got[p]; !ok {
-					t.Errorf("expected %q in set, got %v", p, got)
-				}
-			}
+			got := classifySchedulingPaths(tt.overrides, tt.setOverrides, tt.paths)
+
+			assertSetEqual(t, "optOut", got.optOut, tt.wantOptOut)
+			assertSetEqual(t, "appendMode", got.appendMode, tt.wantAppend)
 		})
+	}
+}
+
+func assertSetEqual(t *testing.T, label string, got map[string]struct{}, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("%s: size = %d, want %d (got=%v, want=%v)", label, len(got), len(want), got, want)
+		return
+	}
+	for _, p := range want {
+		if _, ok := got[p]; !ok {
+			t.Errorf("%s: missing %q (got %v)", label, p, got)
+		}
 	}
 }
 
@@ -1402,7 +1413,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 
 	// With a nil provider the lookup must miss (component unknown to global registry).
 	nilValues := map[string]any{}
-	b.applyNodeSchedulingOverrides(uniqueComponent, nilValues, nil, nil)
+	b.applyNodeSchedulingOverrides(uniqueComponent, nilValues, nil, schedulingPathPolicy{})
 	if got, ok := component.GetValueByPath(nilValues, nodeSelectorPath); ok {
 		t.Fatalf("nil-provider call unexpectedly populated %s = %v; component must be unknown to global registry", nodeSelectorPath, got)
 	}
@@ -1410,7 +1421,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 	// With the bound provider the lookup hits and the nodeSelector lands at the
 	// path the external registry declares.
 	values := map[string]any{}
-	b.applyNodeSchedulingOverrides(uniqueComponent, values, layered, nil)
+	b.applyNodeSchedulingOverrides(uniqueComponent, values, layered, schedulingPathPolicy{})
 
 	got, ok := component.GetValueByPath(values, nodeSelectorPath)
 	if !ok {
