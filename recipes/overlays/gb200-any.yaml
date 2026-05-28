@@ -14,12 +14,17 @@
 
 # Cross-cutting overlay applied via criteria-wildcard matching.
 #
-# Companion to gb200-any-training.yaml — that overlay contributes only the
-# NCCL performance floor and is scoped to `intent: training`. This overlay
-# carries the deployment-phase floor (the 4 standard checks plus the
+# Carries the deployment-phase floor (the 4 standard checks plus the
 # gpu-operator version pin) and applies to every GB200 query regardless
-# of intent, so inference recipes (e.g., gb200-eks-ubuntu-inference-dynamo,
-# gb200-oke-ubuntu-inference) inherit the version pin too.
+# of intent, so both training and inference recipes (e.g.,
+# gb200-eks-ubuntu-inference-dynamo, gb200-oke-ubuntu-inference) inherit
+# the version pin.
+#
+# The intent-scoped sibling `gb200-any-training.yaml` (NCCL performance
+# floor for training only) was retired in #1052 — performance thresholds
+# now live per-leaf so the value can be tuned to each service's network
+# fabric instead of carrying one cross-service number that is rarely
+# correct for two fabrics.
 #
 # Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
 # that declare their own `deployment:` block (e.g., gb200-eks-training,
