@@ -155,14 +155,14 @@ func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, buildFn func(
 
 	store, err := LoadMetadataStoreFor(buildCtx, b.dp)
 	if err != nil {
-		return nil, aicrerrors.WrapWithContext(
-			aicrerrors.ErrCodeInternal,
-			"failed to load metadata store",
-			err,
-			map[string]any{
-				"stage": "metadata_load",
-			},
-		)
+		// PropagateOrWrap preserves an already-structured error
+		// (e.g., the ErrCodeTimeout buildMetadataStore returns when
+		// ctx is canceled mid-walk). Without this, a transient
+		// context cancellation surfaced as ErrCodeInternal — losing
+		// the timeout signal that callers (and the new transient-
+		// error-eviction in LoadMetadataStoreFor) rely on.
+		return nil, aicrerrors.PropagateOrWrap(err,
+			aicrerrors.ErrCodeInternal, "failed to load metadata store")
 	}
 
 	result, err := buildFn(store, buildCtx)
