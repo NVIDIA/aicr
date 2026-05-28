@@ -248,6 +248,103 @@ func TestApplyTolerationsOverrides(t *testing.T) {
 	}
 }
 
+// TestAppendTolerationsOverrides covers the union-semantic append used by the
+// bundler when a recipe overlay populated a non-empty toleration list (e.g.,
+// bcm.yaml's BCM-master `controller.tolerations`). The CLI flag's tolerations
+// must augment the overlay list rather than replace it, so the controller
+// can land on the union of BCM-master and KWOK system-pool taints.
+func TestAppendTolerationsOverrides(t *testing.T) {
+	tests := []struct {
+		name        string
+		values      map[string]any
+		tolerations []corev1.Toleration
+		paths       []string
+		verify      func(t *testing.T, values map[string]any)
+	}{
+		{
+			name: "appends to existing list (BCM union case)",
+			values: map[string]any{
+				"controller": map[string]any{
+					"tolerations": []any{
+						map[string]any{"key": "node-role.kubernetes.io/master", "operator": "Exists", "effect": "NoSchedule"},
+					},
+				},
+			},
+			tolerations: []corev1.Toleration{
+				{Key: "kwok.x-k8s.io/node", Operator: corev1.TolerationOpEqual, Value: "fake", Effect: corev1.TaintEffectNoSchedule},
+			},
+			paths: []string{"controller.tolerations"},
+			verify: func(t *testing.T, values map[string]any) {
+				got, _ := GetValueByPath(values, "controller.tolerations")
+				list, _ := got.([]any)
+				if len(list) != 2 {
+					t.Fatalf("expected 2 tolerations, got %d (%v)", len(list), list)
+				}
+				first, _ := list[0].(map[string]any)
+				if first["key"] != "node-role.kubernetes.io/master" {
+					t.Errorf("existing toleration not preserved as first entry: %v", first)
+				}
+				second, _ := list[1].(map[string]any)
+				if second["key"] != "kwok.x-k8s.io/node" {
+					t.Errorf("appended toleration missing or wrong: %v", second)
+				}
+			},
+		},
+		{
+			name:   "appends to absent path (behaves like replace)",
+			values: map[string]any{},
+			tolerations: []corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+			},
+			paths: []string{"daemonsets.tolerations"},
+			verify: func(t *testing.T, values map[string]any) {
+				got, _ := GetValueByPath(values, "daemonsets.tolerations")
+				list, _ := got.([]any)
+				if len(list) != 1 {
+					t.Fatalf("expected 1 toleration, got %d (%v)", len(list), list)
+				}
+			},
+		},
+		{
+			name: "non-slice existing value is replaced",
+			values: map[string]any{
+				"controller": map[string]any{
+					"tolerations": "scalar",
+				},
+			},
+			tolerations: []corev1.Toleration{
+				{Key: "x", Operator: corev1.TolerationOpExists},
+			},
+			paths: []string{"controller.tolerations"},
+			verify: func(t *testing.T, values map[string]any) {
+				got, _ := GetValueByPath(values, "controller.tolerations")
+				list, ok := got.([]any)
+				if !ok || len(list) != 1 {
+					t.Fatalf("expected scalar to be replaced with 1-item slice, got %T: %v", got, got)
+				}
+			},
+		},
+		{
+			name:        "empty tolerations slice is a no-op",
+			values:      map[string]any{"x": "untouched"},
+			tolerations: nil,
+			paths:       []string{"controller.tolerations"},
+			verify: func(t *testing.T, values map[string]any) {
+				if _, found := GetValueByPath(values, "controller.tolerations"); found {
+					t.Error("expected no path written when tolerations is empty")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			AppendTolerationsOverrides(tt.values, tt.tolerations, tt.paths...)
+			tt.verify(t, tt.values)
+		})
+	}
+}
+
 func TestTolerationsToPodSpec(t *testing.T) {
 	tests := []struct {
 		name        string
