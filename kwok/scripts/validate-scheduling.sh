@@ -1277,45 +1277,152 @@ verify_pods() {
     # Exclude system namespaces that aren't part of our bundle (control-plane
     # infra plus GitOps controller namespaces — argocd/flux-system/aicr-
     # registry are owned by install-infra.sh, not the bundle under test).
-    local ns_filter="--all-namespaces"
     local exclude_ns="kube-system|kube-node-lease|kube-public|local-path-storage|kwok-system|argocd|flux-system|aicr-registry"
 
+    # Take a coherent snapshot of pod state and derive every count, the
+    # pod distribution, and the failure diagnostic from it. The previous
+    # implementation issued 5+ separate `kubectl get pods` calls over
+    # several seconds; controllers (gpu-operator, dynamo, dra-driver, …)
+    # reconciled new pods between calls, producing impossible math (e.g.
+    # pending=0 + unscheduled=1) plus a "No resources found" diagnostic
+    # when the transient pod had already been bound by the scheduler.
+    # See #1090 for the failure signature.
+    #
+    # Poll-then-verify: after the Argo CD / Flux sync gate reports
+    # Synced+Healthy, controllers continue creating pods that haven't
+    # been bound by the scheduler yet. Without a settle window, every
+    # snapshot taken in that gap reports the pre-bind transient as a
+    # failure (observed on the eks-inference/argocd-oci and
+    # oke-training/argocd-oci lanes — cert-manager and skyhook-operator
+    # respectively, both with zero FailedScheduling events, meaning
+    # the scheduler simply had not gotten to them yet). The loop below
+    # re-snapshots up to KWOK_VERIFY_PODS_DEADLINE seconds at
+    # KWOK_VERIFY_PODS_INTERVAL spacing and only declares failure if
+    # unscheduled_pods is still positive at the deadline. Each snapshot
+    # is internally coherent (single `kubectl get pods -o json`), so the
+    # impossible-math signature from #1090 cannot reappear regardless
+    # of how many iterations the loop runs.
+    local deadline="${KWOK_VERIFY_PODS_DEADLINE:-60}"
+    local interval="${KWOK_VERIFY_PODS_INTERVAL:-5}"
+
+    # Validate the tunables before the loop relies on them. The settle
+    # window is only bounded if `waited` advances every iteration:
+    #   - interval=0 → `sleep 0` returns instantly AND `waited+=0` never
+    #     grows, so an unschedulable pod (Pending, failed=0) spins the
+    #     loop forever until the CI job timeout — defeating the deadline.
+    #   - a non-integer value (e.g. "abc", "2.5") aborts opaquely under
+    #     `set -euo pipefail` at `sleep`/`$(( ))` with no clear cause.
+    #   - a leading-zero value (e.g. "08", "09") matches the digit regex
+    #     but bash arithmetic reads it as octal ("08: value too great for
+    #     base"), so the `waited >= deadline` test and `$(( ))` increment
+    #     misbehave. Canonicalize to base 10 with `10#...` after the regex
+    #     so the loop only ever sees clean decimal integers.
+    # Reject non-digits up front, then normalize. deadline may be 0
+    # (fail fast, no settle); interval must be >= 1.
+    if ! [[ "$deadline" =~ ^[0-9]+$ ]]; then
+        log_error "KWOK_VERIFY_PODS_DEADLINE must be a non-negative integer (got: '${deadline}')"
+        return 1
+    fi
+    if ! [[ "$interval" =~ ^[0-9]+$ ]]; then
+        log_error "KWOK_VERIFY_PODS_INTERVAL must be a positive integer (got: '${interval}')"
+        return 1
+    fi
+    deadline=$((10#$deadline))
+    interval=$((10#$interval))
+    if (( interval < 1 )); then
+        log_error "KWOK_VERIFY_PODS_INTERVAL must be a positive integer >= 1 (got: '${KWOK_VERIFY_PODS_INTERVAL:-}')"
+        return 1
+    fi
+
+    local waited=0
+    local attempt=0
+    local snap
     local total_pods pending_pods failed_pods running_pods unscheduled_pods
-    total_pods=$(kubectl get pods ${ns_filter} --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
-    pending_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Pending --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
-    failed_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Failed --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
-    running_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Running --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
 
-    # Count truly unscheduled pods (Pending with no node assigned)
-    # Pods in ContainerCreating are Pending but scheduled - they have a node
-    # Exclude cleanup/webhook Jobs - these are Helm hooks that may not have proper tolerations
-    # Use awk to count lines, avoiding issues with empty output or newlines
-    unscheduled_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Pending \
-        -o json 2>/dev/null | \
-        jq -r '.items[] | select(.metadata.namespace as $ns | "'${exclude_ns}'" | split("|") | map(. == $ns) | any | not) | select(.spec.nodeName == null or .spec.nodeName == "") | select(.metadata.ownerReferences == null or (.metadata.ownerReferences | map(.kind) | contains(["Job"]) | not)) | .metadata.name' | \
-        awk 'NF {count++} END {print count+0}')
+    while :; do
+        attempt=$((attempt + 1))
 
-    log_info "Pod status: $total_pods total, $running_pods running, $pending_pods pending ($unscheduled_pods unscheduled), $failed_pods failed"
+        # Fail closed on kubectl error: apiserver outage, auth/RBAC
+        # failure, or a bad kube context must not be reported as a
+        # scheduling pass. The pre-existing `2>/dev/null | wc -l` chain
+        # did abort under `set -euo pipefail` (pipefail propagated
+        # kubectl's non-zero status), but opaquely — stderr was
+        # discarded, so the job log showed a bare non-zero exit with no
+        # cause. Capture stderr and emit an explicit message + clean
+        # `return 1` instead.
+        local snap_err_file
+        snap_err_file=$(mktemp)
+        if ! snap=$(kubectl get pods --all-namespaces -o json 2>"$snap_err_file"); then
+            log_error "Failed to list pods (apiserver unreachable, auth/RBAC failure, or bad kube context):"
+            log_error "$(cat "$snap_err_file")"
+            rm -f "$snap_err_file"
+            return 1
+        fi
+        rm -f "$snap_err_file"
 
-    # Show pod distribution across nodes.
-    # grep -vE returns exit 1 when no lines match (e.g. all pods are in
-    # excluded namespaces — happens on the flux-oci lane where every pod
-    # the controller has placed so far lives in flux-system / kube-system).
-    # Under `set -euo pipefail` that exit 1 propagates as the pipeline's
-    # exit code and kills the script silently AFTER Pod-status logging,
-    # masquerading as a pass-then-fail. Wrap with `{ ... || true; }` so
-    # an empty result is a no-op, matching the total_pods / unscheduled_pods
-    # extraction above.
+        # All counts derive from the same $snap in a SINGLE jq pass: the
+        # namespace exclusion is applied once (`as $f`), then each count
+        # is a sub-filter over $f, emitted as one tab-separated line and
+        # split by `read`. One jq invocation per iteration (vs five)
+        # reinforces the "all counts from one snapshot" invariant. The
+        # exclusion filter uses the same pipe-delimited list passed via
+        # --arg pat and split inside jq, so the bash regex pattern and
+        # the jq namespace filter agree by construction. The fifth field,
+        # "truly unscheduled", is Pending with no node assigned, excluding
+        # Job-owned cleanup pods (Helm hooks may legitimately lack
+        # tolerations).
+        read -r total_pods running_pods pending_pods failed_pods unscheduled_pods < <(
+            jq -r --arg pat "$exclude_ns" '
+                [ .items[]
+                  | select(.metadata.namespace as $ns | $pat | split("|") | map(. == $ns) | any | not)
+                ] as $f
+                | [ ($f | length),
+                    ([$f[] | select(.status.phase == "Running")] | length),
+                    ([$f[] | select(.status.phase == "Pending")] | length),
+                    ([$f[] | select(.status.phase == "Failed")] | length),
+                    ([$f[]
+                      | select(.status.phase == "Pending")
+                      | select((.spec.nodeName // "") == "")
+                      | select((.metadata.ownerReferences // []) | map(.kind) | contains(["Job"]) | not)
+                     ] | length)
+                  ] | @tsv
+            ' <<<"$snap"
+        )
+
+        # Exit conditions:
+        #   - unscheduled == 0   → scheduler has caught up; fall through
+        #   - failed > 0         → terminal state, no point waiting
+        #   - waited >= deadline → bounded window exhausted, fail with
+        #                          the final snapshot
+        if [[ "$unscheduled_pods" -eq 0 ]] \
+                || [[ "$failed_pods" -gt 0 ]] \
+                || [[ "$waited" -ge "$deadline" ]]; then
+            break
+        fi
+
+        log_info "Attempt ${attempt}: $total_pods total, $running_pods running, $pending_pods pending ($unscheduled_pods unscheduled), $failed_pods failed — waiting for scheduler (${waited}/${deadline}s)"
+        sleep "$interval"
+        waited=$((waited + interval))
+    done
+
+    log_info "Pod status: $total_pods total, $running_pods running, $pending_pods pending ($unscheduled_pods unscheduled), $failed_pods failed (attempts=${attempt}, waited=${waited}s)"
+
+    # Pod distribution — derived from the SAME snapshot, not a fresh
+    # `kubectl get pods -o wide` (which would race against the counts).
     log_info "Pod distribution:"
-    kubectl get pods --all-namespaces -o wide --no-headers 2>/dev/null | \
-        { grep -vE "^(${exclude_ns})\s" || true; } | \
-        awk '{print $8}' | sort | uniq -c | \
-        while read -r count node; do
-            echo "  $node: $count pods"
-        done
+    jq -r --arg pat "$exclude_ns" '
+        .items[]
+        | select(.metadata.namespace as $ns | $pat | split("|") | map(. == $ns) | any | not)
+        | (if (.spec.nodeName // "") == "" then "<none>" else .spec.nodeName end)
+    ' <<<"$snap" | sort | uniq -c | while read -r count node; do
+        echo "  $node: $count pods"
+    done
 
-    # Check for scheduling failures - only fail if pods are truly unscheduled (no node assigned)
-    # Pods in ContainerCreating on real nodes are scheduled but waiting for container start
+    # Check for scheduling failures. Diagnostics MUST come from the same
+    # snapshot the count came from; otherwise a transient Pending pod is
+    # already bound by the time `kubectl get` re-runs, and the diagnostic
+    # prints "No resources found" — which has misled multiple prior root-
+    # cause analyses (see #1090).
     if [[ "$unscheduled_pods" -gt 0 ]]; then
         log_error "=========================================="
         log_error "Scheduling validation FAILED"
@@ -1323,11 +1430,33 @@ verify_pods() {
         log_error "$unscheduled_pods pods could not be scheduled to nodes"
         log_error ""
         log_error "Unscheduled pods:"
-        kubectl get pods --all-namespaces --field-selector=status.phase=Pending -o wide | \
-            awk 'NR==1 || $8=="<none>"'
+        jq -r --arg pat "$exclude_ns" '
+            .items[]
+            | select(.metadata.namespace as $ns | $pat | split("|") | map(. == $ns) | any | not)
+            | select(.status.phase == "Pending")
+            | select((.spec.nodeName // "") == "")
+            | select((.metadata.ownerReferences // []) | map(.kind) | contains(["Job"]) | not)
+            | "  \(.metadata.namespace)/\(.metadata.name)  phase=\(.status.phase)  node=\(.spec.nodeName // "<none>")"
+        ' <<<"$snap"
         log_error ""
-        log_error "Events for unscheduled pods:"
-        kubectl get events --all-namespaces --field-selector reason=FailedScheduling --sort-by='.lastTimestamp'
+        # FailedScheduling event dump filtered with the SAME namespace
+        # exclusions as the count. The kind control-plane node carries an
+        # intentional `nfd-excluded=true:NoSchedule` taint that kube-system
+        # pods (coredns, local-path-provisioner) cannot tolerate; those
+        # events are persistent harness noise — surfacing them unfiltered
+        # misled at least two prior reviews of #1090's symptom signature.
+        log_error "Events for unscheduled pods (excluding harness/system namespaces):"
+        # `head -50` closes the pipe after 50 lines; if `kubectl get events`
+        # is still writing it takes SIGPIPE (exit 141), which under
+        # `set -euo pipefail` would abort the function before the trailing
+        # diagnostics and `return 1`. Trailing `|| true` keeps the dump
+        # best-effort (same pattern as list_bundle_entries' PIPE guard).
+        kubectl get events --all-namespaces \
+            --field-selector reason=FailedScheduling \
+            --sort-by='.lastTimestamp' \
+            --no-headers 2>/dev/null \
+            | { grep -vE "^(${exclude_ns})\s" || true; } \
+            | head -50 || true
         log_error ""
         log_error "Common causes:"
         log_error "  - Node selectors don't match available nodes"
@@ -1343,11 +1472,13 @@ verify_pods() {
         log_error "=========================================="
         log_error "$failed_pods pods are in Failed state"
         log_error ""
-        kubectl get pods --all-namespaces --field-selector=status.phase=Failed -o wide
-        log_error ""
-        log_error "Pod failure details:"
-        kubectl get pods --all-namespaces --field-selector=status.phase=Failed -o json | \
-            jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name): \(.status.containerStatuses[0].state.terminated.reason // "Unknown") - \(.status.containerStatuses[0].state.terminated.message // "")"'
+        log_error "Failed pods:"
+        jq -r --arg pat "$exclude_ns" '
+            .items[]
+            | select(.metadata.namespace as $ns | $pat | split("|") | map(. == $ns) | any | not)
+            | select(.status.phase == "Failed")
+            | "  \(.metadata.namespace)/\(.metadata.name)  reason=\(.status.containerStatuses[0].state.terminated.reason // "Unknown")  message=\(.status.containerStatuses[0].state.terminated.message // "")"
+        ' <<<"$snap"
         log_error "=========================================="
         return 1
     fi
