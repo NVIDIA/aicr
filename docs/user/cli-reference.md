@@ -1615,7 +1615,6 @@ If the recipe is pure-Helm (no manifest-only / mixed components), path-based chi
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
 ├── deploy.sh                      # Generic install loop + name-matched blocks
-├── undeploy.sh                    # Generic reverse loop
 ├── recipe.yaml                    # Recipe used to generate bundle
 ├── checksums.txt                  # SHA256 checksums
 ├── attestation/                   # Present when --attest is used
@@ -1880,7 +1879,7 @@ sha256sum -c checksums.txt
 chmod +x deploy.sh && ./deploy.sh
 ```
 
-> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each `NNN-<component>/` folder contains a rendered `install.sh` that runs the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
+> **Note:** `deploy.sh` is a convenience script — not the only deployment path. Each `NNN-<component>/` folder contains a rendered `install.sh` that runs the exact `helm upgrade --install` command for manual or pipeline-driven deployment. For teardown, bundles delegate to the deployer-native uninstall path (see [Bundle Uninstall](#bundle-uninstall) below).
 
 #### Deploy Script Behavior (`deploy.sh`)
 
@@ -1930,36 +1929,79 @@ aws ec2 reboot-instances --instance-ids <instance-id>
 kubectl uncordon <node-name>
 ```
 
-#### Undeploy Script Behavior (`undeploy.sh`)
+#### Bundle Uninstall
 
-The undeploy script removes components in reverse deployment order.
+AICR bundles do **not** ship a generated `undeploy.sh`. Teardown is delegated
+to the deployer-native uninstall path; AICR's role ends at design-time
+generation. Pick the walkthrough that matches the deployer used to generate
+your bundle.
 
-**Flags:**
+##### helm
 
-| Flag | Description |
-|------|-------------|
-| `--keep-namespaces` | Skip namespace deletion after component removal |
-| `--delete-pvcs` | Delete all PVCs in component namespaces (default: **off**) |
-| `--skip-preflight` | Skip pre-flight CRD/finalizer checks (use with caution) |
-| `--timeout SECONDS` | Helm uninstall timeout per component (default: 120) |
+Uninstall releases in **reverse** deployment order — the same order the
+generated `README.md` lists under `## Uninstall`:
 
-**PVC preservation (default):**
+```bash
+# For each NNN-<component>/ folder in descending order:
+helm uninstall <release> -n <namespace>
+```
 
-PVCs are **not deleted** by default. This preserves historical data (Prometheus metrics, Alertmanager state, etcd data) across redeploys. If an EBS-backed PV has an AZ mismatch after redeployment, the PVC will stay Pending with a clear error — the operator can then decide to delete it manually.
+Helm intentionally does not delete CRDs (charts that declare them under
+`crds/` are left in place) or PVCs (StatefulSet-managed volumes are
+preserved). Remove them only when you are sure no other release depends on
+them:
 
-Pass `--delete-pvcs` to delete all PVCs. Protected namespaces (`kube-system`, `kube-public`, `kube-node-lease`, `default`) are always excluded from PVC deletion to prevent accidental removal of non-bundle PVCs.
+```bash
+# CRDs — review first; deletion cascades to every custom resource cluster-wide
+kubectl get crd -o name | grep -E '<component-prefix>'
+kubectl delete crd <name>
 
-**Shared namespace ordering:**
+# PVCs in a single namespace
+kubectl -n <namespace> delete pvc --all
 
-When multiple components share a namespace (e.g., `monitoring` contains `kube-prometheus-stack`, `prometheus-adapter`, and `k8s-ephemeral-storage-metrics`), all components are uninstalled first, then PVC and namespace cleanup runs once. This prevents hangs caused by `kubernetes.io/pvc-protection` finalizers — if a StatefulSet owner is still running when PVC deletion is attempted, the delete blocks indefinitely.
+# Namespace
+kubectl delete namespace <namespace>
+```
 
-**Stuck release handling:**
+If a release is stuck in `pending-install` or `pending-upgrade` (interrupted
+deploy), retry with `--no-hooks`:
 
-If a Helm release is in a `pending-install` or `pending-upgrade` state (from an interrupted deploy), the script retries with `--no-hooks` to force removal.
+```bash
+helm uninstall <release> -n <namespace> --no-hooks
+```
 
-**Orphaned webhook cleanup:**
+See [Helm 3 uninstall docs](https://helm.sh/docs/helm/helm_uninstall/) for
+the full flag reference.
 
-After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
+##### argocd
+
+Delete the parent `Application` that owns the bundle's child Applications
+(app-of-apps). The `resources-finalizer.argocd.argoproj.io` finalizer that
+AICR sets on each Application causes ArgoCD to cascade the delete to
+every managed resource:
+
+```bash
+kubectl -n argocd delete application <bundle-parent-app>
+```
+
+The CRD and PVC notes above still apply — Argo follows Helm's
+non-destructive-by-default semantics for both.
+
+See [ArgoCD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
+for finalizer behavior and selective deletion.
+
+##### argocd-helm
+
+The ArgoCD application drives `helm uninstall` under the hood, so deletion
+follows the same path as plain ArgoCD:
+
+```bash
+kubectl -n argocd delete application <bundle-parent-app>
+```
+
+The cascade is Helm-driven, so the same CRD/PVC preservation behavior
+applies. Manual cleanup of CRDs and PVCs follows the **helm** walkthrough
+above.
 
 ---
 

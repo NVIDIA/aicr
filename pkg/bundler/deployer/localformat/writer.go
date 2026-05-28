@@ -186,8 +186,8 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 // Removes any pre-existing NNN-* folders under OutputDir before writing, so
 // reusing the same --output across recipe regenerations does not leave stale
 // component folders that the deployer's loop would later install. Top-level
-// orchestration files (deploy.sh, undeploy.sh, README.md, attestation/) are
-// left intact; only files under [0-9][0-9][0-9]-* are removed.
+// orchestration files (deploy.sh, README.md, attestation/) are left intact;
+// only files under [0-9][0-9][0-9]-* are removed.
 //
 // Returns the list of emitted folders plus, when opts.VendorCharts is set,
 // one VendorRecord per pulled upstream chart for inclusion in the bundle's
@@ -204,8 +204,8 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 	// the count using the same pre/primary/post emission rules the main
 	// loop below applies — a worst-case 3x bound would reject valid
 	// 500-component bundles whose components emit only their primary
-	// folder. The deploy/undeploy templates glob [0-9][0-9][0-9]-*/, so
-	// a 4-digit prefix would be silently skipped at install time.
+	// folder. The deploy.sh template globs [0-9][0-9][0-9]-*/, so a
+	// 4-digit prefix would be silently skipped at install time.
 	folderCount := 0
 	for _, c := range opts.Components {
 		if len(opts.ComponentPreManifests[c.Name]) > 0 {

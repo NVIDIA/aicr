@@ -846,7 +846,6 @@ func TestMake_Helmfile(t *testing.T) {
 	// regression that brings any of these back is a scope violation.
 	for _, leaked := range []string{
 		"deploy.sh",          // helm deployer
-		"undeploy.sh",        // helm deployer
 		"app-of-apps.yaml",   // argocd / argocd-helm deployer
 		"kustomization.yaml", // flux deployer
 	} {

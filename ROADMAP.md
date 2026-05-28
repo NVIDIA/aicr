@@ -58,9 +58,10 @@ so future changes can warn before they break.
 
 **Bundle output as a stable surface.** The bundle is what downstream consumers
 integrate against; v1 hardens it as a first-class contract. This includes a generic
-Helm bundle format that is deployer-neutral, undeploy pre/post-flight checks for
-safe teardown, and decoupling environment specifics (e.g., StorageClass) from
-recipe content so bundles are portable.
+Helm bundle format that is deployer-neutral, deferring teardown to the deployer's
+native uninstall path (helm, ArgoCD, Flux) rather than shipping bundle-side
+scripts, and decoupling environment specifics (e.g., StorageClass) from recipe
+content so bundles are portable.
 
 **Versioning policy.** Document the major-bump policy for each surface in
 `RELEASING.md` and wire compatibility tests into CI.

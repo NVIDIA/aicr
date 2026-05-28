@@ -84,7 +84,7 @@ Before deploying, AICR can validate that a target cluster meets the recipe requi
 Finally, AICR converts the abstract Recipe into concrete deployment files.
 *   **What it does:** It generates a "Bundle" containing Helm values, Kubernetes manifests, installation scripts, and a custom README.
 *   **Deployer Options:** Supports multiple deployment methods: `helm` (per-component bundle, default), `argocd` and `argocd-helm` (Applications with sync-wave ordering), `flux` (HelmReleases with dependsOn ordering), `helmfile` (declarative release graph driven by the upstream helmfile CLI).
-*   **How it helps:** Users receive deployer-specific artifacts ready for standard operational workflows: the `helm` deployer emits a per-component `install.sh` plus top-level `deploy.sh`/`undeploy.sh` wrappers; `argocd` and `argocd-helm` emit `Application` manifests; `flux` emits `HelmRelease` + `Kustomization` manifests; `helmfile` emits a declarative `helmfile.yaml` release graph driven by the upstream `helmfile` CLI.
+*   **How it helps:** Users receive deployer-specific artifacts ready for standard operational workflows: the `helm` deployer emits a per-component `install.sh` plus a top-level `deploy.sh` wrapper; `argocd` and `argocd-helm` emit `Application` manifests; `flux` emits `HelmRelease` + `Kustomization` manifests; `helmfile` emits a declarative `helmfile.yaml` release graph driven by the upstream `helmfile` CLI.
 *   **Parallel Execution:** Multiple "Bundlers" (e.g., GPU Operator, Network Operator) can run simultaneously to generate a full stack configuration in seconds.
 
 ## Key Capabilities
