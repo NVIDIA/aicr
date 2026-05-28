@@ -868,11 +868,13 @@ func TestScanMissingPodAffinityDeps(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		pa           *corev1.PodAffinity
-		existingPods []*corev1.Pod
-		wantCount    int
-		wantContains string
+		name           string
+		pa             *corev1.PodAffinity
+		existingPods   []*corev1.Pod
+		wantCount      int
+		wantReason     string
+		wantNamespace  string
+		wantSelectorIn string // substring expected within Selector
 	}{
 		{
 			name:      "nil PodAffinity returns nil",
@@ -897,7 +899,7 @@ func TestScanMissingPodAffinityDeps(t *testing.T) {
 			wantCount:    0,
 		},
 		{
-			name: "required term with no matching pods emits warning",
+			name: "required term with no matching pods emits zero-match warning",
 			pa: &corev1.PodAffinity{
 				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
 					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": "prometheus"}},
@@ -905,11 +907,13 @@ func TestScanMissingPodAffinityDeps(t *testing.T) {
 					TopologyKey:   "kubernetes.io/hostname",
 				}},
 			},
-			wantCount:    1,
-			wantContains: `selector matched zero pods`,
+			wantCount:      1,
+			wantReason:     affinityScanReasonZeroMatch,
+			wantNamespace:  "monitoring",
+			wantSelectorIn: "app.kubernetes.io/name=prometheus",
 		},
 		{
-			name: "preferred term with no matching pods emits warning",
+			name: "preferred term with no matching pods emits zero-match warning",
 			pa: &corev1.PodAffinity{
 				PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
 					Weight: 100,
@@ -920,8 +924,10 @@ func TestScanMissingPodAffinityDeps(t *testing.T) {
 					},
 				}},
 			},
-			wantCount:    1,
-			wantContains: `selector matched zero pods`,
+			wantCount:      1,
+			wantReason:     affinityScanReasonZeroMatch,
+			wantNamespace:  "monitoring",
+			wantSelectorIn: "app.kubernetes.io/name=prometheus",
 		},
 		{
 			name: "mixed required+preferred where preferred has no match",
@@ -940,9 +946,11 @@ func TestScanMissingPodAffinityDeps(t *testing.T) {
 					},
 				}},
 			},
-			existingPods: []*corev1.Pod{prometheusPod}, // matches required, not preferred
-			wantCount:    1,
-			wantContains: `app=dcgm-exporter`,
+			existingPods:   []*corev1.Pod{prometheusPod}, // matches required, not preferred
+			wantCount:      1,
+			wantReason:     affinityScanReasonZeroMatch,
+			wantNamespace:  "gpu-operator",
+			wantSelectorIn: "app=dcgm-exporter",
 		},
 	}
 	for _, tt := range tests {
@@ -955,18 +963,20 @@ func TestScanMissingPodAffinityDeps(t *testing.T) {
 			cs := fake.NewSimpleClientset(objs...)
 			got := scanMissingPodAffinityDeps(context.Background(), cs, tt.pa)
 			if len(got) != tt.wantCount {
-				t.Fatalf("expected %d warnings, got %d: %v", tt.wantCount, len(got), got)
+				t.Fatalf("expected %d warnings, got %d: %+v", tt.wantCount, len(got), got)
 			}
-			if tt.wantContains != "" {
-				found := false
-				for _, w := range got {
-					if strings.Contains(w, tt.wantContains) {
-						found = true
-						break
-					}
+			if tt.wantReason != "" {
+				if got[0].Reason != tt.wantReason {
+					t.Errorf("Reason = %q, want %q", got[0].Reason, tt.wantReason)
 				}
-				if !found {
-					t.Errorf("expected a warning containing %q, got %v", tt.wantContains, got)
+				if tt.wantNamespace != "" && got[0].Namespace != tt.wantNamespace {
+					t.Errorf("Namespace = %q, want %q", got[0].Namespace, tt.wantNamespace)
+				}
+				if tt.wantSelectorIn != "" && !strings.Contains(got[0].Selector, tt.wantSelectorIn) {
+					t.Errorf("Selector = %q, want substring %q", got[0].Selector, tt.wantSelectorIn)
+				}
+				if got[0].Message == "" {
+					t.Errorf("Message must be non-empty for emitted warning")
 				}
 			}
 		})
@@ -988,10 +998,46 @@ func TestScanMissingPodAffinityDeps_ListErrorReturnsWarning(t *testing.T) {
 	}
 	got := scanMissingPodAffinityDeps(context.Background(), cs, pa)
 	if len(got) != 1 {
-		t.Fatalf("expected 1 warning on List error, got %d: %v", len(got), got)
+		t.Fatalf("expected 1 warning on List error, got %d: %+v", len(got), got)
 	}
-	if !strings.Contains(got[0], "selector lookup failed") {
-		t.Errorf("expected lookup-failed warning, got %v", got[0])
+	if got[0].Reason != affinityScanReasonLookupFailed {
+		t.Errorf("Reason = %q, want %q", got[0].Reason, affinityScanReasonLookupFailed)
+	}
+	if got[0].Err == nil {
+		t.Errorf("Err must be set for lookup-failed reason")
+	}
+}
+
+// TestScanMissingPodAffinityDeps_MalformedSelectorEmitsWarning verifies the
+// LabelSelectorAsSelector path: a selector that doesn't parse (e.g., a
+// MatchExpressions entry with an invalid operator) is reported as a
+// malformed-selector warning instead of bypassing the diagnostic with
+// FormatLabelSelector's "<error>" sentinel.
+func TestScanMissingPodAffinityDeps_MalformedSelectorEmitsWarning(t *testing.T) {
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	cs := fake.NewSimpleClientset()
+	pa := &corev1.PodAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "app",
+					Operator: metav1.LabelSelectorOperator("Bogus"), // invalid operator
+					Values:   []string{"x"},
+				}},
+			},
+			Namespaces:  []string{"monitoring"},
+			TopologyKey: "kubernetes.io/hostname",
+		}},
+	}
+	got := scanMissingPodAffinityDeps(context.Background(), cs, pa)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 warning on malformed selector, got %d: %+v", len(got), got)
+	}
+	if got[0].Reason != affinityScanReasonMalformedSelector {
+		t.Errorf("Reason = %q, want %q", got[0].Reason, affinityScanReasonMalformedSelector)
+	}
+	if got[0].Err == nil {
+		t.Errorf("Err must be set for malformed-selector reason")
 	}
 }
 

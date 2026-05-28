@@ -129,7 +129,16 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 	// surface a hard match miss as Pending if the affinity is `required`.
 	if plan.Affinity != nil && plan.Affinity.PodAffinity != nil {
 		for _, w := range scanMissingPodAffinityDeps(ctx, d.clientset, plan.Affinity.PodAffinity) {
-			slog.Warn(w, "validator", d.entry.Name)
+			attrs := []any{
+				"validator", d.entry.Name,
+				"namespace", w.Namespace,
+				"selector", w.Selector,
+				"reason", w.Reason,
+			}
+			if w.Err != nil {
+				attrs = append(attrs, "error", w.Err)
+			}
+			slog.Warn(w.Message, attrs...)
 		}
 	}
 
@@ -154,9 +163,42 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 	return nil
 }
 
+// Stable reason codes for affinityScanWarning, suitable for log filtering
+// and metric labels. Kept short and ASCII so they round-trip through any
+// downstream sink without escaping.
+const (
+	affinityScanReasonZeroMatch         = "zero-match"
+	affinityScanReasonLookupFailed      = "lookup-failed"
+	affinityScanReasonMalformedSelector = "malformed-selector"
+)
+
+// affinityScanWarning is a structured record of a single dependencyAffinity
+// scan finding. Returned by scanMissingPodAffinityDeps so callers can emit
+// stable-message slog records with queryable attrs rather than embedding
+// namespace/selector inside the log message text.
+type affinityScanWarning struct {
+	// Message is the human-readable slog message. Stable across invocations
+	// so log aggregators can group by msg.
+	Message string
+	// Namespace is the namespace that was Listed. Empty when the warning is
+	// not namespace-scoped (e.g., a malformed selector skipped before any
+	// List call).
+	Namespace string
+	// Selector is the best-effort string form of the term's LabelSelector.
+	// Always populated (may be empty when the selector itself was malformed
+	// before formatting succeeded).
+	Selector string
+	// Reason is one of the affinityScanReason* constants.
+	Reason string
+	// Err is the underlying error for lookup-failed / malformed-selector
+	// reasons; nil for zero-match.
+	Err error
+}
+
 // scanMissingPodAffinityDeps lists pods for each PodAffinityTerm in pa and
-// returns a warning string per term whose selector matched zero pods in the
-// listed namespace at deploy time. The returned slice is nil when every term
+// returns one affinityScanWarning per term whose selector matched zero pods
+// in the listed namespace at deploy time, plus warnings for malformed
+// selectors and List errors. The returned slice is nil when every term
 // matches at least one pod or when pa has no terms.
 //
 // This is a defensive check against silent dependency-chart label drift —
@@ -171,7 +213,17 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 //
 // Each List uses a short per-namespace timeout (defaults.PodAffinitySelectorLookupTimeout)
 // so a slow or unreachable apiserver doesn't delay Job deploy.
-func scanMissingPodAffinityDeps(ctx context.Context, client kubernetes.Interface, pa *corev1.PodAffinity) []string {
+//
+// Intentional coverage gaps (silent skips):
+//   - term.NamespaceSelector is not resolved. AICR's BuildOrchestratorAffinity
+//     always populates Namespaces from the resolved component ref's namespace,
+//     so this case is unreachable from the catalog path. External callers
+//     populating NamespaceSelector instead of Namespaces will get no scan
+//     coverage for those terms.
+//   - term.LabelSelector == nil is skipped without warning. Same reason —
+//     AICR always sets it; this guard is defense-in-depth against a malformed
+//     externally-built PodAffinity reaching the scanner.
+func scanMissingPodAffinityDeps(ctx context.Context, client kubernetes.Interface, pa *corev1.PodAffinity) []affinityScanWarning {
 	if pa == nil {
 		return nil
 	}
@@ -184,7 +236,7 @@ func scanMissingPodAffinityDeps(ctx context.Context, client kubernetes.Interface
 		terms = append(terms, w.PodAffinityTerm)
 	}
 
-	var warnings []string
+	var warnings []affinityScanWarning
 	for _, term := range terms {
 		// Stop early on cancellation. Continuing here would only emit a
 		// "selector lookup failed; error=context canceled" warning per
@@ -193,10 +245,26 @@ func scanMissingPodAffinityDeps(ctx context.Context, client kubernetes.Interface
 		if ctx.Err() != nil {
 			return warnings
 		}
+		// See coverage-gap notes on the function doc: terms with nil
+		// LabelSelector or empty Namespaces are intentionally not scanned.
 		if term.LabelSelector == nil || len(term.Namespaces) == 0 {
 			continue
 		}
-		selector := metav1.FormatLabelSelector(term.LabelSelector)
+		// Use LabelSelectorAsSelector (not FormatLabelSelector, which is a
+		// display helper that returns "<error>" / "<none>" sentinel strings
+		// the apiserver then rejects as malformed). This produces a string
+		// that round-trips through labels.Parse and is accepted as
+		// ListOptions.LabelSelector.
+		sel, err := metav1.LabelSelectorAsSelector(term.LabelSelector)
+		if err != nil {
+			warnings = append(warnings, affinityScanWarning{
+				Message: "dependencyAffinity selector is malformed; skipping lookup",
+				Reason:  affinityScanReasonMalformedSelector,
+				Err:     err,
+			})
+			continue
+		}
+		selector := sel.String()
 		for _, ns := range term.Namespaces {
 			if ctx.Err() != nil {
 				return warnings
@@ -208,15 +276,22 @@ func scanMissingPodAffinityDeps(ctx context.Context, client kubernetes.Interface
 			})
 			cancel()
 			if err != nil {
-				warnings = append(warnings, fmt.Sprintf(
-					"dependencyAffinity selector lookup failed; affinity may not behave as intended: namespace=%q selector=%q error=%v",
-					ns, selector, err))
+				warnings = append(warnings, affinityScanWarning{
+					Message:   "dependencyAffinity selector lookup failed; affinity may not behave as intended",
+					Namespace: ns,
+					Selector:  selector,
+					Reason:    affinityScanReasonLookupFailed,
+					Err:       err,
+				})
 				continue
 			}
 			if len(pods.Items) == 0 {
-				warnings = append(warnings, fmt.Sprintf(
-					"dependencyAffinity selector matched zero pods at deploy time; affinity term will be a no-op until matching pods appear: namespace=%q selector=%q",
-					ns, selector))
+				warnings = append(warnings, affinityScanWarning{
+					Message:   "dependencyAffinity selector matched zero pods at deploy time; affinity term will be a no-op until matching pods appear",
+					Namespace: ns,
+					Selector:  selector,
+					Reason:    affinityScanReasonZeroMatch,
+				})
 			}
 		}
 	}
