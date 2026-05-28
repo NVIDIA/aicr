@@ -62,45 +62,23 @@ spec:
             create: false
             name: ""
             data: ""
-          # Exclude control-plane nodes — NFD labels them with GPU features
-          # (shared host kernel) but they lack actual device access, causing
-          # operand init containers to hang and ClusterPolicy to stay notReady.
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                  - matchExpressions:
-                      - key: node-role.kubernetes.io/control-plane
-                        operator: DoesNotExist
         # Use chart-default device plugin env in kind (no CDI overrides)
         devicePlugin:
           env: []
-          # Exclude control-plane nodes (see dcgmExporter.affinity comment)
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                  - matchExpressions:
-                      - key: node-role.kubernetes.io/control-plane
-                        operator: DoesNotExist
-        gfd:
-          # Exclude control-plane nodes (see dcgmExporter.affinity comment)
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                  - matchExpressions:
-                      - key: node-role.kubernetes.io/control-plane
-                        operator: DoesNotExist
-        validator:
-          # Exclude control-plane nodes (see dcgmExporter.affinity comment)
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                  - matchExpressions:
-                      - key: node-role.kubernetes.io/control-plane
-                        operator: DoesNotExist
+        # Keep GPU Operator operand DaemonSets off kind control-plane nodes.
+        # The chart default `daemonsets.tolerations: [{operator: Exists}]`
+        # tolerates the control-plane `NoSchedule` taint; combined with NFD
+        # labeling the control-plane (shared host kernel exposes the NVIDIA
+        # PCI device) and GPU Operator setting `nvidia.com/gpu.deploy.*=true`,
+        # operand DaemonSets schedule onto the control-plane where they hang
+        # because there's no real device access, keeping ClusterPolicy
+        # notReady. Removing the catchall toleration restores the
+        # NoSchedule taint as the real exclusion mechanism.
+        # Note: per-operand `affinity` (dcgmExporter/devicePlugin/gfd/validator)
+        # is not exposed by ClusterPolicy and is silently dropped by the chart,
+        # so it cannot be used here.
+        daemonsets:
+          tolerations: []
         # Reduce resource requests for local development
         operator:
           resources:
