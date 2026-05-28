@@ -66,6 +66,16 @@ resources:
 # annotation can never drift from the actual chart pin. Recipes that
 # disable either gpu-operator or nvidia-dra-driver-gpu leave the
 # rendered values untouched.
+#
+# priorityClassName is explicitly neutralized (""), overriding the
+# upstream chart's `system-node-critical` default. This lets the DRA
+# driver install in clusters whose PriorityClass admission restricts
+# `system-node-critical` to kube-system (PSA-restricted, ResourceQuota,
+# or PriorityClassPolicy gates), which AICR cannot assume. The trade-off
+# is that DRA pods can be evicted under node pressure; cluster operators
+# who need them to survive eviction should re-pin via their own overlay.
+# TODO(#1086): revisit whether a higher default (e.g., system-cluster-critical)
+# is safe across all supported services.
 controller:
   priorityClassName: ""
 kubeletPlugin:
