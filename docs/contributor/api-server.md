@@ -263,7 +263,7 @@ Supported content types:
 | Parameter | Type | Validation | Example |
 |-----------|------|------------|--------|
 | `service` | ServiceType | Enum: eks, gke, aks, oke, kind, lke, bcm, any | `service=eks` |
-| `accelerator` | AcceleratorType | Enum: h100, gb200, b200, a100, l40, rtx-pro-6000, any | `accelerator=h100` |
+| `accelerator` | AcceleratorType | Enum: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any | `accelerator=h100` |
 | `gpu` | AcceleratorType | Alias for accelerator | `gpu=h100` |
 | `intent` | IntentType | Enum: training, inference, any | `intent=training` |
 | `os` | OSType | Enum: ubuntu, rhel, cos, amazonlinux, talos, any | `os=ubuntu` |

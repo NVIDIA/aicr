@@ -124,7 +124,7 @@ Criteria define when a recipe matches a user query:
 | Field | Type | Description | Example Values |
 |-------|------|-------------|----------------|
 | `service` | String | Kubernetes platform | `eks`, `gke`, `aks`, `oke`, `kind`, `lke`, `bcm` |
-| `accelerator` | String | GPU hardware type | `h100`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000` |
+| `accelerator` | String | GPU hardware type | `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000` |
 | `os` | String | Operating system | `ubuntu`, `rhel`, `cos`, `amazonlinux` |
 | `intent` | String | Workload purpose | `training`, `inference` |
 | `platform` | String | Platform/framework type | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
@@ -801,7 +801,7 @@ fingerprint:
     value: eks                       # eks | gke | aks | oke | kind | lke | bcm
     source: k8s.node.provider
   accelerator:
-    value: h100                      # h100 | gb200 | b200 | a100 | l40 | rtx-pro-6000
+    value: h100                      # h100 | h200 | gb200 | b200 | a100 | l40 | rtx-pro-6000
     source: gpu.smi.gpu.model
   os:
     value: ubuntu                    # ubuntu | rhel | cos | amazonlinux | talos
