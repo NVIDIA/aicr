@@ -102,6 +102,24 @@ type ValidatorEntry struct {
 	// Resources specifies container resource requests/limits.
 	// If nil, defaults from pkg/defaults are used.
 	Resources *ResourceRequirements `json:"resources,omitempty" yaml:"resources,omitempty"`
+
+	// DependencyAffinity declares co-location preferences for the orchestrator
+	// pod of this validator. Each entry references a recipe component by name
+	// (componentRef) and a label selector matching that component's pods.
+	// The deployer resolves the componentRef to a namespace from the resolved
+	// recipe at spawn time and emits a podAffinity term on the orchestrator
+	// Pod spec. "required" entries hard-fail the run when the referenced
+	// component is absent from the recipe; "preferred" entries (default) emit
+	// a structured warning and proceed with no affinity term for that
+	// dependency.
+	//
+	// Motivation: ai-service-metrics queries Prometheus over a Service. On
+	// clusters with asymmetric pod-to-pod network reachability (e.g.,
+	// multi-Security-Group DGXC EKS), the orchestrator must run on a node
+	// that can reach the Prometheus pod. Co-locating with the Prometheus pod
+	// makes the dial loopback / same-network and removes the dependency on
+	// cluster network topology. See https://github.com/NVIDIA/aicr/issues/933.
+	DependencyAffinity []DependencyAffinity `json:"dependencyAffinity,omitempty" yaml:"dependencyAffinity,omitempty"`
 }
 
 // ResourceRequirements defines CPU and memory for a validator container.

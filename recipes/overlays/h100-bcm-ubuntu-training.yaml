@@ -12,33 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Cross-cutting overlay applied via criteria-wildcard matching.
-#
-# This overlay is NOT referenced by any recipe via spec.base or spec.mixins.
-# The resolver picks it up for every GB200+training query because its
-# `service: any` criterion wildcard-matches any service (EKS, OKE, etc.),
-# contributing the GB200-wide NCCL bandwidth target without duplicating it
-# in each service-specific overlay.
-#
-# See docs/contributor/data.md#criteria-wildcard-overlays for details.
-
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  name: gb200-any-training
+  name: h100-bcm-ubuntu-training
 
 spec:
-  base: base
+  # Inherits from h100-bcm-training recipe (H100 + BCM + training settings).
+  # This overlay adds Ubuntu-specific configurations.
+  base: h100-bcm-training
 
   criteria:
-    service: any
-    accelerator: gb200
+    service: bcm
+    accelerator: h100
+    os: ubuntu
     intent: training
 
-  validation:
-    performance:
-      checks:
-        - nccl-all-reduce-bw
-      constraints:
-        - name: nccl-all-reduce-bw
-          value: ">= 720"
+  # Ubuntu OS constraints via mixin (defined once in recipes/mixins/os-ubuntu.yaml)
+  mixins:
+    - os-ubuntu
+
+  componentRefs: []
+
+  # Validation is inherited from h100-bcm-training (not OS-specific)

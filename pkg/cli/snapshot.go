@@ -18,6 +18,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -246,6 +247,14 @@ func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format,
 				"--template requires YAML format; --format must be \"yaml\" or omitted")
 		}
 
+		// Templates only emit local files; a ConfigMap URI here would be
+		// taken literally as a filename and silently create a file named
+		// "cm:..." instead of writing to Kubernetes.
+		if strings.HasPrefix(strings.TrimSpace(outputPath), serializer.ConfigMapURIScheme) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--template does not support ConfigMap output (cm://...); render to a file or stdout instead")
+		}
+
 		// Validate template file exists
 		if validateErr := serializer.ValidateTemplateFile(templatePath); validateErr != nil {
 			return nil, validateErr
@@ -263,11 +272,13 @@ func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format,
 }
 
 // createSnapshotSerializer creates the output serializer based on template options.
-func createSnapshotSerializer(tmplOpts *snapshotTemplateOptions) (serializer.Serializer, error) {
+// kubeconfig is threaded through so ConfigMap destinations (cm://...) write to
+// the same cluster the rest of the snapshot pipeline is configured against.
+func createSnapshotSerializer(tmplOpts *snapshotTemplateOptions, kubeconfig string) (serializer.Serializer, error) {
 	if tmplOpts.templatePath != "" {
 		return serializer.NewTemplateFileWriter(tmplOpts.templatePath, tmplOpts.outputPath)
 	}
-	return serializer.NewFileWriterOrStdout(tmplOpts.format, tmplOpts.outputPath)
+	return serializer.NewFileWriterOrStdoutWithKubeconfig(tmplOpts.format, tmplOpts.outputPath, kubeconfig)
 }
 
 func snapshotCmdFlags() []cli.Flag {
@@ -466,7 +477,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			)
 
 			// Create output serializer
-			ser, err := createSnapshotSerializer(opts.tmplOpts)
+			ser, err := createSnapshotSerializer(opts.tmplOpts, opts.kubeconfig)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output serializer", err)
 			}

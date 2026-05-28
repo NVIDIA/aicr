@@ -840,7 +840,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 				{Operator: v1.TolerationOpExists},
 				{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 			}
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceOKE, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE:
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceOKE, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM:
 		return nil, nil
 	default:
 		return nil, nil

@@ -275,6 +275,12 @@ func validate(c *ValidatorCatalog) error {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("validator %q: image is required", v.Name))
 		}
+		for j, dep := range v.DependencyAffinity {
+			if err := dep.Validate(); err != nil {
+				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("validator %q: dependencyAffinity[%d]", v.Name, j))
+			}
+		}
 	}
 
 	return nil

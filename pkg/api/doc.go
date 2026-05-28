@@ -64,7 +64,7 @@
 // # Query Parameters (GET /v1/recipe)
 //
 // The /v1/recipe endpoint accepts these query parameters for GET requests:
-//   - service: Kubernetes service (eks, gke, aks, oke, kind, lke, any)
+//   - service: Kubernetes service (eks, gke, aks, oke, kind, lke, bcm, any)
 //   - accelerator: GPU type (h100, gb200, b200, a100, l40, rtx-pro-6000, any)
 //   - gpu: Alias for accelerator (back-compat)
 //   - intent: Workload intent (training, inference, any)

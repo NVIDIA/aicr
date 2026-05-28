@@ -64,6 +64,58 @@ validators:
     env: []
 ```
 
+### Co-locating with a dependency (dependencyAffinity)
+
+A validator catalog entry can declare `dependencyAffinity` to control where its
+orchestrator Pod is scheduled relative to the components it queries. Use this
+when a check's correctness depends on pod-to-pod network reachability — the
+canonical case is `ai-service-metrics`, which dials Prometheus over a ClusterIP
+Service.
+
+```yaml
+- name: ai-service-metrics
+  phase: conformance
+  image: ghcr.io/nvidia/aicr-validators/conformance:latest
+  timeout: 5m
+  args: ["ai-service-metrics"]
+  dependencyAffinity:
+    - componentRef: kube-prometheus-stack
+      podLabelSelector:
+        app.kubernetes.io/name: prometheus
+      requirement: preferred       # or "required"; default "preferred"
+      topologyKey: kubernetes.io/hostname  # default
+```
+
+**Fields:**
+
+- `componentRef` *(required)* — the name of a component in the recipe.
+  The deployer resolves it to a namespace at spawn time using the resolved
+  recipe's `componentRefs`. If the named component is not in the recipe and
+  `requirement: required` is set, the run fails before any Job is deployed
+  with `ErrCodeInvalidRequest` — fix the recipe (add the component) or drop
+  the validator from the validation phase.
+- `podLabelSelector` *(required)* — labels that match the dependency's pods.
+  All key/value pairs must match.
+- `requirement` *(optional, default `preferred`)* — `required` emits
+  `requiredDuringSchedulingIgnoredDuringExecution`; the scheduler will refuse
+  to place the orchestrator anywhere else. `preferred` emits
+  `preferredDuringSchedulingIgnoredDuringExecution` with weight 100; the
+  scheduler treats it as the dominant scoring signal but can fall back to
+  another node if the dependency is unschedulable.
+- `topologyKey` *(optional, default `kubernetes.io/hostname`)* — the node
+  label whose value defines co-location. The default pins to the same node;
+  use `topology.kubernetes.io/zone` for zone-level locality.
+
+When in doubt, prefer `preferred`. The high weight (100) has a strong
+influence on the scheduler's scoring on the first run, after which image
+locality can support (rather than oppose) the affinity. Use `required`
+only when the check has no chance of succeeding without exact co-location.
+
+See [#933](https://github.com/NVIDIA/aicr/issues/933) for the motivating case:
+on multi-Security-Group EKS clusters where customer-workload and system-workload
+ENIs sit in separate SGs with asymmetric ingress rules, the orchestrator's
+ability to dial Prometheus depends entirely on which node the scheduler picks.
+
 ### Step 4: Reference in Recipe
 
 Add the check to your recipe's validation section:

@@ -107,6 +107,17 @@ validators:
     timeout: 5m
     args: ["ai-service-metrics"]
     env: []
+    # Best-effort co-location: prefer the same node as Prometheus so the dial
+    # is loopback / same-node and avoids cross-Security-Group ingress filtering.
+    # Uses requirement: preferred — schedule still falls back to any node if
+    # Prometheus is unschedulable. Motivated by multi-SG clusters (e.g., DGXC
+    # EKS with separate customer/system ENI subnets) where pod-to-pod
+    # reachability is asymmetric. See https://github.com/NVIDIA/aicr/issues/933.
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        podLabelSelector:
+          app.kubernetes.io/name: prometheus
+        requirement: preferred
   - name: inference-gateway
     phase: conformance
     description: "Verify inference gateway (agentgateway) is operational"

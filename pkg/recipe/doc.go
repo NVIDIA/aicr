@@ -25,7 +25,7 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, any
 //	    Accelerator CriteriaAcceleratorType // h100, gb200, b200, a100, l40, rtx-pro-6000, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, talos, any
@@ -67,6 +67,7 @@
 //   - CriteriaServiceOKE: Oracle OKE
 //   - CriteriaServiceKind: kind (local clusters)
 //   - CriteriaServiceLKE: Linode LKE
+//   - CriteriaServiceBCM: NVIDIA Base Command Manager
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
@@ -174,7 +175,7 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, any (default: any)
 //   - accelerator: h100, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)

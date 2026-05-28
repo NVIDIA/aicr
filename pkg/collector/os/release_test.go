@@ -89,6 +89,7 @@ func TestReleaseCollector_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}
@@ -159,6 +160,7 @@ func TestReleaseCollector_ValidatesKeyValueParsing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}
@@ -218,6 +220,7 @@ func TestReleaseCollector_HandlesQuotedValues(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}
@@ -350,6 +353,7 @@ func TestReleaseCollector_ValidatesCommonFields(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}
@@ -401,6 +405,7 @@ func TestReleaseCollector_DataTypes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	skipIfNotLinux(t)
 
 	ctx := context.TODO()
 	collector := &Collector{}

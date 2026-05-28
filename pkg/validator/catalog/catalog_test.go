@@ -890,6 +890,170 @@ func TestCatalogOmitEmpty(t *testing.T) {
 	}
 }
 
+func TestParseDependencyAffinity(t *testing.T) {
+	tests := []struct {
+		name          string
+		yaml          string
+		wantErr       bool
+		wantErrSubstr string // when set, the error message must contain this
+	}{
+		{
+			name: "valid dependencyAffinity required",
+			yaml: `
+apiVersion: validator.nvidia.com/v1alpha1
+kind: ValidatorCatalog
+metadata:
+  name: test
+  version: "1.0.0"
+validators:
+  - name: ai-service-metrics
+    phase: conformance
+    description: Verify AI service metrics via Prometheus
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        podLabelSelector:
+          app.kubernetes.io/name: prometheus
+        requirement: required
+`,
+			wantErr: false,
+		},
+		{
+			name: "valid dependencyAffinity preferred default requirement",
+			yaml: `
+apiVersion: validator.nvidia.com/v1alpha1
+kind: ValidatorCatalog
+metadata:
+  name: test
+  version: "1.0.0"
+validators:
+  - name: ai-service-metrics
+    phase: conformance
+    description: x
+    image: ghcr.io/x:latest
+    timeout: 5m
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        podLabelSelector:
+          app.kubernetes.io/name: prometheus
+`,
+			wantErr: false,
+		},
+		{
+			name: "invalid empty componentRef",
+			yaml: `
+apiVersion: validator.nvidia.com/v1alpha1
+kind: ValidatorCatalog
+metadata:
+  name: test
+  version: "1.0.0"
+validators:
+  - name: ai-service-metrics
+    phase: conformance
+    description: x
+    image: ghcr.io/x:latest
+    timeout: 5m
+    dependencyAffinity:
+      - podLabelSelector:
+          app.kubernetes.io/name: prometheus
+        requirement: required
+`,
+			wantErr:       true,
+			wantErrSubstr: `componentRef is required`,
+		},
+		{
+			name: "invalid empty selector",
+			yaml: `
+apiVersion: validator.nvidia.com/v1alpha1
+kind: ValidatorCatalog
+metadata:
+  name: test
+  version: "1.0.0"
+validators:
+  - name: ai-service-metrics
+    phase: conformance
+    description: x
+    image: ghcr.io/x:latest
+    timeout: 5m
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        requirement: required
+`,
+			wantErr:       true,
+			wantErrSubstr: `podLabelSelector is required`,
+		},
+		{
+			name: "invalid requirement value",
+			yaml: `
+apiVersion: validator.nvidia.com/v1alpha1
+kind: ValidatorCatalog
+metadata:
+  name: test
+  version: "1.0.0"
+validators:
+  - name: ai-service-metrics
+    phase: conformance
+    description: x
+    image: ghcr.io/x:latest
+    timeout: 5m
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        podLabelSelector:
+          app.kubernetes.io/name: prometheus
+        requirement: soft
+`,
+			wantErr:       true,
+			wantErrSubstr: `invalid requirement "soft"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse([]byte(tt.yaml))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Parse() err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErrSubstr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
+					t.Errorf("error message = %v, want substring %q", err, tt.wantErrSubstr)
+				}
+			}
+		})
+	}
+}
+
+func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
+	// "-next" suffix bypasses the release-version image-tag rewrite path,
+	// matching how goreleaser snapshots stamp dev binaries.
+	cat, err := Load("v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	var entry *v1.ValidatorEntry
+	for i, v := range cat.Validators {
+		if v.Name == "ai-service-metrics" {
+			entry = &cat.Validators[i]
+			break
+		}
+	}
+	if entry == nil {
+		t.Fatal("ai-service-metrics not found in embedded catalog")
+	}
+	if len(entry.DependencyAffinity) != 1 {
+		t.Fatalf("expected 1 dependencyAffinity, got %d", len(entry.DependencyAffinity))
+	}
+	dep := entry.DependencyAffinity[0]
+	if dep.ComponentRef != "kube-prometheus-stack" {
+		t.Errorf("componentRef = %q, want kube-prometheus-stack", dep.ComponentRef)
+	}
+	if dep.PodLabelSelector["app.kubernetes.io/name"] != "prometheus" {
+		t.Errorf("podLabelSelector = %v, expected app.kubernetes.io/name=prometheus", dep.PodLabelSelector)
+	}
+	if dep.RequirementOrDefault() != v1.DependencyRequirementPreferred {
+		t.Errorf("requirement = %q, want preferred", dep.RequirementOrDefault())
+	}
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {
