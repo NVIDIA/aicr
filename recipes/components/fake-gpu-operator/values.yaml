@@ -23,15 +23,27 @@
 #
 # Required pre-deploy step: every worker node that should advertise
 # simulated GPUs must carry the label
-#   run.ai/simulated-gpu-node-pool=default
-# Apply via:
+#   run.ai/simulated-gpu-node-pool=<pool-name>
+#
+# topology-server only emits per-node ConfigMaps for pools listed under
+# topology.nodePools, so the label and the pool name MUST match. We declare
+# the two conventions we see in the wild so both work without per-cluster
+# tweaks:
+#   * default     — manually-labeled kind/k3s clusters (the runai-installer
+#                   default)
+#   * nodepool-0  — kwok-simulated clusters, where the kwok provisioner
+#                   pre-labels every worker with run.ai/simulated-gpu-node-pool
+#                   =nodepool-0 (and run.ai/fake.gpu=true, nvidia.com/gpu.*).
+#
+# To label a node manually:
 #   kubectl label nodes -l '!node-role.kubernetes.io/control-plane' \
 #     run.ai/simulated-gpu-node-pool=default --overwrite
-# (A pre-install Job that does this lands here later, attached via
-# preManifestFiles in the platform-runai mixin.)
 
 topology:
   nodePools:
+    # Per-node simulated GPU count. 8 matches the runai-installer default;
+    # bump per-pool if a particular pool should advertise more.
     default:
-      # Per-node simulated GPU count. 8 matches the runai-installer default.
+      gpuCount: 8
+    nodepool-0:
       gpuCount: 8
