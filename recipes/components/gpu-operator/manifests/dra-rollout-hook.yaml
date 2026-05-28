@@ -1,0 +1,525 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# DRA Kubelet Plugin Re-Roll Hook (issue #980).
+#
+# Ships as part of the bundler-synthesized "gpu-operator-post" chart.
+# Waits for gpu-operator's k8s-driver-manager to finish migrating
+# drivers on every managed GPU node, then re-rolls the
+# nvidia-dra-driver-gpu kubelet plugin DaemonSet. Mirrors the
+# kubectl wait + rollout-restart block in
+# pkg/bundler/deployer/helm/templates/deploy.sh.tmpl so the same
+# protection applies to every deployer (Helm, helmfile, Flux, Argo CD),
+# not just the default Helm deployer that runs ./deploy.sh.
+#
+# Re-fire mechanism — dual approach across bundler paths:
+#
+# 1. Non-vendored localformat (default for Helm, helmfile, Argo CD,
+#    argocd-helm). pkg/bundler/deployer/localformat/local_helm.go:165
+#    calls stripHelmHooks unconditionally, which removes sync-phase
+#    helm.sh/hook annotations (post-install, post-upgrade, …)
+#    because Argo CD's syncPolicy.automated would otherwise treat the
+#    resource as a PostSync hook that never fires under path-based
+#    sources. After stripping, the Job ships as a regular chart
+#    resource; re-fire on upgrade is achieved by keying the Job name
+#    on the parent gpu-operator chart version, which the bundler
+#    injects into the synthesized chart's values map at
+#    `gpu-operator._aicrParentChartVersion` (see
+#    DefaultBundler.injectDRAParentChartVersionValue in
+#    pkg/bundler/bundler.go). The values-map path is used in
+#    preference to .Chart.Version because (1) the synthesized chart's
+#    Chart.yaml hardcodes version 0.1.0 so .Chart.Version would never
+#    change across gpu-operator bumps, defeating the re-fire
+#    mechanism, and (2) under flux-oci, source-controller suffixes
+#    .Chart.Version with "+<artifact-sha>" — the '+' is rejected by
+#    K8s label validation. Every gpu-operator chart bump produces a
+#    uniquely-named Job manifest that every deployer applies.
+#
+# 2. Vendored localformat (--vendor-charts).
+#    pkg/bundler/deployer/localformat/vendor_folder.go:279 calls
+#    injectPostInstallHooks on each mixed recipe-side manifest, which
+#    auto-tags resources with `helm.sh/hook: post-install` and weight
+#    metadata (starting at vendor_wrapper.postInstallHookWeightBase
+#    = 100) UNLESS the document already declares helm.sh/hook (see
+#    injectHookOnDoc at vendor_wrapper.go:223). Two problems with the
+#    auto-injection for this manifest:
+#      (a) auto-injection is post-install only, so the Job runs on
+#          first install and is silently skipped on every subsequent
+#          `helm upgrade` — exactly when the stale-NVML race occurs.
+#      (b) when the Job alone author-declares a hook (early revision
+#          of this manifest), the SA / ClusterRole / ClusterRoleBinding
+#          still get auto-injected at weights 100/101/102 while the
+#          Job's author-declared hook takes Helm's default weight 0 —
+#          ordering the Job BEFORE its ServiceAccount/RBAC and
+#          failing install with "ServiceAccount not found".
+#    Both are addressed by author-declaring `helm.sh/hook:
+#    post-install,post-upgrade` on ALL FOUR resources below with
+#    explicit ascending hook-weights (SA=1, ClusterRole=2,
+#    ClusterRoleBinding=3, Job=10). vendor_wrapper honors author-
+#    declared hooks; the ordering guarantees the Job's prerequisites
+#    exist before it runs; post-upgrade fires the Job (and refreshes
+#    the RBAC) on every helm upgrade. stripHelmHooks on the
+#    non-vendored path strips ALL of these annotations (every phase
+#    here lives in syncPhaseHooks at hooks.go:109-120), so this
+#    declaration is inert there and Helm's default kind-based ordering
+#    (SA → ClusterRole → ClusterRoleBinding → Job) plus the
+#    chart-version-keyed Job name (path 1) handle the same install
+#    order and re-fire mechanism without hooks.
+#
+# helm.sh/resource-policy: keep applies to the regular-resource case
+# (path 1) and prevents Helm's three-way merge from pruning the prior
+# Job mid-rollout. It is a no-op for the vendored hook case (path 2),
+# where helm.sh/hook-delete-policy controls retention; setting it to
+# before-hook-creation means the prior Job is removed only when a new
+# Job with the SAME name would be created — and because the Job name
+# is chart-version-keyed, that only happens on same-version re-deploys
+# (Argo CD self-heal, helm re-apply), where the Job is intentionally
+# re-run anyway. ttlSecondsAfterFinished is intentionally NOT set:
+# the Job is part of GitOps desired state, so a Kubernetes TTL delete
+# would make the resource missing relative to the rendered manifest
+# and trigger an immediate recreate (plus re-running rollout-restart)
+# on the next Argo CD self-heal or Helm re-apply cycle. Old-version
+# Jobs persist as Succeeded records and can be garbage-collected by
+# label if they become operationally noisy.
+#
+# Host-managed-driver overlays (GKE COS, OKE, Kind, Talos) run
+# gpu-operator with driver.enabled=false; nvidia-driver-daemonset is
+# never created, so the script detects its absence and skips the
+# migration wait. If the DRA kubelet plugin DaemonSet is also absent
+# (fresh install before nvidia-dra-driver-gpu's chart has applied)
+# the script exits 0 — the rollout-restart is only meaningful when
+# both pieces already exist (the upgrade path).
+#
+# Image: pinned by digest (manifest list / multi-arch index) per the
+# repo's image-pinning standard. alpine/k8s ships kubectl + busybox
+# sh in a small layer; the script targets POSIX sh, not bash.
+#
+# Known limitations (the gate is reliable for the common case but is
+# NOT airtight in two scenarios; tracked as follow-ups):
+#
+# 1. Argo CD app-of-apps gating. Sync-waves on child Applications
+#    give ordering but not gating: Argo CD 1.8 removed the default
+#    Health assessment for argoproj.io/Application, so the parent
+#    app-of-apps treats each child as immediately Healthy on
+#    creation and does not wait for the Job's status.succeeded
+#    before advancing to the next sync-wave (here,
+#    nvidia-dra-driver-gpu). To restore gating, operators must add
+#    a `resource.customizations` Lua block on `argocd-cm` that
+#    derives Application Health from `status.health.status` — see
+#    https://argo-cd.readthedocs.io/en/stable/operator-manual/upgrading/1.7-1.8/#health-assessment-of-argoprojioapplication-crd-has-been-removed
+#    Operators who can't apply that cluster-wide customization fall
+#    back to the Job's own fail-closed semantics (exit 1 on
+#    wait/restart/status failure makes the gpu-operator-post
+#    Application unHealthy; manual sync of nvidia-dra-driver-gpu
+#    can be skipped/retried). Helm / helmfile / Flux paths in this
+#    bundle do gate install-time via --wait-for-jobs / waitForJobs
+#    / spec.timeout.
+#
+# 2. Post-bundle driver.version edits. The Job name slug is rendered
+#    at bundle time (pkg/manifest.Render via
+#    pkg/bundler/deployer/localformat/local_helm.go:155 bakes
+#    .Values into the rendered manifest), so any change to
+#    driver.version that happens AFTER `aicr bundle` — e.g., an
+#    editor on the generated values.yaml, a `--set` at `helm
+#    install` time, or an AICR `--dynamic` ConfigMap edit on a
+#    driver.version path — does not update the Job name and the
+#    Job does NOT re-fire on same-chart upgrades. The driver.version
+#    captured into `_aicrDriverVersion` reflects the bundle-time
+#    componentValues map, which already merges registry default +
+#    overlay + user `--set` passed to `aicr bundle`, so the common
+#    workflow (`aicr bundle --set gpuoperator:driver.version=… -o
+#    new-bundle/`) does produce a uniquely-named Job. Operators
+#    editing values post-bundle must re-run `aicr bundle` to refresh
+#    the Job name. Closing this fully requires deferring this
+#    manifest's render to helm install time, which is a structural
+#    change to the localformat render pipeline.
+
+# $versionLabel: K8s-label-safe version. Semver build metadata (e.g.
+# 26.3.1+build.1) is legal in Chart.yaml but '+' is rejected by
+# label-value validation. Replace with '-' so the label survives any
+# future change in the resolved gpu-operator chart pin. The
+# dot/build-tag separators ('.') stay; they are valid in label values.
+# Plain YAML '#' comments are required here — a Go-template
+# `{{- /* … */}}` block renders fine through Helm but breaks the
+# TestComponentManifestImagesAre* tests in recipes/, which decode the
+# raw manifest as YAML before rendering.
+{{- $saName := "aicr-dra-rollout-hook" }}
+{{- $parentVersion := index .Values "gpu-operator" "_aicrParentChartVersion" | toString }}
+# $driverVersion: surfaced by the bundler from the merged gpu-operator
+# componentValues at `driver.version`. Used ONLY in the Job-name
+# slug, not in the chart-version label, so a `--set
+# gpuoperator:driver.version=<X>` override re-keys the Job (and
+# triggers a re-fire on non-hook deployers where stripHelmHooks
+# removes the upgrade-hook annotations) even when the gpu-operator
+# chart pin is unchanged. `default ""` collapses both "key missing"
+# and "key set to empty" into the same no-driver-infix path so
+# host-managed-driver overlays (driver.enabled=false, version
+# unset) keep the original 1-component Job name shape.
+{{- $driverVersion := index .Values "gpu-operator" "_aicrDriverVersion" | default "" | toString }}
+# Trim trailing '.', '_', '-' after the cap so the label value always
+# ends alphanumeric (K8s label-value validation rejects a
+# non-alphanumeric trailing character). A long SemVer pre-release can
+# put any of the three at exactly the truncation boundary, so we
+# strip each variant. Truncate at 60 (3 chars below the 63 cap) to
+# leave headroom for a run of separators to be absorbed, and chain
+# the suffix-strip 5 times — more than enough to handle mixed
+# `.-_` runs at the boundary that one pass would miss. pkg/manifest's
+# helmFuncMap doesn't register a regex helper, so a chain of
+# `trimSuffix` is the only suffix-strip primitive available across
+# both the bundler-time render path (limited funcMap) and the Helm
+# install-time path.
+{{- $versionLabel := $parentVersion | replace "+" "-" | trunc 60 | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" }}
+# $hookRev: pod-spec revision counter. Job .spec.template is immutable
+# (Kubernetes rejects updates to any field under it with
+# "Forbidden: field is immutable"), so changing the image digest,
+# shell script body, tolerations, resources, securityContext, etc.
+# of an existing aicr-dra-rollout-hook-<version> Job will fail to
+# apply on an upgrade where the gpu-operator chart pin is unchanged.
+# Bump $hookRev (1 → 2 → 3 → …) in lockstep with any material edit
+# to the Job spec below. The Job name carries this value so a bump
+# produces a fresh resource the deployer can create cleanly; prior
+# Jobs persist (helm.sh/resource-policy: keep) and can be GC'd by
+# label app.kubernetes.io/component=dra-rollout-hook if the
+# namespace accumulates noise.
+{{- $hookRev := "1" }}
+# Budget the version-slug truncation so the -r<rev> suffix survives
+# the 63-char DNS-1123 cap on the Job name. Full assembled name shape
+# is: "aicr-dra-rollout-hook-" (22 chars) + <versionSlug> + "-r<rev>".
+# Reserve 6 chars for "-r<rev>" (covers up to -r9999, far more
+# revisions than this hook will ever see) and give the slug the
+# remaining 35 chars (63 - 22 - 6). The outer `trunc 63` on the
+# assembled name stays as a defense-in-depth cap.
+#
+# Composite slug shape: `<chartSlug>-d<driverSlug>` when driver.version
+# is set, else `<chartSlug>` alone. The "-d" infix is small enough
+# (2 chars) to keep both real versions in the 35-char budget for any
+# realistic chart+driver pair (e.g. "26-3-1-d570-86-16" = 17 chars).
+# The combined truncation at 35 chars is applied AFTER the infix is
+# inserted so the boundary cleanly falls inside whichever component
+# is longer rather than silently dropping the driver suffix.
+{{- $chartSlug := $parentVersion | replace "." "-" | replace "+" "-" }}
+{{- $driverSlug := $driverVersion | replace "." "-" | replace "+" "-" }}
+{{- $versionSlug := $chartSlug }}
+{{- if $driverVersion }}
+{{- $versionSlug = printf "%s-d%s" $chartSlug $driverSlug }}
+{{- end }}
+{{- $versionSlug = $versionSlug | trunc 35 | trimSuffix "-" }}
+{{- $jobName := printf "aicr-dra-rollout-hook-%s-r%s" $versionSlug $hookRev | trunc 63 | trimSuffix "-" }}
+{{- $chartLabel := printf "%s-%s" .Chart.Name $parentVersion | replace "+" "_" | trunc 60 | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" | trimSuffix "." | trimSuffix "_" | trimSuffix "-" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Hook ordering for the vendored bundler path: SA / ClusterRole /
+    # ClusterRoleBinding must exist BEFORE the Job runs, so they are
+    # all author-declared as post-install,post-upgrade hooks with
+    # explicit weights ascending 1 < 2 < 3 < 10 (Job). Without this,
+    # vendor_wrapper.injectPostInstallHooks would auto-tag each of
+    # SA/CR/CRB with `helm.sh/hook: post-install` starting at
+    # weight 100 (vendor_wrapper.go:124) while the Job's author-
+    # declared hook would get Helm's default weight 0 — making the
+    # Job run before its ServiceAccount/RBAC and fail with a
+    # ServiceAccount-not-found error in vendored bundles. On the
+    # non-vendored path, stripHelmHooks removes all of these
+    # annotations because every phase used here lives in
+    # syncPhaseHooks (hooks.go:109-120), and Helm's default kind-
+    # based ordering (SA → ClusterRole → ClusterRoleBinding → Job)
+    # provides the same install order without hooks.
+    "helm.sh/hook": "post-install,post-upgrade"
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": "before-hook-creation"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: dra-rollout-hook
+    helm.sh/chart: {{ $chartLabel }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $saName }}
+  annotations:
+    "helm.sh/hook": "post-install,post-upgrade"
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": "before-hook-creation"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: dra-rollout-hook
+    helm.sh/chart: {{ $chartLabel }}
+rules:
+  # Discover the nvidia-dra-driver-gpu kubelet-plugin DaemonSet by
+  # label across all namespaces (the os-talos mixin and ad-hoc recipe
+  # overrides can place it outside the default nvidia-dra-driver
+  # namespace), then patch it to trigger rollout-restart and watch
+  # for rollout-status. kubectl rollout status watches the DaemonSet
+  # resource itself, not just Pods, so the watch verb is required.
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch", "patch"]
+  # Wait for per-node gpu-driver-upgrade-state=upgrade-done label.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  # rollout status reads pod state to confirm the new generation is up.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $saName }}
+  annotations:
+    "helm.sh/hook": "post-install,post-upgrade"
+    "helm.sh/hook-weight": "3"
+    "helm.sh/hook-delete-policy": "before-hook-creation"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: dra-rollout-hook
+    helm.sh/chart: {{ $chartLabel }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $saName }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $jobName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Re-fire mechanism: see the header comment block on this file.
+    # `helm.sh/hook: post-install,post-upgrade` is the load-bearing
+    # annotation for the vendored bundler path (--vendor-charts);
+    # vendor_wrapper.injectHookOnDoc honors author-declared hooks, so
+    # the Job runs on both Helm install and Helm upgrade. On the
+    # non-vendored path, local_helm.stripHelmHooks removes both
+    # phases (they sit in syncPhaseHooks at hooks.go:109-120) before
+    # the chart ships to the deployer, and the chart-version-keyed
+    # Job name takes over as the re-fire mechanism.
+    "helm.sh/hook": "post-install,post-upgrade"
+    # Hook weight 10 puts this Job AFTER its prerequisites
+    # (ServiceAccount=1, ClusterRole=2, ClusterRoleBinding=3) in the
+    # vendored bundler path. Without an explicit weight the Job would
+    # take Helm's default weight of 0, which would order it BEFORE
+    # the auto-injected weights of unhooked siblings — exactly the
+    # vendor-ordering bug an earlier revision shipped.
+    "helm.sh/hook-weight": "10"
+    # before-hook-creation deletes a prior Job ONLY when a new Job
+    # would be created with the same name; chart-version-keyed names
+    # mean that only fires on same-version re-deploys (Argo CD
+    # self-heal, helm re-apply), where re-running the rollout-restart
+    # is the desired behavior. Cross-version upgrades create a Job
+    # with a different name, so prior-version Jobs remain in the
+    # cluster as Succeeded records.
+    "helm.sh/hook-delete-policy": "before-hook-creation"
+    # Applies to the regular-resource (non-vendored) path: prevents
+    # Helm's three-way merge from pruning the prior chart-version-
+    # keyed Job mid-rollout. Inert under the vendored hook path
+    # (Helm does not apply resource-policy to hook resources;
+    # retention there is governed by hook-delete-policy above).
+    "helm.sh/resource-policy": keep
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: dra-rollout-hook
+    aicr.nvidia.com/gpu-operator-chart-version: "{{ $versionLabel }}"
+    helm.sh/chart: {{ $chartLabel }}
+spec:
+  # backoffLimit is load-bearing under the fail-closed script
+  # semantics below: a transient apiserver hiccup on a kubectl get /
+  # wait / rollout exits 1 from the script, and the Job restarts up
+  # to twice before surfacing as a failed release. Do not drop this.
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: dra-rollout-hook
+        aicr.nvidia.com/gpu-operator-chart-version: "{{ $versionLabel }}"
+    spec:
+      serviceAccountName: {{ $saName }}
+      restartPolicy: OnFailure
+      # Tolerate every taint so the Job lands on whichever node the
+      # scheduler picks first. The Job is short-lived (a few kubectl
+      # calls plus an optional 15m wait for driver-migration) and only
+      # talks to the kube-apiserver — it does NOT exercise the GPU, so
+      # landing on a GPU-tainted node is harmless and a system node
+      # works equally well. Without this, CI clusters with KWOK nodes
+      # tainted as accelerated/system leave the pod Pending with
+      # FailedScheduling, the Flux HelmRelease never becomes Ready,
+      # and every downstream release stays blocked on
+      # DependencyNotReady. See PR #1030.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: rollout
+          image: docker.io/alpine/k8s:1.34.8@sha256:4d352ba7479706876a62566c4a8eaaf44d8182d39ee456dbd884830df5e493be
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              # Fail-closed design.
+              #
+              # This Job exists as a correctness mitigation for the
+              # stale-NVML race (issue #980). If a classification
+              # API call flakes or a wait times out, exiting 0 would
+              # tell Helm/GitOps "mitigation succeeded" when it may
+              # not have run. That is strictly worse than a failed
+              # release: operators lose the actionable signal and
+              # the cluster silently retains the bug. Therefore we
+              # exit 0 ONLY when state is positively determined as
+              # a no-op (DRA DS absent, driver DS absent, zero
+              # managed nodes), and exit 1 on every other failure.
+              # The pod spec sets backoffLimit: 2, so a transient
+              # apiserver hiccup auto-retries twice before surfacing
+              # as a failed release.
+              #
+              # POSIX-sh capture-then-check pattern.
+              #
+              # alpine/k8s ships BusyBox /bin/sh, which does NOT
+              # support `set -o pipefail`. A bare `kubectl ... |
+              # grep ... | head` silently masks kubectl's exit
+              # code, so "API call failed" and "result is empty"
+              # become indistinguishable. We capture kubectl
+              # output (with stderr merged) into a variable first,
+              # check the command status, THEN parse — this
+              # separates "API call succeeded" from "parsed result
+              # is empty" and lets the no-op vs failure exits stay
+              # accurate.
+
+              # Step 1: locate the nvidia-dra-driver-gpu kubelet-
+              # plugin DaemonSet. Label-based discovery across all
+              # namespaces handles os-talos / privileged-* overlays
+              # that relocate the DS out of its default namespace.
+              echo "Locating nvidia-dra-driver-gpu kubelet plugin daemonset..."
+              if ! DRA_RAW=$(kubectl get daemonset -A \
+                  -l app.kubernetes.io/name=nvidia-dra-driver-gpu \
+                  -o jsonpath='{range .items[?(@.metadata.labels.app\.kubernetes\.io/component!="controller")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' \
+                  2>&1); then
+                echo "  ERROR: failed to list daemonsets to locate DRA kubelet plugin: ${DRA_RAW}" >&2
+                exit 1
+              fi
+              DRA_LOC=$(echo "${DRA_RAW}" | grep -E '(kubelet-plugin|dra-driver)' | head -n 1 || true)
+
+              if [ -z "${DRA_LOC}" ]; then
+                # Fallback: chart variants that don't set
+                # component=controller on the controller Deployment.
+                if ! DRA_RAW=$(kubectl get daemonset -A \
+                    -l app.kubernetes.io/name=nvidia-dra-driver-gpu \
+                    -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' \
+                    2>&1); then
+                  echo "  ERROR: failed to list daemonsets (fallback): ${DRA_RAW}" >&2
+                  exit 1
+                fi
+                DRA_LOC=$(echo "${DRA_RAW}" | head -n 1 || true)
+              fi
+
+              if [ -z "${DRA_LOC}" ]; then
+                # Positively determined absent: no DRA kubelet plugin
+                # deployed yet (fresh install before nvidia-dra-
+                # driver-gpu has applied). Restart is only meaningful
+                # on the upgrade path, so this is a safe no-op.
+                echo "  DRA kubelet plugin daemonset not present; nothing to restart, exiting"
+                exit 0
+              fi
+
+              # Step 2: classify driver mode. Presence of
+              # nvidia-driver-daemonset means gpu-operator owns the
+              # driver and we must wait for migration to settle;
+              # absence means host-managed-driver mode (GKE COS, OKE,
+              # Kind, Talos) and we skip the wait.
+              echo "Locating nvidia-driver-daemonset to determine deployment mode..."
+              if ! DRIVER_RAW=$(kubectl get daemonset -A \
+                  -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' \
+                  2>&1); then
+                echo "  ERROR: failed to list daemonsets to classify driver mode: ${DRIVER_RAW}" >&2
+                exit 1
+              fi
+              DRIVER_DS_NS=$(echo "${DRIVER_RAW}" | awk '{print $1}')
+
+              if [ -z "${DRIVER_DS_NS}" ]; then
+                # Positively determined absent: host-managed driver.
+                echo "  gpu-operator nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"
+              else
+                if ! NODE_RAW=$(kubectl get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>&1); then
+                  echo "  ERROR: failed to list managed GPU nodes: ${NODE_RAW}" >&2
+                  exit 1
+                fi
+                MANAGED_NODES=$(echo "${NODE_RAW}" | grep -c '^node/' || true)
+                if [ "${MANAGED_NODES}" -gt 0 ]; then
+                  echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS})..."
+                  if ! kubectl wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
+                       nodes -l nvidia.com/gpu.deploy.driver=true --timeout=15m; then
+                    # Fail-closed: a wait timeout means migration is
+                    # still in flight (or stuck). Restarting the DRA
+                    # DS now would pin it to the stale pre-migration
+                    # driver state — exactly the bug this Job exists
+                    # to prevent.
+                    echo "  ERROR: not all managed GPU nodes reached upgrade-done within 15m" >&2
+                    exit 1
+                  fi
+                else
+                  # Positively determined zero managed nodes: nothing
+                  # to wait for.
+                  echo "  No nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait"
+                fi
+              fi
+
+              # Step 3: trigger the rollout. Failure to issue the
+              # restart is fatal — without it the stale-NVML
+              # mitigation is absent.
+              DRA_NS="${DRA_LOC%%/*}"
+              DRA_DS_NAME="${DRA_LOC#*/}"
+              echo "  Restarting DRA kubelet plugin (${DRA_NS}/${DRA_DS_NAME}) to clear stale NVML state..."
+              if ! kubectl rollout restart "daemonset/${DRA_DS_NAME}" -n "${DRA_NS}"; then
+                echo "  ERROR: failed to restart DRA kubelet plugin daemonset" >&2
+                exit 1
+              fi
+
+              # Step 4: wait for the rolled DS to converge. A
+              # rollout-status timeout is fatal: a non-Ready new
+              # generation could mean CDI-spec generation is still
+              # failing on the new pods, which is functionally
+              # identical to the pre-fix bug. backoffLimit=2 retries
+              # the whole Job; rollout restart is idempotent.
+              echo "  Waiting for DRA kubelet plugin rollout to complete..."
+              if ! kubectl rollout status "daemonset/${DRA_DS_NAME}" -n "${DRA_NS}" --timeout=5m; then
+                echo "  ERROR: DRA kubelet plugin rollout did not complete within 5m" >&2
+                exit 1
+              fi
+
+              echo "Done."
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

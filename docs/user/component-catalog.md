@@ -101,7 +101,7 @@ helm uninstall gpu-operator-post --namespace gpu-operator
 
 `helm uninstall` removes the ConfigMap it owns; the next `gpu-operator` upgrade re-creates it from values.
 
-**Helmfile** — the new bundle no longer references `gpu-operator-post`, so `helmfile apply` will not prune it on its own. Run the `helm uninstall` above first, then `helmfile apply`.
+**Helmfile** — the new bundle reintroduces a `gpu-operator-post` release (carrying the DRA kubelet-plugin rollout-hook Job from issue #980, not the old `dcgm-exporter` ConfigMap). `helmfile apply` will upgrade the existing release in place, but the prior-revision `dcgm-exporter` ConfigMap stays orphaned and blocks the main `gpu-operator` chart's claim with the error above. Run the `helm uninstall` first to clear it, then `helmfile apply` reinstalls `gpu-operator-post` with the new content.
 
 **Argo CD** — delete the stale Application (it will not self-prune unless an `ApplicationSet` was managing it), then sync the updated `gpu-operator` application:
 

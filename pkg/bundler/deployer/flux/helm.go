@@ -42,6 +42,13 @@ type HelmReleaseData struct {
 	DependsOn       []DependsOnRef
 	ValuesFrom      []ValuesFromRef // ConfigMap references for dynamic values
 	ValuesYAML      string          // Pre-rendered, indented YAML for spec.values
+	// Timeout, when non-empty, is rendered as spec.timeout. Flux's
+	// helm-controller defaults to 5m, which is shorter than some
+	// post-install Jobs need (e.g., gpu-operator-post's DRA rollout
+	// hook from issue #980 can spend 15m+5m in kubectl wait + rollout
+	// status). Must be a Go duration string accepted by Kubernetes
+	// (e.g., "25m").
+	Timeout string
 }
 
 // ChartRefHelmReleaseData carries per-component data for the
@@ -56,6 +63,25 @@ type ChartRefHelmReleaseData struct {
 	DependsOn       []DependsOnRef
 	ValuesFrom      []ValuesFromRef // ConfigMap references for dynamic values
 	ValuesYAML      string          // Pre-rendered, indented YAML for spec.values
+	// Timeout, when non-empty, is rendered as spec.timeout. See
+	// HelmReleaseData.Timeout.
+	Timeout string
+}
+
+// releaseTimeoutOverrides maps a synthesized release name to a
+// spec.timeout value (Go duration string) for the generated Flux
+// HelmRelease. Mirrors releaseOverrides in
+// pkg/bundler/deployer/helmfile/releases.go and the per-name case
+// switch in pkg/bundler/deployer/helm/templates/deploy.sh.tmpl — the
+// three files must be updated together.
+var releaseTimeoutOverrides = map[string]string{
+	// gpu-operator-post wraps the DRA kubelet-plugin rollout hook
+	// from issue #980. Worst-case runtime is 15m (kubectl wait for
+	// per-node driver migration) + 5m (kubectl rollout status) =
+	// 20m; 25m adds 5m headroom. helm-controller already waits for
+	// Jobs by default, so no waitForJobs / disableWaitForJobs knob
+	// is needed on this path — only the outer timeout.
+	"gpu-operator-post": "25m",
 }
 
 // ArtifactGeneratorData carries per-component data for the
@@ -198,7 +224,7 @@ type ChartData struct {
 // it emits an ArtifactGenerator + ExternalArtifact pair and uses spec.chartRef.
 // Returns (wroteConfigMap, extraResourcePaths, error). extraResourcePaths
 // contains the ArtifactGenerator file path when in OCI mode, nil otherwise.
-func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, compDir string,
+func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, chartVersion, compDir string,
 	manifests map[string][]byte, gitSources map[string]*GitRepoSourceData,
 	dependsOn []DependsOnRef, output *deployer.Output) (bool, []string, error) {
 
@@ -212,6 +238,16 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 			fmt.Sprintf("failed to create templates directory for %s", compName), err)
 	}
 
+	// Resolve the chart version exactly once and reuse it for both the
+	// Chart.yaml metadata and the manifest.Render pass below. Empty
+	// component versions (manifest-only refs) fall back to "0.1.0" so
+	// the synthesized chart still has a valid semver. See issue #1034
+	// for the underlying defect: leaving chart.yaml.tmpl hardcoded to
+	// 0.1.0 produced a constant .Chart.Version that broke chart-version
+	// keyed Job names downstream; threading the parent component's
+	// version through fixes it at the source.
+	normalizedVersion := deployer.NormalizeVersionWithDefault(chartVersion)
+
 	// Write manifest files into templates/ in sorted order for determinism.
 	manifestNames := make([]string, 0, len(manifests))
 	for name := range manifests {
@@ -220,6 +256,19 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	sort.Strings(manifestNames)
 
 	for _, name := range manifestNames {
+		// Write the manifest content raw so dynamic `.Values.*`
+		// references the user marked via DynamicValues survive into the
+		// rendered chart and Helm can substitute them at install time
+		// from the static `spec.values` + dynamic ConfigMap merge.
+		// Bundler-time substitution would bake the static default into
+		// the template body and silently make the ConfigMap edits inert
+		// — see TestGenerate_WithDynamicValues_ManifestComponent and
+		// docs/user/cli-reference.md's dynamic-values section.
+		//
+		// Values that need to be visible to the manifest template at
+		// install time (e.g., the parent component's chart version for
+		// the #980 DRA rollout-hook Job name) flow in via the values
+		// map — see DefaultBundler.injectDRAParentChartVersionValue.
 		content := manifests[name]
 		safeName := filepath.Clean(name)
 		filePath, joinErr := deployer.SafeJoin(templatesDir, safeName)
@@ -238,8 +287,11 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		output.TotalSize += int64(len(content))
 	}
 
-	// Write Chart.yaml.
-	if err := writeTemplate(output, chartTemplate, ChartData{Name: dirName, Version: "0.1.0"},
+	// Write Chart.yaml using the same normalized parent version so
+	// future readers of the synthesized chart (operators, attestations,
+	// any tooling that reads Chart.yaml directly) see the real chart
+	// identity, not a placeholder.
+	if err := writeTemplate(output, chartTemplate, ChartData{Name: dirName, Version: normalizedVersion},
 		compDir, fileChart,
 		fmt.Sprintf("failed to write %s for %s", fileChart, compName)); err != nil {
 		return false, nil, err
@@ -306,6 +358,7 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		DependsOn:       dependsOn,
 		ValuesFrom:      valuesFrom,
 		ValuesYAML:      valuesYAML,
+		Timeout:         releaseTimeoutOverrides[dirName],
 	}
 
 	if err := writeTemplate(output, helmReleaseTemplate, data, compDir, fileHelmRelease,
@@ -481,6 +534,7 @@ func (g *Generator) writeOCIArtifactPair(name, targetNamespace string,
 		DependsOn:       dependsOn,
 		ValuesFrom:      valuesFrom,
 		ValuesYAML:      valuesYAML,
+		Timeout:         releaseTimeoutOverrides[name],
 	}
 	if err := writeTemplate(output, helmReleaseChartRefTemplate, crData, compDir, fileHelmRelease,
 		fmt.Sprintf("failed to write %s for %s", fileHelmRelease, name)); err != nil {

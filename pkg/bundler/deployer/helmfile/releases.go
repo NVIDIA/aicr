@@ -103,6 +103,15 @@ type Release struct {
 	// in the cluster. Scoped per-release so other releases keep the
 	// safety check. Issue #914.
 	DisableValidation bool `yaml:"disableValidation,omitempty"`
+	// WaitForJobs is emitted true for releases whose post-install
+	// gating depends on Job completion (e.g., gpu-operator-post's
+	// DRA rollout hook from issue #980). Without this, helm/helmfile
+	// returns as soon as the Job is created and downstream releases
+	// can install while a 15m+ migration wait is still in flight.
+	// Pointer so a deliberate true survives YAML marshaling and a
+	// nil value omits the field entirely (defaulting to helm/helmfile
+	// default, which is false).
+	WaitForJobs *bool `yaml:"waitForJobs,omitempty"`
 }
 
 // overrides carries per-component helm flag overrides.
@@ -118,6 +127,46 @@ type overrides struct {
 // schema is tracked as a follow-up to issue #632.
 var componentOverrides = map[string]overrides{
 	"kai-scheduler": {wait: false, timeout: 20 * 60},
+}
+
+// releaseOverrides carries per-release overrides keyed by the
+// synthesized folder/release name (e.g., "gpu-operator-post"), not
+// the parent component. Used when an injected -post release needs a
+// different timeout or waitForJobs behavior than its parent's primary
+// release. Mirrors the per-name case in
+// pkg/bundler/deployer/helm/templates/deploy.sh.tmpl — the two files
+// must be updated together.
+type releaseOverride struct {
+	timeout     int  // seconds; 0 means "use helmDefaults.timeout"
+	waitForJobs bool // true ⇒ emit waitForJobs: true on the release
+}
+
+var releaseOverrides = map[string]releaseOverride{
+	// gpu-operator covers the --vendor-charts case for the DRA
+	// rollout hook (issue #980). In vendored mode, localformat
+	// collapses recipe-side manifests into the primary gpu-operator
+	// wrapper folder (no gpu-operator-post is emitted), so the DRA
+	// hook Job ships under THIS release with its author-declared
+	// `helm.sh/hook: post-install,post-upgrade` annotations
+	// preserved. Helm/helmfile wait for hook Jobs automatically
+	// under `wait: true` (so waitForJobs is not needed here), but
+	// the outer `timeout: 600` (10m default) is shorter than the
+	// Job's worst case (15m + 5m = 20m). 25m adds 5m headroom.
+	// In non-vendored deployments this raises the cap on a release
+	// that typically completes in minutes; the cap is a hard
+	// ceiling, not a delay, so over-provisioning has no
+	// success-path cost.
+	"gpu-operator": {timeout: 25 * 60},
+
+	// gpu-operator-post wraps the DRA kubelet-plugin rollout hook
+	// from issue #980 in the non-vendored case. Its Job can spend
+	// 15m on `kubectl wait` plus 5m on `kubectl rollout status`
+	// (worst case 20m); 25m adds 5m headroom. waitForJobs: true is
+	// load-bearing — without it, helmfile returns as soon as the
+	// Job is created (hooks were stripped on this path) and
+	// downstream releases such as nvidia-dra-driver-gpu can install
+	// while the migration wait / restart is still in flight.
+	"gpu-operator-post": {timeout: 25 * 60, waitForJobs: true},
 }
 
 // defaultHelmDefaults returns the cluster-wide defaults applied to every
@@ -189,6 +238,20 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 			}
 			if ov.timeout > 0 {
 				rel.Timeout = ov.timeout
+			}
+		}
+
+		// Per-release overrides (keyed by synthesized folder name, e.g.,
+		// "gpu-operator-post"). Applied AFTER componentOverrides so a
+		// release-specific timeout / waitForJobs takes precedence over
+		// the parent-component override.
+		if ov, ok := releaseOverrides[f.Name]; ok {
+			if ov.timeout > 0 {
+				rel.Timeout = ov.timeout
+			}
+			if ov.waitForJobs {
+				waitForJobs := true
+				rel.WaitForJobs = &waitForJobs
 			}
 		}
 

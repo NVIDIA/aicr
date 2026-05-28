@@ -12,4 +12,5 @@ releases:
     version: v25.3.3
     values:
       - ./002-gpu-operator/values.yaml
+    timeout: 1500
     disableValidation: true

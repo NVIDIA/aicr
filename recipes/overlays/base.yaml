@@ -42,6 +42,18 @@ spec:
       source: https://helm.ngc.nvidia.com/nvidia
       version: v26.3.1
       valuesFile: components/gpu-operator/values.yaml
+      manifestFiles:
+        # Chart-version-keyed Job that waits for the gpu-operator driver
+        # migration to settle and then re-rolls the nvidia-dra-driver-gpu
+        # kubelet plugin. Ships via the bundler-synthesized gpu-operator-post
+        # chart so the protection applies to every deployer (Helm, helmfile,
+        # Flux, Argo CD), not just the default Helm deployer that runs
+        # ./deploy.sh. (Helm post-install/post-upgrade hook annotations
+        # would be stripped by the local-helm bundler for Argo CD
+        # compatibility, so the Job ships as a regular resource and re-fires
+        # on every gpu-operator chart bump via a versioned Job name.)
+        # See issue #980.
+        - components/gpu-operator/manifests/dra-rollout-hook.yaml
       dependencyRefs:
         - nfd
         - cert-manager

@@ -415,7 +415,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to create pre directory %s", preName), mkErr)
 		}
-		preWroteCM, preExtra, preErr := g.generateManifestHelmChart(ref.Name, preName, ref.Namespace, preDir,
+		preWroteCM, preExtra, preErr := g.generateManifestHelmChart(ref.Name, preName, ref.Namespace, ref.Version, preDir,
 			g.ComponentPreManifests[ref.Name], gitSources, primaryDependsOn, output)
 		if preErr != nil {
 			return nil, preErr
@@ -434,7 +434,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 		// Manifest-only Helm component: no chart or source, only manifests.
 		// Package as a local Helm chart so Flux renders the templates natively.
 		if ref.Chart == "" && ref.Source == "" && hasManifests {
-			wroteCM, extra, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir,
+			wroteCM, extra, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, ref.Version, compDir,
 				g.ComponentManifests[ref.Name], gitSources, primaryDependsOn, output)
 			if genErr != nil {
 				return nil, genErr
@@ -493,7 +493,7 @@ func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.C
 			}
 
 			postDependsOn := []DependsOnRef{{Name: ref.Name}}
-			postWroteCM, postExtra, postGenErr := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, postDir,
+			postWroteCM, postExtra, postGenErr := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, ref.Version, postDir,
 				g.ComponentManifests[ref.Name], gitSources, postDependsOn, output)
 			if postGenErr != nil {
 				return nil, postGenErr

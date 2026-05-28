@@ -8,6 +8,9 @@ metadata:
 spec:
   interval: 10m
   targetNamespace: {{ .TargetNamespace }}
+{{- if .Timeout }}
+  timeout: {{ .Timeout }}
+{{- end }}
   install:
     createNamespace: true
   chart:

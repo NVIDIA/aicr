@@ -291,6 +291,17 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// See issue #973.
 	b.injectDRAChartVersionAnnotation(componentValues, recipeResult)
 
+	// Bundler-derived values that flow into manifest templates via the
+	// normal Helm install-time render path (NOT pre-rendered at bundle
+	// time, which would defeat downstream dynamic-values overrides).
+	// Applied AFTER extractComponentValues so a user --set cannot
+	// silently override the synthetic key. See issue #980 — the DRA
+	// rollout-hook needs the parent gpu-operator chart version to key
+	// its Job name without relying on .Chart.Version, which is the
+	// synthesized chart's hardcoded 0.1.0 (and is suffixed with
+	// +<artifact-sha> under flux-oci, breaking K8s label validation).
+	b.injectDRAParentChartVersionValue(componentValues, recipeResult)
+
 	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
@@ -1529,6 +1540,29 @@ const (
 	gpuOperatorComponentName = "gpu-operator"
 )
 
+// draParentChartVersionValueKey is the values-map key the bundler
+// writes into the gpu-operator componentValues so the manifest
+// template in recipes/components/gpu-operator/manifests/dra-rollout-hook.yaml
+// can read the resolved gpu-operator chart version at Helm install
+// time. The leading underscore signals "bundler-internal — do not
+// surface in --set documentation"; values.schema.json (if it ever
+// ships) should reject this key as unknown.
+const draParentChartVersionValueKey = "_aicrParentChartVersion"
+
+// draDriverVersionValueKey is the companion to
+// draParentChartVersionValueKey. It carries the resolved gpu-operator
+// `driver.version` value so the rollout-hook Job name can re-key on
+// driver-only overrides (e.g. `--set gpuoperator:driver.version=…`)
+// that do not change the gpu-operator chart pin. Without this,
+// non-hook deployers (Helmfile / Argo CD / argocd-helm where
+// stripHelmHooks removes the upgrade-hook annotations) ship the Job
+// as a regular chart resource and `kubectl apply` on the same
+// chart-version-keyed name is a no-op — the migration mitigation
+// does not rerun when the operator changes only the driver pin.
+// Empty when driver.version is unset (host-managed driver mode or
+// chart default).
+const draDriverVersionValueKey = "_aicrDriverVersion"
+
 // injectDRAChartVersionAnnotation writes the resolved gpu-operator
 // chart version into the nvidia-dra-driver-gpu controller and
 // kubelet-plugin podAnnotations on the bundler's componentValues map.
@@ -1641,4 +1675,124 @@ func (b *DefaultBundler) injectDRAChartVersionAnnotation(
 		}
 		annotations[draChartVersionAnnotation] = gpuOperatorVersion
 	}
+}
+
+// injectDRAParentChartVersionValue writes the resolved gpu-operator
+// chart version into componentValues["gpu-operator"] under the key
+// _aicrParentChartVersion. The synthesized gpu-operator-post chart
+// inherits gpu-operator's values, so the DRA rollout-hook manifest
+// (issue #980) can read the parent chart version via
+// `{{ index .Values "gpu-operator" "_aicrParentChartVersion" }}`
+// at Helm install time.
+//
+// Why a values injection and not .Chart.Version:
+//
+// The synthesized -post chart's Chart.yaml hardcodes version: 0.1.0
+// (see pkg/bundler/deployer/localformat/templates/chart.yaml.tmpl
+// and flux/templates/chart.yaml.tmpl). Under flux-oci, source-
+// controller additionally suffixes that with "+<artifact-sha>" when
+// serving the ExternalArtifact — the '+' character is invalid in
+// K8s label values and the K8s API server rejects any Job carrying
+// the resulting string. Pulling the parent's version through the
+// values map sidesteps both the constant-0.1.0 problem (which would
+// have meant a constant Job name that never re-fires on upgrade) and
+// the flux-oci '+' problem.
+//
+// Trigger gating: gpu-operator must be enabled in the filtered
+// recipe. The hook manifest is wired into base.yaml's gpu-operator
+// componentRef's manifestFiles, so it ships whenever gpu-operator
+// ships — independent of whether nvidia-dra-driver-gpu is also
+// enabled. Without this looser gate, --set
+// nvidia-dra-driver-gpu:enabled=false produces an emitted hook with
+// un-substituted `<nil>` placeholders that K8s rejects as an invalid
+// DNS-1123 Job name. (When DRA is in fact disabled, the hook
+// script's "no DRA DaemonSet → exit 0" branch keeps the Job a no-op
+// at runtime, so over-injecting the value is harmless.) Recipes that
+// disable gpu-operator entirely leave componentValues untouched.
+//
+// Injection point: called from DefaultBundler.Make AFTER
+// extractComponentValues (so user --set overrides have already been
+// applied and a typo'd user override of this internal key cannot
+// silently win) and BEFORE buildDeployer (so every deployer —
+// localformat / flux / argocd-helm — receives the same final map).
+// Mutates componentValues in place.
+func (b *DefaultBundler) injectDRAParentChartVersionValue(
+	componentValues map[string]map[string]any,
+	recipeResult *recipe.RecipeResult,
+) {
+
+	if componentValues == nil || recipeResult == nil {
+		return
+	}
+
+	var gpuOpRefPresent bool
+	var gpuOpVersion string
+	for _, ref := range recipeResult.ComponentRefs {
+		if ref.Name == gpuOperatorComponentName {
+			gpuOpRefPresent = true
+			gpuOpVersion = ref.Version
+			break
+		}
+	}
+	if !gpuOpRefPresent {
+		return
+	}
+
+	gpuOpValues := componentValues[gpuOperatorComponentName]
+	if gpuOpValues == nil {
+		gpuOpValues = make(map[string]any)
+		componentValues[gpuOperatorComponentName] = gpuOpValues
+	}
+
+	// Empty gpu-operator.Version is rare in normal recipe resolution
+	// (only synthetic recipes / hand-cleared versions hit it), but the
+	// hook manifest ships unconditionally when gpu-operator is present,
+	// so leaving the value unset would render `<nil>` placeholders into
+	// the Job name and label that K8s rejects as invalid DNS-1123 /
+	// label values. Fall back to NormalizeVersionWithDefault's "0.1.0"
+	// default so the bundle remains apply-able; warn so operators have
+	// a debuggable signal of the underlying recipe gap.
+	if gpuOpVersion == "" {
+		slog.Warn(
+			"gpu-operator enabled with empty Version, falling back to default for DRA rollout-hook Job key",
+			"component", gpuOperatorComponentName,
+			"valueKey", draParentChartVersionValueKey,
+		)
+	}
+	// Normalize the same way deployers normalize chart version pins so
+	// the rendered Job name doesn't carry a leading 'v' that earlier
+	// substitution chains would have stripped.
+	gpuOpValues[draParentChartVersionValueKey] = deployer.NormalizeVersionWithDefault(gpuOpVersion)
+
+	// Surface the resolved driver.version (if any) so the Job name
+	// re-keys on driver-only overrides. extractComponentValues
+	// produces the merged values map (registry default + recipe
+	// overlay + user `--set`), so reading from componentValues here
+	// captures `--set gpuoperator:driver.version=<X>` even when the
+	// gpu-operator chart pin is unchanged. Missing / non-string is
+	// recorded as empty; the template handles the empty case by
+	// omitting the "-d<driver>" infix.
+	gpuOpValues[draDriverVersionValueKey] = extractGPUOperatorDriverVersion(gpuOpValues)
+}
+
+// extractGPUOperatorDriverVersion reads `driver.version` from the
+// gpu-operator componentValues map, returning "" when the path is
+// missing or holds a non-string value. The gpu-operator chart
+// declares driver.version as a string, so a non-string here would
+// already be invalid for the upstream chart — returning "" routes
+// the bundler to the same "no driver-version re-key" path it takes
+// when driver.version is genuinely unset (host-managed driver mode).
+func extractGPUOperatorDriverVersion(gpuOpValues map[string]any) string {
+	if gpuOpValues == nil {
+		return ""
+	}
+	driver, ok := gpuOpValues["driver"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	v, ok := driver["version"].(string)
+	if !ok {
+		return ""
+	}
+	return v
 }

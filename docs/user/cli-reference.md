@@ -1890,13 +1890,13 @@ The deploy script installs components in the order specified by `deploymentOrder
 
 | Flag | Description |
 |------|-------------|
-| `--no-wait` | Skip Helm chart-level wait (`helm --wait`) where AICR uses it. Keeps `--timeout` for hooks. |
+| `--no-wait` | Skip Helm chart-level wait (`helm --wait`) where AICR uses it. Keeps `--timeout` for hooks. Correctness gates such as `gpu-operator-post` ([#980](https://github.com/NVIDIA/aicr/issues/980)) override `--no-wait` and always run with `--wait --wait-for-jobs` — they exist to close a known race, not as a readiness convenience. |
 | `--best-effort` | Continue past individual component failures instead of exiting |
 | `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
 
 Unknown flags are rejected with an error to catch typos (e.g., `--bes-effort` or `--retires N`).
 
-> **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
+> **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence. Correctness gates such as `gpu-operator-post` ([#980](https://github.com/NVIDIA/aicr/issues/980)) ignore `--no-wait` and always run with `--wait --wait-for-jobs` so a failed Job result is observed by the operator rather than silently passed.
 
 **Retry behavior:**
 

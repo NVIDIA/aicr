@@ -54,6 +54,8 @@ Use `--no-wait` to skip Helm chart-level waiting where AICR uses `--wait` (keeps
 ./deploy.sh --no-wait
 ```
 
+> **Correctness-gate exception:** `--no-wait` skips only readiness-convenience waits. Components that exist specifically to close a known race — currently the `gpu-operator-post` release that re-rolls the NVIDIA DRA kubelet plugin after gpu-operator's driver migration ([issue #980](https://github.com/NVIDIA/aicr/issues/980)) — always run with `--wait --wait-for-jobs` regardless of `--no-wait`. The script prints `(correctness gate — overriding --no-wait for <name>)` when this happens.
+
 > **Note:** The deploy script's final status reflects install/apply results. If `--best-effort` was used, one or more components may still have failed; check warning lines and logs. This does **not** guarantee the cluster is ready to schedule workloads — operator-driven cluster convergence (CRD reconciliation, node tuning, plugin registration, etc.) continues asynchronously after the script exits, in operator-specific ways. See the [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh) for details.
 
 ## Manual Installation
