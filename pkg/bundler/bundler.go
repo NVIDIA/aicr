@@ -603,18 +603,19 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 
 		// Apply user value overrides from --set flags.
 		// Strip "enabled" key — it controls component inclusion, not Helm chart values.
-		if overrides := b.getValueOverridesForComponent(ref.Name, provider); len(overrides) > 0 {
-			if _, has := overrides["enabled"]; has {
-				filtered := make(map[string]string, len(overrides)-1)
-				for k, v := range overrides {
+		setOverrides := b.getValueOverridesForComponent(ref.Name, provider)
+		if len(setOverrides) > 0 {
+			if _, has := setOverrides["enabled"]; has {
+				filtered := make(map[string]string, len(setOverrides)-1)
+				for k, v := range setOverrides {
 					if k == "enabled" {
 						continue
 					}
 					filtered[k] = v
 				}
-				overrides = filtered
+				setOverrides = filtered
 			}
-			if applyErr := component.ApplyMapOverrides(values, overrides); applyErr != nil {
+			if applyErr := component.ApplyMapOverrides(values, setOverrides); applyErr != nil {
 				// User-supplied --set overrides must produce the values the
 				// user asked for; silently dropping them ships a bundle
 				// that doesn't reflect the CLI inputs. Fail loudly so the
@@ -626,8 +627,15 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			}
 		}
 
+		// Compute the set of scheduling paths the user explicitly populated
+		// (recipe overlay's inline overrides + CLI --set). These take
+		// precedence over CLI/config defaults inside
+		// applyNodeSchedulingOverrides. Component default valuesFile values
+		// are intentionally excluded — see authoritativeSchedulingPaths godoc.
+		authoritative := b.computeAuthoritativeSchedulingPaths(&ref, provider, setOverrides)
+
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
-		b.applyNodeSchedulingOverrides(ref.Name, values, provider)
+		b.applyNodeSchedulingOverrides(ref.Name, values, provider, authoritative)
 
 		componentValues[ref.Name] = values
 	}
@@ -709,24 +717,62 @@ func (b *DefaultBundler) getSetEnabledOverride(componentName string, provider re
 	return parsed, true, nil
 }
 
-// preExistingSchedulingPaths returns the subset of dot-notation paths that
-// were already populated in values when scheduling injection began. The
-// bundler captures this snapshot once at the top of applyNodeSchedulingOverrides
-// so a path set by a recipe overlay or --set (e.g., kind.yaml's
-// daemonsets.tolerations: [], bcm.yaml's controller.tolerations) is treated
-// as authoritative for the entire injection chain. Crucially, paths written
-// by an earlier injection step within the same call (e.g., system writing
-// worker.tolerations before accelerated overwrites it) are NOT in the
-// snapshot, so the documented system → accelerated overwrite for shared
-// paths still works.
-func preExistingSchedulingPaths(values map[string]any, paths []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(paths))
+// computeAuthoritativeSchedulingPaths collects every scheduling path declared
+// for the component in the registry, then asks authoritativeSchedulingPaths
+// which of those paths the user explicitly populated. Called once per
+// component before applyNodeSchedulingOverrides so the precedence decision is
+// made from authoritative sources (overlay + --set) rather than the merged
+// values map (which also contains chart default valuesFile data).
+func (b *DefaultBundler) computeAuthoritativeSchedulingPaths(ref *recipe.ComponentRef, provider recipe.DataProvider, setOverrides map[string]string) map[string]struct{} {
+	if ref == nil {
+		return nil
+	}
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		return nil
+	}
+	comp := registry.Get(ref.Name)
+	if comp == nil {
+		return nil
+	}
+	allPaths := make([]string, 0, 16)
+	allPaths = append(allPaths, comp.GetSystemNodeSelectorPaths()...)
+	allPaths = append(allPaths, comp.GetSystemTolerationPaths()...)
+	allPaths = append(allPaths, comp.GetAcceleratedNodeSelectorPaths()...)
+	allPaths = append(allPaths, comp.GetAcceleratedTolerationPaths()...)
+	allPaths = append(allPaths, comp.GetWorkloadSelectorPaths()...)
+	return authoritativeSchedulingPaths(ref.Overrides, setOverrides, allPaths)
+}
+
+// authoritativeSchedulingPaths returns the subset of dot-notation paths that
+// the user explicitly populated via the recipe overlay's inline overrides or
+// a CLI --set flag. Those sources are treated as authoritative and must not
+// be overwritten by CLI/config defaults (e.g., kind.yaml's
+// `daemonsets.tolerations: []`, bcm.yaml's BCM-master `controller.tolerations`).
+//
+// The component's default valuesFile is intentionally NOT consulted: several
+// components (kai-scheduler, kueue, network-operator, aws-efa) ship default
+// values that happen to set registry-declared scheduling paths to a
+// chart-default-equivalent toleration. Treating those as authoritative would
+// silently turn --system-node-toleration / --accelerated-node-toleration into
+// a no-op for those components, breaking a documented CLI surface.
+//
+// CLI --set inputs use dot-notation keys (e.g., "global.tolerations"); inline
+// overrides are nested maps. Both are checked.
+func authoritativeSchedulingPaths(overrides map[string]any, setOverrides map[string]string, paths []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(paths))
 	for _, p := range paths {
-		if _, found := component.GetValueByPath(values, p); found {
-			set[p] = struct{}{}
+		if overrides != nil {
+			if _, found := component.GetValueByPath(overrides, p); found {
+				out[p] = struct{}{}
+				continue
+			}
+		}
+		if _, found := setOverrides[p]; found {
+			out[p] = struct{}{}
 		}
 	}
-	return set
+	return out
 }
 
 // filterPaths returns paths not present in skip.
@@ -747,7 +793,12 @@ func filterPaths(paths []string, skip map[string]struct{}) []string {
 // Uses the component registry to determine the correct paths for each component.
 // The provider argument scopes the registry lookup to the recipe's bound DataProvider;
 // a nil provider falls back to the package-global registry via GetComponentRegistryFor.
-func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, values map[string]any, provider recipe.DataProvider) {
+// The authoritative argument is the set of paths the user explicitly set via
+// the recipe overlay or --set; those paths are not overwritten by CLI/config
+// defaults. Writes within this function (system → accelerated for shared
+// paths like NFD's worker.tolerations) are NOT in the set, so the documented
+// "accelerated overrides system" behavior is preserved.
+func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, values map[string]any, provider recipe.DataProvider, authoritative map[string]struct{}) {
 	if b.Config == nil {
 		return
 	}
@@ -767,22 +818,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		return // Unknown component, skip
 	}
 
-	// Snapshot the set of scheduling paths that were populated BEFORE any
-	// injection ran — i.e. by the recipe overlay or by --set values that
-	// have already been merged into the values map. These paths are
-	// authoritative and must not be overwritten by CLI/config defaults
-	// (e.g., kind.yaml's `daemonsets.tolerations: []`, bcm.yaml's careful
-	// BCM-master `controller.tolerations`). Internal writes during this
-	// function (system → accelerated for shared paths like NFD's
-	// worker.tolerations) are NOT in the snapshot, so the documented
-	// "accelerated overrides system" behavior is preserved.
-	allPaths := make([]string, 0, 16)
-	allPaths = append(allPaths, comp.GetSystemNodeSelectorPaths()...)
-	allPaths = append(allPaths, comp.GetSystemTolerationPaths()...)
-	allPaths = append(allPaths, comp.GetAcceleratedNodeSelectorPaths()...)
-	allPaths = append(allPaths, comp.GetAcceleratedTolerationPaths()...)
-	allPaths = append(allPaths, comp.GetWorkloadSelectorPaths()...)
-	recipeSet := preExistingSchedulingPaths(values, allPaths)
+	recipeSet := authoritative
 
 	// Apply system node selector
 	if nodeSelector := b.Config.SystemNodeSelector(); len(nodeSelector) > 0 {
