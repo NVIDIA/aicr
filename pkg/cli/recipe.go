@@ -179,6 +179,8 @@ Override snapshot-detected criteria:
 				return err
 			}
 
+			kubeconfig := cmd.String("kubeconfig")
+
 			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "error building recipe")
@@ -197,7 +199,7 @@ Override snapshot-detected criteria:
 			}
 
 			output := recipeOutputPath(cmd, cfg)
-			ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
+			ser, err := serializer.NewFileWriterOrStdoutWithKubeconfig(outFormat, output, kubeconfig)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
 			}

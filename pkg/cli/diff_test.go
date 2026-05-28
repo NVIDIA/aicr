@@ -265,7 +265,7 @@ func TestWriteDiffResult_TableToFile(t *testing.T) {
 	cmd := buildDiffCommandWithOutput(t, outFile)
 	result := &diff.Result{Changes: make([]diff.Change, 0)}
 
-	if err := writeDiffResult(t.Context(), cmd, serializer.FormatTable, result); err != nil {
+	if err := writeDiffResult(t.Context(), cmd, serializer.FormatTable, "", result); err != nil {
 		t.Fatalf("writeDiffResult failed: %v", err)
 	}
 
@@ -287,12 +287,34 @@ func TestWriteDiffResult_CreateFails(t *testing.T) {
 	cmd := buildDiffCommandWithOutput(t, bogusPath)
 	result := &diff.Result{Changes: make([]diff.Change, 0)}
 
-	err := writeDiffResult(t.Context(), cmd, serializer.FormatTable, result)
+	err := writeDiffResult(t.Context(), cmd, serializer.FormatTable, "", result)
 	if err == nil {
 		t.Fatal("expected error from os.Create on missing parent dir, got nil")
 	}
 	if !strings.Contains(err.Error(), "failed to create output file") {
 		t.Errorf("expected wrapped create error, got: %v", err)
+	}
+}
+
+// TestWriteDiffResult_KubeconfigPropagatesToConfigMap exercises the JSON path of
+// writeDiffResult with a ConfigMap output URI and a deliberately bogus kubeconfig.
+// If kubeconfig is correctly threaded through to NewFileWriterOrStdoutWithKubeconfig,
+// the Serialize call must fail trying to load that exact kubeconfig path — a
+// silent fallback to default discovery would surface as a different error
+// (or, in a CI environment with no kubeconfig, no error at all on client build).
+func TestWriteDiffResult_KubeconfigPropagatesToConfigMap(t *testing.T) {
+	tmpDir := t.TempDir()
+	bogusKubeconfig := filepath.Join(tmpDir, "missing-kubeconfig.yaml")
+
+	cmd := buildDiffCommandWithOutput(t, "cm://aicr/test")
+	result := &diff.Result{Changes: make([]diff.Change, 0)}
+
+	err := writeDiffResult(t.Context(), cmd, serializer.FormatJSON, bogusKubeconfig, result)
+	if err == nil {
+		t.Fatal("expected error from ConfigMap write with bogus kubeconfig, got nil")
+	}
+	if !strings.Contains(err.Error(), bogusKubeconfig) {
+		t.Errorf("error did not reference threaded kubeconfig path %q; got: %v", bogusKubeconfig, err)
 	}
 }
 
