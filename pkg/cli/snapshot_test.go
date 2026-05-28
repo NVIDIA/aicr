@@ -15,13 +15,16 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -154,12 +157,36 @@ func TestSnapshotTemplateFlagCombinations(t *testing.T) {
 			output:       "",
 			wantErr:      false,
 		},
+		// Template + ConfigMap URI output must be rejected: the template
+		// writer only emits to local files, so a cm:// path would silently
+		// create a file literally named "cm:..." instead of writing to K8s.
+		{
+			name:         "template with ConfigMap URI output is rejected",
+			templatePath: templatePath,
+			format:       "yaml",
+			formatSet:    false,
+			output:       "cm://aicr/snap",
+			wantErr:      true,
+			errContains:  "ConfigMap",
+		},
+		{
+			name:         "no template with ConfigMap URI output is allowed",
+			templatePath: "",
+			format:       "yaml",
+			formatSet:    false,
+			output:       "cm://aicr/snap",
+			wantErr:      false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Validate the combination
-			err := validateTemplateFlagCombination(tt.templatePath, tt.format, tt.formatSet)
+			// Exercise the real production function rather than a hand-copied
+			// mirror — the prior helper drifted from the actual validation
+			// rules during the ConfigMap-rejection addition.
+			cmd := buildSnapshotCmdForTemplateTest(t, tt.templatePath, tt.format, tt.formatSet, tt.output)
+			outFormat := serializer.Format(tt.format)
+			_, err := parseSnapshotTemplateOptions(cmd, outFormat, &config.SnapshotResolved{})
 
 			if tt.wantErr {
 				if err == nil {
@@ -176,29 +203,38 @@ func TestSnapshotTemplateFlagCombinations(t *testing.T) {
 	}
 }
 
-// validateTemplateFlagCombination validates the template + format combination.
-// This mirrors the validation logic in snapshotCmd.Action.
-func validateTemplateFlagCombination(templatePath, format string, formatSet bool) error {
-	if templatePath == "" {
-		return nil // No template, no validation needed
+// buildSnapshotCmdForTemplateTest constructs a parsed *cli.Command with
+// --template / --format / --output set so parseSnapshotTemplateOptions can be
+// exercised in isolation. formatSet=false omits --format so the test exercises
+// the cmd.IsSet("format") branch.
+func buildSnapshotCmdForTemplateTest(t *testing.T, templatePath, format string, formatSet bool, output string) *cli.Command {
+	t.Helper()
+	cmd := snapshotCmd()
+	app := &cli.Command{Name: "aicr", Commands: []*cli.Command{cmd}}
+
+	args := []string{"aicr", "snapshot"}
+	if templatePath != "" {
+		args = append(args, "--template", templatePath)
+	}
+	if formatSet {
+		args = append(args, "--format", format)
+	}
+	if output != "" {
+		args = append(args, "--output", output)
 	}
 
-	// Validate format is YAML when using template
-	if formatSet && format != string(serializer.FormatYAML) {
-		return &validationError{msg: "--template requires YAML format; --format must be \"yaml\" or omitted"}
+	var captured *cli.Command
+	cmd.Action = func(_ context.Context, c *cli.Command) error {
+		captured = c
+		return nil
 	}
-
-	// Validate template file exists
-	return serializer.ValidateTemplateFile(templatePath)
-}
-
-// validationError is a simple error type for validation failures.
-type validationError struct {
-	msg string
-}
-
-func (e *validationError) Error() string {
-	return e.msg
+	if err := app.Run(t.Context(), args); err != nil {
+		t.Fatalf("flag parse setup failed: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("flag parse setup did not capture cmd")
+	}
+	return captured
 }
 
 // TestParseResourceList covers the --requests / --limits parser, including

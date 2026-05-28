@@ -30,23 +30,40 @@ import (
 
 // ConfigMapWriter writes serialized data to a Kubernetes ConfigMap.
 // The ConfigMap is created if it doesn't exist, or updated if it does.
+//
+// When kubeconfig is non-empty, the writer uses that kubeconfig path to
+// build its Kubernetes client; otherwise it uses the singleton client
+// resolved from in-cluster config / KUBECONFIG env / ~/.kube/config.
 type ConfigMapWriter struct {
-	namespace string
-	name      string
-	format    Format
+	namespace  string
+	name       string
+	kubeconfig string
+	format     Format
 }
 
 // NewConfigMapWriter creates a new ConfigMapWriter that writes to the specified
-// namespace and ConfigMap name in the given format.
+// namespace and ConfigMap name in the given format. The writer uses the default
+// kubeconfig discovery (KUBECONFIG env, then ~/.kube/config).
+//
+// Use NewConfigMapWriterWithKubeconfig to write with an explicit kubeconfig path
+// (e.g., for multi-cluster workflows where reads and writes target different clusters).
 func NewConfigMapWriter(namespace, name string, format Format) *ConfigMapWriter {
+	return NewConfigMapWriterWithKubeconfig(namespace, name, "", format)
+}
+
+// NewConfigMapWriterWithKubeconfig creates a ConfigMapWriter that authenticates
+// against the cluster identified by the given kubeconfig path. An empty
+// kubeconfig falls back to the singleton client (default discovery).
+func NewConfigMapWriterWithKubeconfig(namespace, name, kubeconfig string, format Format) *ConfigMapWriter {
 	if format.IsUnknown() {
 		slog.Warn("unknown format, defaulting to JSON", "format", format)
 		format = FormatJSON
 	}
 	return &ConfigMapWriter{
-		namespace: namespace,
-		name:      name,
-		format:    format,
+		namespace:  namespace,
+		name:       name,
+		kubeconfig: kubeconfig,
+		format:     format,
 	}
 }
 
@@ -61,7 +78,10 @@ func (w *ConfigMapWriter) Serialize(ctx context.Context, snapshot any) error {
 	writeCtx, cancel := context.WithTimeout(ctx, defaults.ConfigMapWriteTimeout)
 	defer cancel()
 
-	client, config, err := client.GetKubeClient()
+	// GetKubeClientWithConfig delegates to the singleton on empty/whitespace
+	// kubeconfig, so the dispatch lives in exactly one place — same pattern
+	// as reader.go's ConfigMap read path.
+	k8sClient, config, err := client.GetKubeClientWithConfig(w.kubeconfig)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to get kubernetes client", err)
 	}
@@ -161,7 +181,7 @@ func (w *ConfigMapWriter) Serialize(ctx context.Context, snapshot any) error {
 		"name", w.name,
 		"format", w.format)
 
-	_, err = client.CoreV1().ConfigMaps(w.namespace).Apply(
+	_, err = k8sClient.CoreV1().ConfigMaps(w.namespace).Apply(
 		writeCtx,
 		configMap,
 		metav1.ApplyOptions{

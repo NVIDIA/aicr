@@ -171,6 +171,96 @@ func TestGetKubeClient_Singleton(t *testing.T) {
 	}
 }
 
+// TestBuildKubeClient_WhitespaceTreatedAsEmpty verifies a stray space in a
+// kubeconfig flag/env doesn't bypass the default-discovery chain into a
+// guaranteed "stat   : no such file" error from clientcmd.
+func TestBuildKubeClient_WhitespaceTreatedAsEmpty(t *testing.T) {
+	t.Setenv("KUBECONFIG", "   ")
+	// Pin HOME so a malformed real ~/.kube/config on the dev box can't trip
+	// the "failed to build kube config" assertion below as a false positive.
+	// USERPROFILE covers the Windows equivalent that homedir.HomeDir consults.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// Whitespace-only KUBECONFIG must be treated like unset and fall through
+	// to ~/.kube/config / in-cluster discovery. The clientcmd-specific error
+	// "failed to build kube config" would mean we passed whitespace straight
+	// through, which is exactly the regression we are guarding.
+	_, _, err := BuildKubeClient("   ")
+	if err != nil && strings.Contains(err.Error(), "failed to build kube config") {
+		t.Errorf("whitespace kubeconfig was not normalized to empty: %v", err)
+	}
+}
+
+// TestGetKubeClientWithConfig_ErrorsNotCached verifies that an invalid kubeconfig
+// is retried on every call rather than memoized for the process lifetime — a
+// transient first-call failure (EAGAIN, token-rotation race) must not become
+// permanent. We assert the cache stays empty after error returns; the alternative
+// (success caching) is verified end-to-end in the kind-cluster manual tests.
+func TestGetKubeClientWithConfig_ErrorsNotCached(t *testing.T) {
+	tmpDir := t.TempDir()
+	invalidConfig := filepath.Join(tmpDir, "invalid-kubeconfig")
+	if err := os.WriteFile(invalidConfig, []byte("invalid yaml content"), 0644); err != nil {
+		t.Fatalf("failed to write test kubeconfig: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pathClientMu.Lock()
+		delete(pathClientCache, invalidConfig)
+		pathClientMu.Unlock()
+	})
+
+	client1, cfg1, err1 := GetKubeClientWithConfig(invalidConfig)
+	if err1 == nil {
+		t.Fatal("expected error from invalid kubeconfig, got nil")
+	}
+	if client1 != nil || cfg1 != nil {
+		t.Errorf("expected nil client and config on error; got client=%v cfg=%v", client1, cfg1)
+	}
+
+	pathClientMu.Lock()
+	_, cached := pathClientCache[invalidConfig]
+	pathClientMu.Unlock()
+	if cached {
+		t.Error("error path populated the cache; transient failures must not be memoized")
+	}
+
+	// Second call must re-attempt (and re-fail the same way) — not short-circuit
+	// on a stale cached error.
+	_, _, err2 := GetKubeClientWithConfig(invalidConfig)
+	if err2 == nil {
+		t.Fatal("expected error from invalid kubeconfig on retry, got nil")
+	}
+}
+
+// TestGetKubeClientWithConfig_EmptyDelegatesToSingleton verifies the empty
+// (and whitespace-only) path takes the GetKubeClient branch rather than
+// populating the per-path cache.
+func TestGetKubeClientWithConfig_EmptyDelegatesToSingleton(t *testing.T) {
+	t.Cleanup(func() {
+		pathClientMu.Lock()
+		pathClientCache = map[string]*cachedPathClient{}
+		pathClientMu.Unlock()
+	})
+
+	// Discard the client/config; both inputs go through GetKubeClient whose
+	// environment-dependent outcome we explicitly do not assert on (see
+	// TestBuildKubeClient_AutoDiscovery). The assertion below is purely
+	// about cache-key behavior.
+	for _, kubeconfig := range []string{"", "   "} {
+		if client, _, err := GetKubeClientWithConfig(kubeconfig); err == nil && client == nil {
+			t.Errorf("GetKubeClientWithConfig(%q) succeeded with nil client", kubeconfig)
+		}
+	}
+
+	pathClientMu.Lock()
+	defer pathClientMu.Unlock()
+	if len(pathClientCache) != 0 {
+		t.Errorf("empty/whitespace kubeconfig polluted per-path cache: %d entries", len(pathClientCache))
+	}
+}
+
 // TestGetKubeClient_CallsOnce tests that GetKubeClient only initializes once
 // even when called multiple times concurrently.
 func TestGetKubeClient_CallsOnce(t *testing.T) {

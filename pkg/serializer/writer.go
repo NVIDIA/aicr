@@ -93,8 +93,22 @@ func NewWriter(format Format, output io.Writer) *Writer {
 // Returns an error if the path is invalid or the file cannot be created.
 // Remember to call Close() on the returned Writer to ensure the file is properly closed.
 //
-// Supports ConfigMap URIs in the format cm://namespace/name for Kubernetes ConfigMap output.
+// Supports ConfigMap URIs in the format cm://namespace/name for Kubernetes ConfigMap output;
+// ConfigMap destinations use the default kubeconfig discovery. Use
+// NewFileWriterOrStdoutWithKubeconfig to write ConfigMaps with an explicit kubeconfig path
+// (e.g., for multi-cluster workflows where reads and writes target different clusters).
 func NewFileWriterOrStdout(format Format, path string) (Serializer, error) {
+	return NewFileWriterOrStdoutWithKubeconfig(format, path, "")
+}
+
+// NewFileWriterOrStdoutWithKubeconfig is identical to NewFileWriterOrStdout but
+// threads an explicit kubeconfig path through to the ConfigMap writer when the
+// destination is a ConfigMap URI (cm://namespace/name). For file and stdout
+// destinations the kubeconfig argument is ignored.
+//
+// Pair with serializer.FromFileWithKubeconfig so reads and writes of ConfigMap
+// destinations use the same kubeconfig in multi-cluster workflows.
+func NewFileWriterOrStdoutWithKubeconfig(format Format, path, kubeconfig string) (Serializer, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" || trimmed == "-" || trimmed == StdoutURI {
 		return NewStdoutWriter(format), nil
@@ -106,7 +120,7 @@ func NewFileWriterOrStdout(format Format, path string) (Serializer, error) {
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid ConfigMap URI %q", trimmed), err)
 		}
-		return NewConfigMapWriter(namespace, name, format), nil
+		return NewConfigMapWriterWithKubeconfig(namespace, name, kubeconfig, format), nil
 	}
 
 	file, err := os.Create(trimmed)

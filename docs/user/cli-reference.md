@@ -77,7 +77,7 @@ aicr snapshot [flags]
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (cm://namespace/name), or stdout |
 | `--format` | | string | yaml | Output format: json, yaml, table |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) that populates `spec.snapshot.*`. CLI flags below always win over the corresponding config field. |
-| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env) |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env). Also used when `--output` is a ConfigMap URI so reads and writes target the same cluster. |
 | `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
@@ -428,7 +428,7 @@ Generate recipes from captured snapshots:
 | `--intent` | `-i` | string | Workload intent: training, inference |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | | string | Format: json, yaml (default: yaml) |
-| `--kubeconfig` | `-k` | string | Path to kubeconfig file (for ConfigMap URIs, overrides KUBECONFIG env) |
+| `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
 
 **Snapshot Sources:**
 - **File**: Local file path (`./snapshot.yaml`)
@@ -630,8 +630,8 @@ aicr validate [flags]
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
-| `--output` | `-o` | string | stdout | Output destination (file or stdout) |
-| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (for ConfigMap URIs) |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (used when `--recipe`, `--snapshot`, or `--output` is a ConfigMap URI) |
 | `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
@@ -1002,7 +1002,7 @@ aicr diff --baseline <path|cm://...> --target <path|cm://...> [flags]
 | `--fail-on-drift` | | bool | false | Exit with non-zero status (`ErrCodeConflict`) if any drift is detected. Useful for CI/CD gating. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. **Note:** ConfigMap destinations are rejected for `--format table` (a structured format is required for ConfigMap storage). |
 | `--format` | `-t` | string | yaml | Output format: `json`, `yaml`, or `table`. |
-| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig (used only when `--baseline` or `--target` is a ConfigMap URI). |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig (used when `--baseline`, `--target`, or `--output` is a ConfigMap URI). |
 
 **Inputs:**
 - File paths (`./baseline.yaml`, `/tmp/snap.json`)
