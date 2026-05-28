@@ -677,13 +677,14 @@ components:
         tolerationPaths:
           - nodesets.slinky.podSpec.tolerations
 
-  - name: runai-control-plane
+  - name: runai-backend
     displayName: Run:ai Control Plane
     valueOverrideKeys:
       - runaicp
+      - runai-backend
       - runai-control-plane
     healthCheck:
-      assertFile: checks/runai-control-plane/health-check.yaml
+      assertFile: checks/runai-backend/health-check.yaml
     helm:
       # Private repository — credentials must be added out-of-band via
       # `helm repo add runai https://... --username ... --password ...`

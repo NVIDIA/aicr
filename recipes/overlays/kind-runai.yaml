@@ -130,6 +130,6 @@ spec:
     # embeds its own Postgres/Keycloak/Prometheus internally — an
     # external kube-prometheus-stack only matters once the cluster-side
     # runai-cluster agent is present.
-    - name: runai-control-plane
+    - name: runai-backend
       type: Helm
-      valuesFile: components/runai-control-plane/values.yaml
+      valuesFile: components/runai-backend/values.yaml

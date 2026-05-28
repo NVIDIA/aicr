@@ -21,7 +21,7 @@
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: runai-control-plane-health-check
+  name: runai-backend-health-check
 spec:
   timeouts:
     assert: 10m

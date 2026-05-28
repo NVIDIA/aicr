@@ -73,7 +73,7 @@ spec:
     # Stage 1 already deployed the CP — keep it out of this bundle so
     # `helm upgrade --install` does not re-run the chart on every
     # cluster-stage iteration.
-    - name: runai-control-plane
+    - name: runai-backend
       type: Helm
       overrides:
         enabled: false
