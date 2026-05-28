@@ -81,6 +81,42 @@ spec:
       overrides:
         enabled: false
 
+    # Run:ai CP consumes pre-created TLS secrets (out-of-band via
+    # tools/runai-secrets.py), so cert-manager is unused. Turn it off
+    # so it is not pulled from base.
+    - name: cert-manager
+      type: Helm
+      overrides:
+        enabled: false
+
+    # The CP chart embeds its own Postgres/Keycloak/Prometheus internally.
+    # An external Prometheus stack only matters once the cluster-side
+    # runai-cluster agent (not in this overlay) is present and scraping
+    # cluster-wide GPU metrics. Disable the whole stack here; the
+    # `kind-runai-full` overlay (intent: training) re-enables what's
+    # needed alongside runai-cluster.
+    - name: prometheus-operator-crds
+      type: Helm
+      overrides:
+        enabled: false
+
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        enabled: false
+
+    - name: k8s-ephemeral-storage-metrics
+      type: Helm
+      overrides:
+        enabled: false
+
+    # prometheus-adapter is added by the monitoring-hpa overlay, which
+    # auto-matches via `criteria: intent: any`. Turn it off too.
+    - name: prometheus-adapter
+      type: Helm
+      overrides:
+        enabled: false
+
     # Run:ai expects a fake-GPU advertisement on each worker. The chart
     # is mutually exclusive with gpu-operator (same namespace).
     # Pre-deploy step: label nodes once before sync —
@@ -93,9 +129,13 @@ spec:
     # Run:ai Control Plane. Cluster-side runai-cluster chart is
     # intentionally NOT included here — bring it in via a follow-up
     # overlay once the CP is reachable and you have a clientSecret.
+    #
+    # No dependencyRefs: TLS secrets (runai-backend-tls etc.) and the
+    # image-pull secret (runai-reg-creds) are pre-created out-of-band
+    # by tools/runai-secrets.py, so cert-manager is unused. The chart
+    # embeds its own Postgres/Keycloak/Prometheus internally — an
+    # external kube-prometheus-stack only matters once the cluster-side
+    # runai-cluster agent is present.
     - name: runai-control-plane
       type: Helm
       valuesFile: components/runai-control-plane/values.yaml
-      dependencyRefs:
-        - cert-manager
-        - kube-prometheus-stack

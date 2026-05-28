@@ -1,0 +1,112 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Run:ai cluster-side agent on Kind, second-stage of a two-bundle install.
+#
+# Why two overlays?
+#   `runai-cluster` cannot be installed in the same bundle as the CP —
+#   the cluster registers itself with the CP REST API at install time,
+#   receiving back a UUID + clientSecret that must be plugged into the
+#   chart values. That handoff is by definition out-of-band, so:
+#
+#     stage 1 — `kind-runai`         → CP + fake-gpu-operator
+#                                    → register cluster in CP UI/API,
+#                                      capture cluster.uid + clientSecret
+#     stage 2 — `kind-runai-cluster` → prometheus stack + runai-cluster
+#                                      with the values from stage 1
+#
+# Both stages share the same Kind cluster; helm upgrade --install on
+# already-deployed releases is a no-op, so re-running stage 1 between
+# stages is safe.
+#
+# Selection: `aicr recipe --service kind --platform runai --intent training`
+# (the extra `intent` criterion makes this overlay strictly more specific
+# than `kind-runai`, so AICR picks this leaf.)
+#
+# Required deploy-time --set values:
+#   --set runaicluster:controlPlane.url=<fqdn>
+#   --set runaicluster:cluster.url=<fqdn>
+#   --set runaicluster:cluster.uid=<uuid-from-CP-API>
+#   --set runaicluster:controlPlane.clientSecret=<secret-from-CP-API>
+#   --set runaicluster:global.customCA.enabled=true
+# Or use a pre-created Secret instead of inline uid/clientSecret:
+#   --set runaicluster:controlPlane.existingSecret=runai-cluster-client-secret
+#
+# Pre-created secrets needed in the `runai` namespace (created by
+# tools/runai-secrets.py):
+#   runai-reg-creds                       dockerconfigjson
+#   runai-cluster-domain-tls-secret       tls
+#   runai-cluster-domain-star-tls-secret  tls (host-routing wildcard)
+#   runai-ca-cert                         Opaque (when global.customCA.enabled=true)
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: kind-runai-cluster
+
+spec:
+  base: kind-runai
+
+  criteria:
+    service: kind
+    platform: runai
+    intent: training
+
+  componentRefs:
+    # Stage 1 already deployed these — keep them out of this bundle so
+    # `helm upgrade --install` does not re-run the CP / fake-gpu charts
+    # on every cluster-stage iteration.
+    - name: runai-control-plane
+      type: Helm
+      overrides:
+        enabled: false
+
+    - name: fake-gpu-operator
+      type: Helm
+      overrides:
+        enabled: false
+
+    # Re-enable the prometheus stack disabled by `kind-runai`. The
+    # cluster chart federates from this Prometheus via the
+    # runai-prometheus-pushgateway pattern.
+    - name: prometheus-operator-crds
+      type: Helm
+      overrides:
+        enabled: true
+
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        enabled: true
+
+    - name: k8s-ephemeral-storage-metrics
+      type: Helm
+      overrides:
+        enabled: true
+
+    # prometheus-adapter (custom-metrics HPA) — optional but cheap;
+    # re-enable so HPA-on-GPU-utilization examples work out of the box.
+    - name: prometheus-adapter
+      type: Helm
+      overrides:
+        enabled: true
+
+    # Run:ai cluster agent. Depends on kube-prometheus-stack for
+    # ServiceMonitor scraping of GPU metrics; CP is intentionally not
+    # listed here (it lives in stage 1's bundle, not this one).
+    - name: runai-cluster
+      type: Helm
+      valuesFile: components/runai-cluster/values.yaml
+      dependencyRefs:
+        - kube-prometheus-stack
