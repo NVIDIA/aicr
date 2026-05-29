@@ -242,6 +242,7 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.A
 		}
 		source := aicr.EmbeddedSource()
 		if dataDir != "" {
+			slog.Info("initializing external data provider", "directory", dataDir)
 			source = aicr.FilesystemSource(dataDir)
 		}
 		client, err := aicr.NewClient(

@@ -770,6 +770,12 @@ Run validation without failing on check errors (informational mode):
 			}
 			defer func() { _ = client.Close() }()
 
+			// Second provider, separate from the Client's: this one is handed to
+			// evidence emission so conformance/SLSA evidence resolves files
+			// against the command's data source (the resolved --data dir), not
+			// the package global. The Client owns its own provider for recipe
+			// resolution and validation; evidence emission lives outside the
+			// Client surface and needs its own handle to the same directory.
 			dataProvider, err := validateDataProvider(dataDir)
 			if err != nil {
 				return err
