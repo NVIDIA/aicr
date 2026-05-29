@@ -176,8 +176,9 @@ client, err := aicr.NewClient(
 - **`ParseAllowListsFromEnv()`** builds an `AllowLists` from the
   `AICR_ALLOWED_ACCELERATORS`, `AICR_ALLOWED_SERVICES`,
   `AICR_ALLOWED_INTENTS`, and `AICR_ALLOWED_OS` environment variables.
-  It returns an empty (allow-all) `AllowLists` when none are set. Pass
-  the result to `WithAllowLists`.
+  It returns `nil` when none are set — `WithAllowLists` treats a `nil`
+  `AllowLists` as allow-all, so the result is always safe to pass straight
+  to `WithAllowLists`.
 
 `AllowLists` is a transparent alias of `pkg/recipe.AllowLists`; you can
 also construct one directly when you don't want to read from the
