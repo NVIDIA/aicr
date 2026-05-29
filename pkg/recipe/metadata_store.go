@@ -157,15 +157,14 @@ func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 // buildMetadataStore performs the actual catalog walk against the supplied
 // provider. It is pure with respect to the package-global DataProvider — the
 // only side effect on package state is the call to seedCriteriaRegistry,
-// which intentionally seeds the package-global criteria registry from every
-// overlay's spec.criteria (Task 4 handles per-provider routing for the
-// component registry; criteria registry continues to use the package global
-// for now).
+// which seeds the criteria registry bound to the supplied provider (via
+// GetCriteriaRegistryFor) from every overlay's spec.criteria. So loading a
+// provider's metadata store seeds THAT provider's criteria registry, exactly
+// like the metadata store and component registry are per-provider.
 //
 // The returned MetadataStore has its provider field set so downstream
-// lookups (e.g., applyRegistryDefaults in Task 4) can route through the
-// originating provider even when the package-global provider has since been
-// swapped.
+// lookups (e.g., applyRegistryDefaults) can route through the originating
+// provider even when the package-global provider has since been swapped.
 func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataStore, error) {
 	// Record cache miss on first load for the provider.
 	recipeCacheMisses.Inc()
@@ -178,10 +177,10 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 	}
 
 	// Staged criteria registry entries. Each overlay's criteria are
-	// appended during the walk but only applied to the global registry
-	// after every later validation (walk completion, base presence,
-	// dependency validation) succeeds. Keeps the registry transactional
-	// with respect to catalog-load success.
+	// appended during the walk but only applied to this provider's
+	// registry after every later validation (walk completion, base
+	// presence, dependency validation) succeeds. Keeps the registry
+	// transactional with respect to catalog-load success.
 	var pendingRegistry []pendingRegistryEntry
 
 	// Load all YAML files from data directory.
@@ -281,7 +280,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			// found, and dependency validation passes — see the
 			// commit loop below the walk. This prevents a malformed
 			// file later in the walk from leaving partial criteria
-			// values in the package-global registry.
+			// values in this provider's registry.
 			pendingRegistry = append(pendingRegistry, pendingRegistryEntry{
 				criteria: metadata.Spec.Criteria,
 				source:   provider.Source(path),
@@ -305,10 +304,12 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 	}
 
 	// Catalog fully validated — commit staged criteria registrations
-	// to the global registry now. Any earlier error return path above
-	// leaves the registry untouched.
+	// to this provider's registry now. Any earlier error return path
+	// above leaves the registry untouched. Routing through provider
+	// keeps the criteria registry per-provider, mirroring the
+	// per-provider metadata store and component registry.
 	for _, entry := range pendingRegistry {
-		seedCriteriaRegistry(entry.criteria, entry.source)
+		seedCriteriaRegistry(entry.criteria, entry.source, provider)
 	}
 
 	return store, nil

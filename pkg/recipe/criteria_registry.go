@@ -215,25 +215,89 @@ func (r *CriteriaRegistry) Reset() {
 	r.mu.Unlock()
 }
 
-// defaultRegistry is the process-wide singleton consulted by the
-// ParseCriteria*Type functions. Initialized lazily; access via
-// [DefaultRegistry].
-var (
-	defaultRegistry     *CriteriaRegistry
-	defaultRegistryOnce sync.Once
-)
+// criteriaRegistryCacheEntry holds the lazily-built CriteriaRegistry for a
+// single DataProvider identity. sync.Once gates concurrent first-load callers
+// onto the same registry so two goroutines never construct competing
+// instances for the same provider. This mirrors the per-provider isolation
+// primitive used by storeCache (metadata_store.go) and registryCache
+// (components.go).
+type criteriaRegistryCacheEntry struct {
+	once     sync.Once
+	registry *CriteriaRegistry
+}
 
-// DefaultRegistry returns the process-wide criteria registry, creating
-// it on first access. Threading the registry through every call site
-// would add significant churn for a value that is set once at startup
-// (when the data provider populates it from loaded overlays) and read
-// many times thereafter, so a singleton matches the existing package
-// shape better than dependency injection.
-func DefaultRegistry() *CriteriaRegistry {
-	defaultRegistryOnce.Do(func() {
-		defaultRegistry = newCriteriaRegistry()
+// criteriaRegistryCache holds criteriaRegistryCacheEntry pointers keyed by
+// DataProvider identity. Two callers bound to different DataProvider values
+// populate distinct entries; a single provider value yields a single shared
+// registry regardless of caller goroutine count. EvictCachedCriteriaRegistry
+// drops a single entry so a caller can force a rebuild after rotating a
+// provider's backing data without disturbing other providers.
+var criteriaRegistryCache sync.Map // map[DataProvider]*criteriaRegistryCacheEntry
+
+// GetCriteriaRegistryFor returns the criteria registry for the supplied
+// DataProvider, constructing it lazily on first access. Concurrent callers
+// with the same provider observe the same singleton; distinct providers
+// populate distinct cache entries and never share state. Each per-provider
+// registry honors AICR_CRITERIA_STRICT at construction, exactly like the
+// global default.
+//
+// A nil provider falls back to GetDataProvider() so the legacy global path —
+// DefaultRegistry and the package-level ParseCriteria*Type shims — continues
+// to work transparently and shares a single registry with the embedded
+// provider.
+func GetCriteriaRegistryFor(dp DataProvider) *CriteriaRegistry {
+	if dp == nil {
+		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+	}
+	e, _ := criteriaRegistryCache.LoadOrStore(dp, &criteriaRegistryCacheEntry{})
+	entry := e.(*criteriaRegistryCacheEntry)
+	entry.once.Do(func() {
+		entry.registry = newCriteriaRegistry()
 	})
-	return defaultRegistry
+	return entry.registry
+}
+
+// EvictCachedCriteriaRegistry drops the cached criteria registry for the
+// supplied provider so the next GetCriteriaRegistryFor call rebuilds an empty
+// registry. Passing a nil provider is a no-op (callers handle that case
+// explicitly to avoid silently evicting the package-global registry).
+func EvictCachedCriteriaRegistry(dp DataProvider) {
+	if dp == nil {
+		return
+	}
+	criteriaRegistryCache.Delete(dp)
+}
+
+// CachedCriteriaRegistryContainsForTesting reports whether the criteria
+// registry cache has an entry for the supplied DataProvider.
+//
+// Test-only by convention (the _ForTesting suffix); never call from
+// production code.
+func CachedCriteriaRegistryContainsForTesting(dp DataProvider) bool {
+	_, ok := criteriaRegistryCache.Load(dp)
+	return ok
+}
+
+// ResetCriteriaRegistryForTesting drops every cached criteria registry so the
+// next GetCriteriaRegistryFor call rebuilds from scratch. This must only be
+// called from tests.
+func ResetCriteriaRegistryForTesting() {
+	criteriaRegistryCache.Range(func(k, _ any) bool {
+		criteriaRegistryCache.Delete(k)
+		return true
+	})
+}
+
+// DefaultRegistry returns the criteria registry bound to the package-global
+// DataProvider. Threading the registry through every call site would add
+// significant churn for a value that is set once at startup (when the data
+// provider populates it from loaded overlays) and read many times thereafter,
+// so the package-level ParseCriteria*Type shims consult this registry.
+//
+// It delegates to GetCriteriaRegistryFor(GetDataProvider()) so the global
+// path and the embedded-provider path share a single registry instance.
+func DefaultRegistry() *CriteriaRegistry {
+	return GetCriteriaRegistryFor(GetDataProvider()) //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
 }
 
 // normalizeCriteriaValue lower-cases and trims a criteria value to
@@ -245,9 +309,15 @@ func normalizeCriteriaValue(s string) string {
 }
 
 // seedCriteriaRegistry registers each non-empty value from c into the
-// package criteria registry under the given source. Used by the overlay
+// criteria registry bound to dp under the given source. Used by the overlay
 // loader so values declared in YAML overlay catalogs (embedded or
 // `--data`) become valid CLI / API inputs without a binary rebuild.
+//
+// Routing through dp keeps the criteria registry per-provider: loading a
+// provider's metadata store seeds THAT provider's registry, exactly like the
+// metadata store itself is per-provider. A nil dp falls back to the
+// package-global registry via GetCriteriaRegistryFor, preserving the legacy
+// global path.
 //
 // source is the string returned by the DataProvider's Source(path); we
 // translate it to a CriteriaOrigin here so callers don't have to know
@@ -256,7 +326,7 @@ func normalizeCriteriaValue(s string) string {
 // future value) maps to OriginExternal so strict mode fails closed on
 // non-OSS contributions even if a new DataProvider source category is
 // introduced later.
-func seedCriteriaRegistry(c *Criteria, source string) {
+func seedCriteriaRegistry(c *Criteria, source string, dp DataProvider) {
 	if c == nil {
 		return
 	}
@@ -264,7 +334,7 @@ func seedCriteriaRegistry(c *Criteria, source string) {
 	if source == sourceEmbedded {
 		origin = OriginEmbedded
 	}
-	reg := DefaultRegistry()
+	reg := GetCriteriaRegistryFor(dp)
 	reg.Register(FieldService, string(c.Service), origin)
 	reg.Register(FieldAccelerator, string(c.Accelerator), origin)
 	reg.Register(FieldIntent, string(c.Intent), origin)
