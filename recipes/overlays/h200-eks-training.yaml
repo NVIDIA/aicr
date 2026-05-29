@@ -84,6 +84,12 @@ spec:
       checks:
         - nccl-all-reduce-bw
       constraints:
+        # Conservative floor inherited from h100-eks-training. H200 (HBM3e,
+        # ~4.8 TB/s) sustains higher NCCL all-reduce bandwidth on EFA than H100
+        # (HBM3, ~3.35 TB/s), so this floor is loose: it passes well below
+        # H200's real performance envelope and won't catch regressions until
+        # they fall near the H100 level. Tighten once empirical H200/EFA
+        # numbers are available.
         - name: nccl-all-reduce-bw
           value: ">= 300"
     conformance:

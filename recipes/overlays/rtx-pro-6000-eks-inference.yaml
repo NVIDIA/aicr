@@ -37,14 +37,37 @@ spec:
       value: ">= 1.32.4"
 
   componentRefs:
-    # RTX PRO 6000 GPU Operator dependencies
-    # Single-card inference SKU — no NVLink, no NCCL multi-node tuning needed
+    # RTX PRO 6000 GPU Operator dependencies + node tuning.
+    # Node tuning uses the nodewright "generic" nvidia-tuned profile rather than
+    # the shared tuning.yaml: tuning.yaml also renders nvidia-setup, which only
+    # ships eks-h100/eks-gb200 configs and fails on any other target. The
+    # generic profile is safe baseline GPU tuning that omits the NVLink/
+    # InfiniBand/hugepage/CPU-isolation settings the h100/gb200 profiles carry —
+    # which don't apply to these PCIe RTX PRO 6000 nodes (no NVLink fabric).
     - name: gpu-operator
       type: Helm
       dependencyRefs:
         - nfd
         - cert-manager
         - kube-prometheus-stack
+        - nodewright-customizations
+
+    - name: nodewright-customizations
+      type: Helm
+      # tuning-generic.yaml runs only nvidia-tuned (generic profile); it omits
+      # the nvidia-setup packages, which only support eks-h100/eks-gb200 and
+      # would fail on accelerator=generic. nvidia-setup's kernel/EFA steps are
+      # also unneeded here: the platform provisions the kernel and EFA is unused.
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-generic.yaml
+      overrides:
+        service: eks
+        # No rtx-pro-6000 profile exists in nvidia-tuned (only h100/gb200/
+        # generic); generic is the supported baseline profile for this target.
+        accelerator: generic
+        intent: inference
+      dependencyRefs:
+        - nodewright-operator
 
     - name: nfd
       type: Helm
