@@ -82,10 +82,10 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 //
 // dp is the command's DataProvider (built once in the validate Action and
 // shared with the aicr.Client driving the run). Threading it into
-// catalog.Load means a --data overlay resolves the validator catalog
-// against the command's source rather than the package-global provider —
+// catalog.LoadWithDataProvider means a --data overlay resolves the validator
+// catalog against the command's source rather than the package-global provider —
 // closing the last global dependency on the validate evidence path. A nil
-// dp falls back to the package global inside catalog.Load.
+// dp falls back to the package global inside catalog.LoadWithDataProvider.
 func emitRecipeEvidence(
 	ctx context.Context,
 	dp recipe.DataProvider,
@@ -95,7 +95,7 @@ func emitRecipeEvidence(
 	cfg *recipeEvidenceConfig,
 ) error {
 
-	cat, err := catalog.Load(dp, version, commit)
+	cat, err := catalog.LoadWithDataProvider(dp, version, commit)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog for evidence", err)
 	}

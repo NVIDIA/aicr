@@ -29,7 +29,7 @@ import (
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
-	catalog, err := Load(nil, "", "")
+	catalog, err := Load("", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -164,7 +164,7 @@ validators:
 }
 
 func TestForPhaseNoMatch(t *testing.T) {
-	catalog, err := Load(nil, "", "")
+	catalog, err := Load("", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestReplaceRegistry(t *testing.T) {
 func TestLoadWithRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
 
-	cat, err := Load(nil, "", "")
+	cat, err := Load("", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestLoadWithRegistryOverride(t *testing.T) {
 func TestLoadWithoutRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 
-	cat, err := Load(nil, "", "")
+	cat, err := Load("", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -427,7 +427,7 @@ validators:
 	defer recipe.SetDataProvider(originalProvider) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
 
 	// Load catalog — should merge embedded + external
-	cat, err := Load(nil, "", "")
+	cat, err := Load("", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -1026,7 +1026,7 @@ validators:
 func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
 	// "-next" suffix bypasses the release-version image-tag rewrite path,
 	// matching how goreleaser snapshots stamp dev binaries.
-	cat, err := Load(nil, "v0.0.0-next", "")
+	cat, err := Load("v0.0.0-next", "")
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -1137,9 +1137,9 @@ func (p *fakeCatalogProvider) WalkDir(string, fs.WalkDirFunc) error { return nil
 
 func (p *fakeCatalogProvider) Source(path string) string { return "fake://" + path }
 
-// TestLoadHonorsExplicitProvider proves Load reads the catalog from the
-// DataProvider it is handed (not the package global) by serving a distinct
-// catalog whose marker validator does not exist in the embedded data.
+// TestLoadHonorsExplicitProvider proves LoadWithDataProvider reads the catalog
+// from the DataProvider it is handed (not the package global) by serving a
+// distinct catalog whose marker validator does not exist in the embedded data.
 func TestLoadHonorsExplicitProvider(t *testing.T) {
 	const marker = "explicit-provider-marker"
 	dp := &fakeCatalogProvider{catalogYAML: []byte(`
@@ -1156,15 +1156,15 @@ validators:
     timeout: 1m
 `)}
 
-	cat, err := Load(dp, "", "")
+	cat, err := LoadWithDataProvider(dp, "", "")
 	if err != nil {
-		t.Fatalf("Load() error = %v, want nil", err)
+		t.Fatalf("LoadWithDataProvider() error = %v, want nil", err)
 	}
 	if dp.reads == 0 {
-		t.Error("Load() did not call ReadFile on the explicit provider")
+		t.Error("LoadWithDataProvider() did not call ReadFile on the explicit provider")
 	}
 	if len(cat.Validators) != 1 || cat.Validators[0].Name != marker {
-		t.Errorf("Load() returned %d validators (first = %q); want exactly the %q marker — "+
+		t.Errorf("LoadWithDataProvider() returned %d validators (first = %q); want exactly the %q marker — "+
 			"catalog was not read from the explicit provider",
 			len(cat.Validators), firstValidatorName(cat), marker)
 	}
@@ -1177,8 +1177,8 @@ func firstValidatorName(cat *ValidatorCatalog) string {
 	return cat.Validators[0].Name
 }
 
-// TestLoadDataProvider verifies Load honors an explicit DataProvider and falls
-// back to the package-global provider when nil is passed.
+// TestLoadDataProvider verifies LoadWithDataProvider honors an explicit
+// DataProvider and falls back to the package-global provider when nil is passed.
 func TestLoadDataProvider(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1196,15 +1196,15 @@ func TestLoadDataProvider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cat, err := Load(tt.dp, "", "")
+			cat, err := LoadWithDataProvider(tt.dp, "", "")
 			if err != nil {
-				t.Fatalf("Load() error = %v, want nil", err)
+				t.Fatalf("LoadWithDataProvider() error = %v, want nil", err)
 			}
 			if cat == nil {
-				t.Fatal("Load() returned nil catalog")
+				t.Fatal("LoadWithDataProvider() returned nil catalog")
 			}
 			if len(cat.Validators) == 0 {
-				t.Error("Load() returned catalog with no validators")
+				t.Error("LoadWithDataProvider() returned catalog with no validators")
 			}
 		})
 	}
