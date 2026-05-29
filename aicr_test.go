@@ -24,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -955,5 +956,87 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 	if delta := afterRegistry - baselineRegistry; delta != 0 {
 		t.Errorf("registryCache grew by %d after %d NewClient/Resolve/Close cycles; expected 0 (Close should evict)",
 			delta, N)
+	}
+}
+
+// leafOverlayYAML is a minimal leaf RecipeMetadata overlay (carries
+// spec.criteria) that LoadRecipe can auto-hydrate against the embedded
+// recipe data. It targets the h100-eks-training chain (no OS pin) so the
+// hydrated result's only top-level readiness constraint is
+// K8s.server.version — keeping the ValidateState assertion below
+// decoupled from OS-mixin constraints while still exercising real
+// embedded resolution (base + h100-any + eks + eks-training).
+const leafOverlayYAML = `kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: aicr-loadrecipe-test
+spec:
+  base: h100-eks-training
+  criteria:
+    service: eks
+    accelerator: h100
+    intent: training
+  componentRefs: []
+`
+
+// TestLoadRecipe_HydratesAndOwns proves LoadRecipe loads a leaf overlay
+// file through the Client's provider, hydrates it against the embedded
+// recipe data (Components populated), stamps the producing Client as
+// owner, and produces a RecipeResult that ValidateState accepts (the
+// owner/internal wiring is correct end-to-end).
+func TestLoadRecipe_HydratesAndOwns(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	overlayPath := filepath.Join(dir, "overlay.yaml")
+	if err := os.WriteFile(overlayPath, []byte(leafOverlayYAML), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	result, err := client.LoadRecipe(t.Context(), overlayPath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	if result == nil {
+		t.Fatal("LoadRecipe returned nil result")
+	}
+	if len(result.Components) == 0 {
+		t.Errorf("expected hydrated recipe to carry components, got none")
+	}
+
+	// The loaded result must be usable by ValidateState (owner-stamped,
+	// internal populated). no-cluster mode keeps the run hermetic, but
+	// the readiness pre-flight still evaluates the recipe's resolution
+	// constraints (e.g., K8s.server.version >= 1.32.4) against the
+	// snapshot — so supply a snapshot that satisfies them.
+	phases, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot("v1.33.0"),
+		aicr.WithValidationNoCluster(true))
+	if err != nil {
+		t.Fatalf("ValidateState on loaded recipe: %v", err)
+	}
+	if len(phases) == 0 {
+		t.Errorf("expected at least one phase result from no-cluster validation, got none")
+	}
+}
+
+// k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
+// reading satisfies the readiness constraints carried by the embedded
+// recipe chain (base: ">= 1.25", h100-eks-ubuntu-training: ">= 1.32.4").
+func k8sVersionSnapshot(version string) *aicr.Snapshot {
+	return &aicr.Snapshot{
+		Measurements: []*measurement.Measurement{
+			measurement.NewMeasurement(measurement.TypeK8s).
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("server").
+						SetString("version", version),
+				).
+				Build(),
+		},
 	}
 }

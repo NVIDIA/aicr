@@ -556,6 +556,71 @@ func recipeResultFromInternal(r *recipe.RecipeResult) (*RecipeResult, error) {
 	return out, nil
 }
 
+// LoadRecipe loads a recipe from a file path (or cm:// ConfigMap URI,
+// honoring kubeconfig) through THIS Client's data provider, and returns
+// it as a Client-owned *RecipeResult ready for ValidateState /
+// BundleComponents. Overlay inputs (kind: RecipeMetadata) are hydrated
+// against the Client's provider, so an external --data overlay resolves
+// against the same recipe source the Client was constructed with rather
+// than the package global. An already-hydrated RecipeResult file is
+// returned with its provider bound to the Client's provider.
+//
+// The returned RecipeResult is owner-stamped with this Client, so it
+// passes ValidateState / BundleComponents' assertOwns check — same as a
+// RecipeResult produced by ResolveRecipe.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client is nil, ctx is nil, path is
+//     empty, or the Client has been Closed.
+//   - All loader errors propagate with their structured codes (e.g.,
+//     ErrCodeInvalidRequest for an overlay without criteria,
+//     ErrCodeInternal for a read or parse failure).
+func (c *Client) LoadRecipe(ctx context.Context, path, kubeconfig string) (*RecipeResult, error) {
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if path == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe path is required (got empty)")
+	}
+
+	// Snapshot the per-Client provider under the read lock so a
+	// concurrent Close can't race the read; Add to inflight under the
+	// lock so Close's drain observes the increment. Same protocol as
+	// ResolveRecipeFromCriteria.
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	loaded, err := recipe.LoadFromFileWithProvider(ctx, path, kubeconfig, c.version, dp)
+	if err != nil {
+		// Don't re-wrap — the loader already returns structured errors
+		// with the right code (ErrCodeInvalidRequest for a bad overlay,
+		// ErrCodeInternal for read/parse failures).
+		return nil, err
+	}
+
+	result, err := recipeResultFromInternal(loaded)
+	if err != nil {
+		return nil, err
+	}
+	// Stamp the owning Client so ValidateState / BundleComponents accept
+	// this result — same owner-token contract as ResolveRecipe.
+	result.owner = c
+	return result, nil
+}
+
 // BundleComponents resolves Helm values and rendered manifests for
 // each component in a previously-resolved RecipeResult. The returned
 // slice mirrors r.Components 1:1 — same order, same length — so
