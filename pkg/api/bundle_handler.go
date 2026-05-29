@@ -143,10 +143,15 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate bundle through the facade.
+	// Generate bundle through the facade. Set Timeout to keep the REST
+	// path's 60s request boundary even though ctx is already wrapped
+	// above — MakeBundle defaults to uncapped (opt-in) so the REST cap
+	// must be supplied explicitly. context.WithTimeout honors the smaller
+	// of the two, so this is a backstop, not a second deadline.
 	output, err := h.client.MakeBundle(ctx, adopted, aicr.BundleOptions{
 		Config:    bundleConfig,
 		OutputDir: tempDir,
+		Timeout:   defaults.BundleHandlerTimeout,
 	})
 	if err != nil {
 		server.WriteErrorFromErr(w, r, err, "Failed to generate bundle", nil)

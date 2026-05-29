@@ -15,11 +15,13 @@
 package aicr_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr"
 	"github.com/NVIDIA/aicr/pkg/bundler"
@@ -237,6 +239,59 @@ func TestMakeBundle_RejectsCrossClientRecipe(t *testing.T) {
 
 	_, err = clientB.MakeBundle(t.Context(), recA, aicr.BundleOptions{OutputDir: t.TempDir()})
 	assertInvalidRequest(t, err)
+}
+
+// TestMakeBundle_TimeoutOptIn pins the opt-in timeout contract: with
+// Timeout unset (0), MakeBundle adds NO facade-level deadline, so a bundle
+// that fits well within the caller's context succeeds; an already-expired
+// caller deadline still governs (the facade does not paper over it). This
+// guards the regression where the CLI bundle path inherited the REST 60s
+// cap. The REST handler's own 60s cap is asserted separately in the api
+// package; here we only verify the facade no longer self-imposes one.
+func TestMakeBundle_TimeoutOptIn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero timeout adds no facade cap", func(t *testing.T) {
+		t.Parallel()
+		client, rec := resolveEmbeddedTrainingRecipe(t)
+
+		// Caller passes a generous context and Timeout: 0. The bundle
+		// must complete without the facade injecting a deadline.
+		out, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+			Config: config.NewConfig(
+				config.WithVersion("v-test"),
+				config.WithDeployer(config.DeployerHelm),
+			),
+			OutputDir: t.TempDir(),
+			Timeout:   0,
+		})
+		if err != nil {
+			t.Fatalf("MakeBundle with Timeout=0: %v", err)
+		}
+		if out == nil || out.TotalFiles == 0 {
+			t.Fatal("MakeBundle with Timeout=0 produced no artifact")
+		}
+	})
+
+	t.Run("already-expired caller deadline governs", func(t *testing.T) {
+		t.Parallel()
+		client, rec := resolveEmbeddedTrainingRecipe(t)
+
+		ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+		defer cancel()
+
+		_, err := client.MakeBundle(ctx, rec, aicr.BundleOptions{
+			Config: config.NewConfig(
+				config.WithVersion("v-test"),
+				config.WithDeployer(config.DeployerHelm),
+			),
+			OutputDir: t.TempDir(),
+			Timeout:   0,
+		})
+		if err == nil {
+			t.Fatal("expected error from already-expired caller deadline, got nil")
+		}
+	})
 }
 
 func assertInvalidRequest(t *testing.T, err error) {

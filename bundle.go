@@ -16,12 +16,12 @@ package aicr
 
 import (
 	"context"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -69,6 +69,17 @@ type BundleOptions struct {
 	// OutputDir is the directory bundle files are written to. Empty
 	// means the current directory ("."), matching Make's default.
 	OutputDir string
+
+	// Timeout optionally caps the bundle run. When > 0, MakeBundle wraps
+	// the caller's context with context.WithTimeout(ctx, Timeout) so the
+	// run is bounded by the smaller of this and any tighter parent
+	// deadline. When 0 (the zero value), MakeBundle imposes NO
+	// facade-level deadline and runs under the caller's ctx as-is —
+	// large bundles, --vendor-charts, and attestation/signing can each
+	// exceed a fixed cap. The REST /v1/bundle handler sets this to
+	// defaults.BundleHandlerTimeout to preserve its 60s request boundary;
+	// the CLI bundle command leaves it 0 so long bundles are uncapped.
+	Timeout time.Duration
 }
 
 // adoptRecipe wraps a raw, externally-supplied *Recipe (the full
@@ -169,9 +180,12 @@ func (c *Client) AdoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult
 // Read-locks Client.mu so a concurrent Close can't race the bundle, and
 // registers in the inflight WaitGroup so Close drains before evicting
 // caches — the same protocol as BundleComponents. A facade-level timeout
-// (defaults.BundleHandlerTimeout) bounds the run so a caller passing an
-// unbounded context still gets a deadline; a tighter caller deadline is
-// honored.
+// is opt-in via opts.Timeout: when set (> 0) it bounds the run by the
+// smaller of opts.Timeout and any tighter caller deadline; when unset
+// (0) MakeBundle runs under the caller's context with NO added cap. The
+// REST /v1/bundle handler sets opts.Timeout = defaults.BundleHandlerTimeout
+// to keep its 60s request boundary; the CLI bundle command leaves it 0 so
+// large bundles, --vendor-charts, and attestation/signing are uncapped.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, ctx, or recipe is nil, when
@@ -210,13 +224,20 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 	c.mu.RUnlock()
 	defer c.inflight.Done()
 
-	// Apply a facade-level deadline so a caller passing context.Background()
-	// still gets a bounded bundle. context.WithTimeout honors the smaller
-	// of the parent deadline and ours, so a caller with a tighter deadline
-	// keeps it. Placed after the guards so already-canceled-context tests
-	// flow through the same error paths.
-	ctx, cancel := context.WithTimeout(ctx, defaults.BundleHandlerTimeout)
-	defer cancel()
+	// Apply a facade-level deadline only when the caller opts in via
+	// opts.Timeout. context.WithTimeout honors the smaller of the parent
+	// deadline and ours, so a caller with a tighter deadline keeps it.
+	// When opts.Timeout is 0 the caller's ctx governs unchanged — the CLI
+	// bundle path runs uncapped (large bundles, --vendor-charts, and
+	// signing can exceed any fixed cap), while the REST handler passes
+	// defaults.BundleHandlerTimeout to retain its 60s boundary. Placed
+	// after the guards so already-canceled-context tests flow through the
+	// same error paths.
+	if opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+	}
 
 	// Enforce the Client's allowlists against the recipe criteria, mirroring
 	// the REST /v1/bundle handler's `AllowLists != nil && Criteria != nil`
