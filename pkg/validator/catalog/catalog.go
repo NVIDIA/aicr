@@ -71,7 +71,7 @@ func Load(version, commit string) (*ValidatorCatalog, error) {
 // steps 1-2 but are replaced by step 3 if that env var is set.
 func LoadWithDataProvider(dp recipe.DataProvider, version, commit string) (*ValidatorCatalog, error) {
 	if dp == nil {
-		dp = recipe.GetDataProvider() //nolint:staticcheck // back-compat fallback; tracked by #983/#987
+		dp = recipe.GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
 	}
 	data, err := dp.ReadFile("validators/catalog.yaml")
 	if err != nil {

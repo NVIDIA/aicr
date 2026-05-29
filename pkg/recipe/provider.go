@@ -123,6 +123,13 @@ func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, er
 
 // DataProvider abstracts access to recipe data files.
 // This allows layering external directories over embedded data.
+//
+// Implementations must be comparable per the Go language spec: per-provider
+// caches (the metadata store, component registry, and criteria registry) key
+// by interface value via sync.Map, which panics at runtime if the dynamic
+// type is non-comparable (e.g., a struct containing a slice, map, or func
+// field). The safe and idiomatic shape is methods on a pointer receiver, as
+// the in-tree EmbeddedDataProvider / LayeredDataProvider do.
 type DataProvider interface {
 	// ReadFile reads a file by path (relative to data directory).
 	ReadFile(path string) ([]byte, error)

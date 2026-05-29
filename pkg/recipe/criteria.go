@@ -639,7 +639,17 @@ func (c *Criteria) String() string {
 	return fmt.Sprintf("criteria(%s)", strings.Join(parts, ", "))
 }
 
-// CriteriaOption is a functional option for building Criteria.
+// CriteriaOption is a functional option for building Criteria. Each option
+// resolves its enum value via the package-level ParseCriteria*Type shims,
+// which consult DefaultRegistry() — the registry bound to the package-global
+// DataProvider.
+//
+// For per-provider isolation (e.g., when building Criteria against an
+// aicr.Client's own DataProvider so non-OSS values declared in a `--data`
+// overlay validate against THAT provider's registered values), use
+// RegistryCriteriaOption + BuildCriteriaWithRegistry instead. The two option
+// types deliberately have distinct signatures because RegistryCriteriaOption
+// takes the registry as an explicit parameter; they are not interchangeable.
 type CriteriaOption func(*Criteria) error
 
 // WithCriteriaService sets the service type.
@@ -713,10 +723,16 @@ func WithCriteriaNodes(n int) CriteriaOption {
 	}
 }
 
-// BuildCriteria creates a Criteria from functional options, resolving each
-// field against the package-global criteria registry. It is a shim over
-// BuildCriteriaWithRegistry(DefaultRegistry(), ...); callers holding an
-// explicit per-provider registry should call that directly.
+// BuildCriteria creates a Criteria from functional options. Each option
+// resolves its enum value through the package-level ParseCriteria*Type shims
+// against DefaultRegistry() (the registry bound to the package-global
+// DataProvider).
+//
+// For per-provider isolation, use BuildCriteriaWithRegistry with
+// RegistryCriteriaOption — that path threads an explicit *CriteriaRegistry
+// (typically from GetCriteriaRegistryFor) so registered values from a
+// caller-owned DataProvider's overlays are honored instead of (or in
+// addition to) the package-global registry.
 func BuildCriteria(opts ...CriteriaOption) (*Criteria, error) {
 	c := NewCriteria()
 	for _, opt := range opts {
