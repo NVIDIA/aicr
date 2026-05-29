@@ -444,6 +444,105 @@ func (r *RecipeResult) BindDataProvider(dp DataProvider) {
 	r.provider = dp
 }
 
+// DeepCopy returns an independent copy of r with all exported fields
+// deep-copied: the nested Metadata slices, Criteria, Constraints,
+// ComponentRefs (including their map/slice fields), DeploymentOrder, and
+// Validation config. The unexported provider is intentionally NOT copied —
+// it is left nil so the caller can rebind it (e.g. the aicr.Client facade
+// adopts a recipe by deep-copying first, then BindDataProvider on the copy,
+// so binding never mutates caller-owned state). Nil-safe on the receiver.
+//
+// Used by the facade's AdoptRecipe path: a caller may reuse one *RecipeResult
+// across multiple Clients, and binding a Client's provider must not leak into
+// the caller's pointer or contaminate a sibling Client's binding.
+func (r *RecipeResult) DeepCopy() *RecipeResult {
+	if r == nil {
+		return nil
+	}
+	out := &RecipeResult{
+		Kind:       r.Kind,
+		APIVersion: r.APIVersion,
+		// provider intentionally left nil: BindDataProvider sets it on the copy.
+	}
+
+	// Metadata: scalar Version plus three slices.
+	out.Metadata.Version = r.Metadata.Version
+	if r.Metadata.AppliedOverlays != nil {
+		out.Metadata.AppliedOverlays = make([]string, len(r.Metadata.AppliedOverlays))
+		copy(out.Metadata.AppliedOverlays, r.Metadata.AppliedOverlays)
+	}
+	if r.Metadata.ExcludedOverlays != nil {
+		out.Metadata.ExcludedOverlays = make([]ExcludedOverlay, len(r.Metadata.ExcludedOverlays))
+		copy(out.Metadata.ExcludedOverlays, r.Metadata.ExcludedOverlays)
+	}
+	if r.Metadata.ConstraintWarnings != nil {
+		out.Metadata.ConstraintWarnings = make([]ConstraintWarning, len(r.Metadata.ConstraintWarnings))
+		copy(out.Metadata.ConstraintWarnings, r.Metadata.ConstraintWarnings)
+	}
+
+	// Criteria is all-scalar, so a value copy behind a fresh pointer is a
+	// full deep copy.
+	if r.Criteria != nil {
+		c := *r.Criteria
+		out.Criteria = &c
+	}
+
+	if r.Constraints != nil {
+		out.Constraints = make([]Constraint, len(r.Constraints))
+		copy(out.Constraints, r.Constraints)
+	}
+
+	if r.ComponentRefs != nil {
+		out.ComponentRefs = make([]ComponentRef, len(r.ComponentRefs))
+		for i := range r.ComponentRefs {
+			out.ComponentRefs[i] = cloneComponentRef(r.ComponentRefs[i])
+		}
+	}
+
+	if r.DeploymentOrder != nil {
+		out.DeploymentOrder = make([]string, len(r.DeploymentOrder))
+		copy(out.DeploymentOrder, r.DeploymentOrder)
+	}
+
+	out.Validation = cloneValidationConfig(r.Validation)
+
+	return out
+}
+
+// cloneComponentRef returns a deep copy of a ComponentRef, allocating
+// independent backing storage for every map/slice field so a mutation
+// through the copy can't reach the source.
+func cloneComponentRef(ref ComponentRef) ComponentRef {
+	out := ref // copies scalars and the (to-be-replaced) reference fields
+	if ref.Overrides != nil {
+		out.Overrides = make(map[string]any, len(ref.Overrides))
+		for k, v := range ref.Overrides {
+			out.Overrides[k] = v
+		}
+	}
+	if ref.Patches != nil {
+		out.Patches = make([]string, len(ref.Patches))
+		copy(out.Patches, ref.Patches)
+	}
+	if ref.DependencyRefs != nil {
+		out.DependencyRefs = make([]string, len(ref.DependencyRefs))
+		copy(out.DependencyRefs, ref.DependencyRefs)
+	}
+	if ref.ManifestFiles != nil {
+		out.ManifestFiles = make([]string, len(ref.ManifestFiles))
+		copy(out.ManifestFiles, ref.ManifestFiles)
+	}
+	if ref.PreManifestFiles != nil {
+		out.PreManifestFiles = make([]string, len(ref.PreManifestFiles))
+		copy(out.PreManifestFiles, ref.PreManifestFiles)
+	}
+	if ref.ExpectedResources != nil {
+		out.ExpectedResources = make([]ExpectedResource, len(ref.ExpectedResources))
+		copy(out.ExpectedResources, ref.ExpectedResources)
+	}
+	return out
+}
+
 // Merge merges another RecipeMetadataSpec into this one.
 // The other spec takes precedence for conflicts.
 func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {

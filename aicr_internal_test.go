@@ -562,6 +562,87 @@ func TestValidateState_RejectsClosedClient(t *testing.T) {
 	}
 }
 
+// TestAdoptRecipe_DeepCopiesForClientIsolation pins FIX A: adopting the
+// SAME caller-owned *Recipe into two different Clients must not let the
+// second adopt overwrite the first's provider binding, and must not mutate
+// the caller's original recipe pointer. adoptRecipe deep-copies before
+// BindDataProvider, so each adopted result carries its own Client's
+// DataProvider and the input recipe's provider stays nil.
+func TestAdoptRecipe_DeepCopiesForClientIsolation(t *testing.T) {
+	t.Parallel()
+
+	// Two Clients with distinct DataProviders. Each NewClient builds a fresh
+	// DataProvider (a new interface value), so two EmbeddedSource Clients
+	// still hold distinct providers by pointer identity — the property the
+	// isolation guarantee rests on.
+	clientA, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient A: %v", err)
+	}
+	t.Cleanup(func() { _ = clientA.Close() })
+	clientB, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient B: %v", err)
+	}
+	t.Cleanup(func() { _ = clientB.Close() })
+
+	if clientA.dp == clientB.dp {
+		t.Fatal("test precondition failed: both Clients share a DataProvider")
+	}
+
+	// One caller-owned raw recipe reused across both adopts.
+	input := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeAPIVersion,
+		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "c1", Type: recipe.ComponentTypeHelm},
+		},
+	}
+	if input.DataProvider() != nil {
+		t.Fatal("test precondition failed: input recipe already has a provider")
+	}
+
+	resA, err := clientA.adoptRecipe(t.Context(), input)
+	if err != nil {
+		t.Fatalf("adoptRecipe A: %v", err)
+	}
+	resB, err := clientB.adoptRecipe(t.Context(), input)
+	if err != nil {
+		t.Fatalf("adoptRecipe B: %v", err)
+	}
+
+	// Each result must carry its OWN Client's provider — no cross-contamination.
+	if resA.internal.DataProvider() != clientA.dp {
+		t.Errorf("adopted A provider = %p, want clientA.dp %p",
+			resA.internal.DataProvider(), clientA.dp)
+	}
+	if resB.internal.DataProvider() != clientB.dp {
+		t.Errorf("adopted B provider = %p, want clientB.dp %p",
+			resB.internal.DataProvider(), clientB.dp)
+	}
+	// The second adopt must not have mutated the first result's binding.
+	if resA.internal.DataProvider() == resB.internal.DataProvider() {
+		t.Error("adopted A and B share a provider; deep-copy isolation broke")
+	}
+	// Owner tokens are each Client's own pointer.
+	if resA.owner != clientA || resB.owner != clientB {
+		t.Errorf("owner mismatch: A=%p (want %p) B=%p (want %p)",
+			resA.owner, clientA, resB.owner, clientB)
+	}
+
+	// The caller-owned input must be unchanged: adoptRecipe deep-copies, so
+	// its provider was never bound and its internal pointer is distinct from
+	// both adopted copies.
+	if input.DataProvider() != nil {
+		t.Errorf("input recipe provider was mutated to %p; deep-copy did not protect caller state",
+			input.DataProvider())
+	}
+	if resA.internal == input || resB.internal == input {
+		t.Error("adopted result aliases the caller's input recipe; deep-copy did not allocate a fresh result")
+	}
+}
+
 // TestClient_CloseDrainsInflightResolve is the deterministic race
 // test for the inflight-drain pattern. Without the drain, this
 // sequence races storeCache repopulation against eviction:

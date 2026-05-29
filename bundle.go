@@ -120,12 +120,16 @@ func (c *Client) adoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult
 	dp := c.dp
 	c.mu.RUnlock()
 
-	// Bind this Client's provider so downstream reads route through the
-	// Client's recipe source, the same way LoadRecipe binds it for a
-	// file-loaded recipe.
-	recipe.BindDataProvider(dp)
+	// Deep-copy the caller-supplied recipe BEFORE binding the provider.
+	// BindDataProvider mutates the receiver's unexported provider field, and
+	// the input *Recipe is caller-owned: a caller reusing one *Recipe across
+	// two Clients would otherwise have the second adopt overwrite the first's
+	// binding, breaking per-Client isolation. DeepCopy leaves the copy's
+	// provider nil for BindDataProvider to set, so the original is untouched.
+	cp := recipe.DeepCopy()
+	cp.BindDataProvider(dp)
 
-	result, err := loadedResultFromInternal(recipe)
+	result, err := loadedResultFromInternal(cp)
 	if err != nil {
 		return nil, err
 	}
