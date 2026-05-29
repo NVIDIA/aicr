@@ -93,6 +93,29 @@ spec:
               key: node-role.kubernetes.io/control-plane
               operator: Exists
 
+    - name: nodewright-operator
+      type: Helm
+      overrides:
+        controllerManager:
+          manager:
+            env:
+              # Because BCM re-writes the OS on boot, we need to reapply the nodewright customizations on reboot
+              reapplyOnReboot: "true"
+
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/bcm-setup.yaml
+      overrides:
+        service: bcm
+        # The nvidia-setup package is accelerator-agnostic today, so this value
+        # does not change what gets applied. An accelerator is hardcoded here to
+        # avoid a larger change to the setup package; BCM criteria filters on
+        # service only, so any accelerator value would behave identically.
+        accelerator: h100
+      dependencyRefs:
+        - nodewright-operator
+
   validation:
     conformance:
       checks:
