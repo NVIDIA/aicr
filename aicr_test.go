@@ -1463,7 +1463,9 @@ func writeExternalCriterionData(t *testing.T, service string) string {
 // client's registry must NOT see the external value — that is the per-provider
 // isolation guarantee Stage 4 relies on.
 func TestClient_LoadCatalogSeedsCriteriaRegistry(t *testing.T) {
-	t.Parallel()
+	// Not parallel: asserts on per-provider criteria-registry state seeded by
+	// LoadCatalog. Running serially avoids interleaving with any other test
+	// that toggles registry strict mode, keeping these assertions deterministic.
 
 	const externalService = "ncp-internal-test"
 	dataDir := writeExternalCriterionData(t, externalService)
@@ -1519,7 +1521,8 @@ func TestClient_LoadCatalogSeedsCriteriaRegistry(t *testing.T) {
 // Client's own registry hides external-origin values while keeping embedded
 // OSS values — the per-Client equivalent of the --criteria-strict gate.
 func TestClient_CriteriaRegistryStrictMode(t *testing.T) {
-	t.Parallel()
+	// Not parallel: mutates per-provider registry strict state. Serial
+	// execution keeps the assertions deterministic regardless of test order.
 
 	const externalService = "ncp-strict-test"
 	dataDir := writeExternalCriterionData(t, externalService)
