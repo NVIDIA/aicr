@@ -84,6 +84,7 @@ import (
 	"time"
 
 	validatorv1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -428,6 +429,86 @@ func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criter
 	defer cancel()
 
 	return c.resolveCriteria(ctx, builder, criteria)
+}
+
+// ResolveRecipeFromSnapshot resolves a recipe from explicit Criteria and
+// evaluates its constraints against an observed cluster Snapshot, mirroring
+// `aicr recipe --snapshot`. It returns the full lossless *Recipe (the
+// pkg/recipe.RecipeResult alias), so callers see ComponentRefs, deployment
+// order, and per-constraint evaluation results directly.
+//
+// Unlike ResolveRecipeFromCriteria — which builds the recipe without
+// observing the cluster — this variant threads a constraint evaluator that
+// runs each resolution constraint against snap via pkg/constraints.Evaluate.
+// The CLI's `recipe --snapshot` path does the same: it derives criteria from
+// the snapshot fingerprint, then calls BuildFromCriteriaWithEvaluator so the
+// resolved recipe records whether each constraint passed against the observed
+// state.
+//
+// Allowlist enforcement (WithAllowLists) applies here just as it does on the
+// shared resolve path: criteria outside the configured allowlist are rejected
+// before the recipe is built.
+//
+// The same guards and synchronization as ResolveRecipeFromCriteria apply: nil
+// receiver, nil context, nil criteria, and nil snapshot are rejected with
+// ErrCodeInvalidRequest; a closed Client is rejected; a facade-level timeout
+// bounds the resolve. Builder errors propagate as-is (they already carry the
+// appropriate pkg/errors code) rather than being re-wrapped.
+func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criteria, snap *Snapshot) (*Recipe, error) {
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if criteria == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "criteria is required (got nil)")
+	}
+	if snap == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "snapshot is required (got nil)")
+	}
+
+	// Snapshot builder under the read lock so a concurrent Close can't
+	// race the read; Add to inflight under the lock so Close's drain
+	// observes the increment. Same protocol as ResolveRecipeFromCriteria.
+	c.mu.RLock()
+	builder := c.builder
+	if builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	// Enforce allowlists before building — same fence resolveCriteria applies
+	// on the criteria-only path. AllowLists.ValidateCriteria returns a
+	// pkg/errors-coded error, so enforceAllowLists propagates it as-is.
+	if err := c.enforceAllowLists(criteria); err != nil {
+		return nil, err
+	}
+
+	// Evaluate each resolution constraint against the observed snapshot,
+	// mirroring the CLI's `recipe --snapshot` path. The evaluator bridges
+	// pkg/constraints.EvalResult into the recipe package's
+	// ConstraintEvalResult (kept distinct to avoid a recipe→constraints
+	// import cycle).
+	evaluator := func(constraint recipe.Constraint) recipe.ConstraintEvalResult {
+		v := constraints.Evaluate(constraint, snap)
+		return recipe.ConstraintEvalResult{
+			Passed: v.Passed,
+			Actual: v.Actual,
+			Error:  v.Error,
+		}
+	}
+
+	// Don't re-wrap the builder's error — it already returns a structured
+	// error with the appropriate code (ErrCodeInvalidRequest for bad
+	// criteria, ErrCodeTimeout for context expiry, etc.).
+	return builder.BuildFromCriteriaWithEvaluator(ctx, criteria, evaluator)
 }
 
 // buildDataProvider constructs an isolated DataProvider for a single

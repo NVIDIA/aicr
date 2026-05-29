@@ -787,6 +787,151 @@ func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
 	}
 }
 
+// TestResolveRecipeFromSnapshot proves the snapshot-evaluator resolve path:
+// ResolveRecipeFromSnapshot builds a recipe from explicit Criteria while
+// evaluating its resolution constraints against an observed cluster Snapshot
+// (mirroring `aicr recipe --snapshot`). A snapshot reporting K8s server
+// version v1.33.0 satisfies the strictest readiness constraint on the
+// h100-eks-training chain (">= 1.32.4"), so the OS-pinned/version-gated
+// overlays are NOT excluded and the resolved recipe carries ComponentRefs —
+// proving the constraint evaluator ran without error against the snapshot.
+func TestResolveRecipeFromSnapshot(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()), aicr.WithVersion("v1.2.3"))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteria(
+		recipe.WithCriteriaService("eks"),
+		recipe.WithCriteriaAccelerator("h100"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	// k8sVersionSnapshot() reports v1.33.0, which clears the
+	// h100-eks-training chain's strictest readiness constraint (">= 1.32.4").
+	snap := k8sVersionSnapshot()
+
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), crit, snap)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("expected non-nil *Recipe")
+	}
+	if len(rec.ComponentRefs) == 0 {
+		t.Fatal("expected component refs (snapshot satisfies the chain's constraints, so overlays must not be excluded)")
+	}
+	// Version is threaded through the builder just as on the criteria path.
+	if rec.Metadata.Version != "v1.2.3" {
+		t.Fatalf("version not threaded: %q", rec.Metadata.Version)
+	}
+}
+
+// TestResolveRecipeFromSnapshot_NilArgs pins the bounds-checking contract:
+// nil receiver, nil context, nil criteria, and nil snapshot each surface a
+// structured ErrCodeInvalidRequest rather than panicking on a nil dereference.
+func TestResolveRecipeFromSnapshot_NilArgs(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	crit, err := recipe.BuildCriteria(
+		recipe.WithCriteriaAccelerator("h100"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+	snap := k8sVersionSnapshot()
+
+	// Nil receiver: must not panic; returns an error.
+	t.Run("nil receiver", func(t *testing.T) {
+		t.Parallel()
+		var nilClient *aicr.Client
+		if _, err := nilClient.ResolveRecipeFromSnapshot(context.Background(), crit, snap); err == nil {
+			t.Fatal("expected error from nil receiver, got nil")
+		}
+	})
+
+	// The remaining guards return a structured ErrCodeInvalidRequest.
+	tests := []struct {
+		name string
+		ctx  context.Context
+		crit *recipe.Criteria
+		snap *aicr.Snapshot
+	}{
+		{name: "nil context", ctx: nil, crit: crit, snap: snap},
+		{name: "nil criteria", ctx: context.Background(), crit: nil, snap: snap},
+		{name: "nil snapshot", ctx: context.Background(), crit: crit, snap: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := c.ResolveRecipeFromSnapshot(tt.ctx, tt.crit, tt.snap)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tt.name)
+			}
+			var se *aicrerrors.StructuredError
+			if !errors.As(err, &se) {
+				t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+			}
+			if se.Code != aicrerrors.ErrCodeInvalidRequest {
+				t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+			}
+		})
+	}
+}
+
+// TestResolveRecipeFromSnapshotRejectsOutOfAllowList proves allowlist
+// enforcement applies on the snapshot path too: a Client allowing only h100
+// rejects a b200 request before any recipe is built — even though a snapshot
+// is supplied.
+func TestResolveRecipeFromSnapshotRejectsOutOfAllowList(t *testing.T) {
+	t.Parallel()
+
+	al := &aicr.AllowLists{
+		Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100},
+	}
+	c, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithAllowLists(al),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	crit, err := recipe.BuildCriteria(
+		recipe.WithCriteriaAccelerator("b200"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	_, err = c.ResolveRecipeFromSnapshot(t.Context(), crit, k8sVersionSnapshot())
+	if err == nil {
+		t.Fatal("expected allowlist rejection for b200, got nil error")
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
 // TestResolveRecipeFromCriteriaRejectsOutOfAllowList proves that a Client
 // configured with an allowlist rejects a ResolveRecipeFromCriteria call
 // whose accelerator is outside the allowed set. The allowlist permits only
