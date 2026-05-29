@@ -55,6 +55,11 @@ spec:
       dependencyRefs:
         - cert-manager
         - gpu-operator
+        # Direct edge so a refactor of an intermediate node (e.g.,
+        # removing gpu-operator → kube-prometheus-stack) cannot
+        # silently break the helm-diff race on nvsentinel's
+        # PodMonitor CR. Issue #928.
+        - prometheus-operator-crds
 
     - name: nodewright-operator
       type: Helm
@@ -83,6 +88,10 @@ spec:
       valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
       dependencyRefs:
         - kube-prometheus-stack
+        # Direct edge so removing the kube-prometheus-stack edge
+        # would not silently break the helm-diff race on this
+        # chart's ServiceMonitor CR. Issue #928.
+        - prometheus-operator-crds
 
     - name: nvidia-dra-driver-gpu
       type: Helm

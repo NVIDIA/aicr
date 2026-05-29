@@ -38,6 +38,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -833,6 +834,73 @@ func TestBaseRecipeValidation(t *testing.T) {
 	if len(order) != len(metadata.Spec.ComponentRefs) {
 		t.Errorf("topological sort returned %d components, expected %d",
 			len(order), len(metadata.Spec.ComponentRefs))
+	}
+}
+
+// TestMonitoringCREmittersHaveDirectPrometheusOperatorCRDsEdge enforces
+// issue #928: every component whose Helm chart templates emit
+// monitoring.coreos.com/v1 CRs (PodMonitor / ServiceMonitor / etc.) must
+// declare prometheus-operator-crds in its DIRECT dependencyRefs — not just
+// reachable through a transitive chain. A direct edge survives refactors
+// of intermediate nodes (e.g., removing gpu-operator → kube-prometheus-stack)
+// that would otherwise silently break the helm-diff CRD-registration race
+// described in issue #914.
+//
+// The emitter list is derived from `helm template` of each chart at the
+// version pinned in base.yaml using its checked-in values file. When a
+// chart bump (or values change) flips a chart between emitter and
+// non-emitter status, update this list. The refresh recipe is documented
+// in the test body.
+func TestMonitoringCREmittersHaveDirectPrometheusOperatorCRDsEdge(t *testing.T) {
+	// Components whose chart templates render at least one
+	// monitoring.coreos.com/v1 CR with the values in
+	// recipes/components/<name>/values.yaml.
+	//
+	// To refresh:
+	//   helm template release-<name> <chart> --version <v> \
+	//     -f recipes/components/<name>/values.yaml \
+	//     --namespace test --include-crds \
+	//     | grep -c '^apiVersion: monitoring.coreos.com'
+	//
+	// A non-zero count means the component is an emitter and must
+	// appear below. prometheus-operator-crds itself is excluded
+	// because it IS the producer of the CRDs.
+	emitters := []string{
+		"kube-prometheus-stack",
+		"nvsentinel",
+		"k8s-ephemeral-storage-metrics",
+	}
+
+	content, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", baseYAMLFile, err)
+	}
+
+	var metadata RecipeMetadata
+	if parseErr := yaml.Unmarshal(content, &metadata); parseErr != nil {
+		t.Fatalf("failed to parse %s: %v", baseYAMLFile, parseErr)
+	}
+
+	byName := make(map[string]ComponentRef, len(metadata.Spec.ComponentRefs))
+	for _, c := range metadata.Spec.ComponentRefs {
+		byName[c.Name] = c
+	}
+
+	const required = "prometheus-operator-crds"
+
+	for _, name := range emitters {
+		t.Run(name, func(t *testing.T) {
+			comp, ok := byName[name]
+			if !ok {
+				t.Fatalf("emitter %q not present in %s", name, baseYAMLFile)
+			}
+			if slices.Contains(comp.DependencyRefs, required) {
+				return
+			}
+			t.Errorf("component %q emits monitoring.coreos.com/v1 CRs but does not declare %q "+
+				"as a DIRECT dependencyRef in %s. A transitive path is not enough — see issue #928. "+
+				"Current dependencyRefs: %v", name, required, baseYAMLFile, comp.DependencyRefs)
+		})
 	}
 }
 
