@@ -51,21 +51,38 @@ type validateConfig struct {
 	noCluster        *bool
 	tolerations      []corev1.Toleration
 	nodeSelector     map[string]string
+
+	// phases selects which validation phases run. nil/empty means
+	// "run all phases" (validator.PhaseOrder) — the prior behavior.
+	// Unlike the pointer fields above, an empty slice is treated the
+	// same as nil (run all), because there is no meaningful "run zero
+	// phases" request: a caller wanting a subset names that subset.
+	phases []Phase
 }
 
-// applyValidateOptions builds the []validator.Option slice from a
-// validateConfig populated by the WithValidation* factories. Called
-// from Client.ValidateState AFTER it releases Client.mu — the
-// translation is pure (no Client state read) and runs once per call,
-// so a future field added to validator.With* is one edit here and
-// zero edits on the facade surface.
-func applyValidateOptions(opts []ValidateOption) []validator.Option {
+// buildValidateConfig replays each WithValidation* option into a fresh
+// validateConfig. Client.ValidateState reads BOTH the derived
+// []validator.Option (via validateOptionsFromConfig) AND the configured
+// phases from this single options pass — the phases don't map to a
+// validator.Option (they're a parameter to ValidatePhases), so they
+// can't be expressed in the option slice.
+func buildValidateConfig(opts []ValidateOption) *validateConfig {
 	cfg := &validateConfig{}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(cfg)
 		}
 	}
+	return cfg
+}
+
+// validateOptionsFromConfig translates an already-built validateConfig into
+// the pkg/validator option slice. Called from Client.ValidateState AFTER it
+// releases Client.mu — the translation is pure (no Client state read) and
+// runs once per call, so a future field added to validator.With* is one edit
+// here and zero edits on the facade surface. phases is intentionally NOT
+// translated here — it is passed directly to ValidatePhases by the caller.
+func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
 	out := make([]validator.Option, 0, 7)
 	if cfg.namespace != nil {
 		out = append(out, validator.WithNamespace(*cfg.namespace))
@@ -165,9 +182,26 @@ func WithValidationNodeSelector(nodeSelector map[string]string) ValidateOption {
 	}
 }
 
+// WithValidationPhases restricts the run to the named phases, in the
+// order given. Valid values are PhaseDeployment, PhasePerformance, and
+// PhaseConformance. When omitted (or called with no phases), all phases
+// run in their canonical order — the default behavior.
+//
+// The input is defensively copied so a caller mutating the slice after
+// this returns won't race with ValidateState reading it.
+func WithValidationPhases(phases ...Phase) ValidateOption {
+	return func(c *validateConfig) {
+		if phases == nil {
+			c.phases = nil
+			return
+		}
+		c.phases = append([]Phase(nil), phases...)
+	}
+}
+
 // cloneStringSlice returns a shallow copy of s, preserving the
 // nil-vs-empty distinction. A nil input maps to nil out (so the
-// "unset" sentinel survives through to applyValidateOptions, which
+// "unset" sentinel survives through to validateOptionsFromConfig, which
 // skips the validator option entirely on nil); an empty non-nil input
 // maps to an empty non-nil copy (preserving caller intent for "no
 // secrets" / "no tolerations" overrides).
@@ -194,7 +228,7 @@ func cloneTolerations(t []corev1.Toleration) []corev1.Toleration {
 
 // cloneStringMap returns a shallow copy of m, preserving the
 // nil-vs-empty distinction. Same rationale as cloneStringSlice;
-// applyValidateOptions checks for nil to decide whether to emit the
+// validateOptionsFromConfig checks for nil to decide whether to emit the
 // validator.With* call at all.
 func cloneStringMap(m map[string]string) map[string]string {
 	if m == nil {

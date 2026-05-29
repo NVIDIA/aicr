@@ -860,9 +860,10 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 }
 
 // ValidateState evaluates a resolved recipe against an observed cluster
-// snapshot, runs every validation phase (PhaseDeployment,
-// PhasePerformance, PhaseConformance) in order, and returns one
-// PhaseResult per phase.
+// snapshot, runs the selected validation phases (by default
+// PhaseDeployment, PhasePerformance, PhaseConformance) in order, and
+// returns one PhaseResult per phase run. Pass WithValidationPhases to
+// restrict the run to a subset.
 //
 // recipe must come from a prior Client.ResolveRecipe call on this
 // Client — it carries the unexported internal recipe state needed to
@@ -876,8 +877,11 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 // opts configure the validator run. Pass WithValidationNoCluster(true)
 // from unit tests so no Kubernetes resources are created and every
 // check reports as "skipped". WithValidationNamespace, WithValidationRunID,
-// WithValidationCleanup, WithValidationTolerations, and
-// WithValidationNodeSelector cover the production-controller knobs.
+// WithValidationCleanup, WithValidationTolerations,
+// WithValidationNodeSelector, and WithValidationPhases cover the
+// production-controller knobs. The validator catalog loads through this
+// Client's own DataProvider, so a Client built from FilesystemSource
+// validates against that recipe source rather than the package global.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, recipe, or snap is nil,
@@ -924,6 +928,9 @@ func (c *Client) ValidateState(
 		c.mu.RUnlock()
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
 	}
+	// Snapshot the per-Client provider so the validator catalog loads
+	// from THIS Client's recipe source rather than the package global.
+	dp := c.dp
 	c.inflight.Add(1)
 	c.mu.RUnlock()
 	defer c.inflight.Done()
@@ -939,22 +946,31 @@ func (c *Client) ValidateState(
 	defer cancel()
 
 	// ValidateOption is a facade-owned wrapper that captures into an
-	// internal validateConfig; applyValidateOptions replays each
-	// captured setting through pkg/validator's With* factories. The
-	// translation happens once per call so a future renamed or added
-	// validator.With* is a one-line edit in applyValidateOptions and
-	// zero edits on the facade surface.
-	v := validator.New(applyValidateOptions(opts)...)
+	// internal validateConfig. Build the config once so we can read BOTH
+	// the derived []validator.Option AND the configured phases from a
+	// single options pass — the phases are a ValidatePhases parameter,
+	// not a validator.Option, so they can't ride in the option slice.
+	// A future renamed or added validator.With* is a one-line edit in
+	// validateOptionsFromConfig and zero edits on the facade surface.
+	cfg := buildValidateConfig(opts)
+	valOpts := validateOptionsFromConfig(cfg)
+	// Thread the Client's provider so catalog.Load reads from this
+	// Client's recipe source (nil dp falls back to the package global
+	// inside validator.WithDataProvider). Appended after the user opts
+	// so it isn't overridden by a translated option.
+	valOpts = append(valOpts, validator.WithDataProvider(dp))
+	v := validator.New(valOpts...)
 
-	// Pass nil phases → validator runs PhaseOrder (all phases) per
-	// the package's documented default. The internal recipe pointer
-	// is the same one BundleComponents uses, threading the per-Client
-	// data provider through without re-resolving the recipe.
-	// ValidatePhases takes a *v1.ValidationInput, not a *recipe.RecipeResult,
-	// on github/main (post-PR #1015/#1066 refactor that promoted validation
-	// inputs into the v1 catalog package). ToValidationInput translates the
-	// internal recipe result into that shape without re-resolving the recipe.
-	return v.ValidatePhases(ctx, nil, validatorv1.ToValidationInput(recipe.internal), snap)
+	// cfg.phases is nil unless WithValidationPhases was set; nil → the
+	// validator runs PhaseOrder (all phases) per its documented default.
+	// The internal recipe pointer is the same one BundleComponents uses,
+	// threading the per-Client data provider through without re-resolving
+	// the recipe. ValidatePhases takes a *v1.ValidationInput, not a
+	// *recipe.RecipeResult, on github/main (post-PR #1015/#1066 refactor
+	// that promoted validation inputs into the v1 catalog package).
+	// ToValidationInput translates the internal recipe result into that
+	// shape without re-resolving the recipe.
+	return v.ValidatePhases(ctx, cfg.phases, validatorv1.ToValidationInput(recipe.internal), snap)
 }
 
 // loadManifestFiles concatenates the recipe-attached ManifestFiles for

@@ -1027,7 +1027,7 @@ func TestLoadRecipe_HydratesAndOwns(t *testing.T) {
 
 // k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
 // reading satisfies the readiness constraints carried by the embedded
-// recipe chain (base: ">= 1.25", h100-eks-ubuntu-training: ">= 1.32.4").
+// h100-eks-training chain (the strictest is ">= 1.32.4").
 func k8sVersionSnapshot(version string) *aicr.Snapshot {
 	return &aicr.Snapshot{
 		Measurements: []*measurement.Measurement{
@@ -1038,5 +1038,90 @@ func k8sVersionSnapshot(version string) *aicr.Snapshot {
 				).
 				Build(),
 		},
+	}
+}
+
+// loadTestRecipe constructs an EmbeddedSource Client and loads the
+// shared leaf overlay through it, returning both so callers can drive
+// ValidateState. The Client is registered for cleanup on t.
+func loadTestRecipe(t *testing.T) (*aicr.Client, *aicr.RecipeResult) {
+	t.Helper()
+	dir := t.TempDir()
+	overlayPath := filepath.Join(dir, "overlay.yaml")
+	if err := os.WriteFile(overlayPath, []byte(leafOverlayYAML), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	result, err := client.LoadRecipe(t.Context(), overlayPath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	return client, result
+}
+
+// TestValidateState_PhaseSelection proves WithValidationPhases restricts
+// the run to exactly the requested phase(s), in order. Run in no-cluster
+// mode so no Kubernetes resources are created; the per-Client provider
+// (EmbeddedSource) loads the validator catalog so the run reaches the
+// phase loop rather than failing catalog load.
+func TestValidateState_PhaseSelection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		phases []aicr.Phase
+		want   []aicr.Phase
+	}{
+		{
+			name:   "single deployment phase",
+			phases: []aicr.Phase{aicr.PhaseDeployment},
+			want:   []aicr.Phase{aicr.PhaseDeployment},
+		},
+		{
+			name:   "deployment then conformance",
+			phases: []aicr.Phase{aicr.PhaseDeployment, aicr.PhaseConformance},
+			want:   []aicr.Phase{aicr.PhaseDeployment, aicr.PhaseConformance},
+		},
+		{
+			name:   "unset runs all phases",
+			phases: nil,
+			want:   []aicr.Phase{aicr.PhaseDeployment, aicr.PhasePerformance, aicr.PhaseConformance},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, result := loadTestRecipe(t)
+
+			opts := []aicr.ValidateOption{aicr.WithValidationNoCluster(true)}
+			if tt.phases != nil {
+				opts = append(opts, aicr.WithValidationPhases(tt.phases...))
+			}
+
+			phases, err := client.ValidateState(t.Context(), result,
+				k8sVersionSnapshot("v1.33.0"), opts...)
+			if err != nil {
+				t.Fatalf("ValidateState: %v", err)
+			}
+
+			got := make([]aicr.Phase, 0, len(phases))
+			for _, pr := range phases {
+				got = append(got, pr.Phase)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("phase count = %d (%v), want %d (%v)", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("phase[%d] = %q, want %q (full: %v)", i, got[i], tt.want[i], got)
+				}
+			}
+		})
 	}
 }
