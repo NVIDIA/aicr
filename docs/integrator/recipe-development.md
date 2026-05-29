@@ -155,7 +155,7 @@ Only use this pattern when the content is truly uniform across the wildcard dime
 **Merge rules:**
 - Constraints: same-named overridden, new added
 - ComponentRefs: same-named merged field-by-field, new added
-- `validation.<phase>` blocks merge per-field: `checks` union and deduplicate, `constraints` merge by name (overlay wins on same-name), `nodeSelection` replaced wholesale when set, `timeout`/`infrastructure` overlay-wins-if-non-empty
+- `validation.<phase>` blocks merge per-field: `checks` and `constraints` union and deduplicate when non-empty (`constraints` by name, overlay wins on same-name); an explicit empty list (`checks: []` / `constraints: []`) **clears** the inherited list, while an omitted/null field **inherits** it; `nodeSelection` replaced wholesale when set; `timeout`/`infrastructure` overlay-wins-if-non-empty
 - Criteria: not inherited (each recipe defines its own)
 - Mixin constraints/components must not conflict with the inheritance chain or other mixins
 

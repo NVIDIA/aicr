@@ -80,10 +80,16 @@ func cloneValidationConfig(v *ValidationConfig) *ValidationConfig {
 
 // mergeValidationPhase merges overlay into base, returning a freshly allocated
 // phase with no aliased state. Semantics mirror the top-level merge:
-//   - Checks: deduplicated union, preserving order (base entries first,
-//     then overlay-only entries appended).
-//   - Constraints: union by Name, overlay value wins on same-name (analogous
-//     to top-level RecipeMetadataSpec.Constraints).
+//   - Checks: an omitted overlay list (nil) inherits the base list; an
+//     explicit empty list ([]string{}, from YAML `checks: []`) clears the
+//     inherited list — needed by leaves like h100-eks-ubuntu-training-slurm
+//     that must drop K8s-native checks (e.g., nccl-all-reduce-bw) which
+//     don't apply to slurmd-managed clusters. A non-empty overlay list
+//     unions with the base list, deduplicated, preserving order (base
+//     entries first, then overlay-only entries appended).
+//   - Constraints: same nil-vs-empty rule as Checks. A non-empty overlay
+//     list unions with the base by Name; overlay value wins on same-name
+//     (analogous to top-level RecipeMetadataSpec.Constraints).
 //   - NodeSelection: overlay replaces if non-nil; otherwise base is preserved.
 //   - Timeout, Infrastructure: overlay-wins-if-non-empty.
 //
@@ -108,8 +114,14 @@ func mergeValidationPhase(base, overlay *ValidationPhase) *ValidationPhase {
 		out.Infrastructure = overlay.Infrastructure
 	}
 
-	// Checks: union, deduplicated, base order preserved.
-	if len(base.Checks)+len(overlay.Checks) > 0 {
+	// Checks: explicit empty (non-nil, len 0) clears; nil inherits; non-empty
+	// unions with base. yaml.v3 decodes `checks: []` as non-nil empty and an
+	// omitted/null key as nil, so authors can intentionally drop inherited
+	// checks (e.g., Slurm leaves dropping nccl-all-reduce-bw).
+	switch {
+	case overlay.Checks != nil && len(overlay.Checks) == 0:
+		out.Checks = []string{}
+	case len(base.Checks)+len(overlay.Checks) > 0:
 		seen := make(map[string]bool, len(base.Checks)+len(overlay.Checks))
 		out.Checks = make([]string, 0, len(base.Checks)+len(overlay.Checks))
 		for _, c := range base.Checks {
@@ -126,9 +138,13 @@ func mergeValidationPhase(base, overlay *ValidationPhase) *ValidationPhase {
 		}
 	}
 
-	// Constraints: union by Name, overlay wins on same-name. Order preserves
+	// Constraints: same nil-vs-empty rule as Checks. Non-empty overlay
+	// unions by Name; overlay value wins on same-name. Order preserves
 	// base appearance, then overlay-only additions in overlay order.
-	if len(base.Constraints)+len(overlay.Constraints) > 0 {
+	switch {
+	case overlay.Constraints != nil && len(overlay.Constraints) == 0:
+		out.Constraints = []Constraint{}
+	case len(base.Constraints)+len(overlay.Constraints) > 0:
 		overlayByName := make(map[string]Constraint, len(overlay.Constraints))
 		for _, c := range overlay.Constraints {
 			overlayByName[c.Name] = c

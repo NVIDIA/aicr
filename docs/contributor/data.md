@@ -486,8 +486,8 @@ The gpu-operator version pin from `gb200-any` lands in the hydrated recipe witho
 
 - **Top-level `spec.constraints`** merge by name. A same-named constraint from the more-specific leaf overrides the wildcard's value (the "overridden, new added" rule from the merge algorithm).
 - **`spec.validation.<phase>`** blocks (readiness, deployment, performance, conformance) also merge per-field:
-  - `checks`: deduplicated union, preserving order (wildcard entries first, then leaf-only entries appended).
-  - `constraints`: union by `name`; same-named constraint from the leaf wins (analogous to the top-level constraint merge).
+  - `checks`: an omitted field (nil) inherits the parent's list; an explicit empty list (`checks: []`) clears the inherited list for that phase; a non-empty list unions with the parent's, deduplicated and preserving order (parent entries first, then leaf-only entries appended).
+  - `constraints`: same nil-vs-empty rule as `checks`; a non-empty list unions by `name` with the leaf winning on same-name (analogous to the top-level constraint merge).
   - `nodeSelection`: overlay replaces wholesale when non-nil (full struct replace).
   - `timeout`, `infrastructure`: overlay-wins-if-non-empty.
 
@@ -506,6 +506,21 @@ spec:
 ```
 
 Leaves may still restate the inherited list when it documents intent (e.g., recording which checks the leaf depends on). With per-field union, restating is a no-op: duplicates dedupe against the wildcard's entries.
+
+To intentionally drop an inherited check or constraint, declare the field as an explicit empty list (`checks: []` / `constraints: []`) rather than omitting it. Omission means "inherit"; explicit empty means "clear":
+
+```yaml
+# recipes/overlays/h100-eks-ubuntu-training-slurm.yaml — Slurm-managed
+# clusters bypass slurmd for K8s-native NCCL tests, so the leaf clears
+# the inherited performance phase rather than running it.
+spec:
+  validation:
+    performance:
+      checks: []        # Explicit clear — drops inherited nccl-all-reduce-bw.
+      constraints: []   # Same — clears the inherited >= 300 floor.
+```
+
+This distinction is preserved by `yaml.v3`: a YAML `[]` decodes as a non-nil empty slice (clear), while an omitted or `null` field decodes as nil (inherit).
 
 Criteria-wildcard overlays are only appropriate when the content is genuinely uniform across the wildcard dimension. If the value diverges (e.g., H100 NCCL targets differ by cloud: AKS ≥ 100, EKS ≥ 300, GKE ≥ 250), keep it inline in each service-specific overlay — collapsing divergent values to a lowest-common-denominator wildcard silently weakens validation.
 

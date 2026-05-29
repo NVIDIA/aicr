@@ -1245,6 +1245,82 @@ func TestMergeValidationConfig(t *testing.T) {
 		}
 	})
 
+	// Regression for #1000 review feedback: an overlay declaring
+	// `checks: []` / `constraints: []` (non-nil empty, distinguishable
+	// from a nil/omitted field) must clear the inherited list, not
+	// inherit it. The Slurm leaves (h100-*-training-slurm) rely on this
+	// to drop the K8s-native nccl-all-reduce-bw check on slurmd clusters.
+	t.Run("phase explicit empty checks clears inherited", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					Checks: []string{"nccl-all-reduce-bw"},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					Checks: []string{}, // explicit clear
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		got := base.Validation.Performance.Checks
+		if len(got) != 0 {
+			t.Errorf("checks = %v, want empty (explicit clear must drop inherited entries)", got)
+		}
+	})
+
+	t.Run("phase explicit empty constraints clears inherited", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					Constraints: []Constraint{{Name: "nccl-all-reduce-bw", Value: ">= 300"}},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					Constraints: []Constraint{}, // explicit clear
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		got := base.Validation.Performance.Constraints
+		if len(got) != 0 {
+			t.Errorf("constraints = %v, want empty (explicit clear must drop inherited entries)", got)
+		}
+	})
+
+	t.Run("phase nil checks inherits from base", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					Checks: []string{"nccl-all-reduce-bw"},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					// Checks is nil (field omitted) — base must be inherited.
+					Constraints: []Constraint{{Name: "x", Value: "1"}},
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		got := base.Validation.Performance.Checks
+		want := []string{"nccl-all-reduce-bw"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("checks = %v, want %v (nil overlay list must inherit base)", got, want)
+		}
+	})
+
 	t.Run("union merge does not mutate source slices", func(t *testing.T) {
 		// Repeat the alias-safety guarantee for the union path: writing into
 		// the merged result must not leak through to the source's Checks/Constraints.

@@ -614,6 +614,47 @@ func TestBothBuildPathsProduceIdenticalContent(t *testing.T) {
 	t.Logf("verified %d leaf overlays through both build paths", leafCount)
 }
 
+// TestSlurmLeavesClearInheritedPerformancePhase is a regression guard for
+// issue #1000: leaves like h100-eks-ubuntu-training-slurm and
+// h100-gke-cos-training-slurm declare `performance.checks: []` /
+// `constraints: []` to drop the K8s-native nccl-all-reduce-bw check, which
+// bypasses slurmd on a Slurm-managed cluster. The fix in mergeValidationPhase
+// distinguishes an omitted overlay list (nil → inherit) from an explicit
+// empty list (`[]` → clear), so these recipes resolve with no performance
+// checks and the phase is skipped by FilterEntriesByValidation.
+func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	for _, name := range []string{
+		"h100-eks-ubuntu-training-slurm",
+		"h100-gke-cos-training-slurm",
+	} {
+		t.Run(name, func(t *testing.T) {
+			leaf, ok := store.GetRecipeByName(name)
+			if !ok {
+				t.Fatalf("overlay %q not found in store", name)
+			}
+			result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
+			if err != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", err)
+			}
+			if result.Validation == nil || result.Validation.Performance == nil {
+				t.Fatalf("performance phase missing from resolved recipe")
+			}
+			if got := result.Validation.Performance.Checks; len(got) != 0 {
+				t.Errorf("performance.checks = %v, want empty — Slurm leaf must drop inherited K8s-native checks", got)
+			}
+			if got := result.Validation.Performance.Constraints; len(got) != 0 {
+				t.Errorf("performance.constraints = %v, want empty — Slurm leaf must drop inherited K8s-native constraints", got)
+			}
+		})
+	}
+}
+
 // TestEvaluatorFailingLeafExcludesCandidate verifies that when a leaf overlay's
 // constraints fail evaluation, no ancestor overlay is used as a fallback
 // candidate. With maximal leaf selection, ancestors are not independent
