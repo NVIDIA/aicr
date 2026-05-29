@@ -24,6 +24,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -213,18 +214,57 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) error {
 
 // resolveRecipeForMirror loads a recipe from --recipe flag or builds one
 // from query parameters (--service, --accelerator, etc.).
+//
+// The two branches consume two different recipe-resolution paths:
+//
+//   - --recipe path: routed through the aicr.Client facade. A Client built
+//     from the command's data source (--data / spec.recipe.data) owns its
+//     own DataProvider, so LoadRecipe hydrates overlays against that source
+//     rather than the process-global. rec.Resolved() returns the raw
+//     *recipe.RecipeResult the mirror Lister.Discover needs.
+//   - criteria path: still uses buildRecipeFromCmdWithConfig, which depends
+//     on the process-global criteria registry installed by initDataProvider
+//     (the caller keeps initDataProvider for exactly this reason). Migrating
+//     it requires de-globalizing the criteria registry, tracked by #987
+//     (Stage 4). Leave this branch UNCHANGED until then.
 func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
 		slog.Info("loading recipe from file", "path", recipePath)
-		rec, err := recipe.LoadFromFile(ctx, recipePath, cmd.String("kubeconfig"), version)
+
+		// Build the Client from the resolved data source (--data flag, else
+		// spec.recipe.data), mirroring validate/bundle. A filesystem source
+		// layers the external dir over the embedded data; an empty data dir
+		// uses the embedded data only.
+		dataDir := cmd.String("data")
+		if dataDir == "" {
+			dataDir = cfg.Recipe().DataDir()
+		}
+		source := aicr.EmbeddedSource()
+		if dataDir != "" {
+			source = aicr.FilesystemSource(dataDir)
+		}
+		client, err := aicr.NewClient(
+			aicr.WithRecipeSource(source),
+			aicr.WithVersion(version),
+		)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+		}
+		defer func() { _ = client.Close() }()
+
+		loaded, err := client.LoadRecipe(ctx, recipePath, cmd.String("kubeconfig"))
 		if err != nil {
 			return nil, err
 		}
-		return rec, nil
+		// Lister.Discover needs the raw *recipe.RecipeResult (constraints,
+		// component refs); Resolved() returns the Client-owned internal recipe.
+		return loaded.Resolved(), nil
 	}
 
-	// Fall through to criteria-based resolution.
+	// Fall through to criteria-based resolution. This branch still depends on
+	// the process-global criteria registry (initDataProvider); de-globalizing
+	// it is tracked by #987 (Stage 4), so it is intentionally left unchanged.
 	return buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
 }
 
