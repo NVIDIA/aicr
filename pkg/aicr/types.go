@@ -64,6 +64,22 @@ type PhaseResult = validator.PhaseResult
 // docs/integrator/public-api.md "Facade type aliases".
 type Phase = validator.Phase
 
+// Recipe is the full resolved recipe, returned losslessly by the resolve
+// methods. Transparent alias of recipe.RecipeResult; wrapping is tracked by #1078.
+type Recipe = recipe.RecipeResult
+
+// AllowLists fences which criteria values the resolve path accepts (#1078 wraps it).
+type AllowLists = recipe.AllowLists
+
+// Criteria lets REST keep its exact existing HTTP->Criteria parser.
+type Criteria = recipe.Criteria
+
+// CriteriaRegistry is the per-DataProvider set of valid criteria values,
+// returned by Client.CriteriaRegistry so CLI/library callers parse and
+// validate criteria against the SAME provider the Client resolves with.
+// Transparent alias of recipe.CriteriaRegistry; wrapping is tracked by #1078.
+type CriteriaRegistry = recipe.CriteriaRegistry
+
 // Validation phases, re-exported as facade constants so consumers
 // don't need to import pkg/validator to filter by phase. Same
 // Public (evolving) tier as Phase above.
@@ -174,6 +190,18 @@ type RecipeResult struct {
 	// the token: zero-cost, naturally unique, and unforgeable from
 	// outside the package because the field is unexported.
 	owner *Client
+}
+
+// Resolved returns the complete underlying recipe (the full
+// pkg/recipe.RecipeResult) that this result wraps. The facade RecipeResult
+// exposes only Name/Version/Components; callers that need constraints,
+// validation config, deployment order, or metadata (e.g. evidence emission)
+// use this. Returns nil if the result was not produced by the Client.
+func (r *RecipeResult) Resolved() *Recipe {
+	if r == nil {
+		return nil
+	}
+	return r.internal
 }
 
 // ComponentBundle is the resolved deployable artifact for one

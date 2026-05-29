@@ -26,7 +26,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/bundler"
+	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
@@ -34,7 +34,6 @@ import (
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/urfave/cli/v3"
 )
@@ -603,10 +602,17 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// Initialize external data provider if --data flag is set
-	if err = initDataProvider(cmd, cfg); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+	// Build the Client from the resolved data source (--data flag, else
+	// spec.recipe.data). The shared helper layers a filesystem source over
+	// the embedded data when --data resolves, and uses embedded data alone
+	// otherwise. The Client owns its DataProvider — LoadRecipe and
+	// MakeBundle thread it through, replacing the old process-global
+	// data provider.
+	client, err := recipeClientFromCmd(cmd, cfg)
+	if err != nil {
+		return err
 	}
+	defer func() { _ = client.Close() }()
 
 	opts, err := parseBundleCmdOptions(cmd, cfg)
 	if err != nil {
@@ -634,8 +640,9 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		slog.Bool("oci", opts.ociRef != nil),
 	)
 
-	// Load recipe from file/URL/ConfigMap; auto-hydrates RecipeMetadata overlays.
-	rec, err := recipe.LoadFromFile(ctx, opts.recipeFilePath, opts.kubeconfig, version)
+	// Load recipe from file/URL/ConfigMap through the Client's own data
+	// provider; auto-hydrates RecipeMetadata overlays against that provider.
+	rec, err := client.LoadRecipe(ctx, opts.recipeFilePath, opts.kubeconfig)
 	if err != nil {
 		return err
 	}
@@ -672,23 +679,21 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithAppName(opts.appName),
 	)
 
-	// Note: binary attestation pre-flight check is handled by bundler.New().
+	// Note: binary attestation pre-flight check is handled inside
+	// MakeBundle via bundler.New().
 	attester, err := selectAttester(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	b, err := bundler.New(
-		bundler.WithConfig(bcfg),
-		bundler.WithAttester(attester),
-	)
-	if err != nil {
-		slog.Error("failed to create bundler", "error", err)
-		return err
-	}
-
-	// Generate bundle
-	out, err := b.Make(ctx, rec, opts.outputDir)
+	// Generate bundle through the Client facade. MakeBundle constructs the
+	// bundler (with config + attester), bundles from the Client-owned
+	// recipe, and writes the same artifact bundler.Make produced directly.
+	out, err := client.MakeBundle(ctx, rec, aicr.BundleOptions{
+		Config:    bcfg,
+		Attester:  attester,
+		OutputDir: opts.outputDir,
+	})
 	if err != nil {
 		slog.Error("bundle generation failed", "error", err)
 		return err

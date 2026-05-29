@@ -28,6 +28,35 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
+// buildCriteriaFromCmd is a test helper that constructs a recipe.Criteria
+// from CLI command flags, resolving each enum value against the supplied
+// per-provider registry. Used only by TestBuildCriteriaFromCmd to assert
+// the registry-aware option set; production code builds criteria via the
+// mergeCriteriaFromCmdAndConfig → applyCriteriaOverrides path which
+// composes a config base with CLI overrides.
+func buildCriteriaFromCmd(cmd *cli.Command, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
+	var opts []recipe.RegistryCriteriaOption
+	if s := cmd.String("service"); s != "" {
+		opts = append(opts, recipe.WithServiceRegistry(s))
+	}
+	if s := cmd.String("accelerator"); s != "" {
+		opts = append(opts, recipe.WithAcceleratorRegistry(s))
+	}
+	if s := cmd.String("intent"); s != "" {
+		opts = append(opts, recipe.WithIntentRegistry(s))
+	}
+	if s := cmd.String("os"); s != "" {
+		opts = append(opts, recipe.WithOSRegistry(s))
+	}
+	if s := cmd.String("platform"); s != "" {
+		opts = append(opts, recipe.WithPlatformRegistry(s))
+	}
+	if n := cmd.Int("nodes"); n > 0 {
+		opts = append(opts, recipe.WithNodesRegistry(n))
+	}
+	return recipe.BuildCriteriaWithRegistry(reg, opts...)
+}
+
 func TestBuildCriteriaFromCmd(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -168,7 +197,7 @@ func TestBuildCriteriaFromCmd(t *testing.T) {
 					&cli.IntFlag{Name: "nodes"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					capturedCriteria, capturedErr = buildCriteriaFromCmd(cmd)
+					capturedCriteria, capturedErr = buildCriteriaFromCmd(cmd, recipe.DefaultRegistry())
 					return capturedErr
 				},
 			}
@@ -550,7 +579,7 @@ func TestApplyCriteriaOverrides(t *testing.T) {
 					&cli.IntFlag{Name: "nodes"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return applyCriteriaOverrides(cmd, tt.initial)
+					return applyCriteriaOverrides(cmd, tt.initial, recipe.DefaultRegistry())
 				},
 			}
 
@@ -683,45 +712,55 @@ func TestRecipeCmd_HasDataFlag(t *testing.T) {
 	}
 }
 
-func TestInitDataProvider_EmptyPath(t *testing.T) {
-	// Create a minimal command with just the data flag
+func TestRecipeClientFromCmd_EmptyPath(t *testing.T) {
+	// With no --data flag, recipeClientFromCmd constructs an embedded-source
+	// Client (no error). This is the post-migration replacement for the old
+	// empty-path data-provider no-op.
 	testCmd := &cli.Command{
 		Name: "test",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return initDataProvider(cmd, nil)
+			client, err := recipeClientFromCmd(cmd, nil)
+			if err != nil {
+				return err
+			}
+			return client.Close()
 		},
 	}
 
-	// Run with no --data flag (should succeed with no-op)
 	err := testCmd.Run(context.Background(), []string{"test"})
 	if err != nil {
 		t.Errorf("expected no error with empty --data flag, got: %v", err)
 	}
 }
 
-func TestInitDataProvider_InvalidPath(t *testing.T) {
+func TestRecipeClientFromCmd_InvalidPath(t *testing.T) {
 	testCmd := &cli.Command{
 		Name: "test",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return initDataProvider(cmd, nil)
+			client, err := recipeClientFromCmd(cmd, nil)
+			if err == nil {
+				_ = client.Close()
+			}
+			return err
 		},
 	}
 
-	// Run with non-existent path
+	// A --data pointing at a non-existent directory must fail Client
+	// construction (the layered FilesystemSource provider validates the dir).
 	err := testCmd.Run(context.Background(), []string{"test", "--data", "/non/existent/path"})
 	if err == nil {
 		t.Error("expected error with non-existent path")
 	}
 }
 
-func TestInitDataProvider_MissingRegistry(t *testing.T) {
-	// Create temp directory without registry.yaml
+func TestRecipeClientFromCmd_MissingRegistry(t *testing.T) {
+	// A --data directory without registry.yaml must fail Client construction.
 	tmpDir := t.TempDir()
 
 	testCmd := &cli.Command{
@@ -730,11 +769,14 @@ func TestInitDataProvider_MissingRegistry(t *testing.T) {
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return initDataProvider(cmd, nil)
+			client, err := recipeClientFromCmd(cmd, nil)
+			if err == nil {
+				_ = client.Close()
+			}
+			return err
 		},
 	}
 
-	// Run with directory that has no registry.yaml
 	err := testCmd.Run(context.Background(), []string{"test", "--data", tmpDir})
 	if err == nil {
 		t.Error("expected error when registry.yaml is missing")

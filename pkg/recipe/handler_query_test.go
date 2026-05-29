@@ -207,7 +207,7 @@ func TestHandleQuery_POST_InvalidCriteria(t *testing.T) {
 }
 
 func TestParseQueryRequestFromBody_NilBody(t *testing.T) {
-	_, err := parseQueryRequestFromBody(nil, "application/json")
+	_, err := ParseQueryRequestFromBody(nil, "application/json")
 	if err == nil {
 		t.Fatal("expected error for nil body")
 	}

@@ -84,6 +84,7 @@ import (
 	"time"
 
 	validatorv1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -117,6 +118,18 @@ type Client struct {
 	builder *recipe.Builder
 	dp      recipe.DataProvider
 	source  recipeSource
+
+	// version is threaded into the Builder via recipe.WithVersion so
+	// resolved recipes carry it in Metadata.Version. Set by WithVersion;
+	// applied once in NewClient before the builder is constructed. Doesn't
+	// change after construction, so it doesn't need locking.
+	version string
+
+	// allowLists fences which criteria values the resolve path accepts.
+	// nil means "no fencing — all values allowed". Set by WithAllowLists;
+	// enforced in enforceAllowLists on the shared resolve path. Doesn't
+	// change after construction, so it doesn't need locking.
+	allowLists *AllowLists
 
 	// inflight tracks in-flight cache-using operations so Close
 	// can drain them before evicting the per-Client metadata-store
@@ -176,8 +189,12 @@ func NewClient(opts ...Option) (*Client, error) {
 	// returns — but using the same mu Lock pattern here keeps the
 	// access pattern uniform and makes the field-mutation rule
 	// trivial to verify by grep.
+	builderOpts := []recipe.Option{recipe.WithDataProvider(dp)}
+	if c.version != "" {
+		builderOpts = append(builderOpts, recipe.WithVersion(c.version))
+	}
 	c.mu.Lock()
-	c.builder = recipe.NewBuilder(recipe.WithDataProvider(dp))
+	c.builder = recipe.NewBuilder(builderOpts...)
 	c.dp = dp
 	c.mu.Unlock()
 
@@ -235,6 +252,73 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// LoadCatalog eagerly loads (and caches) this Client's metadata store,
+// which has the side effect of seeding THIS Client's per-provider criteria
+// registry from every overlay's spec.criteria. Call it before parsing
+// criteria through CriteriaRegistry so values contributed by a
+// FilesystemSource --data overlay are admitted by the registry's lookups.
+//
+// This mirrors the pre-facade eager recipe.LoadCatalog the CLI ran after
+// SetDataProvider, but seeds the Client's OWN provider registry rather than
+// the process-global one — so two Clients built from different sources keep
+// isolated criteria registries.
+//
+// Errors propagate with their structured codes preserved (a malformed
+// overlay surfaces as ErrCodeInvalidRequest, not masked as ErrCodeInternal)
+// via PropagateOrWrap.
+//
+// The same guards as the resolve methods apply: nil receiver and nil context
+// are rejected with ErrCodeInvalidRequest, and a closed Client is rejected.
+func (c *Client) LoadCatalog(ctx context.Context) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+
+	// Snapshot the per-Client provider under the read lock so a concurrent
+	// Close can't race the read; Add to inflight under the lock so Close's
+	// drain observes the increment. Same protocol as ResolveRecipeFromCriteria.
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	if _, err := recipe.LoadMetadataStoreFor(ctx, dp); err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load recipe catalog")
+	}
+	return nil
+}
+
+// CriteriaRegistry returns the per-DataProvider criteria registry for THIS
+// Client. CLI/library callers use it to parse criteria values (so --data
+// overlay contributions validate) and to apply strict mode against the same
+// provider the Client resolves with. Call LoadCatalog first so the registry
+// is seeded from the provider's overlays before parsing.
+//
+// Returns the registry for this Client's provider via
+// recipe.GetCriteriaRegistryFor. On a nil or closed Client the underlying
+// provider snapshot is nil, which falls back to the package-global registry —
+// the same lenient behavior as the other accessors when a Client is unusable.
+func (c *Client) CriteriaRegistry() *CriteriaRegistry {
+	if c == nil {
+		return recipe.GetCriteriaRegistryFor(nil)
+	}
+	c.mu.RLock()
+	dp := c.dp
+	c.mu.RUnlock()
+	return recipe.GetCriteriaRegistryFor(dp)
+}
+
 // assertOwns rejects RecipeResults that were not produced by this Client.
 // The owner field is stamped in ResolveRecipe with the producing Client's
 // pointer identity; passing result A to client B silently mixed A's
@@ -259,6 +343,18 @@ func (c *Client) assertOwns(r *RecipeResult) error {
 			"expectedOwner": fmt.Sprintf("%p", c),
 			"actualOwner":   fmt.Sprintf("%p", r.owner),
 		})
+}
+
+// enforceAllowLists rejects criteria values outside the Client's
+// configured allowlists. When no allowlists are set (the common case),
+// it is a no-op. The underlying AllowLists.ValidateCriteria already
+// returns a pkg/errors-coded error, so the result is returned as-is
+// rather than re-wrapped.
+func (c *Client) enforceAllowLists(criteria *Criteria) error {
+	if c.allowLists == nil {
+		return nil
+	}
+	return c.allowLists.ValidateCriteria(criteria)
 }
 
 // ResolveRecipe maps a RecipeRequest to a concrete validated recipe.
@@ -323,7 +419,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		return nil, err
 	}
 
-	internal, err := builder.BuildFromCriteria(ctx, criteria)
+	internal, err := c.resolveCriteria(ctx, builder, criteria)
 	if err != nil {
 		// Don't re-wrap with ErrCodeInternal — the builder already
 		// returns a structured error with the appropriate code
@@ -345,6 +441,141 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	// is unexported.
 	result.owner = c
 	return result, nil
+}
+
+// resolveCriteria is the shared path: allowlist enforcement + build. Callers
+// snapshot the builder under the read lock and pass it in; they own the lossy-
+// vs-lossless projection and owner stamping.
+func (c *Client) resolveCriteria(ctx context.Context, builder *recipe.Builder, criteria *Criteria) (*recipe.RecipeResult, error) {
+	if err := c.enforceAllowLists(criteria); err != nil {
+		return nil, err
+	}
+	return builder.BuildFromCriteria(ctx, criteria)
+}
+
+// ResolveRecipeFromCriteria resolves a pre-built recipe.Criteria into the
+// FULL pkg/recipe.RecipeResult (the Recipe alias), losslessly — unlike
+// ResolveRecipe, which projects into the lossy facade RecipeResult shape.
+// Use this when the caller already speaks the internal Criteria type (e.g.,
+// a REST handler that parsed criteria from an HTTP request) and needs the
+// complete resolved recipe, including constraints, deployment order, and
+// metadata.
+//
+// Allowlist enforcement (WithAllowLists) applies here just as it does on the
+// shared resolve path: criteria outside the configured allowlist are rejected
+// before the recipe is built.
+//
+// The same guards and synchronization as ResolveRecipe apply: nil receiver,
+// nil context, and nil criteria are rejected with ErrCodeInvalidRequest; a
+// closed Client is rejected; a facade-level timeout bounds the resolve.
+func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criteria) (*Recipe, error) {
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if criteria == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "criteria is required (got nil)")
+	}
+
+	// Snapshot builder under the read lock so a concurrent Close can't
+	// race the read; Add to inflight under the lock so Close's drain
+	// observes the increment. Same protocol as ResolveRecipe.
+	c.mu.RLock()
+	builder := c.builder
+	if builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	return c.resolveCriteria(ctx, builder, criteria)
+}
+
+// ResolveRecipeFromSnapshot resolves a recipe from explicit Criteria and
+// evaluates its constraints against an observed cluster Snapshot, mirroring
+// `aicr recipe --snapshot`. It returns the full lossless *Recipe (the
+// pkg/recipe.RecipeResult alias), so callers see ComponentRefs, deployment
+// order, and per-constraint evaluation results directly.
+//
+// Unlike ResolveRecipeFromCriteria — which builds the recipe without
+// observing the cluster — this variant threads a constraint evaluator that
+// runs each resolution constraint against snap via pkg/constraints.Evaluate.
+// The CLI's `recipe --snapshot` path does the same: it derives criteria from
+// the snapshot fingerprint, then calls BuildFromCriteriaWithEvaluator so the
+// resolved recipe records whether each constraint passed against the observed
+// state.
+//
+// Allowlist enforcement (WithAllowLists) applies here just as it does on the
+// shared resolve path: criteria outside the configured allowlist are rejected
+// before the recipe is built.
+//
+// The same guards and synchronization as ResolveRecipeFromCriteria apply: nil
+// receiver, nil context, nil criteria, and nil snapshot are rejected with
+// ErrCodeInvalidRequest; a closed Client is rejected; a facade-level timeout
+// bounds the resolve. Builder errors propagate as-is (they already carry the
+// appropriate pkg/errors code) rather than being re-wrapped.
+func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criteria, snap *Snapshot) (*Recipe, error) {
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if criteria == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "criteria is required (got nil)")
+	}
+	if snap == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "snapshot is required (got nil)")
+	}
+
+	// Snapshot builder under the read lock so a concurrent Close can't
+	// race the read; Add to inflight under the lock so Close's drain
+	// observes the increment. Same protocol as ResolveRecipeFromCriteria.
+	c.mu.RLock()
+	builder := c.builder
+	if builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	// Enforce allowlists before building — same fence resolveCriteria applies
+	// on the criteria-only path. AllowLists.ValidateCriteria returns a
+	// pkg/errors-coded error, so enforceAllowLists propagates it as-is.
+	if err := c.enforceAllowLists(criteria); err != nil {
+		return nil, err
+	}
+
+	// Evaluate each resolution constraint against the observed snapshot,
+	// mirroring the CLI's `recipe --snapshot` path. The evaluator bridges
+	// pkg/constraints.EvalResult into the recipe package's
+	// ConstraintEvalResult (kept distinct to avoid a recipe→constraints
+	// import cycle).
+	evaluator := func(constraint recipe.Constraint) recipe.ConstraintEvalResult {
+		v := constraints.Evaluate(constraint, snap)
+		return recipe.ConstraintEvalResult{
+			Passed: v.Passed,
+			Actual: v.Actual,
+			Error:  v.Error,
+		}
+	}
+
+	// Don't re-wrap the builder's error — it already returns a structured
+	// error with the appropriate code (ErrCodeInvalidRequest for bad
+	// criteria, ErrCodeTimeout for context expiry, etc.).
+	return builder.BuildFromCriteriaWithEvaluator(ctx, criteria, evaluator)
 }
 
 // buildDataProvider constructs an isolated DataProvider for a single
@@ -374,6 +605,8 @@ func buildDataProvider(s recipeSource) (recipe.DataProvider, error) {
 				"construct layered data provider", err)
 		}
 		return layered, nil
+	case sourceKindEmbedded:
+		return recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."), nil
 	case sourceKindOCI:
 		return nil, errors.NewWithContext(
 			errors.ErrCodeUnavailable,
@@ -451,9 +684,39 @@ func recipeResultFromInternal(r *recipe.RecipeResult) (*RecipeResult, error) {
 		return nil, errors.New(errors.ErrCodeInternal,
 			"recipe result has no criteria; cannot derive stable name")
 	}
+	return facadeResultFromInternal(r, r.Criteria.String()), nil
+}
 
+// loadedResultFromInternal wraps a recipe loaded from a file into the
+// facade shape. Unlike recipeResultFromInternal — which is the resolve
+// path, where a nil Criteria is a builder bug — a file loaded via
+// LoadRecipe may legitimately carry no Criteria: an already-hydrated
+// RecipeResult, or a bare/empty-kind RecipeResult file, both of which
+// recipe.LoadFromFile accepts. Those flow through validate/bundle by
+// their internal state and component refs, not by a criteria-derived
+// Name, so the facade Name is derived from Criteria when present and is
+// left empty otherwise. This preserves the CLI loader's tolerance of
+// criteria-less recipe files (already-hydrated or bare RecipeResult),
+// which the strict resolve path intentionally rejects.
+func loadedResultFromInternal(r *recipe.RecipeResult) (*RecipeResult, error) {
+	if r == nil {
+		return nil, errors.New(errors.ErrCodeInternal,
+			"recipe loader returned nil RecipeResult")
+	}
+	var name string
+	if r.Criteria != nil {
+		name = r.Criteria.String()
+	}
+	return facadeResultFromInternal(r, name), nil
+}
+
+// facadeResultFromInternal builds the facade RecipeResult from an internal
+// recipe result and a pre-derived Name. Both the resolve path
+// (recipeResultFromInternal) and the load path (loadedResultFromInternal)
+// share this mapping so a pkg/recipe field rename is a single edit.
+func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult {
 	out := &RecipeResult{
-		Name:         r.Criteria.String(),
+		Name:         name,
 		Version:      r.Metadata.Version,
 		TranslatedAt: time.Now(),
 		internal:     r,
@@ -468,7 +731,76 @@ func recipeResultFromInternal(r *recipe.RecipeResult) (*RecipeResult, error) {
 			Namespace: c.Namespace,
 		})
 	}
-	return out, nil
+	return out
+}
+
+// LoadRecipe loads a recipe from a file path (or cm:// ConfigMap URI,
+// honoring kubeconfig) through THIS Client's data provider, and returns
+// it as a Client-owned *RecipeResult ready for ValidateState /
+// BundleComponents. Overlay inputs (kind: RecipeMetadata) are hydrated
+// against the Client's provider, so an external --data overlay resolves
+// against the same recipe source the Client was constructed with rather
+// than the package global. An already-hydrated RecipeResult file is
+// returned with its provider bound to the Client's provider.
+//
+// The returned RecipeResult is owner-stamped with this Client, so it
+// passes ValidateState / BundleComponents' assertOwns check — same as a
+// RecipeResult produced by ResolveRecipe.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client is nil, ctx is nil, path is
+//     empty, or the Client has been Closed.
+//   - All loader errors propagate with their structured codes (e.g.,
+//     ErrCodeInvalidRequest for an overlay without criteria,
+//     ErrCodeInternal for a read or parse failure).
+func (c *Client) LoadRecipe(ctx context.Context, path, kubeconfig string) (*RecipeResult, error) {
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if path == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe path is required (got empty)")
+	}
+
+	// Snapshot the per-Client provider under the read lock so a
+	// concurrent Close can't race the read; Add to inflight under the
+	// lock so Close's drain observes the increment. Same protocol as
+	// ResolveRecipeFromCriteria.
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	loaded, err := recipe.LoadFromFileWithProvider(ctx, path, kubeconfig, c.version, dp)
+	if err != nil {
+		// Don't re-wrap — the loader already returns structured errors
+		// with the right code (ErrCodeInvalidRequest for a bad overlay,
+		// ErrCodeInternal for read/parse failures).
+		return nil, err
+	}
+
+	// Use the load-path constructor (tolerant of a nil Criteria) rather than
+	// the resolve-path one: recipe.LoadFromFile accepts already-hydrated and
+	// bare RecipeResult files that carry no Criteria, and rejecting them here
+	// would diverge from the CLI's historical loader behavior.
+	result, err := loadedResultFromInternal(loaded)
+	if err != nil {
+		return nil, err
+	}
+	// Stamp the owning Client so ValidateState / BundleComponents accept
+	// this result — same owner-token contract as ResolveRecipe.
+	result.owner = c
+	return result, nil
 }
 
 // BundleComponents resolves Helm values and rendered manifests for
@@ -710,9 +1042,10 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 }
 
 // ValidateState evaluates a resolved recipe against an observed cluster
-// snapshot, runs every validation phase (PhaseDeployment,
-// PhasePerformance, PhaseConformance) in order, and returns one
-// PhaseResult per phase.
+// snapshot, runs the selected validation phases (by default
+// PhaseDeployment, PhasePerformance, PhaseConformance) in order, and
+// returns one PhaseResult per phase run. Pass WithValidationPhases to
+// restrict the run to a subset.
 //
 // recipe must come from a prior Client.ResolveRecipe call on this
 // Client — it carries the unexported internal recipe state needed to
@@ -726,8 +1059,11 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 // opts configure the validator run. Pass WithValidationNoCluster(true)
 // from unit tests so no Kubernetes resources are created and every
 // check reports as "skipped". WithValidationNamespace, WithValidationRunID,
-// WithValidationCleanup, WithValidationTolerations, and
-// WithValidationNodeSelector cover the production-controller knobs.
+// WithValidationCleanup, WithValidationTolerations,
+// WithValidationNodeSelector, and WithValidationPhases cover the
+// production-controller knobs. The validator catalog loads through this
+// Client's own DataProvider, so a Client built from FilesystemSource
+// validates against that recipe source rather than the package global.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, recipe, or snap is nil,
@@ -774,37 +1110,94 @@ func (c *Client) ValidateState(
 		c.mu.RUnlock()
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
 	}
+	// Snapshot the per-Client provider so the validator catalog loads
+	// from THIS Client's recipe source rather than the package global.
+	// version is snapshotted under the same lock so it can be threaded into
+	// the validator (it rewrites :latest images to the release tag and
+	// populates AICR_CLI_VERSION). It doesn't change after construction, so
+	// the lock is belt-and-suspenders, but keeps the read uniform with dp.
+	dp := c.dp
+	clientVersion := c.version
 	c.inflight.Add(1)
 	c.mu.RUnlock()
 	defer c.inflight.Done()
 
-	// Apply a facade-level deadline so a caller passing context.Background()
-	// can't hang a controller reconcile on stuck Kubernetes I/O. The
-	// ValidationOperationTimeout default sits ABOVE the per-check Job
-	// CheckExecutionTimeout (45m), so a single hung check fires its own
-	// per-check timeout first and surfaces as a structured check
-	// failure — not as a wrapping deadline-exceeded that loses the
-	// per-check signal. Callers passing a tighter deadline keep it.
-	ctx, cancel := context.WithTimeout(ctx, defaults.ValidationOperationTimeout)
-	defer cancel()
-
 	// ValidateOption is a facade-owned wrapper that captures into an
-	// internal validateConfig; applyValidateOptions replays each
-	// captured setting through pkg/validator's With* factories. The
-	// translation happens once per call so a future renamed or added
-	// validator.With* is a one-line edit in applyValidateOptions and
-	// zero edits on the facade surface.
-	v := validator.New(applyValidateOptions(opts)...)
+	// internal validateConfig. Build the config once so we can read BOTH
+	// the derived []validator.Option AND the configured phases from a
+	// single options pass — the phases are a ValidatePhases parameter,
+	// not a validator.Option, so they can't ride in the option slice.
+	// A future renamed or added validator.With* is a one-line edit in
+	// validateOptionsFromConfig and zero edits on the facade surface.
+	cfg := buildValidateConfig(opts)
 
-	// Pass nil phases → validator runs PhaseOrder (all phases) per
-	// the package's documented default. The internal recipe pointer
-	// is the same one BundleComponents uses, threading the per-Client
-	// data provider through without re-resolving the recipe.
-	// ValidatePhases takes a *v1.ValidationInput, not a *recipe.RecipeResult,
-	// on github/main (post-PR #1015/#1066 refactor that promoted validation
-	// inputs into the v1 catalog package). ToValidationInput translates the
-	// internal recipe result into that shape without re-resolving the recipe.
-	return v.ValidatePhases(ctx, nil, validatorv1.ToValidationInput(recipe.internal), snap)
+	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
+	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
+	// ValidationOperationTimeout cap (~60m), which sits ABOVE the per-check Job
+	// CheckExecutionTimeout (45m), so a single hung check fires its own
+	// per-check timeout first and surfaces as a structured check failure rather
+	// than a wrapping deadline-exceeded that loses the per-check signal — the
+	// behavior controllers rely on. A non-nil *0 imposes NO facade cap (the CLI
+	// path, where per-validator timeouts govern an all-phase run that can
+	// include the 50m inference-perf check); a non-nil >0 sets that explicit
+	// cap. context.WithTimeout honors the smaller of the parent deadline and
+	// ours, so a tighter caller deadline always wins.
+	switch {
+	case cfg.timeout == nil:
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaults.ValidationOperationTimeout)
+		defer cancel()
+	case *cfg.timeout > 0:
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *cfg.timeout)
+		defer cancel()
+	default:
+		// *cfg.timeout == 0: no facade cap; run under the caller's ctx as-is.
+	}
+
+	// Reject unknown phase values before any cluster work. The CLI --phase
+	// flag parses through validator.ParsePhase, but the facade's
+	// WithValidationPhases takes typed Phase values directly — so a caller
+	// typo like aicr.Phase("deploymnt") would otherwise reach ValidatePhases
+	// and surface as an empty/skipped result instead of an error. Fail
+	// closed with ErrCodeInvalidRequest.
+	if len(cfg.phases) > 0 {
+		valid := make([]string, len(validator.PhaseOrder))
+		for i, p := range validator.PhaseOrder {
+			valid[i] = string(p)
+		}
+		for _, p := range cfg.phases {
+			if _, ok := validator.ParsePhase(string(p)); !ok {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid validation phase %q (valid: %s)",
+						string(p), strings.Join(valid, ", ")))
+			}
+		}
+	}
+	valOpts := validateOptionsFromConfig(cfg)
+	// Thread the Client's provider so catalog.Load reads from this
+	// Client's recipe source (nil dp falls back to the package global
+	// inside validator.WithDataProvider). Appended after the user opts
+	// so it isn't overridden by a translated option.
+	valOpts = append(valOpts, validator.WithDataProvider(dp))
+	// Thread the Client's version: the validator catalog uses it to rewrite
+	// :latest images to the release tag and to populate AICR_CLI_VERSION. The
+	// pre-facade CLI passed validator.WithVersion(version); without this the
+	// facade silently dropped it. Empty version (controllers that don't set
+	// WithVersion) is the validator's "unset" sentinel and changes nothing.
+	valOpts = append(valOpts, validator.WithVersion(clientVersion))
+	v := validator.New(valOpts...)
+
+	// cfg.phases is nil unless WithValidationPhases was set; nil → the
+	// validator runs PhaseOrder (all phases) per its documented default.
+	// The internal recipe pointer is the same one BundleComponents uses,
+	// threading the per-Client data provider through without re-resolving
+	// the recipe. ValidatePhases takes a *v1.ValidationInput, not a
+	// *recipe.RecipeResult, on github/main (post-PR #1015/#1066 refactor
+	// that promoted validation inputs into the v1 catalog package).
+	// ToValidationInput translates the internal recipe result into that
+	// shape without re-resolving the recipe.
+	return v.ValidatePhases(ctx, cfg.phases, validatorv1.ToValidationInput(recipe.internal), snap)
 }
 
 // loadManifestFiles concatenates the recipe-attached ManifestFiles for

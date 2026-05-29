@@ -22,10 +22,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/NVIDIA/aicr/pkg/bundler"
+	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/logging"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/server"
 )
 
@@ -61,7 +60,7 @@ func Serve() error {
 	)
 
 	// Parse allowlists from environment variables
-	allowLists, err := recipe.ParseAllowListsFromEnv()
+	allowLists, err := aicr.ParseAllowListsFromEnv()
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to parse allowlists from environment", err)
 	}
@@ -81,24 +80,31 @@ func Serve() error {
 		)
 	}
 
-	// Setup recipe handler
-	rb := recipe.NewBuilder(
-		recipe.WithVersion(version),
-		recipe.WithAllowLists(allowLists),
-	)
-
-	// Setup bundle handler
-	bb, err := bundler.New(
-		bundler.WithAllowLists(allowLists),
+	// Setup recipe/query handlers backed by the aicr.Client facade.
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithVersion(version),
+		aicr.WithAllowLists(allowLists),
 	)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create bundler", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to construct aicr client", err)
 	}
+	defer func() {
+		if closeErr := client.Close(); closeErr != nil {
+			slog.Warn("aicr client close failed", "error", closeErr)
+		}
+	}()
+	h := newRecipeHandler(client, allowLists)
+
+	// Setup bundle handler backed by the same aicr.Client facade. server.go
+	// no longer constructs a bundler.Bundler (or a recipe.Builder) directly —
+	// the Client owns both, completing #1077 acceptance criterion #2.
+	bh := newBundleHandler(client, allowLists)
 
 	r := map[string]http.HandlerFunc{
-		"/v1/recipe": rb.HandleRecipes,
-		"/v1/query":  rb.HandleQuery,
-		"/v1/bundle": bb.HandleBundles,
+		"/v1/recipe": h.HandleRecipes,
+		"/v1/query":  h.HandleQuery,
+		"/v1/bundle": bh.HandleBundles,
 	}
 
 	// Create and run server

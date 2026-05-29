@@ -55,6 +55,9 @@ Public (evolving) packages:
 | `aicr.PhaseResult` | `pkg/validator.PhaseResult` | Public (evolving) |
 | `aicr.Phase` | `pkg/validator.Phase` | Public (evolving) |
 | `aicr.PhaseDeployment` / `PhasePerformance` / `PhaseConformance` | `pkg/validator.Phase*` | Public (evolving) |
+| `aicr.Recipe` | `pkg/recipe.RecipeResult` | Public (evolving) |
+| `aicr.AllowLists` | `pkg/recipe.AllowLists` | Public (evolving) |
+| `aicr.Criteria` | `pkg/recipe.Criteria` | Public (evolving) |
 
 These symbols inherit their source package's stability rather than the
 facade's. Field-shape changes in `pkg/snapshotter.Snapshot` (or any of

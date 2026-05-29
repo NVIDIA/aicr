@@ -24,6 +24,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -161,12 +162,17 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	if err = initDataProvider(cmd, cfg); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+	// Build ONE per-command Client bound to the resolved data source. Both
+	// recipe-resolution paths (--recipe load and criteria resolve) run through
+	// it, replacing the old process-global data provider.
+	client, err := recipeClientFromCmd(cmd, cfg)
+	if err != nil {
+		return err
 	}
+	defer func() { _ = client.Close() }()
 
 	// Resolve recipe: --recipe takes precedence over query parameters.
-	rec, err := resolveRecipeForMirror(ctx, cmd, cfg)
+	rec, err := resolveRecipeForMirror(ctx, cmd, cfg, client)
 	if err != nil {
 		return err
 	}
@@ -212,20 +218,36 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) error {
 }
 
 // resolveRecipeForMirror loads a recipe from --recipe flag or builds one
-// from query parameters (--service, --accelerator, etc.).
-func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig) (*recipe.RecipeResult, error) {
+// from query parameters (--service, --accelerator, etc.), through the
+// supplied per-command aicr.Client. Both branches are now Client-based:
+//
+//   - --recipe path: client.LoadRecipe hydrates overlays against the Client's
+//     own DataProvider rather than the process-global. rec.Resolved() returns
+//     the raw *recipe.RecipeResult the mirror Lister.Discover needs.
+//   - criteria path: buildRecipeFromCmdWithConfig resolves through the same
+//     Client and parses criteria against its per-provider registry. The
+//     caller seeds that registry via client.LoadCatalog before this call so
+//     a `--data` overlay's non-OSS criteria values validate.
+func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
 		slog.Info("loading recipe from file", "path", recipePath)
-		rec, err := recipe.LoadFromFile(ctx, recipePath, cmd.String("kubeconfig"), version)
+
+		loaded, err := client.LoadRecipe(ctx, recipePath, cmd.String("kubeconfig"))
 		if err != nil {
 			return nil, err
 		}
-		return rec, nil
+		// Lister.Discover needs the raw *recipe.RecipeResult (constraints,
+		// component refs); Resolved() returns the Client-owned internal recipe.
+		return loaded.Resolved(), nil
 	}
 
-	// Fall through to criteria-based resolution.
-	return buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
+	// Criteria-based resolution: seed the Client's per-provider criteria
+	// registry before parsing criteria, then resolve through the same Client.
+	if err := client.LoadCatalog(ctx); err != nil {
+		return nil, err
+	}
+	return buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
 }
 
 // resolveOutputWriter returns a writer for the mirror list output. When

@@ -67,7 +67,7 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 				logger.Debug("query request body close failed", "error", closeErr)
 			}
 		}()
-		req, parseErr := parseQueryRequestFromBody(bounded, r.Header.Get("Content-Type"))
+		req, parseErr := ParseQueryRequestFromBody(bounded, r.Header.Get("Content-Type"))
 		if parseErr != nil {
 			var maxBytesErr *http.MaxBytesError
 			if stderrors.As(parseErr, &maxBytesErr) {
@@ -165,8 +165,8 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	serializer.RespondJSON(w, http.StatusOK, selected)
 }
 
-// parseQueryRequestFromBody parses a QueryRequest from the request body.
-func parseQueryRequestFromBody(body io.Reader, contentType string) (*QueryRequest, error) {
+// ParseQueryRequestFromBody parses a QueryRequest from the request body.
+func ParseQueryRequestFromBody(body io.Reader, contentType string) (*QueryRequest, error) {
 	if body == nil {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "request body cannot be nil")
 	}

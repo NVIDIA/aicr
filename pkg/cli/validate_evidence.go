@@ -79,17 +79,25 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 // version), builds an EmitOptions value from the parsed flag config, and
 // delegates the orchestration to the evidence package so the same code
 // path is reachable from the future API surface.
+//
+// dp is the command's DataProvider (built once in the validate Action and
+// shared with the aicr.Client driving the run). Threading it into
+// catalog.LoadWithDataProvider means a --data overlay resolves the validator
+// catalog against the command's source rather than the package-global provider —
+// closing the last global dependency on the validate evidence path. A nil
+// dp falls back to the package global inside catalog.LoadWithDataProvider.
 func emitRecipeEvidence(
 	ctx context.Context,
+	dp recipe.DataProvider,
 	rec *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 	results []*validator.PhaseResult,
 	cfg *recipeEvidenceConfig,
 ) error {
 
-	cat, err := catalog.Load(version, commit)
+	cat, err := catalog.LoadWithDataProvider(dp, version, commit)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog for evidence", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog for evidence")
 	}
 
 	_, err = attestation.Emit(ctx, attestation.EmitOptions{

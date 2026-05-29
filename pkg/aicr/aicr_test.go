@@ -24,6 +24,8 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 func TestNewClientRequiresRecipeSource(t *testing.T) {
@@ -756,6 +758,268 @@ spec:
 	}
 }
 
+// TestResolveRecipeFromCriteriaLossless proves the lossless resolve path:
+// ResolveRecipeFromCriteria returns the full pkg/recipe.RecipeResult
+// (not the lossy facade RecipeResult), so callers see ComponentRefs and
+// the threaded Metadata.Version directly.
+func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()), aicr.WithVersion("v1.2.3"))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteria(recipe.WithCriteriaAccelerator("h100"), recipe.WithCriteriaIntent("training"))
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+	rec, err := c.ResolveRecipeFromCriteria(t.Context(), crit)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
+	}
+	if len(rec.ComponentRefs) == 0 {
+		t.Fatal("expected component refs")
+	}
+	if rec.Metadata.Version != "v1.2.3" {
+		t.Fatalf("version not threaded: %q", rec.Metadata.Version)
+	}
+}
+
+// TestResolveRecipeFromSnapshot proves the snapshot-evaluator resolve path:
+// ResolveRecipeFromSnapshot builds a recipe from explicit Criteria while
+// evaluating its resolution constraints against an observed cluster Snapshot
+// (mirroring `aicr recipe --snapshot`). A snapshot reporting K8s server
+// version v1.33.0 satisfies the strictest readiness constraint on the
+// h100-eks-training chain (">= 1.32.4"), so the OS-pinned/version-gated
+// overlays are NOT excluded and the resolved recipe carries ComponentRefs —
+// proving the constraint evaluator ran without error against the snapshot.
+func TestResolveRecipeFromSnapshot(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()), aicr.WithVersion("v1.2.3"))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteria(
+		recipe.WithCriteriaService("eks"),
+		recipe.WithCriteriaAccelerator("h100"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	// k8sVersionSnapshot() reports v1.33.0, which clears the
+	// h100-eks-training chain's strictest readiness constraint (">= 1.32.4").
+	snap := k8sVersionSnapshot()
+
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), crit, snap)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("expected non-nil *Recipe")
+	}
+	if len(rec.ComponentRefs) == 0 {
+		t.Fatal("expected component refs (snapshot satisfies the chain's constraints, so overlays must not be excluded)")
+	}
+	// Version is threaded through the builder just as on the criteria path.
+	if rec.Metadata.Version != "v1.2.3" {
+		t.Fatalf("version not threaded: %q", rec.Metadata.Version)
+	}
+}
+
+// TestResolveRecipeFromSnapshot_NilArgs pins the bounds-checking contract:
+// nil receiver, nil context, nil criteria, and nil snapshot each surface a
+// structured ErrCodeInvalidRequest rather than panicking on a nil dereference.
+func TestResolveRecipeFromSnapshot_NilArgs(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	crit, err := recipe.BuildCriteria(
+		recipe.WithCriteriaAccelerator("h100"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+	snap := k8sVersionSnapshot()
+
+	// Nil receiver: must not panic; returns an error.
+	t.Run("nil receiver", func(t *testing.T) {
+		t.Parallel()
+		var nilClient *aicr.Client
+		if _, err := nilClient.ResolveRecipeFromSnapshot(context.Background(), crit, snap); err == nil {
+			t.Fatal("expected error from nil receiver, got nil")
+		}
+	})
+
+	// The remaining guards return a structured ErrCodeInvalidRequest.
+	tests := []struct {
+		name string
+		ctx  context.Context
+		crit *recipe.Criteria
+		snap *aicr.Snapshot
+	}{
+		{name: "nil context", ctx: nil, crit: crit, snap: snap},
+		{name: "nil criteria", ctx: context.Background(), crit: nil, snap: snap},
+		{name: "nil snapshot", ctx: context.Background(), crit: crit, snap: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := c.ResolveRecipeFromSnapshot(tt.ctx, tt.crit, tt.snap)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tt.name)
+			}
+			var se *aicrerrors.StructuredError
+			if !errors.As(err, &se) {
+				t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+			}
+			if se.Code != aicrerrors.ErrCodeInvalidRequest {
+				t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+			}
+		})
+	}
+}
+
+// TestResolveRecipeFromSnapshotRejectsOutOfAllowList proves allowlist
+// enforcement applies on the snapshot path too: a Client allowing only h100
+// rejects a b200 request before any recipe is built — even though a snapshot
+// is supplied.
+func TestResolveRecipeFromSnapshotRejectsOutOfAllowList(t *testing.T) {
+	t.Parallel()
+
+	al := &aicr.AllowLists{
+		Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100},
+	}
+	c, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithAllowLists(al),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	crit, err := recipe.BuildCriteria(
+		recipe.WithCriteriaAccelerator("b200"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	_, err = c.ResolveRecipeFromSnapshot(t.Context(), crit, k8sVersionSnapshot())
+	if err == nil {
+		t.Fatal("expected allowlist rejection for b200, got nil error")
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
+// TestResolveRecipeFromCriteriaRejectsOutOfAllowList proves that a Client
+// configured with an allowlist rejects a ResolveRecipeFromCriteria call
+// whose accelerator is outside the allowed set. The allowlist permits only
+// h100; requesting b200 must surface a structured error before any recipe
+// is built.
+func TestResolveRecipeFromCriteriaRejectsOutOfAllowList(t *testing.T) {
+	t.Parallel()
+
+	al := &aicr.AllowLists{
+		Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100},
+	}
+	c, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithAllowLists(al),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	crit, err := recipe.BuildCriteria(
+		recipe.WithCriteriaAccelerator("b200"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+
+	_, err = c.ResolveRecipeFromCriteria(t.Context(), crit)
+	if err == nil {
+		t.Fatal("expected allowlist rejection for b200, got nil error")
+	}
+	var se *aicrerrors.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
+// TestSelectFromRecipe proves the hydrate+select helper mirrors
+// `aicr query`: a dot-path selector extracts a nested value from a
+// resolved recipe, and an empty selector returns the whole hydrated
+// structure. The recipe is resolved from embedded data so the test is
+// hermetic.
+func TestSelectFromRecipe(t *testing.T) {
+	t.Parallel()
+
+	c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+
+	crit, err := recipe.BuildCriteria(recipe.WithCriteriaAccelerator("h100"), recipe.WithCriteriaIntent("training"))
+	if err != nil {
+		t.Fatalf("BuildCriteria: %v", err)
+	}
+	rec, err := c.ResolveRecipeFromCriteria(t.Context(), crit)
+	if err != nil {
+		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
+	}
+
+	// Dot-path selector into a known embedded value.
+	got, err := aicr.SelectFromRecipe(rec, "components.gpu-operator.values.driver.version")
+	if err != nil {
+		t.Fatalf("SelectFromRecipe(driver.version): %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil value for components.gpu-operator.values.driver.version")
+	}
+
+	// Empty selector returns the entire hydrated structure.
+	all, err := aicr.SelectFromRecipe(rec, "")
+	if err != nil {
+		t.Fatalf("SelectFromRecipe(empty): %v", err)
+	}
+	if all == nil {
+		t.Fatal("expected non-nil hydrated structure for empty selector")
+	}
+
+	// nil recipe is rejected.
+	if _, err := aicr.SelectFromRecipe(nil, ""); err == nil {
+		t.Fatal("expected error for nil recipe, got nil")
+	}
+}
+
 // componentNames extracts a slice of component names from a
 // RecipeResult, suitable for error-message diagnostics. Keeps the
 // assertion logic above readable.
@@ -768,4 +1032,553 @@ func componentNames(r *aicr.RecipeResult) []string {
 		out = append(out, c.Name)
 	}
 	return out
+}
+
+// TestClient_NoCacheGrowthAcrossManyCloseCycles is the acceptance-
+// criterion test for the issue's "memory does not grow when N
+// clients are created and released in a loop" requirement.
+//
+// Each NewClient call constructs a fresh LayeredDataProvider (unique
+// pointer identity), so the recipe package's sync.Map caches —
+// storeCache and registryCache, keyed by DataProvider — would
+// accumulate N entries if Close didn't evict them. The test takes
+// a baseline of both cache counts immediately before the loop and
+// asserts they return to the same value after N iterations. Baseline
+// math insulates the test from any parallel sibling's cache entries
+// (those exist both before and after, so they cancel out in the diff).
+//
+// N is intentionally large (50) so a regression that leaks a single
+// entry per Close cycle would push the delta well past any noise
+// floor; running with -race confirms there's no concurrent map
+// corruption while Close is racing the package-global cache writers.
+//
+// NOT t.Parallel: the recipe-package caches (storeCache, registryCache)
+// are process-global sync.Maps. A parallel sibling test that constructs
+// a Client populates those caches while this test runs, so the
+// baseline-diff arithmetic would catch sibling entries as "growth"
+// from this test's perspective. Running sequentially (during go test's
+// pre-parallel phase) gives a clean baseline at minimal time cost.
+func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
+	const N = 50
+
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
+		[]byte("components: []\n"), 0o600); err != nil {
+		t.Fatalf("setup: write registry.yaml: %v", err)
+	}
+
+	baselineStore := recipe.CachedStoreCountForTesting()
+	baselineRegistry := recipe.CachedRegistryCountForTesting()
+
+	for i := 0; i < N; i++ {
+		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
+		if err != nil {
+			t.Fatalf("iteration %d: NewClient: %v", i, err)
+		}
+
+		// ResolveRecipe forces both caches to populate for this
+		// Client's DataProvider. Without this, only registryCache
+		// would gain an entry (from buildDataProvider's construction
+		// path); storeCache wouldn't, and the test would miss the
+		// store-side leak.
+		if _, err := c.ResolveRecipe(t.Context(), aicr.RecipeRequest{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		}); err != nil {
+			t.Fatalf("iteration %d: ResolveRecipe: %v", i, err)
+		}
+
+		if err := c.Close(); err != nil {
+			t.Fatalf("iteration %d: Close: %v", i, err)
+		}
+	}
+
+	afterStore := recipe.CachedStoreCountForTesting()
+	afterRegistry := recipe.CachedRegistryCountForTesting()
+
+	if delta := afterStore - baselineStore; delta != 0 {
+		t.Errorf("storeCache grew by %d after %d NewClient/Resolve/Close cycles; expected 0 (Close should evict)",
+			delta, N)
+	}
+	if delta := afterRegistry - baselineRegistry; delta != 0 {
+		t.Errorf("registryCache grew by %d after %d NewClient/Resolve/Close cycles; expected 0 (Close should evict)",
+			delta, N)
+	}
+}
+
+// leafOverlayYAML is a minimal leaf RecipeMetadata overlay (carries
+// spec.criteria) that LoadRecipe can auto-hydrate against the embedded
+// recipe data. It targets the h100-eks-training chain (no OS pin) so the
+// hydrated result's only top-level readiness constraint is
+// K8s.server.version — keeping the ValidateState assertion below
+// decoupled from OS-mixin constraints while still exercising real
+// embedded resolution (base + h100-any + eks + eks-training).
+const leafOverlayYAML = `kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: aicr-loadrecipe-test
+spec:
+  base: h100-eks-training
+  criteria:
+    service: eks
+    accelerator: h100
+    intent: training
+  componentRefs: []
+`
+
+// TestLoadRecipe_HydratesAndOwns proves LoadRecipe loads a leaf overlay
+// file through the Client's provider, hydrates it against the embedded
+// recipe data (Components populated), stamps the producing Client as
+// owner, and produces a RecipeResult that ValidateState accepts (the
+// owner/internal wiring is correct end-to-end).
+func TestLoadRecipe_HydratesAndOwns(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	overlayPath := filepath.Join(dir, "overlay.yaml")
+	if err := os.WriteFile(overlayPath, []byte(leafOverlayYAML), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	result, err := client.LoadRecipe(t.Context(), overlayPath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	if result == nil {
+		t.Fatal("LoadRecipe returned nil result")
+	}
+	if len(result.Components) == 0 {
+		t.Errorf("expected hydrated recipe to carry components, got none")
+	}
+
+	// The loaded result must be usable by ValidateState (owner-stamped,
+	// internal populated). no-cluster mode keeps the run hermetic, but
+	// the readiness pre-flight still evaluates the recipe's resolution
+	// constraints (e.g., K8s.server.version >= 1.32.4) against the
+	// snapshot — so supply a snapshot that satisfies them.
+	phases, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot(),
+		aicr.WithValidationNoCluster(true))
+	if err != nil {
+		t.Fatalf("ValidateState on loaded recipe: %v", err)
+	}
+	if len(phases) == 0 {
+		t.Errorf("expected at least one phase result from no-cluster validation, got none")
+	}
+}
+
+// TestLoadRecipe_BareResultNoCriteria proves LoadRecipe accepts an
+// already-hydrated RecipeResult file that carries no spec.criteria — the
+// same tolerance recipe.LoadFromFile has historically had. The resolve
+// path rejects a nil Criteria as a builder bug, but a file loaded from
+// disk legitimately may omit it; LoadRecipe must not diverge from the CLI
+// loader's behavior or the validate-command kind-handling tests break.
+func TestLoadRecipe_BareResultNoCriteria(t *testing.T) {
+	t.Parallel()
+
+	const bareResult = `kind: RecipeResult
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  version: test
+componentRefs: []
+`
+	dir := t.TempDir()
+	recipePath := filepath.Join(dir, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte(bareResult), 0o600); err != nil {
+		t.Fatalf("setup: write recipe: %v", err)
+	}
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	result, err := client.LoadRecipe(t.Context(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe on bare RecipeResult: %v", err)
+	}
+	if result == nil {
+		t.Fatal("LoadRecipe returned nil result")
+	}
+	// No criteria → empty facade Name, but Resolved() must still be
+	// populated so downstream validate/evidence paths work.
+	if result.Name != "" {
+		t.Errorf("Name = %q, want empty for a criteria-less recipe", result.Name)
+	}
+	if result.Resolved() == nil {
+		t.Error("Resolved() = nil, want the loaded recipe")
+	}
+}
+
+// k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
+// reading satisfies the readiness constraints carried by the embedded
+// h100-eks-training chain (the strictest is ">= 1.32.4").
+func k8sVersionSnapshot() *aicr.Snapshot {
+	// v1.33.0 clears the strictest readiness constraint on the
+	// h100-eks-training chain (">= 1.32.4"). All current callers want a
+	// satisfying version, so it is a fixed constant here rather than a
+	// parameter (unparam would flag a param that never varies).
+	const version = "v1.33.0"
+	return &aicr.Snapshot{
+		Measurements: []*measurement.Measurement{
+			measurement.NewMeasurement(measurement.TypeK8s).
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("server").
+						SetString("version", version),
+				).
+				Build(),
+		},
+	}
+}
+
+// loadTestRecipe constructs an EmbeddedSource Client and loads the
+// shared leaf overlay through it, returning both so callers can drive
+// ValidateState. The Client is registered for cleanup on t.
+func loadTestRecipe(t *testing.T) (*aicr.Client, *aicr.RecipeResult) {
+	t.Helper()
+	dir := t.TempDir()
+	overlayPath := filepath.Join(dir, "overlay.yaml")
+	if err := os.WriteFile(overlayPath, []byte(leafOverlayYAML), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	result, err := client.LoadRecipe(t.Context(), overlayPath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	return client, result
+}
+
+// TestValidateState_PhaseSelection proves WithValidationPhases restricts
+// the run to exactly the requested phase(s), in order. Run in no-cluster
+// mode so no Kubernetes resources are created; the per-Client provider
+// (EmbeddedSource) loads the validator catalog so the run reaches the
+// phase loop rather than failing catalog load.
+func TestValidateState_PhaseSelection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		phases []aicr.Phase
+		want   []aicr.Phase
+	}{
+		{
+			name:   "single deployment phase",
+			phases: []aicr.Phase{aicr.PhaseDeployment},
+			want:   []aicr.Phase{aicr.PhaseDeployment},
+		},
+		{
+			name:   "deployment then conformance",
+			phases: []aicr.Phase{aicr.PhaseDeployment, aicr.PhaseConformance},
+			want:   []aicr.Phase{aicr.PhaseDeployment, aicr.PhaseConformance},
+		},
+		{
+			name:   "unset runs all phases",
+			phases: nil,
+			want:   []aicr.Phase{aicr.PhaseDeployment, aicr.PhasePerformance, aicr.PhaseConformance},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, result := loadTestRecipe(t)
+
+			opts := []aicr.ValidateOption{aicr.WithValidationNoCluster(true)}
+			if tt.phases != nil {
+				opts = append(opts, aicr.WithValidationPhases(tt.phases...))
+			}
+
+			phases, err := client.ValidateState(t.Context(), result,
+				k8sVersionSnapshot(), opts...)
+			if err != nil {
+				t.Fatalf("ValidateState: %v", err)
+			}
+
+			got := make([]aicr.Phase, 0, len(phases))
+			for _, pr := range phases {
+				got = append(got, pr.Phase)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("phase count = %d (%v), want %d (%v)", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("phase[%d] = %q, want %q (full: %v)", i, got[i], tt.want[i], got)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateState_RejectsInvalidPhase proves an unrecognized phase value
+// passed via WithValidationPhases is rejected with ErrCodeInvalidRequest
+// before any cluster work — a typed Phase typo must not silently degrade to
+// an empty/skipped run. Run in no-cluster mode so the only thing under test
+// is the phase guard.
+func TestValidateState_RejectsInvalidPhase(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		phases []aicr.Phase
+	}{
+		{name: "typo", phases: []aicr.Phase{aicr.Phase("deploymnt")}},
+		{name: "empty string", phases: []aicr.Phase{aicr.Phase("")}},
+		{name: "wildcard not accepted by facade", phases: []aicr.Phase{aicr.Phase("all")}},
+		{name: "valid then invalid", phases: []aicr.Phase{aicr.PhaseDeployment, aicr.Phase("bogus")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, result := loadTestRecipe(t)
+
+			_, err := client.ValidateState(t.Context(), result,
+				k8sVersionSnapshot(),
+				aicr.WithValidationNoCluster(true),
+				aicr.WithValidationPhases(tt.phases...))
+			if err == nil {
+				t.Fatal("expected error for invalid phase, got nil")
+			}
+			var se *aicrerrors.StructuredError
+			if !errors.As(err, &se) || se.Code != aicrerrors.ErrCodeInvalidRequest {
+				t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+			}
+		})
+	}
+}
+
+// TestRecipeResult_Resolved proves Resolved() exposes the full underlying
+// recipe.RecipeResult after LoadRecipe — including the resolution
+// constraints and validation config the lossy facade shape omits — so
+// internal consumers (phase warnings, evidence emission) can reach them.
+func TestRecipeResult_Resolved(t *testing.T) {
+	t.Parallel()
+
+	_, result := loadTestRecipe(t)
+
+	resolved := result.Resolved()
+	if resolved == nil {
+		t.Fatal("Resolved() returned nil for a LoadRecipe result")
+	}
+	// The full recipe carries Criteria (used to derive the facade Name)
+	// and at least one resolution constraint (the h100-eks-training chain
+	// pins K8s.server.version) — neither is on the facade RecipeResult.
+	if resolved.Criteria == nil {
+		t.Error("Resolved().Criteria = nil, want the hydrated criteria")
+	}
+	if len(resolved.Constraints) == 0 {
+		t.Error("Resolved().Constraints is empty, want the chain's resolution constraints")
+	}
+
+	// A RecipeResult NOT produced by the Client has a nil internal and
+	// Resolved() must return nil rather than panic.
+	var empty aicr.RecipeResult
+	if empty.Resolved() != nil {
+		t.Error("Resolved() on a zero-value RecipeResult = non-nil, want nil")
+	}
+}
+
+// TestValidateState_ImageAndCommitOptions proves the three new validate
+// options (commit + image registry/tag overrides) translate cleanly and a
+// no-cluster ValidateState run still succeeds with them set. The overrides
+// only influence emitted Job images (not exercised in no-cluster mode), so
+// the assertion is that the option plumbing doesn't break the run.
+func TestValidateState_ImageAndCommitOptions(t *testing.T) {
+	t.Parallel()
+
+	client, result := loadTestRecipe(t)
+
+	phases, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot(),
+		aicr.WithValidationNoCluster(true),
+		aicr.WithValidationCommit("abc1234"),
+		aicr.WithValidationImageRegistryOverride("localhost:5001"),
+		aicr.WithValidationImageTagOverride("dev"),
+	)
+	if err != nil {
+		t.Fatalf("ValidateState with image/commit options: %v", err)
+	}
+	if len(phases) == 0 {
+		t.Error("expected at least one phase result, got none")
+	}
+
+	// Empty-string overrides are the unset sentinel and must be accepted
+	// the same as omitting the option entirely.
+	if _, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot(),
+		aicr.WithValidationNoCluster(true),
+		aicr.WithValidationCommit(""),
+		aicr.WithValidationImageRegistryOverride(""),
+		aicr.WithValidationImageTagOverride(""),
+	); err != nil {
+		t.Fatalf("ValidateState with empty overrides: %v", err)
+	}
+}
+
+// writeExternalCriterionData lays out a minimal --data directory that the
+// layered FilesystemSource provider can load: a registry.yaml (required) plus
+// an overlay declaring a non-OSS criteria value. Loading this provider's
+// catalog seeds that provider's criteria registry with the external value,
+// mirroring the e2e fixture in tests/chainsaw/cli/criteria-registry.
+func writeExternalCriterionData(t *testing.T, service string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
+		[]byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		t.Fatalf("setup: write registry.yaml: %v", err)
+	}
+	overlayDir := filepath.Join(dir, "overlays")
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		t.Fatalf("setup: mkdir overlays: %v", err)
+	}
+	overlay := "apiVersion: aicr.nvidia.com/v1alpha1\n" +
+		"kind: RecipeMetadata\n" +
+		"metadata:\n  name: " + service + "-h100-training\n" +
+		"spec:\n  base: base\n  criteria:\n" +
+		"    service: " + service + "\n    accelerator: h100\n    intent: training\n" +
+		"  componentRefs: []\n"
+	if err := os.WriteFile(filepath.Join(overlayDir, service+"-overlay.yaml"), []byte(overlay), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+	return dir
+}
+
+// TestClient_LoadCatalogSeedsCriteriaRegistry verifies that LoadCatalog seeds
+// THIS Client's per-provider criteria registry: embedded OSS values are always
+// present, and a FilesystemSource --data overlay declaring a non-OSS service
+// value becomes Has()-visible after LoadCatalog. A separate EmbeddedSource
+// client's registry must NOT see the external value — that is the per-provider
+// isolation guarantee Stage 4 relies on.
+func TestClient_LoadCatalogSeedsCriteriaRegistry(t *testing.T) {
+	// Not parallel: asserts on per-provider criteria-registry state seeded by
+	// LoadCatalog, and uses t.Setenv (which forbids t.Parallel). Clearing
+	// AICR_CRITERIA_STRICT neutralizes the CI gate (make test sets it to 1) so
+	// each freshly-constructed per-provider registry starts non-strict and the
+	// external --data value is admitted — strict-mode behavior is covered
+	// separately in TestClient_CriteriaRegistryStrictMode.
+	t.Setenv("AICR_CRITERIA_STRICT", "")
+
+	const externalService = "ncp-internal-test"
+	dataDir := writeExternalCriterionData(t, externalService)
+
+	fsClient, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(dataDir)))
+	if err != nil {
+		t.Fatalf("NewClient(FilesystemSource): %v", err)
+	}
+	t.Cleanup(func() { _ = fsClient.Close() })
+
+	embClient, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient(EmbeddedSource): %v", err)
+	}
+	t.Cleanup(func() { _ = embClient.Close() })
+
+	if err := fsClient.LoadCatalog(t.Context()); err != nil {
+		t.Fatalf("fsClient.LoadCatalog: %v", err)
+	}
+	if err := embClient.LoadCatalog(t.Context()); err != nil {
+		t.Fatalf("embClient.LoadCatalog: %v", err)
+	}
+
+	fsReg := fsClient.CriteriaRegistry()
+	if fsReg == nil {
+		t.Fatal("fsClient.CriteriaRegistry() returned nil")
+	}
+	embReg := embClient.CriteriaRegistry()
+	if embReg == nil {
+		t.Fatal("embClient.CriteriaRegistry() returned nil")
+	}
+
+	// Embedded OSS criteria are seeded into both registries after LoadCatalog.
+	if !fsReg.Has(recipe.FieldService, "eks") {
+		t.Error("fsClient registry missing embedded OSS service 'eks'")
+	}
+	if !embReg.Has(recipe.FieldService, "eks") {
+		t.Error("embClient registry missing embedded OSS service 'eks'")
+	}
+
+	// The external --data overlay's novel service value is visible ONLY in the
+	// FilesystemSource client's registry — the EmbeddedSource client never
+	// walked that directory, so its registry is isolated.
+	if !fsReg.Has(recipe.FieldService, externalService) {
+		t.Errorf("fsClient registry missing external service %q after LoadCatalog", externalService)
+	}
+	if embReg.Has(recipe.FieldService, externalService) {
+		t.Errorf("embClient registry leaked external service %q (per-provider isolation broken)", externalService)
+	}
+}
+
+// TestClient_CriteriaRegistryStrictMode verifies that SetStrict applied to the
+// Client's own registry hides external-origin values while keeping embedded
+// OSS values — the per-Client equivalent of the --criteria-strict gate.
+func TestClient_CriteriaRegistryStrictMode(t *testing.T) {
+	// Not parallel: mutates per-provider registry strict state and uses
+	// t.Setenv (which forbids t.Parallel). Clear AICR_CRITERIA_STRICT so the
+	// registry starts non-strict regardless of the CI gate (make test sets it
+	// to 1); the test then flips strict explicitly via SetStrict.
+	t.Setenv("AICR_CRITERIA_STRICT", "")
+
+	const externalService = "ncp-strict-test"
+	dataDir := writeExternalCriterionData(t, externalService)
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(dataDir)))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	if err := client.LoadCatalog(t.Context()); err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+
+	reg := client.CriteriaRegistry()
+	if !reg.Has(recipe.FieldService, externalService) {
+		t.Fatalf("precondition: external service %q not seeded", externalService)
+	}
+
+	reg.SetStrict(true)
+	t.Cleanup(func() { reg.SetStrict(false) })
+
+	if reg.Has(recipe.FieldService, externalService) {
+		t.Errorf("strict mode must hide external service %q", externalService)
+	}
+	if !reg.Has(recipe.FieldService, "eks") {
+		t.Error("strict mode must still admit embedded OSS service 'eks'")
+	}
+}
+
+// TestClient_LoadCatalogGuards verifies the nil-context and closed-Client
+// rejections on LoadCatalog match the other Client methods.
+func TestClient_LoadCatalogGuards(t *testing.T) {
+	t.Parallel()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	//nolint:staticcheck // intentional nil-context guard test
+	if err := client.LoadCatalog(nil); err == nil {
+		t.Error("LoadCatalog(nil ctx) must be rejected")
+	}
+
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := client.LoadCatalog(t.Context()); err == nil {
+		t.Error("LoadCatalog on a closed Client must be rejected")
+	}
 }

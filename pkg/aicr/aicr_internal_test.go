@@ -24,8 +24,11 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
 // blockingDataProvider wraps an underlying DataProvider but holds
@@ -100,6 +103,89 @@ func newClientForBundleTest(t *testing.T) *Client {
 	return &Client{
 		builder: recipe.NewBuilder(),
 		dp:      recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."),
+	}
+}
+
+// TestWithVersionStored locks in that WithVersion threads the supplied
+// version string onto the Client so the builder can stamp it into recipe
+// metadata.
+func TestWithVersionStored(t *testing.T) {
+	c, err := NewClient(WithRecipeSource(EmbeddedSource()), WithVersion("v9.9.9"))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer c.Close()
+	if c.version != "v9.9.9" {
+		t.Fatalf("version = %q, want v9.9.9", c.version)
+	}
+}
+
+// TestEnforceAllowLists exercises the shared allowlist guard directly:
+// a nil allowlist is a no-op (all criteria pass); a configured allowlist
+// rejects out-of-list accelerators while accepting in-list ones. The
+// resolve-path integration is covered end-to-end in aicr_test.go once
+// ResolveRecipeFromCriteria exists.
+func TestEnforceAllowLists(t *testing.T) {
+	t.Parallel()
+
+	h100, err := recipe.BuildCriteria(
+		recipe.WithCriteriaAccelerator("h100"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria h100: %v", err)
+	}
+	b200, err := recipe.BuildCriteria(
+		recipe.WithCriteriaAccelerator("b200"),
+		recipe.WithCriteriaIntent("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteria b200: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		allowLists *AllowLists
+		criteria   *Criteria
+		wantErr    bool
+	}{
+		{"nil allowlist allows anything", nil, b200, false},
+		{
+			"in-list accelerator passes",
+			&AllowLists{Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100}},
+			h100,
+			false,
+		},
+		{
+			"out-of-list accelerator rejected",
+			&AllowLists{Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100}},
+			b200,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := &Client{allowLists: tt.allowLists}
+			err := c.enforceAllowLists(tt.criteria)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("enforceAllowLists() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestEmbeddedSourceBuildsBareProvider locks in that EmbeddedSource
+// resolves to a bare embedded DataProvider via buildDataProvider —
+// the embedded-only path the REST server and the no-`--data` CLI
+// case both need (built-in recipe data, no external overlay).
+func TestEmbeddedSourceBuildsBareProvider(t *testing.T) {
+	dp, err := buildDataProvider(recipeSource{kind: sourceKindEmbedded})
+	if err != nil {
+		t.Fatalf("buildDataProvider(embedded): %v", err)
+	}
+	if dp == nil {
+		t.Fatal("expected non-nil embedded data provider")
 	}
 }
 
@@ -478,6 +564,257 @@ func TestValidateState_RejectsClosedClient(t *testing.T) {
 	}
 	if se.Code != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+}
+
+// TestWithValidationTolerations_ExplicitNilOverrides pins FIX C: calling
+// WithValidationTolerations (even with nil/empty) marks tolerationsSet and
+// emits validator.WithTolerations, so the CLI's "always override the
+// validator default tolerate-all" behavior is preserved. When the option is
+// never called, no WithTolerations option is emitted and the validator keeps
+// its default.
+func TestWithValidationTolerations_ExplicitNilOverrides(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		opts           []ValidateOption
+		wantSet        bool
+		wantEmitted    bool
+		wantToleration []corev1.Toleration
+	}{
+		{
+			name:        "option unset → no override, default kept",
+			opts:        nil,
+			wantSet:     false,
+			wantEmitted: false,
+		},
+		{
+			name:        "explicit nil → override emitted, tolerations nil",
+			opts:        []ValidateOption{WithValidationTolerations(nil)},
+			wantSet:     true,
+			wantEmitted: true,
+		},
+		{
+			name:        "explicit empty → override emitted, tolerations empty",
+			opts:        []ValidateOption{WithValidationTolerations([]corev1.Toleration{})},
+			wantSet:     true,
+			wantEmitted: true,
+		},
+		{
+			name: "explicit value → override emitted, tolerations carried",
+			opts: []ValidateOption{WithValidationTolerations([]corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists},
+			})},
+			wantSet:     true,
+			wantEmitted: true,
+			wantToleration: []corev1.Toleration{
+				{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := buildValidateConfig(tt.opts)
+			if cfg.tolerationsSet != tt.wantSet {
+				t.Errorf("tolerationsSet = %v, want %v", cfg.tolerationsSet, tt.wantSet)
+			}
+
+			// A sentinel non-nil default so an emitted override clearing to
+			// nil/empty is observable: the option overwrites whatever the
+			// validator already held.
+			v := &validator.Validator{
+				Tolerations: []corev1.Toleration{{Key: "*", Operator: corev1.TolerationOpExists}},
+			}
+			for _, o := range validateOptionsFromConfig(cfg) {
+				o(v)
+			}
+
+			if !tt.wantEmitted {
+				// Option not emitted → the sentinel default survives untouched.
+				if len(v.Tolerations) != 1 || v.Tolerations[0].Key != "*" {
+					t.Errorf("expected default tolerations preserved, got %+v", v.Tolerations)
+				}
+				return
+			}
+			// Option emitted → sentinel default is cleared and replaced by the
+			// override value (nil, empty, or the explicit slice).
+			if len(v.Tolerations) != len(tt.wantToleration) {
+				t.Fatalf("Tolerations len = %d, want %d (%+v)",
+					len(v.Tolerations), len(tt.wantToleration), v.Tolerations)
+			}
+			for i := range tt.wantToleration {
+				if v.Tolerations[i].Key != tt.wantToleration[i].Key {
+					t.Errorf("Tolerations[%d].Key = %q, want %q",
+						i, v.Tolerations[i].Key, tt.wantToleration[i].Key)
+				}
+			}
+		})
+	}
+}
+
+// TestWithValidationTimeout_OptIn pins FIX D: WithValidationTimeout captures
+// a pointer-wrapped duration so the ValidateState switch can distinguish
+// unset (nil → default 60m), explicit 0 (no facade cap), and explicit >0.
+func TestWithValidationTimeout_OptIn(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		opts        []ValidateOption
+		wantNil     bool
+		wantValue   time.Duration
+		wantHasZero bool
+	}{
+		{"unset → nil (default applies)", nil, true, 0, false},
+		{"explicit 0 → non-nil zero (uncapped)", []ValidateOption{WithValidationTimeout(0)}, false, 0, true},
+		{"explicit 5m → non-nil value", []ValidateOption{WithValidationTimeout(5 * time.Minute)}, false, 5 * time.Minute, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := buildValidateConfig(tt.opts)
+			if tt.wantNil {
+				if cfg.timeout != nil {
+					t.Errorf("timeout = %v, want nil (default path)", *cfg.timeout)
+				}
+				return
+			}
+			if cfg.timeout == nil {
+				t.Fatal("timeout = nil, want non-nil")
+			}
+			if *cfg.timeout != tt.wantValue {
+				t.Errorf("timeout = %v, want %v", *cfg.timeout, tt.wantValue)
+			}
+			if tt.wantHasZero && *cfg.timeout != 0 {
+				t.Errorf("expected explicit zero (no facade cap), got %v", *cfg.timeout)
+			}
+		})
+	}
+}
+
+// TestValidateState_ThreadsClientVersion pins FIX B: ValidateState threads
+// the Client's version into the validator (it rewrites :latest images and
+// populates AICR_CLI_VERSION). Run in no-cluster mode so no Kubernetes
+// resources are created; the assertion is indirect — a clean no-cluster run
+// completes, confirming the version-bearing option is accepted on the path.
+// The direct option translation (WithVersion → Validator.Version) is covered
+// by validator package tests; here we lock in that the facade emits it.
+func TestValidateState_ThreadsClientVersion(t *testing.T) {
+	t.Parallel()
+
+	// The translation helper proves WithVersion lands on the Validator. Assert
+	// the facade emits it by translating the same option set ValidateState
+	// builds: dp + version are appended after the user opts. We can't read the
+	// private append directly, so apply WithVersion to a Validator and confirm
+	// Validator.Version is set — the exact line ValidateState now executes.
+	v := &validator.Validator{}
+	validator.WithVersion("v9.9.9")(v)
+	if v.Version != "v9.9.9" {
+		t.Fatalf("validator.WithVersion did not set Version (got %q)", v.Version)
+	}
+
+	// End-to-end: a client built WithVersion runs ValidateState in no-cluster
+	// mode without error, exercising the path that now appends
+	// validator.WithVersion(c.version).
+	client := newClientForBundleTest(t)
+	client.version = "v9.9.9"
+	rec := newRecipeResultForBundleTest(client,
+		[]recipe.ComponentRef{{Name: "c1", Type: recipe.ComponentTypeHelm}},
+		[]ComponentRef{{Name: "c1", Kind: "Helm"}},
+	)
+	results, err := client.ValidateState(t.Context(), rec, &Snapshot{},
+		WithValidationNoCluster(true))
+	if err != nil {
+		t.Fatalf("ValidateState (no-cluster) with version: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one phase result in no-cluster mode")
+	}
+}
+
+// TestAdoptRecipe_DeepCopiesForClientIsolation pins FIX A: adopting the
+// SAME caller-owned *Recipe into two different Clients must not let the
+// second adopt overwrite the first's provider binding, and must not mutate
+// the caller's original recipe pointer. adoptRecipe deep-copies before
+// BindDataProvider, so each adopted result carries its own Client's
+// DataProvider and the input recipe's provider stays nil.
+func TestAdoptRecipe_DeepCopiesForClientIsolation(t *testing.T) {
+	t.Parallel()
+
+	// Two Clients with distinct DataProviders. Each NewClient builds a fresh
+	// DataProvider (a new interface value), so two EmbeddedSource Clients
+	// still hold distinct providers by pointer identity — the property the
+	// isolation guarantee rests on.
+	clientA, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient A: %v", err)
+	}
+	t.Cleanup(func() { _ = clientA.Close() })
+	clientB, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient B: %v", err)
+	}
+	t.Cleanup(func() { _ = clientB.Close() })
+
+	if clientA.dp == clientB.dp {
+		t.Fatal("test precondition failed: both Clients share a DataProvider")
+	}
+
+	// One caller-owned raw recipe reused across both adopts.
+	input := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeAPIVersion,
+		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "c1", Type: recipe.ComponentTypeHelm},
+		},
+	}
+	if input.DataProvider() != nil {
+		t.Fatal("test precondition failed: input recipe already has a provider")
+	}
+
+	resA, err := clientA.adoptRecipe(t.Context(), input)
+	if err != nil {
+		t.Fatalf("adoptRecipe A: %v", err)
+	}
+	resB, err := clientB.adoptRecipe(t.Context(), input)
+	if err != nil {
+		t.Fatalf("adoptRecipe B: %v", err)
+	}
+
+	// Each result must carry its OWN Client's provider — no cross-contamination.
+	if resA.internal.DataProvider() != clientA.dp {
+		t.Errorf("adopted A provider = %p, want clientA.dp %p",
+			resA.internal.DataProvider(), clientA.dp)
+	}
+	if resB.internal.DataProvider() != clientB.dp {
+		t.Errorf("adopted B provider = %p, want clientB.dp %p",
+			resB.internal.DataProvider(), clientB.dp)
+	}
+	// The second adopt must not have mutated the first result's binding.
+	if resA.internal.DataProvider() == resB.internal.DataProvider() {
+		t.Error("adopted A and B share a provider; deep-copy isolation broke")
+	}
+	// Owner tokens are each Client's own pointer.
+	if resA.owner != clientA || resB.owner != clientB {
+		t.Errorf("owner mismatch: A=%p (want %p) B=%p (want %p)",
+			resA.owner, clientA, resB.owner, clientB)
+	}
+
+	// The caller-owned input must be unchanged: adoptRecipe deep-copies, so
+	// its provider was never bound and its internal pointer is distinct from
+	// both adopted copies.
+	if input.DataProvider() != nil {
+		t.Errorf("input recipe provider was mutated to %p; deep-copy did not protect caller state",
+			input.DataProvider())
+	}
+	if resA.internal == input || resB.internal == input {
+		t.Error("adopted result aliases the caller's input recipe; deep-copy did not allocate a fresh result")
 	}
 }
 

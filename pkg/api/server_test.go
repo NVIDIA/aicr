@@ -72,38 +72,33 @@ func TestConstants(t *testing.T) {
 	}
 }
 
-// TestRouteConfiguration verifies that the correct routes are set up
+// TestRouteConfiguration verifies that the correct routes are set up,
+// mirroring how Serve wires them: /v1/recipe and /v1/query are backed by the
+// aicr.Client-based recipeHandler, and /v1/bundle by the bundler.
 func TestRouteConfiguration(t *testing.T) {
-	// Test that the route map is properly structured
-	rb := recipe.NewBuilder(
-		recipe.WithVersion("test-version"),
-	)
+	h := newTestHandler(t, nil)
 	bb, err := bundler.New()
 	if err != nil {
 		t.Fatalf("failed to create bundler: %v", err)
 	}
 
 	routes := map[string]http.HandlerFunc{
-		"/v1/recipe": rb.HandleRecipes,
+		"/v1/recipe": h.HandleRecipes,
+		"/v1/query":  h.HandleQuery,
 		"/v1/bundle": bb.HandleBundles,
 	}
 
-	// Verify expected routes exist
-	if handler, exists := routes["/v1/recipe"]; !exists {
-		t.Error("expected /v1/recipe route to exist")
-	} else if handler == nil {
-		t.Error("expected /v1/recipe handler to be non-nil")
-	}
-
-	if handler, exists := routes["/v1/bundle"]; !exists {
-		t.Error("expected /v1/bundle route to exist")
-	} else if handler == nil {
-		t.Error("expected /v1/bundle handler to be non-nil")
+	for _, path := range []string{"/v1/recipe", "/v1/query", "/v1/bundle"} {
+		if handler, exists := routes[path]; !exists {
+			t.Errorf("expected %s route to exist", path)
+		} else if handler == nil {
+			t.Errorf("expected %s handler to be non-nil", path)
+		}
 	}
 
 	// Verify no extra routes
-	if len(routes) != 2 {
-		t.Errorf("expected exactly 2 routes, got %d", len(routes))
+	if len(routes) != 3 {
+		t.Errorf("expected exactly 3 routes, got %d", len(routes))
 	}
 }
 
