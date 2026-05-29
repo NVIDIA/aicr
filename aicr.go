@@ -536,9 +536,39 @@ func recipeResultFromInternal(r *recipe.RecipeResult) (*RecipeResult, error) {
 		return nil, errors.New(errors.ErrCodeInternal,
 			"recipe result has no criteria; cannot derive stable name")
 	}
+	return facadeResultFromInternal(r, r.Criteria.String()), nil
+}
 
+// loadedResultFromInternal wraps a recipe loaded from a file into the
+// facade shape. Unlike recipeResultFromInternal — which is the resolve
+// path, where a nil Criteria is a builder bug — a file loaded via
+// LoadRecipe may legitimately carry no Criteria: an already-hydrated
+// RecipeResult, or a bare/empty-kind RecipeResult file, both of which
+// recipe.LoadFromFile accepts. Those flow through validate/bundle by
+// their internal state and component refs, not by a criteria-derived
+// Name, so the facade Name is derived from Criteria when present and is
+// left empty otherwise. This preserves the CLI loader's tolerance of
+// criteria-less recipe files (already-hydrated or bare RecipeResult),
+// which the strict resolve path intentionally rejects.
+func loadedResultFromInternal(r *recipe.RecipeResult) (*RecipeResult, error) {
+	if r == nil {
+		return nil, errors.New(errors.ErrCodeInternal,
+			"recipe loader returned nil RecipeResult")
+	}
+	var name string
+	if r.Criteria != nil {
+		name = r.Criteria.String()
+	}
+	return facadeResultFromInternal(r, name), nil
+}
+
+// facadeResultFromInternal builds the facade RecipeResult from an internal
+// recipe result and a pre-derived Name. Both the resolve path
+// (recipeResultFromInternal) and the load path (loadedResultFromInternal)
+// share this mapping so a pkg/recipe field rename is a single edit.
+func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult {
 	out := &RecipeResult{
-		Name:         r.Criteria.String(),
+		Name:         name,
 		Version:      r.Metadata.Version,
 		TranslatedAt: time.Now(),
 		internal:     r,
@@ -553,7 +583,7 @@ func recipeResultFromInternal(r *recipe.RecipeResult) (*RecipeResult, error) {
 			Namespace: c.Namespace,
 		})
 	}
-	return out, nil
+	return out
 }
 
 // LoadRecipe loads a recipe from a file path (or cm:// ConfigMap URI,
@@ -611,7 +641,11 @@ func (c *Client) LoadRecipe(ctx context.Context, path, kubeconfig string) (*Reci
 		return nil, err
 	}
 
-	result, err := recipeResultFromInternal(loaded)
+	// Use the load-path constructor (tolerant of a nil Criteria) rather than
+	// the resolve-path one: recipe.LoadFromFile accepts already-hydrated and
+	// bare RecipeResult files that carry no Criteria, and rejecting them here
+	// would diverge from the CLI's historical loader behavior.
+	result, err := loadedResultFromInternal(loaded)
 	if err != nil {
 		return nil, err
 	}

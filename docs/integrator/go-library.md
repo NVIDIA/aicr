@@ -108,8 +108,9 @@ if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
 }
 
-// ValidateState runs every validation phase (Deployment, Performance,
-// Conformance) against the resolved recipe + observed snapshot.
+// ValidateState runs the validation phases against the resolved recipe +
+// observed snapshot. With no WithValidationPhases option it runs all three
+// phases (Deployment, Performance, Conformance) in canonical order.
 results, err := client.ValidateState(ctx, result, snap)
 if err != nil {
 	log.Fatalf("validate state: %v", err)
@@ -120,8 +121,44 @@ for _, r := range results {
 ```
 
 The `recipe` argument to `ValidateState` MUST be the `*RecipeResult`
-returned by the same Client's `ResolveRecipe` call — the unexported
-internal recipe state is required for constraint evaluation.
+returned by the same Client's `ResolveRecipe` (or `LoadRecipe`) call —
+the unexported internal recipe state is required for constraint
+evaluation.
+
+To restrict the run to specific phases, pass `WithValidationPhases` in
+the order you want them executed:
+
+```go
+results, err := client.ValidateState(ctx, result, snap,
+	aicr.WithValidationPhases(aicr.PhaseDeployment, aicr.PhaseConformance))
+```
+
+Valid phase values are `PhaseDeployment`, `PhasePerformance`, and
+`PhaseConformance`. An unrecognized phase is rejected with
+`ErrCodeInvalidRequest` before any cluster work, so a typo cannot
+silently degrade to an empty run.
+
+### Loading an existing recipe
+
+When a recipe has already been resolved and persisted (for example a
+recipe file checked into a GitOps repo, or a `cm://` ConfigMap URI), load
+it back through the same Client with `LoadRecipe` instead of re-resolving
+from criteria:
+
+```go
+result, err := client.LoadRecipe(ctx, "/etc/aicr/recipe.yaml", "")
+if err != nil {
+	log.Fatalf("load recipe: %v", err)
+}
+```
+
+`LoadRecipe` hydrates overlay inputs (`kind: RecipeMetadata`) against the
+Client's own data provider and returns a Client-owned `*RecipeResult`
+ready for `ValidateState` / `BundleComponents` — it passes the same
+ownership check as a `ResolveRecipe` result. An already-hydrated
+`RecipeResult` file is returned with its provider bound to the Client.
+Pass a kubeconfig path as the third argument only when the path is a
+`cm://` ConfigMap URI.
 
 For unit tests that exercise the facade surface without a live
 cluster, pass `aicr.WithValidationNoCluster(true)`: every check

@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/NVIDIA/aicr"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -200,18 +201,19 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 
 // validatePhasesAgainstRecipe warns when a requested phase has no checks
 // defined in the recipe. The phase will still run but produce 0 tests
-// in the CTRF report.
-func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeResult) error {
+// in the CTRF report. This is purely advisory — it emits slog warnings and
+// never fails the run, so it has no error result.
+func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeResult) {
 	if rec.Validation == nil {
 		if len(phases) > 0 {
 			slog.Warn("recipe has no validation section; requested phases will have no checks",
 				"phases", phases)
 		}
-		return nil
+		return
 	}
 
 	if len(phases) == 0 {
-		return nil
+		return
 	}
 
 	defined := make(map[validator.Phase]bool)
@@ -231,8 +233,6 @@ func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeRes
 				"phase", p)
 		}
 	}
-
-	return nil
 }
 
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
@@ -308,31 +308,82 @@ type validationConfig struct {
 	evidence *recipeEvidenceConfig
 }
 
+// validateDataProvider builds the recipe.DataProvider matching the source
+// the validate Action handed to aicr.NewClient. It is constructed
+// separately (rather than reaching into the Client) so it can be threaded
+// into evidence emission, whose catalog.Load takes a DataProvider directly.
+// It mirrors the Client's own buildDataProvider so the evidence catalog
+// resolves against exactly the source the validator run used:
+//
+//   - empty dataDir → embedded provider only.
+//   - non-empty dataDir → the external dir layered over the embedded data.
+func validateDataProvider(dataDir string) (recipe.DataProvider, error) {
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	if dataDir == "" {
+		return embedded, nil
+	}
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
+		ExternalDir: dataDir,
+	})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize external data", err)
+	}
+	return layered, nil
+}
+
 // runValidation runs validation using the container-per-validator engine.
+//
+// The validator run is now driven through the aicr.Client facade
+// (ValidateState), which owns the per-command DataProvider and threads it
+// into the validator catalog load. The evidence path still needs the raw
+// pkg/recipe.RecipeResult (via rec.Resolved()) and the same DataProvider
+// (dataProvider) so the attestation catalog resolves against the command's
+// source rather than the package global.
 func runValidation(
 	ctx context.Context,
-	rec *recipe.RecipeResult,
+	client *aicr.Client,
+	dataProvider recipe.DataProvider,
+	rec *aicr.RecipeResult,
 	snap *snapshotter.Snapshot,
 	cfg validationConfig,
 ) error {
 
 	slog.Info("running validation", "phases", cfg.phases)
 
-	v := validator.New(
-		validator.WithVersion(version),
-		validator.WithCommit(commit),
-		validator.WithNamespace(cfg.validationNamespace),
-		validator.WithCleanup(cfg.cleanup),
-		validator.WithImagePullSecrets(cfg.imagePullSecrets),
-		validator.WithNoCluster(cfg.noCluster),
-		validator.WithTolerations(cfg.tolerations),
-		validator.WithNodeSelector(cfg.nodeSelector),
-		validator.WithImageRegistryOverride(cfg.imageRegistryOverride),
-		validator.WithImageTagOverride(cfg.imageTagOverride),
-	)
+	// Generate the run ID CLI-side rather than letting the validator
+	// auto-generate it internally: the no-cleanup debug log below needs to
+	// surface the same ID the validator stamps on its Jobs/RBAC so an
+	// operator can locate the kept resources. Passing it via
+	// WithValidationRunID keeps that value in our hands.
+	runID := v1.GenerateRunID()
 
-	validationInput := v1.ToValidationInput(rec)
-	results, err := v.ValidatePhases(ctx, cfg.phases, validationInput, snap)
+	// Translate the resolved CLI values into facade ValidateOptions. These
+	// mirror the validator.With* options the direct invocation used to set;
+	// ValidateState applies them plus the Client's own DataProvider. Cleanup,
+	// namespace, etc. are always set (matching the old unconditional
+	// validator.With* calls); the image/commit overrides are passed verbatim
+	// (empty string is the validator's "unset" sentinel).
+	opts := []aicr.ValidateOption{
+		aicr.WithValidationNamespace(cfg.validationNamespace),
+		aicr.WithValidationRunID(runID),
+		aicr.WithValidationCleanup(cfg.cleanup),
+		aicr.WithValidationImagePullSecrets(cfg.imagePullSecrets),
+		aicr.WithValidationNoCluster(cfg.noCluster),
+		aicr.WithValidationTolerations(cfg.tolerations),
+		aicr.WithValidationNodeSelector(cfg.nodeSelector),
+		aicr.WithValidationCommit(commit),
+		aicr.WithValidationImageRegistryOverride(cfg.imageRegistryOverride),
+		aicr.WithValidationImageTagOverride(cfg.imageTagOverride),
+	}
+	// Pass phases only when explicitly selected. cfg.phases is nil when the
+	// user requested all phases (or used the "all" wildcard), and
+	// WithValidationPhases(nil...) would be a no-op anyway — but keeping the
+	// option off the slice preserves the exact "run all phases" default path.
+	if len(cfg.phases) > 0 {
+		opts = append(opts, aicr.WithValidationPhases(cfg.phases...))
+	}
+
+	results, err := client.ValidateState(ctx, rec, snap, opts...)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
 	}
@@ -377,7 +428,7 @@ func runValidation(
 	if !cfg.cleanup {
 		slog.Info("cleanup disabled - Jobs and RBAC kept for debugging",
 			"namespace", cfg.validationNamespace,
-			"runID", v.RunID)
+			"runID", runID)
 		slog.Info("to inspect Job logs: kubectl logs -l aicr.nvidia.com/job -n " + cfg.validationNamespace)
 		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
 		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
@@ -396,8 +447,12 @@ func runValidation(
 	}
 
 	// Emit even on failure: failed runs document hardware-specific limits.
+	// emitRecipeEvidence needs the full pkg/recipe.RecipeResult (via
+	// Resolved()) for the predicate/BOM, and the command's DataProvider so
+	// the validator catalog used for evidence resolves against the same
+	// source as the run rather than the package global.
 	if cfg.evidence != nil {
-		if err := emitRecipeEvidence(ctx, rec, snap, results, cfg.evidence); err != nil {
+		if err := emitRecipeEvidence(ctx, dataProvider, rec.Resolved(), snap, results, cfg.evidence); err != nil {
 			return err
 		}
 	}
@@ -623,10 +678,6 @@ Run validation without failing on check errors (informational mode):
 				return err
 			}
 
-			if initErr := initDataProvider(cmd, cfg); initErr != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", initErr)
-			}
-
 			cncfCfg := resolved.EvidenceCNCF
 			if cncfCfg == nil {
 				cncfCfg = &config.EvidenceCNCFResolved{}
@@ -686,9 +737,40 @@ Run validation without failing on check errors (informational mode):
 				noCleanup:        boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
 			}
 
+			// Build the Client from the resolved data source (--data flag,
+			// else spec.recipe.data). A filesystem source layers the external
+			// dir over the embedded data; an empty data dir uses the embedded
+			// data only. The Client owns its DataProvider, replacing the old
+			// process-global installed by initDataProvider. dataProvider is the
+			// same provider, built once so it can also be threaded into evidence
+			// emission (so --data overlays resolve the validator catalog against
+			// the command's source rather than the package global).
+			dataDir := cmd.String("data")
+			if dataDir == "" {
+				dataDir = cfg.Recipe().DataDir()
+			}
+			source := aicr.EmbeddedSource()
+			if dataDir != "" {
+				slog.Info("initializing external data provider", "directory", dataDir)
+				source = aicr.FilesystemSource(dataDir)
+			}
+			client, err := aicr.NewClient(
+				aicr.WithRecipeSource(source),
+				aicr.WithVersion(version),
+			)
+			if err != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+			}
+			defer func() { _ = client.Close() }()
+
+			dataProvider, err := validateDataProvider(dataDir)
+			if err != nil {
+				return err
+			}
+
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
-			rec, err := recipe.LoadFromFile(ctx, recipeFilePath, kubeconfig, version)
+			rec, err := client.LoadRecipe(ctx, recipeFilePath, kubeconfig)
 			if err != nil {
 				return err
 			}
@@ -723,10 +805,11 @@ Run validation without failing on check errors (informational mode):
 				}
 			}
 
-			// Validate that requested phases are defined in the recipe.
-			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
-				return err
-			}
+			// Warn when a requested phase has no checks defined in the recipe.
+			// The helper reads the full recipe's Validation section, which the
+			// lossy facade RecipeResult does not expose — reach the underlying
+			// pkg/recipe.RecipeResult via Resolved(). Advisory only.
+			validatePhasesAgainstRecipe(phases, rec.Resolved())
 
 			if shared.noCleanup {
 				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
@@ -737,7 +820,7 @@ Run validation without failing on check errors (informational mode):
 
 			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
 
-			return runValidation(ctx, rec, snap, validationConfig{
+			return runValidation(ctx, client, dataProvider, rec, snap, validationConfig{
 				phases:                phases,
 				output:                cmd.String("output"),
 				outFormat:             serializer.FormatJSON,

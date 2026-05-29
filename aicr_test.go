@@ -1025,6 +1025,50 @@ func TestLoadRecipe_HydratesAndOwns(t *testing.T) {
 	}
 }
 
+// TestLoadRecipe_BareResultNoCriteria proves LoadRecipe accepts an
+// already-hydrated RecipeResult file that carries no spec.criteria — the
+// same tolerance recipe.LoadFromFile has historically had. The resolve
+// path rejects a nil Criteria as a builder bug, but a file loaded from
+// disk legitimately may omit it; LoadRecipe must not diverge from the CLI
+// loader's behavior or the validate-command kind-handling tests break.
+func TestLoadRecipe_BareResultNoCriteria(t *testing.T) {
+	t.Parallel()
+
+	const bareResult = `kind: RecipeResult
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  version: test
+componentRefs: []
+`
+	dir := t.TempDir()
+	recipePath := filepath.Join(dir, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte(bareResult), 0o600); err != nil {
+		t.Fatalf("setup: write recipe: %v", err)
+	}
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	result, err := client.LoadRecipe(t.Context(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe on bare RecipeResult: %v", err)
+	}
+	if result == nil {
+		t.Fatal("LoadRecipe returned nil result")
+	}
+	// No criteria → empty facade Name, but Resolved() must still be
+	// populated so downstream validate/evidence paths work.
+	if result.Name != "" {
+		t.Errorf("Name = %q, want empty for a criteria-less recipe", result.Name)
+	}
+	if result.Resolved() == nil {
+		t.Error("Resolved() = nil, want the loaded recipe")
+	}
+}
+
 // k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
 // reading satisfies the readiness constraints carried by the embedded
 // h100-eks-training chain (the strictest is ">= 1.32.4").
