@@ -1464,8 +1464,12 @@ func writeExternalCriterionData(t *testing.T, service string) string {
 // isolation guarantee Stage 4 relies on.
 func TestClient_LoadCatalogSeedsCriteriaRegistry(t *testing.T) {
 	// Not parallel: asserts on per-provider criteria-registry state seeded by
-	// LoadCatalog. Running serially avoids interleaving with any other test
-	// that toggles registry strict mode, keeping these assertions deterministic.
+	// LoadCatalog, and uses t.Setenv (which forbids t.Parallel). Clearing
+	// AICR_CRITERIA_STRICT neutralizes the CI gate (make test sets it to 1) so
+	// each freshly-constructed per-provider registry starts non-strict and the
+	// external --data value is admitted — strict-mode behavior is covered
+	// separately in TestClient_CriteriaRegistryStrictMode.
+	t.Setenv("AICR_CRITERIA_STRICT", "")
 
 	const externalService = "ncp-internal-test"
 	dataDir := writeExternalCriterionData(t, externalService)
@@ -1521,8 +1525,11 @@ func TestClient_LoadCatalogSeedsCriteriaRegistry(t *testing.T) {
 // Client's own registry hides external-origin values while keeping embedded
 // OSS values — the per-Client equivalent of the --criteria-strict gate.
 func TestClient_CriteriaRegistryStrictMode(t *testing.T) {
-	// Not parallel: mutates per-provider registry strict state. Serial
-	// execution keeps the assertions deterministic regardless of test order.
+	// Not parallel: mutates per-provider registry strict state and uses
+	// t.Setenv (which forbids t.Parallel). Clear AICR_CRITERIA_STRICT so the
+	// registry starts non-strict regardless of the CI gate (make test sets it
+	// to 1); the test then flips strict explicitly via SetStrict.
+	t.Setenv("AICR_CRITERIA_STRICT", "")
 
 	const externalService = "ncp-strict-test"
 	dataDir := writeExternalCriterionData(t, externalService)
