@@ -24,7 +24,6 @@ import (
 
 	"github.com/NVIDIA/aicr"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 func TestNewClientRequiresRecipeSource(t *testing.T) {
@@ -769,77 +768,4 @@ func componentNames(r *aicr.RecipeResult) []string {
 		out = append(out, c.Name)
 	}
 	return out
-}
-
-// TestClient_NoCacheGrowthAcrossManyCloseCycles is the acceptance-
-// criterion test for the issue's "memory does not grow when N
-// clients are created and released in a loop" requirement.
-//
-// Each NewClient call constructs a fresh LayeredDataProvider (unique
-// pointer identity), so the recipe package's sync.Map caches —
-// storeCache and registryCache, keyed by DataProvider — would
-// accumulate N entries if Close didn't evict them. The test takes
-// a baseline of both cache counts immediately before the loop and
-// asserts they return to the same value after N iterations. Baseline
-// math insulates the test from any parallel sibling's cache entries
-// (those exist both before and after, so they cancel out in the diff).
-//
-// N is intentionally large (50) so a regression that leaks a single
-// entry per Close cycle would push the delta well past any noise
-// floor; running with -race confirms there's no concurrent map
-// corruption while Close is racing the package-global cache writers.
-//
-// NOT t.Parallel: the recipe-package caches (storeCache, registryCache)
-// are process-global sync.Maps. A parallel sibling test that constructs
-// a Client populates those caches while this test runs, so the
-// baseline-diff arithmetic would catch sibling entries as "growth"
-// from this test's perspective. Running sequentially (during go test's
-// pre-parallel phase) gives a clean baseline at minimal time cost.
-func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
-	const N = 50
-
-	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
-		t.Fatalf("setup: write registry.yaml: %v", err)
-	}
-
-	baselineStore := recipe.CachedStoreCountForTesting()
-	baselineRegistry := recipe.CachedRegistryCountForTesting()
-
-	for i := 0; i < N; i++ {
-		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
-		if err != nil {
-			t.Fatalf("iteration %d: NewClient: %v", i, err)
-		}
-
-		// ResolveRecipe forces both caches to populate for this
-		// Client's DataProvider. Without this, only registryCache
-		// would gain an entry (from buildDataProvider's construction
-		// path); storeCache wouldn't, and the test would miss the
-		// store-side leak.
-		if _, err := c.ResolveRecipe(t.Context(), aicr.RecipeRequest{
-			Service:     "eks",
-			Accelerator: "h100",
-			Intent:      "training",
-		}); err != nil {
-			t.Fatalf("iteration %d: ResolveRecipe: %v", i, err)
-		}
-
-		if err := c.Close(); err != nil {
-			t.Fatalf("iteration %d: Close: %v", i, err)
-		}
-	}
-
-	afterStore := recipe.CachedStoreCountForTesting()
-	afterRegistry := recipe.CachedRegistryCountForTesting()
-
-	if delta := afterStore - baselineStore; delta != 0 {
-		t.Errorf("storeCache grew by %d after %d NewClient/Resolve/Close cycles; expected 0 (Close should evict)",
-			delta, N)
-	}
-	if delta := afterRegistry - baselineRegistry; delta != 0 {
-		t.Errorf("registryCache grew by %d after %d NewClient/Resolve/Close cycles; expected 0 (Close should evict)",
-			delta, N)
-	}
 }

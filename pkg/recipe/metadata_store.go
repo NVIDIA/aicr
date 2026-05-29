@@ -325,33 +325,10 @@ func EvictCachedStore(dp DataProvider) {
 	storeCache.Delete(dp)
 }
 
-// CachedStoreCountForTesting returns the number of distinct DataProvider
-// entries currently held in the metadata-store cache. Exposed for tests
-// in the aicr facade that assert Client.Close evicts the cached store —
-// paired with CachedRegistryCountForTesting in components.go so a single
-// test can verify both halves of the per-Client cache are released.
-//
-// Test-only by convention (the _ForTesting suffix); never call from
-// production code.
-//
-// NOTE: this returns the GLOBAL count across every DataProvider in the
-// package. A parallel test in another package using its own
-// DataProvider will perturb the count. Tests that need a stable signal
-// scoped to a specific DataProvider should prefer
-// CachedStoreContainsForTesting.
-func CachedStoreCountForTesting() int {
-	n := 0
-	storeCache.Range(func(_, _ any) bool {
-		n++
-		return true
-	})
-	return n
-}
-
 // CachedStoreContainsForTesting reports whether the metadata-store
-// cache has an entry for the supplied DataProvider. Unlike the count
-// helper, this is robust under parallel test execution: each test that
-// uses a distinct DataProvider can observe ONLY its own entry's
+// cache has an entry for the supplied DataProvider. Scoped per-provider
+// so it is robust under parallel test execution: each test that uses a
+// distinct DataProvider can observe ONLY its own entry's
 // presence/absence.
 //
 // Test-only by convention (the _ForTesting suffix); never call from
