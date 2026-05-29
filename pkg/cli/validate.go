@@ -374,6 +374,13 @@ func runValidation(
 		aicr.WithValidationCommit(commit),
 		aicr.WithValidationImageRegistryOverride(cfg.imageRegistryOverride),
 		aicr.WithValidationImageTagOverride(cfg.imageTagOverride),
+		// Uncap the facade-level validation deadline (0 = no cap) so an
+		// all-phase run isn't cut short by ValidationOperationTimeout — the
+		// per-validator timeouts (incl. the 50m inference-perf check) govern,
+		// matching the pre-facade CLI behavior. WithValidationTolerations
+		// above is always passed (even when resolved tolerations are nil) so
+		// the override always clears the validator's default tolerate-all.
+		aicr.WithValidationTimeout(0),
 	}
 	// Pass phases only when explicitly selected. cfg.phases is nil when the
 	// user requested all phases (or used the "all" wildcard), and
