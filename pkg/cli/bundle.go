@@ -603,7 +603,10 @@ Package with explicit tag (overrides CLI version):
 	component that ships a recipes/components/<name>/readiness.yaml chainsaw
 	Test. The chart runs the gate CLI as a post-component Job so deployers
 	block on component-specific readiness signals (e.g. ClusterPolicy state)
-	that Helm/Argo CD/Flux cannot assess natively. Off by default. See #904.`,
+	that Helm/Argo CD cannot assess natively: helm waits via
+	--wait-for-jobs, Argo CD via the gate's sync-wave and built-in Job
+	health. Supported with --deployer helm, argocd, and argocd-helm; off by
+	default. See #904.`,
 				Category: catDeployment,
 			},
 			&cli.StringFlag{

@@ -339,18 +339,26 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		"dynamic_components", len(dynamicValues),
 	)
 
-	// Readiness gate emission is wired only for the helm deployer's bash
-	// orchestration in Phase 1 (the path that runs each folder's install.sh
-	// with `helm upgrade --install --wait`, so the gate Job blocks the
-	// deploy). The Argo CD / Flux / helmfile deployers wrap each folder in
-	// sync-wave / HelmRelease / needs semantics that require dedicated
-	// gating wiring (Phase 2). Fail clearly rather than silently dropping the
-	// opt-in flag and shipping a bundle without the readiness gate the user
-	// asked for. See #904.
-	if b.Config.ReadinessHooks() && b.Config.Deployer() != config.DeployerHelm {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("--readiness-hooks is only supported with --deployer helm (got %q); readiness gate wiring for other deployers is not yet implemented",
-				b.Config.Deployer()))
+	// Readiness gate emission is wired for the deployers whose ordering
+	// primitive can block on the gate Job:
+	//   - helm: deploy.sh runs the folder's install.sh with
+	//     `helm upgrade --install --wait --wait-for-jobs`.
+	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
+	//     and Argo CD's built-in batch/Job health blocks that wave until the
+	//     Job completes.
+	// Flux and helmfile wrap each folder in HelmRelease / needs semantics that
+	// need dedicated gating wiring (not yet implemented). Fail clearly rather
+	// than silently dropping the opt-in flag and shipping a bundle without the
+	// readiness gate the user asked for. See #904.
+	if b.Config.ReadinessHooks() {
+		switch b.Config.Deployer() {
+		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm:
+			// supported
+		case config.DeployerFlux, config.DeployerHelmfile:
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm",
+					b.Config.Deployer()))
+		}
 	}
 
 	switch b.Config.Deployer() {
@@ -374,6 +382,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component post-manifests")
 		}
+		componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component readiness gates")
+		}
 		return &argocdhelm.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -385,6 +398,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:              dataFiles,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
+			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
 			ChartName:              b.Config.BundleChartName(),
 			AppName:                b.Config.AppName(),
@@ -405,6 +419,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component post-manifests")
 		}
+		componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component readiness gates")
+		}
 		return &argocd.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -415,6 +434,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:              dataFiles,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
+			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
 			AppName:                b.Config.AppName(),
 			// Inline values when the bundle repo is OCI: Argo CD's $values

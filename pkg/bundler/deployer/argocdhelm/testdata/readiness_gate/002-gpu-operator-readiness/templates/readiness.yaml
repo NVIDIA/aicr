@@ -1,0 +1,15 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-operator-readiness-gate
+  namespace: gpu-operator
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: gpu-operator-readiness-gate
+      containers:
+        - name: gate
+          image: ghcr.io/nvidia/aicr-gate:v0.0.0-golden
+          args: ["--bundle-dir=/bundle", "--max-wait=1h30m0s"]
