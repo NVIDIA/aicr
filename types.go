@@ -186,6 +186,13 @@ type RecipeResult struct {
 	owner *Client
 }
 
+// Resolved returns the complete underlying recipe (the full
+// pkg/recipe.RecipeResult) that this result wraps. The facade RecipeResult
+// exposes only Name/Version/Components; callers that need constraints,
+// validation config, deployment order, or metadata (e.g. evidence emission)
+// use this. Returns nil if the result was not produced by the Client.
+func (r *RecipeResult) Resolved() *Recipe { return r.internal }
+
 // ComponentBundle is the resolved deployable artifact for one
 // recipe component. The slice returned by Client.BundleComponents
 // mirrors RecipeResult.Components 1:1 — same order, same length —

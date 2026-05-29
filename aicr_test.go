@@ -1015,7 +1015,7 @@ func TestLoadRecipe_HydratesAndOwns(t *testing.T) {
 	// the readiness pre-flight still evaluates the recipe's resolution
 	// constraints (e.g., K8s.server.version >= 1.32.4) against the
 	// snapshot — so supply a snapshot that satisfies them.
-	phases, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot("v1.33.0"),
+	phases, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot(),
 		aicr.WithValidationNoCluster(true))
 	if err != nil {
 		t.Fatalf("ValidateState on loaded recipe: %v", err)
@@ -1028,7 +1028,12 @@ func TestLoadRecipe_HydratesAndOwns(t *testing.T) {
 // k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
 // reading satisfies the readiness constraints carried by the embedded
 // h100-eks-training chain (the strictest is ">= 1.32.4").
-func k8sVersionSnapshot(version string) *aicr.Snapshot {
+func k8sVersionSnapshot() *aicr.Snapshot {
+	// v1.33.0 clears the strictest readiness constraint on the
+	// h100-eks-training chain (">= 1.32.4"). All current callers want a
+	// satisfying version, so it is a fixed constant here rather than a
+	// parameter (unparam would flag a param that never varies).
+	const version = "v1.33.0"
 	return &aicr.Snapshot{
 		Measurements: []*measurement.Measurement{
 			measurement.NewMeasurement(measurement.TypeK8s).
@@ -1105,7 +1110,7 @@ func TestValidateState_PhaseSelection(t *testing.T) {
 			}
 
 			phases, err := client.ValidateState(t.Context(), result,
-				k8sVersionSnapshot("v1.33.0"), opts...)
+				k8sVersionSnapshot(), opts...)
 			if err != nil {
 				t.Fatalf("ValidateState: %v", err)
 			}
@@ -1123,5 +1128,110 @@ func TestValidateState_PhaseSelection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestValidateState_RejectsInvalidPhase proves an unrecognized phase value
+// passed via WithValidationPhases is rejected with ErrCodeInvalidRequest
+// before any cluster work — a typed Phase typo must not silently degrade to
+// an empty/skipped run. Run in no-cluster mode so the only thing under test
+// is the phase guard.
+func TestValidateState_RejectsInvalidPhase(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		phases []aicr.Phase
+	}{
+		{name: "typo", phases: []aicr.Phase{aicr.Phase("deploymnt")}},
+		{name: "empty string", phases: []aicr.Phase{aicr.Phase("")}},
+		{name: "wildcard not accepted by facade", phases: []aicr.Phase{aicr.Phase("all")}},
+		{name: "valid then invalid", phases: []aicr.Phase{aicr.PhaseDeployment, aicr.Phase("bogus")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, result := loadTestRecipe(t)
+
+			_, err := client.ValidateState(t.Context(), result,
+				k8sVersionSnapshot(),
+				aicr.WithValidationNoCluster(true),
+				aicr.WithValidationPhases(tt.phases...))
+			if err == nil {
+				t.Fatal("expected error for invalid phase, got nil")
+			}
+			var se *aicrerrors.StructuredError
+			if !errors.As(err, &se) || se.Code != aicrerrors.ErrCodeInvalidRequest {
+				t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+			}
+		})
+	}
+}
+
+// TestRecipeResult_Resolved proves Resolved() exposes the full underlying
+// recipe.RecipeResult after LoadRecipe — including the resolution
+// constraints and validation config the lossy facade shape omits — so
+// internal consumers (phase warnings, evidence emission) can reach them.
+func TestRecipeResult_Resolved(t *testing.T) {
+	t.Parallel()
+
+	_, result := loadTestRecipe(t)
+
+	resolved := result.Resolved()
+	if resolved == nil {
+		t.Fatal("Resolved() returned nil for a LoadRecipe result")
+	}
+	// The full recipe carries Criteria (used to derive the facade Name)
+	// and at least one resolution constraint (the h100-eks-training chain
+	// pins K8s.server.version) — neither is on the facade RecipeResult.
+	if resolved.Criteria == nil {
+		t.Error("Resolved().Criteria = nil, want the hydrated criteria")
+	}
+	if len(resolved.Constraints) == 0 {
+		t.Error("Resolved().Constraints is empty, want the chain's resolution constraints")
+	}
+
+	// A RecipeResult NOT produced by the Client has a nil internal and
+	// Resolved() must return nil rather than panic.
+	var empty aicr.RecipeResult
+	if empty.Resolved() != nil {
+		t.Error("Resolved() on a zero-value RecipeResult = non-nil, want nil")
+	}
+}
+
+// TestValidateState_ImageAndCommitOptions proves the three new validate
+// options (commit + image registry/tag overrides) translate cleanly and a
+// no-cluster ValidateState run still succeeds with them set. The overrides
+// only influence emitted Job images (not exercised in no-cluster mode), so
+// the assertion is that the option plumbing doesn't break the run.
+func TestValidateState_ImageAndCommitOptions(t *testing.T) {
+	t.Parallel()
+
+	client, result := loadTestRecipe(t)
+
+	phases, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot(),
+		aicr.WithValidationNoCluster(true),
+		aicr.WithValidationCommit("abc1234"),
+		aicr.WithValidationImageRegistryOverride("localhost:5001"),
+		aicr.WithValidationImageTagOverride("dev"),
+	)
+	if err != nil {
+		t.Fatalf("ValidateState with image/commit options: %v", err)
+	}
+	if len(phases) == 0 {
+		t.Error("expected at least one phase result, got none")
+	}
+
+	// Empty-string overrides are the unset sentinel and must be accepted
+	// the same as omitting the option entirely.
+	if _, err := client.ValidateState(t.Context(), result, k8sVersionSnapshot(),
+		aicr.WithValidationNoCluster(true),
+		aicr.WithValidationCommit(""),
+		aicr.WithValidationImageRegistryOverride(""),
+		aicr.WithValidationImageTagOverride(""),
+	); err != nil {
+		t.Fatalf("ValidateState with empty overrides: %v", err)
 	}
 }

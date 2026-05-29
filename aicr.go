@@ -953,6 +953,25 @@ func (c *Client) ValidateState(
 	// A future renamed or added validator.With* is a one-line edit in
 	// validateOptionsFromConfig and zero edits on the facade surface.
 	cfg := buildValidateConfig(opts)
+	// Reject unknown phase values before any cluster work. The CLI --phase
+	// flag parses through validator.ParsePhase, but the facade's
+	// WithValidationPhases takes typed Phase values directly — so a caller
+	// typo like aicr.Phase("deploymnt") would otherwise reach ValidatePhases
+	// and surface as an empty/skipped result instead of an error. Fail
+	// closed with ErrCodeInvalidRequest.
+	if len(cfg.phases) > 0 {
+		valid := make([]string, len(validator.PhaseOrder))
+		for i, p := range validator.PhaseOrder {
+			valid[i] = string(p)
+		}
+		for _, p := range cfg.phases {
+			if _, ok := validator.ParsePhase(string(p)); !ok {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid validation phase %q (valid: %s)",
+						string(p), strings.Join(valid, ", ")))
+			}
+		}
+	}
 	valOpts := validateOptionsFromConfig(cfg)
 	// Thread the Client's provider so catalog.Load reads from this
 	// Client's recipe source (nil dp falls back to the package global

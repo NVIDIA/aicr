@@ -58,6 +58,17 @@ type validateConfig struct {
 	// same as nil (run all), because there is no meaningful "run zero
 	// phases" request: a caller wanting a subset names that subset.
 	phases []Phase
+
+	// commit, imageRegistryOverride, and imageTagOverride mirror the
+	// validator.WithCommit / WithImageRegistryOverride / WithImageTagOverride
+	// options. These are string values whose validator-side handling already
+	// treats empty as "unset" (commit only influences dev-image SHA
+	// resolution; the two overrides only apply when non-empty), so an empty
+	// string here is the natural "unset" sentinel — no pointer wrapper is
+	// needed to disambiguate it from a meaningful zero value.
+	commit                string
+	imageRegistryOverride string
+	imageTagOverride      string
 }
 
 // buildValidateConfig replays each WithValidation* option into a fresh
@@ -83,7 +94,7 @@ func buildValidateConfig(opts []ValidateOption) *validateConfig {
 // here and zero edits on the facade surface. phases is intentionally NOT
 // translated here — it is passed directly to ValidatePhases by the caller.
 func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
-	out := make([]validator.Option, 0, 7)
+	out := make([]validator.Option, 0, 10)
 	if cfg.namespace != nil {
 		out = append(out, validator.WithNamespace(*cfg.namespace))
 	}
@@ -104,6 +115,15 @@ func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
 	}
 	if cfg.nodeSelector != nil {
 		out = append(out, validator.WithNodeSelector(cfg.nodeSelector))
+	}
+	if cfg.commit != "" {
+		out = append(out, validator.WithCommit(cfg.commit))
+	}
+	if cfg.imageRegistryOverride != "" {
+		out = append(out, validator.WithImageRegistryOverride(cfg.imageRegistryOverride))
+	}
+	if cfg.imageTagOverride != "" {
+		out = append(out, validator.WithImageTagOverride(cfg.imageTagOverride))
 	}
 	return out
 }
@@ -185,7 +205,9 @@ func WithValidationNodeSelector(nodeSelector map[string]string) ValidateOption {
 // WithValidationPhases restricts the run to the named phases, in the
 // order given. Valid values are PhaseDeployment, PhasePerformance, and
 // PhaseConformance. When omitted (or called with no phases), all phases
-// run in their canonical order — the default behavior.
+// run in their canonical order — the default behavior. ValidateState
+// rejects any unrecognized phase value with ErrCodeInvalidRequest before
+// touching the cluster, so a typo cannot silently produce an empty run.
 //
 // The input is defensively copied so a caller mutating the slice after
 // this returns won't race with ValidateState reading it.
@@ -197,6 +219,31 @@ func WithValidationPhases(phases ...Phase) ValidateOption {
 		}
 		c.phases = append([]Phase(nil), phases...)
 	}
+}
+
+// WithValidationCommit sets the git commit SHA threaded into the
+// validator (validator.WithCommit). Used to resolve dev-build validator
+// images to SHA-tagged images. An empty string is the "unset" sentinel —
+// no validator option is emitted, matching the validator's own behavior
+// where an empty commit influences nothing.
+func WithValidationCommit(commit string) ValidateOption {
+	return func(c *validateConfig) { c.commit = commit }
+}
+
+// WithValidationImageRegistryOverride overrides the registry prefix on
+// validator container images (validator.WithImageRegistryOverride), e.g.
+// to point at a local registry mirror. Empty means "no override" — the
+// validator keeps its default registry.
+func WithValidationImageRegistryOverride(registry string) ValidateOption {
+	return func(c *validateConfig) { c.imageRegistryOverride = registry }
+}
+
+// WithValidationImageTagOverride overrides the tag on every validator
+// container image (validator.WithImageTagOverride), intended for
+// feature-branch dev builds whose commit SHA has no published image.
+// Empty means "no override" — the validator keeps its resolved tag.
+func WithValidationImageTagOverride(tag string) ValidateOption {
+	return func(c *validateConfig) { c.imageTagOverride = tag }
 }
 
 // cloneStringSlice returns a shallow copy of s, preserving the
