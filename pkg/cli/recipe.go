@@ -141,37 +141,38 @@ Override snapshot-detected criteria:
 				return err
 			}
 
-			if err = initDataProvider(cmd, cfg); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+			// Build a per-command Client bound to the resolved data source
+			// (--data / spec.recipe.data, else embedded). The Client owns its
+			// own DataProvider and per-provider criteria registry, replacing
+			// the old process-global data provider.
+			client, err := recipeClientFromCmd(cmd, cfg)
+			if err != nil {
+				return err
 			}
+			defer func() { _ = client.Close() }()
 
-			// Eagerly load the catalog so the criteria registry is
-			// populated before any ParseCriteria*Type call. The metadata
-			// store cache is otherwise lazy and the first call would not
-			// run until inside buildRecipeFromCmdWithConfig — after
-			// criteria validation, when the registry-based fallback
-			// can't help yet.
-			//
-			// PropagateOrWrap preserves the inner error code so YAML
-			// parse failures surface as ErrCodeInvalidRequest instead of
-			// being masked as ErrCodeInternal.
-			if err = recipe.LoadCatalog(ctx); err != nil {
-				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load recipe catalog")
+			// Eagerly load THIS Client's catalog so its criteria registry is
+			// seeded before any criteria parse. The metadata store cache is
+			// otherwise lazy and the first parse would run against an empty
+			// registry. LoadCatalog preserves the inner error code so YAML
+			// parse failures surface as ErrCodeInvalidRequest.
+			if err = client.LoadCatalog(ctx); err != nil {
+				return err
 			}
 
 			// Apply criteria-strict AFTER the catalog has loaded —
-			// LoadCatalog populated the registry from every overlay's
-			// spec.criteria; strict mode then hides external-origin
-			// entries from subsequent ParseCriteria*Type lookups.
+			// LoadCatalog seeded the Client's registry from every overlay's
+			// spec.criteria; strict mode then hides external-origin entries
+			// from subsequent registry lookups.
 			//
 			// Three sources can enable strict mode (logical OR):
 			//   1. --criteria-strict CLI flag
 			//   2. spec.recipe.criteriaStrict in --config
 			//   3. AICR_CRITERIA_STRICT env var (honored at registry init)
-			// AICR_CRITERIA_STRICT is read when DefaultRegistry() is first
+			// AICR_CRITERIA_STRICT is read when the registry is first
 			// constructed, so we only need to apply the flag + config here.
 			if cmd.Bool("criteria-strict") || cfg.Recipe().IsCriteriaStrict() {
-				recipe.DefaultRegistry().SetStrict(true)
+				client.CriteriaRegistry().SetStrict(true)
 			}
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
@@ -179,7 +180,7 @@ Override snapshot-detected criteria:
 				return err
 			}
 
-			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
+			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "error building recipe")
 			}
@@ -251,12 +252,14 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 // populates it. CLI flags subsequently override both via applyCriteriaOverrides,
 // yielding precedence: CLI > config > snapshot.
 //
-// Conversion (string→typed enum) happens in (*config.RecipeSpec).ResolveCriteria
-// — this function only handles the merge-and-log concern.
+// Conversion (string→typed enum) happens in
+// (*config.RecipeSpec).ResolveCriteriaWithRegistry against the per-provider
+// registry threaded in by the caller — this function only handles the
+// merge-and-log concern.
 //
 // Override events are logged at INFO so the resolved value is auditable.
-func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig) error {
-	resolved, err := cfg.Recipe().ResolveCriteria()
+func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry) error {
+	resolved, err := cfg.Recipe().ResolveCriteriaWithRegistry(reg)
 	if err != nil {
 		return err
 	}
@@ -302,49 +305,53 @@ func logCriteriaOverride(field, prior, override string) {
 }
 
 // mergeCriteriaFromCmdAndConfig builds a Criteria starting from spec.recipe.criteria
-// (when cfg is non-nil) and overlays CLI flag values on top.
-func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig) (*recipe.Criteria, error) {
+// (when cfg is non-nil) and overlays CLI flag values on top. Every enum value
+// — config-sourced and flag-sourced alike — is resolved against the supplied
+// per-provider registry so a `--data` overlay's non-OSS values validate.
+func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
 	criteria := recipe.NewCriteria()
-	if err := applyCriteriaFromConfig(criteria, cfg); err != nil {
+	if err := applyCriteriaFromConfig(criteria, cfg, reg); err != nil {
 		return nil, err
 	}
-	if err := applyCriteriaOverrides(cmd, criteria); err != nil {
+	if err := applyCriteriaOverrides(cmd, criteria, reg); err != nil {
 		return nil, err
 	}
 	return criteria, nil
 }
 
-// buildCriteriaFromCmd constructs a recipe.Criteria from CLI command flags.
-func buildCriteriaFromCmd(cmd *cli.Command) (*recipe.Criteria, error) {
-	var opts []recipe.CriteriaOption
+// buildCriteriaFromCmd constructs a recipe.Criteria from CLI command flags,
+// resolving each enum value against the supplied per-provider registry.
+func buildCriteriaFromCmd(cmd *cli.Command, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
+	var opts []recipe.RegistryCriteriaOption
 
 	if s := cmd.String("service"); s != "" {
-		opts = append(opts, recipe.WithCriteriaService(s))
+		opts = append(opts, recipe.WithServiceRegistry(s))
 	}
 	if s := cmd.String("accelerator"); s != "" {
-		opts = append(opts, recipe.WithCriteriaAccelerator(s))
+		opts = append(opts, recipe.WithAcceleratorRegistry(s))
 	}
 	if s := cmd.String("intent"); s != "" {
-		opts = append(opts, recipe.WithCriteriaIntent(s))
+		opts = append(opts, recipe.WithIntentRegistry(s))
 	}
 	if s := cmd.String("os"); s != "" {
-		opts = append(opts, recipe.WithCriteriaOS(s))
+		opts = append(opts, recipe.WithOSRegistry(s))
 	}
 	if s := cmd.String("platform"); s != "" {
-		opts = append(opts, recipe.WithCriteriaPlatform(s))
+		opts = append(opts, recipe.WithPlatformRegistry(s))
 	}
 	if n := cmd.Int("nodes"); n > 0 {
-		opts = append(opts, recipe.WithCriteriaNodes(n))
+		opts = append(opts, recipe.WithNodesRegistry(n))
 	}
 
-	return recipe.BuildCriteria(opts...)
+	return recipe.BuildCriteriaWithRegistry(reg, opts...)
 }
 
-// applyCriteriaOverrides applies CLI flag overrides to criteria.
-// Logs a warning when a flag overrides a value detected from the snapshot.
-func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
+// applyCriteriaOverrides applies CLI flag overrides to criteria, resolving each
+// enum value against the supplied per-provider registry. Logs a warning when a
+// flag overrides a value detected from the snapshot.
+func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *recipe.CriteriaRegistry) error {
 	if s := cmd.String("service"); s != "" {
-		parsed, err := recipe.ParseCriteriaServiceType(s)
+		parsed, err := reg.ParseService(s)
 		if err != nil {
 			return err
 		}
@@ -357,7 +364,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
 		criteria.Service = parsed
 	}
 	if s := cmd.String("accelerator"); s != "" {
-		parsed, err := recipe.ParseCriteriaAcceleratorType(s)
+		parsed, err := reg.ParseAccelerator(s)
 		if err != nil {
 			return err
 		}
@@ -370,7 +377,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
 		criteria.Accelerator = parsed
 	}
 	if s := cmd.String("intent"); s != "" {
-		parsed, err := recipe.ParseCriteriaIntentType(s)
+		parsed, err := reg.ParseIntent(s)
 		if err != nil {
 			return err
 		}
@@ -383,7 +390,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
 		criteria.Intent = parsed
 	}
 	if s := cmd.String("os"); s != "" {
-		parsed, err := recipe.ParseCriteriaOSType(s)
+		parsed, err := reg.ParseOS(s)
 		if err != nil {
 			return err
 		}
@@ -396,7 +403,7 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
 		criteria.OS = parsed
 	}
 	if s := cmd.String("platform"); s != "" {
-		parsed, err := recipe.ParseCriteriaPlatformType(s)
+		parsed, err := reg.ParsePlatform(s)
 		if err != nil {
 			return err
 		}

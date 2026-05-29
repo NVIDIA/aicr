@@ -606,8 +606,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// spec.recipe.data). A filesystem source layers the external dir over
 	// the embedded data; an empty data dir uses the embedded data only. The
 	// Client owns its DataProvider — LoadRecipe and MakeBundle thread it
-	// through, replacing the old process-global installed by
-	// initDataProvider.
+	// through, replacing the old process-global data provider.
 	dataDir := cmd.String("data")
 	if dataDir == "" {
 		dataDir = cfg.Recipe().DataDir()

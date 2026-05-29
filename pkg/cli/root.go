@@ -26,10 +26,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/logging"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -362,41 +362,40 @@ func sanitizeCompletionArgs(args []string) []string {
 	return out
 }
 
-// initDataProvider initializes the data provider from the --data flag,
-// falling back to spec.recipe.data on the supplied AICRConfig when the flag
-// is not set. cfg may be nil; if so, only the flag is consulted.
+// recipeClientFromCmd constructs an aicr.Client bound to the command's
+// resolved recipe data source. The data directory is read from the --data
+// flag, falling back to spec.recipe.data on the supplied AICRConfig when the
+// flag is not set (cfg may be nil; only the flag is consulted then). A
+// non-empty data dir yields a FilesystemSource (the external dir layered over
+// the embedded data); an empty data dir yields the EmbeddedSource. The CLI
+// version is threaded through so resolved recipes carry it in
+// Metadata.Version.
 //
-// The data provider is a process-global. When neither input is set the
-// provider is reset to the embedded one so a long-lived process (or a
-// successive Run within tests) does not silently keep a layered provider
-// installed by a previous invocation.
-func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-
+// Instead of mutating a process-global DataProvider (the pre-Stage-4
+// pattern), each command now owns a per-command Client whose own
+// DataProvider backs recipe resolution and the per-provider criteria
+// registry. Callers MUST Close the returned Client (defer client.Close()).
+//
+// The "initializing external data provider" INFO log matches validate /
+// bundle / mirror so a `--data` invocation is auditable.
+func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client, error) {
 	dataDir := cmd.String("data")
 	if dataDir == "" {
 		dataDir = cfg.Recipe().DataDir()
 	}
-	if dataDir == "" {
-		// Reset to embedded so prior --data state does not leak across runs.
-		recipe.SetDataProvider(embedded) //nolint:staticcheck // tracked by #983 Stage 2
-		return nil
+	source := aicr.EmbeddedSource()
+	if dataDir != "" {
+		slog.Info("initializing external data provider", "directory", dataDir)
+		source = aicr.FilesystemSource(dataDir)
 	}
-
-	slog.Info("initializing external data provider", "directory", dataDir)
-
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-		ExternalDir:   dataDir,
-		AllowSymlinks: false,
-	})
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(source),
+		aicr.WithVersion(version),
+	)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize external data", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 	}
-
-	recipe.SetDataProvider(layered) //nolint:staticcheck // tracked by #983 Stage 2
-
-	slog.Info("external data provider initialized successfully", "directory", dataDir)
-	return nil
+	return client, nil
 }
 
 // loadCmdConfig reads --config from the command and returns a parsed

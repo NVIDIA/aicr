@@ -748,7 +748,7 @@ Run validation without failing on check errors (informational mode):
 			// else spec.recipe.data). A filesystem source layers the external
 			// dir over the embedded data; an empty data dir uses the embedded
 			// data only. The Client owns its DataProvider, replacing the old
-			// process-global installed by initDataProvider. dataProvider is the
+			// process-global data provider. dataProvider is the
 			// same provider, built once so it can also be threaded into evidence
 			// emission (so --data overlays resolve the validator catalog against
 			// the command's source rather than the package global).
