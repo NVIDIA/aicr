@@ -1,0 +1,186 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package runner contains the chainsaw-test evaluation machinery shared by the
+// chainsaw-gate controller and the standalone `gate` CLI. It owns:
+//
+//   - Evaluate: run all components of a bundle once, aggregate per-component results
+//   - RunComponent: a single chainsaw exec with a timeout (the historical core)
+//   - LoadBundleDir: read a directory of *.yaml files into a name -> content map
+//   - ComputeReadyState / ApplyDeadline: the pure stability-window and deadline
+//     state machine driving the aggregate Ready condition
+//
+// The package intentionally does not depend on any Kubernetes API types so it
+// stays usable from non-CRD contexts (CLI, local dev, ad-hoc scripts) and so
+// the chainsaw-gate controller can import it without pulling extra dependencies.
+package runner
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+)
+
+const (
+	// ResultPass / ResultFail / ResultUnknown are the possible per-component outcomes.
+	ResultPass    = "Pass"
+	ResultFail    = "Fail"
+	ResultUnknown = "Unknown"
+
+	maxMsgLen = 120
+)
+
+// Options holds the parameters that govern one or more evaluations.
+// Not every field applies in every context — the controller uses all five
+// (via its reconcile loop), the CLI ignores nothing.
+type Options struct {
+	// Namespace is the chainsaw --namespace flag value.
+	Namespace string
+
+	// Timeout is the per-component chainsaw exec timeout.
+	Timeout time.Duration
+
+	// PollInterval is the cadence at which the caller re-evaluates the bundle.
+	// The runner itself does not loop — callers do.
+	PollInterval time.Duration
+
+	// StabilityWindow is the continuous-pass duration required before the
+	// aggregate state flips to Ready.
+	StabilityWindow time.Duration
+
+	// MaxWait is the upper bound on how long the caller may keep waiting
+	// for the bundle to pass before giving up. 0 disables the ceiling.
+	MaxWait time.Duration
+}
+
+// ComponentResult is the outcome of running one component's chainsaw test once.
+type ComponentResult struct {
+	// Result is one of ResultPass, ResultFail, ResultUnknown.
+	Result string
+	// Message holds a truncated tail of stderr/stdout on failure. Empty on pass.
+	Message string
+}
+
+// EvalResult is the aggregate of running every component in a bundle once.
+type EvalResult struct {
+	// Components maps component name -> result. The name is the ConfigMap data
+	// key (or filename) with any ".yaml" suffix stripped.
+	Components map[string]ComponentResult
+	// AllPass is true iff every component returned ResultPass.
+	AllPass bool
+}
+
+// runComponentFn is exposed for tests to swap in a stub for chainsaw exec.
+// Production code should not assign to it.
+var runComponentFn = RunComponent
+
+// Evaluate runs each entry in bundle against the cluster once and returns the
+// aggregate. It writes each component's test YAML to a temp directory under
+// its own subdir and execs chainsaw against that subdir.
+//
+// bundle is a name -> chainsaw-test-YAML map (typically the data field of a
+// bundle ConfigMap, or the contents of a LoadBundleDir directory).
+func Evaluate(ctx context.Context, bundle map[string]string, opts Options) (EvalResult, error) {
+	tmpDir, err := os.MkdirTemp("", "chainsaw-gate-")
+	if err != nil {
+		return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "create temp dir", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	components := make(map[string]ComponentResult, len(bundle))
+	allPass := true
+
+	for key, testYAML := range bundle {
+		comp := strings.TrimSuffix(key, ".yaml")
+		compDir := filepath.Join(tmpDir, comp)
+		if mkErr := os.MkdirAll(compDir, 0o700); mkErr != nil {
+			return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "create component dir "+compDir, mkErr)
+		}
+		if wErr := os.WriteFile(filepath.Join(compDir, "chainsaw-test.yaml"), []byte(testYAML), 0o600); wErr != nil {
+			return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "write test file for "+comp, wErr)
+		}
+		res := runComponentFn(ctx, opts.Timeout, opts.Namespace, compDir)
+		components[comp] = res
+		if res.Result != ResultPass {
+			allPass = false
+		}
+	}
+
+	return EvalResult{Components: components, AllPass: allPass}, nil
+}
+
+// RunComponent execs `chainsaw test --no-color --namespace <ns> <compDir>` with
+// the given timeout. On failure, Message holds up to maxMsgLen trailing bytes
+// of combined stdout+stderr. On context timeout, Result is ResultUnknown.
+func RunComponent(ctx context.Context, timeout time.Duration, namespace, compDir string) ComponentResult {
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var buf bytes.Buffer
+	// G204: the command is a constant ("chainsaw"); namespace and compDir are
+	// operator-/runner-controlled inputs (a flag value and a temp dir), not
+	// attacker-reachable shell strings.
+	cmd := exec.CommandContext(tctx, "chainsaw", "test", "--no-color", "--namespace", namespace, compDir) //nolint:gosec // see comment above
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	if err := cmd.Run(); err != nil {
+		out := buf.String()
+		if len(out) > maxMsgLen {
+			out = "..." + out[len(out)-maxMsgLen:]
+		}
+		if tctx.Err() != nil {
+			return ComponentResult{Result: ResultUnknown, Message: "chainsaw timed out: " + out}
+		}
+		return ComponentResult{Result: ResultFail, Message: out}
+	}
+	return ComponentResult{Result: ResultPass}
+}
+
+// LoadBundleDir reads every *.yaml file in dir into a name -> content map.
+// The map key is the filename with the .yaml suffix stripped — matching the
+// convention used by bundle ConfigMaps (one data key per component).
+//
+// Subdirectories are ignored. Non-.yaml files are ignored. An empty directory
+// is not an error here; callers can decide whether that's invalid.
+func LoadBundleDir(dir string) (map[string]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeNotFound, "read bundle dir "+dir, err)
+	}
+	out := make(map[string]string)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".yaml") {
+			continue
+		}
+		// G304: name comes from ReadDir over the operator-supplied bundle dir
+		// (a ConfigMap mount), constrained to *.yaml entries in that dir.
+		data, rErr := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // see comment above
+		if rErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "read "+name, rErr)
+		}
+		out[name] = string(data)
+	}
+	return out, nil
+}
