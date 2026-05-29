@@ -38,8 +38,10 @@ var recipeCacheTTL = defaults.RecipeCacheTTL
 // Detail keys for structured error responses. These mirror the values the
 // pkg/recipe handlers emit so the facade-backed responses stay byte-identical.
 const (
-	keyError   = "error"
-	keyAllowed = "allowed"
+	keyError      = "error"
+	keyAllowed    = "allowed"
+	keyMethod     = "method"
+	keyLimitBytes = "limit_bytes"
 )
 
 // recipeHandler backs the /v1/recipe and /v1/query endpoints with an
@@ -102,7 +104,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 			)
 			server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
 				"Request body exceeds maximum allowed size", false, map[string]any{
-					"limit_bytes": defaults.MaxRecipePOSTBytes,
+					keyLimitBytes: defaults.MaxRecipePOSTBytes,
 				})
 			return
 		}
@@ -110,7 +112,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
-				"method":   r.Method,
+				keyMethod:  r.Method,
 				keyAllowed: []string{"GET", "POST"},
 			})
 		return
@@ -201,7 +203,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 				)
 				server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
 					"Request body exceeds maximum allowed size", false, map[string]any{
-						"limit_bytes": defaults.MaxRecipePOSTBytes,
+						keyLimitBytes: defaults.MaxRecipePOSTBytes,
 					})
 				return
 			}
@@ -226,7 +228,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
-				"method":   r.Method,
+				keyMethod:  r.Method,
 				keyAllowed: []string{"GET", "POST"},
 			})
 		return

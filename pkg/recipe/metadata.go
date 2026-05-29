@@ -429,6 +429,21 @@ func (r *RecipeResult) DataProvider() DataProvider {
 	return r.provider
 }
 
+// BindDataProvider sets the DataProvider on a RecipeResult so downstream
+// value/manifest/data-file reads route through dp rather than the package
+// global. It is the exported binder the aicr.Client facade uses to adopt a
+// RecipeResult decoded from an external source (e.g. a /v1/bundle POST body)
+// onto the Client's own provider — the in-process equivalent of the
+// rec.provider = dp binding loader.go performs for an already-hydrated file.
+// Nil-safe on the receiver. A nil dp leaves the result on the package-global
+// fallback (DataProvider() then returns nil), matching the pre-bind behavior.
+func (r *RecipeResult) BindDataProvider(dp DataProvider) {
+	if r == nil {
+		return
+	}
+	r.provider = dp
+}
+
 // Merge merges another RecipeMetadataSpec into this one.
 // The other spec takes precedence for conflicts.
 func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {

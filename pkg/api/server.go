@@ -23,7 +23,6 @@ import (
 	"syscall"
 
 	"github.com/NVIDIA/aicr"
-	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/logging"
 	"github.com/NVIDIA/aicr/pkg/server"
@@ -97,18 +96,15 @@ func Serve() error {
 	}()
 	h := newRecipeHandler(client, allowLists)
 
-	// Setup bundle handler
-	bb, err := bundler.New(
-		bundler.WithAllowLists(allowLists),
-	)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create bundler", err)
-	}
+	// Setup bundle handler backed by the same aicr.Client facade. server.go
+	// no longer constructs a bundler.Bundler (or a recipe.Builder) directly —
+	// the Client owns both, completing #1077 acceptance criterion #2.
+	bh := newBundleHandler(client, allowLists)
 
 	r := map[string]http.HandlerFunc{
 		"/v1/recipe": h.HandleRecipes,
 		"/v1/query":  h.HandleQuery,
-		"/v1/bundle": bb.HandleBundles,
+		"/v1/bundle": bh.HandleBundles,
 	}
 
 	// Create and run server

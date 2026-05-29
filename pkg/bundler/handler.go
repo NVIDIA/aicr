@@ -153,21 +153,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 
 	// Create a new bundler with configuration
 	bundler, err := New(
-		WithConfig(config.NewConfig(
-			config.WithValueOverridePaths(params.valueOverrides),
-			config.WithDynamicValuePaths(params.dynamicValues),
-			config.WithSystemNodeSelector(params.systemNodeSelector),
-			config.WithSystemNodeTolerations(params.systemNodeTolerations),
-			config.WithAcceleratedNodeSelector(params.acceleratedNodeSelector),
-			config.WithAcceleratedNodeTolerations(params.acceleratedNodeTolerations),
-			config.WithWorkloadGateTaint(params.workloadGateTaint),
-			config.WithWorkloadSelector(params.workloadSelector),
-			config.WithEstimatedNodeCount(params.estimatedNodeCount),
-			config.WithDeployer(params.deployer),
-			config.WithRepoURL(params.repoURL),
-			config.WithVendorCharts(params.vendorCharts),
-			config.WithAppName(params.appName),
-		)),
+		WithConfig(bundleConfigFromParams(params)),
 	)
 	if err != nil {
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
@@ -201,15 +187,57 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Stream zip response
-	if err := streamZipResponse(w, tempDir, output); err != nil {
+	if err := StreamZipResponse(w, tempDir, output); err != nil {
 		// Can't write error response if we've already started writing
 		logger.Error("failed to stream zip response", "error", err)
 		return
 	}
 }
 
-// streamZipResponse creates a zip archive from the output directory and streams it to the response.
-func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output) (retErr error) {
+// ParseBundleConfig parses the /v1/bundle query parameters from r and
+// returns the bundler *config.Config they describe. It is the exported
+// boundary the aicr.Client-backed REST handler (pkg/api) uses to build
+// the bundle config from a request without reimplementing the query-param
+// parsing or config-building that HandleBundles performs — keeping the
+// facade-backed /v1/bundle handler byte-identical to this one.
+//
+// The returned error carries an ErrCodeInvalidRequest structured code on a
+// bad parameter, suitable for server.WriteErrorFromErr.
+func ParseBundleConfig(r *http.Request) (*config.Config, error) {
+	params, err := parseQueryParams(r)
+	if err != nil {
+		return nil, err
+	}
+	return bundleConfigFromParams(params), nil
+}
+
+// bundleConfigFromParams builds the bundler config from already-parsed
+// query parameters. Extracted so HandleBundles and ParseBundleConfig
+// share one config-construction site (no drift between the two /v1/bundle
+// handlers).
+func bundleConfigFromParams(params *bundleParams) *config.Config {
+	return config.NewConfig(
+		config.WithValueOverridePaths(params.valueOverrides),
+		config.WithDynamicValuePaths(params.dynamicValues),
+		config.WithSystemNodeSelector(params.systemNodeSelector),
+		config.WithSystemNodeTolerations(params.systemNodeTolerations),
+		config.WithAcceleratedNodeSelector(params.acceleratedNodeSelector),
+		config.WithAcceleratedNodeTolerations(params.acceleratedNodeTolerations),
+		config.WithWorkloadGateTaint(params.workloadGateTaint),
+		config.WithWorkloadSelector(params.workloadSelector),
+		config.WithEstimatedNodeCount(params.estimatedNodeCount),
+		config.WithDeployer(params.deployer),
+		config.WithRepoURL(params.repoURL),
+		config.WithVendorCharts(params.vendorCharts),
+		config.WithAppName(params.appName),
+	)
+}
+
+// StreamZipResponse creates a zip archive from the output directory and
+// streams it to the response. Exported so the aicr.Client-backed REST
+// handler (pkg/api) emits the same zip stream — same headers, same entry
+// layout, same compression — as HandleBundles.
+func StreamZipResponse(w http.ResponseWriter, dir string, output *result.Output) (retErr error) {
 	// Set response headers before writing body
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"bundles.zip\"")

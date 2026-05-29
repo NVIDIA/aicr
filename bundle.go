@@ -71,6 +71,71 @@ type BundleOptions struct {
 	OutputDir string
 }
 
+// adoptRecipe wraps a raw, externally-supplied *Recipe (the full
+// pkg/recipe.RecipeResult, e.g. decoded from a /v1/bundle POST body) into a
+// Client-owned *RecipeResult ready for MakeBundle. It binds the Client's own
+// DataProvider onto the recipe so provider-scoped lookups (values files,
+// manifest files, external data files) resolve against the Client's recipe
+// source rather than the package global, and stamps the owner token so the
+// result passes MakeBundle's assertOwns check. This is the REST analog of
+// LoadRecipe: LoadRecipe reads from a path through the provider, adoptRecipe
+// takes an already-decoded RecipeResult and binds the same provider.
+//
+// Synchronization mirrors LoadRecipe: snapshot the per-Client provider under
+// the read lock so a concurrent Close can't race the read. Unlike the
+// resolve/load paths it does not register in the inflight WaitGroup — it does
+// no cache-using work itself (the subsequent MakeBundle call does, and
+// registers there).
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client, ctx, or recipe is nil, or when
+//     the Client has been Closed.
+func (c *Client) adoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult, error) {
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if recipe == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "nil Recipe")
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	c.mu.RUnlock()
+
+	// Bind this Client's provider so downstream reads route through the
+	// Client's recipe source, the same way LoadRecipe binds it for a
+	// file-loaded recipe.
+	recipe.BindDataProvider(dp)
+
+	result, err := loadedResultFromInternal(recipe)
+	if err != nil {
+		return nil, err
+	}
+	result.owner = c
+	return result, nil
+}
+
+// AdoptRecipe wraps a raw pkg/recipe.RecipeResult — typically decoded from an
+// external source such as a REST /v1/bundle POST body — into a Client-owned
+// *RecipeResult ready for MakeBundle. The returned RecipeResult is bound to
+// this Client's DataProvider and owner-stamped, so it passes MakeBundle's
+// ownership and provider-isolation checks exactly as a LoadRecipe result does.
+//
+// Use this when the caller already holds a fully-hydrated RecipeResult (not a
+// criteria request or a file path) and needs to bundle it through the facade.
+// In-process consumers that resolve via ResolveRecipe / LoadRecipe should use
+// those results directly; AdoptRecipe is for the decode-then-bundle boundary.
+func (c *Client) AdoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult, error) {
+	return c.adoptRecipe(ctx, recipe)
+}
+
 // MakeBundle generates the full deployer-mode bundle for a previously
 // resolved or loaded RecipeResult, writing the bundle files under
 // opts.OutputDir and returning a BundleArtifact summary. Unlike
