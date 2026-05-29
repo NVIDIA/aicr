@@ -28,6 +28,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -130,6 +131,76 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 }
 
+// TestGenerate_RemovesStaleUndeployScript verifies that regenerating a
+// bundle over an output directory that already contains a top-level
+// undeploy.sh from a pre-removal bundle deletes the stale file.
+// localformat.Write only prunes NNN-* folders; without the explicit removal
+// in Generate, an executable, unchecksummed undeploy.sh would survive
+// regeneration and contradict the new README's uninstall guidance.
+func TestGenerate_RemovesStaleUndeployScript(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	stalePath := filepath.Join(outputDir, "undeploy.sh")
+	if err := os.WriteFile(stalePath, []byte("#!/bin/bash\necho stale\n"), 0o755); err != nil {
+		t.Fatalf("seed stale undeploy.sh: %v", err)
+	}
+
+	g := &Generator{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{"cert-manager": {}, "gpu-operator": {}},
+		Version:         "v1.0.0",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale undeploy.sh to be removed, stat err = %v", err)
+	}
+}
+
+// TestGenerate_StaleUndeployRemovalErrorPropagates locks the stale-removal
+// error path: if os.Remove fails with anything other than ENOENT (e.g.,
+// the parent directory is not writable), Generate must surface the error
+// rather than silently overwrite the rest of the bundle. Skips on
+// platforms where revoking parent-dir write permission does not block
+// unlink (notably when the test runs as root).
+func TestGenerate_StaleUndeployRemovalErrorPropagates(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; chmod 0o500 will not block unlink")
+	}
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	stalePath := filepath.Join(outputDir, "undeploy.sh")
+	if err := os.WriteFile(stalePath, []byte("#!/bin/bash\n"), 0o755); err != nil {
+		t.Fatalf("seed stale undeploy.sh: %v", err)
+	}
+	// Drop write permission on the parent dir so os.Remove fails with
+	// EACCES rather than the ENOENT case Generate intentionally swallows.
+	if err := os.Chmod(outputDir, 0o500); err != nil {
+		t.Fatalf("chmod outputDir read-only: %v", err)
+	}
+	t.Cleanup(func() {
+		// Restore so t.TempDir's cleanup can recurse.
+		_ = os.Chmod(outputDir, 0o755)
+	})
+
+	g := &Generator{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{"cert-manager": {}, "gpu-operator": {}},
+		Version:         "v1.0.0",
+	}
+	_, err := g.Generate(ctx, outputDir)
+	if err == nil {
+		t.Fatal("expected Generate to fail when stale undeploy.sh cannot be removed")
+	}
+	if !strings.Contains(err.Error(), "failed to remove stale undeploy.sh") {
+		t.Errorf("expected error to mention stale undeploy.sh removal, got: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Deploy-script behavior tests
 // ---------------------------------------------------------------------------
@@ -194,53 +265,63 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 // Property tests (helpers and data-shape preservation)
 // ---------------------------------------------------------------------------
 
-func TestReverseComponents(t *testing.T) {
+// TestReverseReleases verifies that reverseReleases projects every emitted
+// localformat.Folder (including injected *-pre / *-post auxiliaries) into a
+// (release, namespace) pair in reverse-install order. The bundle README
+// uses this to enumerate every helm uninstall command — recipe-component
+// order alone misses the auxiliary folders the deploy.sh loop installs.
+func TestReverseReleases(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    []ComponentData
-		wantLen  int
-		wantName string
+		name string
+		in   []localformat.Folder
+		want []releaseRef
 	}{
 		{
-			name:    "empty",
-			input:   []ComponentData{},
-			wantLen: 0,
+			name: "empty",
+			in:   nil,
+			want: []releaseRef{},
 		},
 		{
-			name:     "single",
-			input:    []ComponentData{{Name: "a"}},
-			wantLen:  1,
-			wantName: "a",
-		},
-		{
-			name: "multiple",
-			input: []ComponentData{
-				{Name: "a"},
-				{Name: "b"},
-				{Name: "c"},
+			name: "single primary",
+			in: []localformat.Folder{
+				{Name: "cert-manager", Namespace: "cert-manager"},
 			},
-			wantLen:  3,
-			wantName: "c",
+			want: []releaseRef{
+				{Name: "cert-manager", Namespace: "cert-manager"},
+			},
+		},
+		{
+			name: "pre + primary + post",
+			in: []localformat.Folder{
+				{Name: "gpu-operator-pre", Namespace: "gpu-operator"},
+				{Name: "gpu-operator", Namespace: "gpu-operator"},
+				{Name: "gpu-operator-post", Namespace: "gpu-operator"},
+			},
+			want: []releaseRef{
+				{Name: "gpu-operator-post", Namespace: "gpu-operator"},
+				{Name: "gpu-operator", Namespace: "gpu-operator"},
+				{Name: "gpu-operator-pre", Namespace: "gpu-operator"},
+			},
+		},
+		{
+			name: "multi-component reversal",
+			in: []localformat.Folder{
+				{Name: "cert-manager", Namespace: "cert-manager"},
+				{Name: "gpu-operator", Namespace: "gpu-operator"},
+				{Name: "nvsentinel", Namespace: "nvsentinel"},
+			},
+			want: []releaseRef{
+				{Name: "nvsentinel", Namespace: "nvsentinel"},
+				{Name: "gpu-operator", Namespace: "gpu-operator"},
+				{Name: "cert-manager", Namespace: "cert-manager"},
+			},
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			original := make([]ComponentData, len(tt.input))
-			copy(original, tt.input)
-
-			result := reverseComponents(tt.input)
-
-			if len(result) != tt.wantLen {
-				t.Fatalf("len = %d, want %d", len(result), tt.wantLen)
-			}
-			if tt.wantLen > 0 && result[0].Name != tt.wantName {
-				t.Errorf("first element = %q, want %q", result[0].Name, tt.wantName)
-			}
-			for i, comp := range tt.input {
-				if comp.Name != original[i].Name {
-					t.Errorf("original[%d] mutated: got %q, want %q", i, comp.Name, original[i].Name)
-				}
+			got := reverseReleases(tt.in)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("reverseReleases() = %v, want %v", got, tt.want)
 			}
 		})
 	}

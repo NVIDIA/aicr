@@ -218,6 +218,7 @@ func writeLocalHelmFolder(
 		Dir:             dir,
 		Kind:            KindLocalHelm,
 		Name:            name,
+		Namespace:       c.Namespace,
 		Parent:          parent,
 		Files:           files,
 		CreateNamespace: effectiveCreateNamespace,

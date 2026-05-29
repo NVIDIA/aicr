@@ -1976,32 +1976,86 @@ the full flag reference.
 ##### argocd
 
 Delete the parent `Application` that owns the bundle's child Applications
-(app-of-apps). The `resources-finalizer.argocd.argoproj.io` finalizer that
-AICR sets on each Application causes ArgoCD to cascade the delete to
-every managed resource:
+(app-of-apps). AICR does **not** set the
+`resources-finalizer.argocd.argoproj.io` finalizer on generated
+Applications, so a plain `kubectl delete` removes only the Application CR
+and leaves the managed resources running. Use one of the cascade-aware
+flows instead:
 
 ```bash
+# Argo CD CLI — cascade is the default; foreground waits for resources
+argocd app delete <bundle-parent-app> --cascade=foreground
+```
+
+If you can only use `kubectl`, add the finalizer first so the controller
+performs the cascade for you:
+
+```bash
+kubectl -n argocd patch application <bundle-parent-app> --type=merge \
+  -p '{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}'
 kubectl -n argocd delete application <bundle-parent-app>
 ```
 
-The CRD and PVC notes above still apply — Argo follows Helm's
-non-destructive-by-default semantics for both.
+The CRD and PVC notes from the **helm** walkthrough above still apply:
+Argo CD does not run `helm uninstall` for Helm-templated children — it
+renders manifests with `helm template` and prunes the rendered resources
+directly — so CRDs declared under `crds/` and PVCs from StatefulSets are
+not deleted by the cascade. Remove them by hand if needed.
 
 See [ArgoCD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
-for finalizer behavior and selective deletion.
+for finalizer behavior, cascade modes, and selective deletion.
 
 ##### argocd-helm
 
-The ArgoCD application drives `helm uninstall` under the hood, so deletion
-follows the same path as plain ArgoCD:
+Same path as plain `argocd`: Argo CD uses Helm only to render charts into
+Kubernetes manifests (via `helm template`) and then manages those resources
+itself. Deleting the Application with cascade enabled prunes the resources
+Argo CD tracks; it does **not** run `helm uninstall`, and `helm ls` will
+not show the bundle's releases.
 
 ```bash
-kubectl -n argocd delete application <bundle-parent-app>
+argocd app delete <bundle-parent-app> --cascade=foreground
 ```
 
-The cascade is Helm-driven, so the same CRD/PVC preservation behavior
-applies. Manual cleanup of CRDs and PVCs follows the **helm** walkthrough
-above.
+The kubectl + finalizer-patch fallback from the **argocd** walkthrough
+applies here too, and CRD / PVC cleanup follows the **helm** notes above.
+
+See the [Argo CD Helm user guide](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/)
+and the [Argo CD FAQ entry on `helm ls`](https://argo-cd.readthedocs.io/en/stable/faq/#after-deploying-my-helm-application-with-argo-cd-i-cannot-see-it-with-helm-ls-and-other-helm-commands)
+for why Helm CLI tools don't see Argo-deployed releases.
+
+##### flux
+
+AICR's `flux` bundle emits one `HelmRelease` per component (plus the
+`HelmRepository` / `OCIRepository` source objects). Deleting each
+`HelmRelease` from the cluster triggers `helm-controller` to run
+`helm uninstall` for the underlying release, honoring the chart's
+`spec.uninstall` settings (`disableHooks`, `keepHistory`, etc.):
+
+```bash
+kubectl -n <namespace> delete helmrelease <release>
+```
+
+Delete the bundle's source objects (`HelmRepository` / `OCIRepository`)
+after the releases are gone. The CRD / PVC notes from the **helm**
+walkthrough above still apply — `helm-controller` follows the same
+non-destructive defaults.
+
+See the [Flux helm-controller uninstall reference](https://fluxcd.io/flux/components/helm/helmreleases/#uninstall-configuration)
+for `spec.uninstall` field semantics.
+
+##### helmfile
+
+AICR's `helmfile` bundle emits a single `helmfile.yaml` release graph.
+The upstream `helmfile` CLI handles teardown:
+
+```bash
+helmfile -f helmfile.yaml destroy
+```
+
+CRD / PVC cleanup follows the **helm** walkthrough above. See the
+[Helmfile `destroy` documentation](https://github.com/helmfile/helmfile/blob/main/docs/index.md)
+for flags and behavior.
 
 ---
 

@@ -80,11 +80,19 @@ bash install.sh
 
 ## Uninstall
 
-Bundles do not ship an `undeploy.sh`. Uninstall components in reverse
-deployment order using `helm uninstall` directly:
+Bundles do not ship an `undeploy.sh`. Uninstall releases in reverse
+deployment order using `helm uninstall` directly — one command per
+`NNN-<release>/` folder the deploy script installs, including any
+injected `*-pre` / `*-post` auxiliaries:
 
 ```bash
+helm uninstall gpu-operator-post -n privileged-gpu-operator
+```
+```bash
 helm uninstall gpu-operator -n privileged-gpu-operator
+```
+```bash
+helm uninstall gpu-operator-pre -n privileged-gpu-operator
 ```
 
 

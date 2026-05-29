@@ -80,11 +80,16 @@ bash install.sh
 
 ## Uninstall
 
-Bundles do not ship an `undeploy.sh`. Uninstall components in reverse
-deployment order using `helm uninstall` directly:
+Bundles do not ship an `undeploy.sh`. Uninstall releases in reverse
+deployment order using `helm uninstall` directly — one command per
+`NNN-<release>/` folder the deploy script installs, including any
+injected `*-pre` / `*-post` auxiliaries:
 
 ```bash
 helm uninstall foo -n privileged-foo
+```
+```bash
+helm uninstall foo-pre -n privileged-foo
 ```
 
 

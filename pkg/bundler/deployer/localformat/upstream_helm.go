@@ -93,11 +93,12 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 	}
 
 	return Folder{
-		Index:  idx,
-		Dir:    dir,
-		Kind:   KindUpstreamHelm,
-		Name:   c.Name,
-		Parent: c.Name,
+		Index:     idx,
+		Dir:       dir,
+		Kind:      KindUpstreamHelm,
+		Name:      c.Name,
+		Namespace: c.Namespace,
+		Parent:    c.Name,
 		Upstream: &Upstream{
 			Chart:   c.ChartName,
 			Repo:    c.Repository,

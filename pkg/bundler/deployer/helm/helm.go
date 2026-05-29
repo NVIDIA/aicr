@@ -17,9 +17,11 @@ package helm
 import (
 	"context"
 	_ "embed"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -131,6 +133,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"failed to create output directory", err)
 	}
 
+	// Remove any stale undeploy.sh left from a pre-removal bundle in the
+	// same output directory. localformat.Write only prunes NNN-* folders;
+	// without this an executable, unchecksummed undeploy.sh would survive
+	// regeneration and contradict the new README's uninstall guidance.
+	if err := os.Remove(filepath.Join(outputDir, "undeploy.sh")); err != nil && !stderrors.Is(err, os.ErrNotExist) {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to remove stale undeploy.sh", err)
+	}
+
 	// Build sorted component data list (validates component names)
 	components, err := g.buildComponentDataList()
 	if err != nil {
@@ -172,7 +183,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// Generate root README.md
-	readmePath, readmeSize, err := g.generateRootREADME(ctx, components, outputDir)
+	readmePath, readmeSize, err := g.generateRootREADME(ctx, components, writeResult.Folders, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to generate README.md", err)
@@ -296,7 +307,10 @@ func toLocalformatComponents(
 }
 
 // generateRootREADME creates the root README.md with deployment instructions.
-func (g *Generator) generateRootREADME(ctx context.Context, components []ComponentData, outputDir string) (string, int64, error) {
+// folders is the localformat.Write output in install order; the README's
+// uninstall block iterates it in reverse so every NNN-* release (including
+// injected *-pre / *-post folders) is enumerated.
+func (g *Generator) generateRootREADME(ctx context.Context, components []ComponentData, folders []localformat.Folder, outputDir string) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
@@ -320,12 +334,12 @@ func (g *Generator) generateRootREADME(ctx context.Context, components []Compone
 	}
 
 	data := readmeTemplateData{
-		RecipeVersion:      g.RecipeResult.Metadata.Version,
-		BundlerVersion:     g.Version,
-		Components:         components,
-		ComponentsReversed: reverseComponents(components),
-		Criteria:           criteriaLines,
-		Constraints:        g.RecipeResult.Constraints,
+		RecipeVersion:    g.RecipeResult.Metadata.Version,
+		BundlerVersion:   g.Version,
+		Components:       components,
+		ReleasesReversed: reverseReleases(folders),
+		Criteria:         criteriaLines,
+		Constraints:      g.RecipeResult.Constraints,
 	}
 
 	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, data, outputDir, "README.md")
@@ -362,25 +376,38 @@ func (g *Generator) generateDeployScript(ctx context.Context, components []Compo
 
 // readmeTemplateData is the template data for root README.md generation.
 type readmeTemplateData struct {
-	RecipeVersion      string
-	BundlerVersion     string
-	Components         []ComponentData
-	ComponentsReversed []ComponentData
-	Criteria           []string
-	Constraints        []recipe.Constraint
+	RecipeVersion    string
+	BundlerVersion   string
+	Components       []ComponentData
+	ReleasesReversed []releaseRef
+	Criteria         []string
+	Constraints      []recipe.Constraint
+}
+
+// releaseRef pairs a helm release name with its target namespace. The
+// README's uninstall block iterates these in reverse-install order so users
+// can run `helm uninstall <Name> -n <Namespace>` for every release the
+// bundle actually emits — including injected *-pre and *-post folders.
+type releaseRef struct {
+	Name      string
+	Namespace string
+}
+
+// reverseReleases projects localformat.Folder entries (in install order)
+// into releaseRef values in reverse-install order. Folder.Name is the helm
+// release name (component name, or "<name>-pre" / "<name>-post" for
+// injected auxiliary folders), and Folder.Namespace mirrors the parent
+// Component.Namespace.
+func reverseReleases(folders []localformat.Folder) []releaseRef {
+	out := make([]releaseRef, len(folders))
+	for i, f := range folders {
+		out[len(folders)-1-i] = releaseRef{Name: f.Name, Namespace: f.Namespace}
+	}
+	return out
 }
 
 // deployTemplateData is the template data for deploy.sh generation.
 type deployTemplateData struct {
 	BundlerVersion string
 	Components     []ComponentData
-}
-
-// reverseComponents returns a reversed copy of the component list (for uninstall order).
-func reverseComponents(components []ComponentData) []ComponentData {
-	reversed := make([]ComponentData, len(components))
-	for i, comp := range components {
-		reversed[len(components)-1-i] = comp
-	}
-	return reversed
 }
