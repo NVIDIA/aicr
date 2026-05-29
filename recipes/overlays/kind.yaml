@@ -36,6 +36,12 @@ spec:
     - name: gpu-operator
       type: Helm
       overrides:
+        # Lockstep with nvidia-dra-driver-gpu.nvidiaDriverRoot ("/") below.
+        # kind uses host-installed drivers, so the on-host driver root is /
+        # rather than the gpu-operator base default /run/nvidia/driver.
+        # Guarded by TestDriverRootLockstep (issue #1087).
+        hostPaths:
+          driverInstallDir: "/"
         driver:
           # Disable driver installation - use pre-installed host drivers
           enabled: false

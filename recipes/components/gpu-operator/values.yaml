@@ -18,6 +18,15 @@
 # Override release name prefix to avoid aicr-stack- prefix in resource names
 fullnameOverride: gpu-operator
 
+# Set explicitly so the lockstep guarded by TestDriverRootLockstep (issue
+# #1087) is verifiable. nvidia-dra-driver-gpu's base values.yaml pins
+# nvidiaDriverRoot to the same path; the two must stay in lockstep or
+# DRA fails CDI spec generation. Overlays that override the host driver
+# location (e.g. gke-cos at /home/kubernetes/bin/nvidia, kind at /) MUST
+# override this field too so the test catches divergence.
+hostPaths:
+  driverInstallDir: /run/nvidia/driver
+
 operator:
   upgradeCRD: true
   resources:

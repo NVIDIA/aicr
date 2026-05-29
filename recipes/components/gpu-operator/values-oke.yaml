@@ -20,6 +20,14 @@
 # To use GPU Operator-managed drivers instead, provision GPU nodes without
 # the Oracle-managed GPU driver and set driver.enabled to true.
 
+# Lockstep with nvidia-dra-driver-gpu/values-oke.yaml, which sets
+# nvidiaDriverRoot: /. OKE bare-metal shapes pre-install drivers at the
+# host root, so both components must read from / rather than the
+# gpu-operator base default /run/nvidia/driver. Guarded by
+# TestDriverRootLockstep (issue #1087).
+hostPaths:
+  driverInstallDir: /
+
 cdi:
   enabled: true
   default: false
