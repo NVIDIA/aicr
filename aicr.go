@@ -252,6 +252,73 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// LoadCatalog eagerly loads (and caches) this Client's metadata store,
+// which has the side effect of seeding THIS Client's per-provider criteria
+// registry from every overlay's spec.criteria. Call it before parsing
+// criteria through CriteriaRegistry so values contributed by a
+// FilesystemSource --data overlay are admitted by the registry's lookups.
+//
+// This mirrors the pre-facade eager recipe.LoadCatalog the CLI ran after
+// SetDataProvider, but seeds the Client's OWN provider registry rather than
+// the process-global one — so two Clients built from different sources keep
+// isolated criteria registries.
+//
+// Errors propagate with their structured codes preserved (a malformed
+// overlay surfaces as ErrCodeInvalidRequest, not masked as ErrCodeInternal)
+// via PropagateOrWrap.
+//
+// The same guards as the resolve methods apply: nil receiver and nil context
+// are rejected with ErrCodeInvalidRequest, and a closed Client is rejected.
+func (c *Client) LoadCatalog(ctx context.Context) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+
+	// Snapshot the per-Client provider under the read lock so a concurrent
+	// Close can't race the read; Add to inflight under the lock so Close's
+	// drain observes the increment. Same protocol as ResolveRecipeFromCriteria.
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	if _, err := recipe.LoadMetadataStoreFor(ctx, dp); err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load recipe catalog")
+	}
+	return nil
+}
+
+// CriteriaRegistry returns the per-DataProvider criteria registry for THIS
+// Client. CLI/library callers use it to parse criteria values (so --data
+// overlay contributions validate) and to apply strict mode against the same
+// provider the Client resolves with. Call LoadCatalog first so the registry
+// is seeded from the provider's overlays before parsing.
+//
+// Returns the registry for this Client's provider via
+// recipe.GetCriteriaRegistryFor. On a nil or closed Client the underlying
+// provider snapshot is nil, which falls back to the package-global registry —
+// the same lenient behavior as the other accessors when a Client is unusable.
+func (c *Client) CriteriaRegistry() *CriteriaRegistry {
+	if c == nil {
+		return recipe.GetCriteriaRegistryFor(nil)
+	}
+	c.mu.RLock()
+	dp := c.dp
+	c.mu.RUnlock()
+	return recipe.GetCriteriaRegistryFor(dp)
+}
+
 // assertOwns rejects RecipeResults that were not produced by this Client.
 // The owner field is stamped in ResolveRecipe with the producing Client's
 // pointer identity; passing result A to client B silently mixed A's

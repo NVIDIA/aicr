@@ -74,6 +74,12 @@ type AllowLists = recipe.AllowLists
 // Criteria lets REST keep its exact existing HTTP->Criteria parser.
 type Criteria = recipe.Criteria
 
+// CriteriaRegistry is the per-DataProvider set of valid criteria values,
+// returned by Client.CriteriaRegistry so CLI/library callers parse and
+// validate criteria against the SAME provider the Client resolves with.
+// Transparent alias of recipe.CriteriaRegistry; wrapping is tracked by #1078.
+type CriteriaRegistry = recipe.CriteriaRegistry
+
 // Validation phases, re-exported as facade constants so consumers
 // don't need to import pkg/validator to filter by phase. Same
 // Public (evolving) tier as Phase above.

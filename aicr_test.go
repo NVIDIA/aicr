@@ -1427,3 +1427,148 @@ func TestValidateState_ImageAndCommitOptions(t *testing.T) {
 		t.Fatalf("ValidateState with empty overrides: %v", err)
 	}
 }
+
+// writeExternalCriterionData lays out a minimal --data directory that the
+// layered FilesystemSource provider can load: a registry.yaml (required) plus
+// an overlay declaring a non-OSS criteria value. Loading this provider's
+// catalog seeds that provider's criteria registry with the external value,
+// mirroring the e2e fixture in tests/chainsaw/cli/criteria-registry.
+func writeExternalCriterionData(t *testing.T, service string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
+		[]byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		t.Fatalf("setup: write registry.yaml: %v", err)
+	}
+	overlayDir := filepath.Join(dir, "overlays")
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		t.Fatalf("setup: mkdir overlays: %v", err)
+	}
+	overlay := "apiVersion: aicr.nvidia.com/v1alpha1\n" +
+		"kind: RecipeMetadata\n" +
+		"metadata:\n  name: " + service + "-h100-training\n" +
+		"spec:\n  base: base\n  criteria:\n" +
+		"    service: " + service + "\n    accelerator: h100\n    intent: training\n" +
+		"  componentRefs: []\n"
+	if err := os.WriteFile(filepath.Join(overlayDir, service+"-overlay.yaml"), []byte(overlay), 0o600); err != nil {
+		t.Fatalf("setup: write overlay: %v", err)
+	}
+	return dir
+}
+
+// TestClient_LoadCatalogSeedsCriteriaRegistry verifies that LoadCatalog seeds
+// THIS Client's per-provider criteria registry: embedded OSS values are always
+// present, and a FilesystemSource --data overlay declaring a non-OSS service
+// value becomes Has()-visible after LoadCatalog. A separate EmbeddedSource
+// client's registry must NOT see the external value — that is the per-provider
+// isolation guarantee Stage 4 relies on.
+func TestClient_LoadCatalogSeedsCriteriaRegistry(t *testing.T) {
+	t.Parallel()
+
+	const externalService = "ncp-internal-test"
+	dataDir := writeExternalCriterionData(t, externalService)
+
+	fsClient, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(dataDir)))
+	if err != nil {
+		t.Fatalf("NewClient(FilesystemSource): %v", err)
+	}
+	t.Cleanup(func() { _ = fsClient.Close() })
+
+	embClient, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient(EmbeddedSource): %v", err)
+	}
+	t.Cleanup(func() { _ = embClient.Close() })
+
+	if err := fsClient.LoadCatalog(t.Context()); err != nil {
+		t.Fatalf("fsClient.LoadCatalog: %v", err)
+	}
+	if err := embClient.LoadCatalog(t.Context()); err != nil {
+		t.Fatalf("embClient.LoadCatalog: %v", err)
+	}
+
+	fsReg := fsClient.CriteriaRegistry()
+	if fsReg == nil {
+		t.Fatal("fsClient.CriteriaRegistry() returned nil")
+	}
+	embReg := embClient.CriteriaRegistry()
+	if embReg == nil {
+		t.Fatal("embClient.CriteriaRegistry() returned nil")
+	}
+
+	// Embedded OSS criteria are seeded into both registries after LoadCatalog.
+	if !fsReg.Has(recipe.FieldService, "eks") {
+		t.Error("fsClient registry missing embedded OSS service 'eks'")
+	}
+	if !embReg.Has(recipe.FieldService, "eks") {
+		t.Error("embClient registry missing embedded OSS service 'eks'")
+	}
+
+	// The external --data overlay's novel service value is visible ONLY in the
+	// FilesystemSource client's registry — the EmbeddedSource client never
+	// walked that directory, so its registry is isolated.
+	if !fsReg.Has(recipe.FieldService, externalService) {
+		t.Errorf("fsClient registry missing external service %q after LoadCatalog", externalService)
+	}
+	if embReg.Has(recipe.FieldService, externalService) {
+		t.Errorf("embClient registry leaked external service %q (per-provider isolation broken)", externalService)
+	}
+}
+
+// TestClient_CriteriaRegistryStrictMode verifies that SetStrict applied to the
+// Client's own registry hides external-origin values while keeping embedded
+// OSS values — the per-Client equivalent of the --criteria-strict gate.
+func TestClient_CriteriaRegistryStrictMode(t *testing.T) {
+	t.Parallel()
+
+	const externalService = "ncp-strict-test"
+	dataDir := writeExternalCriterionData(t, externalService)
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(dataDir)))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	if err := client.LoadCatalog(t.Context()); err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+
+	reg := client.CriteriaRegistry()
+	if !reg.Has(recipe.FieldService, externalService) {
+		t.Fatalf("precondition: external service %q not seeded", externalService)
+	}
+
+	reg.SetStrict(true)
+	t.Cleanup(func() { reg.SetStrict(false) })
+
+	if reg.Has(recipe.FieldService, externalService) {
+		t.Errorf("strict mode must hide external service %q", externalService)
+	}
+	if !reg.Has(recipe.FieldService, "eks") {
+		t.Error("strict mode must still admit embedded OSS service 'eks'")
+	}
+}
+
+// TestClient_LoadCatalogGuards verifies the nil-context and closed-Client
+// rejections on LoadCatalog match the other Client methods.
+func TestClient_LoadCatalogGuards(t *testing.T) {
+	t.Parallel()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	//nolint:staticcheck // intentional nil-context guard test
+	if err := client.LoadCatalog(nil); err == nil {
+		t.Error("LoadCatalog(nil ctx) must be rejected")
+	}
+
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := client.LoadCatalog(t.Context()); err == nil {
+		t.Error("LoadCatalog on a closed Client must be rejected")
+	}
+}
