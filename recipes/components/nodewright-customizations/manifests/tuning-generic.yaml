@@ -12,13 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Nodewright GKE Container-Optimized OS (COS) GPU Customization
-# Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
+# Nodewright GPU customization that runs ONLY the nvidia-tuned "generic"
+# profile (no nvidia-setup).
 #
-# This customization configures GPU nodes on ContainerOptimized OS with:
-# - Sysctl kernel tuning parameters
-# NOTE: runtimeRequired is NOT used here because GKE COS is largely immutable and so
-# the optimizations that can be made are limited to those which are not disruptive.
+# Used by targets where the shared tuning.yaml does not apply: tuning.yaml also
+# renders nvidia-setup, which only ships baked-in (service, accelerator) configs
+# for eks-h100 / eks-gb200 and fails on any other combination — so it cannot be
+# used with accelerator=generic.
+#
+# nvidia-tuned's "generic" profile (nodewright-packages 0.2.4+) is
+# self-contained: safe baseline GPU tuning (governor=performance, iommu=pt, BBR,
+# modest sysctls) with NO InfiniBand/hugepage/ACS/CPU-isolation settings. That
+# baseline fits PCIe accelerators such as RTX PRO 6000 (no NVLink fabric, EFA
+# unused, platform-provisioned kernel) without the HGX/DGX assumptions the
+# h100/gb200 profiles bake in.
+#
+# Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
 {{- $cust := index .Values "nodewright-customizations" }}
 {{- if ne (toString (index $cust "enabled")) "false" }}
 ---
@@ -38,6 +47,7 @@ metadata:
   name: tuning
   namespace: {{ .Release.Namespace }}
 spec:
+  runtimeRequired: true
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
   autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
@@ -62,17 +72,25 @@ spec:
     matchLabels:
       {{- toYaml $cust.workloadSelector | nindent 6 }}
   {{- end }}
-  # Tuning
+  # Tuning: nvidia-tuned generic profile only (no nvidia-setup).
   packages:
-    tuning:
-      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke
-      version: "0.1.2"
-      containerSHA: sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81
+    nvidia-tuned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+      containerSHA: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      # Bootloader params in the generic profile (iommu=pt, init_on_alloc=0, ...)
+      # require a reboot to take effect.
       interrupt:
-        type: service
-        services:
-          - systemd-sysctl
+        type: reboot
+      env:
+        - name: INTERRUPT
+          value: "true"
       configMap:
+        {{- if $cust.intent }}
         intent: {{ $cust.intent }}
+        {{- end }}
         accelerator: {{ $cust.accelerator }}
+        {{- if $cust.service }}
+        service: {{ $cust.service }}
+        {{- end }}
 {{- end }}
