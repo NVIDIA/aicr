@@ -49,13 +49,14 @@ type Upstream struct {
 // Folder describes one written folder. Returned by Write so callers
 // (deployers) can generate orchestration files without re-classifying.
 type Folder struct {
-	Index    int    // 1-based; rendered as zero-padded 3-digit prefix in Dir
-	Dir      string // e.g. "001-nfd"
-	Kind     FolderKind
-	Name     string    // component name, or "<name>-post" for injected
-	Parent   string    // component this folder belongs to (== Name for primary)
-	Upstream *Upstream // set iff Kind == KindUpstreamHelm
-	Files    []string  // relative paths (to OutputDir) of files written in this folder
+	Index     int    // 1-based; rendered as zero-padded 3-digit prefix in Dir
+	Dir       string // e.g. "001-nfd"
+	Kind      FolderKind
+	Name      string    // helm release name: component name, or "<name>-pre" / "<name>-post" for injected
+	Namespace string    // target namespace for the helm release; matches Component.Namespace
+	Parent    string    // component this folder belongs to (== Name for primary)
+	Upstream  *Upstream // set iff Kind == KindUpstreamHelm
+	Files     []string  // relative paths (to OutputDir) of files written in this folder
 	// CreateNamespace is true when the orchestration layer should pass
 	// --create-namespace to helm for this folder's release, false when
 	// the folder's chart ships its own Namespace resource (the Talos

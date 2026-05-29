@@ -71,7 +71,7 @@
 //	  - kernel: kernel version (e.g., 6.8, 5.15.0)
 //	  - service: eks, gke, aks, oke, kind, lke, bcm, any (default: any)
 //	  - k8s: Kubernetes version (e.g., 1.33, 1.32)
-//	  - gpu: h100, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
+//	  - gpu: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
 //	  - intent: training, inference, any (default: any)
 //	  - context: true/false - include context metadata (default: false)
 //

@@ -24,6 +24,10 @@ func TestParseGPUSKU(t *testing.T) {
 	}{
 		{"H100 80GB HBM3", "NVIDIA H100 80GB HBM3", "h100"},
 		{"H100 PCIe", "NVIDIA H100 PCIe", "h100"},
+		{"H200 NVL", "NVIDIA H200 NVL", "h200"},
+		{"H200 141GB HBM3e", "NVIDIA H200 141GB HBM3e", "h200"},
+		{"GH200 not matched as h200", "NVIDIA GH200 480GB", ""},
+		{"GH200 Grace Hopper", "NVIDIA GH200", ""},
 		{"GB200 NVL72", "NVIDIA GB200", "gb200"},
 		{"GB200 wins over B200 substring", "NVIDIA GB200 NVL72", "gb200"},
 		{"B200", "NVIDIA B200", "b200"},

@@ -312,8 +312,8 @@ func TestWrite_PreFolderInstallOmitsCreateNamespace(t *testing.T) {
 // post, per the same conditions the main loop applies) instead of a
 // worst-case 3*len(Components) multiplier. Without this, a recipe of
 // 400 pure upstream-Helm components — which produce 400 directories —
-// would be rejected before any work happens. The deploy/undeploy
-// templates only glob three-digit prefixes, so the cap remains 999.
+// would be rejected before any work happens. The deploy.sh template
+// only globs three-digit prefixes, so the cap remains 999.
 func TestWrite_FolderLimit_CountsEmissionsNotComponents(t *testing.T) {
 	// Helper: build n primary-only upstream-Helm components.
 	makeComponents := func(n int) []localformat.Component {

@@ -280,6 +280,10 @@ type validationConfig struct {
 	// Input
 	phases []validator.Phase
 
+	// Kubeconfig path; propagated to ConfigMap reads/writes so a single
+	// validate invocation can target a non-default cluster end-to-end.
+	kubeconfig string
+
 	// Output
 	output    string
 	outFormat serializer.Format
@@ -402,8 +406,9 @@ func runValidation(
 	}
 	combined := ctrf.MergeReports("aicr", version, reports)
 
-	// Serialize combined report
-	ser, serErr := serializer.NewFileWriterOrStdout(cfg.outFormat, cfg.output)
+	// Serialize combined report; thread kubeconfig so ConfigMap writes
+	// target the same cluster used for snapshot/recipe reads.
+	ser, serErr := serializer.NewFileWriterOrStdoutWithKubeconfig(cfg.outFormat, cfg.output, cfg.kubeconfig)
 	if serErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", serErr)
 	}
@@ -835,6 +840,7 @@ Run validation without failing on check errors (informational mode):
 
 			return runValidation(ctx, client, dataProvider, rec, snap, validationConfig{
 				phases:                phases,
+				kubeconfig:            kubeconfig,
 				output:                cmd.String("output"),
 				outFormat:             serializer.FormatJSON,
 				failOnError:           failOnError,

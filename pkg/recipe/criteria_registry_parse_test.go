@@ -102,16 +102,16 @@ func TestParseCriteriaServiceType_StrictAcceptsEmbedded(t *testing.T) {
 
 func TestParseCriteriaAcceleratorType_RegistryFallback(t *testing.T) {
 	withRegistry(t, func() {
-		if _, err := ParseCriteriaAcceleratorType("h200"); err == nil {
+		if _, err := ParseCriteriaAcceleratorType("mi300x"); err == nil {
 			t.Fatal("expected error before registration")
 		}
-		DefaultRegistry().Register(FieldAccelerator, "h200", OriginExternal)
-		got, err := ParseCriteriaAcceleratorType("h200")
+		DefaultRegistry().Register(FieldAccelerator, "mi300x", OriginExternal)
+		got, err := ParseCriteriaAcceleratorType("mi300x")
 		if err != nil {
 			t.Fatalf("error = %v", err)
 		}
-		if got != CriteriaAcceleratorType("h200") {
-			t.Errorf("got = %q, want h200", got)
+		if got != CriteriaAcceleratorType("mi300x") {
+			t.Errorf("got = %q, want mi300x", got)
 		}
 	})
 }
@@ -181,7 +181,7 @@ func TestAllCriteriaServiceTypes_UnionWithRegistry(t *testing.T) {
 
 func TestAllCriteriaTypes_AllDimensions(t *testing.T) {
 	withRegistry(t, func() {
-		DefaultRegistry().Register(FieldAccelerator, "h200", OriginExternal)
+		DefaultRegistry().Register(FieldAccelerator, "mi300x", OriginExternal)
 		DefaultRegistry().Register(FieldIntent, "fine-tuning", OriginExternal)
 		DefaultRegistry().Register(FieldOS, "bottlerocket", OriginExternal)
 		DefaultRegistry().Register(FieldPlatform, "nvmesh", OriginExternal)
@@ -192,7 +192,7 @@ func TestAllCriteriaTypes_AllDimensions(t *testing.T) {
 				t.Errorf("AllCriteria%sTypes() missing %q; got %v", field, want, got)
 			}
 		}
-		assertContains("Accelerator", AllCriteriaAcceleratorTypes(), "h200")
+		assertContains("Accelerator", AllCriteriaAcceleratorTypes(), "mi300x")
 		assertContains("Intent", AllCriteriaIntentTypes(), "fine-tuning")
 		assertContains("OS", AllCriteriaOSTypes(), "bottlerocket")
 		assertContains("Platform", AllCriteriaPlatformTypes(), "nvmesh")
@@ -212,11 +212,11 @@ func TestMergeCriteriaTypes_NoMutationOfInput(t *testing.T) {
 func TestCriteriaValidate_AdmitsRegisteredValues(t *testing.T) {
 	withRegistry(t, func() {
 		DefaultRegistry().Register(FieldService, "ncp-customer-x", OriginExternal)
-		DefaultRegistry().Register(FieldAccelerator, "h200", OriginExternal)
+		DefaultRegistry().Register(FieldAccelerator, "mi300x", OriginExternal)
 
 		c := &Criteria{
 			Service:     "ncp-customer-x",
-			Accelerator: "h200",
+			Accelerator: "mi300x",
 			Intent:      CriteriaIntentTraining,
 			OS:          CriteriaOSUbuntu,
 		}

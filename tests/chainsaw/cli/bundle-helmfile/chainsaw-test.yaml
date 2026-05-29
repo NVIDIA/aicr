@@ -74,8 +74,6 @@ spec:
               # Artifacts from other deployers must NOT exist.
               ! test -f "${WORK}/basic/deploy.sh" \
                 || { echo "deploy.sh leaked into helmfile bundle" >&2; exit 1; }
-              ! test -f "${WORK}/basic/undeploy.sh" \
-                || { echo "undeploy.sh leaked into helmfile bundle" >&2; exit 1; }
               ! test -f "${WORK}/basic/app-of-apps.yaml" \
                 || { echo "argocd app-of-apps leaked" >&2; exit 1; }
               ! test -d "${WORK}/basic/sources" \

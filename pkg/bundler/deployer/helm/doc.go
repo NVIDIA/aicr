@@ -26,7 +26,6 @@
 //
 //   - README.md: Root deployment guide with ordered steps
 //   - deploy.sh: Automation script (0755)
-//   - undeploy.sh: Reverse-order uninstall script (0755)
 //   - checksums.txt: SHA256 digests for verification (optional)
 //
 // Usage:

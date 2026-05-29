@@ -315,7 +315,7 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 
 			c := &Criteria{
 				Service:     "ncp-x",
-				Accelerator: "h200",
+				Accelerator: "mi300x",
 				Intent:      "fine-tuning",
 				OS:          "bottlerocket",
 				Platform:    "nvmesh",
@@ -327,7 +327,7 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 				value string
 			}{
 				{FieldService, "ncp-x"},
-				{FieldAccelerator, "h200"},
+				{FieldAccelerator, "mi300x"},
 				{FieldIntent, "fine-tuning"},
 				{FieldOS, "bottlerocket"},
 				{FieldPlatform, "nvmesh"},

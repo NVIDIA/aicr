@@ -1,0 +1,115 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: b200-gke-cos-training
+
+spec:
+  # Inherits from gke-cos-training recipe (GKE COS + training settings)
+  base: gke-cos-training
+
+  criteria:
+    service: gke
+    accelerator: b200
+    os: cos
+    intent: training
+
+  # Specific constraints for B200 on GKE COS training workloads
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32"
+
+  componentRefs:
+    # B200-specific GPU Operator overrides. B200 has an x86 host (unlike
+    # GB200's Grace ARM host), so no kernel-module-params override and no
+    # NVreg_GrdmaPciTopoCheckOverride flag.
+    #
+    # Networking model on GKE A4: the production reference cluster
+    # (nvcf-dgxc-k8s-gcp-azne1-prd7) deploys no separate NCCL plugin
+    # installer (no gke-nccl-tcpxo, no GPUDirect-RDMA DaemonSet) — high-
+    # bandwidth multi-node NCCL is provided by GPU Operator with `gdrcopy`
+    # enabled, combined with GKE A4's native multi-NIC infrastructure
+    # managed by GCP. The `gke-nccl-tcpxo` component is intentionally
+    # omitted because its DaemonSets pin to `cloud.google.com/gke-
+    # accelerator: nvidia-h100-mega-80gb` (a3-megagpu / H100) and a
+    # different transport (TCPX), so they would not run on A4 nodes.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        cdi:
+          enabled: true
+        gdrcopy:
+          enabled: true
+
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-gke.yaml
+      overrides:
+        accelerator: b200
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # B200 support stabilized in gpu-operator v25.10. Matches the
+        # accelerator-wide floor in b200-any.yaml.
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
+    performance:
+      # Single-fabric NCCL on GKE A4 — no MNNVL / NVL72 IMEX domain on B200
+      # (that is a GB200 feature), so a single all-reduce constraint is
+      # sufficient. The floor is a conservative placeholder; A4 reaches
+      # high-bandwidth NCCL via GPU Operator's gdrcopy + GKE's native
+      # multi-NIC fabric rather than via a TCPX/RDMA installer DaemonSet,
+      # so the H100 GKE TCPXO baseline (>= 250 GB/s) is not the right
+      # anchor. Tighten once empirical numbers from the B200 GKE testbed
+      # (nvcf-dgxc-k8s-gcp-azne1-prd7) are captured.
+      checks:
+        - nccl-all-reduce-bw
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 100"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

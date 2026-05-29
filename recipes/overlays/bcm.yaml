@@ -58,10 +58,33 @@ spec:
 
     # Tolerate the BCM `master` label so control-plane workloads that
     # already tolerate `control-plane` schedule on BCM masters as well.
+    # Mirrored onto kubeletPlugin so DRA's kubelet plugin DaemonSet still
+    # schedules on small BCM deployments that combine control-plane and
+    # worker roles on the same node.
+    #
+    # Note: AICR's bundler defaults to appending a blanket {operator: Exists}
+    # to both controller.tolerations and kubeletPlugin.tolerations via the
+    # nodeScheduling paths in recipes/registry.yaml (defaults sourced from
+    # pkg/snapshotter/agent.go DefaultTolerations). The registry maps
+    # controller.tolerations to the `system` scheduling scope and
+    # kubeletPlugin.tolerations to the `accelerated` scope. The specific
+    # entries below are belt-and-suspenders in default mode — the blanket
+    # subsumes them — and only have effect when a user drops the blanket via
+    # --system-node-toleration (controller) or --accelerated-node-toleration
+    # (kubeletPlugin), in which case BCM clusters still need `master`
+    # tolerated explicitly.
     - name: nvidia-dra-driver-gpu
       type: Helm
       overrides:
         controller:
+          tolerations:
+            - effect: NoSchedule
+              key: node-role.kubernetes.io/master
+              operator: Exists
+            - effect: NoSchedule
+              key: node-role.kubernetes.io/control-plane
+              operator: Exists
+        kubeletPlugin:
           tolerations:
             - effect: NoSchedule
               key: node-role.kubernetes.io/master

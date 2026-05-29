@@ -290,7 +290,7 @@ func (v *Validator) runPhase(
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during dependencyAffinity pre-flight", ctx.Err())
 		default:
 		}
-		if _, err := v1.BuildOrchestratorAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
+		if err := v1.ValidateDependencyAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("dependencyAffinity pre-flight failed for validator %q", entry.Name))
 		}

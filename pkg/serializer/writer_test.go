@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -280,6 +281,65 @@ func TestNewFileWriterOrStdout_InvalidPath(t *testing.T) {
 	// Verify error message is helpful
 	if !strings.Contains(err.Error(), "failed to create output file") {
 		t.Errorf("Expected helpful error message, got: %v", err)
+	}
+}
+
+// TestNewFileWriterOrStdoutWithKubeconfig_ConfigMapPropagatesKubeconfig verifies
+// that the kubeconfig argument is threaded into the ConfigMapWriter so multi-
+// cluster reads and writes can target the same cluster. The Serializer interface
+// hides the writer type, so we round-trip through the package-internal field.
+func TestNewFileWriterOrStdoutWithKubeconfig_ConfigMapPropagatesKubeconfig(t *testing.T) {
+	const kubeconfigPath = "/tmp/custom-kubeconfig.yaml"
+
+	ser, err := NewFileWriterOrStdoutWithKubeconfig(FormatYAML, "cm://gpu-operator/aicr-snapshot", kubeconfigPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cmw, ok := ser.(*ConfigMapWriter)
+	if !ok {
+		t.Fatalf("expected *ConfigMapWriter, got %T", ser)
+	}
+	if cmw.kubeconfig != kubeconfigPath {
+		t.Errorf("kubeconfig = %q, want %q", cmw.kubeconfig, kubeconfigPath)
+	}
+	if cmw.namespace != "gpu-operator" || cmw.name != "aicr-snapshot" {
+		t.Errorf("ConfigMap target = %s/%s, want gpu-operator/aicr-snapshot", cmw.namespace, cmw.name)
+	}
+}
+
+// TestNewFileWriterOrStdout_ConfigMapDefaultKubeconfig verifies the backward-
+// compatible wrapper leaves kubeconfig empty (default discovery).
+func TestNewFileWriterOrStdout_ConfigMapDefaultKubeconfig(t *testing.T) {
+	ser, err := NewFileWriterOrStdout(FormatYAML, "cm://gpu-operator/aicr-snapshot")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cmw, ok := ser.(*ConfigMapWriter)
+	if !ok {
+		t.Fatalf("expected *ConfigMapWriter, got %T", ser)
+	}
+	if cmw.kubeconfig != "" {
+		t.Errorf("kubeconfig = %q, want empty (default discovery)", cmw.kubeconfig)
+	}
+}
+
+// TestNewFileWriterOrStdoutWithKubeconfig_FileIgnoresKubeconfig confirms file
+// destinations are unaffected by the kubeconfig argument.
+func TestNewFileWriterOrStdoutWithKubeconfig_FileIgnoresKubeconfig(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "out.json")
+	ser, err := NewFileWriterOrStdoutWithKubeconfig(FormatJSON, tmpFile, "/tmp/should-be-ignored")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if closer, ok := ser.(Closer); ok {
+		defer func() {
+			if closeErr := closer.Close(); closeErr != nil {
+				t.Errorf("close failed: %v", closeErr)
+			}
+		}()
+	}
+	if _, ok := ser.(*ConfigMapWriter); ok {
+		t.Fatal("file destination should not produce a ConfigMapWriter")
 	}
 }
 

@@ -50,10 +50,10 @@
 //
 // # Non-goals (per issue #632)
 //
-//   - No deploy.sh / undeploy.sh emitted alongside helmfile.yaml.
+//   - No deploy.sh emitted alongside helmfile.yaml.
 //   - No prepare:/presync:/postsync:/postuninstall: hooks emitted.
-//   - No replication of helm-deployer pre-flight or undeploy cleanup —
-//     `helmfile destroy` is the simple graceful-uninstall primitive.
+//   - No replication of helm-deployer pre-flight — `helmfile destroy`
+//     is the simple graceful-uninstall primitive.
 //
 // Cluster pre-flight, finalizer scrubbing, and scorched-earth cleanup are
 // operator-owned concerns; see #632 for the rationale.

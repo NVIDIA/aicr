@@ -77,7 +77,7 @@ aicr snapshot [flags]
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (cm://namespace/name), or stdout |
 | `--format` | | string | yaml | Output format: json, yaml, table |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) that populates `spec.snapshot.*`. CLI flags below always win over the corresponding config field. |
-| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env) |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env). Also used when `--output` is a ConfigMap URI so reads and writes target the same cluster. |
 | `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
@@ -379,7 +379,7 @@ Generate recipes using direct system parameters:
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke, bcm |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, b200, a100, l40, rtx-pro-6000 |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
@@ -428,7 +428,7 @@ Generate recipes from captured snapshots:
 | `--intent` | `-i` | string | Workload intent: training, inference |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | | string | Format: json, yaml (default: yaml) |
-| `--kubeconfig` | `-k` | string | Path to kubeconfig file (for ConfigMap URIs, overrides KUBECONFIG env) |
+| `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
 
 **Snapshot Sources:**
 - **File**: Local file path (`./snapshot.yaml`)
@@ -630,8 +630,8 @@ aicr validate [flags]
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
-| `--output` | `-o` | string | stdout | Output destination (file or stdout) |
-| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (for ConfigMap URIs) |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (used when `--recipe`, `--snapshot`, or `--output` is a ConfigMap URI) |
 | `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
@@ -1002,7 +1002,7 @@ aicr diff --baseline <path|cm://...> --target <path|cm://...> [flags]
 | `--fail-on-drift` | | bool | false | Exit with non-zero status (`ErrCodeConflict`) if any drift is detected. Useful for CI/CD gating. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. **Note:** ConfigMap destinations are rejected for `--format table` (a structured format is required for ConfigMap storage). |
 | `--format` | `-t` | string | yaml | Output format: `json`, `yaml`, or `table`. |
-| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig (used only when `--baseline` or `--target` is a ConfigMap URI). |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig (used when `--baseline`, `--target`, or `--output` is a ConfigMap URI). |
 
 **Inputs:**
 - File paths (`./baseline.yaml`, `/tmp/snap.json`)
@@ -1615,7 +1615,6 @@ If the recipe is pure-Helm (no manifest-only / mixed components), path-based chi
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
 ├── deploy.sh                      # Generic install loop + name-matched blocks
-├── undeploy.sh                    # Generic reverse loop
 ├── recipe.yaml                    # Recipe used to generate bundle
 ├── checksums.txt                  # SHA256 checksums
 ├── attestation/                   # Present when --attest is used
@@ -1880,7 +1879,7 @@ sha256sum -c checksums.txt
 chmod +x deploy.sh && ./deploy.sh
 ```
 
-> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each `NNN-<component>/` folder contains a rendered `install.sh` that runs the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
+> **Note:** `deploy.sh` is a convenience script — not the only deployment path. Each `NNN-<component>/` folder contains a rendered `install.sh` that runs the exact `helm upgrade --install` command for manual or pipeline-driven deployment. For teardown, bundles delegate to the deployer-native uninstall path (see [Bundle Uninstall](#bundle-uninstall) below).
 
 #### Deploy Script Behavior (`deploy.sh`)
 
@@ -1930,36 +1929,133 @@ aws ec2 reboot-instances --instance-ids <instance-id>
 kubectl uncordon <node-name>
 ```
 
-#### Undeploy Script Behavior (`undeploy.sh`)
+#### Bundle Uninstall
 
-The undeploy script removes components in reverse deployment order.
+AICR bundles do **not** ship a generated `undeploy.sh`. Teardown is delegated
+to the deployer-native uninstall path; AICR's role ends at design-time
+generation. Pick the walkthrough that matches the deployer used to generate
+your bundle.
 
-**Flags:**
+##### helm
 
-| Flag | Description |
-|------|-------------|
-| `--keep-namespaces` | Skip namespace deletion after component removal |
-| `--delete-pvcs` | Delete all PVCs in component namespaces (default: **off**) |
-| `--skip-preflight` | Skip pre-flight CRD/finalizer checks (use with caution) |
-| `--timeout SECONDS` | Helm uninstall timeout per component (default: 120) |
+Uninstall releases in **reverse** deployment order — the same order the
+generated `README.md` lists under `## Uninstall`:
 
-**PVC preservation (default):**
+```bash
+# For each NNN-<component>/ folder in descending order:
+helm uninstall <release> -n <namespace>
+```
 
-PVCs are **not deleted** by default. This preserves historical data (Prometheus metrics, Alertmanager state, etcd data) across redeploys. If an EBS-backed PV has an AZ mismatch after redeployment, the PVC will stay Pending with a clear error — the operator can then decide to delete it manually.
+Helm intentionally does not delete CRDs (charts that declare them under
+`crds/` are left in place) or PVCs (StatefulSet-managed volumes are
+preserved). Remove them only when you are sure no other release depends on
+them:
 
-Pass `--delete-pvcs` to delete all PVCs. Protected namespaces (`kube-system`, `kube-public`, `kube-node-lease`, `default`) are always excluded from PVC deletion to prevent accidental removal of non-bundle PVCs.
+```bash
+# CRDs — review first; deletion cascades to every custom resource cluster-wide
+kubectl get crd -o name | grep -E '<component-prefix>'
+kubectl delete crd <name>
 
-**Shared namespace ordering:**
+# PVCs in a single namespace
+kubectl -n <namespace> delete pvc --all
 
-When multiple components share a namespace (e.g., `monitoring` contains `kube-prometheus-stack`, `prometheus-adapter`, and `k8s-ephemeral-storage-metrics`), all components are uninstalled first, then PVC and namespace cleanup runs once. This prevents hangs caused by `kubernetes.io/pvc-protection` finalizers — if a StatefulSet owner is still running when PVC deletion is attempted, the delete blocks indefinitely.
+# Namespace
+kubectl delete namespace <namespace>
+```
 
-**Stuck release handling:**
+If a release is stuck in `pending-install` or `pending-upgrade` (interrupted
+deploy), retry with `--no-hooks`:
 
-If a Helm release is in a `pending-install` or `pending-upgrade` state (from an interrupted deploy), the script retries with `--no-hooks` to force removal.
+```bash
+helm uninstall <release> -n <namespace> --no-hooks
+```
 
-**Orphaned webhook cleanup:**
+See [Helm 3 uninstall docs](https://helm.sh/docs/helm/helm_uninstall/) for
+the full flag reference.
 
-After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
+##### argocd
+
+Delete the parent `Application` that owns the bundle's child Applications
+(app-of-apps). AICR does **not** set the
+`resources-finalizer.argocd.argoproj.io` finalizer on generated
+Applications, so a plain `kubectl delete` removes only the Application CR
+and leaves the managed resources running. Use one of the cascade-aware
+flows instead:
+
+```bash
+# Argo CD CLI — cascade is the default; foreground waits for resources
+argocd app delete <bundle-parent-app> --cascade --propagation-policy foreground
+```
+
+If you can only use `kubectl`, add the finalizer first so the controller
+performs the cascade for you:
+
+```bash
+kubectl -n argocd patch application <bundle-parent-app> --type=merge \
+  -p '{"metadata":{"finalizers":["resources-finalizer.argocd.argoproj.io"]}}'
+kubectl -n argocd delete application <bundle-parent-app>
+```
+
+The CRD and PVC notes from the **helm** walkthrough above still apply:
+Argo CD does not run `helm uninstall` for Helm-templated children — it
+renders manifests with `helm template` and prunes the rendered resources
+directly — so CRDs declared under `crds/` and PVCs from StatefulSets are
+not deleted by the cascade. Remove them by hand if needed.
+
+See [ArgoCD app deletion docs](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/)
+for finalizer behavior, cascade modes, and selective deletion.
+
+##### argocd-helm
+
+Same path as plain `argocd`: Argo CD uses Helm only to render charts into
+Kubernetes manifests (via `helm template`) and then manages those resources
+itself. Deleting the Application with cascade enabled prunes the resources
+Argo CD tracks; it does **not** run `helm uninstall`, and `helm ls` will
+not show the bundle's releases.
+
+```bash
+argocd app delete <bundle-parent-app> --cascade --propagation-policy foreground
+```
+
+The kubectl + finalizer-patch fallback from the **argocd** walkthrough
+applies here too, and CRD / PVC cleanup follows the **helm** notes above.
+
+See the [Argo CD Helm user guide](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/)
+and the [Argo CD FAQ entry on `helm ls`](https://argo-cd.readthedocs.io/en/stable/faq/#after-deploying-my-helm-application-with-argo-cd-i-cannot-see-it-with-helm-ls-and-other-helm-commands)
+for why Helm CLI tools don't see Argo-deployed releases.
+
+##### flux
+
+AICR's `flux` bundle emits one `HelmRelease` per component (plus the
+`HelmRepository` / `OCIRepository` source objects). Deleting each
+`HelmRelease` from the cluster triggers `helm-controller` to run
+`helm uninstall` for the underlying release, honoring the chart's
+`spec.uninstall` settings (`disableHooks`, `keepHistory`, etc.):
+
+```bash
+kubectl -n <namespace> delete helmrelease <release>
+```
+
+Delete the bundle's source objects (`HelmRepository` / `OCIRepository`)
+after the releases are gone. The CRD / PVC notes from the **helm**
+walkthrough above still apply — `helm-controller` follows the same
+non-destructive defaults.
+
+See the [Flux helm-controller uninstall reference](https://fluxcd.io/flux/components/helm/helmreleases/#uninstall-configuration)
+for `spec.uninstall` field semantics.
+
+##### helmfile
+
+AICR's `helmfile` bundle emits a single `helmfile.yaml` release graph.
+The upstream `helmfile` CLI handles teardown:
+
+```bash
+helmfile -f helmfile.yaml destroy
+```
+
+CRD / PVC cleanup follows the **helm** walkthrough above. See the
+[Helmfile `destroy` documentation](https://github.com/helmfile/helmfile/blob/main/docs/index.md)
+for flags and behavior.
 
 ---
 

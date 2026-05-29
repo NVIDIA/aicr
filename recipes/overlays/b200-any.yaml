@@ -15,17 +15,22 @@
 # Cross-cutting overlay applied via criteria-wildcard matching.
 #
 # This overlay is NOT referenced by any recipe via spec.base or spec.mixins.
-# The resolver picks it up for every B200+training query because its
-# `service: any` criterion wildcard-matches any service (EKS, OKE, etc.),
-# contributing the B200-wide NCCL bandwidth target without duplicating it
-# in each service-specific overlay.
+# The resolver picks it up for every B200 query (any service, any intent)
+# and contributes the B200-wide deployment-phase floor — the 4 standard
+# checks plus the gpu-operator version pin — without duplicating it in
+# every leaf.
+#
+# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
+# that declare their own `deployment:` block win. Concrete leaves that do
+# (e.g., b200-gke-cos-training) match the floor value here so the override
+# is a no-op today.
 #
 # See docs/contributor/data.md#criteria-wildcard-overlays for details.
 
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  name: b200-any-training
+  name: b200-any
 
 spec:
   base: base
@@ -33,12 +38,17 @@ spec:
   criteria:
     service: any
     accelerator: b200
-    intent: training
 
   validation:
-    performance:
+    deployment:
       checks:
-        - nccl-all-reduce-bw
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
       constraints:
-        - name: nccl-all-reduce-bw
-          value: ">= 350"
+        # B200 (datacenter Blackwell, x86 host) support stabilized in
+        # gpu-operator v25.10, matching the GB200 baseline. Concrete leaves
+        # can tighten if they pin to a later working version.
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"

@@ -350,9 +350,9 @@ func CachedStoreCountForTesting() int {
 }
 
 // CachedStoreContainsForTesting reports whether the metadata-store
-// cache has an entry for the supplied DataProvider. Unlike the count
-// helper, this is robust under parallel test execution: each test that
-// uses a distinct DataProvider can observe ONLY its own entry's
+// cache has an entry for the supplied DataProvider. Scoped per-provider
+// so it is robust under parallel test execution: each test that uses a
+// distinct DataProvider can observe ONLY its own entry's
 // presence/absence.
 //
 // Test-only by convention (the _ForTesting suffix); never call from

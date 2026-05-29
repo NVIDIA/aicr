@@ -131,6 +131,7 @@ type CriteriaAcceleratorType string
 const (
 	CriteriaAcceleratorAny        CriteriaAcceleratorType = "any"
 	CriteriaAcceleratorH100       CriteriaAcceleratorType = "h100"
+	CriteriaAcceleratorH200       CriteriaAcceleratorType = "h200"
 	CriteriaAcceleratorGB200      CriteriaAcceleratorType = "gb200"
 	CriteriaAcceleratorB200       CriteriaAcceleratorType = "b200"
 	CriteriaAcceleratorA100       CriteriaAcceleratorType = "a100"
@@ -154,6 +155,8 @@ func (reg *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType
 		return CriteriaAcceleratorAny, nil
 	case "h100":
 		return CriteriaAcceleratorH100, nil
+	case "h200":
+		return CriteriaAcceleratorH200, nil
 	case "gb200":
 		return CriteriaAcceleratorGB200, nil
 	case "b200":
@@ -176,7 +179,7 @@ func (reg *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaAcceleratorTypes.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "b200", "gb200", "h100", "l40", "rtx-pro-6000"}
+	return []string{"a100", "b200", "gb200", "h100", "h200", "l40", "rtx-pro-6000"}
 }
 
 // AllCriteriaAcceleratorTypes returns the union of the static OSS list and
@@ -418,7 +421,7 @@ type Criteria struct {
 	// Service is the Kubernetes service type (eks, gke, aks, oke, kind, lke, bcm).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, gb200, b200, a100, l40, rtx-pro-6000).
+	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, rtx-pro-6000).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).
@@ -427,7 +430,7 @@ type Criteria struct {
 	// OS is the worker node operating system type.
 	OS CriteriaOSType `json:"os,omitempty" yaml:"os,omitempty"`
 
-	// Platform is the platform/framework type (kubeflow).
+	// Platform is the platform/framework type (dynamo, kubeflow, nim, runai, slurm).
 	Platform CriteriaPlatformType `json:"platform,omitempty" yaml:"platform,omitempty"`
 
 	// Nodes is the number of worker nodes (0 means any/unspecified).

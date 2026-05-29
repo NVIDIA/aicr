@@ -80,18 +80,20 @@ bash install.sh
 
 ## Uninstall
 
-To remove components (reverse order):
-
-```bash
-./undeploy.sh
-```
-
-Or remove a single release manually:
+Bundles do not ship an `undeploy.sh`. Uninstall releases in reverse
+deployment order using `helm uninstall` directly — one command per
+`NNN-<release>/` folder the deploy script installs, including any
+injected `*-pre` / `*-post` auxiliaries:
 
 ```bash
 helm uninstall skyhook-customizations -n skyhook
 ```
 
+CRDs installed by these charts are intentionally not deleted by Helm; remove
+them only when you are sure no other release depends on them. See the
+[deployer-native uninstall walkthrough](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#bundle-uninstall) in the AICR CLI reference for details on
+PVC handling, namespace teardown, and the equivalent paths for ArgoCD and
+ArgoCD+Helm bundles.
 
 ## Troubleshooting
 

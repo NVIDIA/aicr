@@ -261,7 +261,7 @@ fi
 if [[ "${preflight_failed}" == "true" ]]; then
   echo ""
   echo "Pre-flight checks failed. Fix the issues above before deploying."
-  echo "To skip pre-flight checks, run: ./undeploy.sh first, then retry."
+  echo "To clean up partial state, run 'helm uninstall <release> -n <namespace>' for each affected component, then retry."
   exit 1
 fi
 

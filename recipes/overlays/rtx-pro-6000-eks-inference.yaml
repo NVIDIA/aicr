@@ -1,0 +1,88 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: rtx-pro-6000-eks-inference
+
+spec:
+  # Inherits from eks-inference recipe (EKS + inference settings).
+  # Targets the AWS g7e instance family (8x RTX PRO 6000 Blackwell Server
+  # Edition; internal codename B40). The deployment-phase floor (4 checks
+  # + Deployment.gpu-operator.version >= v25.10.0) is contributed by the
+  # rtx-pro-6000-any.yaml wildcard overlay via criteria-wildcard match.
+  base: eks-inference
+
+  criteria:
+    service: eks
+    accelerator: rtx-pro-6000
+    intent: inference
+
+  # Specific constraints for RTX PRO 6000 on EKS inference workloads
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  componentRefs:
+    # RTX PRO 6000 GPU Operator dependencies + node tuning.
+    # Node tuning uses the nodewright "generic" nvidia-tuned profile rather than
+    # the shared tuning.yaml: tuning.yaml also renders nvidia-setup, which only
+    # ships eks-h100/eks-gb200 configs and fails on any other target. The
+    # generic profile is safe baseline GPU tuning that omits the NVLink/
+    # InfiniBand/hugepage/CPU-isolation settings the h100/gb200 profiles carry —
+    # which don't apply to these PCIe RTX PRO 6000 nodes (no NVLink fabric).
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+
+    - name: nodewright-customizations
+      type: Helm
+      # tuning-generic.yaml runs only nvidia-tuned (generic profile); it omits
+      # the nvidia-setup packages, which only support eks-h100/eks-gb200 and
+      # would fail on accelerator=generic. nvidia-setup's kernel/EFA steps are
+      # also unneeded here: the platform provisions the kernel and EFA is unused.
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-generic.yaml
+      overrides:
+        service: eks
+        # No rtx-pro-6000 profile exists in nvidia-tuned (only h100/gb200/
+        # generic); generic is the supported baseline profile for this target.
+        accelerator: generic
+        intent: inference
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - inference-gateway
+        - pod-autoscaling
+        - cluster-autoscaling

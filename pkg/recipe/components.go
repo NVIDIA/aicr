@@ -283,8 +283,8 @@ func CachedRegistryCountForTesting() int {
 // CachedRegistryContainsForTesting reports whether the registry cache
 // has an entry for the supplied DataProvider. Pair with
 // CachedStoreContainsForTesting in pkg/recipe/metadata_store.go to
-// verify a single Client's caches are released without depending on
-// the global count.
+// verify a single Client's caches are released. Scoped per-provider so
+// it is robust under parallel test execution.
 //
 // Test-only by convention (the _ForTesting suffix); never call from
 // production code.

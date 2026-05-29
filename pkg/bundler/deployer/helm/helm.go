@@ -17,9 +17,11 @@ package helm
 import (
 	"context"
 	_ "embed"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,17 +38,14 @@ var readmeTemplate string
 //go:embed templates/deploy.sh.tmpl
 var deployScriptTemplate string
 
-//go:embed templates/undeploy.sh.tmpl
-var undeployScriptTemplate string
-
 // criteriaAny is the wildcard value for criteria fields.
 const criteriaAny = "any"
 
 // ComponentData contains data for rendering per-component template blocks.
 // The helm deployer no longer owns per-component folder content (localformat
 // does). ComponentData now carries only the fields needed by the orchestration
-// templates: README.md's component table and deploy.sh / undeploy.sh
-// name-matched special-case blocks.
+// templates: README.md's component table and deploy.sh's name-matched
+// special-case blocks.
 type ComponentData struct {
 	Name       string
 	Namespace  string
@@ -114,7 +113,9 @@ type Generator struct {
 // Generate creates a per-component Helm bundle from the configured generator fields.
 // Per-component folder content (Chart.yaml, values.yaml, install.sh, templates/*)
 // is delegated to pkg/bundler/deployer/localformat. The helm deployer owns only
-// the top-level orchestration: README.md, deploy.sh, undeploy.sh, and checksums.
+// the top-level orchestration: README.md, deploy.sh, and checksums. Bundle
+// teardown is delegated to the deployer-native uninstall path (helm uninstall);
+// see docs/user/cli-reference.md for the per-deployer walkthrough.
 func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 
@@ -130,6 +131,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to create output directory", err)
+	}
+
+	// Remove any stale undeploy.sh left from a pre-removal bundle in the
+	// same output directory. localformat.Write only prunes NNN-* folders;
+	// without this an executable, unchecksummed undeploy.sh would survive
+	// regeneration and contradict the new README's uninstall guidance.
+	if err := os.Remove(filepath.Join(outputDir, "undeploy.sh")); err != nil && !stderrors.Is(err, os.ErrNotExist) {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to remove stale undeploy.sh", err)
 	}
 
 	// Build sorted component data list (validates component names)
@@ -173,7 +183,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// Generate root README.md
-	readmePath, readmeSize, err := g.generateRootREADME(ctx, components, outputDir)
+	readmePath, readmeSize, err := g.generateRootREADME(ctx, components, writeResult.Folders, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to generate README.md", err)
@@ -189,15 +199,6 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	output.Files = append(output.Files, deployPath)
 	output.TotalSize += deploySize
-
-	// Generate undeploy.sh
-	undeployPath, undeploySize, err := g.generateUndeployScript(ctx, components, outputDir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate undeploy.sh", err)
-	}
-	output.Files = append(output.Files, undeployPath)
-	output.TotalSize += undeploySize
 
 	// Include external data files in the file list (for checksums)
 	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
@@ -306,7 +307,10 @@ func toLocalformatComponents(
 }
 
 // generateRootREADME creates the root README.md with deployment instructions.
-func (g *Generator) generateRootREADME(ctx context.Context, components []ComponentData, outputDir string) (string, int64, error) {
+// folders is the localformat.Write output in install order; the README's
+// uninstall block iterates it in reverse so every NNN-* release (including
+// injected *-pre / *-post folders) is enumerated.
+func (g *Generator) generateRootREADME(ctx context.Context, components []ComponentData, folders []localformat.Folder, outputDir string) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
@@ -330,12 +334,12 @@ func (g *Generator) generateRootREADME(ctx context.Context, components []Compone
 	}
 
 	data := readmeTemplateData{
-		RecipeVersion:      g.RecipeResult.Metadata.Version,
-		BundlerVersion:     g.Version,
-		Components:         components,
-		ComponentsReversed: reverseComponents(components),
-		Criteria:           criteriaLines,
-		Constraints:        g.RecipeResult.Constraints,
+		RecipeVersion:    g.RecipeResult.Metadata.Version,
+		BundlerVersion:   g.Version,
+		Components:       components,
+		ReleasesReversed: reverseReleases(folders),
+		Criteria:         criteriaLines,
+		Constraints:      g.RecipeResult.Constraints,
 	}
 
 	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, data, outputDir, "README.md")
@@ -370,75 +374,40 @@ func (g *Generator) generateDeployScript(ctx context.Context, components []Compo
 	return deployPath, deploySize, nil
 }
 
-// generateUndeployScript creates the undeploy.sh automation script.
-func (g *Generator) generateUndeployScript(ctx context.Context, components []ComponentData, outputDir string) (string, int64, error) {
-	if err := ctx.Err(); err != nil {
-		return "", 0, err
-	}
-
-	reversed := reverseComponents(components)
-	data := undeployTemplateData{
-		BundlerVersion:     g.Version,
-		ComponentsReversed: reversed,
-		Namespaces:         uniqueNamespaces(reversed),
-	}
-
-	undeployPath, undeploySize, err := deployer.GenerateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
-	if err != nil {
-		return "", 0, err
-	}
-
-	// Make executable
-	if err := os.Chmod(undeployPath, 0755); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to set undeploy.sh permissions", err)
-	}
-
-	return undeployPath, undeploySize, nil
-}
-
 // readmeTemplateData is the template data for root README.md generation.
 type readmeTemplateData struct {
-	RecipeVersion      string
-	BundlerVersion     string
-	Components         []ComponentData
-	ComponentsReversed []ComponentData
-	Criteria           []string
-	Constraints        []recipe.Constraint
+	RecipeVersion    string
+	BundlerVersion   string
+	Components       []ComponentData
+	ReleasesReversed []releaseRef
+	Criteria         []string
+	Constraints      []recipe.Constraint
+}
+
+// releaseRef pairs a helm release name with its target namespace. The
+// README's uninstall block iterates these in reverse-install order so users
+// can run `helm uninstall <Name> -n <Namespace>` for every release the
+// bundle actually emits — including injected *-pre and *-post folders.
+type releaseRef struct {
+	Name      string
+	Namespace string
+}
+
+// reverseReleases projects localformat.Folder entries (in install order)
+// into releaseRef values in reverse-install order. Folder.Name is the helm
+// release name (component name, or "<name>-pre" / "<name>-post" for
+// injected auxiliary folders), and Folder.Namespace mirrors the parent
+// Component.Namespace.
+func reverseReleases(folders []localformat.Folder) []releaseRef {
+	out := make([]releaseRef, len(folders))
+	for i, f := range folders {
+		out[len(folders)-1-i] = releaseRef{Name: f.Name, Namespace: f.Namespace}
+	}
+	return out
 }
 
 // deployTemplateData is the template data for deploy.sh generation.
 type deployTemplateData struct {
 	BundlerVersion string
 	Components     []ComponentData
-}
-
-// undeployTemplateData is the template data for undeploy.sh generation.
-type undeployTemplateData struct {
-	BundlerVersion     string
-	ComponentsReversed []ComponentData
-	Namespaces         []string // unique namespaces in reverse-deployment order
-}
-
-// reverseComponents returns a reversed copy of the component list (for uninstall order).
-func reverseComponents(components []ComponentData) []ComponentData {
-	reversed := make([]ComponentData, len(components))
-	for i, comp := range components {
-		reversed[len(components)-1-i] = comp
-	}
-	return reversed
-}
-
-// uniqueNamespaces returns deduplicated namespaces from all components,
-// preserving order. Every component in the uniform local-chart format is a
-// helm release with a namespace — no more per-kind filtering needed.
-func uniqueNamespaces(components []ComponentData) []string {
-	seen := make(map[string]bool)
-	var namespaces []string
-	for _, c := range components {
-		if c.Namespace != "" && !seen[c.Namespace] {
-			seen[c.Namespace] = true
-			namespaces = append(namespaces, c.Namespace)
-		}
-	}
-	return namespaces
 }

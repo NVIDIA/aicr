@@ -18,6 +18,8 @@ import (
 	"context"
 	stderrors "errors"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -922,5 +924,73 @@ func TestClient_CloseDrainsInflightResolve(t *testing.T) {
 	}
 	if recipe.CachedRegistryContainsForTesting(blockedDP) {
 		t.Error("registryCache leaked: blockedDP entry still present after Close (cache repopulated post-Close)")
+	}
+}
+
+// TestClient_NoCacheGrowthAcrossManyCloseCycles is the acceptance-
+// criterion test for the "memory does not grow when N clients are
+// created and released in a loop" requirement.
+//
+// Each NewClient call constructs a fresh LayeredDataProvider (unique
+// pointer identity), so the recipe package's sync.Map caches —
+// storeCache and registryCache, keyed by DataProvider — would
+// accumulate N entries if Close didn't evict them. After each
+// Close, the assertion is scoped to THAT iteration's DataProvider
+// (Contains, not Count), so concurrent sibling tests touching their
+// own DataProvider don't perturb the signal.
+//
+// The DataProvider is captured before Close because Close zeros
+// Client.dp (see Close in aicr.go).
+//
+// N is intentionally large (50) so a regression that leaks a single
+// entry per Close cycle fails on the very first iteration but
+// still exercises the eviction path under sustained load when
+// running with -race.
+//
+// Lives in the internal test package so it can read Client.dp; an
+// external test cannot.
+func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
+	const N = 50
+
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
+		[]byte("components: []\n"), 0o600); err != nil {
+		t.Fatalf("setup: write registry.yaml: %v", err)
+	}
+
+	for i := 0; i < N; i++ {
+		c, err := NewClient(WithRecipeSource(FilesystemSource(tmp)))
+		if err != nil {
+			t.Fatalf("iteration %d: NewClient: %v", i, err)
+		}
+
+		// ResolveRecipe forces both caches to populate for this
+		// Client's DataProvider. Without this, only registryCache
+		// would gain an entry (from buildDataProvider's construction
+		// path); storeCache wouldn't, and the test would miss the
+		// store-side leak.
+		result, err := c.ResolveRecipe(t.Context(), RecipeRequest{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		})
+		if err != nil {
+			t.Fatalf("iteration %d: ResolveRecipe: %v", i, err)
+		}
+		if result == nil {
+			t.Fatalf("iteration %d: ResolveRecipe returned nil result without error", i)
+		}
+
+		dp := c.dp // capture before Close zeros it
+		if err := c.Close(); err != nil {
+			t.Fatalf("iteration %d: Close: %v", i, err)
+		}
+
+		if recipe.CachedStoreContainsForTesting(dp) {
+			t.Errorf("iteration %d: storeCache not evicted after Close", i)
+		}
+		if recipe.CachedRegistryContainsForTesting(dp) {
+			t.Errorf("iteration %d: registryCache not evicted after Close", i)
+		}
 	}
 }

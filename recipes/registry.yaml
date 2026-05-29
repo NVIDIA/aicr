@@ -256,12 +256,11 @@ components:
     valueOverrideKeys:
       - nv-sentinel
     # nvsentinel's templates create monitoring.coreos.com/v1 PodMonitor
-    # CRs that prometheus-operator-crds must register first. Ordering
-    # is satisfied transitively in the DAG-stratified helmfile layout:
-    # nvsentinel depends on gpu-operator, which depends on
-    # kube-prometheus-stack, which depends on prometheus-operator-crds,
-    # so by the time nvsentinel's level diffs, the monitoring CRDs are
-    # already registered. Issue #914.
+    # CRs that prometheus-operator-crds must register first. nvsentinel
+    # declares prometheus-operator-crds as a direct dependencyRef in
+    # base.yaml so the DAG-stratified helmfile layout installs the
+    # monitoring CRDs first regardless of any refactor of intermediate
+    # nodes (gpu-operator, kube-prometheus-stack). Issues #914, #928.
     healthCheck:
       assertFile: checks/nvsentinel/health-check.yaml
     helm:

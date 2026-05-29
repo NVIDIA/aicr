@@ -80,6 +80,15 @@
 //	    log.Fatal(err)
 //	}
 //
+// Write to a ConfigMap with a non-default kubeconfig (multi-cluster):
+//
+//	w, err := serializer.NewFileWriterOrStdoutWithKubeconfig(
+//	    serializer.FormatYAML, "cm://gpu-operator/aicr-snapshot", "/custom/kubeconfig")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer w.Close()
+//
 // Write with explicit format:
 //
 //	w := serializer.NewWriter(serializer.FormatTable, output)
@@ -140,6 +149,7 @@
 //
 // Format detection is automatic when using:
 //   - NewFileWriterOrStdout(format, path)
+//   - NewFileWriterOrStdoutWithKubeconfig(format, path, kubeconfig)
 //   - newFileReaderAuto(path)
 //
 // # Table Format

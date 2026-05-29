@@ -26,10 +26,10 @@
 //
 //	type Criteria struct {
 //	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, any
-//	    Accelerator CriteriaAcceleratorType // h100, gb200, b200, a100, l40, rtx-pro-6000, any
+//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, talos, any
-//	    Platform    CriteriaPlatformType    // kubeflow, dynamo, nim, runai, slurm, any
+//	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
 //	    Nodes       int                     // node count (0 = any)
 //	}
 //
@@ -72,6 +72,7 @@
 //
 // Accelerator types for GPU selection:
 //   - CriteriaAcceleratorH100: NVIDIA H100
+//   - CriteriaAcceleratorH200: NVIDIA H200
 //   - CriteriaAcceleratorGB200: NVIDIA GB200
 //   - CriteriaAcceleratorB200: NVIDIA B200
 //   - CriteriaAcceleratorA100: NVIDIA A100
@@ -92,8 +93,8 @@
 //   - CriteriaOSAny: Any OS (wildcard)
 //
 // Platform types for workload frameworks:
-//   - CriteriaPlatformKubeflow: Kubeflow
 //   - CriteriaPlatformDynamo: NVIDIA Dynamo
+//   - CriteriaPlatformKubeflow: Kubeflow
 //   - CriteriaPlatformNIM: NVIDIA NIM
 //   - CriteriaPlatformRunai: NVIDIA Run:ai
 //   - CriteriaPlatformSlurm: SchedMD Slinky Slurm
@@ -176,7 +177,7 @@
 //
 // The HTTP handler accepts these query parameters for GET requests:
 //   - service: eks, gke, aks, oke, kind, lke, bcm, any (default: any)
-//   - accelerator: h100, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
+//   - accelerator: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, rhel, cos, amazonlinux, talos, any (default: any)

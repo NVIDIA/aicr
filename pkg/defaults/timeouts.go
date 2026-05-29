@@ -135,6 +135,13 @@ const (
 	// cleanup operations (e.g., chainsaw namespace deletion).
 	// Must exceed the default Kubernetes terminationGracePeriodSeconds (30s).
 	K8sPodTerminationWaitTimeout = 60 * time.Second
+
+	// PodAffinitySelectorLookupTimeout bounds the per-namespace List call
+	// the deployer makes to verify a dependencyAffinity selector matches at
+	// least one running pod. Short because the lookup is a best-effort
+	// diagnostic — a slow apiserver shouldn't delay Job deploy, and the
+	// scheduler itself will eventually surface any mismatch as Pending.
+	PodAffinitySelectorLookupTimeout = 5 * time.Second
 )
 
 // Local filesystem timeouts.

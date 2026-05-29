@@ -46,8 +46,10 @@ spec:
     {{- if $cust.acceleratedTolerations }}
     {{- toYaml $cust.acceleratedTolerations | nindent 4 }}
     {{- else }}
-    - key: dedicated
-      operator: Exists
+    # Tolerate-all default, matching ParseTolerations()/DefaultTolerations()
+    # (operator Exists, no key). Only reached if no acceleratedTolerations are
+    # injected from scheduling defaults/flags.
+    - operator: Exists
     {{- end }}
   # Dynamic: Supports --accelerated-node-selector CLI flag
   {{- if $cust.acceleratedNodeSelector }}

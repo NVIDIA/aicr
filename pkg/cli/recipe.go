@@ -100,7 +100,7 @@ func recipeCmd() *cli.Command {
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
 		Description: `Generate configuration recipe based on specified environment parameters including:
   - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke, bcm)
-  - Accelerator type (e.g. h100, gb200, b200, a100, l40, rtx-pro-6000)
+  - Accelerator type (e.g. h100, h200, gb200, b200, a100, l40, rtx-pro-6000)
   - Workload intent (e.g. training, inference)
   - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux, talos)
   - Number of GPU nodes in the cluster
@@ -180,6 +180,8 @@ Override snapshot-detected criteria:
 				return err
 			}
 
+			kubeconfig := cmd.String("kubeconfig")
+
 			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "error building recipe")
@@ -198,7 +200,7 @@ Override snapshot-detected criteria:
 			}
 
 			output := recipeOutputPath(cmd, cfg)
-			ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
+			ser, err := serializer.NewFileWriterOrStdoutWithKubeconfig(outFormat, output, kubeconfig)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
 			}
