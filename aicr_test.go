@@ -823,6 +823,9 @@ func TestResolveRecipeFromCriteriaRejectsOutOfAllowList(t *testing.T) {
 	if !errors.As(err, &se) {
 		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
 	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
 }
 
 // TestSelectFromRecipe proves the hydrate+select helper mirrors

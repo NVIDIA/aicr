@@ -191,7 +191,12 @@ type RecipeResult struct {
 // exposes only Name/Version/Components; callers that need constraints,
 // validation config, deployment order, or metadata (e.g. evidence emission)
 // use this. Returns nil if the result was not produced by the Client.
-func (r *RecipeResult) Resolved() *Recipe { return r.internal }
+func (r *RecipeResult) Resolved() *Recipe {
+	if r == nil {
+		return nil
+	}
+	return r.internal
+}
 
 // ComponentBundle is the resolved deployable artifact for one
 // recipe component. The slice returned by Client.BundleComponents

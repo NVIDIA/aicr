@@ -157,8 +157,8 @@ Client's own data provider and returns a Client-owned `*RecipeResult`
 ready for `ValidateState` / `BundleComponents` — it passes the same
 ownership check as a `ResolveRecipe` result. An already-hydrated
 `RecipeResult` file is returned with its provider bound to the Client.
-Pass a kubeconfig path as the third argument only when the path is a
-`cm://` ConfigMap URI.
+The kubeconfig argument (third parameter) is only needed when the recipe
+path (first argument) is a `cm://` ConfigMap URI.
 
 For unit tests that exercise the facade surface without a live
 cluster, pass `aicr.WithValidationNoCluster(true)`: every check
