@@ -1116,25 +1116,18 @@ func TestMergeValidationConfig(t *testing.T) {
 		}
 		base.Merge(&overlay)
 
+		// Assert the slice directly: order must be base entries first (with
+		// same-name values replaced by overlay), then overlay-only additions
+		// appended. A map-based assertion would hide order regressions and
+		// duplicate-name leaks.
 		got := base.Validation.Deployment.Constraints
-		byName := make(map[string]string, len(got))
-		for _, c := range got {
-			byName[c.Name] = c.Value
+		want := []Constraint{
+			{Name: "Deployment.gpu-operator.version", Value: ">= v25.10.1"},
+			{Name: "Deployment.operator.replicas", Value: ">= 1"},
+			{Name: "Deployment.driver.version", Value: ">= 570.0"},
 		}
-		if len(byName) != 3 {
-			t.Errorf("constraints len = %d, want 3 unique by name", len(byName))
-		}
-		if byName["Deployment.gpu-operator.version"] != ">= v25.10.1" {
-			t.Errorf("gpu-operator.version = %q, want overlay value >= v25.10.1",
-				byName["Deployment.gpu-operator.version"])
-		}
-		if byName["Deployment.operator.replicas"] != ">= 1" {
-			t.Errorf("operator.replicas = %q, want preserved base value >= 1",
-				byName["Deployment.operator.replicas"])
-		}
-		if byName["Deployment.driver.version"] != ">= 570.0" {
-			t.Errorf("driver.version = %q, want overlay-added value >= 570.0",
-				byName["Deployment.driver.version"])
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("constraints = %#v, want %#v", got, want)
 		}
 	})
 
@@ -1272,9 +1265,16 @@ func TestMergeValidationConfig(t *testing.T) {
 		overlay := RecipeMetadataSpec{Validation: source}
 		base.Merge(&overlay)
 
-		// Mutate the merged result — source must remain unchanged.
-		base.Validation.Deployment.Checks[0] = "mutated"
-		base.Validation.Deployment.Constraints[0].Value = "mutated"
+		// Under base-first union, base entries occupy index 0 and source
+		// entries are appended at index 1+. Mutate the source-derived index
+		// so a missing copy would observably leak back to source — mutating
+		// index 0 would only catch base aliasing, not source aliasing.
+		if len(base.Validation.Deployment.Checks) < 2 || len(base.Validation.Deployment.Constraints) < 2 {
+			t.Fatalf("unexpected merged sizes: checks=%d constraints=%d",
+				len(base.Validation.Deployment.Checks), len(base.Validation.Deployment.Constraints))
+		}
+		base.Validation.Deployment.Checks[1] = "mutated"
+		base.Validation.Deployment.Constraints[1].Value = "mutated"
 
 		if source.Deployment.Checks[0] != "operator-health" {
 			t.Errorf("source.Checks[0] = %q, want operator-health — union merge leaked to source",

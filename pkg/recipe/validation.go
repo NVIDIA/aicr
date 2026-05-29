@@ -151,7 +151,9 @@ func mergeValidationPhase(base, overlay *ValidationPhase) *ValidationPhase {
 				continue
 			}
 			seen[c.Name] = true
-			out.Constraints = append(out.Constraints, c)
+			// Use the resolved overlay winner so intra-overlay duplicates
+			// honor the same last-wins rule the base-override branch uses.
+			out.Constraints = append(out.Constraints, overlayByName[c.Name])
 		}
 	}
 
