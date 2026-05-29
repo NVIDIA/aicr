@@ -88,13 +88,14 @@ injected `*-pre` / `*-post` auxiliaries:
 ```bash
 helm uninstall gpu-operator-post -n privileged-gpu-operator
 ```
+
 ```bash
 helm uninstall gpu-operator -n privileged-gpu-operator
 ```
+
 ```bash
 helm uninstall gpu-operator-pre -n privileged-gpu-operator
 ```
-
 
 CRDs installed by these charts are intentionally not deleted by Helm; remove
 them only when you are sure no other release depends on them. See the

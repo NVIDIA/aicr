@@ -89,7 +89,6 @@ injected `*-pre` / `*-post` auxiliaries:
 helm uninstall skyhook-customizations -n skyhook
 ```
 
-
 CRDs installed by these charts are intentionally not deleted by Helm; remove
 them only when you are sure no other release depends on them. See the
 [deployer-native uninstall walkthrough](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#bundle-uninstall) in the AICR CLI reference for details on

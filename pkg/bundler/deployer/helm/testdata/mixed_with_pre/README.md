@@ -88,10 +88,10 @@ injected `*-pre` / `*-post` auxiliaries:
 ```bash
 helm uninstall foo -n privileged-foo
 ```
+
 ```bash
 helm uninstall foo-pre -n privileged-foo
 ```
-
 
 CRDs installed by these charts are intentionally not deleted by Helm; remove
 them only when you are sure no other release depends on them. See the

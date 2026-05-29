@@ -1984,7 +1984,7 @@ flows instead:
 
 ```bash
 # Argo CD CLI — cascade is the default; foreground waits for resources
-argocd app delete <bundle-parent-app> --cascade=foreground
+argocd app delete <bundle-parent-app> --cascade --propagation-policy foreground
 ```
 
 If you can only use `kubectl`, add the finalizer first so the controller
@@ -2014,7 +2014,7 @@ Argo CD tracks; it does **not** run `helm uninstall`, and `helm ls` will
 not show the bundle's releases.
 
 ```bash
-argocd app delete <bundle-parent-app> --cascade=foreground
+argocd app delete <bundle-parent-app> --cascade --propagation-policy foreground
 ```
 
 The kubectl + finalizer-patch fallback from the **argocd** walkthrough
