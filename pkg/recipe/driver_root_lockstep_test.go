@@ -16,21 +16,13 @@ package recipe
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"testing"
 )
 
-// driverRootLockstepStrictEnvVar promotes "lockstep unverifiable"
-// findings (one side explicitly set, the other unset and falling
-// through to the upstream chart default) from warnings to test
-// failures. Used by CI jobs that want the stronger contract.
-const driverRootLockstepStrictEnvVar = "AICR_DRIVER_ROOT_LOCKSTEP_STRICT"
-
-// TestDriverRootLockstep enforces that, for every leaf overlay that ships
-// both nvidia-dra-driver-gpu and gpu-operator, the resolved values of
+// TestDriverRootLockstep enforces that, for every overlay carrying both
+// nvidia-dra-driver-gpu and gpu-operator, the resolved values of
 // nvidia-dra-driver-gpu.nvidiaDriverRoot and
-// gpu-operator.hostPaths.driverInstallDir do not silently diverge.
+// gpu-operator.hostPaths.driverInstallDir are explicitly set and identical.
 //
 // Why this lockstep matters (see issue #1087):
 // The DRA kubelet plugin loads the NVIDIA driver userspace
@@ -44,19 +36,24 @@ const driverRootLockstepStrictEnvVar = "AICR_DRIVER_ROOT_LOCKSTEP_STRICT"
 // between the two fields, so an overlay editor can change one without
 // the other and CI won't notice — this test is the only guard.
 //
-// The test walks every leaf overlay (same discovery pattern used by
-// TestBothBuildPathsProduceIdenticalContent), resolves it through the
-// production builder, and inspects both resolved values:
+// **Discovery.** The test iterates every overlay with non-nil
+// Spec.Criteria. The earlier draft restricted to "leaf" overlays
+// (overlays not referenced as spec.base by any other overlay), but
+// production resolution is per-query: FindMatchingOverlays →
+// filterToMaximalLeaves drops an overlay only when a matching descendant
+// exists for that query. E.g., h100-gke-cos-training is a base for
+// -kubeflow/-slurm leaves (which require platform=kubeflow/slurm), so a
+// {h100, gke-cos, training} query without platform resolves to it
+// directly in production. The earlier filter would miss that.
 //
-//   - Both explicitly set and differ: HARD FAIL. This is the core
-//     drift case the issue is guarding against.
-//   - Exactly one explicitly set: warn-only by default; promoted to
-//     fail when AICR_DRIVER_ROOT_LOCKSTEP_STRICT=1. The other side
-//     falls through to the upstream chart default which this test
-//     cannot read, so the lockstep is unverifiable rather than
-//     definitively broken. The strict mode is for the eventual
-//     cleanup PR that makes every overlay explicit.
-//   - Both unset / both set and match: pass.
+// **Assertion.** Both resolved values must be explicitly set (non-empty
+// in the resolved Helm values map) AND identical. An empty value falls
+// through to the upstream chart's bundled default, which the test cannot
+// read — and per-component defaults differ (GPU Operator chart 26.3.1
+// defaults driverInstallDir to /run/nvidia/driver, but DRA chart 25.12.0
+// defaults nvidiaDriverRoot to /). Relying on chart defaults is itself
+// drift waiting to happen on the next chart bump, so the test treats
+// "not explicitly set on both" as a failure.
 func TestDriverRootLockstep(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
@@ -64,29 +61,13 @@ func TestDriverRootLockstep(t *testing.T) {
 		t.Fatalf("loadMetadataStore: %v", err)
 	}
 
-	strict := os.Getenv(driverRootLockstepStrictEnvVar) == "1"
-	t.Logf("strict mode (%s=1): %t", driverRootLockstepStrictEnvVar, strict)
-
-	// Discover leaf overlays: overlays not referenced as spec.base by any
-	// other overlay. Mirrors the discovery in
-	// TestBothBuildPathsProduceIdenticalContent.
-	referencedAsBases := make(map[string]bool, len(store.Overlays))
-	for _, overlay := range store.Overlays {
-		if overlay.Spec.Base != "" {
-			referencedAsBases[overlay.Spec.Base] = true
-		}
-	}
-
-	leafCount := 0
+	overlayCount := 0
 	checked := 0
 	for name, overlay := range store.Overlays {
-		if referencedAsBases[name] {
-			continue
-		}
 		if overlay.Spec.Criteria == nil {
 			continue
 		}
-		leafCount++
+		overlayCount++
 
 		t.Run(name, func(t *testing.T) {
 			result, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria)
@@ -118,10 +99,32 @@ func TestDriverRootLockstep(t *testing.T) {
 			draRoot, _ := draValues["nvidiaDriverRoot"].(string)
 			opInstallDir := stringAtPath(opValues, "hostPaths", "driverInstallDir")
 
-			// Hard fail (the core lockstep break): both sides are
-			// explicitly set, but they disagree. This is the silent-
-			// drift case the issue is guarding against.
-			if draRoot != "" && opInstallDir != "" && draRoot != opInstallDir {
+			switch {
+			case draRoot == "" && opInstallDir == "":
+				t.Errorf(
+					"overlay %q: both nvidia-dra-driver-gpu.nvidiaDriverRoot and gpu-operator.hostPaths.driverInstallDir are unset.\n"+
+						"  Both must be set explicitly to the same path. Chart defaults differ across components\n"+
+						"  (gpu-operator chart 26.3.1: /run/nvidia/driver; dra chart 25.12.0: /), so an unset value\n"+
+						"  is drift waiting to happen on the next chart bump.\n"+
+						"  See issue #1087.",
+					name)
+			case draRoot == "":
+				t.Errorf(
+					"overlay %q: nvidia-dra-driver-gpu.nvidiaDriverRoot is unset (chart default in effect)\n"+
+						"  but gpu-operator.hostPaths.driverInstallDir = %q.\n"+
+						"  Set nvidiaDriverRoot in the dra-driver values (or via the overlay's componentRefs.overrides)\n"+
+						"  to %q so the lockstep is verifiable.\n"+
+						"  See issue #1087.",
+					name, opInstallDir, opInstallDir)
+			case opInstallDir == "":
+				t.Errorf(
+					"overlay %q: gpu-operator.hostPaths.driverInstallDir is unset (chart default in effect)\n"+
+						"  but nvidia-dra-driver-gpu.nvidiaDriverRoot = %q.\n"+
+						"  Set hostPaths.driverInstallDir in the gpu-operator values (or via the overlay's componentRefs.overrides)\n"+
+						"  to %q so the lockstep is verifiable.\n"+
+						"  See issue #1087.",
+					name, draRoot, draRoot)
+			case draRoot != opInstallDir:
 				t.Errorf(
 					"overlay %q: driver path mismatch — these MUST be identical:\n"+
 						"  nvidia-dra-driver-gpu.nvidiaDriverRoot         = %q\n"+
@@ -131,43 +134,16 @@ func TestDriverRootLockstep(t *testing.T) {
 						"  Divergence breaks CDI spec generation and stalls DRA-allocated pods.\n"+
 						"  See issue #1087.",
 					name, draRoot, opInstallDir)
-				return
-			}
-
-			// Soft finding (warn by default, fail under strict mode):
-			// exactly one side is explicitly set. The unset side falls
-			// through to the upstream chart default, which this test
-			// cannot read — so the lockstep is unverifiable rather than
-			// definitively broken. Strict mode is for the eventual
-			// cleanup PR that makes every overlay's pair explicit.
-			report := func(msg string) {
-				if strict {
-					t.Error(msg)
-				} else {
-					t.Logf("UNVERIFIED LOCKSTEP: %s", msg)
-				}
-			}
-			switch {
-			case draRoot == "" && opInstallDir != "":
-				report(fmt.Sprintf(
-					"overlay %q: nvidia-dra-driver-gpu.nvidiaDriverRoot is unset (chart default in effect) but gpu-operator.hostPaths.driverInstallDir = %q. "+
-						"Set both explicitly so the lockstep is verifiable.",
-					name, opInstallDir))
-			case opInstallDir == "" && draRoot != "":
-				report(fmt.Sprintf(
-					"overlay %q: gpu-operator.hostPaths.driverInstallDir is unset (chart default in effect) but nvidia-dra-driver-gpu.nvidiaDriverRoot = %q. "+
-						"Set both explicitly so the lockstep is verifiable.",
-					name, draRoot))
 			}
 		})
 	}
 
-	if leafCount == 0 {
-		t.Fatal("no leaf overlays discovered — the lockstep check would be vacuous; " +
-			"verify the recipes/overlays/ directory and the leaf-discovery filter")
+	if overlayCount == 0 {
+		t.Fatal("no overlays with criteria discovered — the lockstep check would be vacuous; " +
+			"verify the recipes/overlays/ directory")
 	}
-	t.Logf("verified driver-root lockstep across %d leaf overlays (%d carried both components)",
-		leafCount, checked)
+	t.Logf("verified driver-root lockstep across %d overlays (%d carried both components)",
+		overlayCount, checked)
 }
 
 // TestStringAtPath covers the helper used to dig
