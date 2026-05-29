@@ -339,6 +339,20 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		"dynamic_components", len(dynamicValues),
 	)
 
+	// Readiness gate emission is wired only for the helm deployer's bash
+	// orchestration in Phase 1 (the path that runs each folder's install.sh
+	// with `helm upgrade --install --wait`, so the gate Job blocks the
+	// deploy). The Argo CD / Flux / helmfile deployers wrap each folder in
+	// sync-wave / HelmRelease / needs semantics that require dedicated
+	// gating wiring (Phase 2). Fail clearly rather than silently dropping the
+	// opt-in flag and shipping a bundle without the readiness gate the user
+	// asked for. See #904.
+	if b.Config.ReadinessHooks() && b.Config.Deployer() != config.DeployerHelm {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("--readiness-hooks is only supported with --deployer helm (got %q); readiness gate wiring for other deployers is not yet implemented",
+				b.Config.Deployer()))
+	}
+
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
 		// --repo is meaningful for --deployer argocd (baked into child
@@ -420,6 +434,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component post-manifests")
 		}
+		componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component readiness gates")
+		}
 		return &helm.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -427,6 +446,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			IncludeChecksums:       b.Config.IncludeChecksums(),
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
+			ComponentReadiness:     componentReadiness,
 			DataFiles:              dataFiles,
 			DynamicValues:          dynamicValues,
 			VendorCharts:           b.Config.VendorCharts(),

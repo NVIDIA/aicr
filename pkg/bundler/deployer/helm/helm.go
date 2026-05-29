@@ -88,6 +88,13 @@ type Generator struct {
 	// Populated from ComponentRef.ManifestFiles.
 	ComponentPostManifests map[string]map[string][]byte
 
+	// ComponentReadiness maps component name → manifest path → content for the
+	// per-component readiness gate chart emitted after each component's
+	// primary chart. Populated by the bundler from readiness.yaml when
+	// --readiness-hooks is set; empty otherwise. Forwarded to
+	// localformat.Options.ComponentReadiness. See #904.
+	ComponentReadiness map[string]map[string][]byte
+
 	// DataFiles lists additional file paths (relative to output dir) to include
 	// in checksum generation. Used for external data files copied into the bundle.
 	DataFiles []string
@@ -157,6 +164,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		Components:             lfComponents,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
+		ComponentReadiness:     g.ComponentReadiness,
 		VendorCharts:           g.VendorCharts,
 	})
 	if err != nil {
