@@ -55,7 +55,7 @@ import (
 )
 
 // Load catalog
-cat, err := catalog.Load("", "")
+cat, err := catalog.Load(nil, "", "")
 if err != nil {
     return err
 }
@@ -260,7 +260,7 @@ func RunValidation(
     }
 
     // 3. Load catalog and generate plans
-    cat, err := catalog.Load("", "")
+    cat, err := catalog.Load(nil, "", "")
     if err != nil {
         return err
     }

@@ -16,6 +16,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1112,6 +1113,68 @@ func TestCatalogEmbedding(t *testing.T) {
 	if strings.Contains(jsonStr, "metadata") {
 		t.Error("Embedded catalog should not contain metadata in JSON")
 	}
+}
+
+// fakeCatalogProvider is a recipe.DataProvider that serves a single,
+// distinct validators/catalog.yaml. It lets a test prove catalog.Load read
+// from the provider it was handed rather than the package global: the
+// embedded catalog has no validator by this name, so seeing it back is
+// proof the explicit provider's bytes were used.
+type fakeCatalogProvider struct {
+	catalogYAML []byte
+	reads       int
+}
+
+func (p *fakeCatalogProvider) ReadFile(path string) ([]byte, error) {
+	if path == "validators/catalog.yaml" {
+		p.reads++
+		return p.catalogYAML, nil
+	}
+	return nil, os.ErrNotExist
+}
+
+func (p *fakeCatalogProvider) WalkDir(string, fs.WalkDirFunc) error { return nil }
+
+func (p *fakeCatalogProvider) Source(path string) string { return "fake://" + path }
+
+// TestLoadHonorsExplicitProvider proves Load reads the catalog from the
+// DataProvider it is handed (not the package global) by serving a distinct
+// catalog whose marker validator does not exist in the embedded data.
+func TestLoadHonorsExplicitProvider(t *testing.T) {
+	const marker = "explicit-provider-marker"
+	dp := &fakeCatalogProvider{catalogYAML: []byte(`
+apiVersion: validator.nvidia.com/v1alpha1
+kind: ValidatorCatalog
+metadata:
+  name: fake-catalog
+  version: "9.9.9"
+validators:
+  - name: ` + marker + `
+    phase: deployment
+    description: "marker validator unique to the fake provider"
+    image: ghcr.io/nvidia/aicr-validators/marker:v9.9.9
+    timeout: 1m
+`)}
+
+	cat, err := Load(dp, "", "")
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if dp.reads == 0 {
+		t.Error("Load() did not call ReadFile on the explicit provider")
+	}
+	if len(cat.Validators) != 1 || cat.Validators[0].Name != marker {
+		t.Errorf("Load() returned %d validators (first = %q); want exactly the %q marker — "+
+			"catalog was not read from the explicit provider",
+			len(cat.Validators), firstValidatorName(cat), marker)
+	}
+}
+
+func firstValidatorName(cat *ValidatorCatalog) string {
+	if cat == nil || len(cat.Validators) == 0 {
+		return ""
+	}
+	return cat.Validators[0].Name
 }
 
 // TestLoadDataProvider verifies Load honors an explicit DataProvider and falls
