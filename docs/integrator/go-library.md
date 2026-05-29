@@ -144,8 +144,8 @@ AICR exposes one production recipe source today; pick it via
 | OCI registry | `aicr.OCISource(registry, tag)` | **Reserved — not yet implemented.** `NewClient` returns `ErrCodeUnavailable` when this source is selected. |
 
 `EmbeddedSource` resolves against the recipe data compiled into the
-AICR binary — no filesystem path required. Use it when you want the
-recipes AICR shipped with and no local overrides. `FilesystemSource`
+AICR binary — no filesystem path required. Use it when you want AICR's
+bundled recipe data and no local overrides. `FilesystemSource`
 layers an external directory over that same embedded data, so files in
 the directory override their embedded equivalents.
 
@@ -187,10 +187,13 @@ environment.
 ## Resolving from criteria
 
 `ResolveRecipe` takes the stable `RecipeRequest` shape and returns the
-lossy facade `RecipeResult`. When you already hold a
-`pkg/recipe.Criteria` value — for example, a REST handler that parsed
-criteria from an incoming HTTP request — use `ResolveRecipeFromCriteria`
-to resolve it losslessly into the full `Recipe`:
+facade `RecipeResult` — a deliberately small struct exposing the
+`Name`, `Version`, and `Components` of the resolved recipe. When you
+already hold a `pkg/recipe.Criteria` value — for example, a REST handler
+that parsed criteria from an incoming HTTP request — use
+`ResolveRecipeFromCriteria`, which returns the full `Recipe` (the
+complete underlying `pkg/recipe.RecipeResult`, including constraints,
+deployment order, and metadata that the facade `RecipeResult` omits):
 
 ```go
 rec, err := client.ResolveRecipeFromCriteria(ctx, criteria)
@@ -200,8 +203,14 @@ if err != nil {
 ```
 
 `Recipe` is a transparent alias of `pkg/recipe.RecipeResult` and carries
-the complete resolved recipe — component references, constraints,
-deployment order, and metadata. `Criteria` is a transparent alias of
+the complete resolved recipe, including:
+
+- component references
+- constraints
+- deployment order
+- metadata
+
+`Criteria` is a transparent alias of
 `pkg/recipe.Criteria`. Allowlist enforcement (`WithAllowLists`) applies
 here just as it does on `ResolveRecipe`; a `nil` Client, `nil` context,
 or `nil` criteria each return `ErrCodeInvalidRequest`, and the same
@@ -210,8 +219,8 @@ facade-level timeout bounds the resolve.
 To extract a single value from a resolved `Recipe`, use
 `SelectFromRecipe` with a dot-path selector. It hydrates the recipe's
 component values and returns the value at the path; an empty selector
-returns the entire hydrated structure. This mirrors the `aicr query`
-CLI command:
+returns the entire hydrated structure, and a `nil` `Recipe` returns
+`ErrCodeInvalidRequest`. This mirrors the `aicr query` CLI command:
 
 ```go
 v, err := aicr.SelectFromRecipe(rec, "components.gpu-operator.values.driver.version")
