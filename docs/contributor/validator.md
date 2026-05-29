@@ -147,6 +147,19 @@ The validator engine mounts snapshot and recipe data as ConfigMaps:
 | `AICR_NODE_SELECTOR` | User-provided node selector override for inner workloads (comma-separated `key=value` pairs). Set by the `--node-selector` CLI flag. Use `ctx.NodeSelector` to access the parsed value. |
 | `AICR_TOLERATIONS` | User-provided toleration override for inner workloads (comma-separated `key=value:effect` entries). Set by the `--toleration` CLI flag. Use `ctx.Tolerations` to access the parsed value. |
 
+### `inference-perf` benchmark tuning
+
+The `inference-perf` performance check warms vLLM before measuring, so the one-time CUDA-graph/JIT compile cost is excluded from the reported throughput and p99 time-to-first-token (TTFT). These knobs (set on the `inference-perf` catalog entry's `env`, overridable via `aicr ... --data`) retune the benchmark without rebuilding the validator image. An unset knob uses the default below; a value that is not a positive integer **fails the check with `ErrCodeInvalidRequest`** — validated up front, before any workload is deployed — rather than silently falling back to a default and reporting a pass/fail the operator never configured. They are validation *methodology* knobs and live with the validator/catalog; the per-accelerator pass/fail thresholds stay in the recipe overlays.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU` | `16` | Concurrent requests per GPU; total concurrency is this × free GPUs on the chosen node. |
+| `AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY` | `1` | Warmup requests per concurrency slot (excluded from stats); one full wave primes every in-flight slot. |
+| `AICR_INFERENCE_PERF_MIN_REQUESTS` | `1000` | Floor on measured request count, so small nodes still get a stable steady-state window. |
+| `AICR_INFERENCE_PERF_REQUESTS_PER_CONCURRENCY` | `8` | Scales measured request count with concurrency; actual count is `max(MIN_REQUESTS, concurrency × this)`. |
+| `AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN` | `128` | Mean prompt input tokens per request. |
+| `AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN` | `128` | Mean prompt output tokens per request. |
+
 ## Context API
 
 The `validators.Context` struct provides all dependencies a check needs:

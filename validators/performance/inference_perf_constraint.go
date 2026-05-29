@@ -80,10 +80,26 @@ const (
 	// 16 per GPU saturates without overwhelming, based on empirical testing.
 	aiperfConcurrencyPerGPU = 16
 
-	// aiperfMinRequests is the minimum total number of requests to send.
-	// Actual request count is max(aiperfMinRequests, concurrency * 2) to ensure
-	// request_count >= concurrency (AIPerf requirement).
-	aiperfMinRequests = 200
+	// aiperfWarmupPerConcurrency is the number of warmup requests sent per
+	// in-flight concurrency slot before measurement begins. vLLM compiles CUDA
+	// graphs / JIT-warms kernels on its first requests; without warmup that
+	// one-time cost lands inside the measured window and dominates p99 TTFT
+	// (observed ~42s p99 on a cold run). One full concurrency wave primes every
+	// in-flight slot so steady-state latency/throughput are what get measured.
+	// Warmup requests are excluded from AIPerf's reported statistics.
+	aiperfWarmupPerConcurrency = 1
+
+	// aiperfMinRequests is the minimum total number of MEASURED requests to send
+	// (warmup is separate and excluded). Actual request count is
+	// max(aiperfMinRequests, concurrency * aiperfRequestsPerConcurrency) to keep
+	// the steady-state window long enough for a stable throughput/TTFT estimate
+	// while satisfying AIPerf's request_count >= concurrency requirement.
+	aiperfMinRequests = 1000
+
+	// aiperfRequestsPerConcurrency scales the measured request count with the
+	// concurrency level (and therefore GPU count) so larger nodes still run a
+	// multi-wave steady-state measurement rather than a handful of requests.
+	aiperfRequestsPerConcurrency = 8
 
 	// aiperfInputTokensMean is the mean number of input tokens per request.
 	aiperfInputTokensMean = 128
@@ -93,6 +109,22 @@ const (
 
 	// aiperfArtifactDir is where AIPerf writes benchmark result files.
 	aiperfArtifactDir = "/tmp/aiperf"
+
+	// AICR_INFERENCE_PERF_* env vars let operators tune the benchmark without
+	// rebuilding the validator image. Each overrides the like-named constant
+	// above; set them on the inference-perf catalog entry's `env` (editable
+	// in-tree or via `aicr ... --data`). An unset knob uses the constant
+	// default; a value that is not a positive integer aborts the check with
+	// ErrCodeInvalidRequest (see validatePerfTuningEnvs) rather than silently
+	// defaulting. These are validation *methodology* knobs and live with the
+	// validator/catalog; the per-accelerator pass/fail thresholds stay in the
+	// recipe overlays.
+	envConcurrencyPerGPU      = "AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU"
+	envWarmupPerConcurrency   = "AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY"
+	envMinRequests            = "AICR_INFERENCE_PERF_MIN_REQUESTS"
+	envRequestsPerConcurrency = "AICR_INFERENCE_PERF_REQUESTS_PER_CONCURRENCY"
+	envInputTokensMean        = "AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN"  //nolint:gosec // G101: env var name for a token-count knob, not a credential
+	envOutputTokensMean       = "AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN" //nolint:gosec // G101: env var name for a token-count knob, not a credential
 
 	// inferenceDeploymentName is the DynamoGraphDeployment name for the benchmark
 	// workload. Passed to the template via ${DEPLOYMENT_NAME}.
@@ -388,12 +420,17 @@ func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, er
 			"node", chosen.Name, "allocatable", gpuCountPerNode, "inUse", gpuCountPerNode-freeGPUs, "free", freeGPUs)
 	}
 
+	concurrencyPerGPU, err := intFromEnv(envConcurrencyPerGPU, aiperfConcurrencyPerGPU)
+	if err != nil {
+		return nil, err
+	}
+
 	runID := deriveRunID()
 	config := &inferenceWorkloadConfig{
 		runID:           runID,
 		gpuCount:        gpuCount,
 		gpuCountPerNode: gpuCountPerNode,
-		concurrency:     aiperfConcurrencyPerGPU * gpuCount,
+		concurrency:     concurrencyPerGPU * gpuCount,
 		namespace:       fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
 		aiperfJobName:   fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
 	}
@@ -1099,14 +1136,22 @@ func runAIPerfJob(ctx *validators.Context, endpoint string, concurrency int, job
 	// secrets via --image-pull-secret) but the inner aiperf pod hangs in
 	// ImagePullBackOff.
 	pullSecrets := getOwnPullSecrets(ctx)
+
+	job, params, err := buildAIPerfJob(ctx.Namespace, jobName, endpoint, concurrency, pullSecrets)
+	if err != nil {
+		return "", err
+	}
+
+	// Log after building so the reported counts are the ones actually baked into
+	// the benchmark script (honoring concurrency scaling and AICR_INFERENCE_PERF_*
+	// overrides), not the bare constant defaults.
 	slog.Info("Running AIPerf benchmark",
 		"endpoint", endpoint,
 		"model", inferenceModel,
 		"concurrency", concurrency,
-		"requests", aiperfMinRequests,
+		"requests", params.requestCount,
+		"warmup", params.warmupCount,
 		"job", jobName)
-
-	job := buildAIPerfJob(ctx.Namespace, jobName, endpoint, concurrency, pullSecrets)
 
 	// Because jobName is per-run-unique, there is no shared-state pre-clean to
 	// do; only the deferred cleanup runs on exit.
@@ -1114,8 +1159,7 @@ func runAIPerfJob(ctx *validators.Context, endpoint string, concurrency int, job
 	createCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.K8sJobCreationTimeout)
 	defer cancel()
 
-	_, err := ctx.Clientset.BatchV1().Jobs(ctx.Namespace).Create(createCtx, job, metav1.CreateOptions{})
-	if err != nil {
+	if _, err = ctx.Clientset.BatchV1().Jobs(ctx.Namespace).Create(createCtx, job, metav1.CreateOptions{}); err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create AIPerf Job", err)
 	}
 	defer cleanupAIPerfJob(ctx, jobName)
@@ -1190,6 +1234,53 @@ func getOwnPullSecrets(ctx *validators.Context) []v1.LocalObjectReference {
 	return out
 }
 
+// intFromEnv reads a positive-integer tuning knob from the named env var. It
+// returns def when the var is unset, the parsed value when it is a positive
+// integer, and an ErrCodeInvalidRequest error when it is set but not a positive
+// integer. These knobs change the benchmark methodology and feed a pass/fail
+// gate, so a typo must abort the run rather than silently fall back to a default
+// and ship a result the operator never configured (see validatePerfTuningEnvs,
+// which surfaces the error up front before any workload is deployed).
+func intFromEnv(name string, def int) (int, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s=%q: must be a positive integer", name, raw))
+	}
+	return v, nil
+}
+
+// validatePerfTuningEnvs fails closed if any AICR_INFERENCE_PERF_* knob is set
+// to a non-integer or non-positive value, returning ErrCodeInvalidRequest so a
+// catalog/env typo aborts the check up front — before the (multi-minute)
+// benchmark workload is deployed — instead of silently benchmarking under
+// defaults and reporting a pass/fail the operator did not ask for.
+func validatePerfTuningEnvs() error {
+	for _, name := range []string{
+		envConcurrencyPerGPU, envWarmupPerConcurrency, envMinRequests,
+		envRequestsPerConcurrency, envInputTokensMean, envOutputTokensMean,
+	} {
+		if _, err := intFromEnv(name, 1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// aiperfRunParams are the resolved (env-overridable) per-run AIPerf counts that
+// buildAIPerfJob baked into the benchmark script. It returns them so the caller
+// logs the values actually sent to aiperf rather than the bare constant
+// defaults, which diverge once concurrency scaling or AICR_INFERENCE_PERF_*
+// overrides take effect.
+type aiperfRunParams struct {
+	requestCount int
+	warmupCount  int
+}
+
 // buildAIPerfJob constructs the Kubernetes Job spec for running AIPerf.
 // The image (aiperfBaseImage) has aiperf pre-installed at build time — no pip
 // install at runtime. The script wraps aiperf invocation in sentinel markers
@@ -1201,11 +1292,38 @@ func getOwnPullSecrets(ctx *validators.Context) []v1.LocalObjectReference {
 // chain aiperf + echo + cat for sentinel framing. /bin/sh is POSIX-sufficient
 // for everything in the script (set -e, line continuation, echo, cat) and is
 // present in the python:3.12-slim base image, avoiding a bash dependency.
-func buildAIPerfJob(namespace, jobName, endpoint string, concurrency int, pullSecrets []v1.LocalObjectReference) *batchv1.Job {
-	// AIPerf requires request_count >= concurrency.
-	requestCount := aiperfMinRequests
-	if concurrency*2 > requestCount {
-		requestCount = concurrency * 2
+func buildAIPerfJob(namespace, jobName, endpoint string, concurrency int, pullSecrets []v1.LocalObjectReference) (*batchv1.Job, aiperfRunParams, error) {
+	// AIPerf requires request_count >= concurrency. Scale the measured request
+	// count with concurrency so larger GPU counts still get a multi-wave
+	// steady-state window, with a fixed floor for small nodes. Tuning-env reads
+	// are pre-validated by validatePerfTuningEnvs; the error returns here are a
+	// defensive fail-closed against a malformed knob.
+	minRequests, err := intFromEnv(envMinRequests, aiperfMinRequests)
+	if err != nil {
+		return nil, aiperfRunParams{}, err
+	}
+	requestsPerConcurrency, err := intFromEnv(envRequestsPerConcurrency, aiperfRequestsPerConcurrency)
+	if err != nil {
+		return nil, aiperfRunParams{}, err
+	}
+	requestCount := minRequests
+	if scaled := concurrency * requestsPerConcurrency; scaled > requestCount {
+		requestCount = scaled
+	}
+	// Warmup primes vLLM (CUDA graph capture / JIT) before measurement so the
+	// one-time compile cost does not inflate p99 TTFT. Excluded from stats.
+	warmupPerConcurrency, err := intFromEnv(envWarmupPerConcurrency, aiperfWarmupPerConcurrency)
+	if err != nil {
+		return nil, aiperfRunParams{}, err
+	}
+	warmupCount := concurrency * warmupPerConcurrency
+	inputTokensMean, err := intFromEnv(envInputTokensMean, aiperfInputTokensMean)
+	if err != nil {
+		return nil, aiperfRunParams{}, err
+	}
+	outputTokensMean, err := intFromEnv(envOutputTokensMean, aiperfOutputTokensMean)
+	if err != nil {
+		return nil, aiperfRunParams{}, err
 	}
 	// Resolve once so Image and ImagePullPolicy can't drift if env vars
 	// were mutated between two calls (matters in tests; cheap in prod).
@@ -1218,6 +1336,7 @@ aiperf profile "%s" \
   --streaming \
   --concurrency %d \
   --request-count %d \
+  --warmup-request-count %d \
   --prompt-input-tokens-mean %d \
   --prompt-output-tokens-mean %d \
   --output-artifact-dir %s \
@@ -1226,8 +1345,8 @@ echo '%s'
 cat %s/profile_export_aiperf.json
 echo '%s'`,
 		inferenceModel, endpoint,
-		concurrency, requestCount,
-		aiperfInputTokensMean, aiperfOutputTokensMean,
+		concurrency, requestCount, warmupCount,
+		inputTokensMean, outputTokensMean,
 		aiperfArtifactDir,
 		aiperfResultSentinel,
 		aiperfArtifactDir,
@@ -1277,7 +1396,7 @@ echo '%s'`,
 				},
 			},
 		},
-	}
+	}, aiperfRunParams{requestCount: requestCount, warmupCount: warmupCount}, nil
 }
 
 // cleanupAIPerfJob removes the AIPerf Job (if it exists) and waits for

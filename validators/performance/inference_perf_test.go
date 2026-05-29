@@ -30,6 +30,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
+	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -466,13 +467,17 @@ func TestBuildAIPerfJob_PrebuiltImageAndSentinel(t *testing.T) {
 	t.Setenv("AICR_CLI_COMMIT", "")
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 	t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
+	// Neutralize tuning knobs so an AICR_INFERENCE_PERF_* value exported by the
+	// runner can't make buildAIPerfJob error out before these image/sentinel
+	// assertions run.
+	clearTuningEnvs(t)
 
 	pullSecrets := []v1.LocalObjectReference{
 		{Name: "ghcr-mirror-pull"},
 		{Name: "nvcr-pull"},
 	}
 	const jobName = "aicr-aiperf-run-42"
-	job := buildAIPerfJob("test-ns", jobName, "http://frontend.test-ns.svc:8000", 16, pullSecrets)
+	job := mustBuildAIPerfJob(t, "test-ns", jobName, "http://frontend.test-ns.svc:8000", 16, pullSecrets)
 	if job.Name != jobName {
 		t.Errorf("job name = %q, want %q", job.Name, jobName)
 	}
@@ -522,7 +527,8 @@ func TestBuildAIPerfJob_PrebuiltImageAndSentinel(t *testing.T) {
 func TestBuildAIPerfJob_NoPullSecrets(t *testing.T) {
 	// nil/empty pullSecrets must not break construction; the field stays empty
 	// and public-registry pulls work unchanged.
-	job := buildAIPerfJob("test-ns", "aicr-aiperf-run-0", "http://ep:8000", 16, nil)
+	clearTuningEnvs(t)
+	job := mustBuildAIPerfJob(t, "test-ns", "aicr-aiperf-run-0", "http://ep:8000", 16, nil)
 	if len(job.Spec.Template.Spec.ImagePullSecrets) != 0 {
 		t.Errorf("nil pullSecrets should yield empty ImagePullSecrets; got %v",
 			job.Spec.Template.Spec.ImagePullSecrets)
@@ -541,6 +547,9 @@ func TestBuildAIPerfJob_ImagePullPolicy(t *testing.T) {
 	t.Setenv("AICR_CLI_VERSION", "")
 	t.Setenv("AICR_CLI_COMMIT", "")
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+	// A runner-exported AICR_INFERENCE_PERF_* knob must not fail this
+	// pull-policy test before the policy assertion runs.
+	clearTuningEnvs(t)
 
 	tests := []struct {
 		name   string
@@ -564,7 +573,7 @@ func TestBuildAIPerfJob_ImagePullPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
-			job := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", 16, nil)
+			job := mustBuildAIPerfJob(t, "ns", "aicr-aiperf-run-0", "http://ep:8000", 16, nil)
 			got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy
 			if got != tt.want {
 				t.Errorf("aiperf ImagePullPolicy = %q, want %q", got, tt.want)
@@ -573,18 +582,46 @@ func TestBuildAIPerfJob_ImagePullPolicy(t *testing.T) {
 	}
 }
 
+// mustBuildAIPerfJob calls buildAIPerfJob and fails the test on error, keeping
+// the many default-path assertions terse. Cases that intentionally exercise a
+// malformed knob assert the error from validatePerfTuningEnvs / intFromEnv
+// directly instead.
+func mustBuildAIPerfJob(t *testing.T, namespace, jobName, endpoint string, concurrency int, pullSecrets []v1.LocalObjectReference) *batchv1.Job {
+	t.Helper()
+	job, _, err := buildAIPerfJob(namespace, jobName, endpoint, concurrency, pullSecrets)
+	if err != nil {
+		t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
+	}
+	return job
+}
+
+// clearTuningEnvs neutralizes the AICR_INFERENCE_PERF_* knobs for the duration
+// of the test so default-output assertions stay hermetic even when the runner
+// environment exports them. intFromEnv treats an empty value as unset, so the
+// constant defaults apply. t.Setenv restores prior values after the test.
+func clearTuningEnvs(t *testing.T) {
+	t.Helper()
+	for _, e := range []string{
+		envConcurrencyPerGPU, envWarmupPerConcurrency, envMinRequests,
+		envRequestsPerConcurrency, envInputTokensMean, envOutputTokensMean,
+	} {
+		t.Setenv(e, "")
+	}
+}
+
 func TestBuildAIPerfJob_RequestCountFloor(t *testing.T) {
+	clearTuningEnvs(t)
 	tests := []struct {
 		name        string
 		concurrency int
 		wantMinReqs int
 	}{
 		{"low concurrency — floor at aiperfMinRequests", 16, aiperfMinRequests},
-		{"high concurrency — 2x concurrency", 500, 1000},
+		{"high concurrency — scaled by aiperfRequestsPerConcurrency", 500, 500 * aiperfRequestsPerConcurrency},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			job := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", tt.concurrency, nil)
+			job := mustBuildAIPerfJob(t, "ns", "aicr-aiperf-run-0", "http://ep:8000", tt.concurrency, nil)
 			script := job.Spec.Template.Spec.Containers[0].Args[0]
 			needle := fmt.Sprintf("--request-count %d", tt.wantMinReqs)
 			if !strings.Contains(script, needle) {
@@ -592,6 +629,162 @@ func TestBuildAIPerfJob_RequestCountFloor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBuildAIPerfJob_Warmup verifies a warmup-request-count is emitted and
+// scales with concurrency, so vLLM's one-time compile cost is excluded from the
+// measured p99 TTFT.
+func TestBuildAIPerfJob_Warmup(t *testing.T) {
+	clearTuningEnvs(t)
+	tests := []struct {
+		name        string
+		concurrency int
+	}{
+		{"low concurrency", 16},
+		{"medium concurrency", 128},
+		{"high concurrency", 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := mustBuildAIPerfJob(t, "ns", "aicr-aiperf-run-0", "http://ep:8000", tt.concurrency, nil)
+			script := job.Spec.Template.Spec.Containers[0].Args[0]
+			needle := fmt.Sprintf("--warmup-request-count %d", tt.concurrency*aiperfWarmupPerConcurrency)
+			if !strings.Contains(script, needle) {
+				t.Errorf("concurrency=%d: script missing %q; script:\n%s", tt.concurrency, needle, script)
+			}
+		})
+	}
+}
+
+// TestIntFromEnv verifies the catalog-tuning env reader: an unset knob returns
+// the default, a valid positive integer is parsed, and a non-integer / zero /
+// negative value returns an error so a typo in the catalog entry can't silently
+// ship a benchmark run under unintended settings.
+func TestIntFromEnv(t *testing.T) {
+	const (
+		env = "AICR_INFERENCE_PERF_TEST_KNOB"
+		def = 42
+	)
+	tests := []struct {
+		name    string
+		val     string
+		want    int
+		wantErr bool
+	}{
+		{"empty/unset → default", "", def, false},
+		{"valid positive → override", "7", 7, false},
+		{"zero → error", "0", 0, true},
+		{"negative → error", "-3", 0, true},
+		{"non-integer → error", "abc", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Always t.Setenv (never leave it to the inherited environment):
+			// it overrides any runner-exported value and restores it after the
+			// subtest, and "" makes intFromEnv treat the knob as unset. This
+			// keeps every case hermetic.
+			t.Setenv(env, tt.val)
+			got, err := intFromEnv(env, def)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("intFromEnv(%q=%q) err = %v, wantErr %v", env, tt.val, err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("intFromEnv(%q=%q) = %d, want %d", env, tt.val, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidatePerfTuningEnvs verifies the up-front gate fails closed
+// (ErrCodeInvalidRequest) on a malformed knob and passes when knobs are unset
+// or valid — so a typo aborts before the benchmark workload is deployed.
+func TestValidatePerfTuningEnvs(t *testing.T) {
+	t.Run("all unset → ok", func(t *testing.T) {
+		clearTuningEnvs(t)
+		if err := validatePerfTuningEnvs(); err != nil {
+			t.Errorf("unexpected error with all knobs unset: %v", err)
+		}
+	})
+	t.Run("all valid → ok", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envMinRequests, "2000")
+		t.Setenv(envConcurrencyPerGPU, "8")
+		if err := validatePerfTuningEnvs(); err != nil {
+			t.Errorf("unexpected error with valid knobs: %v", err)
+		}
+	})
+	t.Run("malformed → ErrCodeInvalidRequest", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envWarmupPerConcurrency, "lots")
+		err := validatePerfTuningEnvs()
+		if err == nil {
+			t.Fatal("expected an error for a non-integer knob")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+}
+
+// TestBuildAIPerfJob_EnvOverrides verifies the AICR_INFERENCE_PERF_* knobs flow
+// into the AIPerf invocation so operators can retune without an image rebuild.
+func TestBuildAIPerfJob_EnvOverrides(t *testing.T) {
+	t.Setenv(envMinRequests, "2000")
+	t.Setenv(envRequestsPerConcurrency, "4") // 100*4=400 < 2000 floor
+	t.Setenv(envWarmupPerConcurrency, "3")   // 100*3=300
+	t.Setenv(envInputTokensMean, "64")
+	t.Setenv(envOutputTokensMean, "256")
+
+	job := mustBuildAIPerfJob(t, "ns", "run-0", "http://ep:8000", 100, nil)
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	for _, needle := range []string{
+		"--request-count 2000",
+		"--warmup-request-count 300",
+		"--prompt-input-tokens-mean 64",
+		"--prompt-output-tokens-mean 256",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Errorf("script missing %q; script:\n%s", needle, script)
+		}
+	}
+}
+
+// TestBuildAIPerfJob_ReturnedParams verifies buildAIPerfJob reports the resolved
+// request/warmup counts it baked into the script, so runAIPerfJob can log the
+// values actually sent to aiperf instead of the bare constant defaults.
+func TestBuildAIPerfJob_ReturnedParams(t *testing.T) {
+	t.Run("defaults scale with concurrency", func(t *testing.T) {
+		clearTuningEnvs(t)
+		// 128*8 = 1024 exceeds the 1000 floor, so the count is the scaled value
+		// — exactly the case the old log (which printed the 1000 constant) got
+		// wrong.
+		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", 128, nil)
+		if err != nil {
+			t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
+		}
+		if params.requestCount != 128*aiperfRequestsPerConcurrency {
+			t.Errorf("requestCount = %d, want %d", params.requestCount, 128*aiperfRequestsPerConcurrency)
+		}
+		if params.warmupCount != 128*aiperfWarmupPerConcurrency {
+			t.Errorf("warmupCount = %d, want %d", params.warmupCount, 128*aiperfWarmupPerConcurrency)
+		}
+	})
+	t.Run("honors env overrides", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envMinRequests, "2000")
+		t.Setenv(envRequestsPerConcurrency, "4") // 100*4=400 < 2000 floor
+		t.Setenv(envWarmupPerConcurrency, "3")   // 100*3=300
+		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", 100, nil)
+		if err != nil {
+			t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
+		}
+		if params.requestCount != 2000 {
+			t.Errorf("requestCount = %d, want 2000", params.requestCount)
+		}
+		if params.warmupCount != 300 {
+			t.Errorf("warmupCount = %d, want 300", params.warmupCount)
+		}
+	})
 }
 
 func TestResolveAiperfImage(t *testing.T) {
