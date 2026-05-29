@@ -14,7 +14,11 @@
 
 package validator
 
-import corev1 "k8s.io/api/core/v1"
+import (
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
 
 // Option is a functional option for configuring Validator instances.
 type Option func(*Validator)
@@ -108,5 +112,13 @@ func WithImageRegistryOverride(override string) Option {
 func WithImageTagOverride(override string) Option {
 	return func(v *Validator) {
 		v.ImageTagOverride = override
+	}
+}
+
+// WithDataProvider binds the recipe DataProvider used to load the validator
+// catalog. When unset, the catalog loads from the package-global provider.
+func WithDataProvider(dp recipe.DataProvider) Option {
+	return func(v *Validator) {
+		v.dataProvider = dp
 	}
 }

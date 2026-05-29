@@ -87,7 +87,7 @@ func emitRecipeEvidence(
 	cfg *recipeEvidenceConfig,
 ) error {
 
-	cat, err := catalog.Load(version, commit)
+	cat, err := catalog.Load(recipe.GetDataProvider(), version, commit) //nolint:staticcheck // preserve global behavior for the CNCF path; tracked by #983/#987
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog for evidence", err)
 	}

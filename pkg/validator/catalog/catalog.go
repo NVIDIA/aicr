@@ -38,7 +38,8 @@ type (
 	EnvVar               = v1.EnvVar
 )
 
-// Load reads and parses the validator catalog from the global DataProvider.
+// Load reads and parses the validator catalog from dp. A nil dp falls back to
+// the package-global recipe.GetDataProvider() so existing callers are unaffected.
 // When the --data flag provides an external directory containing
 // validators/catalog.yaml, the external catalog is merged with the embedded
 // catalog using merge-by-name semantics: external validators override embedded
@@ -59,8 +60,11 @@ type (
 //
 // Entries with explicit version tags (e.g., :v1.2.3) are never modified by
 // steps 1-2 but are replaced by step 3 if that env var is set.
-func Load(version, commit string) (*ValidatorCatalog, error) {
-	data, err := recipe.GetDataProvider().ReadFile("validators/catalog.yaml") //nolint:staticcheck // tracked by #983 Stage 2
+func Load(dp recipe.DataProvider, version, commit string) (*ValidatorCatalog, error) {
+	if dp == nil {
+		dp = recipe.GetDataProvider() //nolint:staticcheck // back-compat fallback; tracked by #983/#987
+	}
+	data, err := dp.ReadFile("validators/catalog.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read catalog", err)
 	}

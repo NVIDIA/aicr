@@ -28,7 +28,7 @@ import (
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
-	catalog, err := Load("", "")
+	catalog, err := Load(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -163,7 +163,7 @@ validators:
 }
 
 func TestForPhaseNoMatch(t *testing.T) {
-	catalog, err := Load("", "")
+	catalog, err := Load(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestReplaceRegistry(t *testing.T) {
 func TestLoadWithRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
 
-	cat, err := Load("", "")
+	cat, err := Load(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestLoadWithRegistryOverride(t *testing.T) {
 func TestLoadWithoutRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 
-	cat, err := Load("", "")
+	cat, err := Load(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -426,7 +426,7 @@ validators:
 	defer recipe.SetDataProvider(originalProvider) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
 
 	// Load catalog — should merge embedded + external
-	cat, err := Load("", "")
+	cat, err := Load(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -1025,7 +1025,7 @@ validators:
 func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
 	// "-next" suffix bypasses the release-version image-tag rewrite path,
 	// matching how goreleaser snapshots stamp dev binaries.
-	cat, err := Load("v0.0.0-next", "")
+	cat, err := Load(nil, "v0.0.0-next", "")
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -1111,5 +1111,38 @@ func TestCatalogEmbedding(t *testing.T) {
 	}
 	if strings.Contains(jsonStr, "metadata") {
 		t.Error("Embedded catalog should not contain metadata in JSON")
+	}
+}
+
+// TestLoadDataProvider verifies Load honors an explicit DataProvider and falls
+// back to the package-global provider when nil is passed.
+func TestLoadDataProvider(t *testing.T) {
+	tests := []struct {
+		name string
+		dp   recipe.DataProvider
+	}{
+		{
+			name: "explicit embedded provider",
+			dp:   recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."),
+		},
+		{
+			name: "nil falls back to global",
+			dp:   nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cat, err := Load(tt.dp, "", "")
+			if err != nil {
+				t.Fatalf("Load() error = %v, want nil", err)
+			}
+			if cat == nil {
+				t.Fatal("Load() returned nil catalog")
+			}
+			if len(cat.Validators) == 0 {
+				t.Error("Load() returned catalog with no validators")
+			}
+		})
 	}
 }
