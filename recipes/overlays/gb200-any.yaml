@@ -26,10 +26,11 @@
 # fabric instead of carrying one cross-service number that is rarely
 # correct for two fabrics.
 #
-# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
+# Per-field union merge (see pkg/recipe/metadata.go) means concrete leaves
 # that declare their own `deployment:` block (e.g., gb200-eks-training,
-# gb200-eks-inference) continue to win — their constraint values match
-# the floor here so the override is a no-op.
+# gb200-eks-inference) add to or override this floor without dropping its
+# inherited checks — same-name constraints from the leaf win, additional
+# checks are appended.
 #
 # See docs/contributor/data.md#criteria-wildcard-overlays for details.
 

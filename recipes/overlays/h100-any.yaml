@@ -21,10 +21,11 @@
 # plus the gpu-operator version pin — without duplicating it in every
 # service+intent leaf.
 #
-# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
+# Per-field union merge (see pkg/recipe/metadata.go) means concrete leaves
 # that declare their own `deployment:` block (e.g., h100-eks-training,
-# h100-aks-training, h100-eks-ubuntu-inference-dynamo) continue to win —
-# their constraint values match the floor here so the override is a no-op.
+# h100-aks-training, h100-eks-ubuntu-inference-dynamo) add to or override
+# this floor without dropping its inherited checks — same-name constraints
+# from the leaf win, additional checks are appended.
 #
 # See docs/contributor/data.md#criteria-wildcard-overlays for details.
 

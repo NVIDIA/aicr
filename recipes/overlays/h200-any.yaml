@@ -25,9 +25,10 @@
 # same gpu-operator support floor), so this mirrors h100-any.yaml. Splitting
 # only becomes necessary if an H200-specific floor delta emerges.
 #
-# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
-# that declare their own `deployment:` block continue to win — their
-# constraint values match the floor here so the override is a no-op.
+# Per-field union merge (see pkg/recipe/metadata.go) means concrete leaves
+# that declare their own `deployment:` block add to or override this floor
+# without dropping its inherited checks — same-name constraints from the
+# leaf win, additional checks are appended.
 #
 # See docs/contributor/data.md#criteria-wildcard-overlays for details.
 

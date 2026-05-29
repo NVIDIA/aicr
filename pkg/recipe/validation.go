@@ -78,6 +78,112 @@ func cloneValidationConfig(v *ValidationConfig) *ValidationConfig {
 	}
 }
 
+// mergeValidationPhase merges overlay into base, returning a freshly allocated
+// phase with no aliased state. Semantics mirror the top-level merge:
+//   - Checks: deduplicated union, preserving order (base entries first,
+//     then overlay-only entries appended).
+//   - Constraints: union by Name, overlay value wins on same-name (analogous
+//     to top-level RecipeMetadataSpec.Constraints).
+//   - NodeSelection: overlay replaces if non-nil; otherwise base is preserved.
+//   - Timeout, Infrastructure: overlay-wins-if-non-empty.
+//
+// If overlay is nil, base is returned untouched. If base is nil, overlay is
+// deep-cloned to avoid aliasing into the source's cached metadata.
+func mergeValidationPhase(base, overlay *ValidationPhase) *ValidationPhase {
+	if overlay == nil {
+		return base
+	}
+	if base == nil {
+		return cloneValidationPhase(overlay)
+	}
+
+	out := &ValidationPhase{
+		Timeout:        base.Timeout,
+		Infrastructure: base.Infrastructure,
+	}
+	if overlay.Timeout != "" {
+		out.Timeout = overlay.Timeout
+	}
+	if overlay.Infrastructure != "" {
+		out.Infrastructure = overlay.Infrastructure
+	}
+
+	// Checks: union, deduplicated, base order preserved.
+	if len(base.Checks)+len(overlay.Checks) > 0 {
+		seen := make(map[string]bool, len(base.Checks)+len(overlay.Checks))
+		out.Checks = make([]string, 0, len(base.Checks)+len(overlay.Checks))
+		for _, c := range base.Checks {
+			if !seen[c] {
+				seen[c] = true
+				out.Checks = append(out.Checks, c)
+			}
+		}
+		for _, c := range overlay.Checks {
+			if !seen[c] {
+				seen[c] = true
+				out.Checks = append(out.Checks, c)
+			}
+		}
+	}
+
+	// Constraints: union by Name, overlay wins on same-name. Order preserves
+	// base appearance, then overlay-only additions in overlay order.
+	if len(base.Constraints)+len(overlay.Constraints) > 0 {
+		overlayByName := make(map[string]Constraint, len(overlay.Constraints))
+		for _, c := range overlay.Constraints {
+			overlayByName[c.Name] = c
+		}
+		seen := make(map[string]bool, len(base.Constraints)+len(overlay.Constraints))
+		out.Constraints = make([]Constraint, 0, len(base.Constraints)+len(overlay.Constraints))
+		for _, c := range base.Constraints {
+			if seen[c.Name] {
+				continue
+			}
+			seen[c.Name] = true
+			if ov, ok := overlayByName[c.Name]; ok {
+				out.Constraints = append(out.Constraints, ov)
+			} else {
+				out.Constraints = append(out.Constraints, c)
+			}
+		}
+		for _, c := range overlay.Constraints {
+			if seen[c.Name] {
+				continue
+			}
+			seen[c.Name] = true
+			out.Constraints = append(out.Constraints, c)
+		}
+	}
+
+	// NodeSelection: overlay-wins-if-non-nil (full struct replace).
+	if overlay.NodeSelection != nil {
+		out.NodeSelection = cloneNodeSelection(overlay.NodeSelection)
+	} else if base.NodeSelection != nil {
+		out.NodeSelection = cloneNodeSelection(base.NodeSelection)
+	}
+
+	return out
+}
+
+// cloneNodeSelection returns a deep copy of ns with independent backing
+// map and slice, so callers writing through the clone cannot reach the
+// source's cached metadata.
+func cloneNodeSelection(ns *NodeSelection) *NodeSelection {
+	if ns == nil {
+		return nil
+	}
+	out := *ns
+	if ns.Selector != nil {
+		out.Selector = make(map[string]string, len(ns.Selector))
+		maps.Copy(out.Selector, ns.Selector)
+	}
+	if ns.ExcludeNodes != nil {
+		out.ExcludeNodes = make([]string, len(ns.ExcludeNodes))
+		copy(out.ExcludeNodes, ns.ExcludeNodes)
+	}
+	return &out
+}
+
 // cloneValidationPhase returns a deep copy of p with independent backing
 // slices and a freshly allocated NodeSelection, so callers writing through
 // the clone cannot reach the source's cached metadata.
@@ -94,17 +200,6 @@ func cloneValidationPhase(p *ValidationPhase) *ValidationPhase {
 		out.Checks = make([]string, len(p.Checks))
 		copy(out.Checks, p.Checks)
 	}
-	if p.NodeSelection != nil {
-		ns := *p.NodeSelection
-		if p.NodeSelection.Selector != nil {
-			ns.Selector = make(map[string]string, len(p.NodeSelection.Selector))
-			maps.Copy(ns.Selector, p.NodeSelection.Selector)
-		}
-		if p.NodeSelection.ExcludeNodes != nil {
-			ns.ExcludeNodes = make([]string, len(p.NodeSelection.ExcludeNodes))
-			copy(ns.ExcludeNodes, p.NodeSelection.ExcludeNodes)
-		}
-		out.NodeSelection = &ns
-	}
+	out.NodeSelection = cloneNodeSelection(p.NodeSelection)
 	return &out
 }

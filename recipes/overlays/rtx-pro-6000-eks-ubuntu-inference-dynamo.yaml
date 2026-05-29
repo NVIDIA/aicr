@@ -67,8 +67,8 @@ spec:
         - check-nvidia-smi
       constraints:
         # RTX PRO 6000 Blackwell needs the Blackwell-era gpu-operator floor.
-        # Match the rtx-pro-6000-any.yaml wildcard so the per-phase replace
-        # semantics keep the version pin intact.
+        # Matches the rtx-pro-6000-any.yaml wildcard's pin; per-field union
+        # merge would inherit it anyway, but restating it documents intent.
         - name: Deployment.gpu-operator.version
           value: ">= v25.10.0"
     performance:

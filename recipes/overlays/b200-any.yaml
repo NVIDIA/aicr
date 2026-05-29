@@ -18,12 +18,9 @@
 # The resolver picks it up for every B200 query (any service, any intent)
 # and contributes the B200-wide deployment-phase floor — the 4 standard
 # checks plus the gpu-operator version pin — without duplicating it in
-# every leaf.
-#
-# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
-# that declare their own `deployment:` block win. Concrete leaves that do
-# (e.g., b200-gke-cos-training) match the floor value here so the override
-# is a no-op today.
+# every leaf. Per-field union merge (see pkg/recipe/metadata.go) means
+# concrete leaves that declare their own `deployment:` block add to or
+# override this floor without dropping its inherited checks.
 #
 # See docs/contributor/data.md#criteria-wildcard-overlays for details.
 

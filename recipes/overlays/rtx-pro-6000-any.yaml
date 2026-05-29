@@ -20,9 +20,10 @@
 # the 4 standard checks plus the gpu-operator version pin — without
 # duplicating it in every leaf.
 #
-# Per-phase replace semantics in pkg/recipe/metadata.go mean concrete leaves
-# that declare their own `deployment:` block win. None of the current
-# rtx-pro-6000-lke-* leaves do, so they all inherit this floor.
+# Per-field union merge (see pkg/recipe/metadata.go) means concrete leaves
+# that declare their own `deployment:` block add to or override this floor
+# without dropping its inherited checks — same-name constraints from the
+# leaf win, additional checks are appended.
 #
 # See docs/contributor/data.md#criteria-wildcard-overlays for details.
 

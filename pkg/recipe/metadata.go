@@ -476,28 +476,22 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		return s.ComponentRefs[i].Name < s.ComponentRefs[j].Name
 	})
 
-	// Merge validation config - overlay phases take precedence. Phase
-	// pointers are cloned (not aliased) so successive merges cannot mutate
-	// the source's cached ValidationConfig — a previous version aliased
-	// other.Validation when s.Validation was nil, then later writes through
-	// s.Validation.Deployment etc. corrupted whichever overlay's cached
-	// metadata the alias pointed at.
+	// Merge validation config. Each phase merges field-by-field so leaf
+	// overlays can add or override checks/constraints without restating the
+	// entire inherited block. See issue #1000 for the rationale — the prior
+	// per-phase pointer replace was the only list-shaped field with replace
+	// semantics, and it silently dropped inherited checks when a descendant
+	// declared its own phase block. Phase pointers are still cloned (not
+	// aliased) when the destination's phase is nil so successive merges
+	// cannot mutate the source's cached ValidationConfig.
 	if other.Validation != nil {
 		if s.Validation == nil {
 			s.Validation = cloneValidationConfig(other.Validation)
 		} else {
-			if other.Validation.Readiness != nil {
-				s.Validation.Readiness = cloneValidationPhase(other.Validation.Readiness)
-			}
-			if other.Validation.Deployment != nil {
-				s.Validation.Deployment = cloneValidationPhase(other.Validation.Deployment)
-			}
-			if other.Validation.Performance != nil {
-				s.Validation.Performance = cloneValidationPhase(other.Validation.Performance)
-			}
-			if other.Validation.Conformance != nil {
-				s.Validation.Conformance = cloneValidationPhase(other.Validation.Conformance)
-			}
+			s.Validation.Readiness = mergeValidationPhase(s.Validation.Readiness, other.Validation.Readiness)
+			s.Validation.Deployment = mergeValidationPhase(s.Validation.Deployment, other.Validation.Deployment)
+			s.Validation.Performance = mergeValidationPhase(s.Validation.Performance, other.Validation.Performance)
+			s.Validation.Conformance = mergeValidationPhase(s.Validation.Conformance, other.Validation.Conformance)
 		}
 	}
 

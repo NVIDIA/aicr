@@ -982,8 +982,11 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation.Deployment.Timeout != "10m" {
 			t.Errorf("deployment timeout = %q, want 10m (from overlay)", base.Validation.Deployment.Timeout)
 		}
-		if len(base.Validation.Deployment.Checks) != 2 {
-			t.Errorf("deployment checks len = %d, want 2 (from overlay)", len(base.Validation.Deployment.Checks))
+		// After switching to per-field union semantics, the overlay's checks
+		// are unioned with the base's. Both blocks list "expected-resources",
+		// so dedupe collapses to 2 unique entries — base then overlay-only.
+		if got, want := base.Validation.Deployment.Checks, []string{"expected-resources", "check-nvidia-smi"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("deployment checks = %v, want %v (base ∪ overlay, deduped, preserving order)", got, want)
 		}
 		if base.Validation.Performance == nil {
 			t.Fatal("performance should be added from overlay")
@@ -1058,6 +1061,228 @@ func TestMergeValidationConfig(t *testing.T) {
 		}
 		if dest.Validation.Conformance == source.Conformance {
 			t.Error("dest.Validation.Conformance aliases source.Conformance — phase pointers must be cloned")
+		}
+	})
+
+	// Per-field union-merge semantics — see issue #1000. Each phase's Checks
+	// and Constraints union with the base instead of replacing it wholesale.
+	t.Run("phase checks union deduplicates preserving order", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Checks: []string{"operator-health", "expected-resources", "gpu-operator-version"},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					// "expected-resources" duplicates base; "check-nvidia-smi"
+					// is overlay-only and must be appended after base entries.
+					Checks: []string{"expected-resources", "check-nvidia-smi"},
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		want := []string{"operator-health", "expected-resources", "gpu-operator-version", "check-nvidia-smi"}
+		if got := base.Validation.Deployment.Checks; !reflect.DeepEqual(got, want) {
+			t.Errorf("checks = %v, want %v (union, dedup, preserve order)", got, want)
+		}
+	})
+
+	t.Run("phase constraints union with overlay overriding same name", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Constraints: []Constraint{
+						{Name: "Deployment.gpu-operator.version", Value: ">= v25.10.0"},
+						{Name: "Deployment.operator.replicas", Value: ">= 1"},
+					},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Constraints: []Constraint{
+						// Same name — overlay value wins.
+						{Name: "Deployment.gpu-operator.version", Value: ">= v25.10.1"},
+						// New name — appended.
+						{Name: "Deployment.driver.version", Value: ">= 570.0"},
+					},
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		got := base.Validation.Deployment.Constraints
+		byName := make(map[string]string, len(got))
+		for _, c := range got {
+			byName[c.Name] = c.Value
+		}
+		if len(byName) != 3 {
+			t.Errorf("constraints len = %d, want 3 unique by name", len(byName))
+		}
+		if byName["Deployment.gpu-operator.version"] != ">= v25.10.1" {
+			t.Errorf("gpu-operator.version = %q, want overlay value >= v25.10.1",
+				byName["Deployment.gpu-operator.version"])
+		}
+		if byName["Deployment.operator.replicas"] != ">= 1" {
+			t.Errorf("operator.replicas = %q, want preserved base value >= 1",
+				byName["Deployment.operator.replicas"])
+		}
+		if byName["Deployment.driver.version"] != ">= 570.0" {
+			t.Errorf("driver.version = %q, want overlay-added value >= 570.0",
+				byName["Deployment.driver.version"])
+		}
+	})
+
+	t.Run("phase NodeSelection overlay wins when set", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					NodeSelection: &NodeSelection{
+						Selector: map[string]string{"role": "base"},
+						MaxNodes: 4,
+					},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					NodeSelection: &NodeSelection{
+						Selector: map[string]string{"role": "overlay"},
+						MaxNodes: 8,
+					},
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		ns := base.Validation.Performance.NodeSelection
+		if ns == nil {
+			t.Fatal("performance NodeSelection should not be nil")
+		}
+		if ns.Selector["role"] != "overlay" || ns.MaxNodes != 8 {
+			t.Errorf("NodeSelection = %+v, want overlay-wins (role=overlay, maxNodes=8)", ns)
+		}
+	})
+
+	t.Run("phase NodeSelection inherited when overlay omits it", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					NodeSelection: &NodeSelection{
+						Selector: map[string]string{"role": "base"},
+					},
+					Checks: []string{"nccl-test"},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Performance: &ValidationPhase{
+					// Overlay touches only checks; NodeSelection must inherit.
+					Checks: []string{"inference-perf"},
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		ns := base.Validation.Performance.NodeSelection
+		if ns == nil || ns.Selector["role"] != "base" {
+			t.Errorf("NodeSelection = %+v, want base preserved when overlay omits it", ns)
+		}
+	})
+
+	t.Run("phase scalar fields overlay wins when set", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Timeout:        "5m",
+					Infrastructure: "base-infra",
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Timeout:        "10m",
+					Infrastructure: "overlay-infra",
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		if base.Validation.Deployment.Timeout != "10m" {
+			t.Errorf("timeout = %q, want 10m (overlay-wins)", base.Validation.Deployment.Timeout)
+		}
+		if base.Validation.Deployment.Infrastructure != "overlay-infra" {
+			t.Errorf("infrastructure = %q, want overlay-infra (overlay-wins)",
+				base.Validation.Deployment.Infrastructure)
+		}
+	})
+
+	t.Run("phase scalar fields inherited when overlay omits them", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Timeout:        "5m",
+					Infrastructure: "base-infra",
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					// Overlay defines block but omits scalars — must inherit.
+					Checks: []string{"new-check"},
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		if base.Validation.Deployment.Timeout != "5m" {
+			t.Errorf("timeout = %q, want 5m preserved from base", base.Validation.Deployment.Timeout)
+		}
+		if base.Validation.Deployment.Infrastructure != "base-infra" {
+			t.Errorf("infrastructure = %q, want base-infra preserved", base.Validation.Deployment.Infrastructure)
+		}
+	})
+
+	t.Run("union merge does not mutate source slices", func(t *testing.T) {
+		// Repeat the alias-safety guarantee for the union path: writing into
+		// the merged result must not leak through to the source's Checks/Constraints.
+		source := &ValidationConfig{
+			Deployment: &ValidationPhase{
+				Checks:      []string{"operator-health"},
+				Constraints: []Constraint{{Name: "Deployment.gpu-operator.version", Value: ">= v25.10.0"}},
+			},
+		}
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Checks:      []string{"expected-resources"},
+					Constraints: []Constraint{{Name: "Deployment.driver.version", Value: ">= 570.0"}},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{Validation: source}
+		base.Merge(&overlay)
+
+		// Mutate the merged result — source must remain unchanged.
+		base.Validation.Deployment.Checks[0] = "mutated"
+		base.Validation.Deployment.Constraints[0].Value = "mutated"
+
+		if source.Deployment.Checks[0] != "operator-health" {
+			t.Errorf("source.Checks[0] = %q, want operator-health — union merge leaked to source",
+				source.Deployment.Checks[0])
+		}
+		if source.Deployment.Constraints[0].Value != ">= v25.10.0" {
+			t.Errorf("source.Constraints[0].Value = %q, union merge leaked to source",
+				source.Deployment.Constraints[0].Value)
 		}
 	})
 }
