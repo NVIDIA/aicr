@@ -600,21 +600,45 @@ func (s *SnapshotSpec) Resolve() (*SnapshotResolved, error) {
 }
 
 // ResolveCriteria converts the recipe criteria spec from wire-string form
-// to a typed *recipe.Criteria. Nil-receiver tolerant; never returns a nil
-// pointer.
+// to a typed *recipe.Criteria, validating each enum value against the
+// package-global criteria registry. Nil-receiver tolerant; never returns a
+// nil pointer.
+//
+// This is a shim over ResolveCriteriaWithRegistry(recipe.DefaultRegistry()).
+// Callers holding a per-provider registry (e.g., the CLI building criteria
+// against an aicr.Client's own DataProvider) should call
+// ResolveCriteriaWithRegistry directly so config-sourced criteria validate
+// against THAT provider's registered values rather than the package global.
 //
 // Unlike recipe.NewCriteria, the returned Criteria does NOT default
 // unset fields to "any": empty enum fields signal "config did not set
 // this slot" so callers can detect what to copy onto a target Criteria.
 // Nodes < 0 is rejected; Nodes == 0 means unset.
 func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
+	return r.ResolveCriteriaWithRegistry(recipe.DefaultRegistry())
+}
+
+// ResolveCriteriaWithRegistry converts the recipe criteria spec from
+// wire-string form to a typed *recipe.Criteria, validating each enum value
+// against the supplied per-provider registry. A nil reg falls back to the
+// package-global registry via recipe.DefaultRegistry(), so the call is
+// well-defined for callers that have not bound a provider.
+//
+// Routing config-sourced criteria through the per-provider registry is what
+// lets a `--data` overlay's non-OSS criteria value (e.g. service=ncp-internal)
+// supplied via spec.recipe.criteria validate the same way it does on the CLI
+// flag path. See ResolveCriteria for the unset-field semantics.
+func (r *RecipeSpec) ResolveCriteriaWithRegistry(reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
+	if reg == nil {
+		reg = recipe.DefaultRegistry()
+	}
 	out := &recipe.Criteria{}
 	if r == nil || r.Criteria == nil {
 		return out, nil
 	}
 	c := r.Criteria
 	if c.Service != "" {
-		v, err := recipe.ParseCriteriaServiceType(c.Service)
+		v, err := reg.ParseService(c.Service)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				"invalid spec.recipe.criteria.service", err)
@@ -622,7 +646,7 @@ func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
 		out.Service = v
 	}
 	if c.Accelerator != "" {
-		v, err := recipe.ParseCriteriaAcceleratorType(c.Accelerator)
+		v, err := reg.ParseAccelerator(c.Accelerator)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				"invalid spec.recipe.criteria.accelerator", err)
@@ -630,7 +654,7 @@ func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
 		out.Accelerator = v
 	}
 	if c.Intent != "" {
-		v, err := recipe.ParseCriteriaIntentType(c.Intent)
+		v, err := reg.ParseIntent(c.Intent)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				"invalid spec.recipe.criteria.intent", err)
@@ -638,7 +662,7 @@ func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
 		out.Intent = v
 	}
 	if c.OS != "" {
-		v, err := recipe.ParseCriteriaOSType(c.OS)
+		v, err := reg.ParseOS(c.OS)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				"invalid spec.recipe.criteria.os", err)
@@ -646,7 +670,7 @@ func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
 		out.OS = v
 	}
 	if c.Platform != "" {
-		v, err := recipe.ParseCriteriaPlatformType(c.Platform)
+		v, err := reg.ParsePlatform(c.Platform)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				"invalid spec.recipe.criteria.platform", err)
