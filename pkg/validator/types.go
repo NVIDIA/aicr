@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
@@ -71,6 +72,10 @@ type Validator struct {
 	// container env as AICR_VALIDATOR_IMAGE_TAG. Intended for feature-branch
 	// dev builds whose commit SHA has no published image; typical value: "latest".
 	ImageTagOverride string
+
+	// dataProvider supplies the recipe data files used to load the validator
+	// catalog. When nil, catalog.Load falls back to the package-global provider.
+	dataProvider recipe.DataProvider
 }
 
 // PhaseResult is the outcome of running all validators in a single phase.

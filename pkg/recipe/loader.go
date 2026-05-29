@@ -28,6 +28,15 @@ import (
 // builder using the overlay's criteria. This allows callers to accept both overlay
 // files and pre-hydrated RecipeResult files transparently.
 func LoadFromFile(ctx context.Context, path, kubeconfig, version string) (*RecipeResult, error) {
+	return LoadFromFileWithProvider(ctx, path, kubeconfig, version, nil)
+}
+
+// LoadFromFileWithProvider is LoadFromFile bound to an explicit DataProvider.
+// Overlay inputs (kind: RecipeMetadata) are hydrated through a builder bound to
+// dp (so external --data overlays resolve against dp, not the package global),
+// and the returned result carries dp via its provider field. A nil dp falls
+// back to the package-global provider (matching LoadFromFile).
+func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version string, dp DataProvider) (*RecipeResult, error) {
 	rec, err := serializer.FromFileWithKubeconfig[RecipeResult](path, kubeconfig)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
@@ -53,7 +62,16 @@ func LoadFromFile(ctx context.Context, path, kubeconfig, version string) (*Recip
 					path))
 		}
 
-		builder := NewBuilder(WithVersion(version))
+		// Bind the builder to dp when supplied so the overlay resolves
+		// against the caller's provider; the hydrated result inherits dp
+		// via the metadata store (finalizeRecipeResult threads it through).
+		// A nil dp omits the option, matching LoadFromFile's package-global
+		// behavior exactly.
+		opts := []Option{WithVersion(version)}
+		if dp != nil {
+			opts = append(opts, WithDataProvider(dp))
+		}
+		builder := NewBuilder(opts...)
 		rec, err = builder.BuildFromCriteria(ctx, overlay.Spec.Criteria)
 		if err != nil {
 			return nil, err
@@ -61,6 +79,11 @@ func LoadFromFile(ctx context.Context, path, kubeconfig, version string) (*Recip
 
 		slog.Info("overlay hydrated successfully",
 			"appliedOverlays", rec.Metadata.AppliedOverlays)
+	} else if dp != nil {
+		// Already-hydrated RecipeResult: the builder never runs, so bind the
+		// caller's provider directly so downstream value/manifest reads route
+		// through dp rather than the package global.
+		rec.provider = dp
 	}
 
 	// Empty kind is allowed for backward compatibility with older RecipeResult files

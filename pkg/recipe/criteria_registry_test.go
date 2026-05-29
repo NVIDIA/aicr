@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -319,7 +320,7 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 				OS:          "bottlerocket",
 				Platform:    "nvmesh",
 			}
-			seedCriteriaRegistry(c, tt.source)
+			seedCriteriaRegistry(c, tt.source, nil)
 
 			checks := []struct {
 				field CriteriaField
@@ -346,12 +347,158 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 	}
 }
 
+// buildProviderWithServiceCriteria returns an inMemoryDataProvider whose
+// single overlay declares the supplied custom service criteria value. Loading
+// its metadata store seeds the provider's criteria registry with that value
+// (OriginExternal, since inMemoryDataProvider.Source never returns
+// "embedded"). Used by the per-provider isolation test.
+func buildProviderWithServiceCriteria(t *testing.T, tag, serviceValue string) DataProvider {
+	t.Helper()
+
+	baseYAML := []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`)
+
+	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: %s-overlay
+spec:
+  base: base
+  criteria:
+    service: %s
+  componentRefs: []
+`, tag, serviceValue)
+
+	files := map[string][]byte{
+		"overlays/base.yaml":        baseYAML,
+		"overlays/" + tag + ".yaml": overlayYAML,
+	}
+	return newInMemoryProvider(tag, files)
+}
+
+// TestGetCriteriaRegistryFor_PerProviderIsolation verifies that loading two
+// distinct DataProviders that register DIFFERENT external criteria values
+// seeds two distinct criteria registries with no cross-contamination: each
+// provider's registry knows only its own value.
+func TestGetCriteriaRegistryFor_PerProviderIsolation(t *testing.T) {
+	t.Setenv(strictModeEnvVar, "")
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetCriteriaRegistryForTesting)
+
+	const valA = "ncp-alpha"
+	const valB = "ncp-beta"
+
+	dpA := buildProviderWithServiceCriteria(t, "alpha", valA)
+	dpB := buildProviderWithServiceCriteria(t, "beta", valB)
+
+	ctx := context.Background()
+	if _, err := LoadMetadataStoreFor(ctx, dpA); err != nil {
+		t.Fatalf("LoadMetadataStoreFor(A): %v", err)
+	}
+	if _, err := LoadMetadataStoreFor(ctx, dpB); err != nil {
+		t.Fatalf("LoadMetadataStoreFor(B): %v", err)
+	}
+
+	regA := GetCriteriaRegistryFor(dpA)
+	regB := GetCriteriaRegistryFor(dpB)
+
+	if regA == regB {
+		t.Fatal("expected distinct criteria registries for distinct providers")
+	}
+
+	// Each registry must know its own value...
+	if !regA.Has(FieldService, valA) {
+		t.Errorf("registry A missing its own value %q", valA)
+	}
+	if !regB.Has(FieldService, valB) {
+		t.Errorf("registry B missing its own value %q", valB)
+	}
+	// ...and must NOT know the other provider's value.
+	if regA.Has(FieldService, valB) {
+		t.Errorf("registry A leaked provider B's value %q", valB)
+	}
+	if regB.Has(FieldService, valA) {
+		t.Errorf("registry B leaked provider A's value %q", valA)
+	}
+
+	// ParseService routes through the per-provider registry, so each
+	// provider's registry admits its own value and rejects the other's.
+	if _, err := regA.ParseService(valA); err != nil {
+		t.Errorf("regA.ParseService(%q) rejected own value: %v", valA, err)
+	}
+	if _, err := regA.ParseService(valB); err == nil {
+		t.Errorf("regA.ParseService(%q) admitted foreign value", valB)
+	}
+}
+
+// TestEvictCachedCriteriaRegistry verifies that EvictCachedCriteriaRegistry
+// drops the cached entry so the next GetCriteriaRegistryFor rebuilds an empty
+// registry (the seeded value is gone until the catalog is reloaded), and that
+// a nil provider is a no-op that does not clobber other entries.
+func TestEvictCachedCriteriaRegistry(t *testing.T) {
+	t.Setenv(strictModeEnvVar, "")
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetCriteriaRegistryForTesting)
+
+	const val = "ncp-evict"
+	dp := buildProviderWithServiceCriteria(t, "evict", val)
+
+	if _, err := LoadMetadataStoreFor(context.Background(), dp); err != nil {
+		t.Fatalf("LoadMetadataStoreFor: %v", err)
+	}
+	first := GetCriteriaRegistryFor(dp)
+	if !first.Has(FieldService, val) {
+		t.Fatalf("seeded registry missing %q", val)
+	}
+	if !CachedCriteriaRegistryContainsForTesting(dp) {
+		t.Fatal("expected cache to contain entry after load")
+	}
+
+	// nil is a no-op: must not panic and must not clobber dp's entry.
+	EvictCachedCriteriaRegistry(nil)
+	if !CachedCriteriaRegistryContainsForTesting(dp) {
+		t.Fatal("EvictCachedCriteriaRegistry(nil) clobbered an existing entry")
+	}
+
+	EvictCachedCriteriaRegistry(dp)
+	if CachedCriteriaRegistryContainsForTesting(dp) {
+		t.Fatal("expected entry dropped after evict")
+	}
+
+	// Next access rebuilds a fresh (empty, not-yet-reseeded) registry.
+	second := GetCriteriaRegistryFor(dp)
+	if second == first {
+		t.Error("expected a fresh registry instance after evict")
+	}
+	if second.Has(FieldService, val) {
+		t.Error("rebuilt registry must be empty until the catalog is reloaded")
+	}
+}
+
+// TestGetCriteriaRegistryFor_StrictPerRegistry verifies each per-provider
+// registry honors AICR_CRITERIA_STRICT at construction independently.
+func TestGetCriteriaRegistryFor_StrictPerRegistry(t *testing.T) {
+	t.Setenv(strictModeEnvVar, "true")
+	t.Cleanup(ResetCriteriaRegistryForTesting)
+
+	dp := newInMemoryProvider("strict-probe", map[string][]byte{})
+	reg := GetCriteriaRegistryFor(dp)
+	if !reg.IsStrict() {
+		t.Error("per-provider registry must inherit AICR_CRITERIA_STRICT=true at construction")
+	}
+}
+
 func TestSeedCriteriaRegistry_NilCriteria(t *testing.T) {
 	reg := DefaultRegistry()
 	reg.Reset()
 	t.Cleanup(reg.Reset)
 	// Must not panic.
-	seedCriteriaRegistry(nil, "embedded")
+	seedCriteriaRegistry(nil, "embedded", nil)
 	if got := reg.Values(FieldService); len(got) != 0 {
 		t.Errorf("nil criteria must not register anything, got %v", got)
 	}
@@ -366,7 +513,7 @@ func TestSeedCriteriaRegistry_SkipsWildcardAndEmpty(t *testing.T) {
 		Accelerator: "",                 // empty must be skipped
 		Intent:      "training",         // real value, must register
 	}
-	seedCriteriaRegistry(c, "embedded")
+	seedCriteriaRegistry(c, "embedded", nil)
 	if reg.Has(FieldService, "any") {
 		t.Error("registry should not record wildcard 'any'")
 	}
