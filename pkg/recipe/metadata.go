@@ -515,10 +515,10 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 func cloneComponentRef(ref ComponentRef) ComponentRef {
 	out := ref // copies scalars and the (to-be-replaced) reference fields
 	if ref.Overrides != nil {
-		out.Overrides = make(map[string]any, len(ref.Overrides))
-		for k, v := range ref.Overrides {
-			out.Overrides[k] = v
-		}
+		// deepCopyAnyMap recurses into nested map[string]any/[]any so a
+		// mutation through the copy can't reach the source's nested values
+		// (a shallow key-copy would share those nested containers).
+		out.Overrides = deepCopyAnyMap(ref.Overrides)
 	}
 	if ref.Patches != nil {
 		out.Patches = make([]string, len(ref.Patches))
