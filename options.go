@@ -15,6 +15,8 @@
 package aicr
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -50,7 +52,23 @@ type validateConfig struct {
 	imagePullSecrets []string
 	noCluster        *bool
 	tolerations      []corev1.Toleration
-	nodeSelector     map[string]string
+	// tolerationsSet records that WithValidationTolerations was called,
+	// even with a nil/empty slice. nil tolerations cannot itself signal
+	// "explicitly override" because nil is also the zero value — but the CLI
+	// must ALWAYS override the validator's default tolerate-all ("*") so it
+	// doesn't ship AICR_TOLERATIONS. When tolerationsSet is true the option
+	// is emitted regardless of nil-ness; when false (controllers that never
+	// call the option) the validator keeps its default.
+	tolerationsSet bool
+	nodeSelector   map[string]string
+
+	// timeout opts into a facade-level deadline for ValidateState. nil means
+	// "use the default (ValidationOperationTimeout)" — the controller path.
+	// A non-nil *0 means "no facade cap; run under the caller's ctx as-is"
+	// (the CLI path, where per-validator timeouts govern). A non-nil >0 sets
+	// that explicit cap. Pointer-wrapped so the zero (0 = uncapped) is
+	// distinguishable from unset (nil = default).
+	timeout *time.Duration
 
 	// phases selects which validation phases run. nil/empty means
 	// "run all phases" (validator.PhaseOrder) — the prior behavior.
@@ -110,7 +128,11 @@ func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
 	if cfg.noCluster != nil {
 		out = append(out, validator.WithNoCluster(*cfg.noCluster))
 	}
-	if cfg.tolerations != nil {
+	if cfg.tolerationsSet {
+		// Emit even on a nil/empty slice: an explicit override must clear the
+		// validator's default tolerate-all ("*") so AICR_TOLERATIONS isn't
+		// sent. Gating on non-nil would silently drop the CLI's intentional
+		// "no tolerations" override back to the default.
 		out = append(out, validator.WithTolerations(cfg.tolerations))
 	}
 	if cfg.nodeSelector != nil {
@@ -183,8 +205,24 @@ func WithValidationNoCluster(noCluster bool) ValidateOption {
 // race with downstream serialization on a validator goroutine.
 func WithValidationTolerations(tolerations []corev1.Toleration) ValidateOption {
 	return func(c *validateConfig) {
+		// Mark set even for a nil/empty slice so validateOptionsFromConfig
+		// always emits validator.WithTolerations — clearing the validator's
+		// default tolerate-all is an explicit override, not a no-op.
+		c.tolerationsSet = true
 		c.tolerations = cloneTolerations(tolerations)
 	}
+}
+
+// WithValidationTimeout opts into a facade-level deadline for the
+// ValidateState run. By default (option unset) ValidateState wraps the
+// caller's context with defaults.ValidationOperationTimeout (~60m), which
+// suits controllers that pass an unbounded context. Pass a positive
+// duration to set an explicit cap, or 0 to impose NO facade cap — the run
+// then proceeds under the caller's context unchanged so per-validator
+// timeouts (e.g. the 50m inference-perf check) govern. The CLI validate
+// command passes 0 so an all-phase run isn't cut short by a fixed cap.
+func WithValidationTimeout(d time.Duration) ValidateOption {
+	return func(c *validateConfig) { c.timeout = &d }
 }
 
 // WithValidationNodeSelector passes a node selector through to the

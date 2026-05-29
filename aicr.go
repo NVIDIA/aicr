@@ -964,20 +964,15 @@ func (c *Client) ValidateState(
 	}
 	// Snapshot the per-Client provider so the validator catalog loads
 	// from THIS Client's recipe source rather than the package global.
+	// version is snapshotted under the same lock so it can be threaded into
+	// the validator (it rewrites :latest images to the release tag and
+	// populates AICR_CLI_VERSION). It doesn't change after construction, so
+	// the lock is belt-and-suspenders, but keeps the read uniform with dp.
 	dp := c.dp
+	clientVersion := c.version
 	c.inflight.Add(1)
 	c.mu.RUnlock()
 	defer c.inflight.Done()
-
-	// Apply a facade-level deadline so a caller passing context.Background()
-	// can't hang a controller reconcile on stuck Kubernetes I/O. The
-	// ValidationOperationTimeout default sits ABOVE the per-check Job
-	// CheckExecutionTimeout (45m), so a single hung check fires its own
-	// per-check timeout first and surfaces as a structured check
-	// failure — not as a wrapping deadline-exceeded that loses the
-	// per-check signal. Callers passing a tighter deadline keep it.
-	ctx, cancel := context.WithTimeout(ctx, defaults.ValidationOperationTimeout)
-	defer cancel()
 
 	// ValidateOption is a facade-owned wrapper that captures into an
 	// internal validateConfig. Build the config once so we can read BOTH
@@ -987,6 +982,31 @@ func (c *Client) ValidateState(
 	// A future renamed or added validator.With* is a one-line edit in
 	// validateOptionsFromConfig and zero edits on the facade surface.
 	cfg := buildValidateConfig(opts)
+
+	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
+	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
+	// ValidationOperationTimeout cap (~60m), which sits ABOVE the per-check Job
+	// CheckExecutionTimeout (45m), so a single hung check fires its own
+	// per-check timeout first and surfaces as a structured check failure rather
+	// than a wrapping deadline-exceeded that loses the per-check signal — the
+	// behavior controllers rely on. A non-nil *0 imposes NO facade cap (the CLI
+	// path, where per-validator timeouts govern an all-phase run that can
+	// include the 50m inference-perf check); a non-nil >0 sets that explicit
+	// cap. context.WithTimeout honors the smaller of the parent deadline and
+	// ours, so a tighter caller deadline always wins.
+	switch {
+	case cfg.timeout == nil:
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaults.ValidationOperationTimeout)
+		defer cancel()
+	case *cfg.timeout > 0:
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *cfg.timeout)
+		defer cancel()
+	default:
+		// *cfg.timeout == 0: no facade cap; run under the caller's ctx as-is.
+	}
+
 	// Reject unknown phase values before any cluster work. The CLI --phase
 	// flag parses through validator.ParsePhase, but the facade's
 	// WithValidationPhases takes typed Phase values directly — so a caller
@@ -1012,6 +1032,12 @@ func (c *Client) ValidateState(
 	// inside validator.WithDataProvider). Appended after the user opts
 	// so it isn't overridden by a translated option.
 	valOpts = append(valOpts, validator.WithDataProvider(dp))
+	// Thread the Client's version: the validator catalog uses it to rewrite
+	// :latest images to the release tag and to populate AICR_CLI_VERSION. The
+	// pre-facade CLI passed validator.WithVersion(version); without this the
+	// facade silently dropped it. Empty version (controllers that don't set
+	// WithVersion) is the validator's "unset" sentinel and changes nothing.
+	valOpts = append(valOpts, validator.WithVersion(clientVersion))
 	v := validator.New(valOpts...)
 
 	// cfg.phases is nil unless WithValidationPhases was set; nil → the
