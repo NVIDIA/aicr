@@ -385,7 +385,7 @@ func runValidation(
 
 	results, err := client.ValidateState(ctx, rec, snap, opts...)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
 	}
 
 	// Extract CTRF reports from phase results and merge into a single report.
@@ -759,7 +759,7 @@ Run validation without failing on check errors (informational mode):
 				aicr.WithVersion(version),
 			)
 			if err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
 			}
 			defer func() { _ = client.Close() }()
 
