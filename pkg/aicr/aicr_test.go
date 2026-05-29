@@ -22,7 +22,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/NVIDIA/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 

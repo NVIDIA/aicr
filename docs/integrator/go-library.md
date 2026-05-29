@@ -6,11 +6,11 @@ state can import AICR directly. This page is for those consumers.
 
 ## Which package to import
 
-**Import the top-level `github.com/NVIDIA/aicr` package.** This is the
+**Import the `github.com/NVIDIA/aicr/pkg/aicr` package.** This is the
 stable facade.
 
 ```go
-import "github.com/NVIDIA/aicr"
+import aicr "github.com/NVIDIA/aicr/pkg/aicr"
 ```
 
 The facade provides a single `Client` type with constructors for the
@@ -43,7 +43,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/NVIDIA/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 )
 
 func main() {
@@ -152,7 +152,7 @@ values carrying an `ErrorCode`. Use `errors.As` to inspect:
 ```go
 import (
 	stderrors "errors"
-	"github.com/NVIDIA/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
