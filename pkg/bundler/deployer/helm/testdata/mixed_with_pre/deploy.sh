@@ -262,44 +262,43 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
   # Derive wait args: global --wait/--no-wait behavior + per-component timeout.
   COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
   COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
+  COMPONENT_WAIT_ARGS=""
   case "${name}" in
     kai-scheduler)
       COMPONENT_HELM_TIMEOUT="20m"
       COMPONENT_MAX_RETRIES="1"
       ;;
     *-readiness)
-      # Readiness gate folders run the gate CLI as a Job that polls
-      # component-specific signals for up to --max-wait (20m). helm --wait
-      # blocks on that Job completing, so the helm --timeout must exceed the
-      # gate's --max-wait or helm aborts the install before the gate can
-      # finish. The gate owns its own internal poll/retry loop, so a single
-      # helm attempt is sufficient — re-running the whole 20m Job on transient
-      # helm errors would only multiply the wait.
-      COMPONENT_HELM_TIMEOUT="25m"
+      # Readiness gate folders run the gate CLI as a Job that polls component
+      # signals until they pass or the gate's own --max-wait deadline elapses.
+      # The gate owns the deadline; helm cannot wait indefinitely (--wait is
+      # bounded by --timeout), so this --timeout is DERIVED by the bundler as
+      # gate --max-wait + a buffer — large enough that helm never preempts the
+      # gate, small enough to still surface a hung gate shortly after. The gate
+      # is a correctness barrier, so it ignores --no-wait and pins its args:
+      #   --wait-for-jobs  helm --wait alone does NOT block on bare Jobs, so
+      #                    without this helm returns before the gate runs.
+      #   MAX_RETRIES=1    the gate owns its own poll/retry loop; re-running the
+      #                    whole Job on a transient helm error only doubles wait.
+      COMPONENT_HELM_TIMEOUT="1h35m0s"
       COMPONENT_MAX_RETRIES="1"
-      ;;
-  esac
-  if [[ "${NO_WAIT}" == "true" ]]; then
-    COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
-  else
-    COMPONENT_WAIT_ARGS="--wait --timeout ${COMPONENT_HELM_TIMEOUT}"
-  fi
-  if echo "${ASYNC_COMPONENTS}" | grep -qw "${name}"; then
-    # Skip --wait (no readiness check) but keep --timeout for hook completion.
-    COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
-    echo "  (async component — skipping --wait, keeping --timeout for hooks)"
-  fi
-  case "${name}" in
-    *-readiness)
-      # The readiness gate is a standalone Job that only "completes" once the
-      # gate CLI confirms the component is ready. Helm's --wait does NOT block
-      # on bare Jobs — that requires --wait-for-jobs — so without it helm
-      # returns immediately and the gate never gates the deploy. Force both,
-      # and ignore --no-wait: the gate is a correctness barrier (like the DRA
-      # plugin rollout below), not a readiness convenience.
       COMPONENT_WAIT_ARGS="--wait --wait-for-jobs --timeout ${COMPONENT_HELM_TIMEOUT}"
       ;;
   esac
+  # Components that didn't pin their own wait args above honor the global
+  # --wait/--no-wait flag plus the async-component override.
+  if [[ -z "${COMPONENT_WAIT_ARGS}" ]]; then
+    if [[ "${NO_WAIT}" == "true" ]]; then
+      COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
+    else
+      COMPONENT_WAIT_ARGS="--wait --timeout ${COMPONENT_HELM_TIMEOUT}"
+    fi
+    if echo "${ASYNC_COMPONENTS}" | grep -qw "${name}"; then
+      # Skip --wait (no readiness check) but keep --timeout for hook completion.
+      COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
+      echo "  (async component — skipping --wait, keeping --timeout for hooks)"
+    fi
+  fi
   export COMPONENT_WAIT_ARGS
 
   # Invoke the per-folder install.sh with retry. On failure, dump kai-scheduler

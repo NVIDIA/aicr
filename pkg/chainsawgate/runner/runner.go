@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package runner contains the chainsaw-test evaluation machinery shared by the
-// chainsaw-gate controller and the standalone `gate` CLI. It owns:
+// Package runner contains the chainsaw-test evaluation machinery used by the
+// standalone `gate` CLI. It owns:
 //
 //   - Evaluate: run all components of a bundle once, aggregate per-component results
-//   - RunComponent: a single chainsaw exec with a timeout (the historical core)
+//   - RunComponent: a single chainsaw exec with a timeout
 //   - LoadBundleDir: read a directory of *.yaml files into a name -> content map
 //   - ComputeReadyState / ApplyDeadline: the pure stability-window and deadline
 //     state machine driving the aggregate Ready condition
 //
 // The package intentionally does not depend on any Kubernetes API types so it
-// stays usable from non-CRD contexts (CLI, local dev, ad-hoc scripts) and so
-// the chainsaw-gate controller can import it without pulling extra dependencies.
+// stays usable from any context (CLI, local dev, ad-hoc scripts) without
+// pulling extra dependencies.
 package runner
 
 import (
@@ -47,9 +47,9 @@ const (
 	maxMsgLen = 120
 )
 
-// Options holds the parameters that govern one or more evaluations.
-// Not every field applies in every context — the controller uses all five
-// (via its reconcile loop), the CLI ignores nothing.
+// Options holds the parameters that govern one or more evaluations. The gate
+// CLI populates all fields from its flags; the runner reads each field as
+// described below.
 type Options struct {
 	// Namespace is the chainsaw --namespace flag value.
 	Namespace string
@@ -98,7 +98,7 @@ var runComponentFn = RunComponent
 // bundle is a name -> chainsaw-test-YAML map (typically the data field of a
 // bundle ConfigMap, or the contents of a LoadBundleDir directory).
 func Evaluate(ctx context.Context, bundle map[string]string, opts Options) (EvalResult, error) {
-	tmpDir, err := os.MkdirTemp("", "chainsaw-gate-")
+	tmpDir, err := os.MkdirTemp("", "aicr-gate-")
 	if err != nil {
 		return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "create temp dir", err)
 	}

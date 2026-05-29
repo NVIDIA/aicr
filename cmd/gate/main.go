@@ -22,8 +22,9 @@
 // into the pod, but any directory of *.yaml chainsaw tests works). Each file
 // becomes a component named after the filename (sans .yaml suffix).
 //
-// Flags mirror the chainsaw-gate Readiness CRD fields so behavior is
-// consistent between the controller and an out-of-cluster invocation.
+// AICR runs this CLI from a readiness-gate Job emitted by the bundler; the Job
+// mounts the chainsaw Test as a ConfigMap and passes the polling parameters as
+// flags. No CRD or controller is involved.
 package main
 
 import (

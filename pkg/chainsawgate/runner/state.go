@@ -21,8 +21,8 @@ import (
 	"time"
 )
 
-// Condition status values. Mirror metav1.ConditionStatus strings so the
-// controller can use them directly without translation.
+// Condition status values. These mirror metav1.ConditionStatus strings so
+// callers that surface them on a Kubernetes condition need no translation.
 const (
 	StatusTrue  = "True"
 	StatusFalse = "False"

@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
 func TestIndentBlock(t *testing.T) {
@@ -96,6 +97,20 @@ metadata:
 	// The chainsaw Test is embedded, indented under the ConfigMap data block.
 	if !strings.Contains(got, "    kind: Test") {
 		t.Errorf("manifest missing indented embedded chainsaw Test:\n%s", got)
+	}
+
+	// Gate timing args are sourced from pkg/defaults (single source of truth),
+	// not hardcoded in the manifest string. Assert the rendered args match the
+	// constants so a constant change or a positional-verb mistake is caught.
+	for _, want := range []string{
+		"--timeout=" + defaults.ReadinessGateExecTimeout.String(),
+		"--poll-interval=" + defaults.ReadinessGatePollInterval.String(),
+		"--stability-window=" + defaults.ReadinessGateStabilityWindow.String(),
+		"--max-wait=" + defaults.ReadinessGateMaxWait.String(),
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("manifest missing gate arg %q:\n%s", want, got)
+		}
 	}
 }
 

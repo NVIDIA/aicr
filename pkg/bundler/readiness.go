@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -186,10 +187,10 @@ spec:
           args:
             - --bundle-dir=/bundle
             - --namespace={{ .Release.Namespace }}
-            - --timeout=2m
-            - --poll-interval=10s
-            - --stability-window=30s
-            - --max-wait=20m
+            - --timeout=%[6]s
+            - --poll-interval=%[7]s
+            - --stability-window=%[8]s
+            - --max-wait=%[9]s
           volumeMounts:
             - name: bundle
               mountPath: /bundle
@@ -198,7 +199,11 @@ spec:
         - name: bundle
           configMap:
             name: %[2]s
-`, saName, bundleName, componentName, indented, image)
+`, saName, bundleName, componentName, indented, image,
+		defaults.ReadinessGateExecTimeout.String(),
+		defaults.ReadinessGatePollInterval.String(),
+		defaults.ReadinessGateStabilityWindow.String(),
+		defaults.ReadinessGateMaxWait.String())
 
 	return []byte(sb.String()), nil
 }
