@@ -232,7 +232,7 @@ Each entry in `recipes/validators/catalog.yaml`:
     memory: "128Mi"
 ```
 
-**Image tag resolution** (applied by `catalog.Load`):
+**Image tag resolution** (applied by `catalog.LoadWithDataProvider`):
 
 1. `:latest` tags are replaced with the CLI version (e.g., `:v0.9.5`) for release builds
 2. On non-release dev builds with a valid commit, `:latest` becomes `:sha-<commit>` (matches the tags `on-push.yaml` pushes for merges to `main`)
@@ -242,7 +242,7 @@ Each entry in `recipes/validators/catalog.yaml`:
 
 **Digest-pinned references** (`name@sha256:…`) are not rewritten by step 4. A tag override is meaningless against a content-addressable pin, and naive rewriting would corrupt the digest. Step 5's registry override still applies — only the registry prefix changes, the digest is preserved verbatim.
 
-**Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.Load`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
+**Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.LoadWithDataProvider`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
 
 **Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `v1.ImagePullPolicy(image)` helper (`pkg/api/validator/v1/job_plan.go`). The rule, in precedence order, is:
 

@@ -1673,68 +1673,53 @@ provider only.
 
 ### CLI initialization
 
-The CLI installs a single process-global provider so legacy entry points
-that have no `Builder` in scope (e.g., the criteria registry pre-load,
-manifest helpers without a `RecipeResult`) keep working without threading
-a provider through every call site:
+Each CLI command owns a per-command `aicr.Client` whose own `DataProvider`
+backs recipe resolution and the per-provider criteria registry — no
+process-global provider is installed:
 
 ```go
 // pkg/cli/root.go
-func initDataProvider(cmd *cli.Command) error {
+func recipeClientFromCmd(cmd *cli.Command, cfg *config.AICRConfig) (*aicr.Client, error) {
     dataDir := cmd.String("data")
     if dataDir == "" {
-        return nil  // Use default embedded provider
+        dataDir = cfg.Recipe().DataDir()
     }
-
-    embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-    layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-        ExternalDir:   dataDir,
-        AllowSymlinks: false,
-    })
-    if err != nil {
-        return err
+    source := aicr.EmbeddedSource()
+    if dataDir != "" {
+        source = aicr.FilesystemSource(dataDir) // external dir layered over embedded
     }
-
-    recipe.SetDataProvider(layered)
-    return nil
+    return aicr.NewClient(
+        aicr.WithRecipeSource(source),
+        aicr.WithVersion(version),
+    )
+    // Caller MUST defer client.Close().
 }
 ```
 
-Single-tenant CLIs and the API server can stay on this pattern. Library
-callers and multi-tenant servers should prefer `WithDataProvider`.
+The Client binds its provider through `recipe.WithDataProvider` internally,
+so concurrent commands (and multi-tenant servers) stay isolated. Library
+callers construct their own `aicr.Client`, or call
+`recipe.NewBuilder(recipe.WithDataProvider(dp))` directly.
 
-### Back-compat: package-global accessors
-
-The following package-level accessors predate `WithDataProvider` and are
-retained for back-compat. New code should use `WithDataProvider`; see the
-godoc on each for the migration recommendation.
-
-- `SetDataProvider(dp)` — installs the process-global provider. Deprecated;
-  use `recipe.NewBuilder(recipe.WithDataProvider(dp))` instead.
-- `GetDataProvider()` — returns the current process-global provider
-  (embedded by default). Deprecated; recover the Builder-bound provider via
-  `(*RecipeResult).DataProvider()` or pass one explicitly.
-- `GetDataProviderGeneration()` — monotonic counter incremented by
-  `SetDataProvider` so caches keyed on the global can detect a swap.
-- `LoadMetadataStore(ctx)` — convenience wrapper around
-  `LoadMetadataStoreFor(ctx, GetDataProvider())`. Multi-tenant callers
-  should call `LoadMetadataStoreFor` directly with their bound provider.
-- `GetComponentRegistry()` — convenience wrapper around
-  `GetComponentRegistryFor(GetDataProvider())`. Same migration guidance.
+The former package-global accessors (`SetDataProvider`, `GetDataProvider`,
+`GetDataProviderGeneration`) have been removed — bind a provider via
+`WithDataProvider` and recover it with `(*RecipeResult).DataProvider()`.
+Provider-bound helpers that need a default fall back to a single shared
+embedded provider internally; callers no longer pass the global.
 
 ---
 
 ## Criteria Registry
 
-The criteria registry is a process-global cache of valid criteria values
+The criteria registry is a per-`DataProvider` cache of valid criteria values
 (`service`, `accelerator`, `intent`, `os`, `platform`) populated from
 loaded overlays. It is the mechanism by which a `--data` overlay can
 introduce a new criteria value (e.g., `service: ncp-internal`) and have
-it admitted by `ParseCriteriaServiceType` without a code change.
+it admitted by `(*CriteriaRegistry).ParseService` without a code change.
 
 ### Why a registry
 
-Before the registry existed, each `ParseCriteria*Type` had a hardcoded
+Before the registry existed, each criteria parser had a hardcoded
 `switch` of valid string values; an unknown value returned
 `ErrCodeInvalidRequest` before the overlay catalog was even consulted.
 That made it impossible to add a new criteria value via `--data` —
@@ -1768,7 +1753,8 @@ validate. Three sources can enable it (logical OR):
 
 1. `--criteria-strict` CLI flag (added on `aicr recipe`).
 2. `spec.recipe.criteriaStrict: true` in `--config`.
-3. `AICR_CRITERIA_STRICT=1` env var (read at `DefaultRegistry()` init).
+3. `AICR_CRITERIA_STRICT=1` env var (read at registry construction —
+   `NewCriteriaRegistry` / `GetCriteriaRegistryFor`).
 
 Strict mode is intended for **OSS CI gates** — `make qualify` exports
 `AICR_CRITERIA_STRICT=1` for the unit-test step so the upstream catalog
@@ -1794,26 +1780,28 @@ validation runs *before* the recipe build pulls the catalog, a fresh
 process with `--data` would otherwise reject a custom criteria value on
 the very first call — the registry would still be empty.
 
-`recipe.LoadCatalog(ctx)` forces an eager catalog parse, seeding the
-registry. The CLI `recipe` Action calls it right after
-`initDataProvider` so the registry is populated before any
-`ParseCriteria*Type` lookup. **Any future caller that wires its own
-`--data` (e.g., a new API server flag) must also call `LoadCatalog`
-right after `SetDataProvider` for the same reason.**
+`(*aicr.Client).LoadCatalog(ctx)` forces an eager catalog parse, seeding
+the Client's per-provider registry. The CLI `recipe` Action calls it right
+after constructing the Client so the registry is populated before any
+criteria lookup. **Any caller that wires its own `--data` provider must
+likewise call `LoadCatalog` before validating criteria for the same
+reason.** (The package-level `recipe.LoadCatalog(ctx)` seeds the default
+embedded provider's registry and is used by the embedded-only path.)
 
 ### API surface
 
 | Function | Purpose |
 |---|---|
-| `DefaultRegistry()` | Returns the process-wide singleton (lazy-init). |
+| `NewCriteriaRegistry()` | Constructs an empty ephemeral registry (OSS fast-path values only; honors `AICR_CRITERIA_STRICT`). |
+| `GetCriteriaRegistryFor(dp)` | Returns the per-`DataProvider` registry, seeded from that provider's overlays (the common case). |
 | `(*CriteriaRegistry).Register(field, value, origin)` | Records a value; embedded never downgrades. |
 | `(*CriteriaRegistry).Has(field, value)` | Lookup; respects strict mode (external hidden when strict). |
 | `(*CriteriaRegistry).HasEmbedded(field, value)` | Embedded-only lookup, regardless of strict. |
 | `(*CriteriaRegistry).Values(field)` | Sorted union of known values for help / autocomplete. |
 | `(*CriteriaRegistry).SetStrict(bool)` | Toggle strict mode. Composes with `AICR_CRITERIA_STRICT`. |
 | `(*CriteriaRegistry).Reset()` | Test helper; re-reads `AICR_CRITERIA_STRICT` from env. |
-| `LoadCatalog(ctx)` | Eager catalog load — call after `SetDataProvider`. |
-| `AllCriteria{Service,Accelerator,Intent,OS,Platform}Types()` | Union of static OSS list + currently-registered values. |
+| `(*aicr.Client).LoadCatalog(ctx)` | Eager catalog load — seeds the Client's per-provider registry. |
+| `(*CriteriaRegistry).All{Service,Accelerator,Intent,OS,Platform}Types()` | Union of static OSS list + values registered in this registry. |
 | `GetCriteria{Service,Accelerator,Intent,OS,Platform}Types()` | Static OSS list only (stable; not affected by `--data`). |
 
 ---
