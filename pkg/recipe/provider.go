@@ -654,3 +654,11 @@ func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
 			func(v map[string]any) string { s, _ := v["name"].(string); return s }),
 	}
 }
+
+// defaultEmbeddedProvider is the singleton embedded-data provider used as the
+// nil-fallback by per-provider cache entry points (LoadMetadataStoreFor,
+// GetComponentRegistryFor, GetCriteriaRegistryFor, GetManifestContentWithProvider).
+// A fresh *EmbeddedDataProvider per nil-call would change the cache key on every
+// access, defeating storeCache / registryCache and causing unbounded growth on
+// the default path. Holding a single instance gives the cache a stable key.
+var defaultEmbeddedProvider DataProvider = NewEmbeddedDataProvider(GetEmbeddedFS(), "")

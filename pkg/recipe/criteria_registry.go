@@ -80,20 +80,19 @@ type CriteriaRegistry struct {
 	strict bool
 }
 
-// newCriteriaRegistry constructs an empty registry. Use
-// [DefaultRegistry] for the package singleton consulted by
-// ParseCriteria*Type.
+// newCriteriaRegistry is the package-private alias for NewCriteriaRegistry,
+// kept so existing in-package callers (and tests) read naturally.
 func newCriteriaRegistry() *CriteriaRegistry {
 	return NewCriteriaRegistry()
 }
 
 // NewCriteriaRegistry constructs an empty criteria registry, honoring
-// AICR_CRITERIA_STRICT at construction. Use this for an ephemeral registry
-// independent of any DataProvider — e.g., config YAML validation that runs
-// before the Client/Builder is wired and only needs the hardcoded OSS
-// fast-path values. For per-DataProvider registries (the common case),
-// use GetCriteriaRegistryFor(dp) so the registry is seeded by the
-// provider's overlays.
+// AICR_CRITERIA_STRICT at construction. Use this when you need an
+// ephemeral registry that is not tied to a DataProvider — e.g. config
+// YAML validation that runs before the Client/Builder is wired and only
+// needs the hardcoded OSS fast-path values to validate. For
+// per-DataProvider registries (the common case — seeded by overlays
+// loaded for a specific provider) use GetCriteriaRegistryFor(dp).
 func NewCriteriaRegistry() *CriteriaRegistry {
 	r := &CriteriaRegistry{
 		values: make(map[CriteriaField]map[string]CriteriaOrigin),
@@ -119,8 +118,8 @@ func (r *CriteriaRegistry) Register(field CriteriaField, value string, origin Cr
 	defer r.mu.Unlock()
 
 	// Lazy-init the outer map so a zero-value or externally constructed
-	// CriteriaRegistry (i.e., one not built via newCriteriaRegistry /
-	// DefaultRegistry) does not panic on first Register.
+	// CriteriaRegistry (i.e., one not built via NewCriteriaRegistry) does
+	// not panic on first Register.
 	if r.values == nil {
 		r.values = make(map[CriteriaField]map[string]CriteriaOrigin)
 	}
@@ -247,8 +246,7 @@ var criteriaRegistryCache sync.Map // map[DataProvider]*criteriaRegistryCacheEnt
 // DataProvider, constructing it lazily on first access. Concurrent callers
 // with the same provider observe the same singleton; distinct providers
 // populate distinct cache entries and never share state. Each per-provider
-// registry honors AICR_CRITERIA_STRICT at construction, exactly like the
-// global default.
+// registry honors AICR_CRITERIA_STRICT at construction.
 //
 // A nil provider returns a fresh ephemeral registry (not inserted into the
 // cache) — only the hardcoded OSS fast-path values will validate. Callers

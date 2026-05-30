@@ -662,7 +662,7 @@ func criteriaFromRequest(req RecipeRequest, reg *recipe.CriteriaRegistry) (*reci
 
 	criteria, err := recipe.BuildCriteriaWithRegistry(reg, opts...)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "build criteria", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "build criteria")
 	}
 	return criteria, nil
 }

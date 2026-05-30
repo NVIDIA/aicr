@@ -45,15 +45,15 @@ func GetManifestContent(path string) ([]byte, error) {
 }
 
 // GetManifestContentWithProvider reads a manifest file from the supplied
-// DataProvider. A nil provider falls back to GetDataProvider() so callers
-// that thread a possibly-nil RecipeResult.DataProvider() through can rely on
-// the global-provider fallback without an explicit nil check.
+// DataProvider. A nil provider falls back to the package-level embedded-data
+// singleton so callers that thread a possibly-nil RecipeResult.DataProvider()
+// through can rely on the embedded fallback without an explicit nil check.
 //
 // Path should be relative to the data root (e.g.,
 // "components/network-operator/manifests/nfd-network-rule.yaml").
 func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error) {
 	if dp == nil {
-		dp = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+		dp = defaultEmbeddedProvider
 	}
 	content, err := dp.ReadFile(path)
 	if err != nil {
@@ -147,8 +147,7 @@ func (r *RecipeResult) GetComponentRef(name string) *ComponentRef {
 //
 // File lookups route through the DataProvider bound to this result (set when
 // the result was built by a Builder via WithDataProvider). When no provider
-// is bound (legacy global-provider path), falls back to GetDataProvider() so
-// existing callers keep working.
+// is bound, lookups fall back to the package-level embedded-data singleton.
 func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error) {
 	ref := r.GetComponentRef(name)
 	if ref == nil {
@@ -164,11 +163,12 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 	}
 
 	// Resolve provider once: prefer the result-bound provider (per-tenant
-	// isolation), fall back to the package-global for back-compat with
-	// results built before WithDataProvider was wired through.
+	// isolation), fall back to the embedded-data singleton when the result
+	// was constructed without a Builder (e.g. decoded from a recipe file
+	// before BindDataProvider has been called).
 	provider := r.provider
 	if provider == nil {
-		provider = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+		provider = defaultEmbeddedProvider
 	}
 
 	// Step 1: Load base and/or overlay values from files (if ValuesFile specified)
