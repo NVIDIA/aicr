@@ -126,7 +126,7 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 
 			// Helm components: render chart and extract images.
 			if compRef.Type == recipe.ComponentTypeHelm {
-				values, valErr := rec.GetValuesForComponent(compRef.Name)
+				values, valErr := rec.GetValuesForComponentWithContext(gctx, compRef.Name)
 				if valErr != nil {
 					slog.Warn("failed to load values for component",
 						"component", compRef.Name, "error", valErr)
@@ -179,10 +179,10 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 				return gctx.Err()
 			}
 			for _, mPath := range compRef.ManifestFiles {
-				allImages = extractManifestImages(allImages, &ci, compRef.Name, mPath)
+				allImages = extractManifestImages(gctx, allImages, &ci, compRef.Name, mPath)
 			}
 			for _, mPath := range compRef.PreManifestFiles {
-				allImages = extractManifestImages(allImages, &ci, compRef.Name, mPath)
+				allImages = extractManifestImages(gctx, allImages, &ci, compRef.Name, mPath)
 			}
 
 			slices.Sort(allImages)
@@ -248,8 +248,8 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 
 // extractManifestImages reads a manifest file and appends extracted images
 // to the accumulator, recording warnings on failure.
-func extractManifestImages(acc []string, ci *ComponentImages, compName, mPath string) []string {
-	content, readErr := recipe.GetManifestContent(mPath)
+func extractManifestImages(ctx context.Context, acc []string, ci *ComponentImages, compName, mPath string) []string {
+	content, readErr := recipe.GetManifestContentWithContext(ctx, nil, mPath)
 	if readErr != nil {
 		slog.Warn("failed to read manifest",
 			"component", compName, "path", mPath, "error", readErr)

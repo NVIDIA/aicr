@@ -106,7 +106,7 @@ func TestDriverRootLockstep(t *testing.T) {
 			// invariant below and the lockstep checks share them.
 			var opValues map[string]any
 			if op != nil {
-				opValues, err = result.GetValuesForComponent("gpu-operator")
+				opValues, err = result.GetValuesForComponentWithContext(ctx, "gpu-operator")
 				if err != nil {
 					t.Fatalf("GetValuesForComponent(gpu-operator): %v", err)
 				}
@@ -149,7 +149,7 @@ func TestDriverRootLockstep(t *testing.T) {
 			}
 			checked++
 
-			draValues, err := result.GetValuesForComponent("nvidia-dra-driver-gpu")
+			draValues, err := result.GetValuesForComponentWithContext(ctx, "nvidia-dra-driver-gpu")
 			if err != nil {
 				t.Fatalf("GetValuesForComponent(nvidia-dra-driver-gpu): %v", err)
 			}

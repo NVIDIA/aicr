@@ -95,7 +95,7 @@ func emitRecipeEvidence(
 	cfg *recipeEvidenceConfig,
 ) error {
 
-	cat, err := catalog.LoadWithDataProvider(dp, version, commit)
+	cat, err := catalog.LoadWithDataProvider(ctx, dp, version, commit)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog for evidence")
 	}

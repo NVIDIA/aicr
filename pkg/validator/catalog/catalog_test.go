@@ -15,6 +15,7 @@
 package catalog
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -29,7 +30,7 @@ import (
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
-	catalog, err := LoadWithDataProvider(nil, "", "")
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -164,7 +165,7 @@ validators:
 }
 
 func TestForPhaseNoMatch(t *testing.T) {
-	catalog, err := LoadWithDataProvider(nil, "", "")
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -345,7 +346,7 @@ func TestReplaceRegistry(t *testing.T) {
 func TestLoadWithRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
 
-	cat, err := LoadWithDataProvider(nil, "", "")
+	cat, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -360,7 +361,7 @@ func TestLoadWithRegistryOverride(t *testing.T) {
 func TestLoadWithoutRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 
-	cat, err := LoadWithDataProvider(nil, "", "")
+	cat, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -422,7 +423,7 @@ validators:
 	}
 
 	// Load catalog — should merge embedded + external
-	cat, err := LoadWithDataProvider(layered, "", "")
+	cat, err := LoadWithDataProvider(context.Background(), layered, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -1021,7 +1022,7 @@ validators:
 func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
 	// "-next" suffix bypasses the release-version image-tag rewrite path,
 	// matching how goreleaser snapshots stamp dev binaries.
-	cat, err := LoadWithDataProvider(nil, "v0.0.0-next", "")
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -1120,7 +1121,7 @@ type fakeCatalogProvider struct {
 	reads       int
 }
 
-func (p *fakeCatalogProvider) ReadFile(path string) ([]byte, error) {
+func (p *fakeCatalogProvider) ReadFile(_ context.Context, path string) ([]byte, error) {
 	if path == "validators/catalog.yaml" {
 		p.reads++
 		return p.catalogYAML, nil
@@ -1128,7 +1129,7 @@ func (p *fakeCatalogProvider) ReadFile(path string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
-func (p *fakeCatalogProvider) WalkDir(string, fs.WalkDirFunc) error { return nil }
+func (p *fakeCatalogProvider) WalkDir(context.Context, string, fs.WalkDirFunc) error { return nil }
 
 func (p *fakeCatalogProvider) Source(path string) string { return "fake://" + path }
 
@@ -1151,7 +1152,7 @@ validators:
     timeout: 1m
 `)}
 
-	cat, err := LoadWithDataProvider(dp, "", "")
+	cat, err := LoadWithDataProvider(context.Background(), dp, "", "")
 	if err != nil {
 		t.Fatalf("LoadWithDataProvider() error = %v, want nil", err)
 	}
@@ -1191,7 +1192,7 @@ func TestLoadDataProvider(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cat, err := LoadWithDataProvider(tt.dp, "", "")
+			cat, err := LoadWithDataProvider(context.Background(), tt.dp, "", "")
 			if err != nil {
 				t.Fatalf("LoadWithDataProvider() error = %v, want nil", err)
 			}

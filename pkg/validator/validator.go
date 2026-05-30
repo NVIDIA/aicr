@@ -179,9 +179,9 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
-	cat, err := catalog.LoadWithDataProvider(v.dataProvider, v.Version, v.Commit)
+	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
 	}
 
 	// --no-cluster: report all as skipped, no K8s calls
@@ -237,9 +237,9 @@ func (v *Validator) ValidatePhase(
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
-	cat, err := catalog.LoadWithDataProvider(v.dataProvider, v.Version, v.Commit)
+	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
 	}
 
 	if v.NoCluster {

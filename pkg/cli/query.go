@@ -131,7 +131,7 @@ Use in shell scripts:
 				return err
 			}
 
-			hydrated, err := recipe.HydrateResult(result)
+			hydrated, err := recipe.HydrateResultWithContext(ctx, result)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to hydrate recipe", err)
 			}

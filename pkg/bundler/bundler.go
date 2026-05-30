@@ -592,7 +592,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		}
 
 		// Get base values from recipe
-		values, err := recipeResult.GetValuesForComponent(ref.Name)
+		values, err := recipeResult.GetValuesForComponentWithContext(ctx, ref.Name)
 		if err != nil {
 			slog.Warn("failed to get values for component, using empty map",
 				"component", ref.Name,
@@ -1483,7 +1483,7 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 
 		componentManifests := make(map[string][]byte, len(paths))
 		for _, manifestPath := range paths {
-			content, err := recipe.GetManifestContentWithProvider(provider, manifestPath)
+			content, err := recipe.GetManifestContentWithContext(ctx, provider, manifestPath)
 			if err != nil {
 				if stderrors.Is(err, fs.ErrNotExist) {
 					// Use the bound provider for the type assertion. A nil

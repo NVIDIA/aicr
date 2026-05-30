@@ -278,7 +278,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// mapping: a hydrate failure surfaces via its own error code (5xx), while a
 	// missing selector path is a 404. rec is *aicr.Recipe (= *recipe.RecipeResult),
 	// so HydrateResult accepts it directly.
-	hydrated, err := recipe.HydrateResult(rec)
+	hydrated, err := recipe.HydrateResultWithContext(ctx, rec)
 	if err != nil {
 		server.WriteErrorFromErr(w, r, err, "Failed to hydrate recipe", nil)
 		return

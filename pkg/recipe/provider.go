@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io"
@@ -130,12 +131,25 @@ func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, er
 // type is non-comparable (e.g., a struct containing a slice, map, or func
 // field). The safe and idiomatic shape is methods on a pointer receiver, as
 // the in-tree EmbeddedDataProvider / LayeredDataProvider do.
+//
+// ReadFile and WalkDir accept a context.Context. Cancellation is honored
+// at I/O boundaries — before each file open, and between WalkDir entries —
+// not mid-syscall on an in-flight read. The in-tree LayeredDataProvider
+// reads external files through os.Open + io.ReadAll, which are not
+// cancelable once started; a caller that cancels mid-syscall (e.g. on a
+// stalled NFS / sshfs mount mid-readv) will see the cancellation honored
+// on the *next* file the walk touches, not on the one currently blocked.
+// Embedded reads are in-memory and cannot hang; they honor cancellation
+// before each I/O for symmetry. Source is pure metadata and is not
+// context-aware.
 type DataProvider interface {
-	// ReadFile reads a file by path (relative to data directory).
-	ReadFile(path string) ([]byte, error)
+	// ReadFile reads a file by path (relative to data directory). Returns
+	// the context's error if it is canceled before the read completes.
+	ReadFile(ctx context.Context, path string) ([]byte, error)
 
-	// WalkDir walks the directory tree rooted at root.
-	WalkDir(root string, fn fs.WalkDirFunc) error
+	// WalkDir walks the directory tree rooted at root. Returns the
+	// context's error if it is canceled mid-walk.
+	WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error
 
 	// Source returns a description of where data came from (for debugging).
 	Source(path string) string
@@ -156,20 +170,29 @@ func NewEmbeddedDataProvider(efs embed.FS, prefix string) *EmbeddedDataProvider 
 }
 
 // ReadFile reads a file from the embedded filesystem.
-func (p *EmbeddedDataProvider) ReadFile(path string) ([]byte, error) {
+func (p *EmbeddedDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	fullPath := filepath.Join(p.prefix, path)
 	slog.Debug("reading file from embedded provider", "path", path, "fullPath", fullPath)
 	return p.fs.ReadFile(fullPath)
 }
 
 // WalkDir walks the embedded filesystem.
-func (p *EmbeddedDataProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
+func (p *EmbeddedDataProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
 	fullRoot := filepath.Join(p.prefix, root)
 	if fullRoot == "" {
 		fullRoot = "." // embed.FS expects "." for root
 	}
 	slog.Debug("walking embedded filesystem", "root", root, "fullRoot", fullRoot)
 	return fs.WalkDir(p.fs, fullRoot, func(path string, d fs.DirEntry, err error) error {
+		// Honor caller cancellation between entries — embed.FS reads
+		// can't hang but a slow callback (e.g. one that does its own
+		// I/O) still benefits from short-circuiting on cancel.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		// Strip the prefix before passing to callback
 		var relPath string
 		if p.prefix == "" {
@@ -385,19 +408,22 @@ func (p *LayeredDataProvider) ExternalDir() string {
 // ReadFile reads a file, checking external directory first.
 // For registryFileName, returns merged content.
 // For other files, external completely replaces embedded.
-func (p *LayeredDataProvider) ReadFile(path string) ([]byte, error) {
+func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	slog.Debug("reading file from layered provider", "path", path)
 
 	// Special handling for registry file - merge instead of replace
 	if path == registryFileName {
 		slog.Debug("reading merged registry file")
-		return p.getMergedRegistry()
+		return p.getMergedRegistry(ctx)
 	}
 
 	// Special handling for catalog file - merge instead of replace (when external exists)
 	if path == catalogFileName && p.externalFiles[catalogFileName] {
 		slog.Debug("reading merged catalog file")
-		return p.getMergedCatalog()
+		return p.getMergedCatalog(ctx)
 	}
 
 	// Check external directory first
@@ -412,12 +438,15 @@ func (p *LayeredDataProvider) ReadFile(path string) ([]byte, error) {
 
 	// Fall back to embedded
 	slog.Debug("falling back to embedded data", "path", path)
-	return p.embedded.ReadFile(path)
+	return p.embedded.ReadFile(ctx, path)
 }
 
 // WalkDir walks both embedded and external directories.
 // External files take precedence over embedded files.
-func (p *LayeredDataProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
+func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	slog.Debug("walking layered data directory", "root", root)
 
 	// Track files we've visited (to avoid duplicates)
@@ -428,6 +457,12 @@ func (p *LayeredDataProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
 	if _, err := os.Stat(externalRoot); err == nil {
 		slog.Debug("walking external directory", "path", externalRoot)
 		err := filepath.WalkDir(externalRoot, func(path string, d fs.DirEntry, err error) error {
+			// Honor caller cancellation between entries — a slow
+			// network-mounted --data directory can otherwise hold the
+			// walk goroutine indefinitely on stat / readdirent.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			if err != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk external directory", err)
 			}
@@ -457,7 +492,7 @@ func (p *LayeredDataProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
 	slog.Debug("walking embedded directory", "root", root)
 
 	// Walk embedded, skipping already-visited paths
-	return p.embedded.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	return p.embedded.WalkDir(ctx, root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk embedded directory", err)
 		}
@@ -491,13 +526,14 @@ func (p *LayeredDataProvider) Source(path string) string {
 
 // fileReader is a minimal interface for reading a file by path.
 type fileReader interface {
-	ReadFile(path string) ([]byte, error)
+	ReadFile(ctx context.Context, path string) ([]byte, error)
 }
 
 // mergeEmbeddedAndExternal loads a YAML file from both embedded and external sources,
 // unmarshals each into type T, merges them using the provided function, and serializes
 // the result back to YAML bytes.
 func mergeEmbeddedAndExternal[T any](
+	ctx context.Context,
 	embedded fileReader, externalDir string, maxFileSize int64, allowSymlinks bool,
 	fileName string, merge func(embedded, external *T) *T,
 ) ([]byte, error) {
@@ -506,7 +542,7 @@ func mergeEmbeddedAndExternal[T any](
 	slog.Debug("merging files", "file", kind)
 
 	// Load embedded
-	embeddedData, err := embedded.ReadFile(fileName)
+	embeddedData, err := embedded.ReadFile(ctx, fileName)
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read embedded "+kind, err)
 	}
@@ -540,11 +576,22 @@ func mergeEmbeddedAndExternal[T any](
 }
 
 // getMergedRegistry returns the merged registryFileName content.
-// External registry components are merged with embedded, with external taking precedence.
-func (p *LayeredDataProvider) getMergedRegistry() ([]byte, error) {
+// External registry components are merged with embedded, with external
+// taking precedence.
+//
+// Caching invariant: sync.Once captures the *first* caller's context, so
+// whatever ctx error the merge surfaces on first call is cached for the
+// provider's lifetime. In production this is safe because the only
+// reachable entry point (loadComponentRegistryFor) supplies a fresh
+// bounded background ctx, and per-command Clients discard their
+// LayeredDataProvider at command end. Callers that hold a LayeredDataProvider
+// across requests with cancelable contexts MUST NOT cancel a request's
+// ctx before the first merge completes or every later caller will see
+// the cached cancellation error.
+func (p *LayeredDataProvider) getMergedRegistry(ctx context.Context) ([]byte, error) {
 	p.mergedRegistryOnce.Do(func() {
 		p.mergedRegistry, p.mergedRegistryErr = mergeEmbeddedAndExternal(
-			p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName, mergeRegistries,
+			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName, mergeRegistries,
 		)
 	})
 
@@ -621,11 +668,19 @@ type catalogForMerge struct {
 }
 
 // getMergedCatalog returns the merged catalogFileName content.
-// External catalog validators are merged with embedded, with external taking precedence by name.
-func (p *LayeredDataProvider) getMergedCatalog() ([]byte, error) {
+// External catalog validators are merged with embedded, with external
+// taking precedence by name.
+//
+// Caching invariant: see getMergedRegistry. sync.Once captures the first
+// caller's context; today this is safe because LayeredDataProvider is
+// per-command and discarded at command end, but a long-lived
+// LayeredDataProvider reused across requests with cancelable contexts
+// could see a single canceled first read poison the cache for the
+// provider's lifetime.
+func (p *LayeredDataProvider) getMergedCatalog(ctx context.Context) ([]byte, error) {
 	p.mergedCatalogOnce.Do(func() {
 		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
-			p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName, mergeCatalogs,
+			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName, mergeCatalogs,
 		)
 	})
 

@@ -18,6 +18,7 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -38,12 +39,13 @@ type (
 	EnvVar               = v1.EnvVar
 )
 
-// LoadWithDataProvider reads and parses the validator catalog from dp. A nil
-// dp defaults to the embedded recipe data; callers that want a layered
-// `--data` overlay must pass their own layered provider. When the catalog
-// file is present, the external catalog is merged with the embedded one
-// using merge-by-name semantics: external validators override embedded
-// by name, and new validators are appended.
+// LoadWithDataProvider reads and parses the validator catalog from dp using
+// the supplied context for cancellation/timeout. A nil dp defaults to the
+// embedded recipe data; callers that want a layered `--data` overlay must
+// pass their own layered provider. When the catalog file is present, the
+// external catalog is merged with the embedded one using merge-by-name
+// semantics: external validators override embedded by name, and new
+// validators are appended.
 //
 // Image tag resolution (applied in order):
 //  1. If a catalog entry uses :latest and version looks like a release tag
@@ -60,11 +62,11 @@ type (
 //
 // Entries with explicit version tags (e.g., :v1.2.3) are never modified by
 // steps 1-2 but are replaced by step 3 if that env var is set.
-func LoadWithDataProvider(dp recipe.DataProvider, version, commit string) (*ValidatorCatalog, error) {
+func LoadWithDataProvider(ctx context.Context, dp recipe.DataProvider, version, commit string) (*ValidatorCatalog, error) {
 	if dp == nil {
 		dp = recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	}
-	data, err := dp.ReadFile("validators/catalog.yaml")
+	data, err := dp.ReadFile(ctx, "validators/catalog.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read catalog", err)
 	}

@@ -15,10 +15,12 @@
 package recipe
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sync"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
@@ -221,12 +223,17 @@ var registryCache sync.Map // map[DataProvider]*registryCacheEntry
 // GetComponentRegistryFor returns the component registry for the supplied
 // DataProvider. Concurrent callers with the same provider observe the same
 // singleton; distinct providers populate distinct cache entries and never
-// share state. A nil provider falls back to GetDataProvider() so the legacy
-// GetComponentRegistry entry point continues to work transparently.
+// share state. A nil provider falls back to the package-level
+// embedded-data singleton so legacy entry points continue to work
+// transparently.
 //
-// Note: a first-load error is preserved by sync.Once and returned to every
-// subsequent caller for the same provider until EvictCachedRegistry drops
-// the entry.
+// A first-load *deterministic* error (file missing, schema invalid) is
+// preserved by sync.Once and returned to every subsequent caller for the
+// same provider until EvictCachedRegistry drops the entry — concurrent
+// callers don't all re-run the same broken load. A first-load *transient*
+// error (context.Canceled / DeadlineExceeded) is NOT cached: the entry is
+// CompareAndDelete'd before returning so a follow-up call with a healthy
+// ctx rebuilds from scratch, mirroring LoadMetadataStoreFor.
 func GetComponentRegistryFor(dp DataProvider) (*ComponentRegistry, error) {
 	if dp == nil {
 		dp = defaultEmbeddedProvider
@@ -236,6 +243,13 @@ func GetComponentRegistryFor(dp DataProvider) (*ComponentRegistry, error) {
 	entry.once.Do(func() {
 		entry.registry, entry.err = loadComponentRegistryFor(dp)
 	})
+	if entry.err != nil && isTransientLoadError(entry.err) {
+		// Drop the poisoned entry so the next caller rebuilds rather
+		// than serving the cancellation forever. CompareAndDelete is
+		// safe under concurrent retries — a fresh entry stored by a
+		// parallel caller is left undisturbed.
+		registryCache.CompareAndDelete(dp, e)
+	}
 	return entry.registry, entry.err
 }
 
@@ -307,8 +321,26 @@ func ResetComponentRegistryForTesting() {
 // provider. It is pure with respect to the package-global DataProvider —
 // callers that need package-global semantics route through
 // GetComponentRegistry, which resolves the provider once at the entry point.
+//
+// First-load I/O is bounded with defaults.FileReadTimeout so a hung
+// backing store (e.g., a stalled --data NFS mount) cannot park the
+// sync.Once first-load goroutine indefinitely; cancellation only takes
+// effect at the open-file boundary (see DataProvider interface doc), not
+// mid-syscall on an in-flight read. Each call gets its own context so
+// concurrent callers do not share a deadline.
+//
+// Threading a caller-supplied ctx would require a public-API parameter
+// change to GetComponentRegistryFor and every transitive caller in the
+// bundler / mirror / deployer chains; the bounded internal ctx + the
+// transient-error eviction guard in GetComponentRegistryFor is the
+// acceptable tradeoff until that cascade is taken on as a separate
+// follow-up (tracked alongside #1109's out-of-scope items).
+//
+//nolint:contextcheck // see comment above.
 func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error) {
-	data, err := provider.ReadFile("registry.yaml")
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	data, err := provider.ReadFile(ctx, "registry.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read registry.yaml", err)
 	}

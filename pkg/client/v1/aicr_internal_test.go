@@ -43,11 +43,11 @@ type blockingDataProvider struct {
 	walkUnblock chan struct{}
 }
 
-func (b *blockingDataProvider) ReadFile(path string) ([]byte, error) {
-	return b.underlying.ReadFile(path)
+func (b *blockingDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	return b.underlying.ReadFile(ctx, path)
 }
 
-func (b *blockingDataProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
+func (b *blockingDataProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
 	// Signal exactly once that WalkDir entered; tolerate multiple
 	// calls so a retry inside the same test wouldn't deadlock.
 	select {
@@ -56,7 +56,7 @@ func (b *blockingDataProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
 		close(b.walkStarted)
 	}
 	<-b.walkUnblock
-	return b.underlying.WalkDir(root, fn)
+	return b.underlying.WalkDir(ctx, root, fn)
 }
 
 func (b *blockingDataProvider) Source(path string) string {

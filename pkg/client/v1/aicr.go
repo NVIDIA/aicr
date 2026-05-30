@@ -922,7 +922,7 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 			// field (set during ResolveRecipe → builder.BuildFromCriteria
 			// → LoadMetadataStoreFor). GetValuesForComponent uses that
 			// bound provider directly; no explicit dp arg needed here.
-			values, err := r.internal.GetValuesForComponent(facade.Name)
+			values, err := r.internal.GetValuesForComponentWithContext(ctx, facade.Name)
 			if err != nil {
 				return bundles, errors.Wrap(errors.ErrCodeInternal,
 					"resolve values for component "+facade.Name, err)
@@ -1265,7 +1265,7 @@ func loadManifestFiles(ctx context.Context, internal *recipe.RecipeResult, dp re
 		// the caller is the legacy CLI/API server path (Client always
 		// supplies a non-nil dp); GetManifestContentWithProvider falls
 		// back to the package global in that case.
-		content, err := recipe.GetManifestContentWithProvider(dp, path)
+		content, err := recipe.GetManifestContentWithContext(ctx, dp, path)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				"read manifest "+path, err)

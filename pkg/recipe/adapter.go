@@ -16,11 +16,13 @@
 package recipe
 
 import (
+	"context"
 	"embed"
 	stderrors "errors"
 	"fmt"
 	"io/fs"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/recipes"
 	"gopkg.in/yaml.v3"
@@ -37,11 +39,16 @@ func GetEmbeddedFS() embed.FS {
 // "components/network-operator/manifests/nfd-network-rule.yaml").
 //
 // This entry point is preserved for back-compat with callers that have no
-// RecipeResult-bound provider available. Callers operating against a
+// RecipeResult-bound provider available. Internally derives a
+// defaults.FileReadTimeout-bounded context so a hung backing store still
+// returns instead of blocking the goroutine. Callers operating against a
 // per-tenant Builder should prefer GetManifestContentWithProvider so the
-// lookup honors the bound provider.
+// lookup honors the bound provider; callers that already hold a
+// context.Context should use GetManifestContentWithContext.
 func GetManifestContent(path string) ([]byte, error) {
-	return GetManifestContentWithProvider(nil, path)
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return GetManifestContentWithContext(ctx, nil, path)
 }
 
 // GetManifestContentWithProvider reads a manifest file from the supplied
@@ -49,13 +56,26 @@ func GetManifestContent(path string) ([]byte, error) {
 // singleton so callers that thread a possibly-nil RecipeResult.DataProvider()
 // through can rely on the embedded fallback without an explicit nil check.
 //
+// Internally derives a defaults.FileReadTimeout-bounded context. Callers
+// that already hold a context.Context should use
+// GetManifestContentWithContext to honor their own deadline instead.
+//
 // Path should be relative to the data root (e.g.,
 // "components/network-operator/manifests/nfd-network-rule.yaml").
 func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return GetManifestContentWithContext(ctx, dp, path)
+}
+
+// GetManifestContentWithContext reads a manifest file from the supplied
+// DataProvider, honoring the caller's context for cancellation/timeout.
+// A nil provider falls back to GetDataProvider().
+func GetManifestContentWithContext(ctx context.Context, dp DataProvider, path string) ([]byte, error) {
 	if dp == nil {
 		dp = defaultEmbeddedProvider
 	}
-	content, err := dp.ReadFile(path)
+	content, err := dp.ReadFile(ctx, path)
 	if err != nil {
 		if stderrors.Is(err, fs.ErrNotExist) {
 			return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("manifest file not found: %q", path), err)
@@ -139,6 +159,21 @@ func (r *RecipeResult) GetComponentRef(name string) *ComponentRef {
 }
 
 // GetValuesForComponent loads values from the component's valuesFile and inline overrides.
+//
+// Internally derives a defaults.FileReadTimeout-bounded context so a hung
+// backing store still returns instead of blocking the goroutine. Callers
+// that already hold a context.Context should use
+// GetValuesForComponentWithContext to honor their own deadline.
+func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return r.GetValuesForComponentWithContext(ctx, name)
+}
+
+// GetValuesForComponentWithContext loads values from the component's
+// valuesFile and inline overrides, honoring the caller's context for
+// cancellation/timeout.
+//
 // Merge order: base values → ValuesFile → Overrides (highest precedence).
 // This supports three patterns:
 //  1. ValuesFile only: Traditional separate file approach
@@ -148,7 +183,7 @@ func (r *RecipeResult) GetComponentRef(name string) *ComponentRef {
 // File lookups route through the DataProvider bound to this result (set when
 // the result was built by a Builder via WithDataProvider). When no provider
 // is bound, lookups fall back to the package-level embedded-data singleton.
-func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error) {
+func (r *RecipeResult) GetValuesForComponentWithContext(ctx context.Context, name string) (map[string]any, error) {
 	ref := r.GetComponentRef(name)
 	if ref == nil {
 		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("component %q not found in recipe", name))
@@ -179,7 +214,7 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 
 		if isOverlay {
 			// Load base values first
-			baseData, err := provider.ReadFile(baseValuesFile)
+			baseData, err := provider.ReadFile(ctx, baseValuesFile)
 			if err != nil {
 				// If base file doesn't exist, that's okay - just use overlay
 				result = make(map[string]any)
@@ -191,7 +226,7 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 			}
 
 			// Load overlay values
-			overlayData, err := provider.ReadFile(ref.ValuesFile)
+			overlayData, err := provider.ReadFile(ctx, ref.ValuesFile)
 			if err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read overlay values file %q", ref.ValuesFile), err)
 			}
@@ -205,7 +240,7 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 			mergeValues(result, overlayValues)
 		} else {
 			// Just load the base values file
-			data, err := provider.ReadFile(ref.ValuesFile)
+			data, err := provider.ReadFile(ctx, ref.ValuesFile)
 			if err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read values file %q", ref.ValuesFile), err)
 			}

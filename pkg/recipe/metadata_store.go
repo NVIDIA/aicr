@@ -184,7 +184,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 	var pendingRegistry []pendingRegistryEntry
 
 	// Load all YAML files from data directory.
-	walkErr := provider.WalkDir("", func(path string, d fs.DirEntry, err error) error {
+	walkErr := provider.WalkDir(ctx, "", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk data directory", err)
 		}
@@ -207,7 +207,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			if !strings.HasSuffix(filename, ".yaml") {
 				return nil
 			}
-			content, readErr := provider.ReadFile(path)
+			content, readErr := provider.ReadFile(ctx, path)
 			if readErr != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read mixin %s", path), readErr)
 			}
@@ -232,7 +232,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 
 		// Handle component files (files in the components/ directory)
 		if strings.Contains(path, "components/") {
-			content, readErr := provider.ReadFile(path)
+			content, readErr := provider.ReadFile(ctx, path)
 			if readErr != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read component file %s", path), readErr)
 			}
@@ -252,7 +252,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 		}
 
 		// Read and parse metadata file
-		content, readErr := provider.ReadFile(path)
+		content, readErr := provider.ReadFile(ctx, path)
 		if readErr != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read %s", path), readErr)
 		}
@@ -291,6 +291,15 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 	})
 
 	if walkErr != nil {
+		// A bare context.Canceled / DeadlineExceeded surfaces here when the
+		// provider returns ctx.Err() before invoking the per-entry callback
+		// (the in-flight cancellation guard inside DataProvider.WalkDir).
+		// LoadMetadataStoreFor keys its transient-eviction logic on
+		// stderrors.Is(err, context.Canceled) and downstream callers depend
+		// on the ErrCodeTimeout shape; wrap so both invariants hold.
+		if stderrors.Is(walkErr, context.Canceled) || stderrors.Is(walkErr, context.DeadlineExceeded) {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context canceled during metadata load", walkErr)
+		}
 		return nil, walkErr
 	}
 
@@ -895,7 +904,7 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 			"hint", "recipe may not be optimized for your environment")
 	}
 
-	return finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays)
+	return finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays) //nolint:contextcheck // finalizeRecipeResult routes registry lookups through GetComponentRegistryFor, which is sync.Once-cached and bounds first-load I/O via an internal bounded background context (loadComponentRegistryFor). Threading ctx here is tracked separately if/when the cascade needs caller-driven cancellation.
 }
 
 // BuildRecipeResultWithEvaluator builds a RecipeResult by merging base with matching overlays,
@@ -1005,7 +1014,7 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 		}
 	}
 
-	result, err := finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays)
+	result, err := finalizeRecipeResult(s.provider, criteria, &mergedSpec, appliedOverlays) //nolint:contextcheck // see BuildRecipeResult: registry I/O is sync.Once-cached + bounded inside loadComponentRegistryFor.
 	if err != nil {
 		return nil, err
 	}

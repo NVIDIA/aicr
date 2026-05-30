@@ -145,7 +145,7 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hydrated, err := HydrateResult(result)
+	hydrated, err := HydrateResultWithContext(ctx, result)
 	if err != nil {
 		server.WriteErrorFromErr(w, r, err, "Failed to hydrate recipe", nil)
 		return

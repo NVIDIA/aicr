@@ -1584,7 +1584,10 @@ func newInMemoryProvider(tag string, files map[string][]byte) *inMemoryDataProvi
 	return &inMemoryDataProvider{files: files, tag: tag}
 }
 
-func (p *inMemoryDataProvider) ReadFile(path string) ([]byte, error) {
+func (p *inMemoryDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	content, ok := p.files[path]
 	if !ok {
 		return nil, fs.ErrNotExist
@@ -1592,8 +1595,14 @@ func (p *inMemoryDataProvider) ReadFile(path string) ([]byte, error) {
 	return content, nil
 }
 
-func (p *inMemoryDataProvider) WalkDir(_ string, fn fs.WalkDirFunc) error {
+func (p *inMemoryDataProvider) WalkDir(ctx context.Context, _ string, fn fs.WalkDirFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for path := range p.files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := fn(path, inMemoryDirEntry{name: path}, nil); err != nil {
 			return err
 		}

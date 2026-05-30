@@ -1457,16 +1457,25 @@ The system uses a `DataProvider` interface to abstract file access:
 
 ```go
 type DataProvider interface {
-    // ReadFile reads a file by path (relative to data directory)
-    ReadFile(path string) ([]byte, error)
+    // ReadFile reads a file by path (relative to data directory).
+    // Returns ctx's error if it is canceled before the read completes.
+    ReadFile(ctx context.Context, path string) ([]byte, error)
 
-    // WalkDir walks the directory tree rooted at root
-    WalkDir(root string, fn fs.WalkDirFunc) error
+    // WalkDir walks the directory tree rooted at root.
+    // Returns ctx's error if it is canceled mid-walk.
+    WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error
 
     // Source returns where data came from (for debugging)
     Source(path string) string
 }
 ```
+
+Cancellation is honored at I/O boundaries — before each file open and
+between WalkDir entries — not mid-syscall on an in-flight read.
+`LayeredDataProvider` reads external files via `os.Open` + `io.ReadAll`,
+which are not cancelable once started; a hung NFS / sshfs mount blocked
+mid-readv will see cancellation honored on the *next* file the walk
+touches, not the one currently blocked.
 
 **Provider Types:**
 - `EmbeddedDataProvider`: Wraps Go's `embed.FS` for compile-time embedded data
@@ -1716,6 +1725,11 @@ The criteria registry is a per-`DataProvider` cache of valid criteria values
 loaded overlays. It is the mechanism by which a `--data` overlay can
 introduce a new criteria value (e.g., `service: ncp-internal`) and have
 it admitted by `(*CriteriaRegistry).ParseService` without a code change.
+
+Each `aicr.Client` (and so each `Builder` constructed with
+`WithDataProvider`) owns its own registry, scoped by DataProvider
+identity. Concurrent clients with different `--data` directories do not
+share registry state; closing the client evicts its entry.
 
 ### Why a registry
 
