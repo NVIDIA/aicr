@@ -22,7 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"

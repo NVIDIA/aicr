@@ -22,8 +22,8 @@ import (
 	"net/http"
 	"os"
 
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"

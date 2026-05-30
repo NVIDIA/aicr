@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 

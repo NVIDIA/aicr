@@ -564,7 +564,7 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	// ConstraintEvalResult (kept distinct to avoid a recipe→constraints
 	// import cycle).
 	evaluator := func(constraint recipe.Constraint) recipe.ConstraintEvalResult {
-		v := constraints.Evaluate(constraint, snap)
+		v := constraints.Evaluate(constraint, toInternalSnapshot(snap))
 		return recipe.ConstraintEvalResult{
 			Passed: v.Passed,
 			Actual: v.Actual,
@@ -1038,7 +1038,11 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 	ctx, cancel := context.WithTimeout(ctx, cap)
 	defer cancel()
 
-	return snapshotter.DeployAndGetSnapshot(ctx, cfg)
+	snap, err := snapshotter.DeployAndGetSnapshot(ctx, toInternalAgentConfig(cfg))
+	if err != nil {
+		return nil, err
+	}
+	return fromInternalSnapshot(snap), nil
 }
 
 // ValidateState evaluates a resolved recipe against an observed cluster
@@ -1197,7 +1201,15 @@ func (c *Client) ValidateState(
 	// that promoted validation inputs into the v1 catalog package).
 	// ToValidationInput translates the internal recipe result into that
 	// shape without re-resolving the recipe.
-	return v.ValidatePhases(ctx, cfg.phases, validatorv1.ToValidationInput(recipe.internal), snap)
+	internalPhases := make([]validator.Phase, len(cfg.phases))
+	for i, p := range cfg.phases {
+		internalPhases[i] = validator.Phase(p)
+	}
+	results, err := v.ValidatePhases(ctx, internalPhases, validatorv1.ToValidationInput(recipe.internal), toInternalSnapshot(snap))
+	if err != nil {
+		return nil, err
+	}
+	return fromInternalPhaseResults(results), nil
 }
 
 // loadManifestFiles concatenates the recipe-attached ManifestFiles for

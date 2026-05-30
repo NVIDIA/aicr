@@ -17,58 +17,108 @@ package aicr
 import (
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
-// Snapshot is the captured cluster-state artifact returned by
-// Client.CollectSnapshot. It is a transparent alias of
-// pkg/snapshotter.Snapshot.
-//
-// Stability: this symbol inherits pkg/snapshotter's Public (evolving)
-// tier rather than the facade's stable tier — field-shape changes in
-// the source struct propagate without notice. See
-// docs/integrator/public-api.md "Facade type aliases" and
-// NVIDIA/aicr#1078 (replacing the alias with a facade-owned wrapper).
-//
-// A Snapshot embeds an api header (apiVersion, kind, metadata) and a
-// Measurements slice, one entry per collector that ran.
-type Snapshot = snapshotter.Snapshot
+// Phase identifies a single validation phase. Facade-owned so the
+// stable surface does not propagate pkg/validator type-shape changes.
+// Values match pkg/api/validator/v1 constants verbatim for direct
+// wire compatibility.
+type Phase string
 
-// AgentConfig is the deployment-time configuration for the snapshot-
-// collection Job. Re-exported from pkg/snapshotter.AgentConfig.
-//
-// Stability: inherits pkg/snapshotter's Public (evolving) tier — see
-// Snapshot's godoc and docs/integrator/public-api.md.
-//
-// At minimum, callers set Kubeconfig (path or empty for in-cluster),
-// Namespace, Image, and ServiceAccountName. Everything else is
-// optional and falls back to package defaults.
-type AgentConfig = snapshotter.AgentConfig
+// Validation phases — string values match pkg/api/validator/v1 so wire
+// round-trips between facade and validator are byte-identical.
+const (
+	PhaseDeployment  Phase = "deployment"
+	PhasePerformance Phase = "performance"
+	PhaseConformance Phase = "conformance"
+)
+
+// ReportSummary is the high-level pass/fail count breakdown of a
+// validation phase's CTRF report. Facade-owned (not aliased to
+// ctrf.Summary); fields mirror the CTRF spec summary contract.
+type ReportSummary struct {
+	Tests   int
+	Passed  int
+	Failed  int
+	Skipped int
+	Pending int
+	Other   int
+}
 
 // PhaseResult is the outcome of running all validators in a single
-// phase. Re-exported from pkg/validator.PhaseResult; see that type's
-// documentation for the full field reference (Phase, Status, Report,
-// Duration).
-//
-// Stability: inherits pkg/validator's Public (evolving) tier — see
-// docs/integrator/public-api.md "Facade type aliases".
-type PhaseResult = validator.PhaseResult
+// phase. Facade-owned. Summary holds the CTRF count breakdown for the
+// common pass/fail check; RawReport carries the marshaled CTRF JSON
+// for callers needing per-test detail; Report is the typed CTRF
+// report retained for in-tree consumers that merge per-phase reports
+// via ctrf.MergeReports.
+type PhaseResult struct {
+	Phase     Phase
+	Status    string
+	Duration  time.Duration
+	Summary   ReportSummary
+	RawReport []byte
+	Report    *ctrf.Report
+}
 
-// Phase identifies a single validation phase. Re-exported from
-// pkg/validator.Phase. The supported values are PhaseDeployment,
-// PhasePerformance, and PhaseConformance — see the constants below.
-//
-// Stability: inherits pkg/validator's Public (evolving) tier — see
-// docs/integrator/public-api.md "Facade type aliases".
-type Phase = validator.Phase
+// Snapshot is the captured cluster-state artifact returned by
+// Client.CollectSnapshot. Facade-owned so the stable surface does
+// not propagate pkg/snapshotter type-shape changes. APIVersion / Kind /
+// CapturedAt are the high-level identifying metadata; the full
+// measurement payload is held in an unexported internal field for
+// zero-copy round-trip through ValidateState. Consumers needing
+// measurement-level inspection import pkg/snapshotter directly.
+type Snapshot struct {
+	APIVersion string
+	Kind       string
+	CapturedAt time.Time
+
+	// internal holds the upstream pkg/snapshotter.Snapshot so the
+	// facade can re-pass the snapshot to ValidateState without
+	// reserializing. Tests that construct &Snapshot{} have internal == nil;
+	// the translation helpers reconstruct a minimal pkg/snapshotter.Snapshot
+	// from the public fields in that case.
+	internal *snapshotter.Snapshot
+}
+
+// AgentConfig is the deployment-time configuration for the snapshot-
+// collection Job passed to Client.CollectSnapshot. Facade-owned;
+// field-for-field mirror of pkg/snapshotter.AgentConfig. Tolerations
+// keep k8s.io/api/core/v1.Toleration since kubernetes/api is itself
+// stable.
+type AgentConfig struct {
+	Kubeconfig         string
+	Namespace          string
+	Image              string
+	ImagePullSecrets   []string
+	JobName            string
+	ServiceAccountName string
+	NodeSelector       map[string]string
+	Tolerations        []corev1.Toleration
+	Timeout            time.Duration
+	Cleanup            bool
+	Output             string
+	Debug              bool
+	Privileged         bool
+	RequireGPU         bool
+	RuntimeClassName   string
+	TemplatePath       string
+	MaxNodesPerEntry   int
+	OS                 string
+	Requests           corev1.ResourceList
+	Limits             corev1.ResourceList
+}
 
 // Recipe is the full resolved recipe, returned losslessly by the resolve
-// methods. Transparent alias of recipe.RecipeResult; wrapping is tracked by #1078.
+// methods. Transparent alias of recipe.RecipeResult; future wrapping tracked
+// separately.
 type Recipe = recipe.RecipeResult
 
-// AllowLists fences which criteria values the resolve path accepts (#1078 wraps it).
+// AllowLists fences which criteria values the resolve path accepts.
 type AllowLists = recipe.AllowLists
 
 // Criteria lets REST keep its exact existing HTTP->Criteria parser.
@@ -77,17 +127,7 @@ type Criteria = recipe.Criteria
 // CriteriaRegistry is the per-DataProvider set of valid criteria values,
 // returned by Client.CriteriaRegistry so CLI/library callers parse and
 // validate criteria against the SAME provider the Client resolves with.
-// Transparent alias of recipe.CriteriaRegistry; wrapping is tracked by #1078.
 type CriteriaRegistry = recipe.CriteriaRegistry
-
-// Validation phases, re-exported as facade constants so consumers
-// don't need to import pkg/validator to filter by phase. Same
-// Public (evolving) tier as Phase above.
-const (
-	PhaseDeployment  = validator.PhaseDeployment
-	PhasePerformance = validator.PhasePerformance
-	PhaseConformance = validator.PhaseConformance
-)
 
 // RecipeRequest is the stable external request shape. The Client
 // translates this into pkg/recipe.Criteria.

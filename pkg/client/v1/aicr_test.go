@@ -22,10 +22,11 @@ import (
 	"sync"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 func TestNewClientRequiresRecipeSource(t *testing.T) {
@@ -1226,7 +1227,7 @@ func k8sVersionSnapshot() *aicr.Snapshot {
 	// satisfying version, so it is a fixed constant here rather than a
 	// parameter (unparam would flag a param that never varies).
 	const version = "v1.33.0"
-	return &aicr.Snapshot{
+	return aicr.WrapSnapshot(&snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
 			measurement.NewMeasurement(measurement.TypeK8s).
 				WithSubtypeBuilder(
@@ -1235,7 +1236,7 @@ func k8sVersionSnapshot() *aicr.Snapshot {
 				).
 				Build(),
 		},
-	}
+	})
 }
 
 // loadTestRecipe constructs an EmbeddedSource Client and loads the

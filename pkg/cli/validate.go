@@ -26,7 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -391,10 +391,14 @@ func runValidation(
 	// WithValidationPhases(nil...) would be a no-op anyway — but keeping the
 	// option off the slice preserves the exact "run all phases" default path.
 	if len(cfg.phases) > 0 {
-		opts = append(opts, aicr.WithValidationPhases(cfg.phases...))
+		facadePhases := make([]aicr.Phase, len(cfg.phases))
+		for i, p := range cfg.phases {
+			facadePhases[i] = aicr.Phase(p)
+		}
+		opts = append(opts, aicr.WithValidationPhases(facadePhases...))
 	}
 
-	results, err := client.ValidateState(ctx, rec, snap, opts...)
+	results, err := client.ValidateState(ctx, rec, aicr.WrapSnapshot(snap), opts...)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
 	}
@@ -464,7 +468,22 @@ func runValidation(
 	// the validator catalog used for evidence resolves against the same
 	// source as the run rather than the package global.
 	if cfg.evidence != nil {
-		if err := emitRecipeEvidence(ctx, dataProvider, rec.Resolved(), snap, results, cfg.evidence); err != nil {
+		// emitRecipeEvidence takes []*validator.PhaseResult for downstream
+		// attestation.Emit. Convert each facade PhaseResult; Report is
+		// preserved as a typed pointer.
+		internalResults := make([]*validator.PhaseResult, len(results))
+		for i, pr := range results {
+			if pr == nil {
+				continue
+			}
+			internalResults[i] = &validator.PhaseResult{
+				Phase:    validator.Phase(pr.Phase),
+				Status:   pr.Status,
+				Report:   pr.Report,
+				Duration: pr.Duration,
+			}
+		}
+		if err := emitRecipeEvidence(ctx, dataProvider, rec.Resolved(), snap, internalResults, cfg.evidence); err != nil {
 			return err
 		}
 	}

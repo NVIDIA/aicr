@@ -6,11 +6,11 @@ state can import AICR directly. This page is for those consumers.
 
 ## Which package to import
 
-**Import the `github.com/NVIDIA/aicr/pkg/aicr` package.** This is the
+**Import the `github.com/NVIDIA/aicr/pkg/client/v1` package.** This is the
 stable facade.
 
 ```go
-import aicr "github.com/NVIDIA/aicr/pkg/aicr"
+import aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 ```
 
 The facade provides a single `Client` type with constructors for the
@@ -43,7 +43,7 @@ import (
 	"log"
 	"time"
 
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 )
 
 func main() {
@@ -95,8 +95,8 @@ telemetry hooks.
 
 ```go
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
-// returns the resulting Snapshot. cfg is a transparent alias of
-// pkg/snapshotter.AgentConfig.
+// returns the resulting Snapshot. cfg is a facade-owned struct that
+// mirrors every field of the underlying pkg/snapshotter.AgentConfig.
 snap, err := client.CollectSnapshot(ctx, &aicr.AgentConfig{
 	Kubeconfig:         "/path/to/target-kubeconfig",
 	Namespace:          "aicr-snapshot",
@@ -275,7 +275,7 @@ values carrying an `ErrorCode`. Use `errors.As` to inspect:
 ```go
 import (
 	stderrors "errors"
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 

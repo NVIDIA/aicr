@@ -24,8 +24,8 @@ import (
 	"strings"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/aicr"
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 )
 
 // errCodeMessage decodes a structured-error JSON response body and returns
