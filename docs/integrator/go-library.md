@@ -204,8 +204,8 @@ client, err := aicr.NewClient(
 ```
 
 - **`WithVersion(version string)`** stamps the given version string into
-  resolved recipe metadata (`Recipe.Metadata.Version`). Typically the
-  consuming binary's build version.
+  resolved recipe metadata (accessible via `result.Resolved().Metadata.Version`).
+  Typically the consuming binary's build version.
 - **`WithAllowLists(al *AllowLists)`** fences which criteria values the
   Client's resolve path accepts. A resolve whose criteria fall outside
   the allowlist is rejected before the recipe is built. Pass `nil` (or
@@ -217,47 +217,63 @@ client, err := aicr.NewClient(
   `AllowLists` as allow-all, so the result is always safe to pass straight
   to `WithAllowLists`.
 
-`AllowLists` is a transparent alias of `pkg/recipe.AllowLists`; you can
-also construct one directly when you don't want to read from the
-environment.
+`AllowLists` is a facade-owned struct whose `Accelerators`, `Services`,
+`Intents`, and `OSTypes` fields are plain `[]string` slices, so callers
+can construct one directly without depending on `pkg/recipe`'s enum
+identifiers. When you already hold a `pkg/recipe.AllowLists`, use
+`aicr.WrapAllowLists` to project it onto the facade shape.
 
 ## Resolving from criteria
 
 `ResolveRecipe` takes the stable `RecipeRequest` shape and returns the
 facade `RecipeResult` — a deliberately small struct exposing the
 `Name`, `Version`, and `Components` of the resolved recipe. When you
-already hold a `pkg/recipe.Criteria` value — for example, a REST handler
-that parsed criteria from an incoming HTTP request — use
-`ResolveRecipeFromCriteria`, which returns the full `Recipe` (the
-complete underlying `pkg/recipe.RecipeResult`, including constraints,
-deployment order, and metadata that the facade `RecipeResult` omits):
+already hold an `*aicr.Criteria` value — for example, a REST handler
+that parsed criteria from an incoming HTTP request and wrapped them with
+`aicr.WrapCriteria` — use `ResolveRecipeFromCriteria`. It returns the
+same facade `*RecipeResult`; call `result.Resolved()` when you need the
+complete underlying `*pkg/recipe.RecipeResult` (constraints, deployment
+order, validation config, metadata):
 
 ```go
-rec, err := client.ResolveRecipeFromCriteria(ctx, criteria)
+rec, err := client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
 if err != nil {
 	log.Fatalf("resolve recipe: %v", err)
 }
+
+// Facade surface — Name, Version, Components.
+log.Printf("recipe %s components: %d", rec.Name, len(rec.Components))
+
+// Full upstream shape, when needed.
+resolved := rec.Resolved()
+log.Printf("recipe constraints: %d", len(resolved.Constraints))
 ```
 
-`Recipe` is a transparent alias of `pkg/recipe.RecipeResult` and carries
-the complete resolved recipe, including:
+The returned `*RecipeResult` carries:
 
-- component references
-- constraints
-- deployment order
-- metadata
+- `Name`, `Version`, `TranslatedAt` — stable identity
+- `Components` — `[]ComponentRef` (Name, Kind, Version, Source, Chart, Namespace)
+- `Resolved()` — the upstream `*pkg/recipe.RecipeResult` for callers that
+  need constraints, deployment order, validation config, or metadata
+  (e.g., evidence emission). Do not mutate; do not retain past the
+  facade `RecipeResult`'s lifetime — marshal first if persistence is
+  needed.
 
-`Criteria` is a transparent alias of
-`pkg/recipe.Criteria`. Allowlist enforcement (`WithAllowLists`) applies
-here just as it does on `ResolveRecipe`; a `nil` Client, `nil` context,
-or `nil` criteria each return `ErrCodeInvalidRequest`, and the same
-facade-level timeout bounds the resolve.
+`Criteria` is a facade-owned struct whose enum-typed fields project to
+plain strings, decoupling the public surface from `pkg/recipe`'s enum
+identifiers. Construct one directly or wrap an upstream
+`*pkg/recipe.Criteria` via `aicr.WrapCriteria`. Allowlist enforcement
+(`WithAllowLists`) applies here just as it does on `ResolveRecipe`; a
+`nil` Client, `nil` context, or `nil` criteria each return
+`ErrCodeInvalidRequest`, and the same facade-level timeout bounds the
+resolve.
 
-To extract a single value from a resolved `Recipe`, use
+To extract a single value from a resolved recipe, use
 `SelectFromRecipe` with a dot-path selector. It hydrates the recipe's
 component values and returns the value at the path; an empty selector
-returns the entire hydrated structure, and a `nil` `Recipe` returns
-`ErrCodeInvalidRequest`. This mirrors the `aicr query` CLI command:
+returns the entire hydrated structure, and a `nil` `*RecipeResult`
+returns `ErrCodeInvalidRequest`. This mirrors the `aicr query` CLI
+command:
 
 ```go
 v, err := aicr.SelectFromRecipe(rec, "components.gpu-operator.values.driver.version")

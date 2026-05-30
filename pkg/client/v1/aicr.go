@@ -350,11 +350,16 @@ func (c *Client) assertOwns(r *RecipeResult) error {
 // it is a no-op. The underlying AllowLists.ValidateCriteria already
 // returns a pkg/errors-coded error, so the result is returned as-is
 // rather than re-wrapped.
-func (c *Client) enforceAllowLists(criteria *Criteria) error {
+//
+// Accepts the upstream pkg/recipe.Criteria because all in-tree callers
+// (resolveCriteria, ResolveRecipeFromSnapshot) already hold the internal
+// shape post-translation; routing back through the facade would force a
+// pointless round-trip.
+func (c *Client) enforceAllowLists(criteria *recipe.Criteria) error {
 	if c.allowLists == nil {
 		return nil
 	}
-	return c.allowLists.ValidateCriteria(criteria)
+	return toInternalAllowLists(c.allowLists).ValidateCriteria(criteria)
 }
 
 // ResolveRecipe maps a RecipeRequest to a concrete validated recipe.
@@ -445,21 +450,24 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 
 // resolveCriteria is the shared path: allowlist enforcement + build. Callers
 // snapshot the builder under the read lock and pass it in; they own the lossy-
-// vs-lossless projection and owner stamping.
-func (c *Client) resolveCriteria(ctx context.Context, builder *recipe.Builder, criteria *Criteria) (*recipe.RecipeResult, error) {
+// vs-lossless projection and owner stamping. The criteria parameter is the
+// upstream pkg/recipe.Criteria shape — facade entry points translate via
+// toInternalCriteria before reaching here.
+func (c *Client) resolveCriteria(ctx context.Context, builder *recipe.Builder, criteria *recipe.Criteria) (*recipe.RecipeResult, error) {
 	if err := c.enforceAllowLists(criteria); err != nil {
 		return nil, err
 	}
 	return builder.BuildFromCriteria(ctx, criteria)
 }
 
-// ResolveRecipeFromCriteria resolves a pre-built recipe.Criteria into the
-// FULL pkg/recipe.RecipeResult (the Recipe alias), losslessly — unlike
-// ResolveRecipe, which projects into the lossy facade RecipeResult shape.
-// Use this when the caller already speaks the internal Criteria type (e.g.,
-// a REST handler that parsed criteria from an HTTP request) and needs the
-// complete resolved recipe, including constraints, deployment order, and
-// metadata.
+// ResolveRecipeFromCriteria resolves a facade Criteria into a facade
+// RecipeResult. The Components projection mirrors ResolveRecipe; callers
+// needing the full upstream recipe (constraints, deployment order, metadata)
+// access it via the returned result's Resolved() helper.
+//
+// Use this when the caller already speaks the facade Criteria type (e.g.,
+// a REST handler that parsed criteria from an HTTP request and translated
+// via WrapCriteria) rather than the RecipeRequest shape ResolveRecipe takes.
 //
 // Allowlist enforcement (WithAllowLists) applies here just as it does on the
 // shared resolve path: criteria outside the configured allowlist are rejected
@@ -468,7 +476,7 @@ func (c *Client) resolveCriteria(ctx context.Context, builder *recipe.Builder, c
 // The same guards and synchronization as ResolveRecipe apply: nil receiver,
 // nil context, and nil criteria are rejected with ErrCodeInvalidRequest; a
 // closed Client is rejected; a facade-level timeout bounds the resolve.
-func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criteria) (*Recipe, error) {
+func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criteria) (*RecipeResult, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
@@ -495,14 +503,23 @@ func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criter
 	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
 	defer cancel()
 
-	return c.resolveCriteria(ctx, builder, criteria)
+	internal, err := c.resolveCriteria(ctx, builder, toInternalCriteria(criteria))
+	if err != nil {
+		return nil, err
+	}
+	result, err := recipeResultFromInternal(internal)
+	if err != nil {
+		return nil, err
+	}
+	result.owner = c
+	return result, nil
 }
 
 // ResolveRecipeFromSnapshot resolves a recipe from explicit Criteria and
 // evaluates its constraints against an observed cluster Snapshot, mirroring
-// `aicr recipe --snapshot`. It returns the full lossless *Recipe (the
-// pkg/recipe.RecipeResult alias), so callers see ComponentRefs, deployment
-// order, and per-constraint evaluation results directly.
+// `aicr recipe --snapshot`. It returns the facade RecipeResult; callers
+// needing the upstream recipe (ComponentRefs, deployment order, per-
+// constraint evaluation results) access it via Resolved().
 //
 // Unlike ResolveRecipeFromCriteria — which builds the recipe without
 // observing the cluster — this variant threads a constraint evaluator that
@@ -521,7 +538,7 @@ func (c *Client) ResolveRecipeFromCriteria(ctx context.Context, criteria *Criter
 // ErrCodeInvalidRequest; a closed Client is rejected; a facade-level timeout
 // bounds the resolve. Builder errors propagate as-is (they already carry the
 // appropriate pkg/errors code) rather than being re-wrapped.
-func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criteria, snap *Snapshot) (*Recipe, error) {
+func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criteria, snap *Snapshot) (*RecipeResult, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
@@ -551,10 +568,14 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
 	defer cancel()
 
+	// Translate facade Criteria once; remaining steps operate on the
+	// upstream shape.
+	internalCriteria := toInternalCriteria(criteria)
+
 	// Enforce allowlists before building — same fence resolveCriteria applies
 	// on the criteria-only path. AllowLists.ValidateCriteria returns a
 	// pkg/errors-coded error, so enforceAllowLists propagates it as-is.
-	if err := c.enforceAllowLists(criteria); err != nil {
+	if err := c.enforceAllowLists(internalCriteria); err != nil {
 		return nil, err
 	}
 
@@ -575,7 +596,16 @@ func (c *Client) ResolveRecipeFromSnapshot(ctx context.Context, criteria *Criter
 	// Don't re-wrap the builder's error — it already returns a structured
 	// error with the appropriate code (ErrCodeInvalidRequest for bad
 	// criteria, ErrCodeTimeout for context expiry, etc.).
-	return builder.BuildFromCriteriaWithEvaluator(ctx, criteria, evaluator)
+	internal, err := builder.BuildFromCriteriaWithEvaluator(ctx, internalCriteria, evaluator)
+	if err != nil {
+		return nil, err
+	}
+	result, err := recipeResultFromInternal(internal)
+	if err != nil {
+		return nil, err
+	}
+	result.owner = c
+	return result, nil
 }
 
 // buildDataProvider constructs an isolated DataProvider for a single

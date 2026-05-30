@@ -129,15 +129,20 @@ func TestHandleRecipes_MethodNotAllowed(t *testing.T) {
 // the legacy pkg/recipe Builder handler for the same rejection.
 func TestHandleRecipes_AllowListRejection(t *testing.T) {
 	// Allow only a100; h100 falls outside and must be rejected.
-	allowLists := &aicr.AllowLists{
-		Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorA100},
+	facadeAllow := &aicr.AllowLists{
+		Accelerators: []string{string(recipe.CriteriaAcceleratorA100)},
 	}
-	h := newTestHandler(t, allowLists)
+	h := newTestHandler(t, facadeAllow)
 
-	// Reference: the legacy Builder handler, same allowlists.
+	// Reference: the legacy Builder handler, same allowlists. The facade
+	// AllowLists carries plain strings (semver-stable surface); the upstream
+	// pkg/recipe.AllowLists carries enum-typed slices — so the test
+	// constructs both shapes here for the two consumers.
 	rb := recipe.NewBuilder(
 		recipe.WithVersion("test"),
-		recipe.WithAllowLists(allowLists),
+		recipe.WithAllowLists(&recipe.AllowLists{
+			Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorA100},
+		}),
 	)
 
 	const target = "/v1/recipe?accelerator=h100&intent=training"
@@ -333,13 +338,15 @@ func TestHandleQuery_MethodNotAllowed(t *testing.T) {
 // TestHandleQuery_AllowListRejection verifies query enforces allowlists with the
 // same message as the legacy handler.
 func TestHandleQuery_AllowListRejection(t *testing.T) {
-	allowLists := &aicr.AllowLists{
-		Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorA100},
+	facadeAllow := &aicr.AllowLists{
+		Accelerators: []string{string(recipe.CriteriaAcceleratorA100)},
 	}
-	h := newTestHandler(t, allowLists)
+	h := newTestHandler(t, facadeAllow)
 	rb := recipe.NewBuilder(
 		recipe.WithVersion("test"),
-		recipe.WithAllowLists(allowLists),
+		recipe.WithAllowLists(&recipe.AllowLists{
+			Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorA100},
+		}),
 	)
 
 	const target = "/v1/query?accelerator=h100&intent=training&selector=components.gpu-operator"

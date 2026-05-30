@@ -146,19 +146,19 @@ func TestEnforceAllowLists(t *testing.T) {
 	tests := []struct {
 		name       string
 		allowLists *AllowLists
-		criteria   *Criteria
+		criteria   *recipe.Criteria
 		wantErr    bool
 	}{
 		{"nil allowlist allows anything", nil, b200, false},
 		{
 			"in-list accelerator passes",
-			&AllowLists{Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100}},
+			&AllowLists{Accelerators: []string{string(recipe.CriteriaAcceleratorH100)}},
 			h100,
 			false,
 		},
 		{
 			"out-of-list accelerator rejected",
-			&AllowLists{Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100}},
+			&AllowLists{Accelerators: []string{string(recipe.CriteriaAcceleratorH100)}},
 			b200,
 			true,
 		},
@@ -738,10 +738,10 @@ func TestValidateState_ThreadsClientVersion(t *testing.T) {
 }
 
 // TestAdoptRecipe_DeepCopiesForClientIsolation pins FIX A: adopting the
-// SAME caller-owned *Recipe into two different Clients must not let the
-// second adopt overwrite the first's provider binding, and must not mutate
-// the caller's original recipe pointer. adoptRecipe deep-copies before
-// BindDataProvider, so each adopted result carries its own Client's
+// SAME caller-owned pkg/recipe.RecipeResult into two different Clients must
+// not let the second adopt overwrite the first's provider binding, and must
+// not mutate the caller's original recipe pointer. adoptRecipe deep-copies
+// before BindDataProvider, so each adopted result carries its own Client's
 // DataProvider and the input recipe's provider stays nil.
 func TestAdoptRecipe_DeepCopiesForClientIsolation(t *testing.T) {
 	t.Parallel()

@@ -23,15 +23,16 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // BundleConfig is the bundler configuration — deployer mode, value
 // overrides, node selectors, tolerations, vendoring, app/chart names,
 // etc. Transparent alias of pkg/bundler/config.Config (the alias is
-// tracked by #1078, matching the Recipe / AllowLists pattern). Construct
-// one with config.NewConfig(config.WithDeployer(...), ...) — the same
-// builder the CLI bundle command and the REST /v1/bundle handler use, so
-// MakeBundle reproduces their exact output byte-for-byte.
+// tracked by #1078). Construct one with
+// config.NewConfig(config.WithDeployer(...), ...) — the same builder the
+// CLI bundle command and the REST /v1/bundle handler use, so MakeBundle
+// reproduces their exact output byte-for-byte.
 type BundleConfig = config.Config
 
 // BundleAttester signs bundle content. Transparent alias of
@@ -82,9 +83,9 @@ type BundleOptions struct {
 	Timeout time.Duration
 }
 
-// adoptRecipe wraps a raw, externally-supplied *Recipe (the full
-// pkg/recipe.RecipeResult, e.g. decoded from a /v1/bundle POST body) into a
-// Client-owned *RecipeResult ready for MakeBundle. It binds the Client's own
+// adoptRecipe wraps a raw, externally-supplied pkg/recipe.RecipeResult (e.g.
+// decoded from a /v1/bundle POST body) into a Client-owned facade
+// *RecipeResult ready for MakeBundle. It binds the Client's own
 // DataProvider onto the recipe so provider-scoped lookups (values files,
 // manifest files, external data files) resolve against the Client's recipe
 // source rather than the package global, and stamps the owner token so the
@@ -101,15 +102,15 @@ type BundleOptions struct {
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, ctx, or recipe is nil, or when
 //     the Client has been Closed.
-func (c *Client) adoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult, error) {
+func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*RecipeResult, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
 	}
-	if recipe == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "nil Recipe")
+	if rec == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "nil RecipeResult")
 	}
 
 	c.mu.RLock()
@@ -122,11 +123,12 @@ func (c *Client) adoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult
 
 	// Deep-copy the caller-supplied recipe BEFORE binding the provider.
 	// BindDataProvider mutates the receiver's unexported provider field, and
-	// the input *Recipe is caller-owned: a caller reusing one *Recipe across
-	// two Clients would otherwise have the second adopt overwrite the first's
-	// binding, breaking per-Client isolation. DeepCopy leaves the copy's
-	// provider nil for BindDataProvider to set, so the original is untouched.
-	cp := recipe.DeepCopy()
+	// the input is caller-owned: a caller reusing one recipe.RecipeResult
+	// across two Clients would otherwise have the second adopt overwrite
+	// the first's binding, breaking per-Client isolation. DeepCopy leaves
+	// the copy's provider nil for BindDataProvider to set, so the original
+	// is untouched.
+	cp := rec.DeepCopy()
 	cp.BindDataProvider(dp)
 
 	result, err := loadedResultFromInternal(cp)
@@ -147,8 +149,8 @@ func (c *Client) adoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult
 // criteria request or a file path) and needs to bundle it through the facade.
 // In-process consumers that resolve via ResolveRecipe / LoadRecipe should use
 // those results directly; AdoptRecipe is for the decode-then-bundle boundary.
-func (c *Client) AdoptRecipe(ctx context.Context, recipe *Recipe) (*RecipeResult, error) {
-	return c.adoptRecipe(ctx, recipe)
+func (c *Client) AdoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*RecipeResult, error) {
+	return c.adoptRecipe(ctx, rec)
 }
 
 // MakeBundle generates the full deployer-mode bundle for a previously

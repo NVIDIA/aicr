@@ -145,13 +145,13 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	// pre-check preserves the exact user-facing message; the Client's internal
 	// enforcement remains a backstop.
 	if h.allowLists != nil {
-		if validateErr := h.allowLists.ValidateCriteria(criteria); validateErr != nil {
+		if validateErr := validateAgainstAllowLists(h.allowLists, criteria); validateErr != nil {
 			server.WriteErrorFromErr(w, r, validateErr, "Criteria value not allowed", nil)
 			return
 		}
 	}
 
-	result, err := h.client.ResolveRecipeFromCriteria(ctx, criteria)
+	result, err := h.client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
 	if err != nil {
 		server.WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
 		return
@@ -160,7 +160,12 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	// Set caching headers
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(recipeCacheTTL.Seconds())))
 
-	serializer.RespondJSON(w, http.StatusOK, result)
+	// Wire format must remain the upstream pkg/recipe.RecipeResult JSON so
+	// CLI/library consumers parse the same shape they always have. Resolved()
+	// returns the borrowed upstream pointer the facade wraps; nil would mean
+	// the result lacks internal state (only possible from a hand-constructed
+	// RecipeResult, which ResolveRecipeFromCriteria never returns).
+	serializer.RespondJSON(w, http.StatusOK, result.Resolved())
 }
 
 // HandleQuery processes query requests. It resolves a recipe from criteria,
@@ -261,13 +266,13 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// pre-check preserves the exact user-facing message; the Client's internal
 	// enforcement remains a backstop.
 	if h.allowLists != nil {
-		if validateErr := h.allowLists.ValidateCriteria(criteria); validateErr != nil {
+		if validateErr := validateAgainstAllowLists(h.allowLists, criteria); validateErr != nil {
 			server.WriteErrorFromErr(w, r, validateErr, "Criteria value not allowed", nil)
 			return
 		}
 	}
 
-	rec, err := h.client.ResolveRecipeFromCriteria(ctx, criteria)
+	rec, err := h.client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
 	if err != nil {
 		server.WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
 		return
@@ -276,9 +281,9 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// Hydrate and select as two steps (rather than the combined
 	// aicr.SelectFromRecipe) to preserve the legacy handler's distinct error
 	// mapping: a hydrate failure surfaces via its own error code (5xx), while a
-	// missing selector path is a 404. rec is *aicr.Recipe (= *recipe.RecipeResult),
-	// so HydrateResult accepts it directly.
-	hydrated, err := recipe.HydrateResultWithContext(ctx, rec)
+	// missing selector path is a 404. rec.Resolved() returns the upstream
+	// pkg/recipe.RecipeResult that HydrateResult accepts.
+	hydrated, err := recipe.HydrateResultWithContext(ctx, rec.Resolved())
 	if err != nil {
 		server.WriteErrorFromErr(w, r, err, "Failed to hydrate recipe", nil)
 		return

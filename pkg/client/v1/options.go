@@ -361,7 +361,11 @@ func WithAllowLists(al *AllowLists) Option {
 // WithAllowLists treats a nil AllowLists as allow-all. Pass the result to
 // WithAllowLists.
 func ParseAllowListsFromEnv() (*AllowLists, error) {
-	return recipe.ParseAllowListsFromEnv()
+	internal, err := recipe.ParseAllowListsFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return WrapAllowLists(internal), nil
 }
 
 // OCISource describes an OCI registry containing AICR recipes.

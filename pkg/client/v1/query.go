@@ -22,11 +22,21 @@ import (
 // SelectFromRecipe hydrates a resolved recipe and extracts a dot-path selector
 // (e.g. "components.gpu-operator.values.driver.version"). An empty selector
 // returns the entire hydrated structure. Mirrors `aicr query`.
-func SelectFromRecipe(r *Recipe, selector string) (any, error) {
+//
+// The recipe must have been produced by a Client (so its internal
+// pkg/recipe.RecipeResult is populated). A facade RecipeResult constructed
+// outside ResolveRecipe / LoadRecipe / AdoptRecipe is rejected with
+// ErrCodeInvalidRequest.
+func SelectFromRecipe(r *RecipeResult, selector string) (any, error) {
 	if r == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "nil recipe")
 	}
-	hydrated, err := recipe.HydrateResult(r)
+	internal := r.Resolved()
+	if internal == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"RecipeResult has no internal recipe state — call Client.ResolveRecipe, LoadRecipe, or AdoptRecipe to obtain a queryable RecipeResult")
+	}
+	hydrated, err := recipe.HydrateResult(internal)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "hydrate recipe", err)
 	}

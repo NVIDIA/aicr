@@ -115,7 +115,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// pre-check preserves the legacy user-facing message; the Client's
 	// MakeBundle enforcement remains a backstop.
 	if h.allowLists != nil && recipeResult.Criteria != nil {
-		if validateErr := h.allowLists.ValidateCriteria(recipeResult.Criteria); validateErr != nil {
+		if validateErr := validateAgainstAllowLists(h.allowLists, recipeResult.Criteria); validateErr != nil {
 			server.WriteErrorFromErr(w, r, validateErr, "Recipe criteria value not allowed", nil)
 			return
 		}

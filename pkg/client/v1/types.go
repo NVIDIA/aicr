@@ -113,20 +113,80 @@ type AgentConfig struct {
 	Limits             corev1.ResourceList
 }
 
-// Recipe is the full resolved recipe, returned losslessly by the resolve
-// methods. Transparent alias of recipe.RecipeResult; future wrapping tracked
-// separately.
-type Recipe = recipe.RecipeResult
+// Criteria is the facade-owned, semver-stable shape of a recipe-resolution
+// query. Mirrors pkg/recipe.Criteria field-for-field with the enum-typed
+// pkg/recipe values projected to plain strings so the facade contract does
+// not pin consumers to pkg/recipe's enum identifiers (an internal enum
+// rename or addition stays internal). Construct one directly or wrap an
+// upstream pkg/recipe.Criteria via WrapCriteria.
+//
+// Field meanings match the pkg/recipe.Criteria documentation:
+//   - Service: Kubernetes service flavor (eks/gke/aks/oke/kind/lke/bcm).
+//   - Accelerator: GPU model identifier (h100/h200/b200/gb200/a100/l40/rtx-pro-6000).
+//   - Intent: workload intent (training/inference).
+//   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos).
+//   - Platform: framework overlay (dynamo/kubeflow/nim/runai/slurm).
+//   - Nodes: worker-node count hint (0 = unspecified).
+//
+// Empty string is the "unspecified" sentinel for every field except Nodes,
+// where 0 plays that role. A non-empty string that the registry does not
+// recognize is rejected at resolve time with ErrCodeInvalidRequest.
+type Criteria struct {
+	Service     string
+	Accelerator string
+	Intent      string
+	OS          string
+	Platform    string
+	Nodes       int
+}
 
-// AllowLists fences which criteria values the resolve path accepts.
-type AllowLists = recipe.AllowLists
+// AllowLists fences which criteria values the resolve path accepts on a
+// Client constructed via WithAllowLists. Facade-owned; the typed-enum
+// fields on pkg/recipe.AllowLists project to plain string slices so the
+// facade does not propagate pkg/recipe's enum identifiers across the
+// semver boundary. A nil receiver, or an AllowLists whose slices are all
+// empty, accepts every value (the documented "no fencing" mode). An "any"
+// value on a Criteria field is always accepted regardless of the
+// allowlist, matching the pkg/recipe behavior.
+type AllowLists struct {
+	// Accelerators is the set of accepted accelerator identifiers
+	// (e.g., "h100", "b200"). Empty = accept all.
+	Accelerators []string
 
-// Criteria lets REST keep its exact existing HTTP->Criteria parser.
-type Criteria = recipe.Criteria
+	// Services is the set of accepted service identifiers
+	// (e.g., "eks", "gke"). Empty = accept all.
+	Services []string
+
+	// Intents is the set of accepted intent identifiers
+	// (e.g., "training", "inference"). Empty = accept all.
+	Intents []string
+
+	// OSTypes is the set of accepted OS identifiers
+	// (e.g., "ubuntu", "rhel"). Empty = accept all.
+	OSTypes []string
+}
 
 // CriteriaRegistry is the per-DataProvider set of valid criteria values,
 // returned by Client.CriteriaRegistry so CLI/library callers parse and
 // validate criteria against the SAME provider the Client resolves with.
+//
+// Intentionally kept as a transparent alias of pkg/recipe.CriteriaRegistry
+// rather than wrapped into a facade-owned type, for two reasons:
+//
+//  1. The registry is behavior-rich (ParseService/ParseAccelerator/...,
+//     SetStrict, Values, AllAcceleratorTypes, etc.) — wrapping it would
+//     require translating every method through, with no semver win because
+//     these methods are already used to construct pkg/recipe.Criteria
+//     instances in CLI / API call paths.
+//  2. The registry carries mutable shared state (strict mode, registered
+//     values) keyed by per-Client DataProvider identity. A facade wrapper
+//     would either copy state (breaking the per-Client identity coupling)
+//     or hold a pointer (no isolation win over the alias).
+//
+// External callers receive the same pkg/recipe.CriteriaRegistry the
+// Client's resolve path uses. If the underlying API evolves, this alias
+// is the single canary; the facade can absorb it by hand-writing a wrapper
+// then.
 type CriteriaRegistry = recipe.CriteriaRegistry
 
 // RecipeRequest is the stable external request shape. The Client
@@ -237,7 +297,11 @@ type RecipeResult struct {
 // exposes only Name/Version/Components; callers that need constraints,
 // validation config, deployment order, or metadata (e.g. evidence emission)
 // use this. Returns nil if the result was not produced by the Client.
-func (r *RecipeResult) Resolved() *Recipe {
+//
+// Lifetime: the returned pointer is borrowed from the facade RecipeResult.
+// Do not mutate; do not retain past the facade RecipeResult's lifetime.
+// Marshal/serialize first if persistence is needed.
+func (r *RecipeResult) Resolved() *recipe.RecipeResult {
 	if r == nil {
 		return nil
 	}

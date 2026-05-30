@@ -131,7 +131,7 @@ Use in shell scripts:
 				return err
 			}
 
-			hydrated, err := recipe.HydrateResultWithContext(ctx, result)
+			hydrated, err := recipe.HydrateResultWithContext(ctx, result.Resolved())
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to hydrate recipe", err)
 			}
@@ -164,7 +164,7 @@ Use in shell scripts:
 // overlay validates against the same DataProvider the Client resolves with.
 // The Client's catalog must already be loaded (LoadCatalog) so that registry
 // is seeded.
-func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
+func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
 
 	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
@@ -188,7 +188,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// ResolveRecipeFromSnapshot builds the constraint evaluator
 		// internally (constraints.Evaluate against snap), mirroring the
 		// pre-facade BuildFromCriteriaWithEvaluator path.
-		return client.ResolveRecipeFromSnapshot(ctx, criteria, aicr.WrapSnapshot(snap))
+		return client.ResolveRecipeFromSnapshot(ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap))
 	}
 
 	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg, reg)
@@ -202,7 +202,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 	}
 
 	slog.Info("building recipe from criteria", "criteria", criteria.String())
-	return client.ResolveRecipeFromCriteria(ctx, criteria)
+	return client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
 }
 
 // writeQueryResult formats and writes the selected value to w.

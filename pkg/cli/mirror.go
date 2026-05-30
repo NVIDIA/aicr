@@ -247,7 +247,11 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.A
 	if err := client.LoadCatalog(ctx); err != nil {
 		return nil, err
 	}
-	return buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
+	resolved, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Resolved(), nil
 }
 
 // resolveOutputWriter returns a writer for the mirror list output. When

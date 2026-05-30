@@ -760,9 +760,9 @@ spec:
 }
 
 // TestResolveRecipeFromCriteriaLossless proves the lossless resolve path:
-// ResolveRecipeFromCriteria returns the full pkg/recipe.RecipeResult
-// (not the lossy facade RecipeResult), so callers see ComponentRefs and
-// the threaded Metadata.Version directly.
+// ResolveRecipeFromCriteria returns a facade RecipeResult whose Resolved()
+// surfaces the full pkg/recipe.RecipeResult, so callers see ComponentRefs
+// and the threaded Metadata.Version directly.
 func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
 	t.Parallel()
 
@@ -776,15 +776,19 @@ func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
-	rec, err := c.ResolveRecipeFromCriteria(t.Context(), crit)
+	rec, err := c.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(crit))
 	if err != nil {
 		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
 	}
-	if len(rec.ComponentRefs) == 0 {
+	resolved := rec.Resolved()
+	if resolved == nil {
+		t.Fatal("expected non-nil Resolved()")
+	}
+	if len(resolved.ComponentRefs) == 0 {
 		t.Fatal("expected component refs")
 	}
-	if rec.Metadata.Version != "v1.2.3" {
-		t.Fatalf("version not threaded: %q", rec.Metadata.Version)
+	if resolved.Metadata.Version != "v1.2.3" {
+		t.Fatalf("version not threaded: %q", resolved.Metadata.Version)
 	}
 }
 
@@ -818,19 +822,23 @@ func TestResolveRecipeFromSnapshot(t *testing.T) {
 	// h100-eks-training chain's strictest readiness constraint (">= 1.32.4").
 	snap := k8sVersionSnapshot()
 
-	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), crit, snap)
+	rec, err := c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), snap)
 	if err != nil {
 		t.Fatalf("ResolveRecipeFromSnapshot: %v", err)
 	}
 	if rec == nil {
-		t.Fatal("expected non-nil *Recipe")
+		t.Fatal("expected non-nil *RecipeResult")
 	}
-	if len(rec.ComponentRefs) == 0 {
+	resolved := rec.Resolved()
+	if resolved == nil {
+		t.Fatal("expected non-nil Resolved()")
+	}
+	if len(resolved.ComponentRefs) == 0 {
 		t.Fatal("expected component refs (snapshot satisfies the chain's constraints, so overlays must not be excluded)")
 	}
 	// Version is threaded through the builder just as on the criteria path.
-	if rec.Metadata.Version != "v1.2.3" {
-		t.Fatalf("version not threaded: %q", rec.Metadata.Version)
+	if resolved.Metadata.Version != "v1.2.3" {
+		t.Fatalf("version not threaded: %q", resolved.Metadata.Version)
 	}
 }
 
@@ -855,11 +863,13 @@ func TestResolveRecipeFromSnapshot_NilArgs(t *testing.T) {
 	}
 	snap := k8sVersionSnapshot()
 
+	facadeCrit := aicr.WrapCriteria(crit)
+
 	// Nil receiver: must not panic; returns an error.
 	t.Run("nil receiver", func(t *testing.T) {
 		t.Parallel()
 		var nilClient *aicr.Client
-		if _, err := nilClient.ResolveRecipeFromSnapshot(context.Background(), crit, snap); err == nil {
+		if _, err := nilClient.ResolveRecipeFromSnapshot(context.Background(), facadeCrit, snap); err == nil {
 			t.Fatal("expected error from nil receiver, got nil")
 		}
 	})
@@ -868,12 +878,12 @@ func TestResolveRecipeFromSnapshot_NilArgs(t *testing.T) {
 	tests := []struct {
 		name string
 		ctx  context.Context
-		crit *recipe.Criteria
+		crit *aicr.Criteria
 		snap *aicr.Snapshot
 	}{
-		{name: "nil context", ctx: nil, crit: crit, snap: snap},
+		{name: "nil context", ctx: nil, crit: facadeCrit, snap: snap},
 		{name: "nil criteria", ctx: context.Background(), crit: nil, snap: snap},
-		{name: "nil snapshot", ctx: context.Background(), crit: crit, snap: nil},
+		{name: "nil snapshot", ctx: context.Background(), crit: facadeCrit, snap: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -901,7 +911,7 @@ func TestResolveRecipeFromSnapshotRejectsOutOfAllowList(t *testing.T) {
 	t.Parallel()
 
 	al := &aicr.AllowLists{
-		Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100},
+		Accelerators: []string{string(recipe.CriteriaAcceleratorH100)},
 	}
 	c, err := aicr.NewClient(
 		aicr.WithRecipeSource(aicr.EmbeddedSource()),
@@ -920,7 +930,7 @@ func TestResolveRecipeFromSnapshotRejectsOutOfAllowList(t *testing.T) {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
 
-	_, err = c.ResolveRecipeFromSnapshot(t.Context(), crit, k8sVersionSnapshot())
+	_, err = c.ResolveRecipeFromSnapshot(t.Context(), aicr.WrapCriteria(crit), k8sVersionSnapshot())
 	if err == nil {
 		t.Fatal("expected allowlist rejection for b200, got nil error")
 	}
@@ -942,7 +952,7 @@ func TestResolveRecipeFromCriteriaRejectsOutOfAllowList(t *testing.T) {
 	t.Parallel()
 
 	al := &aicr.AllowLists{
-		Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100},
+		Accelerators: []string{string(recipe.CriteriaAcceleratorH100)},
 	}
 	c, err := aicr.NewClient(
 		aicr.WithRecipeSource(aicr.EmbeddedSource()),
@@ -961,7 +971,7 @@ func TestResolveRecipeFromCriteriaRejectsOutOfAllowList(t *testing.T) {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
 
-	_, err = c.ResolveRecipeFromCriteria(t.Context(), crit)
+	_, err = c.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(crit))
 	if err == nil {
 		t.Fatal("expected allowlist rejection for b200, got nil error")
 	}
@@ -992,7 +1002,7 @@ func TestSelectFromRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
-	rec, err := c.ResolveRecipeFromCriteria(t.Context(), crit)
+	rec, err := c.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(crit))
 	if err != nil {
 		t.Fatalf("ResolveRecipeFromCriteria: %v", err)
 	}

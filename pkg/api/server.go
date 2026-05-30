@@ -73,10 +73,10 @@ func Serve() error {
 			"os_types", len(allowLists.OSTypes),
 		)
 		slog.Debug("criteria allowlists loaded",
-			"accelerators", allowLists.AcceleratorStrings(),
-			"services", allowLists.ServiceStrings(),
-			"intents", allowLists.IntentStrings(),
-			"os_types", allowLists.OSTypeStrings(),
+			"accelerators", allowLists.Accelerators,
+			"services", allowLists.Services,
+			"intents", allowLists.Intents,
+			"os_types", allowLists.OSTypes,
 		)
 	}
 

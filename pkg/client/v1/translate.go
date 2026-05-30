@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
@@ -156,3 +157,109 @@ func fromInternalPhaseResult(p *validator.PhaseResult) *PhaseResult {
 
 // fromInternalPhase is the typed lift from validator.Phase to facade Phase.
 func fromInternalPhase(p validator.Phase) Phase { return Phase(p) }
+
+// WrapCriteria projects a pkg/recipe.Criteria into the facade Criteria
+// shape. Use this at the boundary where in-tree callers (CLI/API
+// handlers) hand a parsed criteria — produced by recipe.ParseCriteriaFromRequest
+// or recipe.BuildCriteriaWithRegistry — to facade methods such as
+// Client.ResolveRecipeFromCriteria. Returns nil for nil input.
+//
+// Round-trip: WrapCriteria(c) then toInternalCriteria projects back to the
+// pkg/recipe.Criteria enum-typed shape; the round-trip is lossless because
+// the facade carries plain strings for the same set of named enum fields
+// (Service/Accelerator/Intent/OS/Platform) plus Nodes.
+func WrapCriteria(c *recipe.Criteria) *Criteria {
+	if c == nil {
+		return nil
+	}
+	return &Criteria{
+		Service:     string(c.Service),
+		Accelerator: string(c.Accelerator),
+		Intent:      string(c.Intent),
+		OS:          string(c.OS),
+		Platform:    string(c.Platform),
+		Nodes:       c.Nodes,
+	}
+}
+
+// toInternalCriteria translates a facade Criteria back into the
+// pkg/recipe.Criteria enum-typed shape the resolver consumes. The string
+// values are wrapped in the corresponding pkg/recipe enum types without
+// validation — registry-strict mode at resolve time is the gate that
+// rejects unknown values (with ErrCodeInvalidRequest).
+func toInternalCriteria(c *Criteria) *recipe.Criteria {
+	if c == nil {
+		return nil
+	}
+	return &recipe.Criteria{
+		Service:     recipe.CriteriaServiceType(c.Service),
+		Accelerator: recipe.CriteriaAcceleratorType(c.Accelerator),
+		Intent:      recipe.CriteriaIntentType(c.Intent),
+		OS:          recipe.CriteriaOSType(c.OS),
+		Platform:    recipe.CriteriaPlatformType(c.Platform),
+		Nodes:       c.Nodes,
+	}
+}
+
+// WrapAllowLists projects a pkg/recipe.AllowLists into the facade
+// AllowLists shape. Use at the boundary where in-tree callers parse
+// allowlists from configuration (e.g., recipe.ParseAllowListsFromEnv)
+// and hand them to the facade. Returns nil for nil input.
+//
+// The facade slices are independent copies; mutating either side after
+// wrap does not affect the other.
+func WrapAllowLists(al *recipe.AllowLists) *AllowLists {
+	if al == nil {
+		return nil
+	}
+	return &AllowLists{
+		Accelerators: stringsFromTypes(al.Accelerators),
+		Services:     stringsFromTypes(al.Services),
+		Intents:      stringsFromTypes(al.Intents),
+		OSTypes:      stringsFromTypes(al.OSTypes),
+	}
+}
+
+// toInternalAllowLists translates a facade AllowLists into the
+// pkg/recipe.AllowLists enum-typed shape the resolver consumes. The
+// string values are wrapped in the corresponding pkg/recipe enum types
+// without validation; registry-strict mode at resolve time rejects
+// unknown values.
+func toInternalAllowLists(al *AllowLists) *recipe.AllowLists {
+	if al == nil {
+		return nil
+	}
+	return &recipe.AllowLists{
+		Accelerators: typesFromStrings[recipe.CriteriaAcceleratorType](al.Accelerators),
+		Services:     typesFromStrings[recipe.CriteriaServiceType](al.Services),
+		Intents:      typesFromStrings[recipe.CriteriaIntentType](al.Intents),
+		OSTypes:      typesFromStrings[recipe.CriteriaOSType](al.OSTypes),
+	}
+}
+
+// stringsFromTypes converts a slice of pkg/recipe enum-typed strings to
+// a plain []string. Returns nil for nil/empty input so the facade can
+// retain the upstream IsEmpty semantics (nil = "accept all").
+func stringsFromTypes[T ~string](in []T) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = string(v)
+	}
+	return out
+}
+
+// typesFromStrings converts a plain []string to a slice of pkg/recipe
+// enum-typed strings. Returns nil for nil/empty input.
+func typesFromStrings[T ~string](in []string) []T {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]T, len(in))
+	for i, v := range in {
+		out[i] = T(v)
+	}
+	return out
+}

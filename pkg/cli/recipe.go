@@ -187,9 +187,15 @@ Override snapshot-detected criteria:
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "error building recipe")
 			}
 
+			// Operate on the upstream pkg/recipe.RecipeResult for the remainder
+			// of this command — the facade RecipeResult exposes only the
+			// stable projection, but the CLI emits the full YAML and reports
+			// metadata that lives on the upstream shape.
+			resolved := result.Resolved()
+
 			// Log constraint warnings for visibility
-			if result != nil && len(result.Metadata.ConstraintWarnings) > 0 {
-				for _, w := range result.Metadata.ConstraintWarnings {
+			if resolved != nil && len(resolved.Metadata.ConstraintWarnings) > 0 {
+				for _, w := range resolved.Metadata.ConstraintWarnings {
 					slog.Warn("overlay excluded due to constraint failure",
 						"overlay", w.Overlay,
 						"constraint", w.Constraint,
@@ -212,14 +218,14 @@ Override snapshot-detected criteria:
 				}
 			}()
 
-			if err := ser.Serialize(ctx, result); err != nil {
+			if err := ser.Serialize(ctx, resolved); err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
 			}
 
 			slog.Info("recipe generation completed",
 				"output", output,
-				"components", len(result.ComponentRefs),
-				"overlays", len(result.Metadata.AppliedOverlays))
+				"components", len(resolved.ComponentRefs),
+				"overlays", len(resolved.Metadata.AppliedOverlays))
 
 			return nil
 		},
