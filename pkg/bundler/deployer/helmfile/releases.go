@@ -100,8 +100,10 @@ type Release struct {
 	// will skip the live-cluster REST-mapper check for this release,
 	// letting render succeed when a template creates a CR whose CRD
 	// is shipped under `crds/` in the same chart and not yet present
-	// in the cluster. Scoped per-release so other releases keep the
-	// safety check. Issue #914.
+	// in the cluster. Scoped to the primary release only — injected
+	// -pre / -post wrapper folders carry raw manifests, not the
+	// self-ref chart, so they keep the safety check. Issues #914,
+	// #929.
 	DisableValidation bool `yaml:"disableValidation,omitempty"`
 }
 
@@ -210,9 +212,14 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		// disableValidation: true so helm-diff skips the live-cluster
 		// mapper check for charts whose own templates reference CRDs
 		// they ship in `crds/` (e.g., gpu-operator's clusterpolicy
-		// template). Keyed by f.Parent so injected -pre / -post
-		// folders inherit the same flag.
-		if flags[f.Parent].HasSelfRefCRDs {
+		// template). Scoped to the primary release (f.Name == f.Parent):
+		// injected -pre / -post wrapper folders are local-helm charts
+		// containing only raw manifests, so they have no `crds/` and
+		// no self-reference of their own. Letting them inherit the
+		// flag would silently drop helm-diff's mapper sanity check on
+		// the wrapper's manifests — a typo in a resource Kind would
+		// render at diff time and fail at apply. See issue #929.
+		if f.Name == f.Parent && flags[f.Parent].HasSelfRefCRDs {
 			rel.DisableValidation = true
 		}
 

@@ -20,4 +20,3 @@ releases:
       - ./002-gpu-operator-post/values.yaml
     needs:
       - gpu-operator
-    disableValidation: true
