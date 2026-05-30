@@ -18,12 +18,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
@@ -131,37 +131,38 @@ func buildVolumeMounts() []corev1.VolumeMount {
 	}
 }
 
-// buildResources creates resource requirements for the validator container
-func buildResources(entry ValidatorEntry) corev1.ResourceRequirements {
-	// Use catalog entry resources if specified, otherwise use defaults
-	if entry.Resources != nil && entry.Resources.CPU != "" && entry.Resources.Memory != "" {
-		// Parse user-provided quantities with error handling
+// buildResources creates resource requirements for the validator container.
+// Fails closed on invalid resource quantities — a typo in validators/catalog.yaml
+// must not silently substitute defaults and ship a misconfigured workload.
+func buildResources(entry ValidatorEntry) (corev1.ResourceRequirements, error) {
+	if entry.Resources != nil && (entry.Resources.CPU != "" || entry.Resources.Memory != "") {
+		// Both fields must be set when overriding defaults — partial overrides
+		// are ambiguous and almost always a config error.
+		if entry.Resources.CPU == "" || entry.Resources.Memory == "" {
+			return corev1.ResourceRequirements{}, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("validator %q: resources must specify both cpu and memory (got cpu=%q memory=%q)",
+					entry.Name, entry.Resources.CPU, entry.Resources.Memory))
+		}
 		cpu, cpuErr := resource.ParseQuantity(entry.Resources.CPU)
 		memory, memErr := resource.ParseQuantity(entry.Resources.Memory)
-
-		// If parsing fails, fall back to defaults
 		if cpuErr != nil || memErr != nil {
-			slog.Warn("invalid resource quantities in catalog entry, using defaults",
-				"validator", entry.Name,
-				"cpu", entry.Resources.CPU,
-				"cpuError", cpuErr,
-				"memory", entry.Resources.Memory,
-				"memoryError", memErr)
-		} else {
-			return corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceCPU:    cpu,
-					corev1.ResourceMemory: memory,
-				},
-				Limits: corev1.ResourceList{
-					corev1.ResourceCPU:    cpu,
-					corev1.ResourceMemory: memory,
-				},
-			}
+			return corev1.ResourceRequirements{}, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("validator %q: invalid resource quantities (cpu=%q err=%v; memory=%q err=%v)",
+					entry.Name, entry.Resources.CPU, cpuErr, entry.Resources.Memory, memErr))
 		}
+		return corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    cpu,
+				corev1.ResourceMemory: memory,
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    cpu,
+				corev1.ResourceMemory: memory,
+			},
+		}, nil
 	}
 
-	// Default resources
+	// Default resources when entry.Resources is nil or both fields empty.
 	return corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse("1"),
@@ -171,7 +172,7 @@ func buildResources(entry ValidatorEntry) corev1.ResourceRequirements {
 			corev1.ResourceCPU:    resource.MustParse("1"),
 			corev1.ResourceMemory: resource.MustParse("1Gi"),
 		},
-	}
+	}, nil
 }
 
 // serializeNodeSelector encodes a nodeSelector map as a comma-separated key=value string.

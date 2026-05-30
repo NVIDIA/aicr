@@ -30,7 +30,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Re-exported types from pkg/api/validator/v1 for backward compatibility.
+// Re-exported types from pkg/validator/v1 so callers that work with the
+// catalog do not have to import the wire-format package directly.
 type (
 	ValidatorCatalog     = v1.ValidatorCatalog
 	CatalogMetadata      = v1.CatalogMetadata

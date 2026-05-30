@@ -109,7 +109,7 @@ Exit codes:
 	}
 }
 
-func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
+func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	input := cmd.Args().First()
 	if input == "" {
 		return errors.New(errors.ErrCodeInvalidRequest,
@@ -120,7 +120,7 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}
 
-	result, err := verifier.Verify(ctx, verifier.VerifyOptions{
+	result, verifyErr := verifier.Verify(ctx, verifier.VerifyOptions{
 		Input:                  input,
 		BundleRef:              cmd.String("bundle"),
 		ExpectedIssuer:         cmd.String("expected-issuer"),
@@ -129,17 +129,23 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		InsecureTLS:            cmd.Bool("registry-insecure-tls"),
 		AllowUnpinnedTag:       cmd.Bool("allow-unpinned-tag"),
 	})
-	if err != nil {
-		return err
+	if verifyErr != nil {
+		return verifyErr
 	}
 
-	w, closeFn, err := openVerifyOutput(cmd.String(flagOutput), cmd.Root().Writer)
-	if err != nil {
-		return err
+	w, closeFn, openErr := openVerifyOutput(cmd.String(flagOutput), cmd.Root().Writer)
+	if openErr != nil {
+		return openErr
 	}
-	defer closeFn()
-	if err := writeVerifyOutput(w, format, result); err != nil {
-		return err
+	defer func() {
+		// Writable Close errors flush buffered data — capture so a partial
+		// write to --output is not reported as success.
+		if closeErr := closeFn(); closeErr != nil && err == nil {
+			err = errors.Wrap(errors.ErrCodeInternal, "failed to close --output file", closeErr)
+		}
+	}()
+	if writeErr := writeVerifyOutput(w, format, result); writeErr != nil {
+		return writeErr
 	}
 
 	switch result.Exit {
@@ -155,18 +161,20 @@ func runEvidenceVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 }
 
 // openVerifyOutput resolves the --output flag. Empty path returns the
-// CLI's default writer (stdout); a path opens the file for writing and
-// returns a closer that the caller must invoke (typically via defer).
-func openVerifyOutput(path string, stdout io.Writer) (io.Writer, func(), error) {
+// CLI's default writer (stdout) and a no-op closer; a path opens the file
+// for writing and returns a closer that flushes/closes it. The caller MUST
+// invoke the closer and propagate its error — closing a writable file can
+// surface buffered-write failures that would otherwise look like success.
+func openVerifyOutput(path string, stdout io.Writer) (io.Writer, func() error, error) {
 	if path == "" {
-		return stdout, func() {}, nil
+		return stdout, func() error { return nil }, nil
 	}
 	f, err := os.Create(path) //nolint:gosec // operator-supplied destination
 	if err != nil {
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to open --output file for writing", err)
 	}
-	return f, func() { _ = f.Close() }, nil
+	return f, f.Close, nil
 }
 
 func writeVerifyOutput(w io.Writer, format string, r *verifier.VerifyResult) error {

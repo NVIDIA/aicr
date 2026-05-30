@@ -22,9 +22,10 @@
 // The server implements a stateless HTTP API with the following key components:
 //
 //   - Request validation using regex patterns from OpenAPI spec
-//   - Per-request context timeout (defaults.ServerHandlerTimeout, 30s)
-//     applied by timeoutMiddleware so slow upstream calls cannot outlive
-//     the WriteTimeout.
+//   - Per-request context timeout (defaults.ServerHandlerTimeout, 90s —
+//     sized for the longest per-handler timeout) applied by
+//     timeoutMiddleware so slow upstream calls cannot outlive the
+//     WriteTimeout.
 //   - Per-request body cap (defaults.ServerMaxBodyBytes, 8 MiB) applied
 //     by bodyLimitMiddleware via http.MaxBytesReader; handlers may
 //     install a tighter cap (e.g., MaxRecipePOSTBytes for /v1/recipe).

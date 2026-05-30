@@ -234,7 +234,10 @@ func BuildJobPlan(
 	volumeMounts := buildVolumeMounts()
 
 	// Build resources
-	resources := buildResources(entry)
+	resources, err := buildResources(entry)
+	if err != nil {
+		return JobPlan{}, err
+	}
 
 	// Build labels
 	jobLabels := map[string]string{

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -96,59 +97,60 @@ func (d *Deployer) GetSnapshot(ctx context.Context) ([]byte, error) {
 // Cleanup removes the agent Job and RBAC resources.
 // If opts.Enabled is false, no cleanup is performed (resources are kept for debugging).
 // All resources are attempted for deletion even if some fail, and a combined error is returned.
+// Deletions are fanned out concurrently so a slow apiserver does not serialize the wall clock.
 func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
-	// Skip cleanup if not enabled (keep resources for debugging)
 	if !opts.Enabled {
 		return nil
 	}
 
+	type result struct {
+		label string
+		err   error
+	}
+
+	tasks := []struct {
+		label string
+		op    func(context.Context) error
+	}{
+		{fmt.Sprintf("Job %q", d.config.JobName), d.deleteJob},
+		{fmt.Sprintf("ServiceAccount %q", d.config.ServiceAccountName), d.deleteServiceAccount},
+		{fmt.Sprintf("Role %q", d.config.ServiceAccountName), d.deleteRole},
+		{fmt.Sprintf("RoleBinding %q", d.config.ServiceAccountName), d.deleteRoleBinding},
+		{fmt.Sprintf("ClusterRole %q", clusterRoleName), d.deleteClusterRole},
+		{fmt.Sprintf("ClusterRoleBinding %q", clusterRoleName), d.deleteClusterRoleBinding},
+	}
+
+	// sync.WaitGroup (not errgroup) is intentional here: cleanup must
+	// attempt every delete even if earlier ones fail, AND surface every
+	// failure in the combined error message below. errgroup.WithContext
+	// would cancel siblings on first error; plain errgroup.Group would
+	// only surface the first error. The indexed result slice gives us
+	// per-task attribution without locking.
+	results := make([]result, len(tasks))
+	var wg sync.WaitGroup
+	for i := range tasks {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = result{label: tasks[i].label, err: tasks[i].op(ctx)}
+		}(i)
+	}
+	wg.Wait()
+
 	var errs []string
 	var deleted []string
-
-	// Delete the Job
-	if err := d.deleteJob(ctx); err != nil {
-		errs = append(errs, fmt.Sprintf("Job %q: %v", d.config.JobName, err))
-	} else {
-		deleted = append(deleted, fmt.Sprintf("Job %q", d.config.JobName))
+	for _, r := range results {
+		if r.err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", r.label, r.err))
+		} else {
+			deleted = append(deleted, r.label)
+		}
 	}
 
-	// Delete RBAC resources - attempt all even if some fail
-	if err := d.deleteServiceAccount(ctx); err != nil {
-		errs = append(errs, fmt.Sprintf("ServiceAccount %q: %v", d.config.ServiceAccountName, err))
-	} else {
-		deleted = append(deleted, fmt.Sprintf("ServiceAccount %q", d.config.ServiceAccountName))
-	}
-
-	if err := d.deleteRole(ctx); err != nil {
-		errs = append(errs, fmt.Sprintf("Role %q: %v", d.config.ServiceAccountName, err))
-	} else {
-		deleted = append(deleted, fmt.Sprintf("Role %q", d.config.ServiceAccountName))
-	}
-
-	if err := d.deleteRoleBinding(ctx); err != nil {
-		errs = append(errs, fmt.Sprintf("RoleBinding %q: %v", d.config.ServiceAccountName, err))
-	} else {
-		deleted = append(deleted, fmt.Sprintf("RoleBinding %q", d.config.ServiceAccountName))
-	}
-
-	if err := d.deleteClusterRole(ctx); err != nil {
-		errs = append(errs, fmt.Sprintf("ClusterRole %q: %v", clusterRoleName, err))
-	} else {
-		deleted = append(deleted, fmt.Sprintf("ClusterRole %q", clusterRoleName))
-	}
-
-	if err := d.deleteClusterRoleBinding(ctx); err != nil {
-		errs = append(errs, fmt.Sprintf("ClusterRoleBinding %q: %v", clusterRoleName, err))
-	} else {
-		deleted = append(deleted, fmt.Sprintf("ClusterRoleBinding %q", clusterRoleName))
-	}
-
-	// Log successful deletions
 	if len(deleted) > 0 {
 		slog.Debug("cleanup completed", slog.Int("deleted", len(deleted)), slog.Any("resources", deleted))
 	}
 
-	// Return combined error if any deletions failed
 	if len(errs) > 0 {
 		return aicrerrors.New(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to delete %d resource(s):\n  - %s", len(errs), strings.Join(errs, "\n  - ")))
 	}

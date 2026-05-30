@@ -173,6 +173,35 @@ func TestMergeValues(t *testing.T) {
 	}
 }
 
+// TestMergeValues_NoSliceAliasing verifies that mutating a slice in the
+// merged result does not leak back into the source overlay. The previous
+// implementation assigned []any by reference, allowing cached overlays
+// to be corrupted by downstream --set or dynamic-injection callers.
+func TestMergeValues_NoSliceAliasing(t *testing.T) {
+	src := map[string]any{
+		"tolerations": []any{
+			map[string]any{"key": "nvidia.com/gpu", "operator": "Exists"},
+		},
+		"env": []any{"FOO=bar"},
+	}
+	srcOriginalTol := src["tolerations"].([]any)[0].(map[string]any)["key"]
+	srcOriginalEnv := src["env"].([]any)[0]
+
+	dst := map[string]any{}
+	mergeValues(dst, src)
+
+	// Mutate dst's slices/elements.
+	dst["tolerations"].([]any)[0].(map[string]any)["key"] = "MUTATED"
+	dst["env"].([]any)[0] = "MUTATED"
+
+	if got := src["tolerations"].([]any)[0].(map[string]any)["key"]; got != srcOriginalTol {
+		t.Errorf("src tolerations corrupted via dst alias: got %v want %v", got, srcOriginalTol)
+	}
+	if got := src["env"].([]any)[0]; got != srcOriginalEnv {
+		t.Errorf("src env corrupted via dst alias: got %v want %v", got, srcOriginalEnv)
+	}
+}
+
 // mapsEqual compares two maps recursively.
 func mapsEqual(a, b map[string]any) bool {
 	if len(a) != len(b) {

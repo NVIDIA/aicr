@@ -17,6 +17,7 @@ package attestation
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestBuildStatement(t *testing.T) {
@@ -155,6 +156,78 @@ func TestBuildStatement_NoDependencies(t *testing.T) {
 	predicate := stmt["predicate"].(map[string]any)
 	if _, ok := predicate["buildDefinition"]; !ok {
 		t.Error("missing buildDefinition")
+	}
+}
+
+// TestBuildStatement_Deterministic verifies that two runs of BuildStatement
+// against identical inputs with Deterministic=true produce byte-identical
+// statements. Required for SLSA-reproducible builds.
+func TestBuildStatement_Deterministic(t *testing.T) {
+	subject := AttestSubject{
+		Name:   "checksums.txt",
+		Digest: map[string]string{"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	}
+	metadata := StatementMetadata{
+		Recipe:        "h100-eks-training",
+		Components:    []string{"gpu-operator"},
+		BuilderID:     "jdoe@company.com",
+		ToolVersion:   "v1.2.3",
+		Deterministic: true,
+	}
+
+	first, err := BuildStatement(subject, metadata)
+	if err != nil {
+		t.Fatalf("BuildStatement first run: %v", err)
+	}
+	second, err := BuildStatement(subject, metadata)
+	if err != nil {
+		t.Fatalf("BuildStatement second run: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("deterministic mode produced different statements:\nfirst:  %s\nsecond: %s", first, second)
+	}
+
+	// Confirm startedOn is omitted in deterministic mode.
+	var stmt map[string]any
+	if err := json.Unmarshal(first, &stmt); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	rd := stmt["predicate"].(map[string]any)["runDetails"].(map[string]any)
+	md := rd["metadata"].(map[string]any)
+	if _, present := md["startedOn"]; present {
+		t.Errorf("startedOn should be omitted in deterministic mode, got %v", md["startedOn"])
+	}
+	if md["invocationId"] == "" {
+		t.Error("invocationId should be derived, got empty")
+	}
+}
+
+// TestBuildStatement_InvocationIDOverride verifies that an explicit
+// InvocationID is honored in non-deterministic mode.
+func TestBuildStatement_InvocationIDOverride(t *testing.T) {
+	subject := AttestSubject{
+		Name:   "checksums.txt",
+		Digest: map[string]string{"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	}
+	fixedID := "11111111-2222-3333-4444-555555555555"
+	fixedTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	data, err := BuildStatement(subject, StatementMetadata{
+		InvocationID: fixedID,
+		StartedOn:    fixedTime,
+	})
+	if err != nil {
+		t.Fatalf("BuildStatement: %v", err)
+	}
+	var stmt map[string]any
+	if err := json.Unmarshal(data, &stmt); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	md := stmt["predicate"].(map[string]any)["runDetails"].(map[string]any)["metadata"].(map[string]any)
+	if md["invocationId"] != fixedID {
+		t.Errorf("invocationId = %v, want %v", md["invocationId"], fixedID)
+	}
+	if md["startedOn"] != fixedTime.Format(time.RFC3339) {
+		t.Errorf("startedOn = %v, want %v", md["startedOn"], fixedTime.Format(time.RFC3339))
 	}
 }
 

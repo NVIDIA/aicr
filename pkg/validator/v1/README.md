@@ -1,230 +1,236 @@
-# Validator Job API for External Controllers
+# Validator v1 API
 
-This package provides a public API for external Kubernetes controllers to render and deploy AICR validator Jobs.
+`pkg/validator/v1` is the canonical home of AICR's validator input format
+and the job-plan API external Kubernetes controllers use to render and
+deploy AICR validator Jobs.
 
-## Overview
+> **Stability.** This package implements `v1alpha1`. The schema may have
+> breaking changes before `v1`. Breaking changes once we reach `v1` will
+> require a major version bump (`v2.0.0`). See `doc.go` for the full
+> stability contract.
+>
+> **Provenance.** This package previously lived at
+> `pkg/api/validator/v1` and was relocated under `pkg/validator/v1` so the
+> on-disk layout matches its position in the validation pipeline. Re-exported
+> aliases keep older import paths source-compatible during the transition;
+> new code should import this path directly.
 
-The validator Job API is available in `pkg/api/validator/v1`:
+## Package surface
 
-1. **`GenerateRunID()`** - Generate unique run identifiers
-2. **`Plan()`** - Generate JobPlans for all validators
-3. **`BuildJobPlan()`** - Build a single JobPlan from a catalog entry
-4. **`RenderPlan()`** - Render JobPlan to `*batchv1.Job` (for Create API)
-5. **`RenderPlanToApplyConfig()`** - Render JobPlan to ApplyConfiguration (for server-side apply)
-6. **`ImagePullPolicy()`** - Determine pull policy for an image
+The package is intentionally narrow and exports three concerns:
 
-## Quick Start
+1. **`ValidationInput`** (`validation_input.go`) — the wire format consumed
+   by a recipe's `spec.validation` block. Carries phases, checks,
+   constraints, criteria, and the resolved component refs.
+2. **`ValidatorCatalog` + `ValidatorEntry`** (`catalog.go`) — the catalog
+   schema and the `Phase`/filtering helpers. Catalog *loading* lives in
+   `pkg/validator/catalog`; this package owns the types.
+3. **`JobPlan` + planners + renderers** (`job_plan.go`) — the data shape
+   external controllers customize, plus the functions that build one
+   (`Plan`, `BuildJobPlan`) and render it into a `batchv1.Job` or an
+   apply-config (`RenderPlan`, `RenderPlanToApplyConfig`).
+4. **Affinity helpers** (`affinity.go`, `dependency_affinity.go`) —
+   support for the catalog's `dependencyAffinity` declaration.
 
-### Step 1: Generate a Run ID
+`GenerateRunID` and `ImagePullPolicy` are exported utilities for callers
+that build their own renderer.
+
+## Quick start
+
+### 1. Generate a run ID
 
 ```go
-import v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+import v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 
 runID := v1.GenerateRunID()
 // Example: "20260514-143052-a1b2c3d4e5f6g7h8"
 ```
 
-### Step 2: Create Required ConfigMaps
+### 2. Create the snapshot + validation ConfigMaps
 
 ```go
 import (
-    v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+    v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
     "github.com/NVIDIA/aicr/pkg/validator"
-    "github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
-// Create ConfigMaps for snapshot and validation data
 err := validator.EnsureDataConfigMaps(
     ctx,
     clientset,
     namespace,
     runID,
-    snapshot,
-    validationInput,
+    snapshot,        // *snapshotter.Snapshot
+    validationInput, // *v1.ValidationInput
 )
 ```
 
-**Note:** `EnsureDataConfigMaps` is in the `pkg/validator` package, not v1, as it's an internal implementation detail.
+`EnsureDataConfigMaps` stays in `pkg/validator` because it touches
+Kubernetes API objects and is not part of the v1 wire contract.
 
-### Step 3: Plan Which Validators to Run
+### 3. Load the catalog and plan
 
 ```go
 import (
-    v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+    v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
     "github.com/NVIDIA/aicr/pkg/validator/catalog"
 )
 
-// Load catalog
-cat, err := catalog.Load("", "")
+cat, err := catalog.LoadWithDataProvider(ctx, nil, version, commit)
 if err != nil {
     return err
 }
 
-// Define your service account naming strategy
 serviceAccount := "my-validator-sa-" + runID
 
-// Generate job plans for all validators
 plans, err := v1.Plan(
     cat,
     validationInput,
     runID,
     namespace,
-    "1.0.0",        // Your controller version
-    "abc123",       // Your controller commit
-    serviceAccount, // ServiceAccount name
-    nil,            // imagePullSecrets (empty slice if not needed)
-    nil,            // tolerations
-    nil,            // nodeSelector
+    version,        // controller version
+    commit,         // controller commit SHA
+    serviceAccount, // SA name your controller manages
+    nil,            // imagePullSecrets
+    nil,            // tolerations (forwarded to inner workloads)
+    nil,            // nodeSelector (forwarded to inner workloads)
     "",             // imageRegistryOverride
     "",             // imageTagOverride
-    nil,            // componentRefs
+    componentRefs,  // []recipe.ComponentRef, may be nil
 )
-if err != nil {
-    return err
-}
 ```
 
-**Important:** The `serviceAccount` parameter allows you to use your own service account naming strategy. AICR uses `"aicr-validator-" + runID` internally, but external controllers can use any naming convention.
+Notes:
 
-### Step 4a: Deploy with Create API (Simple Path)
+- `LoadWithDataProvider(ctx, nil, …)` uses the embedded catalog. Pass a
+  layered `recipe.DataProvider` to honor a `--data` overlay.
+- `serviceAccount` is yours to name. AICR's own CLI uses
+  `aicr-validator-<runID>`; external controllers should pick a strategy
+  consistent with their RBAC.
+- `tolerations` and `nodeSelector` apply to *inner workloads* (GPU
+  benchmarks, NCCL tests). The orchestrator pod itself uses
+  tolerate-all scheduling and gets its affinity from
+  `BuildOrchestratorAffinity` (prefer-CPU NodeAffinity, plus PodAffinity
+  for any `dependencyAffinity` declarations).
+- `componentRefs` is the resolved recipe's component list and is used
+  exclusively to resolve `dependencyAffinity.componentRef` entries to
+  namespaces. Pass `nil` when no component-targeted affinity applies.
+- `Plan` returns `ErrCodeInvalidRequest` when an entry declares a
+  `required` `dependencyAffinity.componentRef` that is not present in
+  `componentRefs`.
+
+### 4a. Deploy with `Create` (simple path)
 
 ```go
 for _, plan := range plans {
-    // JobName is pre-generated in the plan
-    fmt.Printf("Creating Job: %s\n", plan.JobName)
-
-    // Render to regular Job
-    jobObj := v1.RenderPlan(plan)
-
-    // Create the Job
-    created, err := clientset.BatchV1().Jobs(namespace).Create(
-        ctx, jobObj, metav1.CreateOptions{},
-    )
-    if err != nil {
+    job := v1.RenderPlan(plan)
+    if _, err := clientset.BatchV1().Jobs(namespace).Create(
+        ctx, job, metav1.CreateOptions{},
+    ); err != nil {
         return err
     }
 }
 ```
 
-### Step 4b: Deploy with Server-Side Apply (Advanced Path)
-
-Use this for idempotent re-runs or field ownership tracking.
+### 4b. Deploy with server-side apply (idempotent)
 
 ```go
 for _, plan := range plans {
-    // Use the pre-generated job name from the plan
-    fmt.Printf("Applying Job: %s\n", plan.JobName)
-
-    // Render to ApplyConfiguration
-    jobApply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
-
-    // Apply the Job (idempotent)
-    created, err := clientset.BatchV1().Jobs(namespace).Apply(
-        ctx, jobApply, metav1.ApplyOptions{
+    apply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
+    if _, err := clientset.BatchV1().Jobs(namespace).Apply(
+        ctx, apply, metav1.ApplyOptions{
             FieldManager: "my-controller",
-            Force: true,
+            Force:        true,
         },
-    )
-    if err != nil {
+    ); err != nil {
         return err
     }
 }
 ```
 
-## JobPlan Structure
+Use the apply path when the same plan may be reconciled more than once
+or when more than one controller owns fields on the same Job.
 
-The `JobPlan` struct contains all components needed to build a validator Job:
+## JobPlan
 
 ```go
 type JobPlan struct {
-    ValidatorName    string                      // Unique validator identifier
-    Phase            string                      // "deployment", "performance", or "conformance"
-    JobName          string                      // Pre-generated unique Job name
-    Image            string                      // Validator container image
-    Args             []string                    // Container arguments
-    Env              []corev1.EnvVar             // Environment variables
-    Volumes          []corev1.Volume             // Pod volumes (ConfigMaps)
-    VolumeMounts     []corev1.VolumeMount        // Container volume mounts
-    Resources        corev1.ResourceRequirements // CPU/memory requests and limits
-    Timeout          int64                       // Max execution time (seconds)
-    ServiceAccount   string                      // Kubernetes ServiceAccount
-    Tolerations      []corev1.Toleration         // Inner workload tolerations (forwarded via env; validator Pod uses tolerate-all)
-    ImagePullSecrets []string                    // Image pull secret names
-    Labels           map[string]string           // Job and Pod labels
+    ValidatorName    string                      // unique validator identifier
+    Phase            string                      // "deployment" | "performance" | "conformance"
+    JobName          string                      // generated; aicr-{validator}-{hex}
+    Namespace        string                      // Kubernetes namespace
+    Image            string                      // resolved container image
+    Args             []string
+    Env              []corev1.EnvVar
+    Volumes          []corev1.Volume             // snapshot + validation ConfigMaps
+    VolumeMounts     []corev1.VolumeMount
+    Resources        corev1.ResourceRequirements
+    Timeout          int64                       // activeDeadlineSeconds
+    ServiceAccount   string
+    Tolerations      []corev1.Toleration         // forwarded; orchestrator pod is tolerate-all
+    ImagePullSecrets []string
+    Labels           map[string]string
+    Affinity         *corev1.Affinity            // orchestrator pod affinity (NodeAffinity + optional PodAffinity)
 }
 ```
 
-**Key Field: `JobName`**
-The `JobName` is automatically generated by `BuildJobPlan()` using the format `aicr-{validatorName}-{random-hex}`. This ensures unique names across invocations while being deterministic within a plan.
+`JobName` is generated by `BuildJobPlan` as `aicr-{validatorName}-{hex}`.
+It is stable within a plan but unique across invocations.
 
-## Grouping by Phase
+`Affinity`, when non-nil, is what the renderer applies to the
+orchestrator pod. A nil value falls back to the default prefer-CPU
+NodeAffinity.
 
-Since `Plan()` returns a flat list, you can group validators by phase:
+## Grouping plans by phase
+
+`Plan` returns a flat list. Controllers that want phase ordering should
+group:
 
 ```go
-phaseGroups := make(map[string][]v1.JobPlan)
-for _, plan := range plans {
-    phaseGroups[plan.Phase] = append(phaseGroups[plan.Phase], plan)
+groups := make(map[string][]v1.JobPlan)
+for _, p := range plans {
+    groups[p.Phase] = append(groups[p.Phase], p)
 }
 
-// Run deployment phase first
-for _, plan := range phaseGroups["deployment"] {
-    jobObj := v1.RenderPlan(plan)
-    // Deploy job...
-}
-
-// Then performance phase
-for _, plan := range phaseGroups["performance"] {
-    jobObj := v1.RenderPlan(plan)
-    // Deploy job...
-}
+for _, p := range groups[string(v1.PhaseDeployment)] { /* … */ }
+for _, p := range groups[string(v1.PhasePerformance)] { /* … */ }
+for _, p := range groups[string(v1.PhaseConformance)] { /* … */ }
 ```
 
-## Customizing JobPlans
-
-You can customize a JobPlan before rendering:
+## Customizing a single plan
 
 ```go
-// Build a plan for a specific validator
 plan, err := v1.BuildJobPlan(
     entry,
     runID,
     namespace,
-    "1.0.0",
-    "abc123",
+    version, commit,
     serviceAccount,
-    nil,            // imagePullSecrets
-    tolerations,
-    nodeSelector,
-    "",             // imageRegistryOverride
-    "",             // imageTagOverride
-    nil,            // componentRefs
+    nil, tolerations, nodeSelector,
+    "", "",
+    componentRefs,
 )
 if err != nil {
-    // handle error
+    return err
 }
 
-// Customize the plan
-plan.Timeout = 600  // Override timeout to 10 minutes
-plan.Env = append(plan.Env, corev1.EnvVar{
-    Name: "MY_CUSTOM_VAR",
-    Value: "custom-value",
-})
+plan.Timeout = 600 // 10 minutes
+plan.Env = append(plan.Env, corev1.EnvVar{Name: "MY_VAR", Value: "x"})
 
-// Render with customizations
-jobObj := v1.RenderPlan(plan)
+job := v1.RenderPlan(plan)
 ```
 
-## When to Use Which API
+## API choice
 
-| Scenario | Recommended API | Why |
-|----------|----------------|-----|
-| Simple controller | `RenderPlan()` + `Create()` | Simpler, fewer concepts |
-| Re-runnable validators | `RenderPlanToApplyConfig()` + `Apply()` | Idempotent, can re-apply same job name |
-| Multi-controller environment | `RenderPlanToApplyConfig()` + `Apply()` | Field ownership tracking prevents conflicts |
-| K8s best practices | `RenderPlanToApplyConfig()` + `Apply()` | Server-side apply is the modern approach |
+| Scenario                          | Use                                      |
+|-----------------------------------|------------------------------------------|
+| Single-shot controller            | `RenderPlan` + `Create`                  |
+| Idempotent reconciliation         | `RenderPlanToApplyConfig` + `Apply`      |
+| Multi-controller field ownership  | `RenderPlanToApplyConfig` + `Apply`      |
 
-## Complete Example
+Server-side apply is the default we recommend for any controller that
+will run a reconcile loop.
+
+## End-to-end example
 
 ```go
 package main
@@ -233,34 +239,32 @@ import (
     "context"
     "fmt"
 
-    v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/client-go/kubernetes"
+
     "github.com/NVIDIA/aicr/pkg/snapshotter"
     "github.com/NVIDIA/aicr/pkg/validator"
     "github.com/NVIDIA/aicr/pkg/validator/catalog"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    "k8s.io/client-go/kubernetes"
+    v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 func RunValidation(
     ctx context.Context,
     clientset kubernetes.Interface,
-    namespace string,
+    namespace, version, commit string,
     validationInput *v1.ValidationInput,
     snapshot *snapshotter.Snapshot,
+    componentRefs []v1.ComponentRef,
 ) error {
-    // 1. Generate run ID
     runID := v1.GenerateRunID()
 
-    // 2. Create required ConfigMaps
-    err := validator.EnsureDataConfigMaps(
+    if err := validator.EnsureDataConfigMaps(
         ctx, clientset, namespace, runID, snapshot, validationInput,
-    )
-    if err != nil {
+    ); err != nil {
         return err
     }
 
-    // 3. Load catalog and generate plans
-    cat, err := catalog.Load("", "")
+    cat, err := catalog.LoadWithDataProvider(ctx, nil, version, commit)
     if err != nil {
         return err
     }
@@ -268,111 +272,113 @@ func RunValidation(
     serviceAccount := "my-validator-sa-" + runID
 
     plans, err := v1.Plan(
-        cat,
-        validationInput,
-        runID,
-        namespace,
-        "1.0.0",       // version
-        "abc123",      // commit
-        serviceAccount,
-        nil,           // imagePullSecrets
-        nil,           // tolerations
-        nil,           // nodeSelector
-        "",            // imageRegistryOverride
-        "",            // imageTagOverride
-        nil,           // componentRefs
+        cat, validationInput, runID, namespace,
+        version, commit, serviceAccount,
+        nil, nil, nil, "", "",
+        componentRefs,
     )
     if err != nil {
         return err
     }
 
-    // 4. Deploy Jobs using server-side apply
     for _, plan := range plans {
-        fmt.Printf("Deploying validator: %s (Job: %s)\n",
-            plan.ValidatorName, plan.JobName)
-
-        jobApply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
-
-        _, err := clientset.BatchV1().Jobs(namespace).Apply(
-            ctx, jobApply, metav1.ApplyOptions{
+        fmt.Printf("apply %s (validator=%s phase=%s)\n",
+            plan.JobName, plan.ValidatorName, plan.Phase)
+        apply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
+        if _, err := clientset.BatchV1().Jobs(namespace).Apply(
+            ctx, apply, metav1.ApplyOptions{
                 FieldManager: "my-controller",
-                Force: true,
+                Force:        true,
             },
-        )
-        if err != nil {
-            return fmt.Errorf("failed to apply job for %s: %w",
-                plan.ValidatorName, err)
+        ); err != nil {
+            return fmt.Errorf("apply %s: %w", plan.ValidatorName, err)
         }
     }
-
     return nil
 }
 ```
 
-## API Reference
+## API reference
 
-### Session Management
+### Session
 
 **`GenerateRunID() string`**
-Generates a unique run identifier for a validation session.
-Format: `{timestamp}-{random-hex}` (e.g., "20260514-123045-abc123def456")
+Returns `{YYYYMMDD-HHMMSS}-{hex16}` — e.g. `20260514-123045-a1b2c3d4e5f6g7h8`.
+Panics on entropy failure (preferred over a predictable ID).
 
-### Job Planning
+### Planning
 
 **`Plan(cat, validationInput, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector, imageRegistryOverride, imageTagOverride, componentRefs) ([]JobPlan, error)`**
-Generates JobPlans for all validators across all phases matching the ValidationInput filters.
 
-**Parameters:**
-- `cat` - Validator catalog
-- `validationInput` - Validation configuration with phase checks
-- `runID` - Unique run identifier (from GenerateRunID)
-- `namespace` - Kubernetes namespace for Jobs
-- `version` - Controller version (forwarded to validators)
-- `commit` - Controller commit SHA (forwarded to validators)
-- `serviceAccount` - ServiceAccount name for Jobs (use your own naming strategy)
-- `imagePullSecrets` - Image pull secret names (empty slice if not needed)
-- `tolerations` - Tolerations for inner workloads (forwarded via `AICR_TOLERATIONS` env var; validator Pod uses tolerate-all)
-- `nodeSelector` - Node selector for inner workloads (forwarded via `AICR_NODE_SELECTOR` env var; validator Pod has no node selector)
-- `imageRegistryOverride` - Optional registry host that replaces the registry prefix on every validator image (matches the `AICR_VALIDATOR_IMAGE_REGISTRY` env var). Empty string disables the override.
-- `imageTagOverride` - Optional tag that replaces the tag on every tag-based validator image reference (matches the `AICR_VALIDATOR_IMAGE_TAG` env var). Digest-pinned references (`name@sha256:…`) are left untouched — the digest is the authoritative pin. Empty string disables the override.
-- `componentRefs` - Resolved recipe component list used to resolve `dependencyAffinity.componentRef` entries to namespaces when building the orchestrator pod's affinity. Pass `nil` when dependencyAffinity is not used or the recipe is not available.
+Builds one `JobPlan` per `(phase, validator entry)` pair that matches
+`validationInput`. A nil catalog returns an empty slice and no error.
 
 **`BuildJobPlan(entry, runID, namespace, version, commit, serviceAccount, imagePullSecrets, tolerations, nodeSelector, imageRegistryOverride, imageTagOverride, componentRefs) (JobPlan, error)`**
-Builds a JobPlan from a single validator catalog entry. Used for custom scenarios.
 
-`componentRefs` is the resolved recipe's component list, used to resolve `dependencyAffinity.componentRef` to a namespace so the orchestrator pod can be co-located with the dependency. The function returns `ErrCodeInvalidRequest` when a `required` componentRef is not present in componentRefs. Pass `nil` when dependencyAffinity is not used or the recipe is not available; this preserves backward-compatible behavior (prefer-CPU NodeAffinity only, no PodAffinity).
+Builds a plan from a single catalog entry. Returns
+`ErrCodeInvalidRequest` when a `required` `dependencyAffinity.componentRef`
+is not present in `componentRefs`.
 
-### Job Rendering
+Parameter notes shared by both functions:
+
+- `tolerations`, `nodeSelector` — forwarded to inner workloads via the
+  `AICR_TOLERATIONS` and `AICR_NODE_SELECTOR` env vars. The orchestrator
+  Pod itself is tolerate-all and has no node selector.
+- `imageRegistryOverride` — replaces the registry prefix on every
+  validator image. Matches `AICR_VALIDATOR_IMAGE_REGISTRY`. Empty
+  disables the override.
+- `imageTagOverride` — replaces the tag on every tag-based reference.
+  Digest-pinned references (`name@sha256:…`) are left untouched.
+  Matches `AICR_VALIDATOR_IMAGE_TAG`. Empty disables the override.
+- `componentRefs` — resolved component list from the recipe. Used to
+  resolve `dependencyAffinity.componentRef` to a namespace. Pass `nil`
+  when dependencyAffinity is unused.
+
+### Rendering
 
 **`RenderPlan(plan JobPlan) *batchv1.Job`**
-Renders a complete Kubernetes Job from a JobPlan. Uses `plan.JobName` for the Job name and `plan.Namespace` for the namespace.
+Materializes a `batchv1.Job`. Uses `plan.JobName` and `plan.Namespace`.
 
 **`RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobApplyConfiguration`**
-Renders a Kubernetes Job ApplyConfiguration from a JobPlan for server-side apply.
-Typically called with `plan.JobName` as the jobName parameter.
+Materializes an apply-config for server-side apply. Pass `plan.JobName`
+as `jobName`.
 
-### Image Utilities
+### Image utilities
 
 **`ImagePullPolicy(image string, imageTagOverride string) corev1.PullPolicy`**
-Determines the appropriate pull policy for a container image based on its reference.
 
-Rules:
-- `ko.local/` or `kind.local/` → `PullNever` (side-loaded images)
-- Digest-pinned (`@sha256:...`) → `PullIfNotPresent` (immutable)
-- `AICR_VALIDATOR_IMAGE_TAG` env set → `PullAlways` (override mode)
-- `:latest` tag → `PullAlways` (mutable tag)
-- Default → `PullIfNotPresent` (versioned releases)
+| Input                                  | Policy            |
+|----------------------------------------|-------------------|
+| `ko.local/…`, `kind.local/…`           | `PullNever`       |
+| digest pinned (`…@sha256:…`)           | `PullIfNotPresent`|
+| `imageTagOverride != ""`               | `PullAlways`      |
+| `:latest`                              | `PullAlways`      |
+| anything else (versioned tag)          | `PullIfNotPresent`|
 
-## RBAC Considerations
+## RBAC
 
-External controllers are responsible for creating their own RBAC resources (ServiceAccount, Role, ClusterRoleBinding). The `serviceAccount` parameter in `Plan()` and `BuildJobPlan()` allows you to specify which ServiceAccount the validator Jobs should use.
+External controllers own their ServiceAccount, Role/ClusterRole, and
+binding. Plug the SA name into `Plan` / `BuildJobPlan` via the
+`serviceAccount` parameter. AICR's own CLI uses
+`aicr-validator-<runID>`, but you are free to choose any convention.
 
-AICR's internal convention is `"aicr-validator-" + runID`, but you can use any naming strategy that fits your controller's design.
+## Where the moving parts live
+
+| Concern                          | Package                              |
+|----------------------------------|--------------------------------------|
+| Wire types (`ValidationInput`, catalog schema, `JobPlan`) | `pkg/validator/v1` (this package) |
+| Catalog loading + image rewriting | `pkg/validator/catalog`             |
+| Job dispatch, watch, log streaming | `pkg/validator`                     |
+| Snapshot capture                 | `pkg/snapshotter`                    |
+| Recipe resolution / overlays     | `pkg/recipe`                         |
 
 ## Notes
 
-- All functions are in the public API package: `github.com/NVIDIA/aicr/pkg/api/validator/v1`
-- The `JobPlan` struct is designed to be customizable before rendering
-- Both Create and server-side Apply deployment strategies are supported
-- ConfigMap creation (`EnsureDataConfigMaps`) is in `pkg/validator` as it's an internal detail
-- The `JobName` field is pre-generated for consistency but can be customized if needed
+- The public, semver-stable consumer surface is `pkg/client/v1`. This
+  package is the underlying wire format the facade re-exports. Embed
+  `ValidationConfig` directly (not `ValidationInput`) if you need to
+  drop the wrapper `metadata`/`apiVersion`/`kind` fields in a custom
+  resource spec.
+- Both Create and server-side Apply deployment strategies are supported.
+- `ConfigMap` creation (`EnsureDataConfigMaps`) stays in `pkg/validator`
+  because it is an in-cluster side effect, not a wire-format concern.

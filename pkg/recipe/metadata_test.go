@@ -2293,3 +2293,31 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		})
 	}
 }
+
+// TestDeepMergeMap_NoSliceAliasing verifies that mutating a []any in the
+// merged result does not leak back into the source. The previous
+// implementation copied []any by reference, so a downstream mutation of
+// an index of a toleration/env/args list corrupted the cached overlay.
+func TestDeepMergeMap_NoSliceAliasing(t *testing.T) {
+	src := map[string]any{
+		"tolerations": []any{
+			map[string]any{"key": "nvidia.com/gpu", "operator": "Exists"},
+		},
+		"env": []any{"FOO=bar"},
+	}
+	srcOriginalTol := src["tolerations"].([]any)[0].(map[string]any)["key"]
+	srcOriginalEnv := src["env"].([]any)[0]
+
+	dst := map[string]any{}
+	deepMergeMap(dst, src)
+
+	dst["tolerations"].([]any)[0].(map[string]any)["key"] = "MUTATED"
+	dst["env"].([]any)[0] = "MUTATED"
+
+	if got := src["tolerations"].([]any)[0].(map[string]any)["key"]; got != srcOriginalTol {
+		t.Errorf("src tolerations corrupted via dst alias: got %v want %v", got, srcOriginalTol)
+	}
+	if got := src["env"].([]any)[0]; got != srcOriginalEnv {
+		t.Errorf("src env corrupted via dst alias: got %v want %v", got, srcOriginalEnv)
+	}
+}

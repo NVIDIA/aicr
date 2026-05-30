@@ -143,11 +143,12 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate bundle through the facade. Set Timeout to keep the REST
-	// path's 60s request boundary even though ctx is already wrapped
-	// above — MakeBundle defaults to uncapped (opt-in) so the REST cap
-	// must be supplied explicitly. context.WithTimeout honors the smaller
-	// of the two, so this is a backstop, not a second deadline.
+	// Generate bundle through the facade. Set Timeout as a belt-and-
+	// suspenders cap that matches the ctx deadline above — MakeBundle
+	// defaults to uncapped (opt-in), so handlers must supply the REST
+	// boundary explicitly. The outer ServerHandlerTimeout middleware is
+	// now sized ≥ BundleHandlerTimeout so this 60s deadline runs to
+	// completion instead of being silently clamped.
 	output, err := h.client.MakeBundle(ctx, adopted, aicr.BundleOptions{
 		Config:    bundleConfig,
 		OutputDir: tempDir,
@@ -158,18 +159,22 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for bundle errors.
+	// Check for bundle errors. Per-bundler errors may include internal
+	// detail (file paths, helm template stacks, network diagnostics).
+	// Log the full payload server-side and surface only the failing
+	// bundler component names to the client — enough to know *which*
+	// component failed without leaking implementation detail on 5xx.
 	if output.HasErrors() {
-		errorDetails := make([]map[string]any, 0, len(output.Errors))
+		failedBundlers := make([]string, 0, len(output.Errors))
 		for _, be := range output.Errors {
-			errorDetails = append(errorDetails, map[string]any{
-				"bundler": be.BundlerType,
-				keyError:  be.Error,
-			})
+			failedBundlers = append(failedBundlers, string(be.BundlerType))
+			logger.Error("bundler reported error",
+				"bundler", be.BundlerType,
+				"error", be.Error)
 		}
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
 			"Bundle generation failed", true, map[string]any{
-				"errors": errorDetails,
+				"failedBundlers": failedBundlers,
 			})
 		return
 	}

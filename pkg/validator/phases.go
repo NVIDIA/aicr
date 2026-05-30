@@ -14,12 +14,22 @@
 
 package validator
 
-import v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+import (
+	"fmt"
+	"log/slog"
+	"strings"
 
-// Re-exported type from pkg/api/validator/v1 for backward compatibility.
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+)
+
+// Phase re-exports pkg/validator/v1.Phase so callers that work in the
+// pkg/validator orchestration layer do not have to import the wire
+// package directly.
 type Phase = v1.Phase
 
-// Re-exported constants from pkg/api/validator/v1 for backward compatibility.
+// Re-exported phase constants from pkg/validator/v1.
 const (
 	PhaseDeployment  = v1.PhaseDeployment
 	PhasePerformance = v1.PhasePerformance
@@ -64,4 +74,88 @@ func ParsePhase(s string) (Phase, bool) {
 		}
 	}
 	return "", false
+}
+
+// ParsePhaseSelection parses a list of user-facing phase names (from the
+// `--phase` CLI flag or the spec.validate.execution.phases config field)
+// into typed Phase values. The PhaseAll wildcard collapses the whole
+// selection to nil (= run every phase), matching the documented "Default:
+// all phases" behavior. PhaseAll is exclusive: combining it with any
+// specific phase is a hard error rather than silently treating the
+// selection as wildcard, so a typo like `--phase deployment --phase all`
+// does not mask the user's mistake.
+//
+// Every entry is parsed before the wildcard collapse, so an invalid
+// phase name surfaces an error even when "all" is also present.
+func ParsePhaseSelection(phaseStrs []string) ([]Phase, error) {
+	if len(phaseStrs) == 0 {
+		return nil, nil
+	}
+
+	var (
+		sawAll bool
+		phases []Phase
+		seen   = make(map[Phase]bool)
+	)
+	for _, s := range phaseStrs {
+		if s == PhaseAll {
+			sawAll = true
+			continue
+		}
+		p, ok := ParsePhase(s)
+		if !ok {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid phase %q: must be one of: %s",
+					s, strings.Join(PhaseNames, ", ")))
+		}
+		if !seen[p] {
+			phases = append(phases, p)
+			seen[p] = true
+		}
+	}
+
+	if sawAll && len(phases) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("phase %q cannot be combined with other phases", PhaseAll))
+	}
+	if sawAll {
+		return nil, nil
+	}
+	return phases, nil
+}
+
+// WarnPhasesAgainstRecipe warns when a requested phase has no checks
+// defined in the recipe. The phase will still run but produce 0 tests
+// in the CTRF report. This is purely advisory — it emits slog warnings
+// and never fails the run.
+func WarnPhasesAgainstRecipe(phases []Phase, rec *recipe.RecipeResult) {
+	if rec.Validation == nil {
+		if len(phases) > 0 {
+			slog.Warn("recipe has no validation section; requested phases will have no checks",
+				"phases", phases)
+		}
+		return
+	}
+
+	if len(phases) == 0 {
+		return
+	}
+
+	defined := make(map[Phase]bool)
+	if rec.Validation.Deployment != nil && len(rec.Validation.Deployment.Checks) > 0 {
+		defined[PhaseDeployment] = true
+	}
+	if rec.Validation.Performance != nil && len(rec.Validation.Performance.Checks) > 0 {
+		defined[PhasePerformance] = true
+	}
+	if rec.Validation.Conformance != nil && len(rec.Validation.Conformance.Checks) > 0 {
+		defined[PhaseConformance] = true
+	}
+
+	for _, p := range phases {
+		if !defined[p] {
+			slog.Warn("phase requested but no checks defined in recipe; phase will be empty",
+				"phase", p)
+		}
+	}
 }

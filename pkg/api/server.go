@@ -81,6 +81,16 @@ func Serve() error {
 	}
 
 	// Setup recipe/query handlers backed by the aicr.Client facade.
+	//
+	// This Client is long-lived: constructed once at server startup and
+	// reused across every request. EmbeddedSource() routes through the
+	// process-embedded data, so the LayeredDataProvider sync.Once caching
+	// hazard (see pkg/recipe/provider.go getMergedRegistry / getMergedCatalog)
+	// is not reachable here. If a future change wires this Client with an
+	// external --data overlay (LayeredDataProvider), the cache must first
+	// be made context-aware (drop ctx.Err() results on retry) so a single
+	// canceled startup request does not poison the cache for the
+	// server's lifetime.
 	client, err := aicr.NewClient(
 		aicr.WithRecipeSource(aicr.EmbeddedSource()),
 		aicr.WithVersion(version),
@@ -115,7 +125,6 @@ func Serve() error {
 	)
 
 	if err := s.Run(ctx); err != nil {
-		slog.Error("server exited with error", "error", err)
 		return errors.Wrap(errors.ErrCodeInternal, "server exited with error", err)
 	}
 

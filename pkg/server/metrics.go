@@ -30,7 +30,7 @@ var (
 			Name: "aicr_http_requests_total",
 			Help: "Total number of HTTP requests",
 		},
-		[]string{keyMethod, "path", "status"},
+		[]string{keyMethod, keyPath, "status"},
 	)
 
 	httpRequestDuration = promauto.NewHistogramVec(
@@ -39,7 +39,7 @@ var (
 			Help:    "HTTP request latency in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{keyMethod, "path"},
+		[]string{keyMethod, keyPath},
 	)
 
 	httpRequestsInFlight = promauto.NewGauge(
@@ -68,19 +68,27 @@ var (
 
 // metricsMiddleware instruments HTTP requests with Prometheus metrics.
 // It tracks request rate, errors, and duration (RED metrics) for observability.
+//
+// The "path" label is the matched mux route pattern (e.g. "/v1/bundle"),
+// NOT the raw r.URL.Path. Labeling by raw path turns Prometheus series
+// into an attacker-controlled set — every garbage URL (/foo, /bar, ...)
+// would mint a new series and exhaust scraper memory. r.Pattern is set
+// by net/http on Go 1.22+; an empty pattern (unregistered route fell
+// through to "/") is bucketed under "unmatched".
 func (s *Server) metricsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		httpRequestsInFlight.Inc()
 		defer httpRequestsInFlight.Dec()
 
-		// Wrap response writer to capture status code
 		wrapped := newResponseWriter(w)
-
 		next.ServeHTTP(wrapped, r)
 
 		duration := time.Since(start).Seconds()
-		path := r.URL.Path
+		path := r.Pattern
+		if path == "" {
+			path = "unmatched"
+		}
 		method := r.Method
 		status := strconv.Itoa(wrapped.Status())
 

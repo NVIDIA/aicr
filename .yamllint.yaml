@@ -40,6 +40,9 @@ ignore: |
   # Git directory
   .git/
 
+  # Claude Code internal worktrees (local-only, not committed)
+  .claude/worktrees/
+
 rules:
   # Formatting
   braces:

@@ -65,7 +65,7 @@ const (
 // (embedded + `--data`). This lets internal/proprietary service values
 // (e.g., undisclosed NCPs) be admitted at runtime via `--data` without a
 // binary rebuild.
-func (reg *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
+func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue, "self-managed", "self", "vanilla":
 		return CriteriaServiceAny, nil
@@ -84,7 +84,7 @@ func (reg *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error)
 	case "bcm":
 		return CriteriaServiceBCM, nil
 	default:
-		if reg.Has(FieldService, s) {
+		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
 		}
 		return CriteriaServiceAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid service type: %s", s))
@@ -101,8 +101,8 @@ func GetCriteriaServiceTypes() []string {
 
 // AllServiceTypes returns the union of the static OSS list and values
 // registered in this registry, sorted alphabetically.
-func (reg *CriteriaRegistry) AllServiceTypes() []string {
-	return mergeCriteriaTypes(GetCriteriaServiceTypes(), reg.Values(FieldService))
+func (r *CriteriaRegistry) AllServiceTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaServiceTypes(), r.Values(FieldService))
 }
 
 // CriteriaAcceleratorType represents the GPU/accelerator type.
@@ -123,7 +123,7 @@ const (
 // ParseAccelerator parses a string into a CriteriaAcceleratorType against
 // this registry. See (*CriteriaRegistry).ParseService for the
 // registry-fallback contract that also applies here.
-func (reg *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, error) {
+func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
 		return CriteriaAcceleratorAny, nil
@@ -142,7 +142,7 @@ func (reg *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType
 	case "rtx-pro-6000":
 		return CriteriaAcceleratorRTXPro6000, nil
 	default:
-		if reg.Has(FieldAccelerator, s) {
+		if r.Has(FieldAccelerator, s) {
 			return CriteriaAcceleratorType(normalizeCriteriaValue(s)), nil
 		}
 		return CriteriaAcceleratorAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid accelerator type: %s", s))
@@ -158,8 +158,8 @@ func GetCriteriaAcceleratorTypes() []string {
 
 // AllAcceleratorTypes returns the union of the static OSS list and values
 // registered in this registry, sorted alphabetically.
-func (reg *CriteriaRegistry) AllAcceleratorTypes() []string {
-	return mergeCriteriaTypes(GetCriteriaAcceleratorTypes(), reg.Values(FieldAccelerator))
+func (r *CriteriaRegistry) AllAcceleratorTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaAcceleratorTypes(), r.Values(FieldAccelerator))
 }
 
 // CriteriaIntentType represents the workload intent.
@@ -175,7 +175,7 @@ const (
 // ParseIntent parses a string into a CriteriaIntentType against this
 // registry. See (*CriteriaRegistry).ParseService for the registry-fallback
 // contract.
-func (reg *CriteriaRegistry) ParseIntent(s string) (CriteriaIntentType, error) {
+func (r *CriteriaRegistry) ParseIntent(s string) (CriteriaIntentType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
 		return CriteriaIntentAny, nil
@@ -184,7 +184,7 @@ func (reg *CriteriaRegistry) ParseIntent(s string) (CriteriaIntentType, error) {
 	case "inference":
 		return CriteriaIntentInference, nil
 	default:
-		if reg.Has(FieldIntent, s) {
+		if r.Has(FieldIntent, s) {
 			return CriteriaIntentType(normalizeCriteriaValue(s)), nil
 		}
 		return CriteriaIntentAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid intent type: %s", s))
@@ -200,8 +200,8 @@ func GetCriteriaIntentTypes() []string {
 
 // AllIntentTypes returns the union of the static OSS list and values
 // registered in this registry, sorted alphabetically.
-func (reg *CriteriaRegistry) AllIntentTypes() []string {
-	return mergeCriteriaTypes(GetCriteriaIntentTypes(), reg.Values(FieldIntent))
+func (r *CriteriaRegistry) AllIntentTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaIntentTypes(), r.Values(FieldIntent))
 }
 
 // CriteriaOSType represents an operating system type.
@@ -221,7 +221,7 @@ const (
 
 // ParseOS parses a string into a CriteriaOSType against this registry.
 // See (*CriteriaRegistry).ParseService for the registry-fallback contract.
-func (reg *CriteriaRegistry) ParseOS(s string) (CriteriaOSType, error) {
+func (r *CriteriaRegistry) ParseOS(s string) (CriteriaOSType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
 		return CriteriaOSAny, nil
@@ -236,7 +236,7 @@ func (reg *CriteriaRegistry) ParseOS(s string) (CriteriaOSType, error) {
 	case oskind.Talos:
 		return CriteriaOSTalos, nil
 	default:
-		if reg.Has(FieldOS, s) {
+		if r.Has(FieldOS, s) {
 			return CriteriaOSType(normalizeCriteriaValue(s)), nil
 		}
 		return CriteriaOSAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid os type: %s", s))
@@ -253,8 +253,8 @@ func GetCriteriaOSTypes() []string {
 
 // AllOSTypes returns the union of the static OSS list and values registered
 // in this registry, sorted alphabetically.
-func (reg *CriteriaRegistry) AllOSTypes() []string {
-	return mergeCriteriaTypes(GetCriteriaOSTypes(), reg.Values(FieldOS))
+func (r *CriteriaRegistry) AllOSTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaOSTypes(), r.Values(FieldOS))
 }
 
 // CriteriaPlatformType represents a platform/framework type.
@@ -273,7 +273,7 @@ const (
 // ParsePlatform parses a string into a CriteriaPlatformType against this
 // registry. See (*CriteriaRegistry).ParseService for the registry-fallback
 // contract.
-func (reg *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error) {
+func (r *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", CriteriaAnyValue:
 		return CriteriaPlatformAny, nil
@@ -288,7 +288,7 @@ func (reg *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, erro
 	case "slurm":
 		return CriteriaPlatformSlurm, nil
 	default:
-		if reg.Has(FieldPlatform, s) {
+		if r.Has(FieldPlatform, s) {
 			return CriteriaPlatformType(normalizeCriteriaValue(s)), nil
 		}
 		return CriteriaPlatformAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid platform type: %s", s))
@@ -304,8 +304,8 @@ func GetCriteriaPlatformTypes() []string {
 
 // AllPlatformTypes returns the union of the static OSS list and values
 // registered in this registry, sorted alphabetically.
-func (reg *CriteriaRegistry) AllPlatformTypes() []string {
-	return mergeCriteriaTypes(GetCriteriaPlatformTypes(), reg.Values(FieldPlatform))
+func (r *CriteriaRegistry) AllPlatformTypes() []string {
+	return mergeCriteriaTypes(GetCriteriaPlatformTypes(), r.Values(FieldPlatform))
 }
 
 // mergeCriteriaTypes returns the deduplicated, alphabetically-sorted

@@ -22,7 +22,6 @@ import (
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
-	"gopkg.in/yaml.v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
@@ -239,7 +238,10 @@ func writeComplexValue(w io.Writer, val any, format serializer.Format) error {
 		return nil
 	}
 
-	data, err := yaml.Marshal(val)
+	// Use deterministic marshal so query output is byte-stable across runs;
+	// selector results commonly include map[string]any fragments from
+	// values.yaml whose Go map iteration would otherwise be randomized.
+	data, err := serializer.MarshalYAMLDeterministic(val)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal YAML", err)
 	}

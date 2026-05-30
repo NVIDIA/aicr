@@ -135,7 +135,11 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	// collectSafe runs a named collector, appending its measurement on success
 	// and logging a warning on failure. Snapshot collection never fails due to
 	// an individual collector error — returns nil to maintain non-fatal semantics.
-	collectSafe := func(name string, c collector.Collector) func() error {
+	// Takes ctx as a parameter (rather than capturing the outer ctx) so that
+	// the errgroup-derived context is honored once errgroup.WithContext is in
+	// use; this makes per-collector cancellation responsive to sibling errors
+	// if and when collectSafe stops swallowing them.
+	collectSafe := func(ctx context.Context, name string, c collector.Collector) func() error {
 		return func() error {
 			collectorStart := time.Now()
 			defer func() {
@@ -166,16 +170,19 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	slog.Debug("obtained node metadata", slog.String("name", nodeName), slog.String("version", n.Version))
 
 	// Launch all collectors in parallel — each degrades gracefully on error.
-	// Derived context is unused because collectSafe swallows all errors (never
-	// triggers early cancellation), so a plain Group suffices.
-	var g errgroup.Group
-	g.Go(collectSafe("k8s", n.Factory.CreateKubernetesCollector()))
-	g.Go(collectSafe("systemd", n.Factory.CreateSystemDCollector()))
-	g.Go(collectSafe("os", n.Factory.CreateOSCollector()))
-	g.Go(collectSafe("gpu", n.Factory.CreateGPUCollector()))
-	g.Go(collectSafe("topology", n.Factory.CreateNodeTopologyCollector()))
+	// errgroup.WithContext is used so that a future collector returning a
+	// real error (e.g., a GPU-required pre-check) cancels siblings instead
+	// of letting them race to completion. Today collectSafe swallows all
+	// errors so cancellation never fires; switching to WithContext now
+	// makes the invariant fail-safe rather than convention-only.
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(collectSafe(gctx, "k8s", n.Factory.CreateKubernetesCollector()))
+	g.Go(collectSafe(gctx, "systemd", n.Factory.CreateSystemDCollector()))
+	g.Go(collectSafe(gctx, "os", n.Factory.CreateOSCollector()))
+	g.Go(collectSafe(gctx, "gpu", n.Factory.CreateGPUCollector()))
+	g.Go(collectSafe(gctx, "topology", n.Factory.CreateNodeTopologyCollector()))
 
-	_ = g.Wait() // Individual collector errors are logged and swallowed; group always returns nil.
+	_ = g.Wait() // Individual collector errors are logged and swallowed today; reserved for future cancel-on-error.
 
 	// Enforce GPU requirement if requested
 	if n.RequireGPU {

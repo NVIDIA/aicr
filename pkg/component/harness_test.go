@@ -65,8 +65,8 @@ func (h *TestHarness) WithRecipeBuilder(builder func() *RecipeBuilder) *TestHarn
 	return h
 }
 
-// TestMake tests the Make method of a bundler with standard assertions.
-func (h *TestHarness) TestMake(bundler BundlerInterface) {
+// RunMake tests the Make method of a bundler with standard assertions.
+func (h *TestHarness) RunMake(bundler BundlerInterface) {
 	ctx := context.Background()
 	tmpDir := h.t.TempDir()
 
@@ -147,8 +147,8 @@ func (h *TestHarness) createDefaultRecipe() *recipe.Recipe {
 	return r
 }
 
-// TestTemplateGetter tests a template getter function.
-func TestTemplateGetter(t *testing.T, getTemplate func(string) (string, bool), expectedTemplates []string) {
+// RunTemplateGetterTests tests a template getter function.
+func RunTemplateGetterTests(t *testing.T, getTemplate func(string) (string, bool), expectedTemplates []string) {
 	for _, name := range expectedTemplates {
 		t.Run(name, func(t *testing.T) {
 			tmpl, ok := getTemplate(name)
@@ -272,8 +272,8 @@ func SMISubtype(data map[string]string) measurement.Subtype {
 	}
 }
 
-// TestValidateRecipe is a reusable test for recipe validation.
-func TestValidateRecipe(t *testing.T, validateFunc func(*recipe.Recipe) error) {
+// RunRecipeValidationTests is a reusable test for recipe validation.
+func RunRecipeValidationTests(t *testing.T, validateFunc func(*recipe.Recipe) error) {
 	tests := []struct {
 		name    string
 		recipe  *recipe.Recipe
@@ -372,7 +372,7 @@ func RunStandardBundlerTests(t *testing.T, cfg StandardBundlerTestConfig) {
 
 	if cfg.GetTemplate != nil && len(cfg.ExpectedTemplates) > 0 {
 		t.Run("GetTemplate", func(t *testing.T) {
-			TestTemplateGetter(t, cfg.GetTemplate, cfg.ExpectedTemplates)
+			RunTemplateGetterTests(t, cfg.GetTemplate, cfg.ExpectedTemplates)
 		})
 	}
 }

@@ -172,7 +172,7 @@ func NewEmbeddedDataProvider(efs embed.FS, prefix string) *EmbeddedDataProvider 
 // ReadFile reads a file from the embedded filesystem.
 func (p *EmbeddedDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before reading %q", path), err)
 	}
 	fullPath := filepath.Join(p.prefix, path)
 	slog.Debug("reading file from embedded provider", "path", path, "fullPath", fullPath)
@@ -191,7 +191,7 @@ func (p *EmbeddedDataProvider) WalkDir(ctx context.Context, root string, fn fs.W
 		// can't hang but a slow callback (e.g. one that does its own
 		// I/O) still benefits from short-circuiting on cancel.
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
+			return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context canceled during embedded walk", ctxErr)
 		}
 		// Strip the prefix before passing to callback
 		var relPath string
@@ -410,7 +410,7 @@ func (p *LayeredDataProvider) ExternalDir() string {
 // For other files, external completely replaces embedded.
 func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before reading %q", path), err)
 	}
 	slog.Debug("reading file from layered provider", "path", path)
 
@@ -445,7 +445,7 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 // External files take precedence over embedded files.
 func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before walking %q", root), err)
 	}
 	slog.Debug("walking layered data directory", "root", root)
 
@@ -461,7 +461,7 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 			// network-mounted --data directory can otherwise hold the
 			// walk goroutine indefinitely on stat / readdirent.
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
+				return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context canceled during external walk", ctxErr)
 			}
 			if err != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk external directory", err)

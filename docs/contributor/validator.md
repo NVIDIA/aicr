@@ -257,7 +257,7 @@ Each entry in `recipes/validators/catalog.yaml`:
 
 **Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.LoadWithDataProvider`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
 
-**Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `v1.ImagePullPolicy(image)` helper (`pkg/api/validator/v1/job_plan.go`). The rule, in precedence order, is:
+**Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `v1.ImagePullPolicy(image)` helper (`pkg/validator/v1/job_plan.go`). The rule, in precedence order, is:
 
 1. **Side-loaded refs** (`ko.local/*`, `kind.local/*`) → `Never` (no registry to pull from).
 2. **Digest-pinned refs** (`name@sha256:…`) → `IfNotPresent`. Cryptographic immutability means a cached copy is always correct; forcing `Always` here would make kubelet re-contact the registry every run, which breaks disconnected / air-gapped clusters even though the image itself was never overridden.
@@ -265,7 +265,7 @@ Each entry in `recipes/validators/catalog.yaml`:
 4. **`:latest` suffix** → `Always`. Mutable tag by convention.
 5. **Otherwise** → `IfNotPresent`. Versioned tag assumed immutable enough that caching is a win.
 
-Callers in this repo: the outer validator Job (via `v1.RenderPlan()` in `pkg/api/validator/v1/job_plan.go`) and the inner AIPerf benchmark pod spec in `buildAIPerfJob` (`validators/performance/inference_perf_constraint.go`). They both delegate to the same helper so their policy can't drift. When adding a new inner workload Job in `validators/<phase>/*`, set `ImagePullPolicy: v1.ImagePullPolicy(<resolved image>)` on the container to keep the invariant.
+Callers in this repo: the outer validator Job (via `v1.RenderPlan()` in `pkg/validator/v1/job_plan.go`) and the inner AIPerf benchmark pod spec in `buildAIPerfJob` (`validators/performance/inference_perf_constraint.go`). They both delegate to the same helper so their policy can't drift. When adding a new inner workload Job in `validators/<phase>/*`, set `ImagePullPolicy: v1.ImagePullPolicy(<resolved image>)` on the container to keep the invariant.
 
 **Performance phase example — inference perf:**
 

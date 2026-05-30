@@ -217,6 +217,18 @@ func (s *Server) configureRootHandler() {
 
 	if _, exists := s.config.Handlers["/"]; !exists {
 		s.config.Handlers["/"] = func(w http.ResponseWriter, r *http.Request) {
+			// http.ServeMux routes ANY unmatched path to the "/" handler.
+			// Without this guard, GET /garbage would receive the route
+			// directory — both confusing for clients (200 instead of 404)
+			// and a free reconnaissance surface for endpoint probing.
+			if r.URL.Path != "/" {
+				WriteError(w, r, http.StatusNotFound, aicrerrors.ErrCodeNotFound,
+					"Route not found", false, map[string]any{
+						keyPath: r.URL.Path,
+					})
+				return
+			}
+
 			if r.Method != http.MethodGet {
 				w.Header().Set("Allow", http.MethodGet)
 				WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
@@ -227,8 +239,6 @@ func (s *Server) configureRootHandler() {
 			}
 
 			routes := make([]string, 0)
-
-			// Add application routes
 			for path := range s.config.Handlers {
 				if path != "/" { // Don't include self
 					routes = append(routes, path)

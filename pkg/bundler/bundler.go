@@ -997,8 +997,8 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 
 	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to load component registry for storage class warnings", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for storage class warnings")
 	}
 
 	for _, ref := range recipeResult.ComponentRefs {
@@ -1093,8 +1093,8 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 	// opposite of what this tool promises; surface the failure to the user.
 	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to load component registry for validations", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for validations")
 	}
 
 	// Iterate through components in recipe
@@ -1203,8 +1203,9 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	// Build attestation subject with full SLSA metadata
 	metadata := attestation.StatementMetadata{
-		ToolVersion: b.Config.Version(),
-		OutputDir:   dir,
+		ToolVersion:   b.Config.Version(),
+		OutputDir:     dir,
+		Deterministic: b.Config.Deterministic(),
 	}
 
 	if recipeResult != nil {
@@ -1395,7 +1396,7 @@ func (b *DefaultBundler) buildDynamicValuesMap(provider recipe.DataProvider) (ma
 
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load component registry for dynamic resolution", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load component registry for dynamic resolution")
 	}
 
 	raw := b.Config.DynamicValues()
@@ -1582,8 +1583,8 @@ func (b *DefaultBundler) injectGKECriticalPriorityQuotas(
 
 	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to load component registry for GKE quota synthesis", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for GKE quota synthesis")
 	}
 
 	pods := computeGKECriticalPriorityQuotaPods(recipeResult.Criteria.Nodes)

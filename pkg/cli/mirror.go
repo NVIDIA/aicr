@@ -143,10 +143,10 @@ func flagMatchesName(f cli.Flag, name string) bool {
 }
 
 //nolint:gocyclo // linear option resolution
-func runMirrorListCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
-		"intent", "os", "platform", "snapshot", "config", "format", "output"); err != nil {
-		return err
+func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
+	if validErr := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
+		"intent", "os", "platform", "snapshot", "config", "format", "output"); validErr != nil {
+		return validErr
 	}
 
 	// Validate format early (fail-fast on pure input errors).
@@ -208,11 +208,17 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) error {
 		"components", len(result.Components))
 
 	// Resolve output writer.
-	w, cleanup, err := resolveOutputWriter(cmd)
-	if err != nil {
-		return err
+	w, cleanup, resolveErr := resolveOutputWriter(cmd)
+	if resolveErr != nil {
+		return resolveErr
 	}
-	defer cleanup()
+	defer func() {
+		// Writable Close flushes buffered data; surface the error so a
+		// truncated --output file isn't reported as success.
+		if closeErr := cleanup(); closeErr != nil && err == nil {
+			err = errors.Wrap(errors.ErrCodeInternal, "failed to close --output file", closeErr)
+		}
+	}()
 
 	return mirror.Render(w, result, format)
 }
@@ -256,25 +262,21 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.A
 
 // resolveOutputWriter returns a writer for the mirror list output. When
 // --output is set, it opens a file; otherwise it uses cmd.Root().Writer
-// (which defaults to stdout).
-func resolveOutputWriter(cmd *cli.Command) (io.Writer, func(), error) {
+// (which defaults to stdout). The returned closer flushes/closes a writable
+// file; the caller MUST invoke it and propagate any error so a partial write
+// to --output is not reported as success.
+func resolveOutputWriter(cmd *cli.Command) (io.Writer, func() error, error) {
 	output := cmd.String("output")
 	if output == "" {
-		return cmd.Root().Writer, func() {}, nil
+		return cmd.Root().Writer, func() error { return nil }, nil
 	}
 
-	f, err := os.Create(output)
+	f, err := os.Create(output) //nolint:gosec // operator-supplied destination
 	if err != nil {
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create output file", err)
 	}
 
-	cleanup := func() {
-		if closeErr := f.Close(); closeErr != nil {
-			slog.Warn("failed to close output file", "error", closeErr)
-		}
-	}
-
-	return f, cleanup, nil
+	return f, f.Close, nil
 }
 
 // isValidMirrorFormat checks if the given format is in the supported list.

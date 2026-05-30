@@ -24,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/recipes"
 	"gopkg.in/yaml.v3"
 )
@@ -263,27 +264,27 @@ func (r *RecipeResult) GetValuesForComponentWithContext(ctx context.Context, nam
 // For maps, it recursively merges nested keys.
 // For other types, src values override dst values.
 // A nil value in src deletes the key from dst (explicit null override).
+//
+// Non-map values (scalars, slices, nested maps when dst lacks a peer map)
+// are deep-copied via deepCopyAny so that mutation of dst never aliases
+// back into src. Without this, []any values from a cached overlay would
+// be shared with the caller's result, and a downstream --set or dynamic
+// injection mutating an index of the slice would corrupt the cache.
 func mergeValues(dst, src map[string]any) {
 	for key, srcVal := range src {
-		// Explicit null in overlay means "delete this key"
 		if srcVal == nil {
 			delete(dst, key)
 			continue
 		}
-		if dstVal, exists := dst[key]; exists {
-			// If both are maps, merge recursively
-			if dstMap, dstOK := dstVal.(map[string]any); dstOK {
-				if srcMap, srcOK := srcVal.(map[string]any); srcOK {
-					mergeValues(dstMap, srcMap)
-					continue
-				}
+		if srcMap, srcOK := srcVal.(map[string]any); srcOK {
+			if dstMap, dstOK := dst[key].(map[string]any); dstOK {
+				mergeValues(dstMap, srcMap)
+				continue
 			}
-			// For non-map or mismatched types, src overrides dst
-			dst[key] = srcVal
-		} else {
-			// Key doesn't exist in dst, add it
-			dst[key] = srcVal
+			dst[key] = serializer.DeepCopyAnyMap(srcMap)
+			continue
 		}
+		dst[key] = serializer.DeepCopyAny(srcVal)
 	}
 }
 

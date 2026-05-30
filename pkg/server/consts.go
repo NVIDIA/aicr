@@ -18,3 +18,9 @@ package server
 // detail key (e.g. on 405 responses) and as a Prometheus metric label
 // dimension.
 const keyMethod = "method"
+
+// keyPath is the request-path label used as a structured-error detail
+// key and as a Prometheus metric label dimension. Matches the
+// keyMethod convention so HTTP labels stay consistent across metrics,
+// logs, and error responses.
+const keyPath = "path"

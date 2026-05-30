@@ -184,9 +184,9 @@ func buildIdentityMatcher(opts VerifyOptions) (verify.CertificateIdentity, error
 }
 
 func loadSigstoreBundle(path string) (*bundle.Bundle, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // bundle-local path
+	data, err := readBoundedFile(path, "sigstore bundle", defaults.MaxSigstoreBundleSize)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read sigstore bundle", err)
+		return nil, err
 	}
 	var pb protobundle.Bundle
 	if uErr := protojson.Unmarshal(data, &pb); uErr != nil {

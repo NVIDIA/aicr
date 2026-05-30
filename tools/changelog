@@ -5,12 +5,6 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${DIR}/common"
 
-# Parse flags
-UPDATE_FILE=false
-if [[ "${1:-}" == "--file" ]]; then
-  UPDATE_FILE=true
-fi
-
 # Check if required tools are installed
 has_tools git git-cliff
 
@@ -66,30 +60,3 @@ $(cat "$f")
 done
 
 echo "$OUTPUT"
-
-if [[ "$UPDATE_FILE" == true ]]; then
-  CHANGELOG="${DIR}/../CHANGELOG.md"
-  TODAY=$(date +%Y-%m-%d)
-  # Derive version from latest tag (stable or RC)
-  VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "unreleased")
-  VERSION="${VERSION#v}"
-
-  HEADER="## [${VERSION}] - ${TODAY}"
-
-  # Insert after the "# Changelog" heading and its following blank line
-  if [[ -f "$CHANGELOG" ]]; then
-    TMPFILE=$(mktemp "${TMPDIR:-/tmp}/changelog-insert.XXXXXX")
-    ENTRYFILE=$(mktemp "${TMPDIR:-/tmp}/changelog-entry.XXXXXX")
-    printf '%s\n\n%s' "$HEADER" "$OUTPUT" > "$ENTRYFILE"
-    # Print first two lines (heading + blank), insert entry, then the rest
-    head -2 "$CHANGELOG" > "$TMPFILE"
-    echo "" >> "$TMPFILE"
-    cat "$ENTRYFILE" >> "$TMPFILE"
-    tail -n +3 "$CHANGELOG" >> "$TMPFILE"
-    mv "$TMPFILE" "$CHANGELOG"
-    rm -f "$ENTRYFILE"
-    msg "Updated $CHANGELOG with [${VERSION}] entry"
-  else
-    err "CHANGELOG.md not found at $CHANGELOG"
-  fi
-fi

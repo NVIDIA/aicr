@@ -26,11 +26,11 @@ import (
 
 // Phase identifies a single validation phase. Facade-owned so the
 // stable surface does not propagate pkg/validator type-shape changes.
-// Values match pkg/api/validator/v1 constants verbatim for direct
+// Values match pkg/validator/v1 constants verbatim for direct
 // wire compatibility.
 type Phase string
 
-// Validation phases — string values match pkg/api/validator/v1 so wire
+// Validation phases — string values match pkg/validator/v1 so wire
 // round-trips between facade and validator are byte-identical.
 const (
 	PhaseDeployment  Phase = "deployment"

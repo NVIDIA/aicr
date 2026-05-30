@@ -155,10 +155,9 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		WithConfig(bundleConfigFromParams(params)),
 	)
 	if err != nil {
+		logger.Error("failed to create bundler", "error", err)
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
-			"Failed to create bundler", true, map[string]any{
-				keyError: err.Error(),
-			})
+			"Failed to create bundler", true, nil)
 		return
 	}
 
@@ -169,18 +168,22 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for bundle errors
+	// Check for bundle errors. Per-bundler errors may include internal
+	// detail (file paths, helm template stacks, network diagnostics).
+	// Log the full payload server-side and surface only the failing
+	// bundler component names to the client — enough to know *which*
+	// component failed without leaking implementation detail on 5xx.
 	if output.HasErrors() {
-		errorDetails := make([]map[string]any, 0, len(output.Errors))
+		failedBundlers := make([]string, 0, len(output.Errors))
 		for _, be := range output.Errors {
-			errorDetails = append(errorDetails, map[string]any{
-				"bundler": be.BundlerType,
-				keyError:  be.Error,
-			})
+			failedBundlers = append(failedBundlers, string(be.BundlerType))
+			logger.Error("bundler reported error",
+				"bundler", be.BundlerType,
+				"error", be.Error)
 		}
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
 			"Bundle generation failed", true, map[string]any{
-				"errors": errorDetails,
+				"failedBundlers": failedBundlers,
 			})
 		return
 	}

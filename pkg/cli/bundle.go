@@ -695,7 +695,6 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		OutputDir: opts.outputDir,
 	})
 	if err != nil {
-		slog.Error("bundle generation failed", "error", err)
 		return err
 	}
 

@@ -158,7 +158,7 @@ func (s *Server) panicRecoveryMiddleware(next http.HandlerFunc) http.HandlerFunc
 				slog.Error("panic recovered",
 					"error", errMsg,
 					"requestID", r.Context().Value(contextKeyRequestID),
-					"path", r.URL.Path,
+					keyPath, r.URL.Path,
 					"method", r.Method,
 				)
 				WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
@@ -169,30 +169,42 @@ func (s *Server) panicRecoveryMiddleware(next http.HandlerFunc) http.HandlerFunc
 	}
 }
 
-// loggingMiddleware logs requests
+// loggingMiddleware logs requests. Success (2xx) is logged at Debug to
+// keep the steady-state at a normal log level quiet — every request would
+// otherwise emit a line. Redirects (3xx) stay at Debug. Client errors
+// (4xx) escalate to Warn so misconfigured clients are visible without
+// reading metrics. Server errors (5xx) escalate to Error.
 func (s *Server) loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		requestID := r.Context().Value(contextKeyRequestID)
 
-		// Wrap response writer to track status code
 		rw := newResponseWriter(w)
 
 		slog.Debug("request started",
 			"requestID", requestID,
 			"method", r.Method,
-			"path", r.URL.Path,
+			keyPath, r.URL.Path,
 		)
 
 		next.ServeHTTP(rw, r)
 
 		duration := time.Since(start)
-		slog.Info("request completed",
+		status := rw.Status()
+		attrs := []any{
 			"requestID", requestID,
 			"method", r.Method,
-			"path", r.URL.Path,
-			"status", rw.Status(),
+			keyPath, r.URL.Path,
+			"status", status,
 			"duration", duration.String(),
-		)
+		}
+		switch {
+		case status >= 500:
+			slog.Error("request completed", attrs...)
+		case status >= 400:
+			slog.Warn("request completed", attrs...)
+		default:
+			slog.Debug("request completed", attrs...)
+		}
 	}
 }

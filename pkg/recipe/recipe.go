@@ -43,12 +43,12 @@ type Recipe struct {
 }
 
 // Validate validates a recipe against all registered bundlers that implement Validator.
-func (v *Recipe) Validate() error {
-	if v == nil {
+func (r *Recipe) Validate() error {
+	if r == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "recipe cannot be nil")
 	}
 
-	if len(v.Measurements) == 0 {
+	if len(r.Measurements) == 0 {
 		return errors.New(errors.ErrCodeInvalidRequest, "recipe has no measurements")
 	}
 
@@ -56,13 +56,13 @@ func (v *Recipe) Validate() error {
 }
 
 // ValidateStructure performs basic structural validation.
-func (v *Recipe) ValidateStructure() error {
-	if err := v.Validate(); err != nil {
+func (r *Recipe) ValidateStructure() error {
+	if err := r.Validate(); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "recipe structure validation failed", err)
 	}
 
 	// Validate each measurement
-	for i, m := range v.Measurements {
+	for i, m := range r.Measurements {
 		if m == nil {
 			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("measurement at index %d is nil", i))
 		}
@@ -91,12 +91,12 @@ func (v *Recipe) ValidateStructure() error {
 }
 
 // validateMeasurementExists checks if a specific measurement type exists.
-func (v *Recipe) validateMeasurementExists(measurementType measurement.Type) error {
-	if err := v.ValidateStructure(); err != nil {
+func (r *Recipe) validateMeasurementExists(measurementType measurement.Type) error {
+	if err := r.ValidateStructure(); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "measurement existence check failed", err)
 	}
 
-	for _, m := range v.Measurements {
+	for _, m := range r.Measurements {
 		if m.Type == measurementType {
 			return nil
 		}
@@ -105,12 +105,12 @@ func (v *Recipe) validateMeasurementExists(measurementType measurement.Type) err
 }
 
 // validateSubtypeExists checks if a specific subtype exists within a measurement.
-func (v *Recipe) validateSubtypeExists(measurementType measurement.Type, subtypeName string) error {
-	if err := v.validateMeasurementExists(measurementType); err != nil {
+func (r *Recipe) validateSubtypeExists(measurementType measurement.Type, subtypeName string) error {
+	if err := r.validateMeasurementExists(measurementType); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "subtype existence check failed", err)
 	}
 
-	for _, m := range v.Measurements {
+	for _, m := range r.Measurements {
 		if m.Type == measurementType {
 			for _, st := range m.Subtypes {
 				if st.Name == subtypeName {

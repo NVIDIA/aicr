@@ -18,10 +18,10 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
-	"os"
 	"path/filepath"
 	"strconv"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
@@ -204,9 +204,9 @@ func record(r *VerifyResult, step int, status StepStatus, detail string, sub []K
 // emitted; the predicate is trusted as-is (self-consistency only).
 func loadUnsignedPredicate(mat *MaterializedBundle) (*attestation.Predicate, error) {
 	path := filepath.Join(mat.BundleDir, attestation.StatementFilename)
-	body, err := os.ReadFile(path) //nolint:gosec // bundle-local path
+	body, err := readBoundedFile(path, "in-toto Statement", defaults.MaxAttestationFileBytes)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, "failed to read in-toto Statement", err)
+		return nil, err
 	}
 	var envelope struct {
 		PredicateType string                `json:"predicateType"`

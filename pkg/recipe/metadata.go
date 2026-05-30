@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
 
@@ -603,10 +604,10 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 func cloneComponentRef(ref ComponentRef) ComponentRef {
 	out := ref // copies scalars and the (to-be-replaced) reference fields
 	if ref.Overrides != nil {
-		// deepCopyAnyMap recurses into nested map[string]any/[]any so a
-		// mutation through the copy can't reach the source's nested values
-		// (a shallow key-copy would share those nested containers).
-		out.Overrides = deepCopyAnyMap(ref.Overrides)
+		// serializer.DeepCopyAnyMap recurses into nested map[string]any/[]any
+		// so a mutation through the copy can't reach the source's nested
+		// values (a shallow key-copy would share those nested containers).
+		out.Overrides = serializer.DeepCopyAnyMap(ref.Overrides)
 	}
 	if ref.Patches != nil {
 		out.Patches = make([]string, len(ref.Patches))
@@ -1037,45 +1038,23 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 // deepMergeMap copies all key-value pairs from src into dst. For keys whose
 // values are nested maps in both src and dst, the merge recurses so that
 // inner maps are not shared by reference between the two trees.
+//
+// Non-map values (scalars, slices) are deep-copied via serializer.DeepCopyAny
+// so that dst never aliases src's []any values. Without this, a downstream
+// mutation at an index of a toleration/env/args list would leak back into
+// the cached source map.
 func deepMergeMap(dst, src map[string]any) {
 	for k, sv := range src {
 		svMap, svIsMap := sv.(map[string]any)
 		if !svIsMap {
-			dst[k] = sv
+			dst[k] = serializer.DeepCopyAny(sv)
 			continue
 		}
 		dvMap, dvIsMap := dst[k].(map[string]any)
 		if !dvIsMap {
-			// dst has no nested map at this key — deep-copy src subtree
-			dst[k] = deepCopyAnyMap(svMap)
+			dst[k] = serializer.DeepCopyAnyMap(svMap)
 			continue
 		}
 		deepMergeMap(dvMap, svMap)
-	}
-}
-
-// deepCopyAnyMap returns a deep copy of a map[string]any tree, recursing into
-// both nested maps and slices so callers may safely mutate the returned tree
-// without leaking writes back to the source.
-func deepCopyAnyMap(m map[string]any) map[string]any {
-	cp := make(map[string]any, len(m))
-	for k, v := range m {
-		cp[k] = deepCopyAny(v)
-	}
-	return cp
-}
-
-func deepCopyAny(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		return deepCopyAnyMap(val)
-	case []any:
-		cp := make([]any, len(val))
-		for i, item := range val {
-			cp[i] = deepCopyAny(item)
-		}
-		return cp
-	default:
-		return v
 	}
 }

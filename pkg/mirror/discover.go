@@ -111,6 +111,7 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(defaults.MirrorDiscoveryConcurrency)
 
 	for i, compRef := range rec.ComponentRefs {
 		if !compRef.IsEnabled() {

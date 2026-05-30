@@ -310,12 +310,21 @@ func (v *Validator) runPhase(
 
 		slog.Info("running validator", "name", entry.Name, "phase", phase)
 
-		deployer := job.NewDeployer(
-			clientset, factory, v.Namespace, v.RunID, v.Version, v.Commit, entry,
-			v.ImagePullSecrets, v.Tolerations, v.NodeSelector,
-			v.ImageRegistryOverride, v.ImageTagOverride,
-			validationInput.GetComponentRefs(),
-		)
+		deployer := job.NewDeployer(job.Config{
+			Clientset:             clientset,
+			Factory:               factory,
+			Namespace:             v.Namespace,
+			RunID:                 v.RunID,
+			Entry:                 entry,
+			CLIVersion:            v.Version,
+			CLICommit:             v.Commit,
+			ImagePullSecrets:      v.ImagePullSecrets,
+			Tolerations:           v.Tolerations,
+			NodeSelector:          v.NodeSelector,
+			ImageRegistryOverride: v.ImageRegistryOverride,
+			ImageTagOverride:      v.ImageTagOverride,
+			ComponentRefs:         validationInput.GetComponentRefs(),
+		})
 
 		// Deploy
 		if deployErr := deployer.DeployJob(ctx); deployErr != nil {

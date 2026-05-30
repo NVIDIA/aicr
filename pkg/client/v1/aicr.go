@@ -962,6 +962,12 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 			// "explicit empty map" (the latter would marshal as
 			// "{}\n", non-nil bytes).
 			if len(values) > 0 {
+				// sigs.k8s.io/yaml routes through encoding/json, which
+				// emits map keys in sorted order — that determinism is
+				// load-bearing here because downstream attestation
+				// digests BundleStatement.HelmValues. Do NOT swap to
+				// gopkg.in/yaml.v3 (randomized map order) without
+				// switching to serializer.MarshalYAMLDeterministic.
 				out, marshalErr := yaml.Marshal(values)
 				if marshalErr != nil {
 					return bundles, errors.Wrap(errors.ErrCodeInternal,

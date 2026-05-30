@@ -48,8 +48,8 @@ const (
 // in a terminal state (Complete or Failed).
 func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 	result := &ctrf.ValidatorResult{
-		Name:  d.entry.Name,
-		Phase: d.entry.Phase,
+		Name:  d.config.Entry.Name,
+		Phase: d.config.Entry.Phase,
 	}
 
 	// Find the pod for this Job
@@ -92,7 +92,7 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 	}
 
 	// Capture stdout from pod logs (explicit container name)
-	logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ValidatorContainerName)
+	logs, logErr := pod.GetPodLogs(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name, ValidatorContainerName)
 	if logErr != nil {
 		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
 		// Not fatal — we still have exit code and termination message
@@ -110,8 +110,8 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 // wait has timed out. Uses a fresh context since the parent may be canceled.
 func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 	result := &ctrf.ValidatorResult{
-		Name:  d.entry.Name,
-		Phase: d.entry.Phase,
+		Name:  d.config.Entry.Name,
+		Phase: d.config.Entry.Phase,
 	}
 
 	// Try to find the pod
@@ -126,12 +126,12 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
 	if !found {
 		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container %q not found - validator package contract)", d.entry.Timeout, ValidatorContainerName)
+		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s (container %q not found - validator package contract)", d.config.Entry.Timeout, ValidatorContainerName)
 		return result
 	}
 
 	// Try to get logs from "validator" container
-	if logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ValidatorContainerName); logErr == nil && logs != "" {
+	if logs, logErr := pod.GetPodLogs(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name, ValidatorContainerName); logErr == nil && logs != "" {
 		result.Stdout = filterStdoutLines(
 			truncateLogLines(logs, defaults.ValidatorMaxStdoutLines),
 			defaults.ValidatorMaxStdoutLineLength,
@@ -146,7 +146,7 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 		result.Duration = result.CompletionTime.Sub(result.StartTime)
 	} else {
 		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s", d.entry.Timeout)
+		result.TerminationMsg = fmt.Sprintf("timeout: validator did not complete within %s", d.config.Entry.Timeout)
 	}
 
 	return result
@@ -184,7 +184,7 @@ func filterStdoutLines(lines []string, maxLineLen int) []string {
 // pod.GetPodForJob helper. Kept as a thin wrapper so existing call sites
 // inside this file remain readable.
 func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
-	return pod.GetPodForJob(ctx, d.clientset, d.namespace, d.jobName)
+	return pod.GetPodForJob(ctx, d.config.Clientset, d.config.Namespace, d.jobName)
 }
 
 // findContainerStatus finds a container status by name in the pod's container

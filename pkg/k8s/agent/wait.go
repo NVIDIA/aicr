@@ -178,10 +178,25 @@ func (d *Deployer) findOrWatchPodName(ctx context.Context) (string, error) {
 			return "", errors.Wrap(errors.ErrCodeTimeout, "timeout waiting for Pod creation", ctx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
+				// apiserver hiccups, LB drops, and rolling restarts commonly
+				// close watch channels without the pod actually failing to
+				// appear. Re-List before declaring failure.
+				pods, listErr := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
+					LabelSelector: agentLabelSelector,
+				})
+				if listErr != nil {
+					return "", errors.Wrap(errors.ErrCodeUnavailable, "Pod watch channel closed and re-List failed", listErr)
+				}
+				if name := pickLivePod(pods.Items); name != "" {
+					return name, nil
+				}
 				return "", errors.New(errors.ErrCodeUnavailable, "Pod watch channel closed before pod observed")
 			}
 			p, isPod := event.Object.(*corev1.Pod)
 			if !isPod {
+				continue
+			}
+			if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodFailed {
 				continue
 			}
 			return p.Name, nil

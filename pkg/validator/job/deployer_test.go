@@ -57,7 +57,7 @@ func deployAndGet(t *testing.T, d *Deployer) *batchv1.Job {
 	if err := d.DeployJob(ctx); err != nil {
 		t.Fatalf("DeployJob() failed: %v", err)
 	}
-	job, err := testClientset.BatchV1().Jobs(d.namespace).Get(ctx, d.JobName(), metav1.GetOptions{})
+	job, err := testClientset.BatchV1().Jobs(d.config.Namespace).Get(ctx, d.JobName(), metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Job not found after deploy: %v", err)
 	}
@@ -65,7 +65,7 @@ func deployAndGet(t *testing.T, d *Deployer) *batchv1.Job {
 }
 
 func TestJobNameEmptyBeforeDeploy(t *testing.T) {
-	d := NewDeployer(nil, nil, "default", "run123", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Namespace: "default", RunID: "run123", Entry: testEntry()})
 	if d.JobName() != "" {
 		t.Errorf("JobName() before deploy = %q, want empty", d.JobName())
 	}
@@ -73,7 +73,7 @@ func TestJobNameEmptyBeforeDeploy(t *testing.T) {
 
 func TestGenerateJobName(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	d := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
 	job := deployAndGet(t, d)
 
 	if !strings.HasPrefix(job.Name, "aicr-gpu-operator-health-") {
@@ -88,8 +88,8 @@ func TestDeployJobUniqueNames(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 
-	d1 := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
-	d2 := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d1 := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
+	d2 := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
 
 	if err := d1.DeployJob(ctx); err != nil {
 		t.Fatalf("first DeployJob() failed: %v", err)
@@ -105,7 +105,7 @@ func TestDeployJobUniqueNames(t *testing.T) {
 
 func TestDeployJobSSAFieldManager(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	found := false
 	for _, ref := range job.ManagedFields {
@@ -121,7 +121,7 @@ func TestDeployJobSSAFieldManager(t *testing.T) {
 
 func TestDeployJobLabels(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	expectedLabels := map[string]string{
 		"app.kubernetes.io/name":       "aicr",
@@ -148,7 +148,7 @@ func TestDeployJobLabels(t *testing.T) {
 
 func TestDeployJobTimeouts(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != 120 {
 		t.Errorf("ActiveDeadlineSeconds = %v, want 120", job.Spec.ActiveDeadlineSeconds)
@@ -173,7 +173,7 @@ func TestDeployJobDefaultTimeout(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	entry := testEntry()
 	entry.Timeout = 0
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", entry, nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: entry}))
 
 	expected := int64(defaults.ValidatorDefaultTimeout.Seconds())
 	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != expected {
@@ -183,7 +183,7 @@ func TestDeployJobDefaultTimeout(t *testing.T) {
 
 func TestDeployJobContainer(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	containers := job.Spec.Template.Spec.Containers
 	if len(containers) != 1 {
@@ -213,7 +213,7 @@ func TestDeployJobContainer(t *testing.T) {
 
 func TestDeployJobResources(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	c := job.Spec.Template.Spec.Containers[0]
 	if c.Resources.Requests.Cpu().String() != "1" {
@@ -232,7 +232,7 @@ func TestDeployJobResources(t *testing.T) {
 
 func TestDeployJobEnvVars(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	envMap := make(map[string]corev1.EnvVar)
@@ -296,7 +296,7 @@ func TestDeployJobEnvVars(t *testing.T) {
 func TestDeployJobCLIVersionInjected(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	const wantVersion = "v0.11.1-test"
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", wantVersion, "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", CLIVersion: wantVersion, Entry: testEntry()}))
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	var got *corev1.EnvVar
@@ -338,7 +338,7 @@ func TestDeployJobImageTagOverrideForwarding(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ns := createUniqueNamespace(t)
-			job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", tt.tagOverride, nil))
+			job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry(), ImageTagOverride: tt.tagOverride}))
 
 			env := job.Spec.Template.Spec.Containers[0].Env
 			var got *corev1.EnvVar
@@ -383,7 +383,7 @@ func TestDeployJobImageRegistryOverrideForwarding(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ns := createUniqueNamespace(t)
-			job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, tt.registryOverride, "", nil))
+			job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry(), ImageRegistryOverride: tt.registryOverride}))
 
 			env := job.Spec.Template.Spec.Containers[0].Env
 			var got *corev1.EnvVar
@@ -417,7 +417,7 @@ func TestDeployJobImageRegistryOverrideForwarding(t *testing.T) {
 func TestDeployJobCLICommitInjected(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	const wantCommit = "abc1234"
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", wantCommit, testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", CLICommit: wantCommit, Entry: testEntry()}))
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	var got *corev1.EnvVar
@@ -437,7 +437,7 @@ func TestDeployJobCLICommitInjected(t *testing.T) {
 
 func TestDeployJobVolumes(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	volumes := job.Spec.Template.Spec.Volumes
 	if len(volumes) != 2 {
@@ -462,7 +462,7 @@ func TestDeployJobVolumes(t *testing.T) {
 
 func TestDeployJobAffinity(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	affinity := job.Spec.Template.Spec.Affinity
 	if affinity == nil || affinity.NodeAffinity == nil {
@@ -486,7 +486,7 @@ func TestDeployJobAffinity(t *testing.T) {
 func TestDeployJobImagePullSecrets(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	secrets := []string{"registry-creds", "other-secret"}
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), secrets, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry(), ImagePullSecrets: secrets}))
 
 	ips := job.Spec.Template.Spec.ImagePullSecrets
 	if len(ips) != 2 {
@@ -511,7 +511,7 @@ func TestDeployJobOrchestratorToleratesTolerateAll(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ns := createUniqueNamespace(t)
-			job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, tt.tolerations, nil, "", "", nil))
+			job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry(), Tolerations: tt.tolerations}))
 			tols := job.Spec.Template.Spec.Tolerations
 			if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists || tols[0].Key != "" {
 				t.Errorf("orchestrator tolerations = %v, want single tolerate-all {Operator: Exists}", tols)
@@ -524,7 +524,7 @@ func TestDeployJobNodeSelectorEnvVar(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	// Use a single-key selector to avoid map ordering issues in serialization.
 	nodeSelector := map[string]string{"my-org/gpu-pool": "true"}
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nodeSelector, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry(), NodeSelector: nodeSelector}))
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	envMap := make(map[string]corev1.EnvVar)
@@ -546,7 +546,7 @@ func TestDeployJobNodeSelectorEnvVar(t *testing.T) {
 
 func TestDeployJobNodeSelectorEnvVarAbsent(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
 		if e.Name == "AICR_NODE_SELECTOR" {
@@ -560,7 +560,7 @@ func TestDeployJobTolerationsEnvVar(t *testing.T) {
 	tolerations := []corev1.Toleration{
 		{Key: "gpu-type", Value: "h100", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 	}
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, tolerations, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry(), Tolerations: tolerations}))
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	envMap := make(map[string]corev1.EnvVar)
@@ -576,7 +576,7 @@ func TestDeployJobTolerationsEnvVar(t *testing.T) {
 
 func TestDeployJobPodSpec(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil))
+	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
 	podSpec := job.Spec.Template.Spec
 	wantSA := ServiceAccountName("run1")
@@ -592,7 +592,7 @@ func TestCleanupJob(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 
-	d := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
 	if err := d.DeployJob(ctx); err != nil {
 		t.Fatalf("DeployJob() failed: %v", err)
 	}
@@ -613,7 +613,7 @@ func TestCleanupJob(t *testing.T) {
 }
 
 func TestCleanupJobNotFound(t *testing.T) {
-	d := NewDeployer(testClientset, nil, "default", "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Namespace: "default", RunID: "run1", Entry: testEntry()})
 	// jobName is empty — CleanupJob should return nil
 	if err := d.CleanupJob(context.Background()); err != nil {
 		t.Fatalf("CleanupJob() on empty jobName should not error, got: %v", err)
@@ -706,7 +706,7 @@ func TestWaitForCompletionFastPath(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 
-	d := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
 	if err := d.DeployJob(ctx); err != nil {
 		t.Fatalf("DeployJob() failed: %v", err)
 	}
@@ -744,7 +744,7 @@ func TestWaitForCompletionFastPathFailed(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 
-	d := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
 	if err := d.DeployJob(ctx); err != nil {
 		t.Fatalf("DeployJob() failed: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestWaitForCompletionFastPathFailed(t *testing.T) {
 func TestWaitForCompletionJobNotFound(t *testing.T) {
 	ns := createUniqueNamespace(t)
 
-	d := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
 	d.jobName = "nonexistent-job"
 
 	err := d.WaitForCompletion(context.Background(), 1*time.Minute)
@@ -782,7 +782,7 @@ func TestWaitForCompletionJobNotFound(t *testing.T) {
 func TestWaitForCompletionTimeout(t *testing.T) {
 	ns := createUniqueNamespace(t)
 
-	d := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
 	if err := d.DeployJob(context.Background()); err != nil {
 		t.Fatalf("DeployJob() failed: %v", err)
 	}
@@ -809,9 +809,11 @@ func TestWaitForPodTerminationPropagatesNonNotFound(t *testing.T) {
 	})
 
 	d := &Deployer{
-		clientset: cs,
-		namespace: "default",
-		jobName:   "test-job",
+		config: Config{
+			Clientset: cs,
+			Namespace: "default",
+		},
+		jobName: "test-job",
 	}
 
 	err := d.WaitForPodTermination(context.Background())
@@ -843,7 +845,7 @@ func TestDeployer_BuildJobPlanRequiredMissing(t *testing.T) {
 	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 	cs := fake.NewSimpleClientset()
 	factory := informers.NewSharedInformerFactory(cs, 0)
-	d := NewDeployer(cs, factory, "aicr-validation", "run-1", "", "", entry, nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: cs, Factory: factory, Namespace: "aicr-validation", RunID: "run-1", Entry: entry})
 
 	err := d.DeployJob(context.Background())
 	if err == nil {

@@ -111,28 +111,8 @@ func parseBoolString(s string) bool {
 
 // DeepCopyMap returns a deep copy of a map[string]any by recursively copying
 // nested maps and slices. Preserves original types (no serialization roundtrip).
+// Delegates to serializer.DeepCopyAnyMap so the recipe and bundler packages
+// share a single implementation.
 func DeepCopyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return make(map[string]any)
-	}
-	result := make(map[string]any, len(m))
-	for k, v := range m {
-		result[k] = deepCopyAny(v)
-	}
-	return result
-}
-
-func deepCopyAny(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		return DeepCopyMap(val)
-	case []any:
-		cp := make([]any, len(val))
-		for i, item := range val {
-			cp[i] = deepCopyAny(item)
-		}
-		return cp
-	default:
-		return v
-	}
+	return serializer.DeepCopyAnyMap(m)
 }

@@ -102,7 +102,7 @@
 //   - AICR_LOG_LEVEL: Logging level (debug, info, warn, error)
 //
 // Request handling middleware enforces:
-//   - Per-request context timeout (defaults.ServerHandlerTimeout, 30s)
+//   - Per-request context timeout (defaults.ServerHandlerTimeout, 90s — sized for the longest per-handler timeout)
 //   - Request body cap (defaults.ServerMaxBodyBytes, 8 MiB) via
 //     http.MaxBytesReader; per-handler caps may apply tighter limits.
 //   - Per-process rate limiting (token bucket, see pkg/server config).

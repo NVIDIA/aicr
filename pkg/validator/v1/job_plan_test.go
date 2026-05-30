@@ -879,3 +879,104 @@ func TestAffinityToApplyConfig_RoundTripsAllFields(t *testing.T) {
 		t.Fatal("PodAntiAffinity dropped entirely")
 	}
 }
+
+// TestBuildResources_FailsClosedOnInvalidQuantity verifies that a typo in
+// a catalog entry's resource quantities surfaces as ErrCodeInvalidRequest
+// rather than silently substituting defaults. Catalogs are user-supplied
+// config; a misconfigured workload must not ship under a benign log line.
+func TestBuildResources_FailsClosedOnInvalidQuantity(t *testing.T) {
+	tests := []struct {
+		name   string
+		cpu    string
+		memory string
+	}{
+		{"invalid cpu", "notacpu", "1Gi"},
+		{"invalid memory", "1", "notamem"},
+		{"both invalid", "abc", "xyz"},
+		{"cpu only - partial override", "2", ""},
+		{"memory only - partial override", "", "2Gi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := ValidatorEntry{
+				Name:      "gpu-bench",
+				Phase:     "performance",
+				Image:     "ghcr.io/x:latest",
+				Resources: &ResourceRequirements{CPU: tt.cpu, Memory: tt.memory},
+			}
+			_, err := buildResources(entry)
+			if err == nil {
+				t.Fatalf("expected error for cpu=%q memory=%q, got nil", tt.cpu, tt.memory)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+			}
+		})
+	}
+}
+
+// TestBuildJobPlan_InvalidResourcesPropagatesError verifies that the
+// fail-closed behavior of buildResources propagates through BuildJobPlan.
+func TestBuildJobPlan_InvalidResourcesPropagatesError(t *testing.T) {
+	entry := ValidatorEntry{
+		Name:      "gpu-bench",
+		Phase:     "performance",
+		Image:     "ghcr.io/x:latest",
+		Timeout:   2 * time.Minute,
+		Resources: &ResourceRequirements{CPU: "notacpu", Memory: "1Gi"},
+	}
+	_, err := BuildJobPlan(entry, "run-1", "ns", "", "", "sa", nil, nil, nil, "", "", nil)
+	if err == nil {
+		t.Fatal("expected error when resources contain a typo")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+}
+
+// TestBuildResources_ValidQuantities verifies the happy path: a valid
+// CPU/Memory pair is parsed and applied to both Requests and Limits.
+func TestBuildResources_ValidQuantities(t *testing.T) {
+	entry := ValidatorEntry{
+		Name:      "gpu-bench",
+		Resources: &ResourceRequirements{CPU: "2", Memory: "4Gi"},
+	}
+	got, err := buildResources(entry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantCPU := resource.MustParse("2")
+	wantMem := resource.MustParse("4Gi")
+	if !got.Requests.Cpu().Equal(wantCPU) || !got.Limits.Cpu().Equal(wantCPU) {
+		t.Errorf("cpu mismatch: requests=%v limits=%v want=%v", got.Requests.Cpu(), got.Limits.Cpu(), wantCPU)
+	}
+	if !got.Requests.Memory().Equal(wantMem) || !got.Limits.Memory().Equal(wantMem) {
+		t.Errorf("memory mismatch: requests=%v limits=%v want=%v", got.Requests.Memory(), got.Limits.Memory(), wantMem)
+	}
+}
+
+// TestBuildResources_NilOrEmptyUsesDefaults verifies that nil or fully-empty
+// Resources still yields the 1 CPU / 1Gi defaults (back-compat for catalog
+// entries that legitimately omit the field).
+func TestBuildResources_NilOrEmptyUsesDefaults(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry ValidatorEntry
+	}{
+		{"nil resources", ValidatorEntry{Name: "x"}},
+		{"empty fields", ValidatorEntry{Name: "x", Resources: &ResourceRequirements{}}},
+	}
+	wantCPU := resource.MustParse("1")
+	wantMem := resource.MustParse("1Gi")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := buildResources(tc.entry)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.Requests.Cpu().Equal(wantCPU) || !got.Requests.Memory().Equal(wantMem) {
+				t.Errorf("defaults not applied: got cpu=%v memory=%v", got.Requests.Cpu(), got.Requests.Memory())
+			}
+		})
+	}
+}

@@ -35,60 +35,53 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// Config holds the immutable configuration for a Deployer.
+// Required: Clientset, Factory, Namespace, RunID, Entry.
+// Other fields are optional and carry orchestrator-wide settings forwarded
+// to the validator Job via env vars or pod spec fields.
+type Config struct {
+	// Clientset is the Kubernetes client used for Job/Pod operations.
+	Clientset kubernetes.Interface
+	// Factory is a namespace-scoped SharedInformerFactory started by the caller.
+	Factory informers.SharedInformerFactory
+	// Namespace is where the validator Job is deployed.
+	Namespace string
+	// RunID is the validation run identifier; used to derive Job/SA names.
+	RunID string
+	// Entry is the catalog entry describing the validator to deploy.
+	Entry catalog.ValidatorEntry
+
+	// CLIVersion is the CLI's own version string; empty is acceptable for dev
+	// builds. Forwarded to the validator container via AICR_CLI_VERSION so the
+	// validator can resolve images it references outside the catalog using the
+	// same rewriting rules as catalog.Load.
+	CLIVersion string
+	// CLICommit is the git commit SHA, forwarded via AICR_CLI_COMMIT for
+	// SHA-based image tag resolution in dev builds.
+	CLICommit string
+	// ImagePullSecrets are added to the validator pod spec.
+	ImagePullSecrets []string
+	// Tolerations are added to the validator pod spec.
+	Tolerations []corev1.Toleration
+	// NodeSelector is passed through to inner workloads via AICR_NODE_SELECTOR.
+	NodeSelector map[string]string
+	// ImageRegistryOverride overrides the image registry prefix for validator containers.
+	ImageRegistryOverride string
+	// ImageTagOverride overrides the resolved image tag for validator containers.
+	ImageTagOverride string
+	// ComponentRefs are resolved recipe components, used for dependencyAffinity resolution.
+	ComponentRefs []recipe.ComponentRef
+}
+
 // Deployer manages the lifecycle of a single validator Job.
 type Deployer struct {
-	clientset             kubernetes.Interface
-	factory               informers.SharedInformerFactory
-	namespace             string
-	runID                 string
-	cliVersion            string // CLI version — forwarded to validator containers via AICR_CLI_VERSION for inner-image resolution
-	cliCommit             string // CLI commit SHA — forwarded via AICR_CLI_COMMIT for dev-build image resolution
-	entry                 catalog.ValidatorEntry
-	jobName               string // Unique name generated client-side (set by DeployJob)
-	imagePullSecrets      []string
-	tolerations           []corev1.Toleration
-	nodeSelector          map[string]string     // passed through to inner workloads via AICR_NODE_SELECTOR env var
-	imageRegistryOverride string                // overrides the image registry prefix for validator containers
-	imageTagOverride      string                // overrides the resolved image tag for validator containers
-	componentRefs         []recipe.ComponentRef // resolved recipe components, used for dependencyAffinity resolution
+	config  Config
+	jobName string // Unique name generated client-side (set by DeployJob)
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
-// The factory must be a namespace-scoped SharedInformerFactory started by the caller.
-// cliVersion is the CLI's own version string; empty is acceptable for dev builds
-// and is forwarded to the validator container via the AICR_CLI_VERSION env var so
-// the validator can resolve images it references outside the catalog (e.g. the
-// AIPerf benchmark image used by inference-perf) using the same rewriting
-// rules as catalog.Load. cliCommit is the git commit SHA, forwarded via
-// AICR_CLI_COMMIT for SHA-based image tag resolution in dev builds.
-func NewDeployer(
-	clientset kubernetes.Interface,
-	factory informers.SharedInformerFactory,
-	namespace, runID, cliVersion, cliCommit string,
-	entry catalog.ValidatorEntry,
-	imagePullSecrets []string,
-	tolerations []corev1.Toleration,
-	nodeSelector map[string]string,
-	imageRegistryOverride string,
-	imageTagOverride string,
-	componentRefs []recipe.ComponentRef,
-) *Deployer {
-
-	return &Deployer{
-		clientset:             clientset,
-		factory:               factory,
-		namespace:             namespace,
-		runID:                 runID,
-		cliVersion:            cliVersion,
-		cliCommit:             cliCommit,
-		entry:                 entry,
-		imagePullSecrets:      imagePullSecrets,
-		tolerations:           tolerations,
-		nodeSelector:          nodeSelector,
-		imageRegistryOverride: imageRegistryOverride,
-		imageTagOverride:      imageTagOverride,
-		componentRefs:         componentRefs,
-	}
+func NewDeployer(cfg Config) *Deployer {
+	return &Deployer{config: cfg}
 }
 
 // JobName returns the Kubernetes Job name assigned by the API server.
@@ -102,18 +95,18 @@ func (d *Deployer) JobName() string {
 func (d *Deployer) DeployJob(ctx context.Context) error {
 	// Build JobPlan from deployer configuration
 	plan, err := v1.BuildJobPlan(
-		d.entry,
-		d.runID,
-		d.namespace,
-		d.cliVersion,
-		d.cliCommit,
-		ServiceAccountName(d.runID),
-		d.imagePullSecrets,
-		d.tolerations,
-		d.nodeSelector,
-		d.imageRegistryOverride,
-		d.imageTagOverride,
-		d.componentRefs,
+		d.config.Entry,
+		d.config.RunID,
+		d.config.Namespace,
+		d.config.CLIVersion,
+		d.config.CLICommit,
+		ServiceAccountName(d.config.RunID),
+		d.config.ImagePullSecrets,
+		d.config.Tolerations,
+		d.config.NodeSelector,
+		d.config.ImageRegistryOverride,
+		d.config.ImageTagOverride,
+		d.config.ComponentRefs,
 	)
 	if err != nil {
 		return err
@@ -128,9 +121,9 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 	// Logging only — we don't block deploy, because the scheduler will
 	// surface a hard match miss as Pending if the affinity is `required`.
 	if plan.Affinity != nil && plan.Affinity.PodAffinity != nil {
-		for _, w := range scanMissingPodAffinityDeps(ctx, d.clientset, plan.Affinity.PodAffinity) {
+		for _, w := range scanMissingPodAffinityDeps(ctx, d.config.Clientset, plan.Affinity.PodAffinity) {
 			attrs := []any{
-				"validator", d.entry.Name,
+				"validator", d.config.Entry.Name,
 				"namespace", w.Namespace,
 				"selector", w.Selector,
 				"reason", w.Reason,
@@ -146,7 +139,7 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 	jobApply := v1.RenderPlanToApplyConfig(plan, plan.JobName)
 
 	// Apply the Job with server-side apply
-	applied, err := d.clientset.BatchV1().Jobs(d.namespace).Apply(
+	applied, err := d.config.Clientset.BatchV1().Jobs(d.config.Namespace).Apply(
 		ctx, jobApply, metav1.ApplyOptions{FieldManager: labels.ValueAICR, Force: true})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
@@ -157,8 +150,8 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 
 	slog.Debug("validator Job applied",
 		"job", d.jobName,
-		"validator", d.entry.Name,
-		"namespace", d.namespace)
+		"validator", d.config.Entry.Name,
+		"namespace", d.config.Namespace)
 
 	return nil
 }
@@ -305,7 +298,7 @@ func (d *Deployer) CleanupJob(ctx context.Context) error {
 		return nil
 	}
 	propagation := metav1.DeletePropagationForeground
-	err := d.clientset.BatchV1().Jobs(d.namespace).Delete(ctx, d.jobName, metav1.DeleteOptions{
+	err := d.config.Clientset.BatchV1().Jobs(d.config.Namespace).Delete(ctx, d.jobName, metav1.DeleteOptions{
 		PropagationPolicy: &propagation,
 	})
 	return k8s.IgnoreNotFound(err)
@@ -325,7 +318,7 @@ func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration)
 	// pod.WaitForJobTerminal already returns structured errors with proper
 	// codes (ErrCodeTimeout, ErrCodeUnavailable, ErrCodeInternal). Propagate
 	// as-is so callers can distinguish retryable from terminal failures.
-	if _, err := pod.WaitForJobTerminal(ctx, d.clientset, d.namespace, d.jobName, waitTimeout); err != nil {
+	if _, err := pod.WaitForJobTerminal(ctx, d.config.Clientset, d.config.Namespace, d.jobName, waitTimeout); err != nil {
 		return err
 	}
 	return nil
@@ -358,5 +351,5 @@ func (d *Deployer) WaitForPodTermination(ctx context.Context) error {
 	}
 
 	slog.Debug("waiting for pod termination", "pod", jobPod.Name)
-	return pod.WaitForTermination(ctx, d.clientset, d.namespace, jobPod.Name)
+	return pod.WaitForTermination(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name)
 }

@@ -157,6 +157,13 @@ type Config struct {
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
+	// deterministic, when true, suppresses run-specific metadata (random
+	// invocation IDs, wall-clock timestamps) from generated artifacts
+	// (SLSA attestation, BOM) so two runs against identical inputs
+	// produce byte-identical output. Required for SLSA-reproducible
+	// builds.
+	deterministic bool
+
 	// certificateIdentityRegexp overrides the default identity pinning pattern
 	// for binary attestation verification during bundle creation.
 	certificateIdentityRegexp string
@@ -328,6 +335,12 @@ func (c *Config) WorkloadSelector() map[string]string {
 // Attest returns whether bundle attestation is enabled.
 func (c *Config) Attest() bool {
 	return c.attest
+}
+
+// Deterministic reports whether generated artifacts (attestation, BOM)
+// should suppress run-specific metadata so output is reproducible.
+func (c *Config) Deterministic() bool {
+	return c.deterministic
 }
 
 // CertificateIdentityRegexp returns the custom identity pinning pattern for
@@ -541,6 +554,16 @@ func WithWorkloadSelector(selector map[string]string) Option {
 func WithAttest(attest bool) Option {
 	return func(c *Config) {
 		c.attest = attest
+	}
+}
+
+// WithDeterministic enables deterministic mode for generated artifacts.
+// When enabled, attestation invocation IDs are derived (UUIDv5) and
+// wall-clock timestamps are omitted, so two runs against identical
+// inputs produce byte-identical output.
+func WithDeterministic(deterministic bool) Option {
+	return func(c *Config) {
+		c.deterministic = deterministic
 	}
 }
 

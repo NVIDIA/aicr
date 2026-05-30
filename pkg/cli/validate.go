@@ -152,89 +152,6 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 	return resolved.Tolerations, nil
 }
 
-// parseValidationPhases parses phase strings into Phase values, accepting
-// the canonical vocabulary in validator.PhaseNames. The validator.PhaseAll
-// wildcard collapses the whole selection to nil (= run every phase),
-// matching the documented "Default: all phases" behavior. PhaseAll is
-// exclusive: combining it with any specific phase is a hard error rather
-// than silently treating the selection as wildcard, so a typo like
-// `--phase deployment --phase all` does not mask the user's mistake.
-//
-// Every entry is parsed before the wildcard collapse, so an invalid
-// phase name surfaces an error even when "all" is also present.
-func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
-	if len(phaseStrs) == 0 {
-		return nil, nil // nil = all phases
-	}
-
-	var (
-		sawAll bool
-		phases []validator.Phase
-		seen   = make(map[validator.Phase]bool)
-	)
-	for _, s := range phaseStrs {
-		if s == validator.PhaseAll {
-			sawAll = true
-			continue
-		}
-		p, ok := validator.ParsePhase(s)
-		if !ok {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid phase %q: must be one of: %s",
-					s, strings.Join(validator.PhaseNames, ", ")))
-		}
-		if !seen[p] {
-			phases = append(phases, p)
-			seen[p] = true
-		}
-	}
-
-	if sawAll && len(phases) > 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("phase %q cannot be combined with other phases", validator.PhaseAll))
-	}
-	if sawAll {
-		return nil, nil
-	}
-	return phases, nil
-}
-
-// validatePhasesAgainstRecipe warns when a requested phase has no checks
-// defined in the recipe. The phase will still run but produce 0 tests
-// in the CTRF report. This is purely advisory — it emits slog warnings and
-// never fails the run, so it has no error result.
-func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeResult) {
-	if rec.Validation == nil {
-		if len(phases) > 0 {
-			slog.Warn("recipe has no validation section; requested phases will have no checks",
-				"phases", phases)
-		}
-		return
-	}
-
-	if len(phases) == 0 {
-		return
-	}
-
-	defined := make(map[validator.Phase]bool)
-	if rec.Validation.Deployment != nil && len(rec.Validation.Deployment.Checks) > 0 {
-		defined[validator.PhaseDeployment] = true
-	}
-	if rec.Validation.Performance != nil && len(rec.Validation.Performance.Checks) > 0 {
-		defined[validator.PhasePerformance] = true
-	}
-	if rec.Validation.Conformance != nil && len(rec.Validation.Conformance.Checks) > 0 {
-		defined[validator.PhaseConformance] = true
-	}
-
-	for _, p := range phases {
-		if !defined[p] {
-			slog.Warn("phase requested but no checks defined in recipe; phase will be empty",
-				"phase", p)
-		}
-	}
-}
-
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
 // Creates the namespace if it does not exist.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
@@ -731,7 +648,7 @@ Run validation without failing on check errors (informational mode):
 				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"))
 			}
 
-			phases, err := parseValidationPhases(stringSliceFlagOrConfig(cmd, "phase", resolved.Phases))
+			phases, err := validator.ParsePhaseSelection(stringSliceFlagOrConfig(cmd, "phase", resolved.Phases))
 			if err != nil {
 				return err
 			}
@@ -842,7 +759,7 @@ Run validation without failing on check errors (informational mode):
 			// The helper reads the full recipe's Validation section, which the
 			// lossy facade RecipeResult does not expose — reach the underlying
 			// pkg/recipe.RecipeResult via Resolved(). Advisory only.
-			validatePhasesAgainstRecipe(phases, rec.Resolved())
+			validator.WarnPhasesAgainstRecipe(phases, rec.Resolved())
 
 			if shared.noCleanup {
 				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",

@@ -177,7 +177,7 @@ func TestTestTemplateGetter(t *testing.T) {
 		return tmpl, ok
 	}
 
-	TestTemplateGetter(t, getter, []string{"test1", "test2"})
+	RunTemplateGetterTests(t, getter, []string{"test1", "test2"})
 }
 
 func TestRecipeBuilder_NewRecipeBuilder(t *testing.T) {
@@ -327,7 +327,7 @@ func TestSMISubtype(t *testing.T) {
 	}
 }
 
-func TestTestValidateRecipe(t *testing.T) {
+func TestRunRecipeValidationTests(t *testing.T) {
 	validateFunc := func(r *recipe.Recipe) error {
 		if r == nil {
 			return fmt.Errorf("recipe is nil")
@@ -338,7 +338,7 @@ func TestTestValidateRecipe(t *testing.T) {
 		return nil
 	}
 
-	TestValidateRecipe(t, validateFunc)
+	RunRecipeValidationTests(t, validateFunc)
 }
 
 func TestAssertConfigValue(t *testing.T) {

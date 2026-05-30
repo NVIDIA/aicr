@@ -222,7 +222,7 @@ func TestAffinityTypeFieldCountInvariant(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := c.t.NumField(); got != c.want {
-				t.Fatalf("corev1.%s has %d fields, expected %d. K8s API has added/removed a field; audit the apply-config converter in pkg/api/validator/v1/job_plan.go and update this test only after confirming the new field is handled or intentionally excluded.",
+				t.Fatalf("corev1.%s has %d fields, expected %d. K8s API has added/removed a field; audit the apply-config converter in pkg/validator/v1/job_plan.go and update this test only after confirming the new field is handled or intentionally excluded.",
 					c.name, got, c.want)
 			}
 		})

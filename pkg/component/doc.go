@@ -137,16 +137,10 @@
 //
 // Access in templates via {{ .Script.Namespace }}, {{ .Script.Version }}, etc.
 //
-// # TestHarness
+// # Internal Test Harness
 //
-// TestHarness simplifies bundler testing by providing common setup and assertions:
-//
-//	func TestMyBundler_Make(t *testing.T) {
-//	    h := component.NewTestHarness(t, "my-bundler")
-//	    bundler := NewMyBundler(h.Config())
-//	    h.TestMake(bundler)
-//	}
-//
-// The harness automatically creates temporary directories, generates test recipes,
-// validates output files, and cleans up resources.
+// A TestHarness and RecipeBuilder live in this package's _test.go files for
+// reuse by the package's own tests. They are intentionally not exported as
+// production API — bundler tests in other packages should construct their
+// own fixtures rather than depend on this package's test scaffolding.
 package component
