@@ -36,12 +36,16 @@ spec:
     - name: gpu-operator
       type: Helm
       overrides:
-        # Lockstep with nvidia-dra-driver-gpu.nvidiaDriverRoot ("/") below.
-        # kind uses host-installed drivers, so the on-host driver root is /
-        # rather than the gpu-operator base default /run/nvidia/driver.
-        # Guarded by TestDriverRootLockstep (issue #1087).
-        hostPaths:
-          driverInstallDir: "/"
+        # hostPaths.driverInstallDir is intentionally NOT overridden here: it
+        # inherits the gpu-operator base default /run/nvidia/driver. This is
+        # the host path the operator-validator bind-mounts as the
+        # driver-validation container's rootfs target — setting it to "/"
+        # makes runc reject the mount ("mountpoint is on the top of rootfs"),
+        # crash-looping nvidia-operator-validator and stalling ClusterPolicy.
+        # nvidia-dra-driver-gpu.nvidiaDriverRoot stays "/" (host-installed
+        # driver userspace lives at the host root); the two fields are
+        # independent here because gpu-operator manages no driver
+        # (driver.enabled: false below). See TestDriverRootLockstep (#1087).
         driver:
           # Disable driver installation - use pre-installed host drivers
           enabled: false
