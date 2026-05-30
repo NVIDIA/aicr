@@ -1147,7 +1147,7 @@ func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider)
 	// Check if the provider is a LayeredDataProvider with external files.
 	// EffectiveDataProvider falls back to the package-global provider when the
 	// caller did not bind one (pre-WithDataProvider CLI path).
-	layered, ok := recipe.EffectiveDataProvider(provider).(*recipe.LayeredDataProvider)
+	layered, ok := provider.(*recipe.LayeredDataProvider)
 	if !ok {
 		return nil, nil // No external data
 	}
@@ -1490,7 +1490,7 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 					// available; EffectiveDataProvider falls back to the
 					// package-global provider when no provider is bound
 					// (CLI today).
-					_, hasExternalData := recipe.EffectiveDataProvider(provider).(*recipe.LayeredDataProvider)
+					_, hasExternalData := provider.(*recipe.LayeredDataProvider)
 					return nil, errors.New(errors.ErrCodeInvalidRequest,
 						missingManifestMessage(manifestPath, ref.Name, hasExternalData))
 				}

@@ -45,12 +45,13 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 
 	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
 
+	reg := GetCriteriaRegistryFor(b.DataProvider())
 	var criteria *Criteria
 	var err error
 
 	switch r.Method {
 	case http.MethodGet:
-		criteria, err = ParseCriteriaFromRequest(r)
+		criteria, err = ParseCriteriaFromRequest(r, reg)
 	case http.MethodPost:
 		// Bound request body to defend against memory exhaustion.
 		bounded := http.MaxBytesReader(w, r.Body, defaults.MaxRecipePOSTBytes)
@@ -65,7 +66,7 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 				logger.Debug("request body close failed", "error", closeErr)
 			}
 		}()
-		criteria, err = ParseCriteriaFromBody(bounded, r.Header.Get("Content-Type"))
+		criteria, err = ParseCriteriaFromBody(bounded, r.Header.Get("Content-Type"), reg)
 		var maxBytesErr *http.MaxBytesError
 		if err != nil && stderrors.As(err, &maxBytesErr) {
 			logger.Warn("recipe POST body exceeded size limit",

@@ -46,13 +46,14 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 
 	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
 
+	reg := GetCriteriaRegistryFor(b.DataProvider())
 	var criteria *Criteria
 	var selector string
 	var err error
 
 	switch r.Method {
 	case http.MethodGet:
-		criteria, err = ParseCriteriaFromRequest(r)
+		criteria, err = ParseCriteriaFromRequest(r, reg)
 		selector = r.URL.Query().Get("selector")
 	case http.MethodPost:
 		// Bound request body to defend against memory exhaustion.

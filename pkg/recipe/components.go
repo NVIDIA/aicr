@@ -229,7 +229,7 @@ var registryCache sync.Map // map[DataProvider]*registryCacheEntry
 // the entry.
 func GetComponentRegistryFor(dp DataProvider) (*ComponentRegistry, error) {
 	if dp == nil {
-		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		dp = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
 	}
 	e, _ := registryCache.LoadOrStore(dp, &registryCacheEntry{})
 	entry := e.(*registryCacheEntry)
@@ -244,7 +244,7 @@ func GetComponentRegistryFor(dp DataProvider) (*ComponentRegistry, error) {
 // isolation — should use GetComponentRegistryFor directly with a
 // caller-supplied provider.
 func GetComponentRegistry() (*ComponentRegistry, error) {
-	return GetComponentRegistryFor(GetDataProvider()) //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+	return GetComponentRegistryFor(NewEmbeddedDataProvider(GetEmbeddedFS(), ""))
 }
 
 // EvictCachedRegistry drops the cached registry for the supplied provider

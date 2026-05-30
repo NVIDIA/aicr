@@ -60,7 +60,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 		},
 	}
 
-	if err := applyCriteriaFromConfig(criteria, cfg, recipe.DefaultRegistry()); err != nil {
+	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
 			},
 		},
 	}
-	if err := applyCriteriaFromConfig(criteria, cfg, recipe.DefaultRegistry()); err != nil {
+	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry()); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if string(criteria.Service) != "eks" {

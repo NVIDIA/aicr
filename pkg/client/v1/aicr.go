@@ -306,12 +306,12 @@ func (c *Client) LoadCatalog(ctx context.Context) error {
 // is seeded from the provider's overlays before parsing.
 //
 // Returns the registry for this Client's provider via
-// recipe.GetCriteriaRegistryFor. On a nil or closed Client the underlying
-// provider snapshot is nil, which falls back to the package-global registry —
-// the same lenient behavior as the other accessors when a Client is unusable.
+// recipe.GetCriteriaRegistryFor. On a nil Client this returns a fresh
+// ephemeral registry so callers can defensively call without nil-checking,
+// matching the lenient nil behavior of the other accessors.
 func (c *Client) CriteriaRegistry() *CriteriaRegistry {
 	if c == nil {
-		return recipe.GetCriteriaRegistryFor(nil)
+		return recipe.NewCriteriaRegistry()
 	}
 	c.mu.RLock()
 	dp := c.dp
@@ -414,7 +414,7 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		)
 	}
 
-	criteria, err := criteriaFromRequest(req)
+	criteria, err := criteriaFromRequest(req, recipe.GetCriteriaRegistryFor(builder.DataProvider()))
 	if err != nil {
 		return nil, err
 	}
@@ -632,35 +632,35 @@ func buildDataProvider(s recipeSource) (recipe.DataProvider, error) {
 //     (matches CLI behavior and the doc on RecipeRequest.Nodes), but a
 //     negative count is a programming error and the criteria builder
 //     would silently treat it the same as zero — masking the bug.
-func criteriaFromRequest(req RecipeRequest) (*recipe.Criteria, error) {
+func criteriaFromRequest(req RecipeRequest, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
 	if req.Nodes < 0 {
 		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"RecipeRequest.Nodes must be >= 0",
 			map[string]any{"nodes": req.Nodes})
 	}
 
-	opts := make([]recipe.CriteriaOption, 0, 6)
+	opts := make([]recipe.RegistryCriteriaOption, 0, 6)
 
 	if req.Service != "" {
-		opts = append(opts, recipe.WithCriteriaService(req.Service))
+		opts = append(opts, recipe.WithServiceRegistry(req.Service))
 	}
 	if req.Accelerator != "" {
-		opts = append(opts, recipe.WithCriteriaAccelerator(req.Accelerator))
+		opts = append(opts, recipe.WithAcceleratorRegistry(req.Accelerator))
 	}
 	if req.Intent != "" {
-		opts = append(opts, recipe.WithCriteriaIntent(req.Intent))
+		opts = append(opts, recipe.WithIntentRegistry(req.Intent))
 	}
 	if req.OS != "" {
-		opts = append(opts, recipe.WithCriteriaOS(req.OS))
+		opts = append(opts, recipe.WithOSRegistry(req.OS))
 	}
 	if req.Platform != "" {
-		opts = append(opts, recipe.WithCriteriaPlatform(req.Platform))
+		opts = append(opts, recipe.WithPlatformRegistry(req.Platform))
 	}
 	if req.Nodes > 0 {
-		opts = append(opts, recipe.WithCriteriaNodes(int(req.Nodes)))
+		opts = append(opts, recipe.WithNodesRegistry(int(req.Nodes)))
 	}
 
-	criteria, err := recipe.BuildCriteria(opts...)
+	criteria, err := recipe.BuildCriteriaWithRegistry(reg, opts...)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "build criteria", err)
 	}

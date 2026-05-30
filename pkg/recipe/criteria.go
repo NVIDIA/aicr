@@ -56,15 +56,6 @@ const (
 	CriteriaServiceBCM  CriteriaServiceType = "bcm"
 )
 
-// ParseCriteriaServiceType parses a string into a CriteriaServiceType using
-// the package-global criteria registry. It is a shim over
-// (*CriteriaRegistry).ParseService bound to DefaultRegistry(); callers
-// holding an explicit registry (e.g., from GetCriteriaRegistryFor) should
-// call the method directly for per-provider isolation.
-func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
-	return DefaultRegistry().ParseService(s)
-}
-
 // ParseService parses a string into a CriteriaServiceType against this
 // registry.
 //
@@ -108,16 +99,6 @@ func GetCriteriaServiceTypes() []string {
 	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "oke"}
 }
 
-// AllCriteriaServiceTypes returns the union of the static OSS list and
-// values currently registered in the package-global criteria registry,
-// sorted alphabetically. In strict mode the registry contributes only its
-// embedded-origin values, so the result matches GetCriteriaServiceTypes
-// (plus any aliases the catalog has explicitly registered). It is a shim
-// over (*CriteriaRegistry).AllServiceTypes bound to DefaultRegistry().
-func AllCriteriaServiceTypes() []string {
-	return DefaultRegistry().AllServiceTypes()
-}
-
 // AllServiceTypes returns the union of the static OSS list and values
 // registered in this registry, sorted alphabetically.
 func (reg *CriteriaRegistry) AllServiceTypes() []string {
@@ -138,13 +119,6 @@ const (
 	CriteriaAcceleratorL40        CriteriaAcceleratorType = "l40"
 	CriteriaAcceleratorRTXPro6000 CriteriaAcceleratorType = "rtx-pro-6000"
 )
-
-// ParseCriteriaAcceleratorType parses a string into a CriteriaAcceleratorType
-// using the package-global criteria registry. Shim over
-// (*CriteriaRegistry).ParseAccelerator bound to DefaultRegistry().
-func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
-	return DefaultRegistry().ParseAccelerator(s)
-}
 
 // ParseAccelerator parses a string into a CriteriaAcceleratorType against
 // this registry. See (*CriteriaRegistry).ParseService for the
@@ -182,13 +156,6 @@ func GetCriteriaAcceleratorTypes() []string {
 	return []string{"a100", "b200", "gb200", "h100", "h200", "l40", "rtx-pro-6000"}
 }
 
-// AllCriteriaAcceleratorTypes returns the union of the static OSS list and
-// values registered in the package-global criteria registry, sorted
-// alphabetically. Shim over (*CriteriaRegistry).AllAcceleratorTypes.
-func AllCriteriaAcceleratorTypes() []string {
-	return DefaultRegistry().AllAcceleratorTypes()
-}
-
 // AllAcceleratorTypes returns the union of the static OSS list and values
 // registered in this registry, sorted alphabetically.
 func (reg *CriteriaRegistry) AllAcceleratorTypes() []string {
@@ -204,13 +171,6 @@ const (
 	CriteriaIntentTraining  CriteriaIntentType = "training"
 	CriteriaIntentInference CriteriaIntentType = "inference"
 )
-
-// ParseCriteriaIntentType parses a string into a CriteriaIntentType using
-// the package-global criteria registry. Shim over
-// (*CriteriaRegistry).ParseIntent bound to DefaultRegistry().
-func ParseCriteriaIntentType(s string) (CriteriaIntentType, error) {
-	return DefaultRegistry().ParseIntent(s)
-}
 
 // ParseIntent parses a string into a CriteriaIntentType against this
 // registry. See (*CriteriaRegistry).ParseService for the registry-fallback
@@ -238,13 +198,6 @@ func GetCriteriaIntentTypes() []string {
 	return []string{"inference", "training"}
 }
 
-// AllCriteriaIntentTypes returns the union of the static OSS list and values
-// registered in the package-global criteria registry, sorted alphabetically.
-// Shim over (*CriteriaRegistry).AllIntentTypes.
-func AllCriteriaIntentTypes() []string {
-	return DefaultRegistry().AllIntentTypes()
-}
-
 // AllIntentTypes returns the union of the static OSS list and values
 // registered in this registry, sorted alphabetically.
 func (reg *CriteriaRegistry) AllIntentTypes() []string {
@@ -265,13 +218,6 @@ const (
 	CriteriaOSAmazonLinux CriteriaOSType = oskind.AmazonLinux
 	CriteriaOSTalos       CriteriaOSType = oskind.Talos
 )
-
-// ParseCriteriaOSType parses a string into a CriteriaOSType using the
-// package-global criteria registry. Shim over (*CriteriaRegistry).ParseOS
-// bound to DefaultRegistry().
-func ParseCriteriaOSType(s string) (CriteriaOSType, error) {
-	return DefaultRegistry().ParseOS(s)
-}
 
 // ParseOS parses a string into a CriteriaOSType against this registry.
 // See (*CriteriaRegistry).ParseService for the registry-fallback contract.
@@ -305,13 +251,6 @@ func GetCriteriaOSTypes() []string {
 	return oskind.All()
 }
 
-// AllCriteriaOSTypes returns the union of the static OSS list and values
-// registered in the package-global criteria registry, sorted alphabetically.
-// Shim over (*CriteriaRegistry).AllOSTypes.
-func AllCriteriaOSTypes() []string {
-	return DefaultRegistry().AllOSTypes()
-}
-
 // AllOSTypes returns the union of the static OSS list and values registered
 // in this registry, sorted alphabetically.
 func (reg *CriteriaRegistry) AllOSTypes() []string {
@@ -330,13 +269,6 @@ const (
 	CriteriaPlatformRunai    CriteriaPlatformType = "runai"
 	CriteriaPlatformSlurm    CriteriaPlatformType = "slurm"
 )
-
-// ParseCriteriaPlatformType parses a string into a CriteriaPlatformType using
-// the package-global criteria registry. Shim over
-// (*CriteriaRegistry).ParsePlatform bound to DefaultRegistry().
-func ParseCriteriaPlatformType(s string) (CriteriaPlatformType, error) {
-	return DefaultRegistry().ParsePlatform(s)
-}
 
 // ParsePlatform parses a string into a CriteriaPlatformType against this
 // registry. See (*CriteriaRegistry).ParseService for the registry-fallback
@@ -368,13 +300,6 @@ func (reg *CriteriaRegistry) ParsePlatform(s string) (CriteriaPlatformType, erro
 // AllCriteriaPlatformTypes.
 func GetCriteriaPlatformTypes() []string {
 	return []string{"dynamo", "kubeflow", "nim", "runai", "slurm"}
-}
-
-// AllCriteriaPlatformTypes returns the union of the static OSS list and
-// values registered in the package-global criteria registry, sorted
-// alphabetically. Shim over (*CriteriaRegistry).AllPlatformTypes.
-func AllCriteriaPlatformTypes() []string {
-	return DefaultRegistry().AllPlatformTypes()
 }
 
 // AllPlatformTypes returns the union of the static OSS list and values
@@ -541,40 +466,51 @@ func MatchesCriteriaField(recipeValue, queryValue string) bool {
 	return recipeValue == queryValue
 }
 
-// Validate checks that all non-empty criteria fields contain valid values.
-// This runs the same parsing/normalization as ParseCriteriaFromValues,
-// ensuring POST request bodies are validated the same as GET query parameters.
+// Validate checks that all non-empty criteria fields contain valid values
+// against a fresh ephemeral registry (only the hardcoded OSS fast-path
+// values will validate). Use ValidateWithRegistry to honor `--data`
+// overlay values.
 func (c *Criteria) Validate() error {
+	return c.ValidateWithRegistry(NewCriteriaRegistry())
+}
+
+// ValidateWithRegistry checks that all non-empty criteria fields contain
+// valid values against reg. A nil reg falls back to a fresh ephemeral
+// registry (only the hardcoded OSS fast-path values will validate).
+func (c *Criteria) ValidateWithRegistry(reg *CriteriaRegistry) error {
+	if reg == nil {
+		reg = NewCriteriaRegistry()
+	}
 	if c.Service != "" {
-		parsed, err := ParseCriteriaServiceType(string(c.Service))
+		parsed, err := reg.ParseService(string(c.Service))
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid service", err)
 		}
 		c.Service = parsed
 	}
 	if c.Accelerator != "" {
-		parsed, err := ParseCriteriaAcceleratorType(string(c.Accelerator))
+		parsed, err := reg.ParseAccelerator(string(c.Accelerator))
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid accelerator", err)
 		}
 		c.Accelerator = parsed
 	}
 	if c.Intent != "" {
-		parsed, err := ParseCriteriaIntentType(string(c.Intent))
+		parsed, err := reg.ParseIntent(string(c.Intent))
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid intent", err)
 		}
 		c.Intent = parsed
 	}
 	if c.OS != "" {
-		parsed, err := ParseCriteriaOSType(string(c.OS))
+		parsed, err := reg.ParseOS(string(c.OS))
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid os", err)
 		}
 		c.OS = parsed
 	}
 	if c.Platform != "" {
-		parsed, err := ParseCriteriaPlatformType(string(c.Platform))
+		parsed, err := reg.ParsePlatform(string(c.Platform))
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid platform", err)
 		}
@@ -637,110 +573,6 @@ func (c *Criteria) String() string {
 		return "criteria(any)"
 	}
 	return fmt.Sprintf("criteria(%s)", strings.Join(parts, ", "))
-}
-
-// CriteriaOption is a functional option for building Criteria. Each option
-// resolves its enum value via the package-level ParseCriteria*Type shims,
-// which consult DefaultRegistry() — the registry bound to the package-global
-// DataProvider.
-//
-// For per-provider isolation (e.g., when building Criteria against an
-// aicr.Client's own DataProvider so non-OSS values declared in a `--data`
-// overlay validate against THAT provider's registered values), use
-// RegistryCriteriaOption + BuildCriteriaWithRegistry instead. The two option
-// types deliberately have distinct signatures because RegistryCriteriaOption
-// takes the registry as an explicit parameter; they are not interchangeable.
-type CriteriaOption func(*Criteria) error
-
-// WithCriteriaService sets the service type.
-func WithCriteriaService(s string) CriteriaOption {
-	return func(c *Criteria) error {
-		st, err := ParseCriteriaServiceType(s)
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse service type", err)
-		}
-		c.Service = st
-		return nil
-	}
-}
-
-// WithCriteriaAccelerator sets the accelerator type.
-func WithCriteriaAccelerator(s string) CriteriaOption {
-	return func(c *Criteria) error {
-		at, err := ParseCriteriaAcceleratorType(s)
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse accelerator type", err)
-		}
-		c.Accelerator = at
-		return nil
-	}
-}
-
-// WithCriteriaIntent sets the intent type.
-func WithCriteriaIntent(s string) CriteriaOption {
-	return func(c *Criteria) error {
-		it, err := ParseCriteriaIntentType(s)
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse intent type", err)
-		}
-		c.Intent = it
-		return nil
-	}
-}
-
-// WithCriteriaOS sets the OS type.
-func WithCriteriaOS(s string) CriteriaOption {
-	return func(c *Criteria) error {
-		ot, err := ParseCriteriaOSType(s)
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse OS type", err)
-		}
-		c.OS = ot
-		return nil
-	}
-}
-
-// WithCriteriaPlatform sets the platform type.
-func WithCriteriaPlatform(s string) CriteriaOption {
-	return func(c *Criteria) error {
-		pt, err := ParseCriteriaPlatformType(s)
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse platform type", err)
-		}
-		c.Platform = pt
-		return nil
-	}
-}
-
-// WithCriteriaNodes sets the number of nodes.
-func WithCriteriaNodes(n int) CriteriaOption {
-	return func(c *Criteria) error {
-		if n < 0 {
-			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid nodes count: %d (must be >= 0)", n))
-		}
-		c.Nodes = n
-		return nil
-	}
-}
-
-// BuildCriteria creates a Criteria from functional options. Each option
-// resolves its enum value through the package-level ParseCriteria*Type shims
-// against DefaultRegistry() (the registry bound to the package-global
-// DataProvider).
-//
-// For per-provider isolation, use BuildCriteriaWithRegistry with
-// RegistryCriteriaOption — that path threads an explicit *CriteriaRegistry
-// (typically from GetCriteriaRegistryFor) so registered values from a
-// caller-owned DataProvider's overlays are honored instead of (or in
-// addition to) the package-global registry.
-func BuildCriteria(opts ...CriteriaOption) (*Criteria, error) {
-	c := NewCriteria()
-	for _, opt := range opts {
-		if err := opt(c); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to apply criteria option", err)
-		}
-	}
-	return c, nil
 }
 
 // RegistryCriteriaOption is a functional option for building a Criteria
@@ -837,12 +669,12 @@ func WithNodesRegistry(n int) RegistryCriteriaOption {
 // GetCriteriaRegistryFor) use to build and validate criteria against a
 // specific provider's registered values rather than the package global.
 //
-// A nil reg falls back to the package-global registry via DefaultRegistry()
+// A nil reg falls back to a fresh ephemeral registry (NewCriteriaRegistry)
 // so the call is still well-defined for callers that have not yet bound a
-// provider.
+// provider — only the hardcoded OSS fast-path values will validate.
 func BuildCriteriaWithRegistry(reg *CriteriaRegistry, opts ...RegistryCriteriaOption) (*Criteria, error) {
 	if reg == nil {
-		reg = DefaultRegistry()
+		reg = NewCriteriaRegistry()
 	}
 	c := NewCriteria()
 	for _, opt := range opts {
@@ -853,27 +685,35 @@ func BuildCriteriaWithRegistry(reg *CriteriaRegistry, opts ...RegistryCriteriaOp
 	return c, nil
 }
 
-// ParseCriteriaFromRequest parses recipe criteria from HTTP query parameters.
+// ParseCriteriaFromRequest parses recipe criteria from HTTP query parameters,
+// validating each enum value against reg so non-OSS values contributed by a
+// `--data` overlay are honored. A nil reg falls back to a fresh ephemeral
+// registry (only the hardcoded OSS fast-path values will validate).
 // All parameters are optional and default to "any" if not specified.
 // Supported parameters: service, accelerator (alias: gpu), intent, os, platform, nodes.
-func ParseCriteriaFromRequest(r *http.Request) (*Criteria, error) {
+func ParseCriteriaFromRequest(r *http.Request, reg *CriteriaRegistry) (*Criteria, error) {
 	if r == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "request cannot be nil")
 	}
 
 	q := r.URL.Query()
-	return ParseCriteriaFromValues(q)
+	return ParseCriteriaFromValues(q, reg)
 }
 
-// ParseCriteriaFromValues parses recipe criteria from URL values.
+// ParseCriteriaFromValues parses recipe criteria from URL values,
+// validating each enum value against reg (a nil reg falls back to a fresh
+// ephemeral registry — only hardcoded OSS values will validate).
 // All parameters are optional and default to "any" if not specified.
 // Supported parameters: service, accelerator (alias: gpu), intent, os, platform, nodes.
-func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
+func ParseCriteriaFromValues(values url.Values, reg *CriteriaRegistry) (*Criteria, error) {
+	if reg == nil {
+		reg = NewCriteriaRegistry()
+	}
 	c := NewCriteria()
 
 	// Parse service
 	if s := values.Get("service"); s != "" {
-		st, err := ParseCriteriaServiceType(s)
+		st, err := reg.ParseService(s)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid service parameter", err)
 		}
@@ -886,7 +726,7 @@ func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
 		accelParam = values.Get("gpu")
 	}
 	if accelParam != "" {
-		at, err := ParseCriteriaAcceleratorType(accelParam)
+		at, err := reg.ParseAccelerator(accelParam)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid accelerator parameter", err)
 		}
@@ -895,7 +735,7 @@ func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
 
 	// Parse intent
 	if s := values.Get("intent"); s != "" {
-		it, err := ParseCriteriaIntentType(s)
+		it, err := reg.ParseIntent(s)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid intent parameter", err)
 		}
@@ -904,7 +744,7 @@ func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
 
 	// Parse OS
 	if s := values.Get("os"); s != "" {
-		ot, err := ParseCriteriaOSType(s)
+		ot, err := reg.ParseOS(s)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid os parameter", err)
 		}
@@ -913,7 +753,7 @@ func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
 
 	// Parse platform
 	if s := values.Get("platform"); s != "" {
-		pt, err := ParseCriteriaPlatformType(s)
+		pt, err := reg.ParsePlatform(s)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid platform parameter", err)
 		}
@@ -993,12 +833,17 @@ type rawRecipeCriteria struct {
 	Spec rawCriteriaSpec `json:"spec" yaml:"spec"`
 }
 
-// validateAndConvertRawSpec validates raw string values and converts to typed Criteria.
-func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
+// validateAndConvertRawSpec validates raw string values and converts to typed
+// Criteria, resolving each enum against reg. A nil reg falls back to a fresh
+// ephemeral registry — only the hardcoded OSS fast-path values will validate.
+func validateAndConvertRawSpec(raw *rawCriteriaSpec, reg *CriteriaRegistry) (*Criteria, error) {
+	if reg == nil {
+		reg = NewCriteriaRegistry()
+	}
 	c := NewCriteria()
 
 	if raw.Service != "" {
-		st, err := ParseCriteriaServiceType(raw.Service)
+		st, err := reg.ParseService(raw.Service)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid service in criteria spec", err)
 		}
@@ -1006,7 +851,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
 	}
 
 	if raw.Accelerator != "" {
-		at, err := ParseCriteriaAcceleratorType(raw.Accelerator)
+		at, err := reg.ParseAccelerator(raw.Accelerator)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid accelerator in criteria spec", err)
 		}
@@ -1014,7 +859,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
 	}
 
 	if raw.Intent != "" {
-		it, err := ParseCriteriaIntentType(raw.Intent)
+		it, err := reg.ParseIntent(raw.Intent)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid intent in criteria spec", err)
 		}
@@ -1022,7 +867,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
 	}
 
 	if raw.OS != "" {
-		ot, err := ParseCriteriaOSType(raw.OS)
+		ot, err := reg.ParseOS(raw.OS)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid os in criteria spec", err)
 		}
@@ -1030,7 +875,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
 	}
 
 	if raw.Platform != "" {
-		pt, err := ParseCriteriaPlatformType(raw.Platform)
+		pt, err := reg.ParsePlatform(raw.Platform)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid platform in criteria spec", err)
 		}
@@ -1060,7 +905,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
 //	  os: ubuntu
 //	  accelerator: gb200
 //	  intent: training
-func LoadCriteriaFromFile(path string) (*Criteria, error) {
+func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error) {
 	raw, err := serializer.FromFile[rawRecipeCriteria](path)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load criteria file", err)
@@ -1074,7 +919,7 @@ func LoadCriteriaFromFile(path string) (*Criteria, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
 	}
 
-	return validateAndConvertRawSpec(&raw.Spec)
+	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
 // LoadCriteriaFromFileWithContext loads criteria from a YAML or JSON file with context support.
@@ -1095,10 +940,10 @@ func LoadCriteriaFromFile(path string) (*Criteria, error) {
 //	  os: ubuntu
 //	  accelerator: gb200
 //	  intent: training
-func LoadCriteriaFromFileWithContext(ctx context.Context, path string) (*Criteria, error) {
+func LoadCriteriaFromFileWithContext(ctx context.Context, path string, reg *CriteriaRegistry) (*Criteria, error) {
 	// For HTTP URLs, we need to use context-aware download
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return loadCriteriaFromHTTPWithContext(ctx, path)
+		return loadCriteriaFromHTTPWithContext(ctx, path, reg)
 	}
 
 	// For local files, use the existing FromFile which doesn't need context.
@@ -1118,11 +963,11 @@ func LoadCriteriaFromFileWithContext(ctx context.Context, path string) (*Criteri
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
 	}
 
-	return validateAndConvertRawSpec(&raw.Spec)
+	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
 // loadCriteriaFromHTTPWithContext loads criteria from an HTTP/HTTPS URL with context support.
-func loadCriteriaFromHTTPWithContext(ctx context.Context, url string) (*Criteria, error) {
+func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *CriteriaRegistry) (*Criteria, error) {
 	httpReader := serializer.NewHTTPReader()
 	data, err := httpReader.ReadWithContext(ctx, url)
 	if err != nil {
@@ -1153,7 +998,7 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string) (*Criteria
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
 	}
 
-	return validateAndConvertRawSpec(&raw.Spec)
+	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
 
 // ParseCriteriaFromBody parses criteria from an io.Reader (HTTP request body).
@@ -1174,7 +1019,7 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string) (*Criteria
 //	  "metadata": {"name": "my-criteria"},
 //	  "spec": {"service": "eks", "accelerator": "h100"}
 //	}
-func ParseCriteriaFromBody(body io.Reader, contentType string) (*Criteria, error) {
+func ParseCriteriaFromBody(body io.Reader, contentType string, reg *CriteriaRegistry) (*Criteria, error) {
 	if body == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "request body cannot be nil")
 	}
@@ -1226,5 +1071,5 @@ func ParseCriteriaFromBody(body io.Reader, contentType string) (*Criteria, error
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
 	}
 
-	return validateAndConvertRawSpec(&raw.Spec)
+	return validateAndConvertRawSpec(&raw.Spec, reg)
 }

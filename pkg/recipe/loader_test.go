@@ -103,7 +103,7 @@ func TestLoadFromFile(t *testing.T) {
 				}
 			}
 
-			rec, err := LoadFromFile(t.Context(), recipeFile, "", "test")
+			rec, err := LoadFromFileWithProvider(t.Context(), recipeFile, "", "test", nil)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)

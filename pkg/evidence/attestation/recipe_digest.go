@@ -29,12 +29,15 @@ import (
 //
 // kubeconfig is consulted only when path is a cm://namespace/name URI.
 // version is the running aicr version threaded into the recipe builder.
-func ComputeRecipeDigest(ctx context.Context, path, kubeconfig, version string) (string, error) {
+// dp is the DataProvider used to resolve recipe references (overlays,
+// component values); pass nil to fall back to the embedded provider when
+// no external data source is configured.
+func ComputeRecipeDigest(ctx context.Context, dp recipe.DataProvider, path, kubeconfig, version string) (string, error) {
 	if path == "" {
 		return "", errors.New(errors.ErrCodeInvalidRequest, "recipe path is required")
 	}
 
-	rec, err := recipe.LoadFromFile(ctx, path, kubeconfig, version)
+	rec, err := recipe.LoadFromFileWithProvider(ctx, path, kubeconfig, version, dp)
 	if err != nil {
 		return "", err
 	}

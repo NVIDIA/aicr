@@ -164,28 +164,28 @@ func TestAllOverlayCriteriaUseValidEnums(t *testing.T) {
 
 			// Validate service type
 			if criteria.Service != "" && criteria.Service != CriteriaServiceAny {
-				if _, err := ParseCriteriaServiceType(string(criteria.Service)); err != nil {
+				if _, err := NewCriteriaRegistry().ParseService(string(criteria.Service)); err != nil {
 					t.Errorf("invalid service type %q: %v", criteria.Service, err)
 				}
 			}
 
 			// Validate accelerator type
 			if criteria.Accelerator != "" && criteria.Accelerator != CriteriaAcceleratorAny {
-				if _, err := ParseCriteriaAcceleratorType(string(criteria.Accelerator)); err != nil {
+				if _, err := NewCriteriaRegistry().ParseAccelerator(string(criteria.Accelerator)); err != nil {
 					t.Errorf("invalid accelerator type %q: %v", criteria.Accelerator, err)
 				}
 			}
 
 			// Validate intent type
 			if criteria.Intent != "" && criteria.Intent != CriteriaIntentAny {
-				if _, err := ParseCriteriaIntentType(string(criteria.Intent)); err != nil {
+				if _, err := NewCriteriaRegistry().ParseIntent(string(criteria.Intent)); err != nil {
 					t.Errorf("invalid intent type %q: %v", criteria.Intent, err)
 				}
 			}
 
 			// Validate OS type
 			if criteria.OS != "" && criteria.OS != CriteriaOSAny {
-				if _, err := ParseCriteriaOSType(string(criteria.OS)); err != nil {
+				if _, err := NewCriteriaRegistry().ParseOS(string(criteria.OS)); err != nil {
 					t.Errorf("invalid OS type %q: %v", criteria.OS, err)
 				}
 			}

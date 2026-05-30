@@ -189,10 +189,11 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 // Invalid values in the environment variables are skipped with a warning logged.
 func ParseAllowListsFromEnv() (*AllowLists, error) {
 	al := &AllowLists{}
+	reg := NewCriteriaRegistry()
 
 	// Parse accelerators
 	if v := os.Getenv(EnvAllowedAccelerators); v != "" {
-		accelerators, err := parseTypeList(v, ParseCriteriaAcceleratorType, CriteriaAcceleratorAny)
+		accelerators, err := parseTypeList(v, reg.ParseAccelerator, CriteriaAcceleratorAny)
 		if err != nil {
 			return nil, aicrerrors.WrapWithContext(
 				aicrerrors.ErrCodeInvalidRequest,
@@ -206,7 +207,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 	// Parse services
 	if v := os.Getenv(EnvAllowedServices); v != "" {
-		services, err := parseTypeList(v, ParseCriteriaServiceType, CriteriaServiceAny)
+		services, err := parseTypeList(v, reg.ParseService, CriteriaServiceAny)
 		if err != nil {
 			return nil, aicrerrors.WrapWithContext(
 				aicrerrors.ErrCodeInvalidRequest,
@@ -220,7 +221,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 	// Parse intents
 	if v := os.Getenv(EnvAllowedIntents); v != "" {
-		intents, err := parseTypeList(v, ParseCriteriaIntentType, CriteriaIntentAny)
+		intents, err := parseTypeList(v, reg.ParseIntent, CriteriaIntentAny)
 		if err != nil {
 			return nil, aicrerrors.WrapWithContext(
 				aicrerrors.ErrCodeInvalidRequest,
@@ -234,7 +235,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 	// Parse OS types
 	if v := os.Getenv(EnvAllowedOSTypes); v != "" {
-		osTypes, err := parseTypeList(v, ParseCriteriaOSType, CriteriaOSAny)
+		osTypes, err := parseTypeList(v, reg.ParseOS, CriteriaOSAny)
 		if err != nil {
 			return nil, aicrerrors.WrapWithContext(
 				aicrerrors.ErrCodeInvalidRequest,

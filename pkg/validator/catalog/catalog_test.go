@@ -29,7 +29,7 @@ import (
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
-	catalog, err := Load("", "")
+	catalog, err := LoadWithDataProvider(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -164,7 +164,7 @@ validators:
 }
 
 func TestForPhaseNoMatch(t *testing.T) {
-	catalog, err := Load("", "")
+	catalog, err := LoadWithDataProvider(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestReplaceRegistry(t *testing.T) {
 func TestLoadWithRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
 
-	cat, err := Load("", "")
+	cat, err := LoadWithDataProvider(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestLoadWithRegistryOverride(t *testing.T) {
 func TestLoadWithoutRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 
-	cat, err := Load("", "")
+	cat, err := LoadWithDataProvider(nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -421,13 +421,8 @@ validators:
 		t.Fatalf("failed to create layered provider: %v", err)
 	}
 
-	// Save and restore global provider
-	originalProvider := recipe.GetDataProvider()   //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-	recipe.SetDataProvider(layered)                //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-	defer recipe.SetDataProvider(originalProvider) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-
 	// Load catalog — should merge embedded + external
-	cat, err := Load("", "")
+	cat, err := LoadWithDataProvider(layered, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -1026,7 +1021,7 @@ validators:
 func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
 	// "-next" suffix bypasses the release-version image-tag rewrite path,
 	// matching how goreleaser snapshots stamp dev binaries.
-	cat, err := Load("v0.0.0-next", "")
+	cat, err := LoadWithDataProvider(nil, "v0.0.0-next", "")
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}

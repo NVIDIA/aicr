@@ -23,15 +23,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// LoadFromFile loads a recipe from the given path and returns a hydrated RecipeResult.
-// If the file contains a RecipeMetadata overlay, it is auto-hydrated via the recipe
-// builder using the overlay's criteria. This allows callers to accept both overlay
-// files and pre-hydrated RecipeResult files transparently.
-func LoadFromFile(ctx context.Context, path, kubeconfig, version string) (*RecipeResult, error) {
-	return LoadFromFileWithProvider(ctx, path, kubeconfig, version, nil)
-}
-
-// LoadFromFileWithProvider is LoadFromFile bound to an explicit DataProvider.
+// LoadFromFileWithProvider loads a recipe from the given path bound to an explicit DataProvider.
 // Overlay inputs (kind: RecipeMetadata) are hydrated through a builder bound to
 // dp (so external --data overlays resolve against dp, not the package global),
 // and the returned result carries dp via its provider field. A nil dp falls

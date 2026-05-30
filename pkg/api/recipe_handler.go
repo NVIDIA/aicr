@@ -80,7 +80,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		criteria, err = recipe.ParseCriteriaFromRequest(r)
+		criteria, err = recipe.ParseCriteriaFromRequest(r, h.client.CriteriaRegistry())
 	case http.MethodPost:
 		// Bound request body to defend against memory exhaustion.
 		bounded := http.MaxBytesReader(w, r.Body, defaults.MaxRecipePOSTBytes)
@@ -95,7 +95,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 				logger.Debug("request body close failed", "error", closeErr)
 			}
 		}()
-		criteria, err = recipe.ParseCriteriaFromBody(bounded, r.Header.Get("Content-Type"))
+		criteria, err = recipe.ParseCriteriaFromBody(bounded, r.Header.Get("Content-Type"), h.client.CriteriaRegistry())
 		var maxBytesErr *http.MaxBytesError
 		if err != nil && stderrors.As(err, &maxBytesErr) {
 			logger.Warn("recipe POST body exceeded size limit",
@@ -178,7 +178,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		criteria, err = recipe.ParseCriteriaFromRequest(r)
+		criteria, err = recipe.ParseCriteriaFromRequest(r, h.client.CriteriaRegistry())
 		selector = r.URL.Query().Get("selector")
 	case http.MethodPost:
 		// Bound request body to defend against memory exhaustion.

@@ -38,20 +38,11 @@ type (
 	EnvVar               = v1.EnvVar
 )
 
-// Load reads and parses the validator catalog from the package-global
-// recipe.GetDataProvider(). It is the back-compat entry point for callers that
-// do not thread a per-command DataProvider; provider-aware callers should use
-// LoadWithDataProvider. See LoadWithDataProvider for the image tag resolution
-// rules.
-func Load(version, commit string) (*ValidatorCatalog, error) {
-	return LoadWithDataProvider(nil, version, commit)
-}
-
-// LoadWithDataProvider reads and parses the validator catalog from dp. A nil dp
-// falls back to the package-global recipe.GetDataProvider() so existing callers
-// are unaffected. When the --data flag provides an external directory containing
-// validators/catalog.yaml, the external catalog is merged with the embedded
-// catalog using merge-by-name semantics: external validators override embedded
+// LoadWithDataProvider reads and parses the validator catalog from dp. A nil
+// dp defaults to the embedded recipe data; callers that want a layered
+// `--data` overlay must pass their own layered provider. When the catalog
+// file is present, the external catalog is merged with the embedded one
+// using merge-by-name semantics: external validators override embedded
 // by name, and new validators are appended.
 //
 // Image tag resolution (applied in order):
@@ -71,7 +62,7 @@ func Load(version, commit string) (*ValidatorCatalog, error) {
 // steps 1-2 but are replaced by step 3 if that env var is set.
 func LoadWithDataProvider(dp recipe.DataProvider, version, commit string) (*ValidatorCatalog, error) {
 	if dp == nil {
-		dp = recipe.GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		dp = recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	}
 	data, err := dp.ReadFile("validators/catalog.yaml")
 	if err != nil {

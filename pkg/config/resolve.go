@@ -599,38 +599,22 @@ func (s *SnapshotSpec) Resolve() (*SnapshotResolved, error) {
 	return out, nil
 }
 
-// ResolveCriteria converts the recipe criteria spec from wire-string form
-// to a typed *recipe.Criteria, validating each enum value against the
-// package-global criteria registry. Nil-receiver tolerant; never returns a
-// nil pointer.
-//
-// This is a shim over ResolveCriteriaWithRegistry(recipe.DefaultRegistry()).
-// Callers holding a per-provider registry (e.g., the CLI building criteria
-// against an aicr.Client's own DataProvider) should call
-// ResolveCriteriaWithRegistry directly so config-sourced criteria validate
-// against THAT provider's registered values rather than the package global.
+// ResolveCriteriaWithRegistry converts the recipe criteria spec from
+// wire-string form to a typed *recipe.Criteria, validating each enum value
+// against the supplied per-provider registry. A nil reg falls back to a
+// fresh ephemeral registry (recipe.NewCriteriaRegistry) — only the
+// hardcoded OSS fast-path values will validate. Use this nil-fallback only
+// for early validation paths that run before the Client/Builder is wired
+// (e.g., YAML config load); production resolution must pass the
+// provider-bound registry from GetCriteriaRegistryFor.
 //
 // Unlike recipe.NewCriteria, the returned Criteria does NOT default
 // unset fields to "any": empty enum fields signal "config did not set
 // this slot" so callers can detect what to copy onto a target Criteria.
 // Nodes < 0 is rejected; Nodes == 0 means unset.
-func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
-	return r.ResolveCriteriaWithRegistry(recipe.DefaultRegistry())
-}
-
-// ResolveCriteriaWithRegistry converts the recipe criteria spec from
-// wire-string form to a typed *recipe.Criteria, validating each enum value
-// against the supplied per-provider registry. A nil reg falls back to the
-// package-global registry via recipe.DefaultRegistry(), so the call is
-// well-defined for callers that have not bound a provider.
-//
-// Routing config-sourced criteria through the per-provider registry is what
-// lets a `--data` overlay's non-OSS criteria value (e.g. service=ncp-internal)
-// supplied via spec.recipe.criteria validate the same way it does on the CLI
-// flag path. See ResolveCriteria for the unset-field semantics.
 func (r *RecipeSpec) ResolveCriteriaWithRegistry(reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
 	if reg == nil {
-		reg = recipe.DefaultRegistry()
+		reg = recipe.NewCriteriaRegistry()
 	}
 	out := &recipe.Criteria{}
 	if r == nil || r.Criteria == nil {

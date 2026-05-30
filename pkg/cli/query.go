@@ -176,7 +176,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapFilePath), loadErr)
 		}
 
-		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria()
+		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria(reg)
 		if applyErr := applyCriteriaFromConfig(criteria, cfg, reg); applyErr != nil {
 			return nil, applyErr
 		}

@@ -115,7 +115,7 @@ type pendingRegistryEntry struct {
 // the result channel.
 func LoadMetadataStoreFor(ctx context.Context, dp DataProvider) (*MetadataStore, error) {
 	if dp == nil {
-		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		dp = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
 	}
 	e, _ := storeCache.LoadOrStore(dp, &storeCacheEntry{})
 	entry := e.(*storeCacheEntry)
@@ -151,7 +151,7 @@ func isTransientLoadError(err error) bool {
 // per-tenant isolation — should use LoadMetadataStoreFor directly with a
 // caller-supplied provider.
 func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
-	return LoadMetadataStoreFor(ctx, GetDataProvider()) //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+	return LoadMetadataStoreFor(ctx, NewEmbeddedDataProvider(GetEmbeddedFS(), ""))
 }
 
 // buildMetadataStore performs the actual catalog walk against the supplied

@@ -53,7 +53,7 @@ func GetManifestContent(path string) ([]byte, error) {
 // "components/network-operator/manifests/nfd-network-rule.yaml").
 func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error) {
 	if dp == nil {
-		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		dp = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
 	}
 	content, err := dp.ReadFile(path)
 	if err != nil {
@@ -168,7 +168,7 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 	// results built before WithDataProvider was wired through.
 	provider := r.provider
 	if provider == nil {
-		provider = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		provider = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
 	}
 
 	// Step 1: Load base and/or overlay values from files (if ValuesFile specified)

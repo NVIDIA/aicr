@@ -41,30 +41,30 @@ func recipeCmdFlags() []cli.Flag {
 	return []cli.Flag{
 		withCompletions(&cli.StringFlag{
 			Name:     "service",
-			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.AllCriteriaServiceTypes(), ", ")),
+			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.GetCriteriaServiceTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.AllCriteriaServiceTypes),
+		}, recipe.GetCriteriaServiceTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "accelerator",
 			Aliases:  []string{"gpu"},
-			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.AllCriteriaAcceleratorTypes(), ", ")),
+			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.AllCriteriaAcceleratorTypes),
+		}, recipe.GetCriteriaAcceleratorTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "intent",
-			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.AllCriteriaIntentTypes(), ", ")),
+			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.GetCriteriaIntentTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.AllCriteriaIntentTypes),
+		}, recipe.GetCriteriaIntentTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "os",
-			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.AllCriteriaOSTypes(), ", ")),
+			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.AllCriteriaOSTypes),
+		}, recipe.GetCriteriaOSTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "platform",
-			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.AllCriteriaPlatformTypes(), ", ")),
+			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
 			Category: catQueryParameters,
-		}, recipe.AllCriteriaPlatformTypes),
+		}, recipe.GetCriteriaPlatformTypes),
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",

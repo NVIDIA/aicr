@@ -772,7 +772,7 @@ func TestResolveRecipeFromCriteriaLossless(t *testing.T) {
 	}
 	defer c.Close()
 
-	crit, err := recipe.BuildCriteria(recipe.WithCriteriaAccelerator("h100"), recipe.WithCriteriaIntent("training"))
+	crit, err := recipe.BuildCriteriaWithRegistry(nil, recipe.WithAcceleratorRegistry("h100"), recipe.WithIntentRegistry("training"))
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
 	}
@@ -805,10 +805,10 @@ func TestResolveRecipeFromSnapshot(t *testing.T) {
 	}
 	defer c.Close()
 
-	crit, err := recipe.BuildCriteria(
-		recipe.WithCriteriaService("eks"),
-		recipe.WithCriteriaAccelerator("h100"),
-		recipe.WithCriteriaIntent("training"),
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
 	)
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
@@ -846,9 +846,9 @@ func TestResolveRecipeFromSnapshot_NilArgs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Close() })
 
-	crit, err := recipe.BuildCriteria(
-		recipe.WithCriteriaAccelerator("h100"),
-		recipe.WithCriteriaIntent("training"),
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
 	)
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
@@ -912,9 +912,9 @@ func TestResolveRecipeFromSnapshotRejectsOutOfAllowList(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Close() })
 
-	crit, err := recipe.BuildCriteria(
-		recipe.WithCriteriaAccelerator("b200"),
-		recipe.WithCriteriaIntent("training"),
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithAcceleratorRegistry("b200"),
+		recipe.WithIntentRegistry("training"),
 	)
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
@@ -953,9 +953,9 @@ func TestResolveRecipeFromCriteriaRejectsOutOfAllowList(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Close() })
 
-	crit, err := recipe.BuildCriteria(
-		recipe.WithCriteriaAccelerator("b200"),
-		recipe.WithCriteriaIntent("training"),
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithAcceleratorRegistry("b200"),
+		recipe.WithIntentRegistry("training"),
 	)
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
@@ -988,7 +988,7 @@ func TestSelectFromRecipe(t *testing.T) {
 	}
 	defer c.Close()
 
-	crit, err := recipe.BuildCriteria(recipe.WithCriteriaAccelerator("h100"), recipe.WithCriteriaIntent("training"))
+	crit, err := recipe.BuildCriteriaWithRegistry(nil, recipe.WithAcceleratorRegistry("h100"), recipe.WithIntentRegistry("training"))
 	if err != nil {
 		t.Fatalf("BuildCriteria: %v", err)
 	}

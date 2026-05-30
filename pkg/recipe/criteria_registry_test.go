@@ -17,8 +17,6 @@ package recipe
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -207,74 +205,6 @@ func TestIsStrictModeFromEnv(t *testing.T) {
 	}
 }
 
-func TestLoadCatalog_DoesNotLeakRegistryOnFailure(t *testing.T) {
-	t.Setenv(strictModeEnvVar, "")
-
-	// Build an external data directory with a well-formed overlay that
-	// would introduce a custom service value, followed by a malformed
-	// overlay that fails YAML parsing. The well-formed overlay is
-	// processed first (lexical filepath.WalkDir order) — under the
-	// pre-fix behavior it would have seeded the registry before the
-	// second file's parse error aborted the load.
-	tmp := t.TempDir()
-	overlaysDir := filepath.Join(tmp, "overlays")
-	if err := os.MkdirAll(overlaysDir, 0o755); err != nil {
-		t.Fatalf("mkdir overlays: %v", err)
-	}
-	writeFile := func(rel, body string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(tmp, rel), []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", rel, err)
-		}
-	}
-	writeFile("registry.yaml", `apiVersion: aicr.nvidia.com/v1alpha1
-kind: ComponentRegistry
-components: []
-`)
-	writeFile("overlays/01-good.yaml", `apiVersion: aicr.nvidia.com/v1alpha1
-kind: RecipeMetadata
-metadata:
-  name: pending-leak-overlay
-spec:
-  base: base
-  criteria:
-    service: pending-leak-service
-    accelerator: h100
-    intent: training
-  componentRefs: []
-`)
-	// Malformed YAML — fails decode, aborts the walk.
-	writeFile("overlays/02-bad.yaml", "this: : not yaml\n  ::\n")
-
-	layered, err := NewLayeredDataProvider(
-		NewEmbeddedDataProvider(GetEmbeddedFS(), ""),
-		LayeredProviderConfig{ExternalDir: tmp},
-	)
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-
-	// Snapshot + restore process globals so this test does not poison
-	// the singleton state observed by tests that run after it.
-	prev := GetDataProvider() //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-	t.Cleanup(func() {
-		SetDataProvider(prev) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-		ResetMetadataStoreForTesting()
-		DefaultRegistry().Reset()
-	})
-	SetDataProvider(layered) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-	ResetMetadataStoreForTesting()
-	DefaultRegistry().Reset()
-
-	if loadErr := LoadCatalog(context.Background()); loadErr == nil {
-		t.Fatal("expected LoadCatalog to error on malformed overlay")
-	}
-	if DefaultRegistry().Has(FieldService, "pending-leak-service") {
-		t.Error("malformed catalog load leaked staged criteria into registry; " +
-			"deferred commit must skip registry mutation when validation fails")
-	}
-}
-
 func TestCriteriaRegistry_RegisterOnZeroValue(t *testing.T) {
 	// External callers may legally construct &CriteriaRegistry{} (the
 	// type is exported even though newCriteriaRegistry is not); Register
@@ -284,14 +214,6 @@ func TestCriteriaRegistry_RegisterOnZeroValue(t *testing.T) {
 	r.Register(FieldService, "ncp-zero", OriginExternal)
 	if !r.Has(FieldService, "ncp-zero") {
 		t.Error("Register on a zero-value CriteriaRegistry must succeed")
-	}
-}
-
-func TestDefaultRegistry_Singleton(t *testing.T) {
-	a := DefaultRegistry()
-	b := DefaultRegistry()
-	if a != b {
-		t.Error("DefaultRegistry must return the same singleton on every call")
 	}
 }
 
@@ -309,9 +231,10 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reg := DefaultRegistry()
-			reg.Reset()
-			t.Cleanup(reg.Reset)
+			// Use a distinct in-memory provider per case so each test
+			// gets an isolated registry from GetCriteriaRegistryFor.
+			dp := newInMemoryProvider("seed-"+tt.name, map[string][]byte{})
+			t.Cleanup(func() { EvictCachedCriteriaRegistry(dp) })
 
 			c := &Criteria{
 				Service:     "ncp-x",
@@ -320,7 +243,8 @@ func TestSeedCriteriaRegistry(t *testing.T) {
 				OS:          "bottlerocket",
 				Platform:    "nvmesh",
 			}
-			seedCriteriaRegistry(c, tt.source, nil)
+			seedCriteriaRegistry(c, tt.source, dp)
+			reg := GetCriteriaRegistryFor(dp)
 
 			checks := []struct {
 				field CriteriaField
@@ -494,26 +418,26 @@ func TestGetCriteriaRegistryFor_StrictPerRegistry(t *testing.T) {
 }
 
 func TestSeedCriteriaRegistry_NilCriteria(t *testing.T) {
-	reg := DefaultRegistry()
-	reg.Reset()
-	t.Cleanup(reg.Reset)
+	dp := newInMemoryProvider("seed-nil", map[string][]byte{})
+	t.Cleanup(func() { EvictCachedCriteriaRegistry(dp) })
 	// Must not panic.
-	seedCriteriaRegistry(nil, "embedded", nil)
+	seedCriteriaRegistry(nil, "embedded", dp)
+	reg := GetCriteriaRegistryFor(dp)
 	if got := reg.Values(FieldService); len(got) != 0 {
 		t.Errorf("nil criteria must not register anything, got %v", got)
 	}
 }
 
 func TestSeedCriteriaRegistry_SkipsWildcardAndEmpty(t *testing.T) {
-	reg := DefaultRegistry()
-	reg.Reset()
-	t.Cleanup(reg.Reset)
+	dp := newInMemoryProvider("seed-skip", map[string][]byte{})
+	t.Cleanup(func() { EvictCachedCriteriaRegistry(dp) })
 	c := &Criteria{
 		Service:     CriteriaServiceAny, // "any" must be skipped
 		Accelerator: "",                 // empty must be skipped
 		Intent:      "training",         // real value, must register
 	}
-	seedCriteriaRegistry(c, "embedded", nil)
+	seedCriteriaRegistry(c, "embedded", dp)
+	reg := GetCriteriaRegistryFor(dp)
 	if reg.Has(FieldService, "any") {
 		t.Error("registry should not record wildcard 'any'")
 	}

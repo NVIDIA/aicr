@@ -128,16 +128,16 @@ func TestWithVersionStored(t *testing.T) {
 func TestEnforceAllowLists(t *testing.T) {
 	t.Parallel()
 
-	h100, err := recipe.BuildCriteria(
-		recipe.WithCriteriaAccelerator("h100"),
-		recipe.WithCriteriaIntent("training"),
+	h100, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
 	)
 	if err != nil {
 		t.Fatalf("BuildCriteria h100: %v", err)
 	}
-	b200, err := recipe.BuildCriteria(
-		recipe.WithCriteriaAccelerator("b200"),
-		recipe.WithCriteriaIntent("training"),
+	b200, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithAcceleratorRegistry("b200"),
+		recipe.WithIntentRegistry("training"),
 	)
 	if err != nil {
 		t.Fatalf("BuildCriteria b200: %v", err)

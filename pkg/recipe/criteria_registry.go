@@ -82,10 +82,19 @@ type CriteriaRegistry struct {
 
 // newCriteriaRegistry constructs an empty registry. Use
 // [DefaultRegistry] for the package singleton consulted by
-// ParseCriteria*Type. Constructor is unexported so external callers
-// cannot accidentally create a competing instance that would silently
-// fail to seed parse-time validation.
+// ParseCriteria*Type.
 func newCriteriaRegistry() *CriteriaRegistry {
+	return NewCriteriaRegistry()
+}
+
+// NewCriteriaRegistry constructs an empty criteria registry, honoring
+// AICR_CRITERIA_STRICT at construction. Use this for an ephemeral registry
+// independent of any DataProvider — e.g., config YAML validation that runs
+// before the Client/Builder is wired and only needs the hardcoded OSS
+// fast-path values. For per-DataProvider registries (the common case),
+// use GetCriteriaRegistryFor(dp) so the registry is seeded by the
+// provider's overlays.
+func NewCriteriaRegistry() *CriteriaRegistry {
 	r := &CriteriaRegistry{
 		values: make(map[CriteriaField]map[string]CriteriaOrigin),
 	}
@@ -241,13 +250,12 @@ var criteriaRegistryCache sync.Map // map[DataProvider]*criteriaRegistryCacheEnt
 // registry honors AICR_CRITERIA_STRICT at construction, exactly like the
 // global default.
 //
-// A nil provider falls back to GetDataProvider() so the legacy global path —
-// DefaultRegistry and the package-level ParseCriteria*Type shims — continues
-// to work transparently and shares a single registry with the embedded
-// provider.
+// A nil provider returns a fresh ephemeral registry (not inserted into the
+// cache) — only the hardcoded OSS fast-path values will validate. Callers
+// that need overlay values to validate must pass a non-nil provider.
 func GetCriteriaRegistryFor(dp DataProvider) *CriteriaRegistry {
 	if dp == nil {
-		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		return NewCriteriaRegistry()
 	}
 	e, _ := criteriaRegistryCache.LoadOrStore(dp, &criteriaRegistryCacheEntry{})
 	entry := e.(*criteriaRegistryCacheEntry)
@@ -286,18 +294,6 @@ func ResetCriteriaRegistryForTesting() {
 		criteriaRegistryCache.Delete(k)
 		return true
 	})
-}
-
-// DefaultRegistry returns the criteria registry bound to the package-global
-// DataProvider. Threading the registry through every call site would add
-// significant churn for a value that is set once at startup (when the data
-// provider populates it from loaded overlays) and read many times thereafter,
-// so the package-level ParseCriteria*Type shims consult this registry.
-//
-// It delegates to GetCriteriaRegistryFor(GetDataProvider()) so the global
-// path and the embedded-provider path share a single registry instance.
-func DefaultRegistry() *CriteriaRegistry {
-	return GetCriteriaRegistryFor(GetDataProvider()) //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
 }
 
 // normalizeCriteriaValue lower-cases and trims a criteria value to

@@ -739,46 +739,6 @@ func TestRecipeResult_GetValuesForComponent_HonorsBoundProvider(t *testing.T) {
 // of the package-global DataProvider. After building a recipe against dpA,
 // swapping the global to dpB (with different values content) must not change
 // what GetValuesForComponent returns — the bound provider wins.
-func TestRecipeResult_GetValuesForComponent_BoundProviderSurvivesGlobalSwap(t *testing.T) {
-	t.Cleanup(ResetMetadataStoreForTesting)
-	t.Cleanup(ResetComponentRegistryForTesting)
-
-	// Build a recipe with bound provider dpA carrying driver.version=111.11.11.
-	dpA := buildProviderWithValues(t, "components/gpu-operator/values.yaml", map[string]any{
-		"driver": map[string]any{"version": "111.11.11"},
-	})
-	b := NewBuilder(WithDataProvider(dpA))
-	result, err := b.BuildFromCriteria(context.Background(), buildIsolatedCriteria(t))
-	if err != nil {
-		t.Fatalf("BuildFromCriteria: %v", err)
-	}
-
-	// Now swap the global to dpB with a DIFFERENT version, AFTER build.
-	dpB := buildProviderWithValues(t, "components/gpu-operator/values.yaml", map[string]any{
-		"driver": map[string]any{"version": "222.22.22"},
-	})
-	saved := GetDataProvider() //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-	t.Cleanup(func() {
-		SetDataProvider(saved) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-		ResetMetadataStoreForTesting()
-		ResetComponentRegistryForTesting()
-	})
-	SetDataProvider(dpB) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-
-	// result.GetValuesForComponent MUST read from dpA (the bound provider),
-	// not from dpB which is now the package-global.
-	vals, err := result.GetValuesForComponent("gpu-operator")
-	if err != nil {
-		t.Fatalf("GetValuesForComponent: %v", err)
-	}
-	driver, ok := vals["driver"].(map[string]any)
-	if !ok {
-		t.Fatalf("driver not a map: %#v", vals["driver"])
-	}
-	if got := driver["version"]; got != "111.11.11" {
-		t.Errorf("driver.version = %v, want 111.11.11 (bound provider must beat global swap)", got)
-	}
-}
 
 // TestGetManifestContentWithProvider verifies the explicit-provider variant
 // reads from the supplied DataProvider rather than the package-global.

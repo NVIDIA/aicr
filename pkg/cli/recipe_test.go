@@ -197,7 +197,7 @@ func TestBuildCriteriaFromCmd(t *testing.T) {
 					&cli.IntFlag{Name: "nodes"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					capturedCriteria, capturedErr = buildCriteriaFromCmd(cmd, recipe.DefaultRegistry())
+					capturedCriteria, capturedErr = buildCriteriaFromCmd(cmd, recipe.NewCriteriaRegistry())
 					return capturedErr
 				},
 			}
@@ -418,7 +418,7 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 			if tt.snapshot != nil {
 				measurements = tt.snapshot.Measurements
 			}
-			criteria := fingerprint.FromMeasurements(measurements).ToCriteria()
+			criteria := fingerprint.FromMeasurements(measurements).ToCriteria(nil)
 
 			if tt.validate != nil {
 				tt.validate(t, criteria)
@@ -579,7 +579,7 @@ func TestApplyCriteriaOverrides(t *testing.T) {
 					&cli.IntFlag{Name: "nodes"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return applyCriteriaOverrides(cmd, tt.initial, recipe.DefaultRegistry())
+					return applyCriteriaOverrides(cmd, tt.initial, recipe.NewCriteriaRegistry())
 				},
 			}
 
