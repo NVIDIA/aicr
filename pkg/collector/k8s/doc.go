@@ -54,16 +54,14 @@
 //
 // Create and use the collector:
 //
-//	collector := k8s.NewCollector()
-//	measurements, err := collector.Collect(ctx)
+//	collector := &k8s.Collector{}
+//	m, err := collector.Collect(ctx)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //
-//	for _, m := range measurements {
-//	    for _, subtype := range m.Subtypes {
-//	        fmt.Printf("%s: %d items\n", subtype.Name, len(subtype.Data))
-//	    }
+//	for _, subtype := range m.Subtypes {
+//	    fmt.Printf("%s: %d items\n", subtype.Name, len(subtype.Data))
 //	}
 //
 // # Kubernetes Client

@@ -90,6 +90,7 @@
 //   - CriteriaOSRHEL: Red Hat Enterprise Linux
 //   - CriteriaOSCOS: Container-Optimized OS (GKE)
 //   - CriteriaOSAmazonLinux: Amazon Linux
+//   - CriteriaOSTalos: Talos Linux
 //   - CriteriaOSAny: Any OS (wildcard)
 //
 // Platform types for workload frameworks:

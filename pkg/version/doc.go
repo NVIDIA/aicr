@@ -73,11 +73,13 @@
 //   - Optional "v" prefix
 //   - Flexible precision (1-3 components)
 //   - Numeric version components
+//   - Prerelease / build metadata after the numeric core (e.g., "1.2.3-alpha",
+//     "1.2.3+build.123", "1.28.0-gke.1337000") is preserved in the Extras
+//     field but is not used for ordering by Compare / EqualsOrNewer
 //
 // Not Supported (may be added in future):
-//   - Prerelease identifiers (e.g., "1.2.3-alpha")
-//   - Build metadata (e.g., "1.2.3+build.123")
 //   - Version ranges or constraints
+//   - Prerelease-aware ordering (Extras is parsed and stored, never compared)
 //
 // # Error Handling
 //

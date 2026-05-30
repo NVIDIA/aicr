@@ -15,15 +15,16 @@
 /*
 Package bundler provides orchestration for generating deployment bundles from recipes.
 
-The bundler package generates deployment-ready artifacts (Helm per-component bundles or
-Argo CD applications) from recipe configurations. Component configuration is loaded
-from the declarative component registry (recipes/registry.yaml).
+The bundler package generates deployment-ready artifacts (Helm per-component bundles,
+Argo CD applications, Flux HelmRelease manifests, helmfile release graphs, or rendered
+local manifests) from recipe configurations. Component configuration is loaded from
+the declarative component registry (recipes/registry.yaml).
 
 # Architecture
 
-  - DefaultBundler: Generates Helm per-component bundles or Argo CD applications
+  - DefaultBundler: Orchestrates bundle generation; the concrete output is produced by a deployer
   - Component Registry: Declarative configuration in recipes/registry.yaml
-  - Deployers: Helm (default) and Argo CD output formats
+  - Deployers: helm (default), argocd, argocd-helm, flux, helmfile, localformat
   - result.Output: Aggregated generation results
 
 # Quick Start
@@ -42,14 +43,11 @@ With options:
 
 # Supported Components
 
-Components are defined in recipes/registry.yaml:
-
-  - gpu-operator: NVIDIA GPU Operator
-  - network-operator: NVIDIA Network Operator
-  - nvidia-dra-driver-gpu: NVIDIA DRA Driver
-  - cert-manager: Certificate Manager
-  - nvsentinel: NVSentinel
-  - nodewright-operator: Nodewright node optimization
+Components are defined declaratively in recipes/registry.yaml. The set evolves
+without Go changes; representative entries include gpu-operator, network-operator,
+nvidia-dra-driver-gpu, cert-manager, nfd, nvsentinel, nodewright-operator,
+kube-prometheus-stack, dynamo-platform, kueue, kubeflow-trainer, and the slinky
+slurm components. See recipes/registry.yaml for the current authoritative list.
 
 # Output Formats
 

@@ -20,7 +20,7 @@
 //
 // # Configuration Options
 //
-//   - Deployer: Deployment method (DeployerHelm or DeployerArgoCD)
+//   - Deployer: Deployment method (see Deployer Types)
 //   - IncludeReadme: Generate deployment documentation
 //   - IncludeChecksums: Generate SHA256 checksums.txt file
 //   - Version: Bundler version string
@@ -32,6 +32,9 @@
 // DeployerType constants define supported deployment methods:
 //   - DeployerHelm: Generates Helm per-component bundles (default)
 //   - DeployerArgoCD: Generates Argo CD App of Apps manifests
+//   - DeployerArgoCDHelm: Generates a Helm chart app-of-apps for Argo CD
+//   - DeployerFlux: Generates Flux HelmRelease manifests
+//   - DeployerHelmfile: Generates a helmfile.yaml release graph
 //
 // Use ParseDeployerType() to parse user input and GetDeployerTypes() for CLI help.
 //

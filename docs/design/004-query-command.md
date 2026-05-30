@@ -2,7 +2,12 @@
 
 ## Status
 
-**Proposed** — 2026-03-19
+**Accepted and Implemented** — 2026-03-19
+
+The `aicr query` CLI command and `GET/POST /v1/query` endpoint are implemented.
+Hydration and selector logic live in `pkg/recipe/query.go`; the REST handler is
+`(*recipeHandler).HandleQuery` in `pkg/server/recipe_handler.go`, wired through
+the `aicr.Client` facade.
 
 ## Scope
 
@@ -204,7 +209,7 @@ echo "Driver version: $VERSION"
 | File | Change |
 |------|--------|
 | `pkg/cli/root.go` | Register `query` subcommand |
-| `pkg/api/server.go` | Add `GET/POST /v1/query` endpoint |
+| `pkg/server/recipe_handler.go` | Add `GET/POST /v1/query` endpoint (facade-backed) |
 
 **Core functions:**
 

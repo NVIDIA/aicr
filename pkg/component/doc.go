@@ -12,12 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package component provides the generic bundler framework and shared utilities.
+// Package component provides shared bundler utilities used by pkg/bundler
+// and its deployers.
 //
 // Component configuration is defined declaratively in recipes/registry.yaml.
-// This package provides reusable utilities for bundle generation. With the declarative
-// registry, no separate Go packages are needed per component - just add an entry to
-// registry.yaml to configure a new component.
+// This package provides reusable building blocks for bundle generation. With
+// the declarative registry, no separate Go packages are required per
+// component — adding a registry.yaml entry is sufficient.
+//
+// Historically AICR had one Go bundler package per component. Those
+// per-component packages have been replaced by the registry-driven
+// pkg/bundler.DefaultBundler; the legacy BaseBundler / MakeBundle entry
+// points described below remain exported for external integrations and the
+// component test harness.
 //
 // # Generic Bundler Framework
 //

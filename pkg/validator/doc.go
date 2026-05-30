@@ -23,8 +23,9 @@
 //     passing.
 //
 //  2. In-cluster checks: each declared check is materialized as a
-//     short-lived Kubernetes Job. RBAC (ServiceAccount, Role, RoleBinding)
-//     is provisioned via server-side apply under the "aicr" field manager
+//     short-lived Kubernetes Job. RBAC (ServiceAccount + a per-run
+//     ClusterRoleBinding to the built-in cluster-admin ClusterRole) is
+//     provisioned via server-side apply under the "aicr" field manager
 //     so concurrent validators converge on a single owner. Job logs and
 //     exit codes are aggregated into a CTRF-formatted report.
 //
@@ -35,9 +36,11 @@
 //
 // Subpackages:
 //   - catalog: built-in validation check catalog
-//   - constraints: shared constraint extraction helpers
 //   - ctrf: Common Test Report Format emitter
 //   - job: Job lifecycle, RBAC, and result extraction
 //   - labels: standard label/annotation set applied to validator resources
 //   - v1: Validation YAML schema and decoders
+//
+// Shared constraint extraction helpers live in the top-level pkg/constraints
+// package, not under validator.
 package validator

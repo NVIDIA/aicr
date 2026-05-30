@@ -55,7 +55,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 |---------|-------------|
 | **`aicr` CLI** | Single binary for the full workflow: snapshot, recipe, bundle, validate, verify, diff, and trust management. |
 | **API Server (`aicrd`)** | REST API exposing the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
-| **Go Library (`github.com/NVIDIA/aicr`)** | Top-level Go package for in-process consumers — same workflow (resolve, bundle, snapshot, validate) callable from any Go program without a subprocess or REST hop. Per-Client isolation supports multi-tenant use. |
+| **Go Library (`github.com/NVIDIA/aicr/pkg/client/v1`)** | Stable Go SDK facade for in-process consumers — same workflow (resolve, bundle, snapshot, validate) callable from any Go program without a subprocess or REST hop. Per-Client isolation supports multi-tenant use. |
 | **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, kernel, OS, operators, K8s config) into a ConfigMap for validation against recipes. |
 | **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD, Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |

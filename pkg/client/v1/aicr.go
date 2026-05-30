@@ -20,6 +20,23 @@
 // public and will remain importable, but this facade is the contract
 // the project commits to via semver.
 //
+// # Surface
+//
+// Client exposes the four end-to-end operations the CLI / server share:
+//
+//   - ResolveRecipe / ResolveRecipeFromCriteria / ResolveRecipeFromSnapshot
+//     and LoadRecipe — produce or load a *RecipeResult.
+//   - BundleComponents — resolve Helm values and stitched manifests for
+//     each component in a *RecipeResult.
+//   - CollectSnapshot — deploy the snapshotter Job and retrieve a *Snapshot.
+//   - ValidateState — evaluate a resolved recipe against a snapshot,
+//     running deployment / performance / conformance phases.
+//
+// All facade types (Snapshot, AgentConfig, Criteria, RecipeRequest,
+// RecipeResult, ComponentBundle, ComponentRef, PhaseResult, AllowLists)
+// are facade-owned structs translated to and from the upstream pkg/*
+// shapes, so internal field renames don't churn external callers.
+//
 // # Example
 //
 //	client, err := aicr.NewClient(

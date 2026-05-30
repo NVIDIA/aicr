@@ -914,8 +914,7 @@ aicr bundle -r recipe.yaml \
 │   ├── manifests/
 │   │   └── clusterpolicy.yaml  # ClusterPolicy CR
 │   ├── scripts/
-│   │   ├── install.sh          # Installation script
-│   │   └── uninstall.sh        # Cleanup script
+│   │   └── install.sh          # Installation script (uninstall delegates to `helm uninstall`)
 │   ├── README.md                # Deployment instructions
 │   └── checksums.txt            # SHA256 verification
 ├── network-operator/

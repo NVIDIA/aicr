@@ -32,23 +32,23 @@
 //
 // Create with specific services to monitor:
 //
-//	collector := systemd.NewCollector([]string{
-//	    "containerd.service",
-//	    "kubelet.service",
-//	    "docker.service",
-//	})
+//	collector := &systemd.Collector{
+//	    Services: []string{
+//	        "containerd.service",
+//	        "kubelet.service",
+//	        "docker.service",
+//	    },
+//	}
 //
-//	measurements, err := collector.Collect(ctx)
+//	m, err := collector.Collect(ctx)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //
-//	for _, m := range measurements {
-//	    for _, subtype := range m.Subtypes {
-//	        fmt.Printf("Service: %s\n", subtype.Name)
-//	        if state, ok := subtype.Data["ActiveState"]; ok {
-//	            fmt.Printf("  State: %s\n", state)
-//	        }
+//	for _, subtype := range m.Subtypes {
+//	    fmt.Printf("Service: %s\n", subtype.Name)
+//	    if state, ok := subtype.Data["ActiveState"]; ok {
+//	        fmt.Printf("  State: %s\n", state)
 //	    }
 //	}
 //
@@ -56,11 +56,12 @@
 //
 // Services to monitor are specified during collector creation:
 //
-//	services := []string{
-//	    "containerd.service",
-//	    "kubelet.service",
+//	collector := &systemd.Collector{
+//	    Services: []string{
+//	        "containerd.service",
+//	        "kubelet.service",
+//	    },
 //	}
-//	collector := systemd.NewCollector(services)
 //
 // Common services for GPU clusters:
 //   - containerd.service: Container runtime

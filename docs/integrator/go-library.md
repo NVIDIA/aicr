@@ -318,6 +318,11 @@ Per-operation caps:
 - `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout`,
   falling back to `defaults.SnapshotOperationTimeout` when unset
 - `ValidateState`: `defaults.ValidationOperationTimeout`
+- `MakeBundle`: opt-in via `BundleOptions.Timeout`. When unset (`0`) the
+  caller's context governs unchanged — large bundles, `--vendor-charts`,
+  and attestation/signing can exceed any fixed cap. The REST `/v1/bundle`
+  handler sets it to `defaults.BundleHandlerTimeout`; the CLI `bundle`
+  command leaves it `0`.
 
 Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 `context.Background()` (or a deadline-bounded child) for unbounded callers.

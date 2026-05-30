@@ -193,46 +193,44 @@ flowchart TD
     K --> L[HTTP Response]
 ```
 
-### Recipe Handler: `pkg/recipe/handler.go`
+### Recipe Handler: `pkg/server/recipe_handler.go`
 
-HTTP handler for recipe generation endpoint. Supports both GET (query parameters) and POST (criteria body) methods.
+HTTP handler for recipe generation endpoint. Supports both GET (query parameters) and POST (criteria body) methods. The handler is a thin adapter over the `aicr.Client` facade — recipe resolution lives in `pkg/client/v1`, not in the handler.
 
 #### Handler Flow
 
 ```go
-func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
-    var criteria *Criteria
+func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
+    var criteria *recipe.Criteria
     var err error
 
     // 1. Route based on HTTP method
     switch r.Method {
     case http.MethodGet:
         // 2a. Parse query parameters for GET
-        criteria, err = ParseCriteriaFromRequest(r)
+        criteria, err = recipe.ParseCriteriaFromRequest(r, h.client.CriteriaRegistry())
     case http.MethodPost:
-        // 2b. Parse request body for POST (JSON or YAML)
-        criteria, err = ParseCriteriaFromBody(r.Body, r.Header.Get("Content-Type"))
-        defer r.Body.Close()
+        // 2b. Parse request body for POST (JSON or YAML), bounded by MaxRecipePOSTBytes
+        bounded := http.MaxBytesReader(w, r.Body, defaults.MaxRecipePOSTBytes)
+        defer bounded.Close()
+        criteria, err = recipe.ParseCriteriaFromBody(bounded, r.Header.Get("Content-Type"), h.client.CriteriaRegistry())
     default:
         // Reject other methods
         w.Header().Set("Allow", "GET, POST")
         return 405
     }
 
-    // 3. Validate criteria format
-    if err := criteria.Validate(); err != nil {
-        return 400 with error details
-    }
+    // 3. Validate criteria format (handled inline by ParseCriteria*)
 
     // 4. Validate against allowlists (if configured)
-    if b.AllowLists != nil {
-        if err := b.AllowLists.ValidateCriteria(criteria); err != nil {
+    if h.allowLists != nil {
+        if err := validateAgainstAllowLists(h.allowLists, criteria); err != nil {
             return 400 with allowed values in error details
         }
     }
 
-    // 5. Build recipe
-    recipe, err := b.BuildFromCriteria(r.Context(), criteria)
+    // 5. Resolve recipe via the facade
+    result, err := h.client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
     if err != nil {
         return 500
     }
@@ -240,8 +238,8 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
     // 6. Set cache headers
     w.Header().Set("Cache-Control", "public, max-age=600")
 
-    // 7. Respond with JSON
-    serializer.RespondJSON(w, http.StatusOK, recipe)
+    // 7. Respond with JSON (upstream RecipeResult shape preserved)
+    serializer.RespondJSON(w, http.StatusOK, result.Resolved())
 }
 ```
 
@@ -277,9 +275,9 @@ Supported content types:
 | `platform` | PlatformType | Enum: dynamo, kubeflow, nim, runai, slurm, any | `platform=kubeflow` |
 | `nodes` | int | >= 0 | `nodes=8` |
 
-### Recipe Builder: `pkg/recipe/builder.go`
+### Recipe Resolution: `pkg/client/v1` (aicr.Client facade)
 
-Shared with CLI - same logic as described in CLI architecture.
+Shared with CLI — both entry points construct an `aicr.Client` and call `ResolveRecipeFromCriteria` for recipe resolution and `AdoptRecipe` + `MakeBundle` for bundling. The facade composes `pkg/recipe` (registry, overlay merge, criteria registry) and `pkg/bundler` (per-component generators) so handlers stay free of business logic. See [CLI Architecture](cli.md) for the same control flow on the CLI side.
 
 ## API Endpoints
 
@@ -940,10 +938,12 @@ Future: OpenTelemetry integration for full tracing
 
 ```go
 func TestRecipeHandler(t *testing.T) {
-    // Create test server
-    builder := recipe.NewBuilder()
-    handler := builder.HandleRecipes
-    
+    // Create test client + handler (facade-backed; no business logic in pkg/server)
+    client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+    assert.NoError(t, err)
+    defer client.Close()
+    handler := newRecipeHandler(client, nil).HandleRecipes
+
     // Create test request
     req := httptest.NewRequest(
         "GET",
@@ -951,17 +951,16 @@ func TestRecipeHandler(t *testing.T) {
         nil,
     )
     w := httptest.NewRecorder()
-    
+
     // Execute handler
     handler(w, req)
-    
+
     // Verify response
     assert.Equal(t, http.StatusOK, w.Code)
-    
-    var resp recipe.Recipe
-    err := json.Unmarshal(w.Body.Bytes(), &resp)
+
+    var resp recipe.RecipeResult
+    err = json.Unmarshal(w.Body.Bytes(), &resp)
     assert.NoError(t, err)
-    assert.Equal(t, "ubuntu", resp.Request.Os)
 }
 ```
 
@@ -979,7 +978,9 @@ func TestRecipeHandler(t *testing.T) {
 
 ### Internal Packages
 
-- `pkg/recipe` - Recipe building logic
+- `pkg/client/v1` - aicr.Client facade (recipe + bundle entry points) shared with CLI
+- `pkg/recipe` - Recipe resolution, registry, criteria registry
+- `pkg/bundler` - Per-component bundle generation (invoked via the facade)
 - `pkg/measurement` - Data model
 - `pkg/version` - Semantic versioning
 - `pkg/serializer` - JSON response formatting

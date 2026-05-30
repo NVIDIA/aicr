@@ -22,19 +22,20 @@
 //
 // # Core Types
 //
-// Snapshotter: Interface for snapshot collection
-//
-//	type Snapshotter interface {
-//	    Measure(ctx context.Context) error
-//	}
-//
-// NodeSnapshotter: Production implementation that collects from the current node
+// NodeSnapshotter: collects from the current node (or, when AgentConfig is
+// set, deploys a Kubernetes Job to capture from a remote GPU node).
 //
 //	type NodeSnapshotter struct {
-//	    Version    string               // Snapshotter version
-//	    Factory    collector.Factory    // Collector factory (optional)
-//	    Serializer serializer.Serializer // Output serializer (optional)
+//	    Version     string                // Snapshotter version
+//	    Factory     collector.Factory     // Collector factory (optional)
+//	    Serializer  serializer.Serializer // Output serializer (optional)
+//	    AgentConfig *AgentConfig          // Optional remote agent deployment
+//	    RequireGPU  bool                  // Fail snapshot if no GPU detected
 //	}
+//
+// The exported entry point is the Measure method:
+//
+//	func (n *NodeSnapshotter) Measure(ctx context.Context) error
 //
 // Snapshot: Captured configuration data
 //
@@ -149,7 +150,10 @@
 //  4. OS configuration (grub, sysctl, modules)
 //  5. GPU hardware (driver, model, settings)
 //
-// If any collector fails, all are canceled and an error is returned.
+// Individual collector failures are logged and skipped — the snapshot
+// contains all measurements that could be successfully collected. The
+// overall Measure call only returns an error for setup, context, or
+// serialization failures (and for missing GPU when RequireGPU is set).
 //
 // # Node Name Detection
 //
@@ -163,11 +167,13 @@
 // # Error Handling
 //
 // Measure() returns an error when:
-//   - Any collector fails
 //   - Context is canceled or times out
 //   - Serialization fails
+//   - RequireGPU is set and no GPU was detected
 //
-// Partial data is never returned - snapshots are all-or-nothing.
+// Individual collector errors do not fail the snapshot; they are logged
+// and the affected measurement is omitted, so partial snapshots are the
+// expected outcome on heterogeneous hosts.
 //
 // # Observability
 //

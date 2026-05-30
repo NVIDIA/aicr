@@ -13,13 +13,16 @@
 // limitations under the License.
 
 // Package config defines the AICRConfig file schema accepted by the
-// aicr CLI's --config flag on the recipe and bundle commands.
+// aicr CLI's --config flag on the snapshot, recipe, bundle, and validate
+// commands.
 //
 // AICRConfig is a Kubernetes-style envelope (kind / apiVersion / metadata / spec)
-// that lets users capture flag values for both commands in a single YAML or
-// JSON document. CLI flags always override values loaded from a config file;
-// for slice/map flags, presence on the command line replaces the file's
-// value rather than appending.
+// that lets users capture flag values for these commands in a single YAML or
+// JSON document. Each per-command section under spec (snapshot, recipe,
+// bundle, validate) is optional, so a config file may populate just one
+// section or any combination for end-to-end workflows. CLI flags always
+// override values loaded from a config file; for slice/map flags, presence
+// on the command line replaces the file's value rather than appending.
 //
 // Sources are restricted to local file paths and HTTP/HTTPS URLs.
 // ConfigMap (cm://) URIs are intentionally rejected: extract the data with
