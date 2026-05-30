@@ -193,6 +193,7 @@ aicr/
 - **Output**: Supports JSON, YAML, and table formats
 
 #### API Server
+
 - **Location**: `cmd/aicrd/main.go` → `pkg/server/`
 - **Endpoints**:
   - `GET /v1/recipe` - Generate configuration recipes

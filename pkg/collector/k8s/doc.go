@@ -52,10 +52,11 @@
 //
 // # Usage
 //
-// Create and use the collector:
+// Construct via the package factory and call Collect:
 //
-//	collector := &k8s.Collector{}
-//	m, err := collector.Collect(ctx)
+//	factory := collector.NewDefaultFactory()
+//	c := factory.CreateKubernetesCollector()
+//	m, err := c.Collect(ctx)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

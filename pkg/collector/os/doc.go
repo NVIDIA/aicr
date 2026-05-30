@@ -49,10 +49,11 @@
 //
 // # Usage
 //
-// Create and use the collector:
+// Construct via the package factory and call Collect:
 //
-//	collector := &os.Collector{}
-//	m, err := collector.Collect(ctx)
+//	factory := collector.NewDefaultFactory()
+//	c := factory.CreateOSCollector()
+//	m, err := c.Collect(ctx)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

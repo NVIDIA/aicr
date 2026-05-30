@@ -27,18 +27,23 @@
 // AdoptRecipe), and translate Client errors into structured HTTP responses.
 // No business logic lives here.
 //
-// Middleware chain (applied by Server.Run):
+// Middleware chain (applied outermost to innermost by Server.withMiddleware):
+//   - metricsMiddleware — Prometheus instrumentation; wraps everything so
+//     counters and histograms cover the full request lifetime.
+//   - versionMiddleware — Accept-header API version negotiation and
+//     X-API-Version response header.
+//   - requestIDMiddleware — accepts X-Request-Id or mints one; emitted on
+//     responses and error payloads for distributed tracing.
 //   - timeoutMiddleware — defaults.ServerHandlerTimeout (90s), sized for the
 //     longest per-handler deadline so a slow upstream cannot outlive
 //     WriteTimeout.
+//   - loggingMiddleware — structured request log (Debug on 2xx, Warn on 4xx,
+//     Error on 5xx).
+//   - panicRecoveryMiddleware — converts panics into structured 500s.
+//   - rateLimitMiddleware — token bucket (golang.org/x/time/rate).
 //   - bodyLimitMiddleware — defaults.ServerMaxBodyBytes (8 MiB) via
 //     http.MaxBytesReader; handlers install tighter caps where appropriate
 //     (MaxRecipePOSTBytes for /v1/recipe, MaxBundlePOSTBytes for /v1/bundle).
-//   - rateLimitMiddleware — token bucket (golang.org/x/time/rate).
-//   - requestIDMiddleware — accepts X-Request-Id or mints one; emitted on
-//     responses and error payloads for distributed tracing.
-//   - panicRecoveryMiddleware — converts panics into structured 500s.
-//   - loggingMiddleware, metricsMiddleware, versionMiddleware.
 //
 // Graceful shutdown is wired via signal.NotifyContext on SIGINT/SIGTERM.
 //
