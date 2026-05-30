@@ -9,9 +9,12 @@ the static image inventory across all registered components, see
 ## Overview
 
 `aicr mirror list` renders each component's Helm chart with recipe-resolved
-values, scans embedded manifests, and produces a deduplicated list of container
-images and chart references. The output is available in four formats — two
-general-purpose (YAML, JSON) and two tool-specific (Hauler, Zarf).
+values, scans referenced manifests, and produces a deduplicated list of
+container images and chart references. Manifest reads honor the recipe's
+data source — when the recipe was built with `--data <dir>`, an overlay
+manifest shadowing an embedded path is used in place of the embedded copy.
+The output is available in four formats — two general-purpose (YAML, JSON)
+and two tool-specific (Hauler, Zarf).
 
 > **Trust boundary:** Discovery shells out to `helm template`, which executes
 > the full Go template engine (`tpl`, `include`, `lookup`). AICR recipes

@@ -2063,7 +2063,9 @@ for flags and behavior.
 
 Discover container images and Helm charts referenced by a recipe for air-gapped
 mirroring. Renders each component's Helm chart with recipe-resolved values and
-scans embedded manifests to produce a deduplicated image and chart list.
+scans referenced manifests to produce a deduplicated image and chart list. When
+the recipe was resolved with `--data <dir>`, both values and manifests are read
+through the overlay so overlay-shadowed paths take precedence over embedded.
 
 For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).
@@ -2083,6 +2085,7 @@ aicr mirror list [flags]
 | `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
 | `--platform` | | string | | Optional platform specialization (e.g., `kubeflow`). |
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
+| `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
 | `--output` | `-o` | string | stdout | Output file path |
 
