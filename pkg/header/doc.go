@@ -97,6 +97,6 @@
 // While Header doesn't enforce validation, consumers should verify:
 //   - APIVersion is supported
 //   - Kind is recognized
-//   - Created timestamp is reasonable
+//   - Metadata["timestamp"] is reasonable
 //   - Version is a valid semantic version (if present)
 package header
