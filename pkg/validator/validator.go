@@ -30,7 +30,6 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
-	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -40,6 +39,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/pkg/validator/job"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // validatorFieldManager identifies AICR's server-side-apply writes against the

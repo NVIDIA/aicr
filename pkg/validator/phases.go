@@ -14,7 +14,7 @@
 
 package validator
 
-import v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
+import v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 
 // Re-exported type from pkg/api/validator/v1 for backward compatibility.
 type Phase = v1.Phase
