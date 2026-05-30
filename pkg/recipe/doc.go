@@ -155,19 +155,23 @@
 //   - EvictCachedRegistry(dp) — drops the cached registry for dp; nil
 //     receiver is a no-op.
 //   - GetManifestContentWithProvider(dp, path) ([]byte, error) — reads a
-//     manifest file from dp; a nil provider falls back to GetDataProvider().
-//   - (*RecipeResult).DataProvider() DataProvider — recovers the bound
-//     provider that produced the result, or nil if the package-global was
-//     used. Nil-safe on the receiver.
+//     manifest file from dp; a nil provider falls back to the package's
+//     default embedded provider.
+//   - (*RecipeResult).DataProvider() DataProvider — recovers the provider
+//     that produced the result. A default/unbound build returns the package
+//     default embedded provider; nil is only returned for a nil receiver or
+//     a result constructed outside the normal builder path.
 //
-// Single-tenant entry points (the CLI, the API server) may continue to use
-// SetDataProvider / GetDataProvider; those package-global accessors are
-// deprecated in favor of WithDataProvider but remain functional for
-// back-compat.
+// Single-tenant entry points (the CLI, the API server) bind a provider
+// explicitly via WithDataProvider; the former package-global accessors
+// (SetDataProvider / GetDataProvider) have been removed. Recover a bound
+// provider with (*RecipeResult).DataProvider(), or pass one explicitly.
 //
-// Parse criteria from HTTP request:
+// Parse criteria from HTTP request (reg is a *CriteriaRegistry, typically
+// from GetCriteriaRegistryFor(dp); a nil reg validates against the OSS
+// fast-path values only):
 //
-//	criteria, err := recipe.ParseCriteriaFromRequest(r)
+//	criteria, err := recipe.ParseCriteriaFromRequest(r, reg)
 //	if err != nil {
 //	    http.Error(w, err.Error(), http.StatusBadRequest)
 //	    return
@@ -214,7 +218,7 @@
 //
 // Load criteria from a file:
 //
-//	criteria, err := recipe.LoadCriteriaFromFile("/path/to/criteria.yaml")
+//	criteria, err := recipe.LoadCriteriaFromFile("/path/to/criteria.yaml", reg)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -222,7 +226,7 @@
 //
 // Parse criteria from HTTP request body (POST):
 //
-//	criteria, err := recipe.ParseCriteriaFromBody(r.Body, r.Header.Get("Content-Type"))
+//	criteria, err := recipe.ParseCriteriaFromBody(r.Body, r.Header.Get("Content-Type"), reg)
 //	if err != nil {
 //	    http.Error(w, err.Error(), http.StatusBadRequest)
 //	    return
