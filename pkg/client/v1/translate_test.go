@@ -120,8 +120,8 @@ func TestWrapAllowLists_Nil(t *testing.T) {
 
 // TestToInternalAllowLists_Nil confirms the inverse direction.
 func TestToInternalAllowLists_Nil(t *testing.T) {
-	if got := toInternalAllowLists(nil); got != nil {
-		t.Fatalf("toInternalAllowLists(nil) = %+v, want nil", got)
+	if got := ToInternalAllowLists(nil); got != nil {
+		t.Fatalf("ToInternalAllowLists(nil) = %+v, want nil", got)
 	}
 }
 
@@ -161,7 +161,7 @@ func TestWrapAllowLists_AllSlicesProjected(t *testing.T) {
 }
 
 // TestAllowListsRoundTrip confirms WrapAllowLists followed by
-// toInternalAllowLists reconstructs the upstream AllowLists.
+// ToInternalAllowLists reconstructs the upstream AllowLists.
 func TestAllowListsRoundTrip(t *testing.T) {
 	src := &recipe.AllowLists{
 		Accelerators: []recipe.CriteriaAcceleratorType{
@@ -172,7 +172,7 @@ func TestAllowListsRoundTrip(t *testing.T) {
 		Intents:  []recipe.CriteriaIntentType{recipe.CriteriaIntentInference},
 		OSTypes:  []recipe.CriteriaOSType{recipe.CriteriaOSUbuntu},
 	}
-	got := toInternalAllowLists(WrapAllowLists(src))
+	got := ToInternalAllowLists(WrapAllowLists(src))
 	if !reflect.DeepEqual(got, src) {
 		t.Errorf("AllowLists round-trip mismatch\n  got:  %+v\n  want: %+v", got, src)
 	}
@@ -198,9 +198,9 @@ func TestWrapAllowLists_EmptySlicesBecomeNil(t *testing.T) {
 	// Round-trip the empty-but-non-nil facade through toInternal and
 	// confirm the upstream AllowLists.IsEmpty returns true so the
 	// resolve-path "no fencing" branch is taken.
-	rt := toInternalAllowLists(got)
+	rt := ToInternalAllowLists(got)
 	if rt == nil {
-		t.Fatal("toInternalAllowLists returned nil for non-nil empty input")
+		t.Fatal("ToInternalAllowLists returned nil for non-nil empty input")
 	}
 	if !rt.IsEmpty() {
 		t.Errorf("round-tripped AllowLists.IsEmpty() = false, want true")

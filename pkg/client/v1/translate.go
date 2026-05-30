@@ -220,12 +220,17 @@ func WrapAllowLists(al *recipe.AllowLists) *AllowLists {
 	}
 }
 
-// toInternalAllowLists translates a facade AllowLists into the
+// ToInternalAllowLists translates a facade AllowLists into the
 // pkg/recipe.AllowLists enum-typed shape the resolver consumes. The
 // string values are wrapped in the corresponding pkg/recipe enum types
 // without validation; registry-strict mode at resolve time rejects
 // unknown values.
-func toInternalAllowLists(al *AllowLists) *recipe.AllowLists {
+//
+// Exposed so in-tree adapters (e.g., the REST handler's pre-check)
+// share the same facade→internal projection as the Client's internal
+// backstop, instead of inlining a parallel mapping that can drift if
+// AllowLists gains a field.
+func ToInternalAllowLists(al *AllowLists) *recipe.AllowLists {
 	if al == nil {
 		return nil
 	}

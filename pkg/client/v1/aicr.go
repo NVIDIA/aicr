@@ -359,7 +359,7 @@ func (c *Client) enforceAllowLists(criteria *recipe.Criteria) error {
 	if c.allowLists == nil {
 		return nil
 	}
-	return toInternalAllowLists(c.allowLists).ValidateCriteria(criteria)
+	return ToInternalAllowLists(c.allowLists).ValidateCriteria(criteria)
 }
 
 // ResolveRecipe maps a RecipeRequest to a concrete validated recipe.

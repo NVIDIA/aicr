@@ -26,28 +26,13 @@ import (
 // emitted; the Client's internal enforcement on Resolve/MakeBundle remains a
 // backstop for callers that go straight to the facade methods.
 //
-// The translation is a thin string-slice → enum-slice projection; it is not
-// in the hot path (handlers run it once per request).
+// Delegates the facade→internal AllowLists projection to
+// aicr.ToInternalAllowLists so this pre-check and the Client's backstop
+// share a single translator — a field added to AllowLists is wired in one
+// place rather than mapped twice.
 func validateAgainstAllowLists(al *aicr.AllowLists, c *recipe.Criteria) error {
 	if al == nil {
 		return nil
 	}
-	internal := &recipe.AllowLists{
-		Accelerators: convertToTypes[recipe.CriteriaAcceleratorType](al.Accelerators),
-		Services:     convertToTypes[recipe.CriteriaServiceType](al.Services),
-		Intents:      convertToTypes[recipe.CriteriaIntentType](al.Intents),
-		OSTypes:      convertToTypes[recipe.CriteriaOSType](al.OSTypes),
-	}
-	return internal.ValidateCriteria(c)
-}
-
-func convertToTypes[T ~string](in []string) []T {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]T, len(in))
-	for i, v := range in {
-		out[i] = T(v)
-	}
-	return out
+	return aicr.ToInternalAllowLists(al).ValidateCriteria(c)
 }
