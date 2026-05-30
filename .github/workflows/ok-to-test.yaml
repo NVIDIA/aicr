@@ -14,14 +14,20 @@
 
 # Allows maintainers to run the full qualification suite on fork PRs
 # by commenting "/ok-to-test" on the PR. This runs in the base repo
-# context, but only grants the minimum permissions needed because the
-# called qualification workflow checks out and runs fork-controlled
-# local actions (`./.github/actions/*`). Privileged grants
-# (id-token: write, security-events: write) are deliberately withheld
-# here so a malicious fork cannot mint OIDC tokens or upload to code
-# scanning. Steps that need those tokens are either already gated to
-# non-fork PRs (e.g. SLSA predicate) or degrade gracefully on permission
-# denial (e.g. SARIF upload via continue-on-error).
+# context. The called qualification workflow checks out and runs
+# fork-controlled local actions (`./.github/actions/*`), so the
+# privileged jobs (cli-e2e with id-token: write, security-scan with
+# security-events: write) are gated by `if: inputs.privileged_ci` in
+# qualification.yaml and we pass `privileged_ci: false` below. Those
+# jobs are skipped before any step runs, so no fork-controlled code
+# ever executes with elevated tokens.
+#
+# We must still declare id-token: write and security-events: write on
+# the reusable-workflow call: GitHub validates the union of permissions
+# requested by every job in the called workflow at startup — before
+# `if:` conditions evaluate — and rejects the run with startup_failure
+# if any declared permission is missing here. The grants are declarative
+# only; the gated jobs never consume them on the fork path.
 
 name: OK to Test
 
@@ -82,6 +88,12 @@ jobs:
     permissions:
       actions: read
       contents: read
+      # Declarative-only: required because qualification.yaml's cli-e2e and
+      # security-scan jobs declare these permissions and GitHub validates the
+      # union at startup. Those jobs are skipped via `if: inputs.privileged_ci`
+      # when privileged_ci=false (set below), so the grants are never consumed.
+      id-token: write
+      security-events: write
     with:
       privileged_ci: false
       ref: ${{ needs.authorize.outputs.ref }}
