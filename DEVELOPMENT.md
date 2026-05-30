@@ -193,7 +193,7 @@ aicr/
 - **Output**: Supports JSON, YAML, and table formats
 
 #### API Server
-- **Location**: `cmd/aicrd/main.go` → `pkg/server/`, `pkg/api/`
+- **Location**: `cmd/aicrd/main.go` → `pkg/server/`
 - **Endpoints**:
   - `GET /v1/recipe` - Generate configuration recipes
   - `GET /health` - Liveness probe
@@ -266,7 +266,7 @@ aicr/
 
 ### Architecture Principle
 
-Business logic lives in `pkg/*` packages. The `pkg/cli` and `pkg/api` packages handle user interaction only, delegating to functional packages so both CLI and API can share the same logic.
+Business logic lives in `pkg/*` packages. The `pkg/cli` and `pkg/server` packages handle user interaction only — both delegate to the `pkg/client/v1` facade (and the functional packages it composes) so CLI and HTTP surfaces share the same logic.
 
 For detailed architecture documentation, see [docs/contributor/index.md](docs/contributor/index.md).
 

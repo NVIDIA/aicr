@@ -24,3 +24,12 @@ const keyMethod = "method"
 // keyMethod convention so HTTP labels stay consistent across metrics,
 // logs, and error responses.
 const keyPath = "path"
+
+// Structured-error detail keys used by the recipe and bundle handlers.
+// Mirror the values the legacy pkg/recipe handlers emit so the
+// facade-backed responses stay byte-identical.
+const (
+	keyError      = "error"
+	keyAllowed    = "allowed"
+	keyLimitBytes = "limit_bytes"
+)

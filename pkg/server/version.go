@@ -53,12 +53,12 @@ func negotiateAPIVersion(r *http.Request) string {
 		}
 		// "application/vnd.nvidia.aicr.v2+json" → "v2+json" → "v2"
 		rest := strings.TrimPrefix(lower, vendorMediaTypePrefix)
-		version := rest
+		apiVersion := rest
 		if i := strings.Index(rest, "+"); i >= 0 {
-			version = rest[:i]
+			apiVersion = rest[:i]
 		}
-		if isValidAPIVersion(version) {
-			return version
+		if isValidAPIVersion(apiVersion) {
+			return apiVersion
 		}
 	}
 

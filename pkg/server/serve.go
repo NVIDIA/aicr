@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package server
 
 import (
 	"context"
@@ -25,7 +25,6 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/logging"
-	"github.com/NVIDIA/aicr/pkg/server"
 )
 
 const (
@@ -35,13 +34,13 @@ const (
 
 var (
 	// overridden during build with ldflags to reflect actual version info
-	// e.g., -X "github.com/NVIDIA/aicr/pkg/api.version=1.0.0"
+	// e.g., -X "github.com/NVIDIA/aicr/pkg/server.version=1.0.0"
 	version = versionDefault
 	commit  = "unknown"
 	date    = "unknown"
 )
 
-// Serve starts the API server and blocks until shutdown.
+// Serve starts the aicrd HTTP server and blocks until shutdown.
 // It configures logging, sets up routes, and handles graceful shutdown.
 // Returns an error if the server fails to start or encounters a fatal error.
 func Serve() error {
@@ -118,10 +117,10 @@ func Serve() error {
 	}
 
 	// Create and run server
-	s := server.New(
-		server.WithName(name),
-		server.WithVersion(version),
-		server.WithHandler(r),
+	s := New(
+		WithName(name),
+		WithVersion(version),
+		WithHandler(r),
 	)
 
 	if err := s.Run(ctx); err != nil {

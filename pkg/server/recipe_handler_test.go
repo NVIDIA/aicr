@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package server
 
 import (
 	"encoding/json"
@@ -125,8 +125,7 @@ func TestHandleRecipes_MethodNotAllowed(t *testing.T) {
 }
 
 // TestHandleRecipes_AllowListRejection verifies an out-of-allowlist criterion is
-// rejected, and that the facade-backed handler produces byte-identical output to
-// the legacy pkg/recipe Builder handler for the same rejection.
+// rejected with a 400 carrying the underlying allowlist error message.
 func TestHandleRecipes_AllowListRejection(t *testing.T) {
 	// Allow only a100; h100 falls outside and must be rejected.
 	facadeAllow := &aicr.AllowLists{
@@ -134,49 +133,21 @@ func TestHandleRecipes_AllowListRejection(t *testing.T) {
 	}
 	h := newTestHandler(t, facadeAllow)
 
-	// Reference: the legacy Builder handler, same allowlists. The facade
-	// AllowLists carries plain strings (semver-stable surface); the upstream
-	// pkg/recipe.AllowLists carries enum-typed slices — so the test
-	// constructs both shapes here for the two consumers.
-	rb := recipe.NewBuilder(
-		recipe.WithVersion("test"),
-		recipe.WithAllowLists(&recipe.AllowLists{
-			Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorA100},
-		}),
-	)
-
 	const target = "/v1/recipe?accelerator=h100&intent=training"
 
-	facadeReq := httptest.NewRequest(http.MethodGet, target, nil)
-	facadeW := httptest.NewRecorder()
-	h.HandleRecipes(facadeW, facadeReq)
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	w := httptest.NewRecorder()
+	h.HandleRecipes(w, req)
 
-	legacyReq := httptest.NewRequest(http.MethodGet, target, nil)
-	legacyW := httptest.NewRecorder()
-	rb.HandleRecipes(legacyW, legacyReq)
-
-	if facadeW.Code != http.StatusBadRequest {
-		t.Fatalf("facade status = %d, want %d; body: %s", facadeW.Code, http.StatusBadRequest, facadeW.Body.String())
-	}
-	if facadeW.Code != legacyW.Code {
-		t.Errorf("facade status = %d, legacy status = %d", facadeW.Code, legacyW.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
 
-	// Decode both error bodies and compare the user-facing fields. RequestID
-	// and Timestamp differ per request, so compare code/message/details only.
-	facadeErr := decodeErrorBody(t, facadeW.Body.Bytes())
-	legacyErr := decodeErrorBody(t, legacyW.Body.Bytes())
-
-	if facadeErr.Message != legacyErr.Message {
-		t.Errorf("message parity: facade %q != legacy %q", facadeErr.Message, legacyErr.Message)
-	}
-	if facadeErr.Code != legacyErr.Code {
-		t.Errorf("code parity: facade %q != legacy %q", facadeErr.Code, legacyErr.Code)
-	}
+	errResp := decodeErrorBody(t, w.Body.Bytes())
 	// The allowlist error carries its own message; the fallback "Criteria
 	// value not allowed" is only used when the inner message is empty.
-	if facadeErr.Message != "accelerator type not allowed" {
-		t.Errorf("message = %q, want %q", facadeErr.Message, "accelerator type not allowed")
+	if errResp.Message != "accelerator type not allowed" {
+		t.Errorf("message = %q, want %q", errResp.Message, "accelerator type not allowed")
 	}
 }
 
@@ -243,36 +214,23 @@ func TestHandleQuery_Success(t *testing.T) {
 	}
 }
 
-// TestHandleQuery_POSTMatchesLegacy proves the facade-backed query POST resolves
-// the same criteria as the legacy recipe.Builder handler for an identical flat
-// body — i.e. the POST criteria actually take effect rather than unmarshalling
-// to empty criteria.
-func TestHandleQuery_POSTMatchesLegacy(t *testing.T) {
+// TestHandleQuery_POSTCriteriaTakesEffect proves the facade-backed query POST
+// resolves criteria from the flat body — i.e. the POST criteria actually take
+// effect rather than unmarshalling to empty criteria.
+func TestHandleQuery_POSTCriteriaTakesEffect(t *testing.T) {
 	const body = `{"criteria":{"accelerator":"h100","intent":"training"},"selector":"components.gpu-operator.values.driver.version"}`
 
-	newReq := func() *http.Request {
-		r := httptest.NewRequest(http.MethodPost, "/v1/query", strings.NewReader(body))
-		r.Header.Set("Content-Type", "application/json")
-		return r
-	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/query", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	newTestHandler(t, nil).HandleQuery(w, req)
 
-	// Facade handler (WithVersion "test").
-	fw := httptest.NewRecorder()
-	newTestHandler(t, nil).HandleQuery(fw, newReq())
-
-	// Legacy handler with the same version.
-	lw := httptest.NewRecorder()
-	recipe.NewBuilder(recipe.WithVersion("test")).HandleQuery(lw, newReq())
-
-	if fw.Code != http.StatusOK || lw.Code != http.StatusOK {
-		t.Fatalf("status: facade=%d legacy=%d (facade body: %s)", fw.Code, lw.Code, fw.Body.String())
-	}
-	if fw.Body.String() != lw.Body.String() {
-		t.Errorf("query POST body mismatch:\n facade=%s\n legacy=%s", fw.Body.String(), lw.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 	var selected string
-	if err := json.Unmarshal(fw.Body.Bytes(), &selected); err != nil || selected == "" {
-		t.Fatalf("expected non-empty resolved driver version, got %q (err %v)", fw.Body.String(), err)
+	if err := json.Unmarshal(w.Body.Bytes(), &selected); err != nil || selected == "" {
+		t.Fatalf("expected non-empty resolved driver version, got %q (err %v)", w.Body.String(), err)
 	}
 }
 
@@ -342,37 +300,20 @@ func TestHandleQuery_AllowListRejection(t *testing.T) {
 		Accelerators: []string{string(recipe.CriteriaAcceleratorA100)},
 	}
 	h := newTestHandler(t, facadeAllow)
-	rb := recipe.NewBuilder(
-		recipe.WithVersion("test"),
-		recipe.WithAllowLists(&recipe.AllowLists{
-			Accelerators: []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorA100},
-		}),
-	)
 
 	const target = "/v1/query?accelerator=h100&intent=training&selector=components.gpu-operator"
 
-	facadeReq := httptest.NewRequest(http.MethodGet, target, nil)
-	facadeW := httptest.NewRecorder()
-	h.HandleQuery(facadeW, facadeReq)
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	w := httptest.NewRecorder()
+	h.HandleQuery(w, req)
 
-	legacyReq := httptest.NewRequest(http.MethodGet, target, nil)
-	legacyW := httptest.NewRecorder()
-	rb.HandleQuery(legacyW, legacyReq)
-
-	if facadeW.Code != http.StatusBadRequest {
-		t.Fatalf("facade status = %d, want %d; body: %s", facadeW.Code, http.StatusBadRequest, facadeW.Body.String())
-	}
-	if facadeW.Code != legacyW.Code {
-		t.Errorf("facade status = %d, legacy status = %d", facadeW.Code, legacyW.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
 
-	facadeErr := decodeErrorBody(t, facadeW.Body.Bytes())
-	legacyErr := decodeErrorBody(t, legacyW.Body.Bytes())
-	if facadeErr.Message != legacyErr.Message {
-		t.Errorf("message parity: facade %q != legacy %q", facadeErr.Message, legacyErr.Message)
-	}
-	if facadeErr.Code != legacyErr.Code {
-		t.Errorf("code parity: facade %q != legacy %q", facadeErr.Code, legacyErr.Code)
+	errResp := decodeErrorBody(t, w.Body.Bytes())
+	if errResp.Message != "accelerator type not allowed" {
+		t.Errorf("message = %q, want %q", errResp.Message, "accelerator type not allowed")
 	}
 }
 

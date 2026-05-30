@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package server
 
 import (
 	"context"
@@ -27,22 +27,12 @@ import (
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/server"
 )
 
 // recipeCacheTTL controls the Cache-Control max-age on successful recipe and
 // query responses. Mirrors the value the pkg/recipe handlers emit so the
 // facade-backed handlers stay byte-identical.
 var recipeCacheTTL = defaults.RecipeCacheTTL
-
-// Detail keys for structured error responses. These mirror the values the
-// pkg/recipe handlers emit so the facade-backed responses stay byte-identical.
-const (
-	keyError      = "error"
-	keyAllowed    = "allowed"
-	keyMethod     = "method"
-	keyLimitBytes = "limit_bytes"
-)
 
 // recipeHandler backs the /v1/recipe and /v1/query endpoints with an
 // aicr.Client. It reproduces the behavior of the pkg/recipe Builder handlers
@@ -73,7 +63,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), defaults.RecipeHandlerTimeout)
 	defer cancel()
 
-	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
+	logger := slog.With("requestID", RequestIDFromContext(r.Context()))
 
 	var criteria *recipe.Criteria
 	var err error
@@ -102,7 +92,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 				"limit", defaults.MaxRecipePOSTBytes,
 				"received", maxBytesErr.Limit,
 			)
-			server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
+			WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
 				"Request body exceeds maximum allowed size", false, map[string]any{
 					keyLimitBytes: defaults.MaxRecipePOSTBytes,
 				})
@@ -110,7 +100,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		w.Header().Set("Allow", "GET, POST")
-		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
+		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
 				keyMethod:  r.Method,
 				keyAllowed: []string{"GET", "POST"},
@@ -119,7 +109,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Invalid recipe criteria", false, map[string]any{
 				keyError: err.Error(),
 			})
@@ -127,7 +117,7 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if criteria == nil {
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Recipe criteria cannot be empty", false, nil)
 		return
 	}
@@ -146,14 +136,14 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	// enforcement remains a backstop.
 	if h.allowLists != nil {
 		if validateErr := validateAgainstAllowLists(h.allowLists, criteria); validateErr != nil {
-			server.WriteErrorFromErr(w, r, validateErr, "Criteria value not allowed", nil)
+			WriteErrorFromErr(w, r, validateErr, "Criteria value not allowed", nil)
 			return
 		}
 	}
 
 	result, err := h.client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
 	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
+		WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
 		return
 	}
 
@@ -175,7 +165,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), defaults.RecipeHandlerTimeout)
 	defer cancel()
 
-	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
+	logger := slog.With("requestID", RequestIDFromContext(r.Context()))
 
 	var criteria *recipe.Criteria
 	var selector string
@@ -206,13 +196,13 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 					"limit", defaults.MaxRecipePOSTBytes,
 					"received", maxBytesErr.Limit,
 				)
-				server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
+				WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
 					"Request body exceeds maximum allowed size", false, map[string]any{
 						keyLimitBytes: defaults.MaxRecipePOSTBytes,
 					})
 				return
 			}
-			server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+			WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 				"Invalid query request body", false, map[string]any{
 					keyError: parseErr.Error(),
 				})
@@ -220,7 +210,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Criteria != nil {
 			if validateErr := req.Criteria.ValidateWithRegistry(h.client.CriteriaRegistry()); validateErr != nil {
-				server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+				WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 					"Invalid criteria in request body", false, map[string]any{
 						keyError: validateErr.Error(),
 					})
@@ -231,7 +221,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		selector = req.Selector
 	default:
 		w.Header().Set("Allow", "GET, POST")
-		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
+		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
 				keyMethod:  r.Method,
 				keyAllowed: []string{"GET", "POST"},
@@ -240,7 +230,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Invalid query criteria", false, map[string]any{
 				keyError: err.Error(),
 			})
@@ -248,7 +238,7 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if criteria == nil {
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Query criteria cannot be empty", false, nil)
 		return
 	}
@@ -267,14 +257,14 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// enforcement remains a backstop.
 	if h.allowLists != nil {
 		if validateErr := validateAgainstAllowLists(h.allowLists, criteria); validateErr != nil {
-			server.WriteErrorFromErr(w, r, validateErr, "Criteria value not allowed", nil)
+			WriteErrorFromErr(w, r, validateErr, "Criteria value not allowed", nil)
 			return
 		}
 	}
 
 	rec, err := h.client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
 	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
+		WriteErrorFromErr(w, r, err, "Failed to build recipe", nil)
 		return
 	}
 
@@ -285,13 +275,13 @@ func (h *recipeHandler) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// pkg/recipe.RecipeResult that HydrateResult accepts.
 	hydrated, err := recipe.HydrateResultWithContext(ctx, rec.Resolved())
 	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Failed to hydrate recipe", nil)
+		WriteErrorFromErr(w, r, err, "Failed to hydrate recipe", nil)
 		return
 	}
 
 	selected, err := recipe.Select(hydrated, selector)
 	if err != nil {
-		server.WriteError(w, r, http.StatusNotFound, aicrerrors.ErrCodeNotFound,
+		WriteError(w, r, http.StatusNotFound, aicrerrors.ErrCodeNotFound,
 			"Selector path not found", false, map[string]any{
 				"selector": selector,
 				keyError:   err.Error(),

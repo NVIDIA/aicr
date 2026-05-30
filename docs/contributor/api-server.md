@@ -33,9 +33,9 @@ For the complete workflow (snapshot → recipe → validate → bundle, ConfigMa
 
 ```mermaid
 flowchart TD
-    A["aicrd<br/>cmd/aicrd/main.go"] --> B["pkg/api/server.go<br/>Serve()"]
+    A["aicrd<br/>cmd/aicrd/main.go"] --> B["pkg/server/serve.go<br/>Serve()"]
     
-    B --> B1["• Initialize logging<br/>• Create recipe.Builder<br/>• Create bundler.DefaultBundler<br/>• Setup routes: /v1/recipe, /v1/bundle<br/>• Create server with middleware<br/>• Graceful shutdown"]
+    B --> B1["• Initialize logging<br/>• Construct aicr.Client facade<br/>• Wire recipeHandler + bundleHandler<br/>• Setup routes: /v1/recipe, /v1/query, /v1/bundle<br/>• Create server with middleware<br/>• Graceful shutdown"]
     
     B1 --> C["pkg/server/server.go<br/>HTTP Server Infrastructure"]
     
@@ -45,12 +45,12 @@ flowchart TD
     
     C3 --> D["Application Handlers"]
     
-    D --> D1["recipe.Builder.HandleRecipes<br/>GET /v1/recipe"]
-    D --> D2["bundler.DefaultBundler.HandleBundles<br/>POST /v1/bundle"]
+    D --> D1["recipeHandler.HandleRecipes / HandleQuery<br/>GET POST /v1/recipe and /v1/query"]
+    D --> D2["bundleHandler.HandleBundles<br/>POST /v1/bundle"]
     
-    D1 --> D1a["1. Method validation (GET)<br/>2. Parse query params<br/>3. Build query<br/>4. Builder.Build(ctx, query)<br/>5. Return JSON response"]
+    D1 --> D1a["1. Method validation<br/>2. Parse criteria (query or body)<br/>3. aicr.Client.BuildRecipe(ctx, criteria)<br/>4. Return JSON or YAML response"]
     
-    D2 --> D2a["1. Method validation (POST)<br/>2. Parse JSON body<br/>3. Validate recipe<br/>4. Generate bundles<br/>5. Return ZIP response"]
+    D2 --> D2a["1. Method validation (POST)<br/>2. Parse RecipeResult body<br/>3. aicr.Client.MakeBundle(ctx, result)<br/>4. Stream ZIP response"]
 ```
 
 ## Request Flow
@@ -71,13 +71,13 @@ flowchart TD
     
     M5["5. Logging Middleware<br/>• Log request start<br/>• Capture status<br/>• Log completion"] --> H
     
-    H["6. Application Handler<br/>recipe.Builder.HandleRecipes"] --> H1
+    H["6. Application Handler<br/>recipeHandler.HandleRecipes"] --> H1
 
     H1["A. Method Validation<br/>(GET only)"] --> H2
     H2["B. Parse Query Parameters<br/>service, accelerator, intent, os, nodes"] --> H3
     H3["C. Format Validation<br/>• Validate enums<br/>• Parse values<br/>• Return 400 on error"] --> H3a
     H3a["D. Allowlist Validation<br/>• Check against configured allowlists<br/>• Return 400 if disallowed"] --> H4
-    H4["E. Build Recipe<br/>• Builder.BuildFromCriteria(ctx, criteria)<br/>• Load store (cached)<br/>• Apply matching overlays"] --> H5
+    H4["E. Build Recipe<br/>• aicr.Client.BuildRecipe(ctx, criteria)<br/>• Load store (cached)<br/>• Apply matching overlays"] --> H5
     H5["F. Respond<br/>• Set Cache-Control<br/>• Serialize to JSON<br/>• Return 200 OK"] --> Z
     
     Z[JSON Response]
@@ -94,19 +94,19 @@ package main
 
 import (
     "log"
-    "github.com/NVIDIA/aicr/pkg/api"
+    "github.com/NVIDIA/aicr/pkg/server"
 )
 
 func main() {
-    if err := api.Serve(); err != nil {
+    if err := server.Serve(); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-### API Package: `pkg/api/server.go`
+### Server Package: `pkg/server/serve.go`
 
-**Responsibilities:** initialize structured logging; parse criteria allowlists; create recipe builder, query handler, and bundle handler with allowlist configuration; install signal handling; run server with middleware; handle graceful shutdown.
+**Responsibilities:** initialize structured logging; parse criteria allowlists; construct the `aicr.Client` facade (long-lived, embedded data source); wire the recipe and bundle handlers as thin adapters over the facade; install signal handling; run server with middleware; handle graceful shutdown.
 
 **Key Features:** version info injected via ldflags (`version`, `commit`, `date`); routes `/v1/recipe`, `/v1/query`, `/v1/bundle`; allowlists from `AICR_ALLOWED_*` env vars; production defaults; graceful shutdown on SIGINT/SIGTERM.
 
@@ -120,24 +120,31 @@ func Serve() error {
 
     logging.SetDefaultStructuredLogger(name, version)
 
-    allowLists, err := recipe.ParseAllowListsFromEnv()
+    allowLists, err := aicr.ParseAllowListsFromEnv()
     if err != nil {
         return errors.Wrap(errors.ErrCodeInternal, "failed to parse allowlists from environment", err)
     }
 
-    rb := recipe.NewBuilder(recipe.WithVersion(version), recipe.WithAllowLists(allowLists))
-    bb, err := bundler.New(bundler.WithAllowLists(allowLists))
+    client, err := aicr.NewClient(
+        aicr.WithRecipeSource(aicr.EmbeddedSource()),
+        aicr.WithVersion(version),
+        aicr.WithAllowLists(allowLists),
+    )
     if err != nil {
-        return errors.Wrap(errors.ErrCodeInternal, "failed to create bundler", err)
+        return errors.Wrap(errors.ErrCodeInternal, "failed to construct aicr client", err)
     }
+    defer client.Close()
 
-    s := server.New(
-        server.WithName(name),
-        server.WithVersion(version),
-        server.WithHandler(map[string]http.HandlerFunc{
-            "/v1/recipe": rb.HandleRecipes,
-            "/v1/query":  rb.HandleQuery,
-            "/v1/bundle": bb.HandleBundles,
+    h := newRecipeHandler(client, allowLists)
+    bh := newBundleHandler(client, allowLists)
+
+    s := New(
+        WithName(name),
+        WithVersion(version),
+        WithHandler(map[string]http.HandlerFunc{
+            "/v1/recipe": h.HandleRecipes,
+            "/v1/query":  h.HandleQuery,
+            "/v1/bundle": bh.HandleBundles,
         }),
     )
     return s.Run(ctx)
@@ -1016,9 +1023,9 @@ VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-LDFLAGS := -X github.com/NVIDIA/aicr/pkg/api.version=$(VERSION)
-LDFLAGS += -X github.com/NVIDIA/aicr/pkg/api.commit=$(COMMIT)
-LDFLAGS += -X github.com/NVIDIA/aicr/pkg/api.date=$(DATE)
+LDFLAGS := -X github.com/NVIDIA/aicr/pkg/server.version=$(VERSION)
+LDFLAGS += -X github.com/NVIDIA/aicr/pkg/server.commit=$(COMMIT)
+LDFLAGS += -X github.com/NVIDIA/aicr/pkg/server.date=$(DATE)
 
 go build -ldflags="$(LDFLAGS)" -o bin/aicrd ./cmd/aicrd
 ```
@@ -1031,7 +1038,7 @@ Production images are built with ko (automated in CI/CD). For local development:
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN go build -ldflags="-X github.com/NVIDIA/aicr/pkg/api.version=v1.0.0" \
+RUN go build -ldflags="-X github.com/NVIDIA/aicr/pkg/server.version=v1.0.0" \
     -o /bin/aicrd ./cmd/aicrd
 
 FROM alpine:3.19

@@ -71,9 +71,6 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 // digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 const digestAlgoSHA256 = "sha256"
 
-// keyError is the map key used in structured-error context payloads.
-const keyError = "error"
-
 // DefaultBundler generates Helm per-component bundles from recipes.
 //
 // The per-component approach produces a directory per component, each with its

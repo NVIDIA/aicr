@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package server
 
 import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"

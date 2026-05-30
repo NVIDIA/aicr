@@ -477,7 +477,7 @@ func TestResolveImageCIContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"pkg/cli.commit={{.FullCommit}}",
-		"pkg/api.commit={{.FullCommit}}",
+		"pkg/server.commit={{.FullCommit}}",
 	} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("goreleaser must inject FullCommit so :sha-<commit> matches on-push.yaml; missing %q", want)

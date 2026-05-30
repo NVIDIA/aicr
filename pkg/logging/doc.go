@@ -186,7 +186,7 @@
 // # Integration
 //
 // This package is used by:
-//   - pkg/api - API server logging
+//   - pkg/server - API server logging
 //   - pkg/cli - CLI command logging
 //   - pkg/collector - Data collection logging
 //   - pkg/snapshotter - Snapshot operation logging

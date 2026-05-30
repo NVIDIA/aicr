@@ -102,7 +102,8 @@ workspace paths. Use local file paths only when explicitly requested.
 | Package | Purpose | Business Logic? |
 |---------|---------|-----------------|
 | `pkg/cli` | User interaction, input validation, output formatting | No |
-| `pkg/api` | REST API handlers | No |
+| `pkg/server` | aicrd HTTP server: middleware chain + REST handlers (thin adapters over `pkg/client/v1`) | No |
+| `pkg/client/v1` | aicr.Client facade (recipe + bundle entry points) — the shared SDK used by CLI, server, and external Go callers | No |
 | `pkg/recipe` | Recipe resolution, overlay system, component registry | Yes |
 | `pkg/bundler` | Per-component Helm bundle generation from recipes | Yes |
 | `pkg/component` | Bundler utilities and test helpers | Yes |
@@ -119,8 +120,8 @@ workspace paths. Use local file paths only when explicitly requested.
 | `pkg/defaults` | Centralized timeout and configuration constants | Yes |
 
 **Critical Architecture Principle:**
-- `pkg/cli` and `pkg/api` = user interaction only, no business logic
-- Business logic lives in functional packages so CLI and API can both use it
+- `pkg/cli` and `pkg/server` = user interaction only, no business logic
+- Business logic lives in functional packages (and the `pkg/client/v1` facade) so CLI and HTTP handlers can both use it
 
 ## Required Patterns
 
@@ -235,7 +236,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 | New Kustomize component | `recipes/registry.yaml` | Add entry with name, displayName, kustomize settings |
 | Component values | `recipes/components/<name>/` | Create values.yaml with Helm chart configuration |
 | New collector | `pkg/collector/<type>/` | Implement `Collector` interface, add to factory |
-| New API endpoint | `pkg/api/` | Handler + middleware chain + OpenAPI spec update |
+| New API endpoint | `pkg/server/` | Handler (thin adapter over `pkg/client/v1`) + middleware chain + OpenAPI spec update |
 | Fix test failures | Run `make test` | Check race conditions (`-race`), verify context handling |
 | New health check | `recipes/checks/<name>/` | Create `health-check.yaml`, register in `registry.yaml`, test with `make check-health` |
 

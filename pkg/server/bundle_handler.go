@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package server
 
 import (
 	"context"
@@ -27,7 +27,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/server"
 )
 
 // bundleHandler backs the /v1/bundle endpoint with an aicr.Client. It
@@ -57,11 +56,11 @@ func newBundleHandler(client *aicr.Client, allowLists *aicr.AllowLists) *bundleH
 // node selectors/tolerations, repo, workload-gate, workload-selector, nodes,
 // vendor-charts, app-name). The response is a zip archive of the bundle.
 func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
-	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
+	logger := slog.With("requestID", RequestIDFromContext(r.Context()))
 
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
+		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
 				keyMethod: r.Method,
 			})
@@ -76,7 +75,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// boundary so this handler stays byte-identical to the legacy one.
 	bundleConfig, err := bundler.ParseBundleConfig(r)
 	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
+		WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
 		return
 	}
 
@@ -91,13 +90,13 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 				"limit", defaults.MaxBundlePOSTBytes,
 				"received", maxBytesErr.Limit,
 			)
-			server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
+			WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
 				"Request body exceeds maximum allowed size", false, map[string]any{
 					keyLimitBytes: defaults.MaxBundlePOSTBytes,
 				})
 			return
 		}
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Invalid request body", false, map[string]any{
 				keyError: err.Error(),
 			})
@@ -106,7 +105,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 
 	// Validate recipe has component references.
 	if len(recipeResult.ComponentRefs) == 0 {
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
+		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Recipe must contain at least one component reference", false, nil)
 		return
 	}
@@ -116,7 +115,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// MakeBundle enforcement remains a backstop.
 	if h.allowLists != nil && recipeResult.Criteria != nil {
 		if validateErr := validateAgainstAllowLists(h.allowLists, recipeResult.Criteria); validateErr != nil {
-			server.WriteErrorFromErr(w, r, validateErr, "Recipe criteria value not allowed", nil)
+			WriteErrorFromErr(w, r, validateErr, "Recipe criteria value not allowed", nil)
 			return
 		}
 	}
@@ -128,7 +127,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// Create temporary directory for bundle output.
 	tempDir, err := os.MkdirTemp("", "aicr-bundle-*")
 	if err != nil {
-		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
+		WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
 			"Failed to create temporary directory", true, nil)
 		return
 	}
@@ -139,7 +138,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// through the Client's recipe source.
 	adopted, err := h.client.AdoptRecipe(ctx, &recipeResult)
 	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Failed to prepare recipe for bundling", nil)
+		WriteErrorFromErr(w, r, err, "Failed to prepare recipe for bundling", nil)
 		return
 	}
 
@@ -155,7 +154,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		Timeout:   defaults.BundleHandlerTimeout,
 	})
 	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Failed to generate bundle", nil)
+		WriteErrorFromErr(w, r, err, "Failed to generate bundle", nil)
 		return
 	}
 
@@ -172,7 +171,7 @@ func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 				"bundler", be.BundlerType,
 				"error", be.Error)
 		}
-		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
+		WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
 			"Bundle generation failed", true, map[string]any{
 				"failedBundlers": failedBundlers,
 			})

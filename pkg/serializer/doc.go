@@ -202,6 +202,6 @@
 // Used throughout AICR for data I/O:
 //   - pkg/cli - Command output formatting
 //   - pkg/snapshotter - Snapshot serialization
-//   - pkg/api - HTTP response encoding
+//   - pkg/server - HTTP response encoding
 //   - pkg/recipe - Recipe output
 package serializer

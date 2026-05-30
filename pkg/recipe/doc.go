@@ -121,10 +121,8 @@
 //	    fmt.Printf("Component: %s, Version: %s\n", ref.Name, ref.Version)
 //	}
 //
-// HTTP handler for API server:
-//
-//	builder := recipe.NewBuilder()
-//	http.HandleFunc("/v1/recipe", builder.HandleRecipes)
+// HTTP handlers for /v1/recipe and /v1/query live in pkg/server; they are thin
+// adapters over pkg/client/v1 (aicr.Client) and do not call Builder directly.
 //
 // # Builder-Bound DataProvider (Multi-Tenant)
 //
@@ -347,7 +345,7 @@
 //
 // The recipe package is used by:
 //   - pkg/cli - recipe command for CLI usage
-//   - pkg/api - API recipe endpoint
+//   - pkg/server - HTTP recipe endpoint (via the pkg/client/v1 facade)
 //   - pkg/bundler - Bundle generation from recipes
 //
 // It depends on:

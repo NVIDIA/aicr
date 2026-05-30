@@ -16,11 +16,7 @@ package bundler
 
 import (
 	"archive/zip"
-	"context"
-	"encoding/json"
-	stderrors "errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,178 +26,15 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/server"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
-// DefaultBundleTimeout is the timeout for bundle generation.
-// Exported for backwards compatibility; prefer using defaults.BundleHandlerTimeout.
-const DefaultBundleTimeout = defaults.BundleHandlerTimeout
-
-// HandleBundles processes bundle generation requests.
-// It accepts a POST request with a JSON body containing the recipe (RecipeResult).
-// Supports query parameters:
-//   - set: Value overrides in format "bundler:path.to.field=value" (can be repeated)
-//   - dynamic: Declare value paths as install-time parameters in format "component:path.to.field" (can be repeated)
-//   - system-node-selector: Node selectors for system components in format "key=value" (can be repeated)
-//   - system-node-toleration: Tolerations for system components in format "key=value:effect" (can be repeated)
-//   - accelerated-node-selector: Node selectors for GPU nodes in format "key=value" (can be repeated)
-//   - accelerated-node-toleration: Tolerations for GPU nodes in format "key=value:effect" (can be repeated)
-//   - deployer: Deployment method (helm, argocd, or argocd-helm; default helm)
-//   - repo: Git repository URL for GitOps deployments (used with deployer=argocd)
-//   - workload-gate: Taint for nodewright-operator runtime required in format "key=value:effect" or "key:effect"
-//   - workload-selector: Label selector for nodewright-customizations in format "key=value" (can be repeated)
-//   - nodes: Estimated number of GPU nodes (sets estimatedNodeCount in nodewright-operator; 0 = unset)
-//
-// The response is a zip archive containing the Helm per-component bundle:
-//   - README.md: Root deployment guide
-//   - deploy.sh: Automation script
-//   - recipe.yaml: Copy of the input recipe
-//   - NNN-<component>/install.sh: Per-folder install script
-//   - NNN-<component>/values.yaml: Static Helm values
-//   - NNN-<component>/cluster-values.yaml: Per-cluster dynamic values
-//   - checksums.txt: SHA256 checksums of generated files
-//
-// Example:
-//
-//	POST /v1/bundle?set=gpuoperator:gds.enabled=true
-//	Content-Type: application/json
-//	Body: { "apiVersion": "aicr.nvidia.com/v1alpha1", "kind": "Recipe", ... }
-func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
-	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
-
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
-			"Method not allowed", false, map[string]any{
-				"method": r.Method,
-			})
-		return
-	}
-
-	// Add request-scoped timeout
-	ctx, cancel := context.WithTimeout(r.Context(), DefaultBundleTimeout)
-	defer cancel()
-
-	// Parse all query parameters
-	params, err := parseQueryParams(r)
-	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
-		return
-	}
-
-	// Parse request body directly as RecipeResult.
-	// Bound the body to defend against memory exhaustion.
-	bounded := http.MaxBytesReader(w, r.Body, defaults.MaxBundlePOSTBytes)
-	var recipeResult recipe.RecipeResult
-	err = json.NewDecoder(bounded).Decode(&recipeResult)
-	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if stderrors.As(err, &maxBytesErr) {
-			logger.Warn("bundle POST body exceeded size limit",
-				"limit", defaults.MaxBundlePOSTBytes,
-				"received", maxBytesErr.Limit,
-			)
-			server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
-				"Request body exceeds maximum allowed size", false, map[string]any{
-					"limit_bytes": defaults.MaxBundlePOSTBytes,
-				})
-			return
-		}
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
-			"Invalid request body", false, map[string]any{
-				keyError: err.Error(),
-			})
-		return
-	}
-
-	// Validate recipe has component references
-	if len(recipeResult.ComponentRefs) == 0 {
-		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
-			"Recipe must contain at least one component reference", false, nil)
-		return
-	}
-
-	// Validate recipe criteria against allowlists (if configured)
-	if b.AllowLists != nil && recipeResult.Criteria != nil {
-		if validateErr := b.AllowLists.ValidateCriteria(recipeResult.Criteria); validateErr != nil {
-			server.WriteErrorFromErr(w, r, validateErr, "Recipe criteria value not allowed", nil)
-			return
-		}
-	}
-
-	logger.Debug("bundle request received",
-		"components", len(recipeResult.ComponentRefs),
-		"value_overrides", len(params.valueOverrides),
-		"dynamic_declarations", len(params.dynamicValues),
-		"system_node_selectors", len(params.systemNodeSelector),
-		"accelerated_node_selectors", len(params.acceleratedNodeSelector),
-	)
-
-	// Create temporary directory for bundle output
-	tempDir, err := os.MkdirTemp("", "aicr-bundle-*")
-	if err != nil {
-		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
-			"Failed to create temporary directory", true, nil)
-		return
-	}
-	defer os.RemoveAll(tempDir) // Clean up on exit
-
-	// Create a new bundler with configuration
-	bundler, err := New(
-		WithConfig(bundleConfigFromParams(params)),
-	)
-	if err != nil {
-		logger.Error("failed to create bundler", "error", err)
-		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
-			"Failed to create bundler", true, nil)
-		return
-	}
-
-	// Generate bundle
-	output, err := bundler.Make(ctx, &recipeResult, tempDir)
-	if err != nil {
-		server.WriteErrorFromErr(w, r, err, "Failed to generate bundle", nil)
-		return
-	}
-
-	// Check for bundle errors. Per-bundler errors may include internal
-	// detail (file paths, helm template stacks, network diagnostics).
-	// Log the full payload server-side and surface only the failing
-	// bundler component names to the client — enough to know *which*
-	// component failed without leaking implementation detail on 5xx.
-	if output.HasErrors() {
-		failedBundlers := make([]string, 0, len(output.Errors))
-		for _, be := range output.Errors {
-			failedBundlers = append(failedBundlers, string(be.BundlerType))
-			logger.Error("bundler reported error",
-				"bundler", be.BundlerType,
-				"error", be.Error)
-		}
-		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
-			"Bundle generation failed", true, map[string]any{
-				"failedBundlers": failedBundlers,
-			})
-		return
-	}
-
-	// Stream zip response
-	if err := StreamZipResponse(w, tempDir, output); err != nil {
-		// Can't write error response if we've already started writing
-		logger.Error("failed to stream zip response", "error", err)
-		return
-	}
-}
-
 // ParseBundleConfig parses the /v1/bundle query parameters from r and
 // returns the bundler *config.Config they describe. It is the exported
-// boundary the aicr.Client-backed REST handler (pkg/api) uses to build
+// boundary the aicr.Client-backed REST handler (pkg/server) uses to build
 // the bundle config from a request without reimplementing the query-param
-// parsing or config-building that HandleBundles performs — keeping the
-// facade-backed /v1/bundle handler byte-identical to this one.
+// parsing or config-building.
 //
 // The returned error carries an ErrCodeInvalidRequest structured code on a
 // bad parameter, suitable for server.WriteErrorFromErr.
@@ -214,9 +47,7 @@ func ParseBundleConfig(r *http.Request) (*config.Config, error) {
 }
 
 // bundleConfigFromParams builds the bundler config from already-parsed
-// query parameters. Extracted so HandleBundles and ParseBundleConfig
-// share one config-construction site (no drift between the two /v1/bundle
-// handlers).
+// query parameters.
 func bundleConfigFromParams(params *bundleParams) *config.Config {
 	return config.NewConfig(
 		config.WithValueOverridePaths(params.valueOverrides),
@@ -237,8 +68,8 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 
 // StreamZipResponse creates a zip archive from the output directory and
 // streams it to the response. Exported so the aicr.Client-backed REST
-// handler (pkg/api) emits the same zip stream — same headers, same entry
-// layout, same compression — as HandleBundles.
+// handler (pkg/server) emits a consistent zip stream — same headers, same
+// entry layout, same compression.
 func StreamZipResponse(w http.ResponseWriter, dir string, output *result.Output) (retErr error) {
 	// Set response headers before writing body
 	w.Header().Set("Content-Type", "application/zip")

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package server
 
 import (
 	"context"
@@ -21,15 +21,12 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/NVIDIA/aicr/pkg/bundler"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // Test Coverage Note:
-// The pkg/api package contains a single Serve() function that:
+// pkg/server exposes a single Serve() function that:
 // 1. Initializes logging
-// 2. Creates a recipe builder
+// 2. Constructs the aicr.Client facade
 // 3. Configures routes
 // 4. Starts a blocking HTTP server
 //
@@ -74,18 +71,16 @@ func TestConstants(t *testing.T) {
 
 // TestRouteConfiguration verifies that the correct routes are set up,
 // mirroring how Serve wires them: /v1/recipe and /v1/query are backed by the
-// aicr.Client-based recipeHandler, and /v1/bundle by the bundler.
+// aicr.Client-based recipeHandler, and /v1/bundle by the aicr.Client-based
+// bundleHandler.
 func TestRouteConfiguration(t *testing.T) {
 	h := newTestHandler(t, nil)
-	bb, err := bundler.New()
-	if err != nil {
-		t.Fatalf("failed to create bundler: %v", err)
-	}
+	bh := newTestBundleHandler(t)
 
 	routes := map[string]http.HandlerFunc{
 		"/v1/recipe": h.HandleRecipes,
 		"/v1/query":  h.HandleQuery,
-		"/v1/bundle": bb.HandleBundles,
+		"/v1/bundle": bh.HandleBundles,
 	}
 
 	for _, path := range []string{"/v1/recipe", "/v1/query", "/v1/bundle"} {
@@ -104,7 +99,7 @@ func TestRouteConfiguration(t *testing.T) {
 
 // TestRecipeEndpoint tests the /v1/recipe endpoint
 func TestRecipeEndpoint(t *testing.T) {
-	b := recipe.NewBuilder(recipe.WithVersion("test"))
+	b := newTestHandler(t, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/recipe", nil)
 	w := httptest.NewRecorder()
@@ -125,7 +120,7 @@ func TestRecipeEndpoint(t *testing.T) {
 
 // TestRecipeEndpointMethods verifies only GET and POST are allowed
 func TestRecipeEndpointMethods(t *testing.T) {
-	b := recipe.NewBuilder()
+	b := newTestHandler(t, nil)
 
 	// These methods should return 405 Method Not Allowed
 	disallowedMethods := []string{http.MethodPut, http.MethodDelete, http.MethodPatch}
@@ -152,7 +147,7 @@ func TestRecipeEndpointMethods(t *testing.T) {
 
 // TestRecipeEndpointPOST verifies POST method works with JSON/YAML bodies
 func TestRecipeEndpointPOST(t *testing.T) {
-	b := recipe.NewBuilder()
+	b := newTestHandler(t, nil)
 
 	tests := []struct {
 		name        string
@@ -216,7 +211,7 @@ func TestRecipeEndpointPOST(t *testing.T) {
 
 // TestRecipeEndpointWithValidQueryParams tests various valid criteria combinations
 func TestRecipeEndpointWithValidQueryParams(t *testing.T) {
-	b := recipe.NewBuilder()
+	b := newTestHandler(t, nil)
 
 	tests := []struct {
 		name  string
@@ -293,7 +288,7 @@ func TestRecipeEndpointWithValidQueryParams(t *testing.T) {
 
 // TestRecipeEndpointWithInvalidQueryParams tests invalid parameter values
 func TestRecipeEndpointWithInvalidQueryParams(t *testing.T) {
-	b := recipe.NewBuilder()
+	b := newTestHandler(t, nil)
 
 	tests := []struct {
 		name  string
@@ -351,7 +346,7 @@ func TestRecipeEndpointWithInvalidQueryParams(t *testing.T) {
 
 // TestRecipeEndpointResponseHeaders verifies common response headers
 func TestRecipeEndpointResponseHeaders(t *testing.T) {
-	b := recipe.NewBuilder()
+	b := newTestHandler(t, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/recipe", nil)
 	w := httptest.NewRecorder()
@@ -369,7 +364,7 @@ func TestRecipeEndpointResponseHeaders(t *testing.T) {
 
 // TestRecipeEndpointConcurrency tests that the handler is safe for concurrent use
 func TestRecipeEndpointConcurrency(t *testing.T) {
-	b := recipe.NewBuilder()
+	b := newTestHandler(t, nil)
 
 	const numRequests = 10
 	done := make(chan bool, numRequests)
@@ -395,24 +390,16 @@ func TestRecipeEndpointConcurrency(t *testing.T) {
 	}
 }
 
-// TestRecipeBuilderInitialization verifies builder is properly initialized
-func TestRecipeBuilderInitialization(t *testing.T) {
-	testVersion := "1.2.3"
-	b := recipe.NewBuilder(
-		recipe.WithVersion(testVersion),
-	)
+// TestRecipeHandlerInitialization verifies the facade handler responds to a
+// basic recipe request without panicking.
+func TestRecipeHandlerInitialization(t *testing.T) {
+	b := newTestHandler(t, nil)
 
-	if b == nil {
-		t.Fatal("expected non-nil builder")
-	}
-
-	// Verify the handler can be called
 	req := httptest.NewRequest(http.MethodGet, "/v1/recipe", nil)
 	w := httptest.NewRecorder()
 
 	b.HandleRecipes(w, req)
 
-	// Should not panic and should return some response
 	if w.Code == 0 {
 		t.Error("handler did not set a status code")
 	}
@@ -420,7 +407,7 @@ func TestRecipeBuilderInitialization(t *testing.T) {
 
 // TestRecipeEndpointContextHandling verifies context is properly handled
 func TestRecipeEndpointContextHandling(t *testing.T) {
-	b := recipe.NewBuilder()
+	b := newTestHandler(t, nil)
 
 	// Create request with canceled context
 	ctx, cancel := context.WithCancel(context.Background())

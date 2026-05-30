@@ -94,10 +94,11 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
 **Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.11.3, Container images via Ko
 
 **Package Architecture (Critical Principle):**
-- **User Interaction Packages** (`pkg/cli`, `pkg/api`): Focus solely on capturing user intent, validating input, and formatting output. No business logic.
-- **Functional Packages** (`pkg/oci`, `pkg/bundler`, `pkg/recipe`, `pkg/collector`, `pkg/validator`): Self-contained, reusable business logic. Should be usable independently without CLI/API.
+- **User Interaction Packages** (`pkg/cli`, `pkg/server`): Focus solely on capturing user intent, validating input, and formatting output. No business logic. HTTP handlers in `pkg/server` are thin adapters over the `pkg/client/v1` facade.
+- **Facade / SDK** (`pkg/client/v1`): The `aicr.Client` facade composes the functional packages into a single entry point used by CLI, server, and external Go callers.
+- **Functional Packages** (`pkg/oci`, `pkg/bundler`, `pkg/recipe`, `pkg/collector`, `pkg/validator`): Self-contained, reusable business logic. Should be usable independently without CLI/server.
 - **Shared Utilities** (`pkg/k8s/pod`, `pkg/defaults`, `pkg/errors`): Common functionality reused across multiple packages. Avoid duplication.
-- **Example**: OCI packaging logic lives in `pkg/oci` (not `pkg/cli`), so both CLI and API can use it. Job/Pod operations live in `pkg/k8s/pod` so both agent packages can use them.
+- **Example**: OCI packaging logic lives in `pkg/oci` (not `pkg/cli`), so both CLI and HTTP handlers can use it. Job/Pod operations live in `pkg/k8s/pod` so both agent packages can use them.
 
 ---
 
@@ -182,8 +183,8 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
 
 ### I Need To: Add New API Endpoint
 
-1. Create handler in `pkg/api/`
-2. Register route in `pkg/api/server.go`
+1. Create handler in `pkg/server/` as a thin adapter over `pkg/client/v1` (add a method on the facade if a new business operation is needed)
+2. Register route in `pkg/server/serve.go`
 3. Add middleware (metrics → version → requestID → panic → rateLimit → logging)
 4. Update API spec in `api/aicr/v1/server.yaml`
 5. Write integration tests
@@ -652,35 +653,29 @@ func TestBundler_Make(t *testing.T) {
 
 ### Adding a New API Endpoint
 
-**1. Create handler in `pkg/api/`:**
+**1. Create handler in `pkg/server/` as a thin adapter over `pkg/client/v1`:**
 ```go
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
+    ctx, cancel := context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)
     defer cancel()
 
-    // Parse query parameters
-    query, err := recipe.NewQuery(
-        recipe.WithOS(r.URL.Query().Get("os")),
-        recipe.WithGPU(r.URL.Query().Get("gpu")),
-    )
+    criteria, err := parseCriteriaFromRequest(r)
     if err != nil {
-        serializer.WriteError(w, r, err, http.StatusBadRequest)
+        WriteErrorFromErr(w, r, err)
         return
     }
 
-    // Generate recipe
-    recipe, err := h.builder.Build(ctx, query)
+    result, err := h.client.BuildRecipe(ctx, criteria)
     if err != nil {
-        serializer.WriteError(w, r, err, http.StatusInternalServerError)
+        WriteErrorFromErr(w, r, err)
         return
     }
 
-    // Serialize response
-    serializer.WriteJSON(w, recipe, http.StatusOK)
+    writeJSON(w, result, http.StatusOK)
 }
 ```
 
-**2. Register route in `pkg/api/server.go`:**
+**2. Register route in `pkg/server/serve.go`:**
 ```go
 mux.Handle("/v1/recipe", handler)
 ```
