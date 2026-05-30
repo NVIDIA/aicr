@@ -38,7 +38,7 @@ func SelectFromRecipe(r *RecipeResult, selector string) (any, error) {
 	}
 	hydrated, err := recipe.HydrateResult(internal)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "hydrate recipe", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "hydrate recipe")
 	}
 	return recipe.Select(hydrated, selector)
 }

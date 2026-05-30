@@ -58,7 +58,7 @@ aliases — the table below documents which.
 | `aicr.ValidateOption` | `pkg/validator.Option` | **Facade-owned** functional-option type that captures into an internal struct and translates at call time. |
 | `aicr.RecipeResult` | `pkg/recipe.RecipeResult` | **Facade-owned struct** exposing `Name`, `Version`, `TranslatedAt`, and `Components`. Call `Resolved()` for the full upstream `*pkg/recipe.RecipeResult` (constraints, deployment order, validation config, metadata). The previous `aicr.Recipe` alias was removed in #1115; `ResolveRecipeFromCriteria` and `ResolveRecipeFromSnapshot` now return `*RecipeResult`. |
 | `aicr.AllowLists` | `pkg/recipe.AllowLists` | **Facade-owned struct** with `[]string` fields (Accelerators / Services / Intents / OSTypes). Use `aicr.WrapAllowLists` to lift a `*pkg/recipe.AllowLists`. |
-| `aicr.Criteria` | `pkg/recipe.Criteria` | **Facade-owned struct** whose enum-typed fields project to plain strings (Service / Accelerator / Intent / OS / Platform / Nodes). Use `aicr.WrapCriteria` to lift a `*pkg/recipe.Criteria`. |
+| `aicr.Criteria` | `pkg/recipe.Criteria` | **Facade-owned struct** whose enum-typed fields (Service / Accelerator / Intent / OS / Platform) project to plain strings; Nodes stays an `int` per the facade's string/int contract. Use `aicr.WrapCriteria` to lift a `*pkg/recipe.Criteria`. |
 | `aicr.CriteriaRegistry` | `pkg/recipe.CriteriaRegistry` | Documented transparent alias. Kept as an alias intentionally because the registry is behavior-rich (`ParseService`, `SetStrict`, `Values`, ...) and carries mutable per-`DataProvider` state — wrapping would either break the per-Client identity coupling (copy) or add no isolation win over the alias (pointer). |
 
 ## Recommended consumption pattern
