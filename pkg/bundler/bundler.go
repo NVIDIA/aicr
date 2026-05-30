@@ -1144,9 +1144,9 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 // the source of truth; a nil provider falls back to the package-global provider so
 // pre-WithDataProvider callers (legacy CLI path) still emit the same bundles.
 func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider) ([]string, error) {
-	// Check if the provider is a LayeredDataProvider with external files.
-	// EffectiveDataProvider falls back to the package-global provider when the
-	// caller did not bind one (pre-WithDataProvider CLI path).
+	// Check if the bound provider is a LayeredDataProvider with external
+	// files. A nil-interface receiver returns (nil, false) from the type
+	// assertion without panicking — equivalent to no external data.
 	layered, ok := provider.(*recipe.LayeredDataProvider)
 	if !ok {
 		return nil, nil // No external data
@@ -1486,10 +1486,10 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 			content, err := recipe.GetManifestContentWithProvider(provider, manifestPath)
 			if err != nil {
 				if stderrors.Is(err, fs.ErrNotExist) {
-					// Honor bound provider for the type assertion when
-					// available; EffectiveDataProvider falls back to the
-					// package-global provider when no provider is bound
-					// (CLI today).
+					// Use the bound provider for the type assertion. A nil
+					// interface returns (nil, false) without panicking, so
+					// callers without a layered provider correctly report
+					// "no external data" in the error message.
 					_, hasExternalData := provider.(*recipe.LayeredDataProvider)
 					return nil, errors.New(errors.ErrCodeInvalidRequest,
 						missingManifestMessage(manifestPath, ref.Name, hasExternalData))

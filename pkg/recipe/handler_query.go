@@ -89,7 +89,7 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.Criteria != nil {
-			if validateErr := req.Criteria.Validate(); validateErr != nil {
+			if validateErr := req.Criteria.ValidateWithRegistry(reg); validateErr != nil {
 				server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 					"Invalid criteria in request body", false, map[string]any{
 						keyError: validateErr.Error(),
