@@ -45,7 +45,7 @@ aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 aicr validate --recipe recipe.yaml
 ```
 
-The contents of the `bundles/` directory depend on the chosen `--deployer`: Helm values and a `deploy.sh` for `helm`, Argo CD `Application` manifests for `argocd`, `HelmRelease` and `Kustomization` manifests for `flux`, or a `helmfile.yaml` release graph for `helmfile`.
+The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, or simple Helm commands for `helm`.
 
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
@@ -57,7 +57,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **API Server (`aicrd`)** | REST API exposing the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
 | **Go Library (`github.com/NVIDIA/aicr/pkg/client/v1`)** | Stable Go SDK facade for in-process consumers — same workflow (resolve, bundle, snapshot, validate) callable from any Go program without a subprocess or REST hop. Per-Client isolation supports multi-tenant use. |
 | **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, kernel, OS, operators, K8s config) into a ConfigMap for validation against recipes. |
-| **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD, Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
+| **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
 | **Drift Detection** | `aicr diff` compares two snapshots to surface configuration drift between clusters or over time. |
 | **Supply Chain Security** | SLSA Level 3 provenance, signed SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
@@ -81,11 +81,11 @@ See the full [Component Catalog](docs/user/component-catalog.md) for every compo
 
 | Dimension | Values |
 |-----------|--------|
-| **Services** | EKS, AKS, GKE, OKE, LKE, Kind |
-| **Accelerators** | H100, GB200, B200, RTX PRO 6000 |
-| **Operating systems** | Ubuntu, Talos, COS |
-| **Workload intents** | Training, Inference |
-| **Platforms** | Kubeflow, Slurm (Slinky), Dynamo, NIM |
+| **Services** | AKS, BCM, EKS, GKE, Kind, LKE, OKE |
+| **Accelerators** | A100, B200, GB200, H100, H200, L40, RTX PRO 6000 |
+| **Operating systems** | Amazon Linux, COS, RHEL, Talos, Ubuntu |
+| **Workload intents** | Inference, Training |
+| **Platforms** | Dynamo, Kubeflow, NIM, Run:ai, Slurm (Slinky) |
 
 ## How It Works
 
