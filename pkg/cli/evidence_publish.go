@@ -110,7 +110,7 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "--push <oci-ref> is required")
 	}
 
-	_, err := attestation.Publish(ctx, attestation.PublishOptions{
+	err := attestation.Publish(ctx, attestation.PublishOptions{
 		BundleDir:   dir,
 		Push:        push,
 		PlainHTTP:   cmd.Bool(flagPlainHTTP),

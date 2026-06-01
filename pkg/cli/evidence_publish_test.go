@@ -76,7 +76,7 @@ func TestEvidencePublishCmd_RejectsInvalidInvocations(t *testing.T) {
 			// the command must fail at bundle load, before any network work.
 			name:       "directory is not a bundle",
 			args:       []string{t.TempDir(), "--push", "ghcr.io/example/aicr-evidence"},
-			wantSubstr: "does not look like an evidence bundle",
+			wantSubstr: "does not look like a summary bundle",
 		},
 	}
 	for _, tt := range tests {

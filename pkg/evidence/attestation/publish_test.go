@@ -64,13 +64,13 @@ func wantInvalidRequest(t *testing.T, err error) {
 }
 
 func TestPublish_RequiresPush(t *testing.T) {
-	_, err := Publish(context.Background(), PublishOptions{BundleDir: t.TempDir()})
+	err := Publish(context.Background(), PublishOptions{BundleDir: t.TempDir()})
 	wantInvalidRequest(t, err)
 }
 
 func TestPublish_InvalidPushReference(t *testing.T) {
 	dir := emitUnsignedBundle(t)
-	_, err := Publish(context.Background(), PublishOptions{
+	err := Publish(context.Background(), PublishOptions{
 		BundleDir: dir,
 		Push:      "oci://not a valid ref",
 	})
@@ -80,7 +80,7 @@ func TestPublish_InvalidPushReference(t *testing.T) {
 func TestPublish_MissingBundleDir(t *testing.T) {
 	// A valid push ref but a directory with no bundle markers must fail
 	// before any network work.
-	_, err := Publish(context.Background(), PublishOptions{
+	err := Publish(context.Background(), PublishOptions{
 		BundleDir: t.TempDir(),
 		Push:      "ghcr.io/example/aicr-evidence",
 	})

@@ -70,25 +70,24 @@ type PublishOptions struct {
 // preserved and the resulting signed artifact is content-identical
 // regardless of which host ran which leg.
 //
-// The *EmitResult return mirrors Emit for the future API surface: it carries
-// PushSummary's ref+digest and the Sign/Rekor info an API handler would
-// serialize. The success path that populates it requires a live push + Fulcio
-// sign, which unit tests can't exercise, so no in-repo caller consumes it yet.
-//
-//nolint:unparam // result is returned for the future API surface; see above.
-func Publish(ctx context.Context, opts PublishOptions) (*EmitResult, error) {
+// Publish returns only an error: unlike Emit (whose EmitResult is exercised by
+// tests), no in-repo caller consumes Publish's artifacts, and the populated
+// success path needs a live push + Fulcio sign that unit tests can't reach. A
+// future API handler that needs PushSummary/Sign can reintroduce the richer
+// return when a real caller exists.
+func Publish(ctx context.Context, opts PublishOptions) error {
 	if opts.Push == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "push reference is required for publish")
+		return errors.New(errors.ErrCodeInvalidRequest, "push reference is required for publish")
 	}
 	// Validate the ref up front so a malformed reference doesn't waste a
 	// Fulcio cert + Rekor inclusion proof on a sign the push would reject.
 	if _, err := oci.ParseOutputTarget(opts.Push); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid push reference", err)
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid push reference", err)
 	}
 
 	bundle, outDir, err := loadOnDiskBundle(opts.BundleDir)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	slog.Info("publishing evidence bundle",
@@ -104,16 +103,16 @@ func Publish(ctx context.Context, opts PublishOptions) (*EmitResult, error) {
 		OIDCResolve: opts.OIDCResolve,
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	pointer, err := BuildPointer(buildPointerInputsFromOutcome(bundle, out))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	pointerPath, err := WritePointer(outDir, pointer)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	slog.Info("evidence pointer written",
@@ -126,12 +125,7 @@ func Publish(ctx context.Context, opts PublishOptions) (*EmitResult, error) {
 			"digest", out.PushSummary.Digest)
 	}
 
-	return &EmitResult{
-		Bundle:      bundle,
-		PointerPath: pointerPath,
-		Sign:        out.Sign,
-		PushSummary: out.PushSummary,
-	}, nil
+	return nil
 }
 
 // loadOnDiskBundle resolves the summary-bundle directory and the
@@ -182,7 +176,7 @@ func resolveSummaryDir(dir string) (summaryDir, outDir string, err error) {
 		return candidate, clean, nil
 	}
 	return "", "", errors.New(errors.ErrCodeInvalidRequest,
-		"directory "+dir+" does not look like an evidence bundle "+
+		"directory "+dir+" does not look like a summary bundle "+
 			"(no recipe.yaml / manifest.json at root or under summary-bundle/)")
 }
 
