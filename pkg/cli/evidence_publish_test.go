@@ -17,7 +17,11 @@ package cli
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
+	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestEvidenceCmd_RegistersPublishSubcommand(t *testing.T) {
@@ -53,26 +57,26 @@ func TestEvidencePublishCmd_HasExpectedFlags(t *testing.T) {
 
 func TestEvidencePublishCmd_RejectsInvalidInvocations(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		why  string
+		name       string
+		args       []string
+		wantSubstr string // case-specific reason embedded in the error
 	}{
 		{
-			name: "missing bundle dir",
-			args: []string{"--push", "ghcr.io/example/aicr-evidence"},
-			why:  "missing positional <bundle-dir> arg",
+			name:       "missing bundle dir",
+			args:       []string{"--push", "ghcr.io/example/aicr-evidence"},
+			wantSubstr: "bundle directory is required",
 		},
 		{
-			name: "missing push",
-			args: []string{t.TempDir()},
-			why:  "missing --push",
+			name:       "missing push",
+			args:       []string{t.TempDir()},
+			wantSubstr: "--push <oci-ref> is required",
 		},
 		{
 			// Valid arg + push, but the directory has no bundle markers:
 			// the command must fail at bundle load, before any network work.
-			name: "directory is not a bundle",
-			args: []string{t.TempDir(), "--push", "ghcr.io/example/aicr-evidence"},
-			why:  "directory that is not an evidence bundle",
+			name:       "directory is not a bundle",
+			args:       []string{t.TempDir(), "--push", "ghcr.io/example/aicr-evidence"},
+			wantSubstr: "does not look like an evidence bundle",
 		},
 	}
 	for _, tt := range tests {
@@ -82,8 +86,16 @@ func TestEvidencePublishCmd_RejectsInvalidInvocations(t *testing.T) {
 			root.Writer = &out
 			root.ErrWriter = &out
 			argv := append([]string{"aicr", "evidence", "publish"}, tt.args...)
-			if err := root.Run(context.Background(), argv); err == nil {
-				t.Errorf("expected error for %s", tt.why)
+			err := root.Run(context.Background(), argv)
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			// Every rejection here is a malformed invocation → invalid-request.
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantSubstr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSubstr)
 			}
 		})
 	}

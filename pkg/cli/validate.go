@@ -542,7 +542,7 @@ func validateCmdFlags() []cli.Flag {
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
-			Name: "push",
+			Name: flagPush,
 			Usage: `OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to.
 	Sigstore keyless OIDC signing uses the same precedence chain as ` + "`aicr bundle --attest`" + `:
 	--identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
@@ -613,7 +613,7 @@ Run validation without failing on check errors (informational mode):
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "push", flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", flagPush, flagIdentityToken); err != nil {
 				return err
 			}
 

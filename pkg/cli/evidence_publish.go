@@ -64,7 +64,7 @@ Example:
   aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "push",
+				Name:     flagPush,
 				Usage:    "OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to. Required.",
 				Category: catEvidence,
 			},
@@ -96,7 +96,7 @@ Example:
 }
 
 func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, "push", flagIdentityToken); err != nil {
+	if err := validateSingleValueFlags(cmd, flagPush, flagIdentityToken); err != nil {
 		return err
 	}
 
@@ -105,7 +105,7 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle directory is required: aicr evidence publish <bundle-dir> --push <ref>")
 	}
-	push := cmd.String("push")
+	push := cmd.String(flagPush)
 	if push == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "--push <oci-ref> is required")
 	}
@@ -118,5 +118,7 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		AICRVersion: version,
 		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
 	})
-	return err
+	// Publish already returns coded pkg/errors; PropagateOrWrap preserves
+	// those and only classifies any uncoded error that slips through.
+	return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to publish evidence bundle")
 }

@@ -17,11 +17,14 @@ package attestation
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 )
@@ -204,9 +207,23 @@ func HasBundleMarkers(dir string) bool {
 // verifier's loadUnsignedPredicate: the predicate is trusted as-is.
 func readBundlePredicate(summaryDir string) (*Predicate, []byte, error) {
 	path := filepath.Join(summaryDir, StatementFilename)
-	body, err := os.ReadFile(path) //nolint:gosec // bundle-local path
+	// Bound the read: a publish target may be an attacker-influenced bundle
+	// root (extracted archive, symlinked path) where os.ReadFile would
+	// allocate the whole file before any size check. Mirrors the verifier's
+	// readBoundedFile against the same defaults cap.
+	f, err := os.Open(path) //nolint:gosec // bundle-local path resolved by resolveSummaryDir
 	if err != nil {
 		return nil, nil, errors.Wrap(errors.ErrCodeNotFound, "failed to read in-toto Statement", err)
+	}
+	defer func() { _ = f.Close() }()
+	body, err := io.ReadAll(io.LimitReader(f, defaults.MaxAttestationFileBytes+1))
+	if err != nil {
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to read in-toto Statement", err)
+	}
+	if int64(len(body)) > defaults.MaxAttestationFileBytes {
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+			"in-toto Statement exceeds maximum size of "+
+				strconv.FormatInt(defaults.MaxAttestationFileBytes, 10)+" bytes")
 	}
 	var envelope struct {
 		PredicateType string    `json:"predicateType"`

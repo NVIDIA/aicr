@@ -61,7 +61,7 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 	return &recipeEvidenceConfig{
 		OutDir:      out,
 		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOM),
-		Push:        stringFlagOrConfig(cmd, "push", att.Push),
+		Push:        stringFlagOrConfig(cmd, flagPush, att.Push),
 		PlainHTTP:   boolFlagOrConfig(cmd, flagPlainHTTP, att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),
 		OIDCResolve: oidcResolveOptionsFromFlags(cmd),

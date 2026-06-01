@@ -40,6 +40,7 @@ const (
 	flagOIDCDeviceFlow = "oidc-device-flow"
 	flagInsecureTLS    = "insecure-tls"
 	flagPlainHTTP      = "plain-http"
+	flagPush           = "push"
 )
 
 // Category labels (urfave/cli flag.Category values, grouping flags in help output).
