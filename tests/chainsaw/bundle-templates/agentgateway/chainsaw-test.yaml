@@ -20,7 +20,8 @@ metadata:
 spec:
   description: |
     Validates that agentgateway manifest templates render correctly.
-    Tests inference-gateway AgentgatewayParameters scheduling (nodeSelector/tolerations).
+    Tests inference-gateway AgentgatewayParameters scheduling (nodeSelector/tolerations)
+    and the default LoadBalancer source-range restriction (loadBalancerSourceRanges).
     Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/agentgateway
   timeouts:
     exec: 30s
@@ -31,6 +32,7 @@ spec:
       try:
         - script:
             content: |
+              set -e
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               rm -rf "${WORK}" && mkdir -p "${WORK}"
@@ -48,6 +50,7 @@ spec:
       try:
         - script:
             content: |
+              set -e
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               rm -rf "${WORK}/bundle-defaults"
@@ -59,7 +62,12 @@ spec:
       description: Verify AgentgatewayParameters and Gateway resources exist.
       try:
         - script:
+            # set -e so EVERY assertion below is fail-closed: without it, /bin/sh -c
+            # only surfaces the last command's status, letting an earlier failed
+            # grep (e.g. a missing resource) pass silently when the final negative
+            # grep happens to succeed.
             content: |
+              set -e
               WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               ## agentgateway is a mixed component (upstream Helm + raw manifests),
               ## so its raw manifests render into an injected NNN-agentgateway-post/
@@ -70,6 +78,47 @@ spec:
               ## Verify both are present.
               grep -q 'kind: AgentgatewayParameters' "${MANIFEST}"
               grep -q 'kind: Gateway' "${MANIFEST}"
+              ## allowedSourceRanges defaults to empty, so no LoadBalancer source
+              ## restriction is rendered out of the box (deployments stay reachable
+              ## regardless of network). Operators opt in via an overlay override;
+              ## see assert-gateway-source-ranges below for the configured path.
+              ! grep -q 'loadBalancerSourceRanges:' "${MANIFEST}"
+
+    ## ── With LoadBalancer source-range restriction ─────────────────────
+
+    - name: bundle-source-ranges
+      description: Override agentgateway.allowedSourceRanges via the recipe componentRef.
+      try:
+        - script:
+            content: |
+              set -e
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
+              rm -rf "${WORK}/bundle-source-ranges"
+              ## --set renders a type-invalid string for this key, so operators scope
+              ## the gateway through an overlay/componentRef override. Inject one here.
+              cp "${WORK}/recipe.yaml" "${WORK}/recipe-sr.yaml"
+              yq -i '(.componentRefs[] | select(.name == "agentgateway")).overrides.allowedSourceRanges = ["216.228.127.128/30"]' \
+                "${WORK}/recipe-sr.yaml"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe-sr.yaml" \
+                --output "${WORK}/bundle-source-ranges"
+
+    - name: assert-gateway-source-ranges
+      description: Verify the override renders loadBalancerSourceRanges onto the Service.
+      try:
+        - script:
+            # set -e so a failed first grep (e.g. the loadBalancerSourceRanges field
+            # name is wrong) cannot be masked by the trailing CIDR grep succeeding.
+            content: |
+              set -e
+              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
+              MANIFEST=$(ls "${WORK}"/bundle-source-ranges/[0-9][0-9][0-9]-agentgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
+              [ -n "${MANIFEST}" ] || { echo "agentgateway inference-gateway.yaml not found in source-ranges bundle" >&2; exit 1; }
+              ## The configured CIDR must reach the generated Service's
+              ## spec.service.spec.loadBalancerSourceRanges.
+              grep -q 'loadBalancerSourceRanges:' "${MANIFEST}"
+              grep -q '216.228.127.128/30' "${MANIFEST}"
 
     ## ── With system node scheduling ────────────────────────────────────
 
@@ -78,6 +127,7 @@ spec:
       try:
         - script:
             content: |
+              set -e
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               rm -rf "${WORK}/bundle-scheduling"
@@ -91,6 +141,7 @@ spec:
       try:
         - script:
             content: |
+              set -e
               WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               MANIFEST=$(ls "${WORK}"/bundle-scheduling/[0-9][0-9][0-9]-agentgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
               [ -n "${MANIFEST}" ] || { echo "agentgateway inference-gateway.yaml not found in scheduling bundle" >&2; exit 1; }
@@ -100,4 +151,5 @@ spec:
       cleanup:
         - script:
             content: |
+              set -e
               rm -rf /tmp/chainsaw-bundle-agentgateway-templates
