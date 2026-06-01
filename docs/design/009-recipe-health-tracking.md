@@ -4,15 +4,18 @@
 
 **Proposed** — 2026-05-30 (design-only; not implemented).
 
-This ADR specifies the V1 contract for computing, recording, and publishing
+This Architecture Decision Record (ADR) specifies the V1 contract for
+computing, recording, and publishing
 recipe health across every supported criteria combination. The package
 layout, CLI surface, generator, and CI workflow described below are intent,
 not current behavior. Implementation will be tracked under a follow-on epic
 once this ADR is accepted.
 
 The V1 scope here was deliberately narrowed after a multi-perspective design
-review (architecture, supply-chain security, developer experience, CI/SRE
-operability, and scope/YAGNI). The review found that an evidence-driven
+review (architecture, supply-chain security, developer experience,
+Continuous Integration/Site Reliability Engineering (CI/SRE) operability, and
+scope / You Aren't Gonna Need It (YAGNI)). The review found that an
+evidence-driven
 "validation posture" axis and two of the originally proposed structural
 signals could not satisfy this ADR's own hermeticity and trust constraints
 while `recipes/evidence/` is empty and KWOK results are ephemeral. Those
@@ -28,7 +31,8 @@ restates evidence.
 
 ## Problem
 
-AICR ships roughly 50 leaf recipes resolved from ~79 overlays
+NVIDIA AI Cluster Runtime (AICR) ships roughly 50 leaf recipes resolved from
+~79 overlays
 (`recipes/overlays/`), spanning combinations of service × accelerator ×
 intent × OS × platform. We continuously want to evaluate these recipes
 across several dimensions — resolvability, constraint validity, declared
@@ -408,8 +412,8 @@ an owner, an advisory matrix silently goes stale — and a stale public
 long-missing enumeration gap is closed by `aicr recipe list`, and the
 structural matrix flags broken/unpinned/constraint-warning recipes. Every
 V1 signal is hermetic and offline, so the generated doc is reproducible from
-a checkout with no network and no wall-clock — the strongest possible
-determinism guarantee, and strictly simpler than the originally proposed
+a checkout with no network and no wall-clock — deterministic under the listed
+V1 inputs and constraints, and strictly simpler than the originally proposed
 evidence-driven design. The two-axis *principle* is fixed now, so the
 evidence axis lands later as an additive column, not a redesign. The CI
 surface is a faithful clone of the proven, weekly BOM loop — one workflow,
@@ -434,7 +438,7 @@ and an `aicr recipe health` command) after a multi-perspective design review.
 The decisive findings:
 
 - **Hermeticity violations (blocking).** `kwok_scheduling` had no durable
-  in-repo source, and `chart_pin_drift` via a live BOM render reintroduced
+  in-repo source, and `chart_drift` via a live BOM render reintroduced
   the very network dependency the design rejected for evidence — both
   contradicting the stated "hermetic, offline, deterministic" goal. Resolved
   by deferring `kwok_scheduling`, redefining the pinning signal as a
