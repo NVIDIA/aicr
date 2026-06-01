@@ -141,7 +141,13 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		"recipe", bundle.RecipeName,
 		"subjectDigest", bundle.SubjectDigest)
 
-	out, err := signAndPush(ctx, bundle, opts)
+	out, err := signAndPush(ctx, bundle, signPushOptions{
+		Push:        opts.Push,
+		PlainHTTP:   opts.PlainHTTP,
+		InsecureTLS: opts.InsecureTLS,
+		AICRVersion: opts.AICRVersion,
+		OIDCResolve: opts.OIDCResolve,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +186,19 @@ type emitOutcome struct {
 	PushSummary *PushResult
 }
 
+// signPushOptions is the subset of EmitOptions the sign+push leg
+// consumes. Pulling it out of EmitOptions lets both Emit (which builds
+// the bundle in-memory) and Publish (which loads a pre-built bundle from
+// disk) drive the identical pipeline without sharing the build-only
+// fields (Recipe, Snapshot, PhaseResults, …).
+type signPushOptions struct {
+	Push        string
+	PlainHTTP   bool
+	InsecureTLS bool
+	AICRVersion string
+	OIDCResolve bundleattest.ResolveOptions
+}
+
 // signAndPush handles the optional sign+push pipeline. Returns a
 // zero-valued outcome when Push is absent.
 //
@@ -187,11 +206,11 @@ type emitOutcome struct {
 //  1. Push the bundle directory as an OCI artifact → artifactDigest.
 //  2. Build an artifact-subject Statement (subject.digest = artifactDigest)
 //     carrying the same predicate body.
-//  3. Resolve the OIDC token (deferred until here — see EmitOptions.OIDCResolve).
+//  3. Resolve the OIDC token (deferred until here — see signPushOptions.OIDCResolve).
 //  4. Sign the Statement → Sigstore Bundle JSON.
 //  5. Attach the Sigstore Bundle as an OCI Referrer so cosign's
 //     /v2/<name>/referrers/<digest> discovery finds the signature.
-func signAndPush(ctx context.Context, bundle *Bundle, opts EmitOptions) (emitOutcome, error) {
+func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emitOutcome, error) {
 	if opts.Push == "" {
 		return emitOutcome{}, nil
 	}

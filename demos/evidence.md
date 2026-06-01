@@ -77,6 +77,29 @@ it finishes:
     └── attestation.intoto.jsonl # SIGNED Sigstore Bundle (DSSE + Fulcio + Rekor)
 ```
 
+### Alternative: split validate and publish across networks
+
+Validation needs the cluster (often behind a corporate VPN); keyless signing
+needs `fulcio.sigstore.dev` + `rekor.sigstore.dev`, which corporate networks
+frequently block. Drop `--push` to emit an *unsigned* bundle on the VPN, then
+sign + push + write the pointer from a host with Sigstore egress:
+
+```shell
+# On the VPN — validates and emits an unsigned bundle (no signing network).
+aicr validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --emit-attestation ./out
+
+# Off the VPN (CI runner, jump box, hotspot) — sign, push, write pointer.
+aicr evidence publish ./out --push ghcr.io/<owner>/aicr-evidence
+```
+
+The bundle is content-addressable and `evidence publish` signs the predicate
+(with its emit-time `attestedAt`) verbatim from disk, so `./out` ends up
+identical to the one-shot output above — including the signed
+`attestation.intoto.jsonl` and a populated `pointer.yaml`.
+
 ## 2. Commit the pointer
 
 ```shell

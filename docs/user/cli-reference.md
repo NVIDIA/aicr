@@ -2208,6 +2208,51 @@ current=$(aicr evidence digest -r recipes/overlays/<file>.yaml)
 
 ---
 
+### aicr evidence publish
+
+Sign, push, and write the pointer for a recipe-evidence v1 bundle that was produced earlier by `aicr validate --emit-attestation` **without** `--push` (which leaves an unsigned bundle on disk).
+
+This decouples the cluster-bound validate step from the Fulcio/Rekor-bound signing step so they can run on different networks: validation must run where the cluster is reachable (often a corporate VPN), but keyless signing must reach `fulcio.sigstore.dev` + `rekor.sigstore.dev`, which corporate networks frequently block. Run `validate --emit-attestation` on the VPN, then `evidence publish` from a host with Sigstore egress (CI runner, jump box, hotspot).
+
+The signed artifact is content-addressable, so the result is byte-for-byte identical to the one-shot `validate --emit-attestation --push` output regardless of which host ran which leg — the predicate (including its baked-in `attestedAt` timestamp) is signed verbatim from the bundle on disk.
+
+**Synopsis:**
+
+```shell
+aicr evidence publish <bundle-dir> --push <ref> [flags]
+```
+
+The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote (holds `summary-bundle/` and receives `pointer.yaml`) or the `summary-bundle/` directory itself.
+
+**Flags:**
+
+| Flag | Alias | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
+| `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
+| `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
+| `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS when pushing the OCI artifact (local-registry tests). |
+| `--insecure-tls` | | bool | `false` | Skip TLS verification when pushing the OCI artifact (self-signed registries). |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Bundle signed, pushed, and `pointer.yaml` written. |
+| non-zero | Bundle could not be loaded, signed, or pushed. |
+
+**Examples:**
+
+```shell
+# On VPN: produce an unsigned bundle from a passing validation.
+aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out
+
+# Off VPN: sign, push, and write the pointer.
+aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence
+```
+
+---
+
 ### aicr evidence verify
 
 Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.

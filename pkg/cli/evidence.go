@@ -33,12 +33,14 @@ the validators against hardware they may not have access to.
 
 Subcommands:
 
-  digest  Print the canonical digest of a resolved recipe.
-  verify  Verify a bundle's integrity claims.
+  digest   Print the canonical digest of a resolved recipe.
+  publish  Sign and push an already-emitted bundle, then write its pointer.
+  verify   Verify a bundle's integrity claims.
 
 See docs/design/007-recipe-evidence.md for the trust model.`,
 		Commands: []*cli.Command{
 			evidenceDigestCmd(),
+			evidencePublishCmd(),
 			evidenceVerifyCmd(),
 		},
 	}

@@ -130,7 +130,7 @@ func TestBuildPointerInputsFromOutcome_SignedWithoutRekorLeavesIndexNil(t *testi
 
 func TestSignAndPush_NoPushReturnsZeroOutcome(t *testing.T) {
 	bundle := &Bundle{SummaryDir: "/tmp/x"}
-	out, err := signAndPush(context.Background(), bundle, EmitOptions{})
+	out, err := signAndPush(context.Background(), bundle, signPushOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
