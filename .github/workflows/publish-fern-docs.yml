@@ -200,17 +200,12 @@ jobs:
           done
 
       - name: Stamp version in docs.yml
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
         run: |
-          # Back up the pre-stamp docs.yml so we can persist registry-only
-          # changes (no transient Latest stamp) in the post-publish PR step.
           cp fern/docs.yml /tmp/docs.yml.preStamp
-          VERSION=$(curl -sf https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name || true)
-          if [ -n "$VERSION" ] && [ "$VERSION" != "null" ]; then
-            export VERSION
-            yq -i '(.products[0].versions[] | select(.slug == "latest")).display-name = "Latest · " + env(VERSION)' fern/docs.yml
-          else
-            echo "::warning::Could not resolve latest GitHub release tag; continuing without stamping"
-          fi
+          export TAG
+          yq -i '(.products[0].versions[] | select(.slug == "latest")).display-name = "Latest · " + env(TAG)' fern/docs.yml
           echo "--- docs.yml versions after stamp ---"
           yq '.products[0].versions[].display-name' fern/docs.yml
 
