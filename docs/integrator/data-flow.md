@@ -398,6 +398,14 @@ as the honored form, so the validator rejects it with
 | `inference-throughput` | `>=` only | Evaluator enforces `throughput >= threshold * 0.9` (10% tolerance); strict `>`, `==`, `!=`, bare, and inverted forms are all coerced to the same check and would mislead recipe authors. |
 | `inference-ttft-p99` | `<=` only | Evaluator enforces `ttftP99 <= threshold * 1.1`; same rationale as throughput, opposite direction. |
 
+The `inference-perf` check also reads two **input** entries from the same
+`performance.constraints` block — `inference-model` (HF model ID) and
+`inference-concurrency-per-gpu` (positive integer). These carry a bare value,
+not a comparator: they configure the benchmark per accelerator rather than
+asserting a pass/fail bound. Resolution precedence is recipe > catalog env
+(`AICR_INFERENCE_PERF_MODEL` / `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU`) >
+compiled default (Qwen3-8B, 256/GPU).
+
 ### Input Sources
 
 **File-based:**
@@ -457,10 +465,10 @@ Results are output in [CTRF](https://ctrf.io/) (Common Test Report Format) JSON:
         "duration": 612000,
         "suite": ["performance"],
         "stdout": [
-          "RESULT: Inference throughput: 37961.24 tokens/sec",
-          "RESULT: Inference TTFT p99: 146.30 ms",
-          "Throughput constraint: >= 5000 → PASS",
-          "TTFT p99 constraint: <= 200 → PASS"
+          "RESULT: Inference throughput: 108789.87 tokens/sec",
+          "RESULT: Inference TTFT p99: 687.50 ms",
+          "Throughput constraint: >= 50000 → PASS",
+          "TTFT p99 constraint: <= 1000 → PASS"
         ]
       }
     ]

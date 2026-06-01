@@ -71,18 +71,16 @@ spec:
         - name: Deployment.gpu-operator.version
           value: ">= v25.10.0"
     performance:
-      checks:
-        - inference-perf
-      # Placeholder thresholds — pending empirical tuning on B200 with the
-      # reference workload at concurrency=16/GPU. Current values mirror the
-      # H100 GKE/Dynamo floor as a conservative smoke-test gate; B200 is
-      # expected to exceed both. Tighten once reference runs from the
-      # B200 GKE testbed (e.g., nvcf-dgxc-k8s-gcp-azne1-prd7) are published.
-      constraints:
-        - name: inference-throughput
-          value: ">= 5000"
-        - name: inference-ttft-p99
-          value: "<= 200"
+      # inference-perf is DISABLED on B200 until a reference benchmark exists.
+      # B200 has not been measured, and shipping a hard gate with UNTESTED
+      # PLACEHOLDER thresholds risks passing against non-representative limits
+      # and hiding a real regression. Re-enable once a B200 GKE testbed run
+      # (e.g. nvcf-dgxc-k8s-gcp-azne1-prd7) publishes measured values: set
+      # checks to [inference-perf] and add a constraints block with the
+      # measured throughput / TTFT p99. As a conservative Blackwell-family
+      # starting point, the measured GB200 gate at Qwen/Qwen3-8B,
+      # concurrency=256/GPU was throughput ≈ 66k tok/s, TTFT p99 ≈ 1,240 ms.
+      checks: []
     conformance:
       checks:
         - platform-health

@@ -79,11 +79,25 @@ func checkInferencePerf(ctx *validators.Context) error {
 		if parseErr != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid throughput threshold", parseErr)
 		}
+		// The recipe throughput gate is a full-node baseline, but
+		// buildInferenceConfig sizes the workload to the FREE GPUs on the chosen
+		// node — fewer than the full node on a shared cluster. Scale the gate to
+		// the GPUs actually benchmarked so a healthy per-GPU result on a
+		// partially occupied node is not failed against a full-node number.
+		effectiveThreshold := scaledThroughputThreshold(threshold, result.gpuCount, result.gpuCountPerNode)
+		if effectiveThreshold != threshold {
+			fmt.Printf("Throughput gate scaled to %d of %d node GPUs benchmarked: %.0f → %.0f tokens/sec\n",
+				result.gpuCount, result.gpuCountPerNode, threshold, effectiveThreshold)
+		}
 		// 10% tolerance, same as NCCL validator
-		if result.throughput < threshold*0.9 {
-			return errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("inference throughput %.2f tokens/sec does not satisfy constraint %q (with 10%% tolerance)",
-					result.throughput, throughputConstraint.Value))
+		if result.throughput < effectiveThreshold*0.9 {
+			msg := fmt.Sprintf("inference throughput %.2f tokens/sec does not satisfy constraint %q (with 10%% tolerance)",
+				result.throughput, throughputConstraint.Value)
+			if effectiveThreshold != threshold {
+				msg += fmt.Sprintf(" — gate scaled to %.0f for %d of %d node GPUs benchmarked",
+					effectiveThreshold, result.gpuCount, result.gpuCountPerNode)
+			}
+			return errors.New(errors.ErrCodeInternal, msg)
 		}
 		fmt.Printf("Throughput constraint: %s → PASS\n", throughputConstraint.Value)
 	}
@@ -108,6 +122,21 @@ func checkInferencePerf(ctx *validators.Context) error {
 	}
 
 	return nil
+}
+
+// scaledThroughputThreshold scales a full-node throughput gate down to the GPU
+// count actually benchmarked. buildInferenceConfig sizes the workload to the
+// free GPUs on the chosen node; on a shared node that is fewer than the node's
+// full allocatable count, so the absolute full-node gate would falsely fail a
+// healthy per-GPU result. Throughput scales ~linearly with GPU count at fixed
+// concurrency-per-GPU, so scale by gpuCount/gpuCountPerNode. Returns the
+// threshold unchanged when the full node was benchmarked or the counts are
+// unknown (gpuCountPerNode <= 0), i.e. the common full-node case is a no-op.
+func scaledThroughputThreshold(threshold float64, gpuCount, gpuCountPerNode int) float64 {
+	if gpuCountPerNode <= 0 || gpuCount <= 0 || gpuCount >= gpuCountPerNode {
+		return threshold
+	}
+	return threshold * float64(gpuCount) / float64(gpuCountPerNode)
 }
 
 // requireComparatorPrefix fails fast unless the trimmed constraint value

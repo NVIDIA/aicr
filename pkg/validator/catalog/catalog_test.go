@@ -24,10 +24,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"gopkg.in/yaml.v3"
 )
+
+// TestCatalogTimeoutsFitFacadeBudget asserts every catalog entry's per-check
+// timeout stays below the facade-level ValidationOperationTimeout. Otherwise a
+// controller/library caller (which gets that facade deadline when no explicit
+// timeout is set) could hit the top-level "context deadline exceeded" before
+// the per-check Job reaches its own deadline and emits a structured result.
+func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	for _, v := range catalog.Validators {
+		if v.Timeout >= defaults.ValidationOperationTimeout {
+			t.Errorf("validator %q timeout %v must be < facade ValidationOperationTimeout %v "+
+				"(else the orchestration cap preempts the per-check structured result)",
+				v.Name, v.Timeout, defaults.ValidationOperationTimeout)
+		}
+	}
+}
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
 	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
@@ -1049,6 +1069,27 @@ func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
 	if dep.RequirementOrDefault() != v1.DependencyRequirementPreferred {
 		t.Errorf("requirement = %q, want preferred", dep.RequirementOrDefault())
 	}
+}
+
+// TestEmbeddedCatalog_InferencePerfEntryExists locks the embedded catalog entry
+// name to the v1.InferencePerfCheckName constant that scopes HF_TOKEN forwarding
+// (see buildValidatorEnv in pkg/validator/v1). Without this, renaming the
+// "inference-perf" catalog entry would silently disable HF_TOKEN forwarding —
+// the forwarding predicate would just never match — with no other test failing.
+func TestEmbeddedCatalog_InferencePerfEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.InferencePerfCheckName {
+			if v.Phase != "performance" {
+				t.Errorf("%q phase = %q, want performance", v1.InferencePerfCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q (HF_TOKEN forwarding would silently no-op)", v1.InferencePerfCheckName)
 }
 
 func TestCatalogEmbedding(t *testing.T) {

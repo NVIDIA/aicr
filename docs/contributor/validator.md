@@ -281,6 +281,85 @@ package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 > constraint; the variant will Skip if only the generic
 > `nccl-all-reduce-bw` constraint is present.
 
+#### `inference-perf`: model, concurrency, and weights cache
+
+The `inference-perf` check warms vLLM before measuring, so the one-time
+CUDA-graph/JIT compile cost is excluded from the reported throughput and
+p99 TTFT. Its knobs are read by the in-cluster validator from the
+`inference-perf` catalog entry's `env` (override per run with a catalog
+overlay in the `aicr validate --data <dir>` directory). Unlike `HF_TOKEN`,
+they are **not** forwarded from the orchestrator shell, so
+`export AICR_INFERENCE_PERF_…` before `aicr validate` has no effect.
+
+The **model** and **per-GPU concurrency** can also be set per accelerator in
+the recipe overlay's `performance.constraints`, symmetric with the
+throughput / TTFT thresholds:
+
+```yaml
+validation:
+  performance:
+    constraints:
+      - name: inference-model
+        value: Qwen/Qwen3-8B          # HF model ID (bare value, no comparator)
+      - name: inference-concurrency-per-gpu
+        value: "256"                  # positive integer
+      - name: inference-throughput
+        value: ">= 50000"
+      - name: inference-ttft-p99
+        value: "<= 1000"
+```
+
+Resolution precedence is **recipe constraint > catalog env knob > compiled
+default** (`Qwen/Qwen3-8B` at 256/GPU). A non-positive / non-integer
+`inference-concurrency-per-gpu` fails closed with `ErrCodeInvalidRequest`.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU` | `256` | Concurrent requests per GPU; total is this × free GPUs on the chosen node. Prefer the per-accelerator `inference-concurrency-per-gpu` recipe constraint over this global knob. |
+| `AICR_INFERENCE_PERF_MODEL` | `Qwen/Qwen3-8B` | Hugging Face model ID to benchmark. Override per accelerator via the `inference-model` recipe constraint. |
+| `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` | `10m` | Wait for the `DynamoGraphDeployment` to become ready (image pull + model load + worker health). Large models load slower — raise this **and** the catalog entry's `timeout` in tandem, or the parent deadline caps it. |
+| `AICR_INFERENCE_PERF_HEALTH_TIMEOUT` | `5m` | Wait for the endpoint to serve a real chat-completion *after* the workload reports Ready. Concurrent first-load from one RWO cache PVC can push first-serve past 5m; raise it (bounded by the catalog `timeout`). |
+| `AICR_INFERENCE_PERF_MODEL_CACHE_SIZE` | `100Gi` (on) | The PVC-backed model-weights cache is **on by default**. Set a different K8s quantity to resize, or a disable sentinel (`off`/`0`/`none`/`disabled`) to turn it off and download from HF directly. |
+| `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` | cluster default | StorageClass for the cache PVC. On a cluster with **no default SC and no value here**, the check **fails fast** with guidance rather than leaving the PVC `Pending` until timeout. AICR-deployed EKS gets a default `gp3` SC from `aws-ebs-csi-driver`; GKE has `standard-rwo`. |
+
+For gated models, or to lift Hugging Face rate limits on large downloads,
+set `HF_TOKEN` in the orchestrator environment: it is forwarded only to the
+`inference-perf` validator, which provisions an optional `aicr-hf-token`
+Secret the benchmark workers reference via `secretKeyRef`. A token raises
+*per-account* limits but does not bypass Hugging Face *per-IP* throttling —
+large models pulled by many workers benefit most from the shared cache.
+
+**Model-weights cache (PVC).** Many workers re-downloading a large model (and
+re-downloading on every crash-restart) repeatedly trips Hugging Face's
+**per-IP** throttle, so the cache is **on by default**:
+
+1. The validator creates an `aicr-model-cache` **PVC** (ReadWriteOnce) in the
+   per-run namespace.
+2. A one-time **populate Job** — pinned to the same node the workers use (so
+   the `WaitForFirstConsumer` RWO volume binds there) — downloads
+   `config.model` into the PVC via `huggingface_hub` (using `HF_TOKEN` if
+   present). The validator blocks on it before deploying. The populate
+   container carries CPU/memory **requests** but no memory **limit** — a limit
+   OOMKills large-model downloads via page cache on cgroup v2.
+3. Workers mount the PVC **read-only** at `HF_HOME` with `HF_HUB_OFFLINE=1`,
+   loading weights locally and never reaching HF (failing closed if the cache
+   is incomplete).
+
+The PVC lives in the per-run namespace and is torn down on cleanup, so the
+cache is **intra-run** (one download shared by the run's N workers), not
+persisted across runs. Because it is RWO, all workers co-locate on one node —
+which the validator already enforces for a stable per-node baseline. Multi-node
+would require RWX storage (e.g. EFS); for at-scale serving, Dynamo's
+ModelExpress server is the alternative (see #1116).
+
+> **Throughput-gate scaling.** `buildInferenceConfig` sizes the workload to the
+> **free** GPUs on the chosen node, which on a shared node is fewer than the
+> full allocatable count. The `inference-throughput` gate is therefore scaled
+> by `freeGPUs / nodeGPUs` (throughput is ~linear in GPU count at fixed
+> per-GPU concurrency) so a healthy per-GPU result on a partially occupied node
+> is not failed against a full-node number. TTFT is a per-request latency and
+> is **not** scaled.
+
 ### Code walkthrough
 
 ```go

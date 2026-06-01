@@ -71,16 +71,26 @@ spec:
     performance:
       checks:
         - inference-perf
-      # Placeholder thresholds — pending empirical tuning on H100 with
-      # Qwen/Qwen3-0.6B at concurrency=16/GPU. Current values are loose
-      # smoke-test floors; tighten once reference runs are published. Each
-      # constraint name corresponds to one metric the inference-perf check
-      # produces (throughput in tok/s; time-to-first-token p99 in ms).
+      # Baseline measured on H100 (p5.48xlarge, 8 GPUs) with Qwen/Qwen3-8B at
+      # concurrency=256/GPU: throughput ≈ 108,790 tok/s, TTFT p99 ≈ 688 ms
+      # (EKS and GKE a3-megagpu-8g landed within 0.6%).
+      # The throughput floor (>= 50000) is a deliberately conservative floor
+      # shared across the inference overlays, not an H100-specific regression
+      # gate: the evaluator already scales it to the GPUs actually benchmarked
+      # and applies a 10% tolerance (validators/performance/inference_perf.go),
+      # so it is sized to clear any healthy run and catch only gross failures,
+      # not modest regressions. The TTFT p99 ceiling sits above the measured
+      # value with margin. Model + concurrency are pinned so the gate stays
+      # valid independent of the compiled defaults.
       constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "256"
         - name: inference-throughput
-          value: ">= 5000"
+          value: ">= 50000"
         - name: inference-ttft-p99
-          value: "<= 200"
+          value: "<= 1000"
     conformance:
       checks:
         - platform-health

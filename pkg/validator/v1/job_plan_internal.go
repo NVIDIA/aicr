@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -28,6 +29,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
+
+// InferencePerfCheckName is the catalog name of the inference performance check.
+// Used to scope HF_TOKEN forwarding to that validator only (it is the sole
+// check that downloads models from Hugging Face). Exported so the catalog
+// package can assert (in TestEmbeddedCatalog_InferencePerfEntryExists) that an
+// embedded entry with this exact name exists — renaming the catalog entry
+// without updating this constant would otherwise silently no-op HF_TOKEN
+// forwarding with no test failure.
+const InferencePerfCheckName = "inference-perf"
 
 // buildEnv creates environment variables for the validator container.
 func buildEnv(
@@ -89,8 +99,40 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: "AICR_VALIDATOR_IMAGE_TAG", Value: imageTagOverride})
 	}
 
-	// Add catalog entry's custom env vars
+	// Forward a Hugging Face token from the orchestrator's environment (never
+	// the in-repo catalog) so inference-perf can provision it for model
+	// downloads that would otherwise hit HF anonymous rate limits. Only set
+	// when present; absent leaves workers on anonymous downloads. Scoped to the
+	// inference-perf entry so the credential is not injected into unrelated
+	// validator Pods (deployment/conformance checks) that never use it.
+	//
+	// Accepted trade-off (deliberate, reviewed): the token lands here as a
+	// plaintext EnvVar.Value on the validator pod spec, whereas the workers and
+	// the model-cache populate Job consume it via secretKeyRef from the
+	// aicr-hf-token Secret (which this validator mints from this env). The
+	// "cleaner" pattern — have the orchestrator create the Secret and reference
+	// it via secretKeyRef on the validator pod too — was considered and
+	// declined: the upside is narrow (keeps the value out of the pod spec, where
+	// the broadly-granted `get pods` permission would otherwise expose it, vs.
+	// the narrower `get secrets`) and does NOT remove the plaintext (the running
+	// container still exposes HF_TOKEN via env/`kubectl exec`; the Secret is
+	// likewise base64-in-etcd absent encryption-at-rest). Given a
+	// low-sensitivity, easily-rotated rate-limit token and a per-run ephemeral
+	// namespace, the exposure does not justify the orchestrator-side Secret
+	// plumbing. Revisit if a higher-privilege credential ever flows this path.
+	if tok := os.Getenv("HF_TOKEN"); tok != "" && entry.Name == InferencePerfCheckName {
+		env = append(env, corev1.EnvVar{Name: "HF_TOKEN", Value: tok})
+	}
+
+	// Add catalog entry's custom env vars. HF_TOKEN is deliberately skipped here:
+	// the token must come only from the orchestrator's environment (forwarded
+	// above), never from the in-repo catalog — appending it from entry.Env would
+	// let a catalog value silently override the forwarded token (k8s takes the
+	// last duplicate), breaking that trust boundary.
 	for _, e := range entry.Env {
+		if e.Name == "HF_TOKEN" {
+			continue
+		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})
 	}
 

@@ -107,9 +107,16 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ## Inference performance validation
 
 Inference performance runs the `inference-perf` check — deploys a
-`DynamoGraphDeployment` with a small vLLM-served model (Qwen/Qwen3-0.6B by
-default) plus an AIPerf benchmark Job, and measures end-to-end output-token
-throughput and time-to-first-token (TTFT) p99.
+`DynamoGraphDeployment` with a vLLM-served model (Qwen/Qwen3-8B by default,
+overridable per accelerator — see below) plus an AIPerf benchmark Job, and
+measures end-to-end output-token throughput and time-to-first-token (TTFT) p99.
+
+**Warm-up:** AIPerf sends a wave of warm-up requests *before* the measured run,
+so vLLM's one-time CUDA-graph / JIT compilation (tens of seconds on a cold
+worker) is excluded from the reported throughput and p99 TTFT — the numbers
+reflect steady state, not cold start. Warm-up scales with concurrency and is
+tunable via `AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY` (see the
+[validator reference](../contributor/validator.md#inference-perf-benchmark-tuning)).
 
 ```bash
 # Capture snapshot, generate inference recipe, validate the performance phase.
@@ -131,11 +138,41 @@ validation:
   performance:
     checks: [inference-perf]
     constraints:
+      # Pass/fail thresholds (10% tolerance applied by the evaluator). Values
+      # shown are the measured H100 gate at 8B/256; each overlay sets its own.
       - name: inference-throughput   # output tokens/sec
-        value: ">= 5000"
+        value: ">= 50000"
       - name: inference-ttft-p99     # time-to-first-token p99 in ms
-        value: "<= 200"
+        value: "<= 1000"
+      # Optional per-accelerator inputs (bare value, no comparator).
+      # Precedence: recipe > AICR_INFERENCE_PERF_* env > compiled default.
+      - name: inference-model                # HF model ID; default Qwen/Qwen3-8B
+        value: Qwen/Qwen3-8B
+      - name: inference-concurrency-per-gpu  # positive integer; default 256
+        value: "256"
 ```
+
+`inference-model` and `inference-concurrency-per-gpu` are optional: omit them to
+use the compiled defaults (Qwen3-8B at 256 concurrent requests per GPU), set them
+per overlay to tune model and load for each accelerator, or override globally
+with the `AICR_INFERENCE_PERF_MODEL` / `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU`
+catalog knobs (recipe wins over catalog env wins over default).
+
+**Model-weights cache and `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`.** The benchmark downloads
+the model **once** into a PVC and serves all workers from it (on by default;
+avoids per-IP Hugging Face throttling). The cache PVC needs a StorageClass: it
+uses the cluster's **default** StorageClass unless you set
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`. On a cluster with **no default
+StorageClass** (common on EKS — e.g. only a non-default `gp2`) and no value set,
+the check **fails fast** in seconds with guidance rather than hanging; set
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS=<name>` (e.g. `gp2`/`gp3` on EKS,
+`standard-rwo` on GKE) on the `inference-perf` catalog entry's `env` (or via a
+catalog overlay in the `aicr validate --data <dir>` directory), or disable the cache with
+`AICR_INFERENCE_PERF_MODEL_CACHE_SIZE=off`. Like the other
+`AICR_INFERENCE_PERF_*` knobs, this is a **catalog/`--data`** setting — it is
+**not** read from the shell environment of the process running `aicr validate`
+(only `HF_TOKEN` is). AICR-deployed EKS clusters get a default `gp3` StorageClass
+from the `aws-ebs-csi-driver` component, so the cache works there with no knob.
 
 Expected flow (~5–7 min on H100): readiness pre-flight → deploy
 `ResourceClaimTemplate` + `DynamoGraphDeployment` in a per-run namespace
@@ -148,11 +185,16 @@ All Dynamo Frontend and worker pods pin to a single GPU node via
 where some GPUs on a candidate node are already held by another workload's
 DRA `ResourceClaim`, the validator picks the candidate with the most free
 GPUs and sizes the benchmark to that count — so the check does not need an
-explicit hostname override to avoid saturated nodes. Concurrent
+explicit hostname override to avoid saturated nodes. The `inference-throughput`
+gate is a full-node baseline, so when the benchmark runs on fewer than the
+node's full GPU count the gate is scaled down by the same `freeGPUs / nodeGPUs`
+fraction (throughput scales ~linearly at fixed concurrency-per-GPU) — a healthy
+per-GPU result on a partially occupied node is not failed against a full-node
+number. TTFT p99 is a per-request latency and is not scaled. Concurrent
 `aicr validate` invocations are isolated from each other by the run-specific
 suffix on both the namespace and the inner AIPerf Job name.
 
-A passing CTRF entry (measured on EKS H100, 8 × H100 GPUs, Qwen/Qwen3-0.6B):
+A passing CTRF entry (measured on EKS H100, 8 × H100 GPUs, Qwen/Qwen3-8B at 256 concurrency/GPU):
 
 ```json
 {
@@ -160,10 +202,10 @@ A passing CTRF entry (measured on EKS H100, 8 × H100 GPUs, Qwen/Qwen3-0.6B):
   "status": "passed",
   "suite": ["performance"],
   "stdout": [
-    "RESULT: Inference throughput: 38367.28 tokens/sec",
-    "RESULT: Inference TTFT p99: 127.90 ms",
-    "Throughput constraint: >= 5000 → PASS",
-    "TTFT p99 constraint: <= 200 → PASS"
+    "RESULT: Inference throughput: 108789.87 tokens/sec",
+    "RESULT: Inference TTFT p99: 687.50 ms",
+    "Throughput constraint: >= 50000 → PASS",
+    "TTFT p99 constraint: <= 1000 → PASS"
   ]
 }
 ```

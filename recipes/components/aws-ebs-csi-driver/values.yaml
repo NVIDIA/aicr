@@ -56,8 +56,16 @@ node:
 
 storageClasses: []
 
+# Provision a cluster-default StorageClass (ebs-csi-default-sc: gp3,
+# WaitForFirstConsumer, expandable, annotated is-default-class=true). EKS ships
+# no default StorageClass on its own, so without this any PVC created without an
+# explicit storageClassName — including the inference-perf model-weights cache —
+# stays Pending. Enabling it here makes dynamic provisioning "just work" on
+# AICR-deployed EKS clusters. NOTE: this sets a *cluster-wide* default; if the
+# cluster already has another default StorageClass, unset that one to avoid two
+# defaults (which Kubernetes treats as ambiguous).
 defaultStorageClass:
-  enabled: false
+  enabled: true
 
 volumeSnapshotClasses: []
 

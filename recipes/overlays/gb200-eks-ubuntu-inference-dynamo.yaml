@@ -62,23 +62,23 @@ spec:
     performance:
       checks:
         - inference-perf
-      # PLACEHOLDER NUMBERS — pending empirical tuning on GB200 with
-      # Qwen/Qwen3-0.6B (concurrency=16/GPU, 1× p6e-gb200.36xlarge node,
-      # 4 vllmDecodeWorkers, vllm-runtime:0.9.0, image+DRA caches warm).
-      # Reference baseline from the passing validation run that informed
-      # these thresholds: throughput ≈ 18,093 tok/s, TTFT p99 ≈ 219 ms.
-      # Run-to-run variance on the same node is ~7% on throughput and a
-      # few ms on TTFT. These floors sit well below the reference numbers
-      # to act as a smoke-test gate rather than a tight perf SLO.
-      # Tighten once a reference dataset is published — for the small
-      # Qwen3-0.6B model the per-GPU compute advantage of GB200 over
-      # H100 is not exercised, so TTFT lands higher than naive
-      # Blackwell-vs-Hopper intuition suggests.
+      # Gate thresholds measured on GB200 (p6e-gb200.36xlarge, 4 GPUs,
+      # 4 vllmDecodeWorkers) with Qwen/Qwen3-8B at concurrency=256/GPU:
+      # throughput ≈ 65,952 tok/s, TTFT p99 ≈ 1,240 ms. Note an 8B model only
+      # loads GB200 to ~80% util, so TTFT sits in the steep part of the curve —
+      # the 2s ceiling leaves headroom for that variance (the evaluator also
+      # applies 10% tolerance). A larger model would exercise the per-GPU
+      # compute advantage and warrant a tighter gate. Model + concurrency are
+      # pinned so the gate stays valid independent of the compiled defaults.
       constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "256"
         - name: inference-throughput
-          value: ">= 10000"
+          value: ">= 50000"
         - name: inference-ttft-p99
-          value: "<= 500"
+          value: "<= 2000"
     conformance:
       checks:
         - platform-health

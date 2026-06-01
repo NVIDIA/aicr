@@ -215,11 +215,11 @@ func WithValidationTolerations(tolerations []corev1.Toleration) ValidateOption {
 
 // WithValidationTimeout opts into a facade-level deadline for the
 // ValidateState run. By default (option unset) ValidateState wraps the
-// caller's context with defaults.ValidationOperationTimeout (~60m), which
+// caller's context with defaults.ValidationOperationTimeout (75m), which
 // suits controllers that pass an unbounded context. Pass a positive
 // duration to set an explicit cap, or 0 to impose NO facade cap — the run
 // then proceeds under the caller's context unchanged so per-validator
-// timeouts (e.g. the 50m inference-perf check) govern. The CLI validate
+// timeouts (e.g. the 65m inference-perf check) govern. The CLI validate
 // command passes 0 so an all-phase run isn't cut short by a fixed cap.
 func WithValidationTimeout(d time.Duration) ValidateOption {
 	return func(c *validateConfig) { c.timeout = &d }

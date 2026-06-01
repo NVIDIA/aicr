@@ -37,7 +37,10 @@ spec:
       replicas: 1
       envs:
         - name: SERVED_MODEL_NAME
-          value: ${MODEL}
+          # Quoted so a scalar-looking model ID (e.g. a pure-numeric or
+          # boolean-like name that passes validateModelID) parses as a string,
+          # not int/bool/null, after ${MODEL} substitution.
+          value: "${MODEL}"
         - name: DYN_STORE_KV
           value: mem
         - name: DYN_EVENT_PLANE
@@ -45,6 +48,21 @@ spec:
       extraPodSpec:
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0
+          # Optional HF token (provisioned by the validator only when a token is
+          # present); absent Secret => anonymous downloads, the default.
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aicr-hf-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aicr-hf-token
+                  key: token
+                  optional: true
     VllmDecodeWorker:
       componentType: worker
       replicas: ${GPU_COUNT}
@@ -62,3 +80,18 @@ spec:
           workingDir: /workspace/examples/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args: ["--model", "${MODEL}"]
+          # Optional HF token (provisioned by the validator only when a token is
+          # present); absent Secret => anonymous downloads, the default.
+          env:
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aicr-hf-token
+                  key: token
+                  optional: true
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aicr-hf-token
+                  key: token
+                  optional: true

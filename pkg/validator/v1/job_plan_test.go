@@ -291,6 +291,75 @@ func TestBuildJobPlan(t *testing.T) {
 	}
 }
 
+// TestBuildJobPlan_ForwardsHFToken verifies HF_TOKEN is forwarded from the
+// orchestrator's environment into the validator Job env when set, and omitted
+// when unset — so inference-perf can provision it for model downloads without
+// the token ever living in the in-repo catalog.
+func TestBuildJobPlan_ForwardsHFToken(t *testing.T) {
+	entry := ValidatorEntry{Name: "inference-perf", Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+	build := func() map[string]string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		m := make(map[string]string)
+		for _, e := range plan.Env {
+			m[e.Name] = e.Value
+		}
+		return m
+	}
+
+	t.Run("set → forwarded", func(t *testing.T) {
+		t.Setenv("HF_TOKEN", "hf_secret123")
+		if got := build()["HF_TOKEN"]; got != "hf_secret123" {
+			t.Errorf("HF_TOKEN env = %q, want hf_secret123", got)
+		}
+	})
+	t.Run("unset → absent", func(t *testing.T) {
+		t.Setenv("HF_TOKEN", "")
+		if _, present := build()["HF_TOKEN"]; present {
+			t.Error("HF_TOKEN should not be in Job env when unset in orchestrator")
+		}
+	})
+	t.Run("non-inference-perf entry → not forwarded", func(t *testing.T) {
+		// Even with HF_TOKEN set, an unrelated check (deployment/conformance)
+		// must not receive the credential in its Pod env.
+		t.Setenv("HF_TOKEN", "hf_secret123")
+		other := ValidatorEntry{Name: "operator-health", Phase: "deployment", Image: "img:v1", Timeout: time.Minute}
+		plan, err := BuildJobPlan(other, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		for _, e := range plan.Env {
+			if e.Name == "HF_TOKEN" {
+				t.Error("HF_TOKEN must not be forwarded to a non-inference-perf validator")
+			}
+		}
+	})
+	t.Run("catalog HF_TOKEN cannot override forwarded token", func(t *testing.T) {
+		// A catalog-provided HF_TOKEN must never win over (or appear alongside)
+		// the orchestrator-forwarded one — the token comes only from the env.
+		t.Setenv("HF_TOKEN", "hf_orchestrator")
+		entry := ValidatorEntry{
+			Name: "inference-perf", Phase: "performance", Image: "img:v1", Timeout: time.Minute,
+			Env: []EnvVar{{Name: "HF_TOKEN", Value: "hf_from_catalog"}},
+		}
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var tokens []string
+		for _, e := range plan.Env {
+			if e.Name == "HF_TOKEN" {
+				tokens = append(tokens, e.Value)
+			}
+		}
+		if len(tokens) != 1 || tokens[0] != "hf_orchestrator" {
+			t.Errorf("HF_TOKEN env = %v, want exactly [hf_orchestrator] (catalog value must be dropped)", tokens)
+		}
+	})
+}
+
 func TestBuildJobPlanWithDefaults(t *testing.T) {
 	// Test with minimal entry (no custom resources, no tolerations, no node selector)
 	entry := ValidatorEntry{

@@ -1190,13 +1190,17 @@ func (c *Client) ValidateState(
 
 	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
 	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
-	// ValidationOperationTimeout cap (~60m), which sits ABOVE the per-check Job
-	// CheckExecutionTimeout (45m), so a single hung check fires its own
-	// per-check timeout first and surfaces as a structured check failure rather
-	// than a wrapping deadline-exceeded that loses the per-check signal — the
-	// behavior controllers rely on. A non-nil *0 imposes NO facade cap (the CLI
-	// path, where per-validator timeouts govern an all-phase run that can
-	// include the 50m inference-perf check); a non-nil >0 sets that explicit
+	// ValidationOperationTimeout cap (75m), which sits ABOVE the largest
+	// per-check Job timeout (the 65m inference-perf catalog timeout; the
+	// CheckExecutionTimeout fallback is 55m), so a single hung check fires its
+	// own per-check timeout first and surfaces as a structured check failure
+	// rather than a wrapping deadline-exceeded that loses the per-check signal —
+	// the behavior controllers rely on. It is a per-check ordering guarantee and
+	// a coarse operation cap, not a bound on the serial sum of an all-phase run
+	// (checks run serially), so a heavy all-phase run should set an explicit
+	// timeout. A non-nil *0 imposes NO facade cap (the CLI path, where
+	// per-validator timeouts govern an all-phase run that can include the 65m
+	// inference-perf check); a non-nil >0 sets that explicit
 	// cap. context.WithTimeout honors the smaller of the parent deadline and
 	// ours, so a tighter caller deadline always wins.
 	switch {

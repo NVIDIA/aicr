@@ -940,10 +940,10 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "duration": 612000,
         "suite": ["performance"],
         "stdout": [
-          "RESULT: Inference throughput: 37961.24 tokens/sec",
-          "RESULT: Inference TTFT p99: 146.30 ms",
-          "Throughput constraint: >= 5000 → PASS",
-          "TTFT p99 constraint: <= 200 → PASS"
+          "RESULT: Inference throughput: 108789.87 tokens/sec",
+          "RESULT: Inference TTFT p99: 687.50 ms",
+          "Throughput constraint: >= 50000 → PASS",
+          "TTFT p99 constraint: <= 1000 → PASS"
         ]
       },
       {

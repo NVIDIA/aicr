@@ -74,15 +74,22 @@ spec:
     performance:
       checks:
         - inference-perf
-      # Placeholder thresholds — pending empirical tuning on RTX PRO 6000
-      # Blackwell Server Edition (g7e.48xlarge, 8x). Current values are
-      # loose smoke-test floors derived from the H100 reference; tighten
-      # once reference runs are published.
+      # Gate thresholds measured on RTX PRO 6000 Blackwell Server Edition
+      # (g7e.48xlarge, 8 GPUs) with Qwen/Qwen3-8B at concurrency=256/GPU:
+      # throughput ≈ 59,260 tok/s, TTFT p99 ≈ 445 ms. Floor/ceiling sit
+      # below/above the reference with margin (the evaluator also applies 10%
+      # tolerance) so the gate catches real regressions without flaking on
+      # run-to-run variance. Model + concurrency are pinned so the gate stays
+      # valid independent of the compiled validator defaults.
       constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "256"
         - name: inference-throughput
-          value: ">= 5000"
+          value: ">= 50000"
         - name: inference-ttft-p99
-          value: "<= 200"
+          value: "<= 1000"
     conformance:
       checks:
         - platform-health
