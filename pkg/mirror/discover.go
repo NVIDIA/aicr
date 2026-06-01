@@ -91,6 +91,12 @@ type componentResult struct {
 
 // Discover takes a loaded RecipeResult and returns a MirrorList by
 // rendering each component's chart and extracting images.
+//
+// Manifest and component-values reads both route through the recipe's bound
+// DataProvider (rec.DataProvider()), so a recipe built against a `--data`
+// overlay sees overlay-provided manifests and values consistently. When the
+// recipe carries no bound provider, reads fall back to the package-global
+// embedded provider inside recipe.GetManifestContentWithContext.
 func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*MirrorList, error) {
 	if rec == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe is required")
@@ -105,6 +111,7 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(defaults.MirrorDiscoveryConcurrency)
 
 	for i, compRef := range rec.ComponentRefs {
 		if !compRef.IsEnabled() {
@@ -126,7 +133,7 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 
 			// Helm components: render chart and extract images.
 			if compRef.Type == recipe.ComponentTypeHelm {
-				values, valErr := rec.GetValuesForComponent(compRef.Name)
+				values, valErr := rec.GetValuesForComponentWithContext(gctx, compRef.Name)
 				if valErr != nil {
 					slog.Warn("failed to load values for component",
 						"component", compRef.Name, "error", valErr)
@@ -174,15 +181,20 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 				}
 			}
 
-			// Both types: scan ManifestFiles and PreManifestFiles.
+			// Both types: scan ManifestFiles and PreManifestFiles. Use the
+			// recipe-bound DataProvider so `--data` overlays that shadow an
+			// embedded manifest path are honored, matching the values-loading
+			// path above. A nil provider falls back to embedded inside
+			// GetManifestContentWithContext.
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
+			dp := rec.DataProvider()
 			for _, mPath := range compRef.ManifestFiles {
-				allImages = extractManifestImages(allImages, &ci, compRef.Name, mPath)
+				allImages = extractManifestImages(gctx, dp, allImages, &ci, compRef.Name, mPath)
 			}
 			for _, mPath := range compRef.PreManifestFiles {
-				allImages = extractManifestImages(allImages, &ci, compRef.Name, mPath)
+				allImages = extractManifestImages(gctx, dp, allImages, &ci, compRef.Name, mPath)
 			}
 
 			slices.Sort(allImages)
@@ -246,10 +258,12 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 	return ml, nil
 }
 
-// extractManifestImages reads a manifest file and appends extracted images
-// to the accumulator, recording warnings on failure.
-func extractManifestImages(acc []string, ci *ComponentImages, compName, mPath string) []string {
-	content, readErr := recipe.GetManifestContent(mPath)
+// extractManifestImages reads a manifest file from the supplied DataProvider
+// and appends extracted images to the accumulator, recording warnings on
+// failure. A nil provider falls back to the package-global embedded provider
+// inside recipe.GetManifestContentWithContext.
+func extractManifestImages(ctx context.Context, dp recipe.DataProvider, acc []string, ci *ComponentImages, compName, mPath string) []string {
+	content, readErr := recipe.GetManifestContentWithContext(ctx, dp, mPath)
 	if readErr != nil {
 		slog.Warn("failed to read manifest",
 			"component", compName, "path", mPath, "error", readErr)

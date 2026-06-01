@@ -51,7 +51,25 @@ type StatementMetadata struct {
 
 	// ToolVersion is the aicr version that produced this bundle (e.g., "v1.0.0").
 	ToolVersion string
+
+	// InvocationID overrides the auto-generated runDetails.metadata.invocationId.
+	// Leave empty for non-deterministic auto-generation.
+	InvocationID string
+
+	// StartedOn overrides the auto-generated runDetails.metadata.startedOn.
+	// Zero value means "use time.Now()" unless Deterministic is true.
+	StartedOn time.Time
+
+	// Deterministic, when true, derives invocationId via UUIDv5 from
+	// (Recipe, ToolVersion, BuilderID, subject digest) and omits startedOn.
+	// Required for SLSA-reproducible builds where two runs against
+	// identical inputs must produce byte-identical attestations.
+	Deterministic bool
 }
+
+// aicrBundleNamespace is the UUIDv5 namespace for deterministic
+// invocationId derivation. Stable across releases.
+var aicrBundleNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://aicr.nvidia.com/bundle/v1"))
 
 // BuildStatement constructs an in-toto Statement v1 with a SLSA Build Provenance v1
 // predicate. Returns the statement as serialized JSON.
@@ -137,12 +155,45 @@ func buildPredicate(subject AttestSubject, metadata StatementMetadata) (*structp
 			"builder": map[string]any{
 				"id": metadata.BuilderID,
 			},
-			"metadata": map[string]any{
-				"invocationId": uuid.New().String(),
-				"startedOn":    time.Now().UTC().Format(time.RFC3339),
-			},
+			"metadata": runDetailsMetadata(subject, metadata),
 		},
 	}
 
 	return structpb.NewStruct(predicateMap)
+}
+
+// runDetailsMetadata builds the runDetails.metadata block. In deterministic
+// mode the invocationId is derived via UUIDv5 from stable identity inputs
+// (subject digest + recipe + tool version + builder) and startedOn is
+// omitted. Otherwise an explicit override is honored, falling back to a
+// random UUID and time.Now() for back-compat with non-reproducible builds.
+func runDetailsMetadata(subject AttestSubject, metadata StatementMetadata) map[string]any {
+	out := map[string]any{}
+
+	switch {
+	case metadata.Deterministic:
+		// Stable identity: subject sha256 digest dominates. Recipe, tool
+		// version, and builder discriminate parallel builds.
+		identity := fmt.Sprintf("%s|%s|%s|%s",
+			subject.Digest["sha256"],
+			metadata.Recipe,
+			metadata.ToolVersion,
+			metadata.BuilderID,
+		)
+		out["invocationId"] = uuid.NewSHA1(aicrBundleNamespace, []byte(identity)).String()
+		// Omit startedOn in deterministic mode.
+	default:
+		if metadata.InvocationID != "" {
+			out["invocationId"] = metadata.InvocationID
+		} else {
+			out["invocationId"] = uuid.New().String()
+		}
+		if !metadata.StartedOn.IsZero() {
+			out["startedOn"] = metadata.StartedOn.UTC().Format(time.RFC3339)
+		} else {
+			out["startedOn"] = time.Now().UTC().Format(time.RFC3339)
+		}
+	}
+
+	return out
 }

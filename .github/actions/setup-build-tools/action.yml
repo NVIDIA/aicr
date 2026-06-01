@@ -148,8 +148,8 @@ runs:
         KO_BASE="https://github.com/ko-build/ko/releases/download/v${KO_VERSION}"
         KO_TAR="ko_${KO_VERSION}_Linux_x86_64.tar.gz"
         KO_TMP="$(mktemp -d)"
-        curl -fsSL -o "${KO_TMP}/${KO_TAR}" "${KO_BASE}/${KO_TAR}"
-        curl -fsSL -o "${KO_TMP}/checksums.txt" "${KO_BASE}/checksums.txt"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${KO_TMP}/${KO_TAR}" "${KO_BASE}/${KO_TAR}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${KO_TMP}/checksums.txt" "${KO_BASE}/checksums.txt"
         EXPECTED=$(grep "${KO_TAR}" "${KO_TMP}/checksums.txt" | head -1 | awk '{print $1}')
         ACTUAL=$(sha256sum "${KO_TMP}/${KO_TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -178,8 +178,8 @@ runs:
         CRANE_BASE="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}"
         CRANE_TAR="go-containerregistry_Linux_x86_64.tar.gz"
         CRANE_TMP="$(mktemp -d)"
-        curl -fsSL -o "${CRANE_TMP}/${CRANE_TAR}" "${CRANE_BASE}/${CRANE_TAR}"
-        curl -fsSL -o "${CRANE_TMP}/checksums.txt" "${CRANE_BASE}/checksums.txt"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${CRANE_TMP}/${CRANE_TAR}" "${CRANE_BASE}/${CRANE_TAR}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${CRANE_TMP}/checksums.txt" "${CRANE_BASE}/checksums.txt"
         EXPECTED=$(grep "${CRANE_TAR}" "${CRANE_TMP}/checksums.txt" | head -1 | awk '{print $1}')
         ACTUAL=$(sha256sum "${CRANE_TMP}/${CRANE_TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -227,7 +227,7 @@ runs:
         TAR="chainsaw_linux_amd64.tar.gz"
         URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${URL}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/${TAR}" "${URL}"
         ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
           echo "::error::chainsaw checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
@@ -250,8 +250,8 @@ runs:
         HELM_BASE="https://get.helm.sh"
         HELM_TAR="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
         HELM_TMP="$(mktemp -d)"
-        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}" "${HELM_BASE}/${HELM_TAR}"
-        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}.sha256sum" "${HELM_BASE}/${HELM_TAR}.sha256sum"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${HELM_TMP}/${HELM_TAR}" "${HELM_BASE}/${HELM_TAR}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${HELM_TMP}/${HELM_TAR}.sha256sum" "${HELM_BASE}/${HELM_TAR}.sha256sum"
         EXPECTED=$(awk '{print $1}' "${HELM_TMP}/${HELM_TAR}.sha256sum")
         ACTUAL=$(sha256sum "${HELM_TMP}/${HELM_TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -280,7 +280,7 @@ runs:
         HELMFILE_TAR="helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz"
         HELMFILE_URL="https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/${HELMFILE_TAR}"
         HELMFILE_TMP="$(mktemp -d)"
-        curl -fsSL -o "${HELMFILE_TMP}/${HELMFILE_TAR}" "${HELMFILE_URL}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${HELMFILE_TMP}/${HELMFILE_TAR}" "${HELMFILE_URL}"
         ACTUAL=$(sha256sum "${HELMFILE_TMP}/${HELMFILE_TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
           echo "::error::helmfile checksum mismatch: expected ${EXPECTED}, got ${ACTUAL} (if upstream rotated, refresh with tools/update-helmfile-checksums v${HELMFILE_VERSION})"
@@ -303,8 +303,8 @@ runs:
         ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
         BASE="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/kubectl" "${BASE}/kubectl"
-        curl -fsSL -o "${TMP}/kubectl.sha256" "${BASE}/kubectl.sha256"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/kubectl" "${BASE}/kubectl"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/kubectl.sha256" "${BASE}/kubectl.sha256"
         EXPECTED=$(awk '{print $1}' "${TMP}/kubectl.sha256")
         ACTUAL=$(sha256sum "${TMP}/kubectl" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -326,8 +326,8 @@ runs:
         if [[ -x /usr/local/bin/kind ]]; then echo "kind already installed"; kind version; exit 0; fi
         BASE="https://kind.sigs.k8s.io/dl/v${KIND_VERSION}"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/kind" "${BASE}/kind-linux-amd64"
-        curl -fsSL -o "${TMP}/kind.sha256sum" "${BASE}/kind-linux-amd64.sha256sum"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/kind" "${BASE}/kind-linux-amd64"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/kind.sha256sum" "${BASE}/kind-linux-amd64.sha256sum"
         EXPECTED=$(awk '{print $1}' "${TMP}/kind.sha256sum")
         ACTUAL=$(sha256sum "${TMP}/kind" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -349,12 +349,12 @@ runs:
         if [[ -x /usr/local/bin/yq ]]; then echo "yq already installed"; yq --version; exit 0; fi
         BASE="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/yq" "${BASE}/yq_linux_amd64"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/yq" "${BASE}/yq_linux_amd64"
         # yq publishes a multi-hash 'checksums' file paired with 'checksums_hashes_order'
         # listing column names. SHA-256 column index is derived dynamically so column
         # reordering upstream doesn't silently fall back to a weaker hash.
-        curl -fsSL -o "${TMP}/checksums" "${BASE}/checksums"
-        curl -fsSL -o "${TMP}/checksums_hashes_order" "${BASE}/checksums_hashes_order"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/checksums" "${BASE}/checksums"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/checksums_hashes_order" "${BASE}/checksums_hashes_order"
         HASH_ROW=$(grep -nx 'SHA-256' "${TMP}/checksums_hashes_order" | head -1 | cut -d: -f1)
         if [[ -z "${HASH_ROW}" ]]; then
           echo "::error::SHA-256 column not found in yq checksums_hashes_order"
@@ -389,8 +389,8 @@ runs:
         BASE="https://github.com/hauler-dev/hauler/releases/download/v${VERSION}"
         TAR="hauler_${VERSION}_linux_amd64.tar.gz"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
-        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/hauler_${VERSION}_checksums.txt"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/checksums.txt" "${BASE}/hauler_${VERSION}_checksums.txt"
         EXPECTED=$(grep "${TAR}" "${TMP}/checksums.txt" | head -1 | awk '{print $1}')
         ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -415,8 +415,8 @@ runs:
         BASE="https://github.com/zarf-dev/zarf/releases/download/v${VERSION}"
         BIN="zarf_v${VERSION}_Linux_amd64"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/zarf" "${BASE}/${BIN}"
-        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/checksums.txt"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/zarf" "${BASE}/${BIN}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/checksums.txt" "${BASE}/checksums.txt"
         EXPECTED=$(grep "  ${BIN}\$" "${TMP}/checksums.txt" | awk '{print $1}')
         ACTUAL=$(sha256sum "${TMP}/zarf" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -444,8 +444,8 @@ runs:
         BASE="https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}"
         TAR="flux_${VERSION}_linux_amd64.tar.gz"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
-        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/flux_${VERSION}_checksums.txt"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/checksums.txt" "${BASE}/flux_${VERSION}_checksums.txt"
         EXPECTED=$(grep "${TAR}" "${TMP}/checksums.txt" | head -1 | awk '{print $1}')
         ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
@@ -469,8 +469,8 @@ runs:
         BASE="https://github.com/tilt-dev/ctlptl/releases/download/v${CTLPTL_VERSION}"
         TAR="ctlptl.${CTLPTL_VERSION}.linux.x86_64.tar.gz"
         TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${BASE}/${TAR}"
-        curl -fsSL -o "${TMP}/checksums.txt" "${BASE}/checksums.txt"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/${TAR}" "${BASE}/${TAR}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${TMP}/checksums.txt" "${BASE}/checksums.txt"
         EXPECTED=$(grep "${TAR}" "${TMP}/checksums.txt" | head -1 | awk '{print $1}')
         ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
         if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then

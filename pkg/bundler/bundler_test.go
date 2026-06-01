@@ -1799,9 +1799,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 			t.Fatalf("NewLayeredDataProvider: %v", layeredErr)
 		}
 
-		original := recipe.GetDataProvider()   //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-		recipe.SetDataProvider(layered)        //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
-		defer recipe.SetDataProvider(original) //nolint:staticcheck // exercises legacy global-provider swap; tracked by #983 Stage 2
+		recipeResult.BindDataProvider(layered)
 
 		_, err := bundler.collectComponentManifests(context.Background(), recipeResult)
 		if err == nil {

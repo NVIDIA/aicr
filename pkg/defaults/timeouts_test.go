@@ -39,7 +39,9 @@ func TestTimeoutConstants(t *testing.T) {
 
 		// Server timeouts
 		{"ServerReadTimeout", ServerReadTimeout, 5 * time.Second, 30 * time.Second},
-		{"ServerWriteTimeout", ServerWriteTimeout, 15 * time.Second, 60 * time.Second},
+		// ServerWriteTimeout must be ≥ longest per-handler timeout
+		// (BundleHandlerTimeout = 60s) plus headroom for error-path writes.
+		{"ServerWriteTimeout", ServerWriteTimeout, 60 * time.Second, 180 * time.Second},
 		{"ServerIdleTimeout", ServerIdleTimeout, 30 * time.Second, 300 * time.Second},
 		{"ServerShutdownTimeout", ServerShutdownTimeout, 10 * time.Second, 60 * time.Second},
 

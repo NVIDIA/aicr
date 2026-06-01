@@ -40,6 +40,7 @@
 //	    CreateOSCollector() Collector
 //	    CreateKubernetesCollector() Collector
 //	    CreateGPUCollector() Collector
+//	    CreateNodeTopologyCollector() Collector
 //	}
 //
 // The DefaultFactory provides production implementations with configurable options:
@@ -129,6 +130,8 @@
 //   - collector/gpu - GPU hardware collectors
 //   - collector/os - Operating system collectors
 //   - collector/systemd - SystemD service collectors
+//   - collector/talos - Talos-aware service + OS collectors (Node API backed)
+//   - collector/topology - Cluster-wide node taint/label topology collector
 //   - collector/file - File-based configuration collectors
 //
 // # Error Handling

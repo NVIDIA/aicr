@@ -16,6 +16,8 @@ package mirror
 
 import (
 	"context"
+	"io/fs"
+	"slices"
 	"testing"
 	"time"
 
@@ -368,4 +370,109 @@ func splitPath(path string) []string {
 		}
 	}
 	return parts
+}
+
+// inMemoryDataProvider is a minimal recipe.DataProvider backed by an
+// in-memory map[path]content. Only ReadFile is exercised by extractManifestImages;
+// WalkDir and Source are implemented to satisfy the interface.
+type inMemoryDataProvider struct {
+	files map[string][]byte
+}
+
+func (p *inMemoryDataProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	content, ok := p.files[path]
+	if !ok {
+		return nil, fs.ErrNotExist
+	}
+	return content, nil
+}
+
+func (p *inMemoryDataProvider) WalkDir(ctx context.Context, _ string, _ fs.WalkDirFunc) error {
+	return ctx.Err()
+}
+
+func (p *inMemoryDataProvider) Source(path string) string { return "inmem:" + path }
+
+// TestDiscover_HonorsRecipeBoundDataProviderForManifests pins the invariant
+// that extractManifestImages reads ManifestFiles through the recipe-bound
+// DataProvider. Without the binding, mirror would silently fall back to the
+// package-global embedded provider — making `aicr mirror --data <dir>`
+// inconsistent with `aicr bundle --data <dir>` for overlay-shadowed manifests.
+func TestDiscover_HonorsRecipeBoundDataProviderForManifests(t *testing.T) {
+	const manifestPath = "components/network-operator/manifests/overlay-only.yaml"
+	overlayManifest := []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: overlay-only
+spec:
+  containers:
+    - name: c
+      image: overlay/from-provider:v9.9.9
+`)
+
+	dp := &inMemoryDataProvider{files: map[string][]byte{
+		manifestPath: overlayManifest,
+	}}
+
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          "network-operator",
+				Type:          recipe.ComponentTypeKustomize,
+				ManifestFiles: []string{manifestPath},
+			},
+		},
+	}
+	rec.BindDataProvider(dp)
+
+	lister := NewLister(WithHelmRenderer(&helmtest.MockRenderer{}))
+	result, err := lister.Discover(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+
+	if !slices.Contains(result.Images, "overlay/from-provider:v9.9.9") {
+		t.Errorf("overlay manifest image not extracted: images=%v", result.Images)
+	}
+	for _, c := range result.Components {
+		if c.Component == "network-operator" && len(c.Warnings) > 0 {
+			t.Errorf("unexpected warnings on overlay-bound read: %v", c.Warnings)
+		}
+	}
+}
+
+// TestDiscover_NilDataProviderFallsBackToEmbedded confirms the back-compat
+// path: when a RecipeResult has no bound provider, extractManifestImages must
+// still resolve manifest paths via the package-global embedded provider
+// (recipe.GetManifestContentWithContext treats a nil dp as embedded fallback).
+// We use a real embedded manifest path to keep the test hermetic.
+func TestDiscover_NilDataProviderFallsBackToEmbedded(t *testing.T) {
+	const embeddedManifest = "components/network-operator/manifests/nfd-network-rule.yaml"
+
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          "network-operator",
+				Type:          recipe.ComponentTypeKustomize,
+				ManifestFiles: []string{embeddedManifest},
+			},
+		},
+	}
+	// Intentionally do NOT call BindDataProvider — rec.DataProvider() returns nil.
+
+	lister := NewLister(WithHelmRenderer(&helmtest.MockRenderer{}))
+	result, err := lister.Discover(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+
+	for _, c := range result.Components {
+		if c.Component == "network-operator" && len(c.Warnings) > 0 {
+			t.Errorf("unexpected warnings reading embedded manifest: %v", c.Warnings)
+		}
+	}
 }

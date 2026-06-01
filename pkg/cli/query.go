@@ -22,10 +22,9 @@ import (
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
-	"gopkg.in/yaml.v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -106,8 +105,19 @@ Use in shell scripts:
 				return err
 			}
 
-			if err = initDataProvider(cmd, cfg); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+			// Build a per-command Client bound to the resolved data source.
+			// query historically relied on lazy global seeding of the criteria
+			// registry; it now explicitly seeds its OWN provider via
+			// LoadCatalog before parsing criteria, fixing a latent ordering
+			// bug where the first parse could run against an empty registry.
+			client, err := recipeClientFromCmd(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+
+			if err = client.LoadCatalog(ctx); err != nil {
+				return err
 			}
 
 			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
@@ -115,12 +125,12 @@ Use in shell scripts:
 				return err
 			}
 
-			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
+			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg, client)
 			if err != nil {
 				return err
 			}
 
-			hydrated, err := recipe.HydrateResult(result)
+			hydrated, err := recipe.HydrateResultWithContext(ctx, result.Resolved())
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to hydrate recipe", err)
 			}
@@ -137,7 +147,8 @@ Use in shell scripts:
 }
 
 // buildRecipeFromCmdWithConfig resolves a recipe from CLI flags layered on
-// top of an optional AICRConfig. Resolution order for each input is:
+// top of an optional AICRConfig, through the supplied aicr.Client. Resolution
+// order for each input is:
 //
 //  1. CLI flag (if explicitly set)
 //  2. spec.recipe.* field on cfg (if non-empty)
@@ -145,10 +156,15 @@ Use in shell scripts:
 //
 // A snapshot path provided by either source takes precedence over the
 // criteria pathway, matching today's --snapshot behavior.
-func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig) (*recipe.RecipeResult, error) {
-	builder := recipe.NewBuilder(
-		recipe.WithVersion(version),
-	)
+//
+// All criteria enum values — fingerprint-derived, config-sourced, and
+// flag-sourced — are parsed against the Client's OWN per-provider criteria
+// registry (client.CriteriaRegistry), so a value contributed by a `--data`
+// overlay validates against the same DataProvider the Client resolves with.
+// The Client's catalog must already be loaded (LoadCatalog) so that registry
+// is seeded.
+func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
+	reg := client.CriteriaRegistry()
 
 	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
 
@@ -159,28 +175,22 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapFilePath), loadErr)
 		}
 
-		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria()
-		if applyErr := applyCriteriaFromConfig(criteria, cfg); applyErr != nil {
+		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria(reg)
+		if applyErr := applyCriteriaFromConfig(criteria, cfg, reg); applyErr != nil {
 			return nil, applyErr
 		}
-		if applyErr := applyCriteriaOverrides(cmd, criteria); applyErr != nil {
+		if applyErr := applyCriteriaOverrides(cmd, criteria, reg); applyErr != nil {
 			return nil, applyErr
-		}
-
-		evaluator := func(constraint recipe.Constraint) recipe.ConstraintEvalResult {
-			valResult := constraints.Evaluate(constraint, snap)
-			return recipe.ConstraintEvalResult{
-				Passed: valResult.Passed,
-				Actual: valResult.Actual,
-				Error:  valResult.Error,
-			}
 		}
 
 		slog.Info("building recipe from snapshot", "criteria", criteria.String())
-		return builder.BuildFromCriteriaWithEvaluator(ctx, criteria, evaluator)
+		// ResolveRecipeFromSnapshot builds the constraint evaluator
+		// internally (constraints.Evaluate against snap), mirroring the
+		// pre-facade BuildFromCriteriaWithEvaluator path.
+		return client.ResolveRecipeFromSnapshot(ctx, aicr.WrapCriteria(criteria), aicr.WrapSnapshot(snap))
 	}
 
-	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg)
+	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg, reg)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "error parsing criteria", err)
 	}
@@ -191,7 +201,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 	}
 
 	slog.Info("building recipe from criteria", "criteria", criteria.String())
-	return builder.BuildFromCriteria(ctx, criteria)
+	return client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
 }
 
 // writeQueryResult formats and writes the selected value to w.
@@ -228,7 +238,10 @@ func writeComplexValue(w io.Writer, val any, format serializer.Format) error {
 		return nil
 	}
 
-	data, err := yaml.Marshal(val)
+	// Use deterministic marshal so query output is byte-stable across runs;
+	// selector results commonly include map[string]any fragments from
+	// values.yaml whose Go map iteration would otherwise be randomized.
+	data, err := serializer.MarshalYAMLDeterministic(val)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal YAML", err)
 	}

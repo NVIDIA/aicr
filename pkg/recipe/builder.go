@@ -174,5 +174,11 @@ func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, buildFn func(
 		result.Metadata.Version = b.Version
 	}
 
+	// Stamp owner so cross-Builder result mixing is rejected at the
+	// consumption point (see RecipeResult.AssertOwnedBy). The Builder
+	// pointer identity is the token — zero-cost and unforgeable from
+	// outside the package because owner is unexported.
+	result.owner = b
+
 	return result, nil
 }

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
@@ -55,9 +56,11 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"expected manifest digest is required (from predicate.manifest.digest)")
 	}
-	body, err := os.ReadFile(filepath.Join(mat.BundleDir, attestation.ManifestFilename)) //nolint:gosec
+	body, err := readBoundedFile(
+		filepath.Join(mat.BundleDir, attestation.ManifestFilename),
+		"manifest.json", defaults.MaxManifestFileBytes)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, "failed to read manifest.json", err)
+		return nil, err
 	}
 	gotManifestDigest := attestation.HashBytesSHA256(body)
 	if gotManifestDigest != expectedManifestDigest {

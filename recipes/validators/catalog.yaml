@@ -77,6 +77,19 @@ validators:
     # ctx itself has expired.
     timeout: 50m
     args: ["inference-perf"]
+    # Benchmark tuning knobs (optional). AIPerf warms up before measuring so
+    # vLLM's one-time CUDA-graph/JIT cost is excluded from the reported p99
+    # TTFT/throughput. Override any of these to retune without rebuilding the
+    # validator image; an unset knob uses the default shown, while a value that
+    # is not a positive integer aborts the check (ErrCodeInvalidRequest) instead
+    # of silently defaulting. The per-accelerator pass/fail thresholds live in
+    # the recipe overlays, not here.
+    #   AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU      (default 16)
+    #   AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY   (default 1; warmup reqs per slot)
+    #   AICR_INFERENCE_PERF_MIN_REQUESTS             (default 1000; measured-request floor)
+    #   AICR_INFERENCE_PERF_REQUESTS_PER_CONCURRENCY (default 8; scales requests w/ concurrency)
+    #   AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN        (default 128)
+    #   AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN       (default 128)
     env: []
   # Conformance phase
   - name: dra-support

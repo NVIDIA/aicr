@@ -34,6 +34,13 @@ func checkInferencePerf(ctx *validators.Context) error {
 		return validators.Skip("no inference-throughput or inference-ttft-p99 constraint in recipe")
 	}
 
+	// Fail closed on a malformed AICR_INFERENCE_PERF_* tuning knob before any
+	// workload is deployed: a typo must not silently benchmark under defaults
+	// and report a pass/fail the operator never configured.
+	if err := validatePerfTuningEnvs(); err != nil {
+		return err
+	}
+
 	// validateInferencePerf returns pkg/errors StructuredError values with the
 	// right codes already (ErrCodeTimeout for deadline exhaustion inside the
 	// pipeline, ErrCodeInternal for infra failures, ErrCodeInvalidRequest for

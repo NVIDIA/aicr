@@ -501,6 +501,47 @@ func TestBuildHelmfile_CreateNamespaceFromFolder(t *testing.T) {
 	}
 }
 
+// TestBuildHelmfile_DisableValidationPrimaryOnly asserts that the
+// registry flag HasSelfRefCRDs emits `disableValidation: true` only on
+// the primary release of a component, not on the injected -pre / -post
+// local-helm wrappers. The wrappers ship raw manifests (no `crds/`, no
+// self-reference of their own); cascading the flag would silently drop
+// helm-diff's REST-mapper sanity check on those wrappers — a typo in a
+// resource Kind would render at diff time and fail at apply. See issue
+// #929.
+func TestBuildHelmfile_DisableValidationPrimaryOnly(t *testing.T) {
+	folders := []localformat.Folder{
+		{Index: 1, Dir: "001-gpu-operator-pre", Kind: localformat.KindLocalHelm,
+			Name: "gpu-operator-pre", Parent: "gpu-operator"},
+		{Index: 2, Dir: "002-gpu-operator", Kind: localformat.KindUpstreamHelm,
+			Name: "gpu-operator", Parent: "gpu-operator",
+			Upstream: &localformat.Upstream{Chart: "gpu-operator", Repo: "https://helm.ngc.nvidia.com/nvidia", Version: "v25.3.3"}},
+		{Index: 3, Dir: "003-gpu-operator-post", Kind: localformat.KindLocalHelm,
+			Name: "gpu-operator-post", Parent: "gpu-operator"},
+	}
+	ns := map[string]string{"gpu-operator": "gpu-operator"}
+	flags := map[string]componentFlags{"gpu-operator": {HasSelfRefCRDs: true}}
+	doc, err := buildHelmfile(folders, ns, nil, flags)
+	if err != nil {
+		t.Fatalf("buildHelmfile() error = %v", err)
+	}
+	if len(doc.Releases) != 3 {
+		t.Fatalf("expected 3 releases (pre + primary + post), got %d", len(doc.Releases))
+	}
+	if doc.Releases[0].DisableValidation {
+		t.Error("release[0] (gpu-operator-pre) DisableValidation = true, want false — " +
+			"the wrapper ships raw manifests, not the self-ref chart's crds/")
+	}
+	if !doc.Releases[1].DisableValidation {
+		t.Error("release[1] (gpu-operator) DisableValidation = false, want true — " +
+			"primary release carries the self-ref CRDs and needs the helm-diff bypass")
+	}
+	if doc.Releases[2].DisableValidation {
+		t.Error("release[2] (gpu-operator-post) DisableValidation = true, want false — " +
+			"the wrapper ships raw manifests, not the self-ref chart's crds/")
+	}
+}
+
 // TestGenerate_NamespaceOwningPreManifest is the integration counterpart:
 // a pre-manifest containing a Namespace resource flows end-to-end through
 // localformat.Write → buildHelmfile and surfaces as `createNamespace: false`

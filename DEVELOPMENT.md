@@ -164,15 +164,15 @@ aicr/
 │   ├── aicr/          # CLI binary
 │   └── aicrd/         # API server binary
 ├── pkg/
-│   ├── api/            # REST API handlers
 │   ├── bundler/        # Bundle generation framework
 │   ├── cli/            # CLI commands and flags
+│   ├── client/v1/      # aicr.Client SDK facade
 │   ├── collector/      # System state collectors
 │   ├── component/      # Bundler utilities
 │   ├── errors/         # Structured error handling
 │   ├── k8s/            # Kubernetes client
 │   ├── recipe/         # Recipe resolution engine
-│   ├── server/         # HTTP server framework
+│   ├── server/         # HTTP server (aicrd) + REST handlers
 │   ├── snapshotter/    # Snapshot orchestration
 │   └── validator/      # Constraint evaluation
 ├── docs/
@@ -188,14 +188,17 @@ aicr/
 #### CLI (`aicr`)
 - **Location**: `cmd/aicr/main.go` → `pkg/cli/`
 - **Framework**: [urfave/cli v3](https://github.com/urfave/cli)
-- **Commands**: `snapshot`, `recipe`, `bundle`, `validate`
+- **Commands**: `snapshot`, `recipe`, `query`, `bundle`, `verify`, `validate`, `evidence`, `diff`, `mirror`, `trust`, `skill`
 - **Purpose**: User-facing tool for system snapshots and recipe generation (supports both query and snapshot modes)
 - **Output**: Supports JSON, YAML, and table formats
 
 #### API Server
-- **Location**: `cmd/aicrd/main.go` → `pkg/server/`, `pkg/api/`
+
+- **Location**: `cmd/aicrd/main.go` → `pkg/server/`
 - **Endpoints**:
   - `GET /v1/recipe` - Generate configuration recipes
+  - `GET /v1/query` - Query a hydrated value from a recipe
+  - `POST /v1/bundle` - Render a recipe into deployment artifacts
   - `GET /health` - Liveness probe
   - `GET /ready` - Readiness probe
   - `GET /metrics` - Prometheus metrics
@@ -266,7 +269,7 @@ aicr/
 
 ### Architecture Principle
 
-Business logic lives in `pkg/*` packages. The `pkg/cli` and `pkg/api` packages handle user interaction only, delegating to functional packages so both CLI and API can share the same logic.
+Business logic lives in `pkg/*` packages. The `pkg/cli` and `pkg/server` packages handle user interaction only — both delegate to the `pkg/client/v1` facade (and the functional packages it composes) so CLI and HTTP surfaces share the same logic.
 
 For detailed architecture documentation, see [docs/contributor/index.md](docs/contributor/index.md).
 
@@ -583,7 +586,7 @@ workflow (`.github/workflows/build-attested.yaml`) from the Actions tab. It runs
 
 #### Bundle Attestation
 
-`aicr bundle` attests bundles by default using Sigstore keyless OIDC signing:
+`aicr bundle` can attest bundles using Sigstore keyless OIDC signing (opt-in via `--attest`):
 
 - **GitHub Actions**: Uses the ambient OIDC token automatically (requires `id-token: write`)
 - **Local**: Opens a browser for Sigstore OIDC authentication (GitHub, Google, or Microsoft)

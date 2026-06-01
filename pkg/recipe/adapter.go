@@ -16,12 +16,15 @@
 package recipe
 
 import (
+	"context"
 	"embed"
 	stderrors "errors"
 	"fmt"
 	"io/fs"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/recipes"
 	"gopkg.in/yaml.v3"
 )
@@ -37,25 +40,43 @@ func GetEmbeddedFS() embed.FS {
 // "components/network-operator/manifests/nfd-network-rule.yaml").
 //
 // This entry point is preserved for back-compat with callers that have no
-// RecipeResult-bound provider available. Callers operating against a
+// RecipeResult-bound provider available. Internally derives a
+// defaults.FileReadTimeout-bounded context so a hung backing store still
+// returns instead of blocking the goroutine. Callers operating against a
 // per-tenant Builder should prefer GetManifestContentWithProvider so the
-// lookup honors the bound provider.
+// lookup honors the bound provider; callers that already hold a
+// context.Context should use GetManifestContentWithContext.
 func GetManifestContent(path string) ([]byte, error) {
-	return GetManifestContentWithProvider(nil, path)
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return GetManifestContentWithContext(ctx, nil, path)
 }
 
 // GetManifestContentWithProvider reads a manifest file from the supplied
-// DataProvider. A nil provider falls back to GetDataProvider() so callers
-// that thread a possibly-nil RecipeResult.DataProvider() through can rely on
-// the global-provider fallback without an explicit nil check.
+// DataProvider. A nil provider falls back to the package-level embedded-data
+// singleton so callers that thread a possibly-nil RecipeResult.DataProvider()
+// through can rely on the embedded fallback without an explicit nil check.
+//
+// Internally derives a defaults.FileReadTimeout-bounded context. Callers
+// that already hold a context.Context should use
+// GetManifestContentWithContext to honor their own deadline instead.
 //
 // Path should be relative to the data root (e.g.,
 // "components/network-operator/manifests/nfd-network-rule.yaml").
 func GetManifestContentWithProvider(dp DataProvider, path string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return GetManifestContentWithContext(ctx, dp, path)
+}
+
+// GetManifestContentWithContext reads a manifest file from the supplied
+// DataProvider, honoring the caller's context for cancellation/timeout.
+// A nil provider falls back to GetDataProvider().
+func GetManifestContentWithContext(ctx context.Context, dp DataProvider, path string) ([]byte, error) {
 	if dp == nil {
-		dp = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		dp = defaultEmbeddedProvider
 	}
-	content, err := dp.ReadFile(path)
+	content, err := dp.ReadFile(ctx, path)
 	if err != nil {
 		if stderrors.Is(err, fs.ErrNotExist) {
 			return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("manifest file not found: %q", path), err)
@@ -139,6 +160,21 @@ func (r *RecipeResult) GetComponentRef(name string) *ComponentRef {
 }
 
 // GetValuesForComponent loads values from the component's valuesFile and inline overrides.
+//
+// Internally derives a defaults.FileReadTimeout-bounded context so a hung
+// backing store still returns instead of blocking the goroutine. Callers
+// that already hold a context.Context should use
+// GetValuesForComponentWithContext to honor their own deadline.
+func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return r.GetValuesForComponentWithContext(ctx, name)
+}
+
+// GetValuesForComponentWithContext loads values from the component's
+// valuesFile and inline overrides, honoring the caller's context for
+// cancellation/timeout.
+//
 // Merge order: base values → ValuesFile → Overrides (highest precedence).
 // This supports three patterns:
 //  1. ValuesFile only: Traditional separate file approach
@@ -147,9 +183,8 @@ func (r *RecipeResult) GetComponentRef(name string) *ComponentRef {
 //
 // File lookups route through the DataProvider bound to this result (set when
 // the result was built by a Builder via WithDataProvider). When no provider
-// is bound (legacy global-provider path), falls back to GetDataProvider() so
-// existing callers keep working.
-func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error) {
+// is bound, lookups fall back to the package-level embedded-data singleton.
+func (r *RecipeResult) GetValuesForComponentWithContext(ctx context.Context, name string) (map[string]any, error) {
 	ref := r.GetComponentRef(name)
 	if ref == nil {
 		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("component %q not found in recipe", name))
@@ -164,11 +199,12 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 	}
 
 	// Resolve provider once: prefer the result-bound provider (per-tenant
-	// isolation), fall back to the package-global for back-compat with
-	// results built before WithDataProvider was wired through.
+	// isolation), fall back to the embedded-data singleton when the result
+	// was constructed without a Builder (e.g. decoded from a recipe file
+	// before BindDataProvider has been called).
 	provider := r.provider
 	if provider == nil {
-		provider = GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		provider = defaultEmbeddedProvider
 	}
 
 	// Step 1: Load base and/or overlay values from files (if ValuesFile specified)
@@ -179,7 +215,7 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 
 		if isOverlay {
 			// Load base values first
-			baseData, err := provider.ReadFile(baseValuesFile)
+			baseData, err := provider.ReadFile(ctx, baseValuesFile)
 			if err != nil {
 				// If base file doesn't exist, that's okay - just use overlay
 				result = make(map[string]any)
@@ -191,7 +227,7 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 			}
 
 			// Load overlay values
-			overlayData, err := provider.ReadFile(ref.ValuesFile)
+			overlayData, err := provider.ReadFile(ctx, ref.ValuesFile)
 			if err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read overlay values file %q", ref.ValuesFile), err)
 			}
@@ -205,7 +241,7 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 			mergeValues(result, overlayValues)
 		} else {
 			// Just load the base values file
-			data, err := provider.ReadFile(ref.ValuesFile)
+			data, err := provider.ReadFile(ctx, ref.ValuesFile)
 			if err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read values file %q", ref.ValuesFile), err)
 			}
@@ -228,27 +264,27 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 // For maps, it recursively merges nested keys.
 // For other types, src values override dst values.
 // A nil value in src deletes the key from dst (explicit null override).
+//
+// Non-map values (scalars, slices, nested maps when dst lacks a peer map)
+// are deep-copied via deepCopyAny so that mutation of dst never aliases
+// back into src. Without this, []any values from a cached overlay would
+// be shared with the caller's result, and a downstream --set or dynamic
+// injection mutating an index of the slice would corrupt the cache.
 func mergeValues(dst, src map[string]any) {
 	for key, srcVal := range src {
-		// Explicit null in overlay means "delete this key"
 		if srcVal == nil {
 			delete(dst, key)
 			continue
 		}
-		if dstVal, exists := dst[key]; exists {
-			// If both are maps, merge recursively
-			if dstMap, dstOK := dstVal.(map[string]any); dstOK {
-				if srcMap, srcOK := srcVal.(map[string]any); srcOK {
-					mergeValues(dstMap, srcMap)
-					continue
-				}
+		if srcMap, srcOK := srcVal.(map[string]any); srcOK {
+			if dstMap, dstOK := dst[key].(map[string]any); dstOK {
+				mergeValues(dstMap, srcMap)
+				continue
 			}
-			// For non-map or mismatched types, src overrides dst
-			dst[key] = srcVal
-		} else {
-			// Key doesn't exist in dst, add it
-			dst[key] = srcVal
+			dst[key] = serializer.DeepCopyAnyMap(srcMap)
+			continue
 		}
+		dst[key] = serializer.DeepCopyAny(srcVal)
 	}
 }
 

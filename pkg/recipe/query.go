@@ -15,17 +15,32 @@
 package recipe
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // HydrateResult builds a fully hydrated map from a RecipeResult.
 // Component values are merged via GetValuesForComponent so the output
 // contains the final resolved configuration, not file references.
+//
+// Internally derives a defaults.FileReadTimeout-bounded context so a hung
+// backing store still returns instead of blocking the goroutine. Callers
+// that hold a context.Context should use HydrateResultWithContext so the
+// caller's deadline propagates to the underlying values reads.
 func HydrateResult(result *RecipeResult) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.FileReadTimeout)
+	defer cancel()
+	return HydrateResultWithContext(ctx, result)
+}
+
+// HydrateResultWithContext builds a fully hydrated map from a RecipeResult,
+// honoring ctx for cancellation/timeout on the underlying values reads.
+func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[string]any, error) {
 	if result == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe result is nil")
 	}
@@ -101,7 +116,7 @@ func HydrateResult(result *RecipeResult) (map[string]any, error) {
 			comp["dependencyRefs"] = ref.DependencyRefs
 		}
 
-		values, err := result.GetValuesForComponent(ref.Name)
+		values, err := result.GetValuesForComponentWithContext(ctx, ref.Name)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to hydrate values for component %q", ref.Name), err)

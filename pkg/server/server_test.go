@@ -333,6 +333,24 @@ func TestDefaultRootHandlerMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestDefaultRootHandler_RejectsUnregisteredPath(t *testing.T) {
+	s := New()
+
+	req := httptest.NewRequest(http.MethodGet, "/garbage", nil)
+	w := httptest.NewRecorder()
+
+	handler := s.config.Handlers["/"]
+	handler(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+
+	if strings.Contains(w.Body.String(), "routes") {
+		t.Error("expected 404 body to not leak route directory")
+	}
+}
+
 func TestCustomRootHandlerNotOverridden(t *testing.T) {
 	customCalled := false
 	routes := map[string]http.HandlerFunc{

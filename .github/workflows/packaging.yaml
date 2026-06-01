@@ -62,6 +62,10 @@ jobs:
         env:
           GORELEASER_CURRENT_TAG: v0.0.0
           GOFLAGS: -mod=vendor
+          # Empty placeholder so brews templates referencing .Env.HOMEBREW_DEPLOY_KEY
+          # evaluate cleanly in dry-run mode (publish is skipped). The real secret is
+          # provided by the release workflow in on-tag.yaml.
+          HOMEBREW_DEPLOY_KEY: ""
         run: |
           set -euo pipefail
           goreleaser release --snapshot --clean --skip=publish,sbom

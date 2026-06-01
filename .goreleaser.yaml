@@ -65,9 +65,9 @@ builds:
       -w
       -s
       -extldflags "-static"
-      -X github.com/NVIDIA/aicr/pkg/api.version={{.Version}}
-      -X github.com/NVIDIA/aicr/pkg/api.commit={{.FullCommit}}
-      -X github.com/NVIDIA/aicr/pkg/api.date={{.Date}}
+      -X github.com/NVIDIA/aicr/pkg/server.version={{.Version}}
+      -X github.com/NVIDIA/aicr/pkg/server.commit={{.FullCommit}}
+      -X github.com/NVIDIA/aicr/pkg/server.date={{.Date}}
     goos:
       - linux
     goarch:

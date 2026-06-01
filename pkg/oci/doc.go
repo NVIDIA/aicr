@@ -20,7 +20,7 @@
 //
 // # Overview
 //
-// The package provides three main operations:
+// The package provides four main operations:
 //   - ParseOutputTarget: Parses output targets (file paths or OCI URIs) into Reference
 //   - Package: Creates a local OCI artifact in OCI Image Layout format
 //   - PushFromStore: Pushes a previously packaged artifact to a remote registry

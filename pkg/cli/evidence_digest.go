@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // evidenceDigestCmd implements `aicr evidence digest -r <recipe-or-overlay>`.
@@ -77,7 +78,8 @@ func runEvidenceDigestCmd(ctx context.Context, cmd *cli.Command) error {
 			"--recipe is required: aicr evidence digest -r <recipe-or-overlay>")
 	}
 
-	digest, err := attestation.ComputeRecipeDigest(ctx, path, cmd.String("kubeconfig"), version)
+	dp := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	digest, err := attestation.ComputeRecipeDigest(ctx, dp, path, cmd.String("kubeconfig"), version)
 	if err != nil {
 		return err
 	}

@@ -27,7 +27,7 @@ area/bundler:
 area/api:
   - changed-files:
       - any-glob-to-any-file:
-          - 'pkg/api/**'
+          - 'pkg/server/**'
           - 'api/**'
 
 area/cli:

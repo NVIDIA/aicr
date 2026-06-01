@@ -18,18 +18,20 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 
-	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"gopkg.in/yaml.v3"
 )
 
-// Re-exported types from pkg/api/validator/v1 for backward compatibility.
+// Re-exported types from pkg/validator/v1 so callers that work with the
+// catalog do not have to import the wire-format package directly.
 type (
 	ValidatorCatalog     = v1.ValidatorCatalog
 	CatalogMetadata      = v1.CatalogMetadata
@@ -38,21 +40,13 @@ type (
 	EnvVar               = v1.EnvVar
 )
 
-// Load reads and parses the validator catalog from the package-global
-// recipe.GetDataProvider(). It is the back-compat entry point for callers that
-// do not thread a per-command DataProvider; provider-aware callers should use
-// LoadWithDataProvider. See LoadWithDataProvider for the image tag resolution
-// rules.
-func Load(version, commit string) (*ValidatorCatalog, error) {
-	return LoadWithDataProvider(nil, version, commit)
-}
-
-// LoadWithDataProvider reads and parses the validator catalog from dp. A nil dp
-// falls back to the package-global recipe.GetDataProvider() so existing callers
-// are unaffected. When the --data flag provides an external directory containing
-// validators/catalog.yaml, the external catalog is merged with the embedded
-// catalog using merge-by-name semantics: external validators override embedded
-// by name, and new validators are appended.
+// LoadWithDataProvider reads and parses the validator catalog from dp using
+// the supplied context for cancellation/timeout. A nil dp defaults to the
+// embedded recipe data; callers that want a layered `--data` overlay must
+// pass their own layered provider. When the catalog file is present, the
+// external catalog is merged with the embedded one using merge-by-name
+// semantics: external validators override embedded by name, and new
+// validators are appended.
 //
 // Image tag resolution (applied in order):
 //  1. If a catalog entry uses :latest and version looks like a release tag
@@ -69,11 +63,11 @@ func Load(version, commit string) (*ValidatorCatalog, error) {
 //
 // Entries with explicit version tags (e.g., :v1.2.3) are never modified by
 // steps 1-2 but are replaced by step 3 if that env var is set.
-func LoadWithDataProvider(dp recipe.DataProvider, version, commit string) (*ValidatorCatalog, error) {
+func LoadWithDataProvider(ctx context.Context, dp recipe.DataProvider, version, commit string) (*ValidatorCatalog, error) {
 	if dp == nil {
-		dp = recipe.GetDataProvider() //nolint:staticcheck // back-compat fallback for pre-WithDataProvider callers (#983 Stage 2)
+		dp = recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	}
-	data, err := dp.ReadFile("validators/catalog.yaml")
+	data, err := dp.ReadFile(ctx, "validators/catalog.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read catalog", err)
 	}

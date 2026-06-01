@@ -12,194 +12,96 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package server implements the AICR System Configuration Recommendation API
-// as defined in api/aicr/aicr-v1.yaml
+// Package server implements the aicrd HTTP server: the AICR System
+// Configuration Recommendation API defined in api/aicr/v1/server.yaml.
 //
-// This implementation follows production-grade distributed systems best practices:
+// This package is the binary's home, not a reusable framework. cmd/aicrd/main.go
+// calls Serve() and exits. The package owns the HTTP entry point, the
+// middleware chain, the /v1/recipe, /v1/query, and /v1/bundle handlers, and
+// the health/readiness probes.
 //
 // # Architecture
 //
-// The server implements a stateless HTTP API with the following key components:
+// The handlers are thin REST adapters over the pkg/client/v1 (aicr.Client)
+// facade — they parse the request, call the Client (BuildRecipe, MakeBundle,
+// AdoptRecipe), and translate Client errors into structured HTTP responses.
+// No business logic lives here.
 //
-//   - Request validation using regex patterns from OpenAPI spec
-//   - Per-request context timeout (defaults.ServerHandlerTimeout, 30s)
-//     applied by timeoutMiddleware so slow upstream calls cannot outlive
-//     the WriteTimeout.
-//   - Per-request body cap (defaults.ServerMaxBodyBytes, 8 MiB) applied
-//     by bodyLimitMiddleware via http.MaxBytesReader; handlers may
-//     install a tighter cap (e.g., MaxRecipePOSTBytes for /v1/recipe).
-//   - Rate limiting using token bucket algorithm (golang.org/x/time/rate)
-//   - Request ID tracking for distributed tracing
-//   - Panic recovery for resilience
-//   - Graceful shutdown handling (signal.NotifyContext on SIGINT/SIGTERM)
-//   - Health and readiness probes for Kubernetes
+// Middleware chain (applied outermost to innermost by Server.withMiddleware):
+//   - metricsMiddleware — Prometheus instrumentation; wraps everything so
+//     counters and histograms cover the full request lifetime.
+//   - versionMiddleware — Accept-header API version negotiation and
+//     X-API-Version response header.
+//   - requestIDMiddleware — accepts X-Request-Id or mints one; emitted on
+//     responses and error payloads for distributed tracing.
+//   - timeoutMiddleware — defaults.ServerHandlerTimeout (90s), sized for the
+//     longest per-handler deadline so a slow upstream cannot outlive
+//     WriteTimeout.
+//   - loggingMiddleware — structured request log (Debug on 2xx, Warn on 4xx,
+//     Error on 5xx).
+//   - panicRecoveryMiddleware — converts panics into structured 500s.
+//   - rateLimitMiddleware — token bucket (golang.org/x/time/rate).
+//   - bodyLimitMiddleware — defaults.ServerMaxBodyBytes (8 MiB) via
+//     http.MaxBytesReader; handlers install tighter caps where appropriate
+//     (MaxRecipePOSTBytes for /v1/recipe, MaxBundlePOSTBytes for /v1/bundle).
 //
-// # Usage
+// Graceful shutdown is wired via signal.NotifyContext on SIGINT/SIGTERM.
 //
-// Basic server startup:
+// # Endpoints
 //
-//	package main
+// POST/GET /v1/recipe — resolve a Recipe from criteria. Query parameters or a
+// JSON/YAML RecipeCriteria body select service, accelerator, intent, os,
+// platform, and version.
 //
-//	import (
-//	    "context"
-//	    "github.com/NVIDIA/aicr/pkg/server"
-//	)
+// POST/GET /v1/query — resolve a hydrated value from a recipe by JSON-path
+// selector. GET takes criteria + selector via query string; POST takes a
+// QueryRequest body ({criteria, selector}).
 //
-//	func main() {
-//	    s := server.New(
-//	        server.WithName("aicrd"),
-//	        server.WithVersion("v1.0.0"),
-//	        server.WithHandler(map[string]http.HandlerFunc{
-//	            "/v1/recipe": myRecipeHandler,
-//	        }),
-//	    )
-//	    if err := s.Run(context.Background()); err != nil {
-//	        panic(err)
-//	    }
-//	}
+// POST /v1/bundle — generate a deployment bundle (zip) from a hydrated
+// RecipeResult body. Query parameters control deployer, value overrides
+// (set=), dynamic declarations (dynamic=), node selectors/tolerations, and
+// workload gating.
 //
-// Configuration is read from environment variables (PORT, server timeouts,
-// rate-limit settings). Functional options override individual fields.
+// GET /health — liveness probe; always 200.
+// GET /ready — readiness probe; 200 when ready, 503 otherwise.
 //
-// # API Endpoints
+// # Error handling
 //
-// GET /v1/recipe - Generate configuration recipe
-//
-//	Query parameters:
-//	  - os: ubuntu, cos, any (default: any)
-//	  - osv: OS version (e.g., 24.04, 22.04)
-//	  - kernel: kernel version (e.g., 6.8, 5.15.0)
-//	  - service: eks, gke, aks, oke, kind, lke, bcm, any (default: any)
-//	  - k8s: Kubernetes version (e.g., 1.33, 1.32)
-//	  - gpu: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
-//	  - intent: training, inference, any (default: any)
-//	  - context: true/false - include context metadata (default: false)
-//
-//	Example:
-//	  curl "http://localhost:8080/v1/recipe?os=ubuntu&osv=24.04&gpu=h100&intent=training"
-//
-// GET /health - Health check (for liveness probe)
-//
-//	Always returns 200 OK with {"status": "healthy", "timestamp": "..."}
-//
-// GET /ready - Readiness check (for readiness probe)
-//
-//	Returns 200 OK when ready, 503 when not ready
-//
-// # Observability
-//
-// Request ID Tracking:
-//
-//	All requests accept an optional X-Request-Id header (UUID format).
-//	If not provided, the server generates one automatically.
-//	The request ID is returned in the X-Request-Id response header
-//	and included in all error responses for tracing.
-//
-// Rate Limiting:
-//
-//	Response headers indicate rate limit status:
-//	  X-RateLimit-Limit: Total requests allowed per window
-//	  X-RateLimit-Remaining: Requests remaining in current window
-//	  X-RateLimit-Reset: Unix timestamp when window resets
-//
-//	When rate limited, returns 429 with Retry-After header.
-//
-// Cache Headers:
-//
-//	Recommendation responses include Cache-Control headers for CDN/client caching:
-//	  Cache-Control: public, max-age=300
-//
-// # Error Handling
-//
-// All errors return a consistent JSON structure:
+// Errors return a stable JSON envelope:
 //
 //	{
 //	  "code": "INVALID_REQUEST",
-//	  "message": "invalid osFamily: must be one of Ubuntu, RHEL, ALL",
-//	  "details": {"error": "..."},
+//	  "message": "...",
+//	  "details": {...},
 //	  "requestId": "550e8400-e29b-41d4-a716-446655440000",
-//	  "timestamp": "2025-12-22T12:00:00Z",
+//	  "timestamp": "2026-05-30T12:00:00Z",
 //	  "retryable": false
 //	}
 //
-// Error codes (canonical, defined in pkg/errors):
-//   - INVALID_REQUEST: Invalid input or malformed payload (400)
-//   - UNAUTHORIZED: Authentication or authorization failure (401)
-//   - NOT_FOUND: Resource not found (404)
-//   - METHOD_NOT_ALLOWED: HTTP method not allowed (405)
-//   - CONFLICT: Resource state conflict (409)
-//   - RATE_LIMIT_EXCEEDED: Too many requests (429)
-//   - INTERNAL: Internal server error (500)
-//   - TIMEOUT: Upstream or handler deadline exceeded (504)
-//   - SERVICE_UNAVAILABLE: Service temporarily unavailable (503)
+// Error codes are the canonical pkg/errors set: INVALID_REQUEST,
+// UNAUTHORIZED, NOT_FOUND, METHOD_NOT_ALLOWED, CONFLICT, RATE_LIMIT_EXCEEDED,
+// INTERNAL, TIMEOUT, SERVICE_UNAVAILABLE.
 //
-// 5xx responses do NOT leak the underlying error cause to clients
-// (the cause is logged server-side); 4xx responses include the cause
-// in details["error"] because it is typically validator feedback the
-// client needs.
+// 5xx responses do NOT leak the underlying cause to clients (logged
+// server-side); 4xx responses include the cause in details["error"] because
+// it is typically validator feedback the client needs. Always use
+// WriteErrorFromErr — it enforces the split.
 //
-// # Deployment
+// # Observability
 //
-// Kubernetes deployment example:
+// Rate-limit headers (X-RateLimit-Limit, X-RateLimit-Remaining,
+// X-RateLimit-Reset) and Cache-Control are emitted automatically. Recipe and
+// query responses are cache-control public, max-age=300 by default.
 //
-//	apiVersion: apps/v1
-//	kind: Deployment
-//	metadata:
-//	  name: aicr-recommendation-api
-//	spec:
-//	  replicas: 3
-//	  selector:
-//	    matchLabels:
-//	      app: aicr-recommendation-api
-//	  template:
-//	    metadata:
-//	      labels:
-//	        app: aicr-recommendation-api
-//	    spec:
-//	      containers:
-//	      - name: api
-//	        image: aicr-recommendation-api:latest
-//	        ports:
-//	        - containerPort: 8080
-//	        env:
-//	        - name: PORT
-//	          value: "8080"
-//	        livenessProbe:
-//	          httpGet:
-//	            path: /health
-//	            port: 8080
-//	          initialDelaySeconds: 5
-//	          periodSeconds: 10
-//	        readinessProbe:
-//	          httpGet:
-//	            path: /ready
-//	            port: 8080
-//	          initialDelaySeconds: 5
-//	          periodSeconds: 5
-//	        resources:
-//	          requests:
-//	            cpu: 100m
-//	            memory: 128Mi
-//	          limits:
-//	            cpu: 1000m
-//	            memory: 512Mi
+// # Configuration
 //
-// # Performance
-//
-// Benchmarks (on M1 Mac):
-//
-//	BenchmarkGetRecommendations-8    50000    23000 ns/op    5000 B/op    80 allocs/op
-//	BenchmarkValidation-8           500000     2500 ns/op     500 B/op    10 allocs/op
-//
-// The server is designed to handle thousands of requests per second with
-// proper horizontal scaling. Rate limiting prevents resource exhaustion.
+// PORT and the rate-limit / timeout settings are read from environment by
+// loadConfig; functional options on Server (WithName, WithVersion,
+// WithHandler) override individual fields and are used internally by Serve.
 //
 // # References
 //
-//   - OpenAPI spec: api/aicr/aicr-v1.yaml
-//   - Rate limiting: https://pkg.go.dev/golang.org/x/time/rate
-//   - UUID generation: https://pkg.go.dev/github.com/google/uuid
-//   - Error groups: https://pkg.go.dev/golang.org/x/sync/errgroup
-//   - HTTP best practices: https://datatracker.ietf.org/doc/html/rfc7807
-//   - Kubernetes probes: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+//   - OpenAPI spec: api/aicr/v1/server.yaml
+//   - Client facade: pkg/client/v1
+//   - Error types: pkg/errors
 package server

@@ -23,7 +23,7 @@ Related: <!-- #123 or N/A -->
 ## Component(s) Affected
 
 - [ ] CLI (`cmd/aicr`, `pkg/cli`)
-- [ ] API server (`cmd/aicrd`, `pkg/api`, `pkg/server`)
+- [ ] API server (`cmd/aicrd`, `pkg/server`)
 - [ ] Recipe engine / data (`pkg/recipe`)
 - [ ] Bundlers (`pkg/bundler`, `pkg/component/*`)
 - [ ] Collectors / snapshotter (`pkg/collector`, `pkg/snapshotter`)

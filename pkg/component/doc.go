@@ -12,12 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package component provides the generic bundler framework and shared utilities.
+// Package component provides shared bundler utilities used by pkg/bundler
+// and its deployers.
 //
 // Component configuration is defined declaratively in recipes/registry.yaml.
-// This package provides reusable utilities for bundle generation. With the declarative
-// registry, no separate Go packages are needed per component - just add an entry to
-// registry.yaml to configure a new component.
+// This package provides reusable building blocks for bundle generation. With
+// the declarative registry, no separate Go packages are required per
+// component — adding a registry.yaml entry is sufficient.
+//
+// Historically AICR had one Go bundler package per component. Those
+// per-component packages have been replaced by the registry-driven
+// pkg/bundler.DefaultBundler; the legacy BaseBundler / MakeBundle entry
+// points described below remain exported for external integrations and the
+// component test harness.
 //
 // # Generic Bundler Framework
 //
@@ -137,16 +144,10 @@
 //
 // Access in templates via {{ .Script.Namespace }}, {{ .Script.Version }}, etc.
 //
-// # TestHarness
+// # Internal Test Harness
 //
-// TestHarness simplifies bundler testing by providing common setup and assertions:
-//
-//	func TestMyBundler_Make(t *testing.T) {
-//	    h := component.NewTestHarness(t, "my-bundler")
-//	    bundler := NewMyBundler(h.Config())
-//	    h.TestMake(bundler)
-//	}
-//
-// The harness automatically creates temporary directories, generates test recipes,
-// validates output files, and cleans up resources.
+// A TestHarness and RecipeBuilder live in this package's _test.go files for
+// reuse by the package's own tests. They are intentionally not exported as
+// production API — bundler tests in other packages should construct their
+// own fixtures rather than depend on this package's test scaffolding.
 package component

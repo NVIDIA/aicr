@@ -6,11 +6,11 @@ state can import AICR directly. This page is for those consumers.
 
 ## Which package to import
 
-**Import the top-level `github.com/NVIDIA/aicr` package.** This is the
+**Import the `github.com/NVIDIA/aicr/pkg/client/v1` package.** This is the
 stable facade.
 
 ```go
-import "github.com/NVIDIA/aicr"
+import aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 ```
 
 The facade provides a single `Client` type with constructors for the
@@ -43,7 +43,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/NVIDIA/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 )
 
 func main() {
@@ -95,8 +95,8 @@ telemetry hooks.
 
 ```go
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
-// returns the resulting Snapshot. cfg is a transparent alias of
-// pkg/snapshotter.AgentConfig.
+// returns the resulting Snapshot. cfg is a facade-owned struct that
+// mirrors every field of the underlying pkg/snapshotter.AgentConfig.
 snap, err := client.CollectSnapshot(ctx, &aicr.AgentConfig{
 	Kubeconfig:         "/path/to/target-kubeconfig",
 	Namespace:          "aicr-snapshot",
@@ -108,8 +108,9 @@ if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
 }
 
-// ValidateState runs every validation phase (Deployment, Performance,
-// Conformance) against the resolved recipe + observed snapshot.
+// ValidateState runs the validation phases against the resolved recipe +
+// observed snapshot. With no WithValidationPhases option it runs all three
+// phases (Deployment, Performance, Conformance) in canonical order.
 results, err := client.ValidateState(ctx, result, snap)
 if err != nil {
 	log.Fatalf("validate state: %v", err)
@@ -120,8 +121,44 @@ for _, r := range results {
 ```
 
 The `recipe` argument to `ValidateState` MUST be the `*RecipeResult`
-returned by the same Client's `ResolveRecipe` call — the unexported
-internal recipe state is required for constraint evaluation.
+returned by the same Client's `ResolveRecipe` (or `LoadRecipe`) call —
+the unexported internal recipe state is required for constraint
+evaluation.
+
+To restrict the run to specific phases, pass `WithValidationPhases` in
+the order you want them executed:
+
+```go
+results, err := client.ValidateState(ctx, result, snap,
+	aicr.WithValidationPhases(aicr.PhaseDeployment, aicr.PhaseConformance))
+```
+
+Valid phase values are `PhaseDeployment`, `PhasePerformance`, and
+`PhaseConformance`. An unrecognized phase is rejected with
+`ErrCodeInvalidRequest` before any cluster work, so a typo cannot
+silently degrade to an empty run.
+
+### Loading an existing recipe
+
+When a recipe has already been resolved and persisted (for example a
+recipe file checked into a GitOps repo, or a `cm://` ConfigMap URI), load
+it back through the same Client with `LoadRecipe` instead of re-resolving
+from criteria:
+
+```go
+result, err := client.LoadRecipe(ctx, "/etc/aicr/recipe.yaml", "")
+if err != nil {
+	log.Fatalf("load recipe: %v", err)
+}
+```
+
+`LoadRecipe` hydrates overlay inputs (`kind: RecipeMetadata`) against the
+Client's own data provider and returns a Client-owned `*RecipeResult`
+ready for `ValidateState` / `BundleComponents` — it passes the same
+ownership check as a `ResolveRecipe` result. An already-hydrated
+`RecipeResult` file is returned with its provider bound to the Client.
+The kubeconfig argument (third parameter) is only needed when the recipe
+path (first argument) is a `cm://` ConfigMap URI.
 
 For unit tests that exercise the facade surface without a live
 cluster, pass `aicr.WithValidationNoCluster(true)`: every check
@@ -139,10 +176,112 @@ AICR exposes one production recipe source today; pick it via
 
 | Source | Constructor | Status |
 |--------|-------------|--------|
+| Embedded | `aicr.EmbeddedSource()` | Production. Uses only AICR's built-in recipe data with no external overlay. |
 | Local filesystem | `aicr.FilesystemSource(path)` | Production. Use a directory containing a `registry.yaml` (layered over the embedded recipe data). |
 | OCI registry | `aicr.OCISource(registry, tag)` | **Reserved — not yet implemented.** `NewClient` returns `ErrCodeUnavailable` when this source is selected. |
 
-`FilesystemSource` is the only production-ready source today.
+`EmbeddedSource` resolves against the recipe data compiled into the
+AICR binary — no filesystem path required. Use it when you want AICR's
+bundled recipe data and no local overrides. `FilesystemSource`
+layers an external directory over that same embedded data, so files in
+the directory override their embedded equivalents.
+
+## Client options
+
+Beyond `WithRecipeSource`, `NewClient` accepts these functional options:
+
+```go
+allowLists, err := aicr.ParseAllowListsFromEnv()
+if err != nil {
+	log.Fatal(err)
+}
+
+client, err := aicr.NewClient(
+	aicr.WithRecipeSource(aicr.EmbeddedSource()),
+	aicr.WithVersion("1.2.3"),
+	aicr.WithAllowLists(allowLists),
+)
+```
+
+- **`WithVersion(version string)`** stamps the given version string into
+  resolved recipe metadata (accessible via `result.Resolved().Metadata.Version`).
+  Typically the consuming binary's build version.
+- **`WithAllowLists(al *AllowLists)`** fences which criteria values the
+  Client's resolve path accepts. A resolve whose criteria fall outside
+  the allowlist is rejected before the recipe is built. Pass `nil` (or
+  omit the option) to allow all values.
+- **`ParseAllowListsFromEnv()`** builds an `AllowLists` from the
+  `AICR_ALLOWED_ACCELERATORS`, `AICR_ALLOWED_SERVICES`,
+  `AICR_ALLOWED_INTENTS`, and `AICR_ALLOWED_OS` environment variables.
+  It returns `nil` when none are set — `WithAllowLists` treats a `nil`
+  `AllowLists` as allow-all, so the result is always safe to pass straight
+  to `WithAllowLists`.
+
+`AllowLists` is a facade-owned struct whose `Accelerators`, `Services`,
+`Intents`, and `OSTypes` fields are plain `[]string` slices, so callers
+can construct one directly without depending on `pkg/recipe`'s enum
+identifiers. When you already hold a `pkg/recipe.AllowLists`, use
+`aicr.WrapAllowLists` to project it onto the facade shape.
+
+## Resolving from criteria
+
+`ResolveRecipe` takes the stable `RecipeRequest` shape and returns the
+facade `RecipeResult` — a deliberately small struct exposing the
+`Name`, `Version`, and `Components` of the resolved recipe. When you
+already hold an `*aicr.Criteria` value — for example, a REST handler
+that parsed criteria from an incoming HTTP request and wrapped them with
+`aicr.WrapCriteria` — use `ResolveRecipeFromCriteria`. It returns the
+same facade `*RecipeResult`; call `result.Resolved()` when you need the
+complete underlying `*pkg/recipe.RecipeResult` (constraints, deployment
+order, validation config, metadata):
+
+```go
+rec, err := client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
+if err != nil {
+	log.Fatalf("resolve recipe: %v", err)
+}
+
+// Facade surface — Name, Version, Components.
+log.Printf("recipe %s components: %d", rec.Name, len(rec.Components))
+
+// Full upstream shape, when needed.
+resolved := rec.Resolved()
+log.Printf("recipe constraints: %d", len(resolved.Constraints))
+```
+
+The returned `*RecipeResult` carries:
+
+- `Name`, `Version`, `TranslatedAt` — stable identity
+- `Components` — `[]ComponentRef` (Name, Kind, Version, Source, Chart, Namespace)
+- `Resolved()` — the upstream `*pkg/recipe.RecipeResult` for callers that
+  need constraints, deployment order, validation config, or metadata
+  (e.g., evidence emission). Do not mutate; do not retain past the
+  facade `RecipeResult`'s lifetime — marshal first if persistence is
+  needed.
+
+`Criteria` is a facade-owned struct whose enum-typed fields project to
+plain strings, decoupling the public surface from `pkg/recipe`'s enum
+identifiers. Construct one directly or wrap an upstream
+`*pkg/recipe.Criteria` via `aicr.WrapCriteria`. Allowlist enforcement
+(`WithAllowLists`) applies here just as it does on `ResolveRecipe`; a
+`nil` Client, `nil` context, or `nil` criteria each return
+`ErrCodeInvalidRequest`, and the same facade-level timeout bounds the
+resolve.
+
+To extract a single value from a resolved recipe, use
+`SelectFromRecipe` with a dot-path selector. It hydrates the recipe's
+component values and returns the value at the path; an empty selector
+returns the entire hydrated structure, and a `nil` `*RecipeResult`
+returns `ErrCodeInvalidRequest`. This mirrors the `aicr query` CLI
+command:
+
+```go
+v, err := aicr.SelectFromRecipe(rec, "components.gpu-operator.values.driver.version")
+if err != nil {
+	log.Fatalf("select: %v", err)
+}
+log.Printf("driver version: %v", v)
+```
 
 ## Errors
 
@@ -152,7 +291,7 @@ values carrying an `ErrorCode`. Use `errors.As` to inspect:
 ```go
 import (
 	stderrors "errors"
-	"github.com/NVIDIA/aicr"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -179,6 +318,11 @@ Per-operation caps:
 - `CollectSnapshot`: caller-controlled via `AgentConfig.Timeout`,
   falling back to `defaults.SnapshotOperationTimeout` when unset
 - `ValidateState`: `defaults.ValidationOperationTimeout`
+- `MakeBundle`: opt-in via `BundleOptions.Timeout`. When unset (`0`) the
+  caller's context governs unchanged — large bundles, `--vendor-charts`,
+  and attestation/signing can exceed any fixed cap. The REST `/v1/bundle`
+  handler sets it to `defaults.BundleHandlerTimeout`; the CLI `bundle`
+  command leaves it `0`.
 
 Passing a `nil` `context.Context` returns `ErrCodeInvalidRequest`. Use
 `context.Background()` (or a deadline-bounded child) for unbounded callers.

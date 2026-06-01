@@ -44,8 +44,8 @@ func TestParseConfig(t *testing.T) {
 			t.Errorf("expected read timeout 10s, got %v", cfg.ReadTimeout)
 		}
 
-		if cfg.WriteTimeout != 30*time.Second {
-			t.Errorf("expected write timeout 30s, got %v", cfg.WriteTimeout)
+		if cfg.WriteTimeout != 90*time.Second {
+			t.Errorf("expected write timeout 90s, got %v", cfg.WriteTimeout)
 		}
 
 		if cfg.IdleTimeout != 120*time.Second {

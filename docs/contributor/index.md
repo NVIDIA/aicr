@@ -151,8 +151,8 @@ running outside the cluster. Detail per stage lives in the
 | Package | Responsibility | Detail |
 |---------|----------------|--------|
 | `pkg/cli` | User interaction (flags, output formatting) — no business logic | [cli.md](cli.md) |
-| `pkg/api` | HTTP handlers — no business logic | [api-server.md](api-server.md) |
-| `pkg/server` | HTTP middleware (rate limit, timeout, body limit, panic recovery) | [api-server.md](api-server.md) |
+| `pkg/server` | aicrd HTTP server: middleware chain + REST handlers (thin adapters over `pkg/client/v1`) — no business logic | [api-server.md](api-server.md) |
+| `pkg/client/v1` | aicr.Client facade — the shared SDK used by CLI, server, and external Go callers | — |
 | `pkg/recipe` | Recipe resolution, overlays, registry | [data.md](data.md) |
 | `pkg/bundler` | Per-component bundle generation, output adapters | [component.md](component.md) |
 | `pkg/component` | Bundler utilities and test helpers | [component.md](component.md) |
@@ -165,11 +165,11 @@ running outside the cluster. Detail per stage lives in the
 | `pkg/errors` | Structured errors with codes | — |
 | `pkg/defaults` | Centralized timeout and limit constants | — |
 
-**Critical separation:** `pkg/cli` and `pkg/api` are user-interaction
+**Critical separation:** `pkg/cli` and `pkg/server` are user-interaction
 packages — they capture intent, validate input, and format output. All
-business logic lives in functional packages so both entry points share
-it. Adding business logic to `pkg/cli` or `pkg/api` is a boundary
-violation.
+business logic lives in functional packages (composed by the
+`pkg/client/v1` facade) so both entry points share it. Adding business
+logic to `pkg/cli` or `pkg/server` handlers is a boundary violation.
 
 ## Key Design Decisions
 

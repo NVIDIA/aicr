@@ -1260,8 +1260,8 @@ func buildDynamicSetFlags(dynamicValues map[string][]string, provider recipe.Dat
 func resolveOverrideKey(componentName string, provider recipe.DataProvider) (string, error) {
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal,
-			"failed to load component registry for override key resolution", err)
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for override key resolution")
 	}
 	comp := registry.Get(componentName)
 	if comp == nil {

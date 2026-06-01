@@ -18,11 +18,11 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/NVIDIA/aicr/pkg/api"
+	"github.com/NVIDIA/aicr/pkg/server"
 )
 
 func main() {
-	if err := api.Serve(); err != nil {
+	if err := server.Serve(); err != nil {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
 	}

@@ -60,7 +60,7 @@ func createPodForJob(t *testing.T, ns, jobName string, status corev1.PodStatus) 
 // deployTestJob deploys a Job via envtest and returns the Deployer.
 func deployTestJob(t *testing.T, ns string, entry catalog.ValidatorEntry) *Deployer {
 	t.Helper()
-	d := NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", entry, nil, nil, nil, "", "", nil)
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: entry})
 	if err := d.DeployJob(context.Background()); err != nil {
 		t.Fatalf("DeployJob() failed: %v", err)
 	}

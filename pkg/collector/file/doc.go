@@ -12,51 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package file provides utilities for reading files from the filesystem.
+// Package file provides a configurable parser for line-oriented configuration
+// files (e.g., /etc/default/grub, /etc/os-release, /proc/sys entries).
 //
-// This package wraps standard file I/O operations with error handling conventions
-// used throughout the collector framework. It provides a simple interface for
-// reading file contents as strings.
+// This package wraps standard file I/O with bounded reads and error handling
+// conventions used throughout the collector framework. It exposes a single
+// Parser type configured via functional options.
 //
 // # Usage
 //
-// Read a single file:
+// Parse a key=value config file into a map:
 //
-//	content, err := file.ReadFile("/etc/os-release")
+//	p := file.NewParser(
+//	    file.WithKVDelimiter("="),
+//	    file.WithSkipComments(true),
+//	)
+//	kv, err := p.GetMap("/etc/os-release")
 //	if err != nil {
 //	    // Handle error
 //	}
-//	fmt.Println(content)
+//	fmt.Println(kv["PRETTY_NAME"])
 //
-// The function automatically handles:
-//   - File opening and closing
-//   - Content reading
-//   - Error wrapping with context
+// Or read raw lines:
+//
+//	lines, err := p.GetLines("/proc/modules")
+//
+// # Options
+//
+//   - WithDelimiter — entry separator (default "\n")
+//   - WithMaxSize — maximum file size in bytes (defaults from pkg/defaults)
+//   - WithSkipComments — drop lines starting with "#"
+//   - WithKVDelimiter — key/value separator within each entry
+//   - WithVDefault — fallback value when an entry has no value
+//   - WithVTrimChars — characters trimmed from values (e.g., quotes)
+//   - WithSkipEmptyValues — drop entries whose value is empty
 //
 // # Error Handling
 //
-// Errors are wrapped with descriptive context:
-//
-//	content, err := file.ReadFile("/nonexistent")
-//	// Error: failed to open file "/nonexistent": no such file or directory
-//
-// Common error scenarios:
+// Errors are wrapped with descriptive context. Common scenarios:
 //   - File does not exist (os.ErrNotExist)
 //   - Permission denied (os.ErrPermission)
+//   - File exceeds the configured maximum size
 //   - I/O errors during read
-//
-// # Use in Collectors
-//
-// Collectors use this package for reading configuration files:
-//
-//	content, err := file.ReadFile("/etc/default/grub")
-//	if err != nil {
-//	    return nil, fmt.Errorf("failed to read GRUB config: %w", err)
-//	}
-//	// Parse content...
 //
 // # Thread Safety
 //
-// Functions in this package are thread-safe and can be called concurrently
-// from multiple collectors.
+// A Parser is read-only after construction and safe for concurrent use.
 package file

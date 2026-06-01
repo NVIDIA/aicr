@@ -30,7 +30,6 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
-	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -40,6 +39,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/pkg/validator/job"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // validatorFieldManager identifies AICR's server-side-apply writes against the
@@ -179,9 +179,9 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
-	cat, err := catalog.LoadWithDataProvider(v.dataProvider, v.Version, v.Commit)
+	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
 	}
 
 	// --no-cluster: report all as skipped, no K8s calls
@@ -237,9 +237,9 @@ func (v *Validator) ValidatePhase(
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
-	cat, err := catalog.LoadWithDataProvider(v.dataProvider, v.Version, v.Commit)
+	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
 	}
 
 	if v.NoCluster {
@@ -310,12 +310,21 @@ func (v *Validator) runPhase(
 
 		slog.Info("running validator", "name", entry.Name, "phase", phase)
 
-		deployer := job.NewDeployer(
-			clientset, factory, v.Namespace, v.RunID, v.Version, v.Commit, entry,
-			v.ImagePullSecrets, v.Tolerations, v.NodeSelector,
-			v.ImageRegistryOverride, v.ImageTagOverride,
-			validationInput.GetComponentRefs(),
-		)
+		deployer := job.NewDeployer(job.Config{
+			Clientset:             clientset,
+			Factory:               factory,
+			Namespace:             v.Namespace,
+			RunID:                 v.RunID,
+			Entry:                 entry,
+			CLIVersion:            v.Version,
+			CLICommit:             v.Commit,
+			ImagePullSecrets:      v.ImagePullSecrets,
+			Tolerations:           v.Tolerations,
+			NodeSelector:          v.NodeSelector,
+			ImageRegistryOverride: v.ImageRegistryOverride,
+			ImageTagOverride:      v.ImageTagOverride,
+			ComponentRefs:         validationInput.GetComponentRefs(),
+		})
 
 		// Deploy
 		if deployErr := deployer.DeployJob(ctx); deployErr != nil {

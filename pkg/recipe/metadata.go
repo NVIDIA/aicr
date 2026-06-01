@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
 
@@ -417,6 +418,28 @@ type RecipeResult struct {
 	// provider, in which case DataProvider() returns nil and callers fall
 	// back to GetDataProvider().
 	provider DataProvider
+
+	// owner identifies the *Builder that produced this RecipeResult.
+	// Stamped by Builder.buildWithStore (covers BuildFromCriteria and
+	// BuildFromCriteriaWithEvaluator) using the Builder's pointer
+	// identity — zero-cost, naturally unique, and unforgeable from
+	// outside the package because the field is unexported.
+	//
+	// Consumers that hold a *Builder reference can call AssertOwnedBy
+	// to refuse a RecipeResult produced by a different Builder before
+	// reading values via GetValuesForComponent. This pushes the
+	// cross-provider safety guard down from the aicr facade (where it
+	// only protected facade callers) to the layer where the bug
+	// actually lives — protecting direct pkg/recipe.Builder importers
+	// the same way.
+	//
+	// Nil when the result was constructed outside Builder (e.g.,
+	// LoadFromFile decoding a pre-hydrated RecipeResult file).
+	// AssertOwnedBy treats nil owner as "no provenance" and rejects;
+	// callers that legitimately load results externally should rebind
+	// via BindDataProvider and consume read-only without going through
+	// ownership-checked entry points.
+	owner *Builder
 }
 
 // DataProvider returns the DataProvider that produced this result, or nil
@@ -427,6 +450,68 @@ func (r *RecipeResult) DataProvider() DataProvider {
 		return nil
 	}
 	return r.provider
+}
+
+// Owner returns the *Builder that produced this RecipeResult, or nil when
+// the result was constructed outside the Builder path (e.g., a recipe file
+// loaded via LoadFromFile that was never re-built locally). Nil-safe on
+// the receiver. Returned identity is for comparison only; callers should
+// not mutate the Builder.
+func (r *RecipeResult) Owner() *Builder {
+	if r == nil {
+		return nil
+	}
+	return r.owner
+}
+
+// AssertOwnedBy returns nil when this RecipeResult was produced by b, and
+// ErrCodeInvalidRequest otherwise. The check uses pointer identity on the
+// unexported owner field stamped by Builder.buildWithStore at build time.
+//
+// Use this from consumer entry points that hold a *Builder reference and
+// want to refuse a RecipeResult produced elsewhere before reading values
+// (e.g., calling GetValuesForComponent). Two Builders with different
+// DataProviders would otherwise mix component refs from one provider with
+// file reads from the other — the same bug class the facade-level
+// assertOwns in pkg/client/v1 protects against, but enforced at the layer
+// where the data lives so external pkg/recipe.Builder importers are
+// covered too.
+//
+// A nil receiver returns nil (vacuously owned by anything) so the helper
+// composes with chained nil-checks. A nil b argument returns
+// ErrCodeInvalidRequest — callers must pass the Builder they want to
+// assert against.
+//
+// A nil owner on a non-nil result is rejected: the result has no provenance
+// and cannot prove it belongs to b. Callers that load results externally
+// (e.g., recipe YAML from disk) and want to consume them must rebuild via
+// Builder or skip the owner-checked entry points; BindDataProvider + the
+// non-checked accessors remain available for that path.
+func (r *RecipeResult) AssertOwnedBy(b *Builder) error {
+	if r == nil {
+		return nil
+	}
+	if b == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"AssertOwnedBy requires a non-nil *Builder")
+	}
+	if r.owner == nil {
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"RecipeResult has no owner (constructed outside Builder); cross-builder operations are not permitted",
+			map[string]any{
+				"expectedOwner": fmt.Sprintf("%p", b),
+				"actualOwner":   "<nil>",
+			})
+	}
+	if r.owner != b {
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"RecipeResult was produced by a different Builder; cross-builder operations are not permitted",
+			map[string]any{
+				"expectedOwner": fmt.Sprintf("%p", b),
+				"actualOwner":   fmt.Sprintf("%p", r.owner),
+			})
+	}
+	return nil
 }
 
 // BindDataProvider sets the DataProvider on a RecipeResult so downstream
@@ -463,6 +548,10 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		Kind:       r.Kind,
 		APIVersion: r.APIVersion,
 		// provider intentionally left nil: BindDataProvider sets it on the copy.
+		// owner intentionally left nil: the copy has no producer Builder, so
+		// AssertOwnedBy rejects it. The facade's AdoptRecipe path rebinds
+		// the provider but does not rebind owner — adopted recipes can be
+		// read but not consumed via ownership-checked entry points.
 	}
 
 	// Metadata: scalar Version plus three slices.
@@ -515,10 +604,10 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 func cloneComponentRef(ref ComponentRef) ComponentRef {
 	out := ref // copies scalars and the (to-be-replaced) reference fields
 	if ref.Overrides != nil {
-		// deepCopyAnyMap recurses into nested map[string]any/[]any so a
-		// mutation through the copy can't reach the source's nested values
-		// (a shallow key-copy would share those nested containers).
-		out.Overrides = deepCopyAnyMap(ref.Overrides)
+		// serializer.DeepCopyAnyMap recurses into nested map[string]any/[]any
+		// so a mutation through the copy can't reach the source's nested
+		// values (a shallow key-copy would share those nested containers).
+		out.Overrides = serializer.DeepCopyAnyMap(ref.Overrides)
 	}
 	if ref.Patches != nil {
 		out.Patches = make([]string, len(ref.Patches))
@@ -949,45 +1038,23 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 // deepMergeMap copies all key-value pairs from src into dst. For keys whose
 // values are nested maps in both src and dst, the merge recurses so that
 // inner maps are not shared by reference between the two trees.
+//
+// Non-map values (scalars, slices) are deep-copied via serializer.DeepCopyAny
+// so that dst never aliases src's []any values. Without this, a downstream
+// mutation at an index of a toleration/env/args list would leak back into
+// the cached source map.
 func deepMergeMap(dst, src map[string]any) {
 	for k, sv := range src {
 		svMap, svIsMap := sv.(map[string]any)
 		if !svIsMap {
-			dst[k] = sv
+			dst[k] = serializer.DeepCopyAny(sv)
 			continue
 		}
 		dvMap, dvIsMap := dst[k].(map[string]any)
 		if !dvIsMap {
-			// dst has no nested map at this key — deep-copy src subtree
-			dst[k] = deepCopyAnyMap(svMap)
+			dst[k] = serializer.DeepCopyAnyMap(svMap)
 			continue
 		}
 		deepMergeMap(dvMap, svMap)
-	}
-}
-
-// deepCopyAnyMap returns a deep copy of a map[string]any tree, recursing into
-// both nested maps and slices so callers may safely mutate the returned tree
-// without leaking writes back to the source.
-func deepCopyAnyMap(m map[string]any) map[string]any {
-	cp := make(map[string]any, len(m))
-	for k, v := range m {
-		cp[k] = deepCopyAny(v)
-	}
-	return cp
-}
-
-func deepCopyAny(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		return deepCopyAnyMap(val)
-	case []any:
-		cp := make([]any, len(val))
-		for i, item := range val {
-			cp[i] = deepCopyAny(item)
-		}
-		return cp
-	default:
-		return v
 	}
 }

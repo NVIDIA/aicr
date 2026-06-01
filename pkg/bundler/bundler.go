@@ -71,9 +71,6 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 // digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 const digestAlgoSHA256 = "sha256"
 
-// keyError is the map key used in structured-error context payloads.
-const keyError = "error"
-
 // DefaultBundler generates Helm per-component bundles from recipes.
 //
 // The per-component approach produces a directory per component, each with its
@@ -592,7 +589,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		}
 
 		// Get base values from recipe
-		values, err := recipeResult.GetValuesForComponent(ref.Name)
+		values, err := recipeResult.GetValuesForComponentWithContext(ctx, ref.Name)
 		if err != nil {
 			slog.Warn("failed to get values for component, using empty map",
 				"component", ref.Name,
@@ -997,8 +994,8 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 
 	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to load component registry for storage class warnings", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for storage class warnings")
 	}
 
 	for _, ref := range recipeResult.ComponentRefs {
@@ -1093,8 +1090,8 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 	// opposite of what this tool promises; surface the failure to the user.
 	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to load component registry for validations", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for validations")
 	}
 
 	// Iterate through components in recipe
@@ -1144,10 +1141,10 @@ func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResu
 // the source of truth; a nil provider falls back to the package-global provider so
 // pre-WithDataProvider callers (legacy CLI path) still emit the same bundles.
 func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider) ([]string, error) {
-	// Check if the provider is a LayeredDataProvider with external files.
-	// EffectiveDataProvider falls back to the package-global provider when the
-	// caller did not bind one (pre-WithDataProvider CLI path).
-	layered, ok := recipe.EffectiveDataProvider(provider).(*recipe.LayeredDataProvider)
+	// Check if the bound provider is a LayeredDataProvider with external
+	// files. A nil-interface receiver returns (nil, false) from the type
+	// assertion without panicking — equivalent to no external data.
+	layered, ok := provider.(*recipe.LayeredDataProvider)
 	if !ok {
 		return nil, nil // No external data
 	}
@@ -1203,8 +1200,9 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	// Build attestation subject with full SLSA metadata
 	metadata := attestation.StatementMetadata{
-		ToolVersion: b.Config.Version(),
-		OutputDir:   dir,
+		ToolVersion:   b.Config.Version(),
+		OutputDir:     dir,
+		Deterministic: b.Config.Deterministic(),
 	}
 
 	if recipeResult != nil {
@@ -1395,7 +1393,7 @@ func (b *DefaultBundler) buildDynamicValuesMap(provider recipe.DataProvider) (ma
 
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load component registry for dynamic resolution", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load component registry for dynamic resolution")
 	}
 
 	raw := b.Config.DynamicValues()
@@ -1483,14 +1481,14 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 
 		componentManifests := make(map[string][]byte, len(paths))
 		for _, manifestPath := range paths {
-			content, err := recipe.GetManifestContentWithProvider(provider, manifestPath)
+			content, err := recipe.GetManifestContentWithContext(ctx, provider, manifestPath)
 			if err != nil {
 				if stderrors.Is(err, fs.ErrNotExist) {
-					// Honor bound provider for the type assertion when
-					// available; EffectiveDataProvider falls back to the
-					// package-global provider when no provider is bound
-					// (CLI today).
-					_, hasExternalData := recipe.EffectiveDataProvider(provider).(*recipe.LayeredDataProvider)
+					// Use the bound provider for the type assertion. A nil
+					// interface returns (nil, false) without panicking, so
+					// callers without a layered provider correctly report
+					// "no external data" in the error message.
+					_, hasExternalData := provider.(*recipe.LayeredDataProvider)
 					return nil, errors.New(errors.ErrCodeInvalidRequest,
 						missingManifestMessage(manifestPath, ref.Name, hasExternalData))
 				}
@@ -1582,8 +1580,8 @@ func (b *DefaultBundler) injectGKECriticalPriorityQuotas(
 
 	registry, err := recipe.GetComponentRegistryFor(recipeResult.DataProvider())
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to load component registry for GKE quota synthesis", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for GKE quota synthesis")
 	}
 
 	pods := computeGKECriticalPriorityQuotaPods(recipeResult.Criteria.Nodes)

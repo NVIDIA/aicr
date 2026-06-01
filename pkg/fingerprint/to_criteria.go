@@ -16,29 +16,32 @@ package fingerprint
 
 import "github.com/NVIDIA/aicr/pkg/recipe"
 
-// ToCriteria projects the fingerprint into a recipe.Criteria so the
-// recipe builder can match against a captured cluster (the
-// `aicr recipe --snapshot` flow). Dimensions the fingerprint did not
-// resolve become "any" via the recipe package's enum parsers — a
-// fingerprint with no accelerator detected yields a generic Criteria
-// that matches recipes pinning any accelerator.
+// ToCriteria projects the fingerprint into a recipe.Criteria, resolving each
+// enum value against reg so non-OSS values contributed by a `--data` overlay
+// are honored. A nil reg falls back to a fresh ephemeral registry (only the
+// hardcoded OSS fast-path values will validate); callers that need overlay
+// values to flow through should pass the registry bound to their Client
+// (via Client.CriteriaRegistry).
 //
-// Intent and Platform are recipe-author choices the cluster cannot
-// reveal, so they always come back as "any"; callers wanting to drive
-// recipe selection by intent or platform must layer that on top of
-// ToCriteria from the CLI flag side.
-func (f *Fingerprint) ToCriteria() *recipe.Criteria {
+// Intent and Platform are recipe-author choices the cluster cannot reveal,
+// so they always come back as "any"; callers wanting to drive recipe
+// selection by intent or platform must layer that on top of ToCriteria
+// from the CLI flag side.
+func (f *Fingerprint) ToCriteria(reg *recipe.CriteriaRegistry) *recipe.Criteria {
 	c := recipe.NewCriteria()
 	if f == nil {
 		return c
 	}
-	if v, err := recipe.ParseCriteriaServiceType(f.Service.Value); err == nil {
+	if reg == nil {
+		reg = recipe.NewCriteriaRegistry()
+	}
+	if v, err := reg.ParseService(f.Service.Value); err == nil {
 		c.Service = v
 	}
-	if v, err := recipe.ParseCriteriaAcceleratorType(f.Accelerator.Value); err == nil {
+	if v, err := reg.ParseAccelerator(f.Accelerator.Value); err == nil {
 		c.Accelerator = v
 	}
-	if v, err := recipe.ParseCriteriaOSType(f.OS.Value); err == nil {
+	if v, err := reg.ParseOS(f.OS.Value); err == nil {
 		c.OS = v
 	}
 	if f.NodeCount.Value > 0 {

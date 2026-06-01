@@ -49,19 +49,18 @@
 //
 // # Usage
 //
-// Create and use the collector:
+// Construct via the package factory and call Collect:
 //
-//	collector := os.NewCollector()
-//	measurements, err := collector.Collect(ctx)
+//	factory := collector.NewDefaultFactory()
+//	c := factory.CreateOSCollector()
+//	m, err := c.Collect(ctx)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //
-//	for _, m := range measurements {
-//	    fmt.Printf("Type: %s\n", m.Type)
-//	    for _, subtype := range m.Subtypes {
-//	        fmt.Printf("  %s: %d settings\n", subtype.Name, len(subtype.Data))
-//	    }
+//	fmt.Printf("Type: %s\n", m.Type)
+//	for _, subtype := range m.Subtypes {
+//	    fmt.Printf("  %s: %d settings\n", subtype.Name, len(subtype.Data))
 //	}
 //
 // # Data Sources

@@ -15,13 +15,14 @@
 # GPU Operator Helm values
 # OKE Training configuration overrides
 
-# Lockstep with nvidia-dra-driver-gpu/values-oke.yaml, which sets
-# nvidiaDriverRoot: /. OKE bare-metal shapes pre-install drivers at the
-# host root, so both components must read from / rather than the
-# gpu-operator base default /run/nvidia/driver. Guarded by
-# TestDriverRootLockstep (issue #1087).
-hostPaths:
-  driverInstallDir: /
+# hostPaths.driverInstallDir is intentionally left at the gpu-operator base
+# default /run/nvidia/driver: it is the host path the operator-validator
+# bind-mounts as the driver-validation container's rootfs target, and "/" is
+# rejected by runc ("mountpoint is on the top of rootfs"), crash-looping
+# nvidia-operator-validator. nvidia-dra-driver-gpu/values-oke.yaml keeps
+# nvidiaDriverRoot: / (host-installed driver userspace at the host root); the
+# two are independent here because gpu-operator manages no driver
+# (driver.enabled: false below). See TestDriverRootLockstep (#1087).
 
 cdi:
   enabled: true

@@ -101,7 +101,7 @@ func (r *RecipeSpec) validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"spec.recipe.criteria and spec.recipe.input.snapshot are mutually exclusive")
 	}
-	if _, err := r.ResolveCriteria(); err != nil {
+	if _, err := r.ResolveCriteriaWithRegistry(nil); err != nil {
 		return err
 	}
 	if r.Output != nil && r.Output.Format != "" {

@@ -30,37 +30,38 @@
 //
 // # Usage
 //
-// Create with specific services to monitor:
+// Construct via the package factory with the systemd services option:
 //
-//	collector := systemd.NewCollector([]string{
-//	    "containerd.service",
-//	    "kubelet.service",
-//	    "docker.service",
-//	})
-//
-//	measurements, err := collector.Collect(ctx)
+//	factory := collector.NewDefaultFactory(
+//	    collector.WithSystemDServices([]string{
+//	        "containerd.service",
+//	        "kubelet.service",
+//	        "docker.service",
+//	    }),
+//	)
+//	c := factory.CreateSystemDCollector()
+//	m, err := c.Collect(ctx)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //
-//	for _, m := range measurements {
-//	    for _, subtype := range m.Subtypes {
-//	        fmt.Printf("Service: %s\n", subtype.Name)
-//	        if state, ok := subtype.Data["ActiveState"]; ok {
-//	            fmt.Printf("  State: %s\n", state)
-//	        }
+//	for _, subtype := range m.Subtypes {
+//	    fmt.Printf("Service: %s\n", subtype.Name)
+//	    if state, ok := subtype.Data["ActiveState"]; ok {
+//	        fmt.Printf("  State: %s\n", state)
 //	    }
 //	}
 //
 // # Service Configuration
 //
-// Services to monitor are specified during collector creation:
+// Services to monitor are specified via the factory option:
 //
-//	services := []string{
-//	    "containerd.service",
-//	    "kubelet.service",
-//	}
-//	collector := systemd.NewCollector(services)
+//	factory := collector.NewDefaultFactory(
+//	    collector.WithSystemDServices([]string{
+//	        "containerd.service",
+//	        "kubelet.service",
+//	    }),
+//	)
 //
 // Common services for GPU clusters:
 //   - containerd.service: Container runtime

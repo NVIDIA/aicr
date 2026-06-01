@@ -105,7 +105,11 @@ const (
 	ServerReadHeaderTimeout = 5 * time.Second
 
 	// ServerWriteTimeout is the maximum duration for writing a response.
-	ServerWriteTimeout = 30 * time.Second
+	// Must be ≥ ServerHandlerTimeout (and therefore ≥ the longest
+	// per-handler timeout, currently BundleHandlerTimeout = 60s) so a
+	// handler's deadline can actually run to completion before the
+	// net/http server force-closes the connection.
+	ServerWriteTimeout = 90 * time.Second
 
 	// ServerIdleTimeout is the maximum duration to wait for the next request.
 	ServerIdleTimeout = 120 * time.Second
@@ -514,6 +518,14 @@ const (
 	// supply-chain artifacts.
 	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
 
+	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
+	// file read by the verifier. A manifest entry is ~150 bytes (path +
+	// size + sha256); 1 MiB allows ~6k entries — well above any realistic
+	// bundle while bounding an attacker-influenced bundle root (extracted
+	// from an untrusted archive, symlink-rich tarball) before os.ReadFile
+	// would allocate the whole file into memory.
+	MaxManifestFileBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxExternalDataFileBytes caps the size of recipe/registry data files
 	// read from the external data directory by LayeredDataProvider. This is
 	// the single source of truth for the external-data size limit:
@@ -527,9 +539,14 @@ const (
 
 // Server-wide handler defaults.
 const (
-	// ServerHandlerTimeout is the default per-request handler timeout used by
-	// the timeout middleware when a handler-specific timeout is not provided.
-	ServerHandlerTimeout = 30 * time.Second
+	// ServerHandlerTimeout is the default per-request handler timeout used
+	// by the timeout middleware. Acts as the server-wide upper bound:
+	// per-handler context.WithTimeout calls (RecipeHandlerTimeout,
+	// BundleHandlerTimeout, ...) must be ≤ this value, otherwise
+	// context.WithTimeout's smaller-of-two semantic silently clamps them.
+	// Sized for the longest handler (BundleHandlerTimeout = 60s) with
+	// headroom for error-path response writing.
+	ServerHandlerTimeout = 90 * time.Second
 
 	// ServerRateLimitWindow is the rate-limit window length advertised to
 	// clients via X-RateLimit-Reset. Mirrors the limiter's per-second model.
@@ -546,6 +563,24 @@ const (
 
 	// ServerRetryAfterSeconds is the Retry-After header value when rate limited.
 	ServerRetryAfterSeconds = "1"
+)
+
+// Server listen address and env-var override names.
+const (
+	// ServerDefaultPort is the default TCP port the API server binds on.
+	// Override via the PORT environment variable. Matches the convention
+	// used by Cloud Run, App Engine, Heroku, and the project's published
+	// K8s deployment manifests, so renaming would be a breaking surface
+	// change for documented operators.
+	ServerDefaultPort = 8080
+
+	// EnvServerPort is the environment variable that overrides
+	// ServerDefaultPort.
+	EnvServerPort = "PORT"
+
+	// EnvServerShutdownTimeoutSeconds is the environment variable that
+	// overrides ServerShutdownTimeout (value parsed as seconds).
+	EnvServerShutdownTimeoutSeconds = "SHUTDOWN_TIMEOUT_SECONDS"
 )
 
 // Log scanner buffer sizes.
@@ -685,6 +720,15 @@ const (
 	// The value tracks the project's minimum supported Kubernetes version
 	// declared in recipes/overlays/base.yaml.
 	MirrorDefaultKubeVersion = "1.33.0"
+
+	// MirrorDiscoveryConcurrency caps the number of components rendered in
+	// parallel during mirror discovery. Each render forks a `helm template`
+	// subprocess and reads YAML output; unbounded fan-out across recipes
+	// with many components can saturate CPU and exhaust file descriptors
+	// in CI runners. The bound trades wall-clock for predictable resource
+	// use; 8 is a balance that keeps a typical 30-component recipe under
+	// a minute on a 4-vCPU runner.
+	MirrorDiscoveryConcurrency = 8
 )
 
 // MirrorExtraAPIVersions lists API group/versions passed to

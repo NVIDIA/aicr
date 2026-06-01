@@ -153,7 +153,7 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 	// in-pod collector factory.
 	osVal := stringFlagOrConfig(cmd, "os", resolved.OS)
 	if osVal != "" {
-		parsedOS, parseErr := recipe.ParseCriteriaOSType(osVal)
+		parsedOS, parseErr := recipe.NewCriteriaRegistry().ParseOS(osVal)
 		if parseErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --os value", parseErr)
 		}

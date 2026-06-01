@@ -19,10 +19,10 @@
 //   - cncf — CNCF AI Conformance behavioral evidence (markdown
 //     rendering + behavioral collector for submission to the CNCF
 //     conformance program).
-//
-// A second subpackage, `attestation`, will land alongside as the
-// recipe-test attestation pipeline (signed in-toto Statement plus
-// supporting bundle) under #754.
+//   - attestation — recipe-test attestation pipeline (signed in-toto
+//     Statement plus supporting bundle).
+//   - verifier — offline verification for recipe-evidence v1 bundles
+//     produced by `aicr validate --emit-attestation`.
 //
 // This file exists only to give the umbrella package a package-level
 // doc comment. The subpackages contain all the runtime code.

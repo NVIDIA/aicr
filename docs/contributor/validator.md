@@ -147,6 +147,19 @@ The validator engine mounts snapshot and recipe data as ConfigMaps:
 | `AICR_NODE_SELECTOR` | User-provided node selector override for inner workloads (comma-separated `key=value` pairs). Set by the `--node-selector` CLI flag. Use `ctx.NodeSelector` to access the parsed value. |
 | `AICR_TOLERATIONS` | User-provided toleration override for inner workloads (comma-separated `key=value:effect` entries). Set by the `--toleration` CLI flag. Use `ctx.Tolerations` to access the parsed value. |
 
+### `inference-perf` benchmark tuning
+
+The `inference-perf` performance check warms vLLM before measuring, so the one-time CUDA-graph/JIT compile cost is excluded from the reported throughput and p99 time-to-first-token (TTFT). These knobs (set on the `inference-perf` catalog entry's `env`, overridable via `aicr ... --data`) retune the benchmark without rebuilding the validator image. An unset knob uses the default below; a value that is not a positive integer **fails the check with `ErrCodeInvalidRequest`** — validated up front, before any workload is deployed — rather than silently falling back to a default and reporting a pass/fail the operator never configured. They are validation *methodology* knobs and live with the validator/catalog; the per-accelerator pass/fail thresholds stay in the recipe overlays.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU` | `16` | Concurrent requests per GPU; total concurrency is this × free GPUs on the chosen node. |
+| `AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY` | `1` | Warmup requests per concurrency slot (excluded from stats); one full wave primes every in-flight slot. |
+| `AICR_INFERENCE_PERF_MIN_REQUESTS` | `1000` | Floor on measured request count, so small nodes still get a stable steady-state window. |
+| `AICR_INFERENCE_PERF_REQUESTS_PER_CONCURRENCY` | `8` | Scales measured request count with concurrency; actual count is `max(MIN_REQUESTS, concurrency × this)`. |
+| `AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN` | `128` | Mean prompt input tokens per request. |
+| `AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN` | `128` | Mean prompt output tokens per request. |
+
 ## Context API
 
 The `validators.Context` struct provides all dependencies a check needs:
@@ -232,7 +245,7 @@ Each entry in `recipes/validators/catalog.yaml`:
     memory: "128Mi"
 ```
 
-**Image tag resolution** (applied by `catalog.Load`):
+**Image tag resolution** (applied by `catalog.LoadWithDataProvider`):
 
 1. `:latest` tags are replaced with the CLI version (e.g., `:v0.9.5`) for release builds
 2. On non-release dev builds with a valid commit, `:latest` becomes `:sha-<commit>` (matches the tags `on-push.yaml` pushes for merges to `main`)
@@ -242,9 +255,9 @@ Each entry in `recipes/validators/catalog.yaml`:
 
 **Digest-pinned references** (`name@sha256:…`) are not rewritten by step 4. A tag override is meaningless against a content-addressable pin, and naive rewriting would corrupt the digest. Step 5's registry override still applies — only the registry prefix changes, the digest is preserved verbatim.
 
-**Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.Load`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
+**Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.LoadWithDataProvider`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
 
-**Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `v1.ImagePullPolicy(image)` helper (`pkg/api/validator/v1/job_plan.go`). The rule, in precedence order, is:
+**Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `v1.ImagePullPolicy(image)` helper (`pkg/validator/v1/job_plan.go`). The rule, in precedence order, is:
 
 1. **Side-loaded refs** (`ko.local/*`, `kind.local/*`) → `Never` (no registry to pull from).
 2. **Digest-pinned refs** (`name@sha256:…`) → `IfNotPresent`. Cryptographic immutability means a cached copy is always correct; forcing `Always` here would make kubelet re-contact the registry every run, which breaks disconnected / air-gapped clusters even though the image itself was never overridden.
@@ -252,7 +265,7 @@ Each entry in `recipes/validators/catalog.yaml`:
 4. **`:latest` suffix** → `Always`. Mutable tag by convention.
 5. **Otherwise** → `IfNotPresent`. Versioned tag assumed immutable enough that caching is a win.
 
-Callers in this repo: the outer validator Job (via `v1.RenderPlan()` in `pkg/api/validator/v1/job_plan.go`) and the inner AIPerf benchmark pod spec in `buildAIPerfJob` (`validators/performance/inference_perf_constraint.go`). They both delegate to the same helper so their policy can't drift. When adding a new inner workload Job in `validators/<phase>/*`, set `ImagePullPolicy: v1.ImagePullPolicy(<resolved image>)` on the container to keep the invariant.
+Callers in this repo: the outer validator Job (via `v1.RenderPlan()` in `pkg/validator/v1/job_plan.go`) and the inner AIPerf benchmark pod spec in `buildAIPerfJob` (`validators/performance/inference_perf_constraint.go`). They both delegate to the same helper so their policy can't drift. When adding a new inner workload Job in `validators/<phase>/*`, set `ImagePullPolicy: v1.ImagePullPolicy(<resolved image>)` on the container to keep the invariant.
 
 **Performance phase example — inference perf:**
 

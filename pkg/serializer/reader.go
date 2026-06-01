@@ -368,6 +368,15 @@ func FromFile[T any](path string) (*T, error) {
 	return FromFileWithKubeconfig[T](path, "")
 }
 
+// FromFileContext is the context-aware variant of FromFile. The provided
+// context bounds the ConfigMap read when path is a cm:// URI and is threaded
+// into NewFileReaderWithContext for plain file and HTTP reads. Prefer this
+// variant in CLI/handler call sites that already hold a request-scoped
+// context.
+func FromFileContext[T any](ctx context.Context, path string) (*T, error) {
+	return FromFileWithKubeconfigContext[T](ctx, path, "")
+}
+
 // FromFileWithKubeconfig reads and deserializes data from a file path, HTTP URL, or ConfigMap URI with custom kubeconfig.
 //
 // This is identical to FromFile but allows specifying a custom kubeconfig path for ConfigMap URIs.
@@ -381,13 +390,20 @@ func FromFile[T any](path string) (*T, error) {
 //
 //	snap, err := FromFileWithKubeconfig[Snapshot]("cm://gpu-operator/aicr-snapshot", "/custom/kubeconfig")
 func FromFileWithKubeconfig[T any](path, kubeconfig string) (*T, error) {
+	return FromFileWithKubeconfigContext[T](context.Background(), path, kubeconfig)
+}
+
+// FromFileWithKubeconfigContext is the context-aware variant of
+// FromFileWithKubeconfig. The context bounds the ConfigMap read when path is
+// a cm:// URI.
+func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig string) (*T, error) {
 	// Check for ConfigMap URI
 	if strings.HasPrefix(path, ConfigMapURIScheme) {
 		namespace, name, err := pod.ParseConfigMapURI(path)
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid ConfigMap URI", err)
 		}
-		return fromConfigMapWithKubeconfig[T](namespace, name, kubeconfig)
+		return fromConfigMapWithKubeconfigContext[T](ctx, namespace, name, kubeconfig)
 	}
 
 	fileFormat := FormatFromPath(path)
@@ -396,7 +412,7 @@ func FromFileWithKubeconfig[T any](path, kubeconfig string) (*T, error) {
 		slog.String("format", string(fileFormat)),
 	)
 
-	ser, err := NewFileReader(fileFormat, path)
+	ser, err := NewFileReaderWithContext(ctx, fileFormat, path)
 	if err != nil {
 		slog.Error("failed to create file reader", "error", err, "path", path, "format", fileFormat)
 		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to create serializer for %q", path), err)
@@ -425,8 +441,10 @@ func FromFileWithKubeconfig[T any](path, kubeconfig string) (*T, error) {
 	return &r, nil
 }
 
-// fromConfigMapWithKubeconfig reads and deserializes data from a Kubernetes ConfigMap with custom kubeconfig.
-func fromConfigMapWithKubeconfig[T any](namespace, name, kubeconfig string) (*T, error) {
+// fromConfigMapWithKubeconfigContext reads and deserializes data from a Kubernetes ConfigMap.
+// The provided context is wrapped with defaults.ConfigMapWriteTimeout so the read is bounded
+// even when the caller passes context.Background().
+func fromConfigMapWithKubeconfigContext[T any](ctx context.Context, namespace, name, kubeconfig string) (*T, error) {
 	var k8sClient client.Interface
 	var err error
 
@@ -439,9 +457,9 @@ func fromConfigMapWithKubeconfig[T any](namespace, name, kubeconfig string) (*T,
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get kubernetes client", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaults.ConfigMapWriteTimeout)
+	readCtx, cancel := context.WithTimeout(ctx, defaults.ConfigMapWriteTimeout)
 	defer cancel()
-	cm, err := k8sClient.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{})
+	cm, err := k8sClient.CoreV1().ConfigMaps(namespace).Get(readCtx, name, metav1.GetOptions{})
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("failed to get ConfigMap %s/%s", namespace, name), err)
 	}

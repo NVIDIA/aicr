@@ -15,7 +15,9 @@
 package recipe
 
 import (
+	"context"
 	stderrors "errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +38,7 @@ func TestEmbeddedDataProvider(t *testing.T) {
 	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 
 	t.Run("read existing file", func(t *testing.T) {
-		data, err := provider.ReadFile("registry.yaml")
+		data, err := provider.ReadFile(context.Background(), "registry.yaml")
 		if err != nil {
 			t.Fatalf("failed to read registry.yaml: %v", err)
 		}
@@ -46,7 +48,7 @@ func TestEmbeddedDataProvider(t *testing.T) {
 	})
 
 	t.Run("read non-existent file", func(t *testing.T) {
-		_, err := provider.ReadFile("non-existent.yaml")
+		_, err := provider.ReadFile(context.Background(), "non-existent.yaml")
 		if err == nil {
 			t.Error("expected error for non-existent file")
 		}
@@ -103,7 +105,7 @@ components:
 	}
 
 	// Read merged registry
-	data, err := provider.ReadFile("registry.yaml")
+	data, err := provider.ReadFile(context.Background(), "registry.yaml")
 	if err != nil {
 		t.Fatalf("failed to read registry.yaml: %v", err)
 	}
@@ -155,7 +157,7 @@ spec:
 	}
 
 	// Read overlays/base.yaml - should get external version
-	data, err := provider.ReadFile("overlays/base.yaml")
+	data, err := provider.ReadFile(context.Background(), "overlays/base.yaml")
 	if err != nil {
 		t.Fatalf("failed to read overlays/base.yaml: %v", err)
 	}
@@ -210,7 +212,7 @@ spec:
 	}
 
 	// Read new overlay
-	data, err := provider.ReadFile("overlays/custom-overlay.yaml")
+	data, err := provider.ReadFile(context.Background(), "overlays/custom-overlay.yaml")
 	if err != nil {
 		t.Fatalf("failed to read custom-overlay.yaml: %v", err)
 	}
@@ -404,7 +406,7 @@ func TestLayeredDataProvider_FallsBackToEmbedded(t *testing.T) {
 	}
 
 	// Read overlays/base.yaml - should fall back to embedded since we didn't override it
-	data, err := provider.ReadFile("overlays/base.yaml")
+	data, err := provider.ReadFile(context.Background(), "overlays/base.yaml")
 	if err != nil {
 		t.Fatalf("failed to read overlays/base.yaml: %v", err)
 	}
@@ -450,7 +452,7 @@ components:
 	}
 
 	// Read the merged registry directly from the provider
-	mergedData, err := layered.ReadFile("registry.yaml")
+	mergedData, err := layered.ReadFile(context.Background(), "registry.yaml")
 	if err != nil {
 		t.Fatalf("failed to read merged registry: %v", err)
 	}
@@ -520,7 +522,7 @@ customField: customValue
 	}
 
 	// Read the custom values
-	data, err := provider.ReadFile("components/cert-manager/values.yaml")
+	data, err := provider.ReadFile(context.Background(), "components/cert-manager/values.yaml")
 	if err != nil {
 		t.Fatalf("failed to read custom values: %v", err)
 	}
@@ -578,7 +580,7 @@ spec:
 
 	t.Run("walks overlays directory", func(t *testing.T) {
 		var files []string
-		err := provider.WalkDir("overlays", func(path string, d os.DirEntry, err error) error {
+		err := provider.WalkDir(context.Background(), "overlays", func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -611,7 +613,7 @@ spec:
 
 	t.Run("walks root directory", func(t *testing.T) {
 		var files []string
-		err := provider.WalkDir("", func(path string, d os.DirEntry, err error) error {
+		err := provider.WalkDir(context.Background(), "", func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -669,7 +671,7 @@ spec:
 
 	// Walk overlays - should include both external and embedded files
 	var files []string
-	err = provider.WalkDir("overlays", func(path string, d os.DirEntry, err error) error {
+	err = provider.WalkDir(context.Background(), "overlays", func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -754,13 +756,13 @@ components:
 	}
 
 	// First read
-	data1, err := provider.ReadFile("registry.yaml")
+	data1, err := provider.ReadFile(context.Background(), "registry.yaml")
 	if err != nil {
 		t.Fatalf("first read failed: %v", err)
 	}
 
 	// Second read should return cached result
-	data2, err := provider.ReadFile("registry.yaml")
+	data2, err := provider.ReadFile(context.Background(), "registry.yaml")
 	if err != nil {
 		t.Fatalf("second read failed: %v", err)
 	}
@@ -775,7 +777,7 @@ func TestEmbeddedDataProvider_WalkDir(t *testing.T) {
 	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 
 	var files []string
-	err := provider.WalkDir("overlays", func(path string, d os.DirEntry, err error) error {
+	err := provider.WalkDir(context.Background(), "overlays", func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -836,7 +838,7 @@ components:
 	}
 
 	// Reading registry should fail due to invalid YAML
-	_, err = provider.ReadFile("registry.yaml")
+	_, err = provider.ReadFile(context.Background(), "registry.yaml")
 	if err == nil {
 		t.Error("expected error for invalid external registry YAML")
 	}
@@ -871,7 +873,7 @@ func TestLayeredDataProvider_ReadExternalFileError(t *testing.T) {
 	}
 
 	// Reading should fail
-	_, err = provider.ReadFile("test-file.yaml")
+	_, err = provider.ReadFile(context.Background(), "test-file.yaml")
 	if err == nil {
 		t.Error("expected error when external file can't be read")
 	}
@@ -909,41 +911,13 @@ func TestLayeredDataProvider_AllowSymlinks(t *testing.T) {
 	}
 
 	// Should be able to read via symlink
-	data, err := provider.ReadFile("symlink.yaml")
+	data, err := provider.ReadFile(context.Background(), "symlink.yaml")
 	if err != nil {
 		t.Fatalf("failed to read symlink file: %v", err)
 	}
 
 	if string(data) != targetContent {
 		t.Errorf("expected content %q, got %q", targetContent, string(data))
-	}
-}
-
-// TestDataProviderGeneration tests that generation increments correctly.
-func TestDataProviderGeneration(t *testing.T) {
-	// Save original state
-	originalProvider := globalDataProvider
-	originalGen := dataProviderGeneration
-	defer func() {
-		globalDataProvider = originalProvider
-		dataProviderGeneration = originalGen
-	}()
-
-	startGen := getDataProviderGeneration()
-
-	// Setting a provider should increment generation
-	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
-	SetDataProvider(embedded) //nolint:staticcheck // tests legacy global-provider behavior; tracked by #983 Stage 2
-
-	newGen := getDataProviderGeneration()
-	if newGen != startGen+1 {
-		t.Errorf("expected generation %d, got %d", startGen+1, newGen)
-	}
-
-	// Setting again should increment again
-	SetDataProvider(embedded) //nolint:staticcheck // tests legacy global-provider behavior; tracked by #983 Stage 2
-	if getDataProviderGeneration() != startGen+2 {
-		t.Errorf("expected generation %d, got %d", startGen+2, getDataProviderGeneration())
 	}
 }
 
@@ -1060,7 +1034,7 @@ func TestLayeredDataProvider_MergesCatalog(t *testing.T) {
 	}
 
 	// Read merged catalog
-	data, err := provider.ReadFile("validators/catalog.yaml")
+	data, err := provider.ReadFile(context.Background(), "validators/catalog.yaml")
 	if err != nil {
 		t.Fatalf("failed to read catalog: %v", err)
 	}
@@ -1109,7 +1083,7 @@ validators:
 		t.Fatalf("failed to create layered provider: %v", err)
 	}
 
-	data, err := provider.ReadFile("validators/catalog.yaml")
+	data, err := provider.ReadFile(context.Background(), "validators/catalog.yaml")
 	if err != nil {
 		t.Fatalf("failed to read catalog: %v", err)
 	}
@@ -1152,7 +1126,7 @@ func TestLayeredDataProvider_CatalogNoCatalogInExternal(t *testing.T) {
 	}
 
 	// Should fall back to embedded catalog
-	data, err := provider.ReadFile("validators/catalog.yaml")
+	data, err := provider.ReadFile(context.Background(), "validators/catalog.yaml")
 	if err != nil {
 		t.Fatalf("failed to read catalog: %v", err)
 	}
@@ -1206,13 +1180,13 @@ func TestLayeredDataProvider_CachedCatalog(t *testing.T) {
 	}
 
 	// First read
-	data1, err := provider.ReadFile("validators/catalog.yaml")
+	data1, err := provider.ReadFile(context.Background(), "validators/catalog.yaml")
 	if err != nil {
 		t.Fatalf("first read failed: %v", err)
 	}
 
 	// Second read should return cached result
-	data2, err := provider.ReadFile("validators/catalog.yaml")
+	data2, err := provider.ReadFile(context.Background(), "validators/catalog.yaml")
 	if err != nil {
 		t.Fatalf("second read failed: %v", err)
 	}
@@ -1239,7 +1213,7 @@ validators:
 		t.Fatalf("failed to create layered provider: %v", err)
 	}
 
-	_, err = provider.ReadFile("validators/catalog.yaml")
+	_, err = provider.ReadFile(context.Background(), "validators/catalog.yaml")
 	if err == nil {
 		t.Error("expected error for invalid external catalog YAML")
 	}
@@ -1280,7 +1254,7 @@ validators:
 		t.Fatalf("failed to create layered provider: %v", err)
 	}
 
-	data, err := provider.ReadFile("validators/catalog.yaml")
+	data, err := provider.ReadFile(context.Background(), "validators/catalog.yaml")
 	if err != nil {
 		t.Fatalf("failed to read catalog: %v", err)
 	}
@@ -1312,25 +1286,48 @@ validators:
 	}
 }
 
-func TestEffectiveDataProvider(t *testing.T) {
-	// Save / restore global state used by the nil-fallback branch.
-	originalProvider := globalDataProvider
-	originalGen := dataProviderGeneration
-	t.Cleanup(func() {
-		globalDataProvider = originalProvider
-		dataProviderGeneration = originalGen
-	})
-
-	// With non-nil provider: returns dp unchanged.
-	dp := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
-	if got := EffectiveDataProvider(dp); got != dp {
-		t.Errorf("EffectiveDataProvider(dp) = %p, want %p", got, dp)
+// TestDataProvider_HonorsContextCancellation pins acceptance criterion #6 of
+// issue #1109: a caller that cancels its context mid-read sees
+// context.Canceled propagate back rather than blocking until the read
+// completes. Run separately for each in-tree implementation so a future
+// refactor that drops the guard on one but not the other gets caught.
+func TestDataProvider_HonorsContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
 	}
 
-	// With nil: falls back to the package-global provider.
-	fallback := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
-	SetDataProvider(fallback) //nolint:staticcheck // test exercises legacy global-provider fallback; tracked by #983 Stage 2
-	if got := EffectiveDataProvider(nil); got != fallback {
-		t.Errorf("EffectiveDataProvider(nil) = %p, want global %p", got, fallback)
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	layered, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{ExternalDir: tmpDir})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		dp   DataProvider
+	}{
+		{"embedded", embedded},
+		{"layered", layered},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+"/ReadFile", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err := tc.dp.ReadFile(ctx, "registry.yaml")
+			if !stderrors.Is(err, context.Canceled) {
+				t.Errorf("ReadFile with canceled ctx returned %v, want context.Canceled", err)
+			}
+		})
+
+		t.Run(tc.name+"/WalkDir", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			err := tc.dp.WalkDir(ctx, ".", func(string, fs.DirEntry, error) error { return nil })
+			if !stderrors.Is(err, context.Canceled) {
+				t.Errorf("WalkDir with canceled ctx returned %v, want context.Canceled", err)
+			}
+		})
 	}
 }

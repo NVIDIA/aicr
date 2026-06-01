@@ -17,12 +17,11 @@ package main
 import (
 	"context"
 	stderrors "errors"
-	"os"
 	"strings"
 	"testing"
 
-	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -57,18 +56,6 @@ const (
 	testAICRCreatedByLabelKey   = "app.kubernetes.io/created-by"
 	testAICRCreatedByLabelValue = "aicr"
 )
-
-// TestMain forces the global recipe data provider to initialize before any
-// parallel t.Parallel() tests start. GetDataProvider() in pkg/recipe
-// performs lazy, unsynchronized initialization of the package-level
-// globalDataProvider — safe at normal runtime (the CLI initializes it on
-// startup), but racy under parallel unit tests that each call
-// recipe.GetManifestContent simultaneously. Calling it once here from the
-// test goroutine serializes the init.
-func TestMain(m *testing.M) {
-	_ = recipe.GetDataProvider() //nolint:staticcheck // forces global-provider init before parallel tests; tracked by #983 Stage 2
-	os.Exit(m.Run())
-}
 
 func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t *testing.T) {
 	t.Parallel()

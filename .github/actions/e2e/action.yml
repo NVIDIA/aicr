@@ -73,7 +73,7 @@ runs:
           (
             CHAINSAW_VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml | sed 's/^v//')
             CHAINSAW_SHA256=$(yq eval '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)
-            curl -fsSL -o dist/validator/chainsaw.tar.gz \
+            curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o dist/validator/chainsaw.tar.gz \
               "https://github.com/kyverno/chainsaw/releases/download/v${CHAINSAW_VERSION}/chainsaw_linux_amd64.tar.gz"
             echo "${CHAINSAW_SHA256}  dist/validator/chainsaw.tar.gz" | sha256sum -c
             tar -xzf dist/validator/chainsaw.tar.gz -C dist/validator chainsaw

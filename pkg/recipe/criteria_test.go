@@ -49,7 +49,7 @@ func TestParseCriteriaServiceType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseCriteriaServiceType(tt.input)
+			got, err := NewCriteriaRegistry().ParseService(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseCriteriaServiceType() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -85,7 +85,7 @@ func TestParseCriteriaAcceleratorType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseCriteriaAcceleratorType(tt.input)
+			got, err := NewCriteriaRegistry().ParseAccelerator(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseCriteriaAcceleratorType() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -113,7 +113,7 @@ func TestParseCriteriaIntentType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseCriteriaIntentType(tt.input)
+			got, err := NewCriteriaRegistry().ParseIntent(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseCriteriaIntentType() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -387,98 +387,6 @@ func TestCriteriaSpecificity(t *testing.T) {
 	}
 }
 
-func TestBuildCriteria(t *testing.T) {
-	tests := []struct {
-		name    string
-		opts    []CriteriaOption
-		want    *Criteria
-		wantErr bool
-	}{
-		{
-			name: "no options",
-			opts: nil,
-			want: NewCriteria(),
-		},
-		{
-			name: "with service",
-			opts: []CriteriaOption{WithCriteriaService("eks")},
-			want: &Criteria{
-				Service:     CriteriaServiceEKS,
-				Accelerator: CriteriaAcceleratorAny,
-				Intent:      CriteriaIntentAny,
-				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformAny,
-			},
-		},
-		{
-			name: "with multiple options",
-			opts: []CriteriaOption{
-				WithCriteriaService("eks"),
-				WithCriteriaAccelerator("h100"),
-				WithCriteriaIntent("training"),
-			},
-			want: &Criteria{
-				Service:     CriteriaServiceEKS,
-				Accelerator: CriteriaAcceleratorH100,
-				Intent:      CriteriaIntentTraining,
-				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformAny,
-			},
-		},
-		{
-			name: "with platform",
-			opts: []CriteriaOption{WithCriteriaPlatform("kubeflow")},
-			want: &Criteria{
-				Service:     CriteriaServiceAny,
-				Accelerator: CriteriaAcceleratorAny,
-				Intent:      CriteriaIntentAny,
-				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformKubeflow,
-			},
-		},
-		{
-			name:    "invalid service",
-			opts:    []CriteriaOption{WithCriteriaService("invalid")},
-			wantErr: true,
-		},
-		{
-			name:    "invalid accelerator",
-			opts:    []CriteriaOption{WithCriteriaAccelerator("v100")},
-			wantErr: true,
-		},
-		{
-			name:    "invalid platform",
-			opts:    []CriteriaOption{WithCriteriaPlatform("invalid")},
-			wantErr: true,
-		},
-		{
-			name:    "negative nodes",
-			opts:    []CriteriaOption{WithCriteriaNodes(-1)},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildCriteria(tt.opts...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("BuildCriteria() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				return
-			}
-			if got.Service != tt.want.Service ||
-				got.Accelerator != tt.want.Accelerator ||
-				got.Intent != tt.want.Intent ||
-				got.Platform != tt.want.Platform {
-
-				t.Errorf("BuildCriteria() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestParseCriteriaFromValues(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -592,7 +500,7 @@ func TestParseCriteriaFromValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			values := parseQuery(tt.query)
 
-			got, err := ParseCriteriaFromValues(values)
+			got, err := ParseCriteriaFromValues(values, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseCriteriaFromValues() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -624,7 +532,7 @@ func TestParseCriteriaFromValues(t *testing.T) {
 
 func TestParseCriteriaFromRequest(t *testing.T) {
 	t.Run("nil request returns error", func(t *testing.T) {
-		_, err := ParseCriteriaFromRequest(nil)
+		_, err := ParseCriteriaFromRequest(nil, nil)
 		if err == nil {
 			t.Error("expected error for nil request")
 		}
@@ -632,7 +540,7 @@ func TestParseCriteriaFromRequest(t *testing.T) {
 
 	t.Run("valid request", func(t *testing.T) {
 		req := createTestRequest("service=gke&accelerator=a100")
-		got, err := ParseCriteriaFromRequest(req)
+		got, err := ParseCriteriaFromRequest(req, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -716,7 +624,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 
 	// Verify each type can be parsed
 	for _, st := range types {
-		_, err := ParseCriteriaServiceType(st)
+		_, err := NewCriteriaRegistry().ParseService(st)
 		if err != nil {
 			t.Errorf("ParseCriteriaServiceType(%s) error = %v", st, err)
 		}
@@ -740,7 +648,7 @@ func TestGetCriteriaAcceleratorTypes(t *testing.T) {
 
 	// Verify each type can be parsed
 	for _, at := range types {
-		_, err := ParseCriteriaAcceleratorType(at)
+		_, err := NewCriteriaRegistry().ParseAccelerator(at)
 		if err != nil {
 			t.Errorf("ParseCriteriaAcceleratorType(%s) error = %v", at, err)
 		}
@@ -764,7 +672,7 @@ func TestGetCriteriaIntentTypes(t *testing.T) {
 
 	// Verify each type can be parsed
 	for _, it := range types {
-		_, err := ParseCriteriaIntentType(it)
+		_, err := NewCriteriaRegistry().ParseIntent(it)
 		if err != nil {
 			t.Errorf("ParseCriteriaIntentType(%s) error = %v", it, err)
 		}
@@ -788,7 +696,7 @@ func TestGetCriteriaOSTypes(t *testing.T) {
 
 	// Verify each type can be parsed
 	for _, ot := range types {
-		_, err := ParseCriteriaOSType(ot)
+		_, err := NewCriteriaRegistry().ParseOS(ot)
 		if err != nil {
 			t.Errorf("ParseCriteriaOSType(%s) error = %v", ot, err)
 		}
@@ -819,7 +727,7 @@ func TestParseCriteriaPlatformType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseCriteriaPlatformType(tt.input)
+			got, err := NewCriteriaRegistry().ParsePlatform(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseCriteriaPlatformType() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -848,7 +756,7 @@ func TestGetCriteriaPlatformTypes(t *testing.T) {
 
 	// Verify each type can be parsed
 	for _, pt := range types {
-		_, err := ParseCriteriaPlatformType(pt)
+		_, err := NewCriteriaRegistry().ParsePlatform(pt)
 		if err != nil {
 			t.Errorf("ParseCriteriaPlatformType(%s) error = %v", pt, err)
 		}
@@ -873,7 +781,7 @@ func TestParseCriteriaOSType_AllAliases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseCriteriaOSType(tt.input)
+			got, err := NewCriteriaRegistry().ParseOS(tt.input)
 			if err != nil {
 				t.Errorf("ParseCriteriaOSType(%s) error = %v", tt.input, err)
 				return
@@ -1097,7 +1005,7 @@ spec:
 				t.Fatalf("failed to create test file: %v", err)
 			}
 
-			got, err := LoadCriteriaFromFile(filePath)
+			got, err := LoadCriteriaFromFile(filePath, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadCriteriaFromFile() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1128,7 +1036,7 @@ spec:
 }
 
 func TestLoadCriteriaFromFile_NotFound(t *testing.T) {
-	_, err := LoadCriteriaFromFile("/nonexistent/path/criteria.yaml")
+	_, err := LoadCriteriaFromFile("/nonexistent/path/criteria.yaml", nil)
 	if err == nil {
 		t.Error("expected error for non-existent file")
 	}
@@ -1160,7 +1068,7 @@ spec:
 		tmpFile.Close()
 
 		// Test loading with context
-		got, err := LoadCriteriaFromFileWithContext(ctx, tmpFile.Name())
+		got, err := LoadCriteriaFromFileWithContext(ctx, tmpFile.Name(), nil)
 		if err != nil {
 			t.Fatalf("LoadCriteriaFromFileWithContext() error = %v", err)
 		}
@@ -1177,7 +1085,7 @@ spec:
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		_, err := LoadCriteriaFromFileWithContext(ctx, "/nonexistent/path/criteria.yaml")
+		_, err := LoadCriteriaFromFileWithContext(ctx, "/nonexistent/path/criteria.yaml", nil)
 		if err == nil {
 			t.Error("expected error for non-existent file")
 		}
@@ -1197,7 +1105,7 @@ spec:
 
 		// For local files, context cancellation doesn't currently affect the operation
 		// but the API accepts context for consistency and future HTTP support
-		_, err = LoadCriteriaFromFileWithContext(canceledCtx, tmpFile.Name())
+		_, err = LoadCriteriaFromFileWithContext(canceledCtx, tmpFile.Name(), nil)
 		// For local files, this should succeed even with canceled context
 		// because file I/O doesn't use context yet
 		if err != nil {
@@ -1392,7 +1300,7 @@ spec:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reader := strings.NewReader(tt.body)
-			got, err := ParseCriteriaFromBody(reader, tt.contentType)
+			got, err := ParseCriteriaFromBody(reader, tt.contentType, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseCriteriaFromBody() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1423,7 +1331,7 @@ spec:
 }
 
 func TestParseCriteriaFromBody_NilBody(t *testing.T) {
-	_, err := ParseCriteriaFromBody(nil, "application/json")
+	_, err := ParseCriteriaFromBody(nil, "application/json", nil)
 	if err == nil {
 		t.Error("expected error for nil body")
 	}
@@ -1467,58 +1375,6 @@ func TestCriteria_String(t *testing.T) {
 			got := tt.criteria.String()
 			if got != tt.want {
 				t.Errorf("Criteria.String() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestWithCriteriaOS(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantOS  CriteriaOSType
-		wantErr bool
-	}{
-		{"valid ubuntu", "ubuntu", "ubuntu", false},
-		{"valid any", "any", CriteriaOSAny, false},
-		{"invalid os", "windows", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			criteria, err := BuildCriteria(WithCriteriaOS(tt.input))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("WithCriteriaOS(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && criteria.OS != tt.wantOS {
-				t.Errorf("OS = %v, want %v", criteria.OS, tt.wantOS)
-			}
-		})
-	}
-}
-
-func TestWithCriteriaNodes(t *testing.T) {
-	tests := []struct {
-		name      string
-		nodes     int
-		wantNodes int
-		wantErr   bool
-	}{
-		{"zero nodes", 0, 0, false},
-		{"positive nodes", 8, 8, false},
-		{"negative nodes", -1, 0, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			criteria, err := BuildCriteria(WithCriteriaNodes(tt.nodes))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && criteria.Nodes != tt.wantNodes {
-				t.Errorf("Nodes = %d, want %d", criteria.Nodes, tt.wantNodes)
 			}
 		})
 	}

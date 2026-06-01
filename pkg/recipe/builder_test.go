@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+
+	errs "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // TestBuilder_BuildFromCriteria_ContextCancellation tests context cancellation
@@ -549,5 +551,106 @@ func TestBuilder_TwoProviders_ConcurrentBuild(t *testing.T) {
 		if slices.Contains(names, "alpha-only-component") {
 			t.Errorf("resultsB[%d] leaked alpha-only-component: %v", i, names)
 		}
+	}
+}
+
+// TestRecipeResult_OwnerStampedByBuilder verifies the producing Builder
+// is stamped on the result via the unexported owner field. The Owner()
+// accessor returns it for comparison; AssertOwnedBy(b) returns nil for
+// the producer and ErrCodeInvalidRequest for any other Builder.
+func TestRecipeResult_OwnerStampedByBuilder(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetComponentRegistryForTesting)
+
+	dp := buildIsolationProvider(t, "alpha-only")
+	b := NewBuilder(WithDataProvider(dp))
+
+	r, err := b.BuildFromCriteria(context.Background(), &Criteria{Service: "eks"})
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+	if r.Owner() != b {
+		t.Errorf("Owner() = %v, want %v", r.Owner(), b)
+	}
+	if err := r.AssertOwnedBy(b); err != nil {
+		t.Errorf("AssertOwnedBy(producer) = %v, want nil", err)
+	}
+}
+
+// TestRecipeResult_AssertOwnedBy_RejectsCrossBuilder is the pkg/recipe-level
+// analog of TestClient_CrossClientBundleRejected (pkg/client/v1) — it
+// proves the owner-token guard fires at the layer where the data lives,
+// not just at the facade boundary. Two Builders with different
+// DataProviders produce results that AssertOwnedBy refuses to attribute
+// to the other, with ErrCodeInvalidRequest.
+func TestRecipeResult_AssertOwnedBy_RejectsCrossBuilder(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetComponentRegistryForTesting)
+
+	dpA := buildIsolationProvider(t, "alpha-only")
+	dpB := buildIsolationProvider(t, "beta-only")
+	bA := NewBuilder(WithDataProvider(dpA))
+	bB := NewBuilder(WithDataProvider(dpB))
+
+	rA, err := bA.BuildFromCriteria(context.Background(), &Criteria{Service: "eks"})
+	if err != nil {
+		t.Fatalf("BuildFromCriteria(A): %v", err)
+	}
+
+	err = rA.AssertOwnedBy(bB)
+	if err == nil {
+		t.Fatal("AssertOwnedBy(other Builder) = nil; expected ErrCodeInvalidRequest")
+	}
+	var se *errs.StructuredError
+	if !errors.As(err, &se) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != errs.ErrCodeInvalidRequest {
+		t.Errorf("error code = %s, want %s", se.Code, errs.ErrCodeInvalidRequest)
+	}
+}
+
+// TestRecipeResult_AssertOwnedBy_NilCases covers the documented nil
+// handling: nil receiver is vacuously owned (returns nil), nil Builder
+// argument is rejected, and a non-nil result with nil owner (no
+// provenance — e.g., LoadFromFile path) is rejected.
+func TestRecipeResult_AssertOwnedBy_NilCases(t *testing.T) {
+	var nilResult *RecipeResult
+	b := NewBuilder()
+
+	if err := nilResult.AssertOwnedBy(b); err != nil {
+		t.Errorf("nil receiver returned %v, want nil", err)
+	}
+
+	r := &RecipeResult{} // constructed outside Builder — no owner
+	if err := r.AssertOwnedBy(nil); err == nil {
+		t.Error("AssertOwnedBy(nil) returned nil; expected rejection")
+	}
+	if err := r.AssertOwnedBy(b); err == nil {
+		t.Error("AssertOwnedBy on owner-less result returned nil; expected rejection")
+	}
+}
+
+// TestRecipeResult_DeepCopy_DropsOwner pins the deep-copy contract: the
+// copy carries the public payload but loses the owner stamp, so adopted
+// recipes (e.g., the facade's AdoptRecipe path) cannot be passed back
+// through ownership-checked entry points without re-building.
+func TestRecipeResult_DeepCopy_DropsOwner(t *testing.T) {
+	t.Cleanup(ResetMetadataStoreForTesting)
+	t.Cleanup(ResetComponentRegistryForTesting)
+
+	dp := buildIsolationProvider(t, "alpha-only")
+	b := NewBuilder(WithDataProvider(dp))
+
+	r, err := b.BuildFromCriteria(context.Background(), &Criteria{Service: "eks"})
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+	copy := r.DeepCopy()
+	if copy.Owner() != nil {
+		t.Errorf("DeepCopy.Owner() = %v, want nil", copy.Owner())
+	}
+	if err := copy.AssertOwnedBy(b); err == nil {
+		t.Error("AssertOwnedBy on deep-copied result returned nil; expected rejection (no provenance)")
 	}
 }

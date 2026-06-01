@@ -26,11 +26,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
-	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
@@ -39,6 +39,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // validateAgentConfig holds parsed agent configuration for validate command.
@@ -151,90 +152,6 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 	return resolved.Tolerations, nil
 }
 
-// parseValidationPhases parses phase strings into Phase values, accepting
-// the canonical vocabulary in validator.PhaseNames. The validator.PhaseAll
-// wildcard collapses the whole selection to nil (= run every phase),
-// matching the documented "Default: all phases" behavior. PhaseAll is
-// exclusive: combining it with any specific phase is a hard error rather
-// than silently treating the selection as wildcard, so a typo like
-// `--phase deployment --phase all` does not mask the user's mistake.
-//
-// Every entry is parsed before the wildcard collapse, so an invalid
-// phase name surfaces an error even when "all" is also present.
-func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
-	if len(phaseStrs) == 0 {
-		return nil, nil // nil = all phases
-	}
-
-	var (
-		sawAll bool
-		phases []validator.Phase
-		seen   = make(map[validator.Phase]bool)
-	)
-	for _, s := range phaseStrs {
-		if s == validator.PhaseAll {
-			sawAll = true
-			continue
-		}
-		p, ok := validator.ParsePhase(s)
-		if !ok {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid phase %q: must be one of: %s",
-					s, strings.Join(validator.PhaseNames, ", ")))
-		}
-		if !seen[p] {
-			phases = append(phases, p)
-			seen[p] = true
-		}
-	}
-
-	if sawAll && len(phases) > 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("phase %q cannot be combined with other phases", validator.PhaseAll))
-	}
-	if sawAll {
-		return nil, nil
-	}
-	return phases, nil
-}
-
-// validatePhasesAgainstRecipe warns when a requested phase has no checks
-// defined in the recipe. The phase will still run but produce 0 tests
-// in the CTRF report.
-func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeResult) error {
-	if rec.Validation == nil {
-		if len(phases) > 0 {
-			slog.Warn("recipe has no validation section; requested phases will have no checks",
-				"phases", phases)
-		}
-		return nil
-	}
-
-	if len(phases) == 0 {
-		return nil
-	}
-
-	defined := make(map[validator.Phase]bool)
-	if rec.Validation.Deployment != nil && len(rec.Validation.Deployment.Checks) > 0 {
-		defined[validator.PhaseDeployment] = true
-	}
-	if rec.Validation.Performance != nil && len(rec.Validation.Performance.Checks) > 0 {
-		defined[validator.PhasePerformance] = true
-	}
-	if rec.Validation.Conformance != nil && len(rec.Validation.Conformance.Checks) > 0 {
-		defined[validator.PhaseConformance] = true
-	}
-
-	for _, p := range phases {
-		if !defined[p] {
-			slog.Warn("phase requested but no checks defined in recipe; phase will be empty",
-				"phase", p)
-		}
-	}
-
-	return nil
-}
-
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
 // Creates the namespace if it does not exist.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
@@ -312,33 +229,95 @@ type validationConfig struct {
 	evidence *recipeEvidenceConfig
 }
 
+// validateDataProvider builds the recipe.DataProvider matching the source
+// the validate Action handed to aicr.NewClient. It is constructed
+// separately (rather than reaching into the Client) so it can be threaded
+// into evidence emission, whose catalog.Load takes a DataProvider directly.
+// It mirrors the Client's own buildDataProvider so the evidence catalog
+// resolves against exactly the source the validator run used:
+//
+//   - empty dataDir → embedded provider only.
+//   - non-empty dataDir → the external dir layered over the embedded data.
+func validateDataProvider(dataDir string) (recipe.DataProvider, error) {
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	if dataDir == "" {
+		return embedded, nil
+	}
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
+		ExternalDir: dataDir,
+	})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize external data", err)
+	}
+	return layered, nil
+}
+
 // runValidation runs validation using the container-per-validator engine.
+//
+// The validator run is now driven through the aicr.Client facade
+// (ValidateState), which owns the per-command DataProvider and threads it
+// into the validator catalog load. The evidence path still needs the raw
+// pkg/recipe.RecipeResult (via rec.Resolved()) and the same DataProvider
+// (dataProvider) so the attestation catalog resolves against the command's
+// source rather than the package global.
 func runValidation(
 	ctx context.Context,
-	rec *recipe.RecipeResult,
+	client *aicr.Client,
+	dataProvider recipe.DataProvider,
+	rec *aicr.RecipeResult,
 	snap *snapshotter.Snapshot,
 	cfg validationConfig,
 ) error {
 
 	slog.Info("running validation", "phases", cfg.phases)
 
-	v := validator.New(
-		validator.WithVersion(version),
-		validator.WithCommit(commit),
-		validator.WithNamespace(cfg.validationNamespace),
-		validator.WithCleanup(cfg.cleanup),
-		validator.WithImagePullSecrets(cfg.imagePullSecrets),
-		validator.WithNoCluster(cfg.noCluster),
-		validator.WithTolerations(cfg.tolerations),
-		validator.WithNodeSelector(cfg.nodeSelector),
-		validator.WithImageRegistryOverride(cfg.imageRegistryOverride),
-		validator.WithImageTagOverride(cfg.imageTagOverride),
-	)
+	// Generate the run ID CLI-side rather than letting the validator
+	// auto-generate it internally: the no-cleanup debug log below needs to
+	// surface the same ID the validator stamps on its Jobs/RBAC so an
+	// operator can locate the kept resources. Passing it via
+	// WithValidationRunID keeps that value in our hands.
+	runID := v1.GenerateRunID()
 
-	validationInput := v1.ToValidationInput(rec)
-	results, err := v.ValidatePhases(ctx, cfg.phases, validationInput, snap)
+	// Translate the resolved CLI values into facade ValidateOptions. These
+	// mirror the validator.With* options the direct invocation used to set;
+	// ValidateState applies them plus the Client's own DataProvider. Cleanup,
+	// namespace, etc. are always set (matching the old unconditional
+	// validator.With* calls); the image/commit overrides are passed verbatim
+	// (empty string is the validator's "unset" sentinel).
+	opts := []aicr.ValidateOption{
+		aicr.WithValidationNamespace(cfg.validationNamespace),
+		aicr.WithValidationRunID(runID),
+		aicr.WithValidationCleanup(cfg.cleanup),
+		aicr.WithValidationImagePullSecrets(cfg.imagePullSecrets),
+		aicr.WithValidationNoCluster(cfg.noCluster),
+		aicr.WithValidationTolerations(cfg.tolerations),
+		aicr.WithValidationNodeSelector(cfg.nodeSelector),
+		aicr.WithValidationCommit(commit),
+		aicr.WithValidationImageRegistryOverride(cfg.imageRegistryOverride),
+		aicr.WithValidationImageTagOverride(cfg.imageTagOverride),
+		// Uncap the facade-level validation deadline (0 = no cap) so an
+		// all-phase run isn't cut short by ValidationOperationTimeout — the
+		// per-validator timeouts (incl. the 50m inference-perf check) govern,
+		// matching the pre-facade CLI behavior. WithValidationTolerations
+		// above is always passed (even when resolved tolerations are nil) so
+		// the override always clears the validator's default tolerate-all.
+		aicr.WithValidationTimeout(0),
+	}
+	// Pass phases only when explicitly selected. cfg.phases is nil when the
+	// user requested all phases (or used the "all" wildcard), and
+	// WithValidationPhases(nil...) would be a no-op anyway — but keeping the
+	// option off the slice preserves the exact "run all phases" default path.
+	if len(cfg.phases) > 0 {
+		facadePhases := make([]aicr.Phase, len(cfg.phases))
+		for i, p := range cfg.phases {
+			facadePhases[i] = aicr.Phase(p)
+		}
+		opts = append(opts, aicr.WithValidationPhases(facadePhases...))
+	}
+
+	results, err := client.ValidateState(ctx, rec, aicr.WrapSnapshot(snap), opts...)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
 	}
 
 	// Extract CTRF reports from phase results and merge into a single report.
@@ -382,7 +361,7 @@ func runValidation(
 	if !cfg.cleanup {
 		slog.Info("cleanup disabled - Jobs and RBAC kept for debugging",
 			"namespace", cfg.validationNamespace,
-			"runID", v.RunID)
+			"runID", runID)
 		slog.Info("to inspect Job logs: kubectl logs -l aicr.nvidia.com/job -n " + cfg.validationNamespace)
 		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
 		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
@@ -401,8 +380,27 @@ func runValidation(
 	}
 
 	// Emit even on failure: failed runs document hardware-specific limits.
+	// emitRecipeEvidence needs the full pkg/recipe.RecipeResult (via
+	// Resolved()) for the predicate/BOM, and the command's DataProvider so
+	// the validator catalog used for evidence resolves against the same
+	// source as the run rather than the package global.
 	if cfg.evidence != nil {
-		if err := emitRecipeEvidence(ctx, rec, snap, results, cfg.evidence); err != nil {
+		// emitRecipeEvidence takes []*validator.PhaseResult for downstream
+		// attestation.Emit. Convert each facade PhaseResult; Report is
+		// preserved as a typed pointer.
+		internalResults := make([]*validator.PhaseResult, len(results))
+		for i, pr := range results {
+			if pr == nil {
+				continue
+			}
+			internalResults[i] = &validator.PhaseResult{
+				Phase:    validator.Phase(pr.Phase),
+				Status:   pr.Status,
+				Report:   pr.Report,
+				Duration: pr.Duration,
+			}
+		}
+		if err := emitRecipeEvidence(ctx, dataProvider, rec.Resolved(), snap, internalResults, cfg.evidence); err != nil {
 			return err
 		}
 	}
@@ -628,10 +626,6 @@ Run validation without failing on check errors (informational mode):
 				return err
 			}
 
-			if initErr := initDataProvider(cmd, cfg); initErr != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", initErr)
-			}
-
 			cncfCfg := resolved.EvidenceCNCF
 			if cncfCfg == nil {
 				cncfCfg = &config.EvidenceCNCFResolved{}
@@ -654,7 +648,7 @@ Run validation without failing on check errors (informational mode):
 				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"))
 			}
 
-			phases, err := parseValidationPhases(stringSliceFlagOrConfig(cmd, "phase", resolved.Phases))
+			phases, err := validator.ParsePhaseSelection(stringSliceFlagOrConfig(cmd, "phase", resolved.Phases))
 			if err != nil {
 				return err
 			}
@@ -691,9 +685,42 @@ Run validation without failing on check errors (informational mode):
 				noCleanup:        boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
 			}
 
+			// Build the Client from the resolved data source (--data flag,
+			// else spec.recipe.data) via the shared helper. The Client owns
+			// its DataProvider, replacing the old process-global data
+			// provider; evidence emission below uses a separate provider
+			// handle to the same directory (dataDir) so SLSA / conformance
+			// evidence resolves files against the command's source rather
+			// than the package global.
+			client, err := recipeClientFromCmd(cmd, cfg)
+			if err != nil {
+				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
+			}
+			defer func() { _ = client.Close() }()
+
+			// dataDir is the resolved external-data root. Mirror the same
+			// resolution recipeClientFromCmd performs internally so the
+			// evidence-side provider points at the same directory as the
+			// Client's recipe source.
+			dataDir := cmd.String("data")
+			if dataDir == "" {
+				dataDir = cfg.Recipe().DataDir()
+			}
+
+			// Second provider, separate from the Client's: this one is handed to
+			// evidence emission so conformance/SLSA evidence resolves files
+			// against the command's data source (the resolved --data dir), not
+			// the package global. The Client owns its own provider for recipe
+			// resolution and validation; evidence emission lives outside the
+			// Client surface and needs its own handle to the same directory.
+			dataProvider, err := validateDataProvider(dataDir)
+			if err != nil {
+				return err
+			}
+
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
-			rec, err := recipe.LoadFromFile(ctx, recipeFilePath, kubeconfig, version)
+			rec, err := client.LoadRecipe(ctx, recipeFilePath, kubeconfig)
 			if err != nil {
 				return err
 			}
@@ -728,10 +755,11 @@ Run validation without failing on check errors (informational mode):
 				}
 			}
 
-			// Validate that requested phases are defined in the recipe.
-			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
-				return err
-			}
+			// Warn when a requested phase has no checks defined in the recipe.
+			// The helper reads the full recipe's Validation section, which the
+			// lossy facade RecipeResult does not expose — reach the underlying
+			// pkg/recipe.RecipeResult via Resolved(). Advisory only.
+			validator.WarnPhasesAgainstRecipe(phases, rec.Resolved())
 
 			if shared.noCleanup {
 				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
@@ -742,7 +770,7 @@ Run validation without failing on check errors (informational mode):
 
 			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
 
-			return runValidation(ctx, rec, snap, validationConfig{
+			return runValidation(ctx, client, dataProvider, rec, snap, validationConfig{
 				phases:                phases,
 				kubeconfig:            kubeconfig,
 				output:                cmd.String("output"),

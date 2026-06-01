@@ -20,7 +20,28 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
+
+// stickyWriter wraps an io.Writer and remembers the first write error so the
+// caller can check once at the end instead of after every Fprintf. Subsequent
+// writes after a failure are no-ops.
+type stickyWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (s *stickyWriter) Write(p []byte) (int, error) {
+	if s.err != nil {
+		return 0, s.err
+	}
+	n, err := s.w.Write(p)
+	if err != nil {
+		s.err = err
+	}
+	return n, err
+}
 
 // WriteMarkdown emits a human-readable summary of a component-level BOM
 // suitable for embedding in docs.
@@ -47,10 +68,10 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 		}
 	}
 
+	sw := &stickyWriter{w: w}
+
 	if !meta.NoTitle {
-		if _, err := fmt.Fprintf(w, "# %s — Container Image Inventory\n\n", titleFor(meta)); err != nil {
-			return err
-		}
+		fmt.Fprintf(sw, "# %s — Container Image Inventory\n\n", titleFor(meta))
 	}
 	if !meta.Deterministic {
 		// Honor an injected Timestamp (e.g., commit-derived) so the markdown
@@ -61,43 +82,24 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 		if ts == "" {
 			ts = time.Now().UTC().Format(time.RFC3339)
 		}
-		if _, err := fmt.Fprintf(w, "_Generated %s for %s %s._\n\n",
-			ts, meta.Name, meta.Version); err != nil {
-			return err
-		}
+		fmt.Fprintf(sw, "_Generated %s for %s %s._\n\n", ts, meta.Name, meta.Version)
 	}
 
-	if _, err := fmt.Fprintf(w, "## Summary\n\n"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "- Components: **%d**\n", len(results)); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "- Unique images: **%d**\n", totalImages); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "- Distinct registries: **%d**\n\n", len(totalRegistries)); err != nil {
-		return err
-	}
+	fmt.Fprintf(sw, "## Summary\n\n")
+	fmt.Fprintf(sw, "- Components: **%d**\n", len(results))
+	fmt.Fprintf(sw, "- Unique images: **%d**\n", totalImages)
+	fmt.Fprintf(sw, "- Distinct registries: **%d**\n\n", len(totalRegistries))
 
 	regs := make([]string, 0, len(totalRegistries))
 	for r := range totalRegistries {
 		regs = append(regs, r)
 	}
 	sort.Strings(regs)
-	if _, err := fmt.Fprintf(w, "Registries: %s\n\n", strings.Join(quoteAll(regs), ", ")); err != nil {
-		return err
-	}
+	fmt.Fprintf(sw, "Registries: %s\n\n", strings.Join(quoteAll(regs), ", "))
 
-	if _, err := fmt.Fprintf(w, "## Components\n\n"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w, "| Component | Type | Chart | Pinned Version | Images |"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w, "|-----------|------|-------|----------------|--------|"); err != nil {
-		return err
-	}
+	fmt.Fprintf(sw, "## Components\n\n")
+	fmt.Fprintln(sw, "| Component | Type | Chart | Pinned Version | Images |")
+	fmt.Fprintln(sw, "|-----------|------|-------|----------------|--------|")
 	for _, r := range results {
 		chart := r.Chart
 		if chart == "" {
@@ -107,38 +109,28 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 		if ver == "" {
 			ver = "—"
 		}
-		if _, err := fmt.Fprintf(w, "| %s | %s | %s | %s | %d |\n",
-			r.Name, r.Type, chart, ver, len(r.Images)); err != nil {
-			return err
-		}
+		fmt.Fprintf(sw, "| %s | %s | %s | %s | %d |\n",
+			r.Name, r.Type, chart, ver, len(r.Images))
 	}
 
-	if _, err := fmt.Fprintf(w, "\n## Images by component\n\n"); err != nil {
-		return err
-	}
+	fmt.Fprintf(sw, "\n## Images by component\n\n")
 	for _, r := range results {
-		if _, err := fmt.Fprintf(w, "### %s\n\n", r.Name); err != nil {
-			return err
-		}
+		fmt.Fprintf(sw, "### %s\n\n", r.Name)
 		for _, warn := range r.Warnings {
-			if _, err := fmt.Fprintf(w, "> Warning: %s\n\n", warn); err != nil {
-				return err
-			}
+			fmt.Fprintf(sw, "> Warning: %s\n\n", warn)
 		}
 		if len(r.Images) == 0 {
-			if _, err := fmt.Fprintln(w, "_No images extracted._"); err != nil {
-				return err
-			}
+			fmt.Fprintln(sw, "_No images extracted._")
 		} else {
 			for _, img := range r.Images {
-				if _, err := fmt.Fprintf(w, "- `%s`\n", img); err != nil {
-					return err
-				}
+				fmt.Fprintf(sw, "- `%s`\n", img)
 			}
 		}
-		if _, err := fmt.Fprintln(w); err != nil {
-			return err
-		}
+		fmt.Fprintln(sw)
+	}
+
+	if sw.err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write markdown BOM", sw.err)
 	}
 	return nil
 }

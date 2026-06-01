@@ -33,7 +33,7 @@ import (
 // EmitOptions controls a single Emit run. The same options struct is used
 // by `aicr validate --emit-attestation` and by the (forthcoming) API
 // surface so the orchestration stays callable from both pkg/cli and
-// pkg/api with no business-logic duplication.
+// pkg/server with no business-logic duplication.
 type EmitOptions struct {
 	// OutDir receives pointer.yaml and the summary-bundle/ tree.
 	OutDir string

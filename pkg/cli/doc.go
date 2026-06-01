@@ -169,11 +169,15 @@
 //
 // # Architecture
 //
-// The CLI uses the urfave/cli/v3 framework and delegates to specialized packages:
+// The CLI uses the urfave/cli/v3 framework. Recipe and bundle commands
+// delegate through the pkg/client/v1 (aicr.Client) facade so the CLI and
+// the aicrd HTTP server share a single implementation path. Specialized
+// packages it routes to include:
+//   - pkg/client/v1 - aicr.Client facade (recipe + bundle entry points)
 //   - pkg/snapshotter - System snapshot collection
-//   - pkg/recipe - Recipe generation from queries or snapshots
+//   - pkg/recipe - Recipe resolution and overlay merge
 //   - pkg/bundler - Bundle orchestration and generation
-//   - pkg/component - Individual bundler implementations
+//   - pkg/component - Shared bundler utilities used by the bundler
 //   - pkg/serializer - Output formatting (including ConfigMap)
 //   - pkg/logging - Structured logging
 //

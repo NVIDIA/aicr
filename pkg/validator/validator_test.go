@@ -23,11 +23,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/recipes"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -89,7 +89,7 @@ func TestNewWithOptions(t *testing.T) {
 
 func loadEmbeddedCatalog(t *testing.T) *catalog.ValidatorCatalog {
 	t.Helper()
-	cat, err := catalog.Load("", "")
+	cat, err := catalog.LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
 		t.Fatalf("failed to load catalog: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestPhaseOrder(t *testing.T) {
 // in recipe overlays exists in the validator catalog for the correct phase.
 // Catches typos and drift between recipes and catalog at PR time.
 func TestRecipeCheckNamesMatchCatalog(t *testing.T) {
-	cat, err := catalog.Load("", "")
+	cat, err := catalog.LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
 		t.Fatalf("failed to load catalog: %v", err)
 	}

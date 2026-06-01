@@ -2,7 +2,6 @@
 
 This page collects forward-looking guidance and operating patterns for the
 `aicrd` API server that go beyond what is implemented in
-[`pkg/api`](https://github.com/NVIDIA/aicr/tree/main/pkg/api) /
 [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main/pkg/server) today.
 The code samples are illustrative — they describe how a feature *would* be
 implemented or operated, not behavior that ships in the current binary.

@@ -55,7 +55,7 @@ func parseConfig() *config {
 		Name:            "server",
 		Version:         "undefined",
 		Address:         "",
-		Port:            8080,
+		Port:            defaults.ServerDefaultPort,
 		RateLimit:       defaults.ServerDefaultRateLimit,
 		RateLimitBurst:  defaults.ServerDefaultRateLimitBurst,
 		ReadTimeout:     defaults.ServerReadTimeout,
@@ -65,22 +65,24 @@ func parseConfig() *config {
 	}
 
 	// Override with environment variables if set
-	if portStr := os.Getenv("PORT"); portStr != "" {
+	if portStr := os.Getenv(defaults.EnvServerPort); portStr != "" {
 		var port int
 		if _, err := fmt.Sscanf(portStr, "%d", &port); err == nil {
 			cfg.Port = port
 		} else {
-			slog.Warn("failed to parse PORT env var, using default", "value", portStr, "error", err)
+			slog.Warn("failed to parse port env var, using default",
+				"var", defaults.EnvServerPort, "value", portStr, "error", err)
 		}
 	}
 
 	// Allow customization of shutdown timeout to match K8s eviction grace period
-	if shutdownStr := os.Getenv("SHUTDOWN_TIMEOUT_SECONDS"); shutdownStr != "" {
+	if shutdownStr := os.Getenv(defaults.EnvServerShutdownTimeoutSeconds); shutdownStr != "" {
 		var seconds int
 		if _, err := fmt.Sscanf(shutdownStr, "%d", &seconds); err == nil && seconds > 0 {
 			cfg.ShutdownTimeout = time.Duration(seconds) * time.Second
 		} else {
-			slog.Warn("failed to parse SHUTDOWN_TIMEOUT_SECONDS env var, using default", "value", shutdownStr, "error", err)
+			slog.Warn("failed to parse shutdown timeout env var, using default",
+				"var", defaults.EnvServerShutdownTimeoutSeconds, "value", shutdownStr, "error", err)
 		}
 	}
 

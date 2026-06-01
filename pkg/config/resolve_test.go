@@ -28,7 +28,7 @@ import (
 
 func TestResolveCriteria_NilReceiver(t *testing.T) {
 	var r *config.RecipeSpec
-	got, err := r.ResolveCriteria()
+	got, err := r.ResolveCriteriaWithRegistry(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestResolveCriteria_NilReceiver(t *testing.T) {
 
 func TestResolveCriteria_NilCriteria(t *testing.T) {
 	r := &config.RecipeSpec{}
-	got, err := r.ResolveCriteria()
+	got, err := r.ResolveCriteriaWithRegistry(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestResolveCriteria_AllFieldsPopulated(t *testing.T) {
 			Nodes:       4,
 		},
 	}
-	got, err := r.ResolveCriteria()
+	got, err := r.ResolveCriteriaWithRegistry(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestResolveCriteria_PartialFields_UnsetStayZero(t *testing.T) {
 	r := &config.RecipeSpec{
 		Criteria: &config.CriteriaSpec{Service: "gke"},
 	}
-	got, err := r.ResolveCriteria()
+	got, err := r.ResolveCriteriaWithRegistry(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestResolveCriteria_InvalidEnums(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &config.RecipeSpec{Criteria: &config.CriteriaSpec{}}
 			tt.mutate(r.Criteria)
-			_, err := r.ResolveCriteria()
+			_, err := r.ResolveCriteriaWithRegistry(nil)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}

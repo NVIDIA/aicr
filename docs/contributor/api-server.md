@@ -33,9 +33,9 @@ For the complete workflow (snapshot → recipe → validate → bundle, ConfigMa
 
 ```mermaid
 flowchart TD
-    A["aicrd<br/>cmd/aicrd/main.go"] --> B["pkg/api/server.go<br/>Serve()"]
+    A["aicrd<br/>cmd/aicrd/main.go"] --> B["pkg/server/serve.go<br/>Serve()"]
     
-    B --> B1["• Initialize logging<br/>• Create recipe.Builder<br/>• Create bundler.DefaultBundler<br/>• Setup routes: /v1/recipe, /v1/bundle<br/>• Create server with middleware<br/>• Graceful shutdown"]
+    B --> B1["• Initialize logging<br/>• Construct aicr.Client facade<br/>• Wire recipeHandler + bundleHandler<br/>• Setup routes: /v1/recipe, /v1/query, /v1/bundle<br/>• Create server with middleware<br/>• Graceful shutdown"]
     
     B1 --> C["pkg/server/server.go<br/>HTTP Server Infrastructure"]
     
@@ -45,12 +45,12 @@ flowchart TD
     
     C3 --> D["Application Handlers"]
     
-    D --> D1["recipe.Builder.HandleRecipes<br/>GET /v1/recipe"]
-    D --> D2["bundler.DefaultBundler.HandleBundles<br/>POST /v1/bundle"]
+    D --> D1["recipeHandler.HandleRecipes / HandleQuery<br/>GET POST /v1/recipe and /v1/query"]
+    D --> D2["bundleHandler.HandleBundles<br/>POST /v1/bundle"]
     
-    D1 --> D1a["1. Method validation (GET)<br/>2. Parse query params<br/>3. Build query<br/>4. Builder.Build(ctx, query)<br/>5. Return JSON response"]
+    D1 --> D1a["1. Method validation<br/>2. Parse criteria (query or body)<br/>3. aicr.Client.BuildRecipe(ctx, criteria)<br/>4. Return JSON or YAML response"]
     
-    D2 --> D2a["1. Method validation (POST)<br/>2. Parse JSON body<br/>3. Validate recipe<br/>4. Generate bundles<br/>5. Return ZIP response"]
+    D2 --> D2a["1. Method validation (POST)<br/>2. Parse RecipeResult body<br/>3. aicr.Client.MakeBundle(ctx, result)<br/>4. Stream ZIP response"]
 ```
 
 ## Request Flow
@@ -71,13 +71,13 @@ flowchart TD
     
     M5["5. Logging Middleware<br/>• Log request start<br/>• Capture status<br/>• Log completion"] --> H
     
-    H["6. Application Handler<br/>recipe.Builder.HandleRecipes"] --> H1
+    H["6. Application Handler<br/>recipeHandler.HandleRecipes"] --> H1
 
     H1["A. Method Validation<br/>(GET only)"] --> H2
     H2["B. Parse Query Parameters<br/>service, accelerator, intent, os, nodes"] --> H3
     H3["C. Format Validation<br/>• Validate enums<br/>• Parse values<br/>• Return 400 on error"] --> H3a
     H3a["D. Allowlist Validation<br/>• Check against configured allowlists<br/>• Return 400 if disallowed"] --> H4
-    H4["E. Build Recipe<br/>• Builder.BuildFromCriteria(ctx, criteria)<br/>• Load store (cached)<br/>• Apply matching overlays"] --> H5
+    H4["E. Build Recipe<br/>• aicr.Client.BuildRecipe(ctx, criteria)<br/>• Load store (cached)<br/>• Apply matching overlays"] --> H5
     H5["F. Respond<br/>• Set Cache-Control<br/>• Serialize to JSON<br/>• Return 200 OK"] --> Z
     
     Z[JSON Response]
@@ -94,19 +94,19 @@ package main
 
 import (
     "log"
-    "github.com/NVIDIA/aicr/pkg/api"
+    "github.com/NVIDIA/aicr/pkg/server"
 )
 
 func main() {
-    if err := api.Serve(); err != nil {
+    if err := server.Serve(); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-### API Package: `pkg/api/server.go`
+### Server Package: `pkg/server/serve.go`
 
-**Responsibilities:** initialize structured logging; parse criteria allowlists; create recipe builder, query handler, and bundle handler with allowlist configuration; install signal handling; run server with middleware; handle graceful shutdown.
+**Responsibilities:** initialize structured logging; parse criteria allowlists; construct the `aicr.Client` facade (long-lived, embedded data source); wire the recipe and bundle handlers as thin adapters over the facade; install signal handling; run server with middleware; handle graceful shutdown.
 
 **Key Features:** version info injected via ldflags (`version`, `commit`, `date`); routes `/v1/recipe`, `/v1/query`, `/v1/bundle`; allowlists from `AICR_ALLOWED_*` env vars; production defaults; graceful shutdown on SIGINT/SIGTERM.
 
@@ -120,24 +120,31 @@ func Serve() error {
 
     logging.SetDefaultStructuredLogger(name, version)
 
-    allowLists, err := recipe.ParseAllowListsFromEnv()
+    allowLists, err := aicr.ParseAllowListsFromEnv()
     if err != nil {
         return errors.Wrap(errors.ErrCodeInternal, "failed to parse allowlists from environment", err)
     }
 
-    rb := recipe.NewBuilder(recipe.WithVersion(version), recipe.WithAllowLists(allowLists))
-    bb, err := bundler.New(bundler.WithAllowLists(allowLists))
+    client, err := aicr.NewClient(
+        aicr.WithRecipeSource(aicr.EmbeddedSource()),
+        aicr.WithVersion(version),
+        aicr.WithAllowLists(allowLists),
+    )
     if err != nil {
-        return errors.Wrap(errors.ErrCodeInternal, "failed to create bundler", err)
+        return errors.Wrap(errors.ErrCodeInternal, "failed to construct aicr client", err)
     }
+    defer client.Close()
 
-    s := server.New(
-        server.WithName(name),
-        server.WithVersion(version),
-        server.WithHandler(map[string]http.HandlerFunc{
-            "/v1/recipe": rb.HandleRecipes,
-            "/v1/query":  rb.HandleQuery,
-            "/v1/bundle": bb.HandleBundles,
+    h := newRecipeHandler(client, allowLists)
+    bh := newBundleHandler(client, allowLists)
+
+    s := New(
+        WithName(name),
+        WithVersion(version),
+        WithHandler(map[string]http.HandlerFunc{
+            "/v1/recipe": h.HandleRecipes,
+            "/v1/query":  h.HandleQuery,
+            "/v1/bundle": bh.HandleBundles,
         }),
     )
     return s.Run(ctx)
@@ -186,46 +193,44 @@ flowchart TD
     K --> L[HTTP Response]
 ```
 
-### Recipe Handler: `pkg/recipe/handler.go`
+### Recipe Handler: `pkg/server/recipe_handler.go`
 
-HTTP handler for recipe generation endpoint. Supports both GET (query parameters) and POST (criteria body) methods.
+HTTP handler for recipe generation endpoint. Supports both GET (query parameters) and POST (criteria body) methods. The handler is a thin adapter over the `aicr.Client` facade — recipe resolution lives in `pkg/client/v1`, not in the handler.
 
 #### Handler Flow
 
 ```go
-func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
-    var criteria *Criteria
+func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
+    var criteria *recipe.Criteria
     var err error
 
     // 1. Route based on HTTP method
     switch r.Method {
     case http.MethodGet:
         // 2a. Parse query parameters for GET
-        criteria, err = ParseCriteriaFromRequest(r)
+        criteria, err = recipe.ParseCriteriaFromRequest(r, h.client.CriteriaRegistry())
     case http.MethodPost:
-        // 2b. Parse request body for POST (JSON or YAML)
-        criteria, err = ParseCriteriaFromBody(r.Body, r.Header.Get("Content-Type"))
-        defer r.Body.Close()
+        // 2b. Parse request body for POST (JSON or YAML), bounded by MaxRecipePOSTBytes
+        bounded := http.MaxBytesReader(w, r.Body, defaults.MaxRecipePOSTBytes)
+        defer bounded.Close()
+        criteria, err = recipe.ParseCriteriaFromBody(bounded, r.Header.Get("Content-Type"), h.client.CriteriaRegistry())
     default:
         // Reject other methods
         w.Header().Set("Allow", "GET, POST")
         return 405
     }
 
-    // 3. Validate criteria format
-    if err := criteria.Validate(); err != nil {
-        return 400 with error details
-    }
+    // 3. Validate criteria format (handled inline by ParseCriteria*)
 
     // 4. Validate against allowlists (if configured)
-    if b.AllowLists != nil {
-        if err := b.AllowLists.ValidateCriteria(criteria); err != nil {
+    if h.allowLists != nil {
+        if err := validateAgainstAllowLists(h.allowLists, criteria); err != nil {
             return 400 with allowed values in error details
         }
     }
 
-    // 5. Build recipe
-    recipe, err := b.BuildFromCriteria(r.Context(), criteria)
+    // 5. Resolve recipe via the facade
+    result, err := h.client.ResolveRecipeFromCriteria(ctx, aicr.WrapCriteria(criteria))
     if err != nil {
         return 500
     }
@@ -233,8 +238,8 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
     // 6. Set cache headers
     w.Header().Set("Cache-Control", "public, max-age=600")
 
-    // 7. Respond with JSON
-    serializer.RespondJSON(w, http.StatusOK, recipe)
+    // 7. Respond with JSON (upstream RecipeResult shape preserved)
+    serializer.RespondJSON(w, http.StatusOK, result.Resolved())
 }
 ```
 
@@ -270,9 +275,9 @@ Supported content types:
 | `platform` | PlatformType | Enum: dynamo, kubeflow, nim, runai, slurm, any | `platform=kubeflow` |
 | `nodes` | int | >= 0 | `nodes=8` |
 
-### Recipe Builder: `pkg/recipe/builder.go`
+### Recipe Resolution: `pkg/client/v1` (aicr.Client facade)
 
-Shared with CLI - same logic as described in CLI architecture.
+Shared with CLI — both entry points construct an `aicr.Client` and call `ResolveRecipeFromCriteria` for recipe resolution and `AdoptRecipe` + `MakeBundle` for bundling. The facade composes `pkg/recipe` (registry, overlay merge, criteria registry) and `pkg/bundler` (per-component generators) so handlers stay free of business logic. See [CLI Architecture](cli.md) for the same control flow on the CLI side.
 
 ## API Endpoints
 
@@ -933,10 +938,12 @@ Future: OpenTelemetry integration for full tracing
 
 ```go
 func TestRecipeHandler(t *testing.T) {
-    // Create test server
-    builder := recipe.NewBuilder()
-    handler := builder.HandleRecipes
-    
+    // Create test client + handler (facade-backed; no business logic in pkg/server)
+    client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+    assert.NoError(t, err)
+    defer client.Close()
+    handler := newRecipeHandler(client, nil).HandleRecipes
+
     // Create test request
     req := httptest.NewRequest(
         "GET",
@@ -944,17 +951,16 @@ func TestRecipeHandler(t *testing.T) {
         nil,
     )
     w := httptest.NewRecorder()
-    
+
     // Execute handler
     handler(w, req)
-    
+
     // Verify response
     assert.Equal(t, http.StatusOK, w.Code)
-    
-    var resp recipe.Recipe
-    err := json.Unmarshal(w.Body.Bytes(), &resp)
+
+    var resp recipe.RecipeResult
+    err = json.Unmarshal(w.Body.Bytes(), &resp)
     assert.NoError(t, err)
-    assert.Equal(t, "ubuntu", resp.Request.Os)
 }
 ```
 
@@ -972,7 +978,9 @@ func TestRecipeHandler(t *testing.T) {
 
 ### Internal Packages
 
-- `pkg/recipe` - Recipe building logic
+- `pkg/client/v1` - aicr.Client facade (recipe + bundle entry points) shared with CLI
+- `pkg/recipe` - Recipe resolution, registry, criteria registry
+- `pkg/bundler` - Per-component bundle generation (invoked via the facade)
 - `pkg/measurement` - Data model
 - `pkg/version` - Semantic versioning
 - `pkg/serializer` - JSON response formatting
@@ -1016,9 +1024,9 @@ VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse --short HEAD)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-LDFLAGS := -X github.com/NVIDIA/aicr/pkg/api.version=$(VERSION)
-LDFLAGS += -X github.com/NVIDIA/aicr/pkg/api.commit=$(COMMIT)
-LDFLAGS += -X github.com/NVIDIA/aicr/pkg/api.date=$(DATE)
+LDFLAGS := -X github.com/NVIDIA/aicr/pkg/server.version=$(VERSION)
+LDFLAGS += -X github.com/NVIDIA/aicr/pkg/server.commit=$(COMMIT)
+LDFLAGS += -X github.com/NVIDIA/aicr/pkg/server.date=$(DATE)
 
 go build -ldflags="$(LDFLAGS)" -o bin/aicrd ./cmd/aicrd
 ```
@@ -1031,7 +1039,7 @@ Production images are built with ko (automated in CI/CD). For local development:
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN go build -ldflags="-X github.com/NVIDIA/aicr/pkg/api.version=v1.0.0" \
+RUN go build -ldflags="-X github.com/NVIDIA/aicr/pkg/server.version=v1.0.0" \
     -o /bin/aicrd ./cmd/aicrd
 
 FROM alpine:3.19

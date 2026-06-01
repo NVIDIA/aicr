@@ -22,7 +22,7 @@ import (
 
 func TestToCriteria_Populated(t *testing.T) {
 	fp := h100Fingerprint()
-	c := fp.ToCriteria()
+	c := fp.ToCriteria(nil)
 	if c.Service != recipe.CriteriaServiceEKS {
 		t.Errorf("Service = %v, want eks", c.Service)
 	}
@@ -45,7 +45,7 @@ func TestToCriteria_Populated(t *testing.T) {
 }
 
 func TestToCriteria_Empty(t *testing.T) {
-	c := (&Fingerprint{}).ToCriteria()
+	c := (&Fingerprint{}).ToCriteria(nil)
 	nonDefault := c.Service != recipe.CriteriaServiceAny ||
 		c.Accelerator != recipe.CriteriaAcceleratorAny ||
 		c.OS != recipe.CriteriaOSAny || c.Nodes != 0
@@ -56,7 +56,7 @@ func TestToCriteria_Empty(t *testing.T) {
 
 func TestToCriteria_Nil(t *testing.T) {
 	var fp *Fingerprint
-	c := fp.ToCriteria()
+	c := fp.ToCriteria(nil)
 	if c == nil {
 		t.Fatal("ToCriteria on nil fingerprint should return non-nil criteria")
 	}
@@ -68,7 +68,7 @@ func TestToCriteria_Nil(t *testing.T) {
 func TestToCriteria_UnknownDimensionStaysAny(t *testing.T) {
 	// An unknown service value should not be parsed; the criteria stays "any".
 	fp := &Fingerprint{Service: Dimension{Value: "unknown-cloud"}}
-	c := fp.ToCriteria()
+	c := fp.ToCriteria(nil)
 	// ParseCriteriaServiceType returns Any + error for unknown values, so
 	// our code preserves NewCriteria's any default.
 	if c.Service != recipe.CriteriaServiceAny {

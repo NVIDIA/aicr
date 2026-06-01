@@ -22,46 +22,27 @@
 // The Header contains standard fields for API versioning and metadata:
 //
 //	type Header struct {
-//	    APIVersion string    `json:"apiVersion" yaml:"apiVersion"` // API version (e.g., "v1")
-//	    Kind       string    `json:"kind" yaml:"kind"`             // Resource type (e.g., "Recipe", "Snapshot")
-//	    Metadata   *Metadata `json:"metadata,omitempty" yaml:"metadata,omitempty"` // Optional metadata
+//	    Kind       Kind              `json:"kind,omitempty" yaml:"kind,omitempty"`             // Resource type (Snapshot, Recipe, RecipeResult)
+//	    APIVersion string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"` // API version (e.g., "v1")
+//	    Metadata   map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`     // Free-form string metadata (timestamp, version, etc.)
 //	}
 //
-// Metadata includes timestamps and version information:
-//
-//	type Metadata struct {
-//	    Created time.Time              `json:"created" yaml:"created"`       // Creation timestamp
-//	    Version string                 `json:"version,omitempty" yaml:"version,omitempty"` // Tool version
-//	    Custom  map[string]any `json:"custom,omitempty" yaml:"custom,omitempty"`   // Custom fields
-//	}
+// Metadata is a flat map[string]string populated by Init / InitWithTime with
+// the unprefixed keys "timestamp" (RFC3339 UTC) and "version" (when supplied).
 //
 // # Usage
 //
-// Create a header for a recipe:
+// Initialize a header for a recipe via Init:
 //
-//	header := header.Header{
-//	    APIVersion: "v1",
-//	    Kind:       "Recipe",
-//	    Metadata: &header.Metadata{
-//	        Created: time.Now(),
-//	        Version: "v1.0.0",
-//	    },
-//	}
+//	var h header.Header
+//	h.Init(header.KindRecipe, "v1", "v1.0.0")
+//	// h.Metadata == map[string]string{"timestamp": "...", "version": "v1.0.0"}
 //
-// Create a header for a snapshot:
+// For reproducible-build callers (SLSA, signed artifacts) inject a fixed
+// timestamp via InitWithTime instead of Init:
 //
-//	header := header.Header{
-//	    APIVersion: "v1",
-//	    Kind:       "Snapshot",
-//	    Metadata: &header.Metadata{
-//	        Created: time.Now(),
-//	        Version: "v1.0.0",
-//	        Custom: map[string]any{
-//	            "node": "gpu-node-1",
-//	            "cluster": "production",
-//	        },
-//	    },
-//	}
+//	var h header.Header
+//	h.InitWithTime(header.KindSnapshot, "v1", "v1.0.0", buildTime)
 //
 // # Serialization
 //
@@ -71,7 +52,7 @@
 //	  "apiVersion": "v1",
 //	  "kind": "Recipe",
 //	  "metadata": {
-//	    "created": "2025-12-30T10:30:00Z",
+//	    "timestamp": "2025-12-30T10:30:00Z",
 //	    "version": "v1.0.0"
 //	  }
 //	}
@@ -90,33 +71,32 @@
 //
 // # Kind Field
 //
-// The Kind field identifies the resource type:
-//   - Recipe: Configuration recommendations
-//   - Snapshot: System configuration capture
-//   - Bundle: Deployment artifact metadata
+// The Kind field is a typed constant identifying the resource:
+//   - KindSnapshot ("Snapshot"): System configuration capture
+//   - KindRecipe ("Recipe"): Configuration recommendations
+//   - KindRecipeResult ("RecipeResult"): Resolved recipe with hydrated values
 //
 // # Custom Metadata
 //
-// Custom fields enable extensibility without API version changes:
+// Because Metadata is a flat map[string]string, callers may add their own
+// keys alongside the Init-populated "timestamp" and "version":
 //
-//	metadata.Custom = map[string]any{
-//	    "node": "gpu-node-1",
-//	    "cluster": "production",
-//	    "environment": "staging",
-//	}
+//	h.Metadata["node"] = "gpu-node-1"
+//	h.Metadata["cluster"] = "production"
+//	h.Metadata["environment"] = "staging"
 //
 // # Timestamps
 //
-// Timestamps use RFC3339 format for consistency:
+// Init writes the timestamp using RFC3339 format in UTC:
 //
-//	metadata.Created = time.Now().UTC()
-//	// Serializes as: "2025-12-30T10:30:00Z"
+//	h.Init(header.KindRecipe, "v1", "v1.0.0")
+//	// h.Metadata["timestamp"] == "2025-12-30T10:30:00Z"
 //
 // # Validation
 //
 // While Header doesn't enforce validation, consumers should verify:
 //   - APIVersion is supported
 //   - Kind is recognized
-//   - Created timestamp is reasonable
+//   - Metadata["timestamp"] is reasonable
 //   - Version is a valid semantic version (if present)
 package header
