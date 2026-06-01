@@ -84,7 +84,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
   yq: 'v4.53.2'
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
-  karpenter: 'v1.12.0'
+  karpenter: 'v1.12.1'
   # In-cluster OCI registry for KWOK deployer-matrix CI (issue #843).
   # renovate: datasource=docker depName=registry depType=testing_tools
   registry_image: 'registry:3.1.1'
@@ -101,7 +101,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v1.4.3'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.76.0'
+  zarf: 'v0.77.0'
 # Quality Thresholds
 quality:
   coverage_threshold: '75'
