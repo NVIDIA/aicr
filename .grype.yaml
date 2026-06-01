@@ -21,24 +21,16 @@ exclude:
   - './aicrd'
   - './dist/**'
 
-# CVE suppressions for aiperf-bench base image (python:3.13-slim, Debian trixie).
-# All are either unfixed upstream or won't-fix in Debian.
-# Reviewed: 2026-05-06
-ignore:
-  # python — no fix available
-  - vulnerability: CVE-2026-6100   # Critical
-  - vulnerability: CVE-2026-3298   # High
-  - vulnerability: CVE-2026-4786   # High
-  # libc 2.41 — won't fix in Debian trixie
-  - vulnerability: CVE-2026-5450   # Critical
-  - vulnerability: CVE-2026-4437   # High
-  - vulnerability: CVE-2026-4046   # High
-  - vulnerability: CVE-2026-5435   # High
-  - vulnerability: CVE-2026-5928   # High
-  # libcap2 — won't fix in Debian trixie
-  - vulnerability: CVE-2026-4878   # High
-  # ncurses 6.5 — won't fix in Debian trixie
-  - vulnerability: CVE-2025-69720  # High
-  # aiperf pip dependencies
-  - vulnerability: GHSA-whj4-6x5x-4v2j  # High, pillow (fix in 12.2.0, pinned by aiperf)
-  - vulnerability: GHSA-pwv6-vv43-88gr  # High, pillow (pinned by aiperf)
+# CVE suppressions for the aiperf-bench base image (python:3.13-slim,
+# Debian trixie) are managed in `.openvex.json` and consumed by
+# scan-action via the `vex:` input in
+# `.github/workflows/vuln-scan-images.yaml`. The OpenVEX document
+# carries the structured status + justification + per-CVE
+# reachability evidence and is self-sufficient for suppression.
+#
+# When scanning the aiperf-bench image locally, pass `--vex
+# .openvex.json` alongside `-c .grype.yaml`. Scans of the AICR Go
+# source tree (`make scan` → `grype dir:.`) don't need VEX since the
+# suppressed CVEs are all in Python / glibc / libcap2 / ncurses /
+# pillow and never surface against Go source.
+# Reviewed: 2026-06-01

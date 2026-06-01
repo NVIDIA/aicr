@@ -232,6 +232,11 @@ jobs:
           only-fixed: true
           fail-build: false
           config: .grype.yaml
+          # OpenVEX statements with per-CVE reachability evidence for
+          # aiperf-bench suppressions. Grype applies statements only to
+          # products whose PURL matches, so this is a no-op for the other
+          # images in the matrix.
+          vex: .openvex.json
 
       - name: Extract severity counts
         shell: bash

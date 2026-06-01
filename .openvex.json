@@ -1,0 +1,215 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
+  "author": "NVIDIA AICR maintainers",
+  "role": "document creator",
+  "timestamp": "2026-06-01T00:00:00Z",
+  "version": 1,
+  "tooling": "manual; reachability verified against aiperf v0.7.0 source",
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6100",
+        "description": "cpython use-after-free in lzma.LZMADecompressor / bz2.BZ2Decompressor / gzip.GzipFile when a decompressor instance is reused after a MemoryError (CWE-416, Critical)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "aiperf v0.7.0 source contains zero imports or references to the gzip, lzma, or bz2 stdlib modules (verified with `grep -rn -E '^(import|from) (gzip|lzma|bz2)'`). The vulnerable decompressor classes are never instantiated. The vulnerability requires not just calling these classes but also reusing the same instance after a MemoryError; one-shot helpers (lzma.decompress(), bz2.decompress(), gzip.decompress(), zlib.decompress()) are not affected per the upstream Python advisory."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-3298",
+        "description": "cpython out-of-bounds write in asyncio.ProactorEventLoop.sock_recvfrom_into() on Windows (CWE-787, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The vulnerable class is asyncio.ProactorEventLoop, defined in asyncio.windows_events and conditionally compiled out of non-Windows CPython builds. The aiperf-bench image is based on python:3.13-slim (Debian trixie, Linux/glibc); the ProactorEventLoop class is not present in the shipped CPython binary."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4786",
+        "description": "cpython command injection in webbrowser.open() via crafted URL (CWE-77, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "aiperf imports webbrowser exclusively in aiperf/plot/dashboard/server.py and invokes webbrowser.open(url) only when launching the local plot dashboard server. That code path is reached from the `aiperf plot` subcommand. The aiperf-bench image's benchmark workload runs `aiperf profile` (validators/performance/inference_perf_constraint.go), which never imports the plot or dashboard modules. Additionally, the URL passed to webbrowser.open is the internally-constructed dashboard server URL, not attacker-supplied."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5450",
+        "description": "glibc heap overflow in _vfscanf_internal via the %mc scanf format specifier (CWE-787, Critical)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Trigger requires calling glibc's scanf family with the %mc (malloc'd character match) format specifier. CPython does not expose the C scanf family to Python code. aiperf's declared runtime dependencies (aiohttp, cyclopts, fastapi, jinja2, jmespath, kaleido, matplotlib, msgspec, numpy, pillow, transformers, uvicorn, uvloop, zstandard) parse user input via Python-native parsers, not scanf. Upstream advisory notes %mc is not used by major Linux distros."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4437",
+        "description": "glibc out-of-bounds read in gethostbyaddr / gethostbyaddr_r legacy POSIX reverse DNS lookup (CWE-125, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Upstream advisory explicitly states getaddrinfo() is not affected. aiperf's HTTP client is aiohttp, which uses asyncio's resolver (getaddrinfo) for name resolution; aiperf source contains no gethostbyaddr references. The legacy gethostbyaddr() and gethostbyaddr_r() reverse-DNS functions are not on aiperf-bench's execution path."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4046",
+        "description": "glibc iconv() assertion failure DoS when converting IBM1390 / IBM1399 EBCDIC variant character sets (CWE-617, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Trigger requires iconv() conversion specifically to/from IBM1390 or IBM1399. aiperf transports UTF-8 JSON over HTTP between the benchmark and the inference endpoint; Python's defaults are UTF-8 throughout. No code in aiperf or its declared dependencies references IBM1390/IBM1399, codepage 1390, or codepage 1399."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5435",
+        "description": "glibc out-of-bounds write in the deprecated DNS resolver-printing functions ns_printrrf / ns_printrr / fp_nquery when processing TSIG records (CWE-787, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable functions are deprecated libresolv internals (ns_printrrf, ns_printrr, fp_nquery) used for formatting DNS records as text. CPython does not expose these symbols; aiperf and its declared dependencies do not link libresolv or print DNS packets. The benchmark performs only outbound HTTP and name resolution via getaddrinfo."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-5928",
+        "description": "glibc buffer under-read in ungetwc / _IO_wdefault_pbackfail on wide-char streams using non-Unicode encodings with byte/multibyte overlaps (CWE-127, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Upstream advisory: the spurious-match condition that triggers the under-read 'is not possible in the standard Unicode character sets.' aiperf runs with Python's default UTF-8 locale; no LC_ALL / LANG override pins the process to a non-Unicode wide-char encoding. The trigger condition cannot occur."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4878",
+        "description": "libcap TOCTOU race in cap_set_file() allowing local privilege escalation when an attacker controls the target's parent directory (CWE-367, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The aiperf-bench image drops root after pip install and runs as the non-root user `aiperf` (uid 10001, no shell, no home write privileges; see validators/performance/aiperf-bench.Dockerfile). The workload never calls cap_set_file or any other libcap API; libcap2 is present only as a transitive dependency of base-image utilities. The benchmark process has no capabilities to set and no parent-directory-control vector."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-69720",
+        "description": "ncurses stack-based buffer overflow in analyze_string() in progs/infocmp.c, triggered by `infocmp -i` on crafted terminfo input (CWE-121, High)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable analyze_string() function lives in the infocmp utility binary (ncurses-bin package), not in the shared libraries (libncursesw6, libtinfo6). Trigger requires executing `infocmp -i <crafted-terminfo>`. The aiperf-bench image runs `aiperf profile` and never invokes infocmp; no shell wrapper or aiperf subcommand exec's it."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-whj4-6x5x-4v2j",
+        "description": "pillow FITS image format decoder GZIP decompression bomb leading to unbounded memory consumption (CVE-2026-40192, CWE-400, High). Fixed in pillow 12.2.0; pinned by aiperf to 12.1.x."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "AICR invokes aiperf-bench as `aiperf profile <text-LLM> --url <endpoint>` against text-only models (Qwen/Qwen3-0.6B per validators/performance/inference_perf_constraint.go) with synthetic text tokens (aiperfInputTokensMean=128, aiperfOutputTokensMean=128). The benchmark transports only JSON over HTTP and never loads image files. aiperf's image-loading code paths in dataset_manager.py / generator/image.py / utils.py are gated to multimodal benchmark configurations that the AICR validator does not exercise. Even when image mode is enabled, aiperf's ImageFormat enum (aiperf/common/enums/enums.py) restricts inputs to PNG/JPEG; FITS is not in the allowlist."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-pwv6-vv43-88gr",
+        "description": "pillow PSD image codec integer overflow leading to out-of-bounds write in src/decode.c / src/encode.c (CVE-2026-25990, CWE-787, High). Fixed in pillow 12.2.0; pinned by aiperf to 12.1.x."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Same reachability argument as GHSA-whj4-6x5x-4v2j: the AICR text-LLM benchmark workload never enters pillow's image-loading paths, and aiperf's ImageFormat allowlist restricts inputs to PNG/JPEG. PSD is not in the allowlist."
+    }
+  ]
+}

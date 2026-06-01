@@ -33,6 +33,20 @@ metadata:
     "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
+  # Restrict the controller-generated LoadBalancer Service to trusted source
+  # CIDRs. Without this the agentgateway controller provisions an internet-facing
+  # load balancer open to 0.0.0.0/0, exposing the (plaintext, unauthenticated)
+  # inference endpoint to the entire internet. spec.service.spec is merged onto
+  # the generated Service, and loadBalancerSourceRanges is a portable Service
+  # field honored by the AWS, GCP, Azure, and OCI cloud load balancers — so this
+  # single setting locks the gateway down on every platform. An empty
+  # allowedSourceRanges list leaves the Service unrestricted (0.0.0.0/0).
+  {{- if $agw.allowedSourceRanges }}
+  service:
+    spec:
+      loadBalancerSourceRanges:
+        {{- toYaml $agw.allowedSourceRanges | nindent 8 }}
+  {{- end }}
   deployment:
     metadata:
       labels:

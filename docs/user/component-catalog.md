@@ -63,6 +63,27 @@ aicr recipe --service eks --accelerator h100 --os ubuntu --intent training -o re
 
 The output lists every component with its pinned version and configuration values.
 
+## Inference Gateway Network Exposure
+
+Inference recipes include the **agentgateway** component, which deploys an `inference-gateway` Gateway. The agentgateway controller materializes that Gateway into a `Service` of type `LoadBalancer`, so on every cloud the platform provisions an internet-facing load balancer for the (plaintext HTTP, unauthenticated) inference endpoint. By default that load balancer accepts traffic from any source (`0.0.0.0/0`).
+
+To restrict it to trusted networks, set `agentgateway.allowedSourceRanges` to a list of CIDR (Classless Inter-Domain Routing) blocks. The values are rendered into the generated Service's `spec.loadBalancerSourceRanges`, which the AWS, GCP, Azure, and OCI cloud load balancers all honor — so one setting locks the gateway down on every platform.
+
+Do **not** use `--set` for this key. `--set agentgateway:allowedSourceRanges=<cidr>` exits 0 but renders `loadBalancerSourceRanges` as a bare string instead of a list, producing a type-invalid Service (the gateway may stay open to `0.0.0.0/0`, or the CR apply is rejected). Scope the gateway through a recipe overlay or `componentRef` override instead:
+
+```yaml
+componentRefs:
+  - name: agentgateway
+    type: Helm
+    overrides:
+      allowedSourceRanges:
+        - 216.228.127.128/30   # e.g. corporate egress
+```
+
+The default is intentionally empty rather than a fixed CIDR: a baked-in range would firewall every downstream deployment to one network and lock other operators out of their own gateway. Each operator should scope this to their own trusted networks. An empty list leaves the load balancer open to `0.0.0.0/0`.
+
+This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
+
 ## Adding Components
 
 New components are added declaratively in `recipes/registry.yaml` — no Go code required. See the [Contributing Guide](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) and [Bundler Development](../contributor/component.md) docs for details.

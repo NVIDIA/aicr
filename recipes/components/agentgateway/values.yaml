@@ -33,3 +33,29 @@ resources:
 # Required for routing to InferencePool backends.
 inferenceExtension:
   enabled: true
+
+# Source IP CIDRs allowed to reach the inference-gateway's public LoadBalancer.
+# When non-empty, these CIDRs are rendered into the generated Service's
+# spec.loadBalancerSourceRanges, which is honored by the AWS, GCP, Azure, and
+# OCI cloud load balancers alike — so one setting locks the gateway down on
+# every platform.
+#
+# Default is EMPTY, which leaves the load balancer reachable from any source
+# (0.0.0.0/0) so deployments work out of the box regardless of network. This is
+# intentionally NOT defaulted to an NVIDIA-specific range: a baked-in CIDR would
+# firewall every downstream deployment to NVIDIA's network and lock external
+# operators out of their own gateway.
+#
+# Each operator should scope this to their trusted networks. Do NOT use `--set`
+# for this key: `--set agentgateway:allowedSourceRanges=<cidr>` exits 0 but
+# renders loadBalancerSourceRanges as a bare string instead of a list, producing
+# a type-invalid Service (the gateway may stay open at 0.0.0.0/0, or the CR apply
+# is rejected). Set it through a recipe overlay / componentRef override, e.g.:
+#
+#   componentRefs:
+#     - name: agentgateway
+#       type: Helm
+#       overrides:
+#         allowedSourceRanges:
+#           - 216.228.127.128/30   # e.g. NVIDIA HQ / Santa Clara egress
+allowedSourceRanges: []
