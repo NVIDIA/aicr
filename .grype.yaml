@@ -25,20 +25,51 @@ exclude:
 # All are either unfixed upstream or won't-fix in Debian.
 # Reviewed: 2026-05-06
 ignore:
-  # python — no fix available
-  - vulnerability: CVE-2026-6100   # Critical
-  - vulnerability: CVE-2026-3298   # High
-  - vulnerability: CVE-2026-4786   # High
-  # libc 2.41 — won't fix in Debian trixie
-  - vulnerability: CVE-2026-5450   # Critical
-  - vulnerability: CVE-2026-4437   # High
-  - vulnerability: CVE-2026-4046   # High
-  - vulnerability: CVE-2026-5435   # High
-  - vulnerability: CVE-2026-5928   # High
-  # libcap2 — won't fix in Debian trixie
-  - vulnerability: CVE-2026-4878   # High
-  # ncurses 6.5 — won't fix in Debian trixie
-  - vulnerability: CVE-2025-69720  # High
-  # aiperf pip dependencies
-  - vulnerability: GHSA-whj4-6x5x-4v2j  # High, pillow (fix in 12.2.0, pinned by aiperf)
-  - vulnerability: GHSA-pwv6-vv43-88gr  # High, pillow (pinned by aiperf)
+  - vulnerability: CVE-2026-6100
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "python upstream — no fix available (Critical)"
+  - vulnerability: CVE-2026-3298
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "python upstream — no fix available (High)"
+  - vulnerability: CVE-2026-4786
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "python upstream — no fix available (High)"
+  - vulnerability: CVE-2026-5450
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "libc 2.41 — won't fix in Debian trixie (Critical)"
+  - vulnerability: CVE-2026-4437
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+  - vulnerability: CVE-2026-4046
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+  - vulnerability: CVE-2026-5435
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+  - vulnerability: CVE-2026-5928
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+  - vulnerability: CVE-2026-4878
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "libcap2 — won't fix in Debian trixie (High)"
+  - vulnerability: CVE-2025-69720
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "ncurses 6.5 — won't fix in Debian trixie (High)"
+  - vulnerability: GHSA-whj4-6x5x-4v2j
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "pillow — fix in 12.2.0, pinned by aiperf (High)"
+  - vulnerability: GHSA-pwv6-vv43-88gr
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
+    reason: "pillow — pinned by aiperf (High)"
