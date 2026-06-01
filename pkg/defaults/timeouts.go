@@ -311,6 +311,12 @@ const (
 	// helm never preempts the gate, small enough to still surface a genuinely
 	// hung gate process shortly after its own deadline.
 	ReadinessGateHelmTimeoutBuffer = 5 * time.Minute
+
+	// ReadinessGateBackoffLimit is the Kubernetes Job backoffLimit for the gate
+	// Job. The gate CLI handles its own retry loop internally; this limit
+	// absorbs transient pod disruption (drain, evict, OOM) by allowing the Job
+	// controller to create a fresh pod without failing the deploy outright.
+	ReadinessGateBackoffLimit = 6
 )
 
 // Conformance test timeouts for DRA and gang scheduling validation.

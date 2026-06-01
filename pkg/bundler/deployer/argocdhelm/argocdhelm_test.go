@@ -29,7 +29,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -1017,21 +1019,7 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 		TargetRevision: "main",
 		ComponentReadiness: map[string]map[string][]byte{
 			"gpu-operator": {
-				"readiness.yaml": []byte("apiVersion: batch/v1\n" +
-					"kind: Job\n" +
-					"metadata:\n" +
-					"  name: gpu-operator-readiness-gate\n" +
-					"  namespace: {{ .Release.Namespace }}\n" +
-					"spec:\n" +
-					"  backoffLimit: 0\n" +
-					"  template:\n" +
-					"    spec:\n" +
-					"      restartPolicy: Never\n" +
-					"      serviceAccountName: gpu-operator-readiness-gate\n" +
-					"      containers:\n" +
-					"        - name: gate\n" +
-					"          image: ghcr.io/nvidia/aicr-gate:v0.0.0-golden\n" +
-					"          args: [\"--bundle-dir=/bundle\", \"--max-wait=1h30m0s\"]\n"),
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
 			},
 		},
 	}
@@ -1713,6 +1701,24 @@ func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
 	if !strings.Contains(string(out), "repoURL is required") {
 		t.Errorf("expected error message to mention 'repoURL is required', got:\n%s", out)
 	}
+}
+
+func readinessGateManifest(t *testing.T, deployer config.DeployerType) []byte {
+	t.Helper()
+	manifest, err := gatemanifest.Render(
+		"gpu-operator",
+		"ghcr.io/nvidia/aicr-gate:v0.0.0-golden",
+		[]byte(`apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-readiness
+`),
+		deployer,
+	)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	return manifest
 }
 
 // assertGolden reads outDir/relPath and diffs it against goldenDir/relPath.

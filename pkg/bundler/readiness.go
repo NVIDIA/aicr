@@ -21,9 +21,10 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"sigs.k8s.io/yaml"
 )
 
 // readinessFileName is the per-component convention file (a chainsaw Test)
@@ -49,8 +50,10 @@ const readinessManifestKey = "readiness.yaml"
 // used by the Phase 1 Kind smoke test.
 func (b *DefaultBundler) gateImage() string {
 	tag := b.Config.Version()
-	if tag == "" {
-		tag = "dev"
+	if tag == "" || tag == "dev" {
+		tag = "dev" // preserve Phase-1 kind-smoke :dev
+	} else if !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag // release contract: 0.13.0 -> v0.13.0
 	}
 	return defaultGateImageRepo + ":" + tag
 }
@@ -86,7 +89,7 @@ func (b *DefaultBundler) collectComponentReadiness(
 		}
 
 		path := fmt.Sprintf("components/%s/%s", ref.Name, readinessFileName)
-		testYAML, err := recipe.GetManifestContentWithProvider(provider, path)
+		testYAML, err := recipe.GetManifestContentWithContext(ctx, provider, path)
 		if err != nil {
 			if stderrors.Is(err, fs.ErrNotExist) {
 				continue // component ships no readiness gate; skip
@@ -95,7 +98,11 @@ func (b *DefaultBundler) collectComponentReadiness(
 				fmt.Sprintf("failed to load readiness gate %s for component %s", path, ref.Name))
 		}
 
-		manifest, genErr := renderReadinessGateManifest(ref.Name, image, testYAML)
+		if err := validateReadinessTestYAML(ref.Name, testYAML); err != nil {
+			return nil, err
+		}
+
+		manifest, genErr := gatemanifest.Render(ref.Name, image, testYAML, b.Config.Deployer())
 		if genErr != nil {
 			return nil, genErr
 		}
@@ -105,119 +112,24 @@ func (b *DefaultBundler) collectComponentReadiness(
 	return result, nil
 }
 
-// renderReadinessGateManifest builds the multi-document gate chart manifest for
-// one component. The namespace is left as a {{ .Release.Namespace }} template
-// token (resolved by the localformat writer's manifest.Render against the
-// component's resolved namespace); the gate image and the embedded chainsaw
-// Test are baked in literally.
-func renderReadinessGateManifest(componentName, image string, testYAML []byte) ([]byte, error) {
-	if componentName == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "readiness gate: empty component name")
+// validateReadinessTestYAML fails fast when readiness.yaml is not a chainsaw Test.
+func validateReadinessTestYAML(componentName string, testYAML []byte) error {
+	var head struct {
+		APIVersion string `yaml:"apiVersion"`
+		Kind       string `yaml:"kind"`
 	}
-
-	// Indent the chainsaw Test under the ConfigMap data block scalar. Each
-	// source line is indented by 4 spaces (data key at 2, block content at 4).
-	indented := indentBlock(string(testYAML), "    ")
-
-	saName := componentName + "-readiness-gate"
-	bundleName := componentName + "-readiness-bundle"
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, `apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: %[1]s
-  namespace: {{ .Release.Namespace }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: %[1]s
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "nodes", "namespaces", "services", "configmaps", "events"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["batch"]
-    resources: ["jobs", "cronjobs"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["nvidia.com"]
-    resources: ["clusterpolicies"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: %[1]s
-subjects:
-  - kind: ServiceAccount
-    name: %[1]s
-    namespace: {{ .Release.Namespace }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: %[1]s
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: %[2]s
-  namespace: {{ .Release.Namespace }}
-data:
-  %[3]s.yaml: |
-%[4]s
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: %[1]s
-  namespace: {{ .Release.Namespace }}
-spec:
-  backoffLimit: 0
-  template:
-    spec:
-      restartPolicy: Never
-      serviceAccountName: %[1]s
-      containers:
-        - name: gate
-          image: %[5]s
-          imagePullPolicy: IfNotPresent
-          args:
-            - --bundle-dir=/bundle
-            - --namespace={{ .Release.Namespace }}
-            - --timeout=%[6]s
-            - --poll-interval=%[7]s
-            - --stability-window=%[8]s
-            - --max-wait=%[9]s
-          volumeMounts:
-            - name: bundle
-              mountPath: /bundle
-              readOnly: true
-      volumes:
-        - name: bundle
-          configMap:
-            name: %[2]s
-`, saName, bundleName, componentName, indented, image,
-		defaults.ReadinessGateExecTimeout.String(),
-		defaults.ReadinessGatePollInterval.String(),
-		defaults.ReadinessGateStabilityWindow.String(),
-		defaults.ReadinessGateMaxWait.String())
-
-	return []byte(sb.String()), nil
-}
-
-// indentBlock prefixes every non-empty line of s with prefix. Empty lines are
-// left blank (no trailing whitespace) so the rendered ConfigMap block scalar
-// stays clean.
-func indentBlock(s, prefix string) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	for i, line := range lines {
-		if line == "" {
-			continue
-		}
-		lines[i] = prefix + line
+	if err := yaml.Unmarshal(testYAML, &head); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("readiness gate for %s: invalid YAML", componentName), err)
 	}
-	return strings.Join(lines, "\n")
+	if !strings.Contains(head.APIVersion, "chainsaw.kyverno.io") {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("readiness gate for %s: apiVersion must be chainsaw.kyverno.io/*, got %q",
+				componentName, head.APIVersion))
+	}
+	if head.Kind != "Test" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("readiness gate for %s: kind must be Test, got %q", componentName, head.Kind))
+	}
+	return nil
 }

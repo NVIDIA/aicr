@@ -27,8 +27,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	sigsyaml "sigs.k8s.io/yaml"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1795,31 +1797,10 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 		RepoURL:        "https://github.com/example/aicr-bundles.git",
 		TargetRevision: "main",
 		// Mirrors the multi-doc manifest the bundler synthesizes from
-		// readiness.yaml: SA + gate Job, namespace left as a Helm token the
-		// local-chart render resolves to the component namespace.
+		// readiness.yaml via gatemanifest.Render.
 		ComponentReadiness: map[string]map[string][]byte{
 			"gpu-operator": {
-				"readiness.yaml": []byte("apiVersion: v1\n" +
-					"kind: ServiceAccount\n" +
-					"metadata:\n" +
-					"  name: gpu-operator-readiness-gate\n" +
-					"  namespace: {{ .Release.Namespace }}\n" +
-					"---\n" +
-					"apiVersion: batch/v1\n" +
-					"kind: Job\n" +
-					"metadata:\n" +
-					"  name: gpu-operator-readiness-gate\n" +
-					"  namespace: {{ .Release.Namespace }}\n" +
-					"spec:\n" +
-					"  backoffLimit: 0\n" +
-					"  template:\n" +
-					"    spec:\n" +
-					"      restartPolicy: Never\n" +
-					"      serviceAccountName: gpu-operator-readiness-gate\n" +
-					"      containers:\n" +
-					"        - name: gate\n" +
-					"          image: ghcr.io/nvidia/aicr-gate:v0.0.0-golden\n" +
-					"          args: [\"--bundle-dir=/bundle\", \"--max-wait=1h30m0s\"]\n"),
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCD),
 			},
 		},
 	}
@@ -1923,6 +1904,24 @@ func syncWaveOf(t *testing.T, appPath string) int {
 		t.Fatalf("sync-wave %q not an int in %s: %v", wave, appPath, err)
 	}
 	return n
+}
+
+func readinessGateManifest(t *testing.T, deployer config.DeployerType) []byte {
+	t.Helper()
+	manifest, err := gatemanifest.Render(
+		"gpu-operator",
+		"ghcr.io/nvidia/aicr-gate:v0.0.0-golden",
+		[]byte(`apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-readiness
+`),
+		deployer,
+	)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	return manifest
 }
 
 // assertGolden reads outDir/relPath and diffs it against goldenDir/relPath.

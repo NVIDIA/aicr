@@ -58,6 +58,9 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// evaluateFn is exposed for tests to stub runner.Evaluate.
+var evaluateFn = runner.Evaluate
+
 func run(args []string) int {
 	fs := flag.NewFlagSet("gate", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -114,13 +117,13 @@ func loop(ctx context.Context, bundle map[string]string, opts runner.Options, st
 	var firstPass *time.Time
 
 	for {
-		now := time.Now()
-		result, err := runner.Evaluate(ctx, bundle, opts)
+		result, err := evaluateFn(ctx, bundle, opts)
 		if err != nil {
 			slog.Error("evaluate failed", "error", err)
 			return exitConfigErr
 		}
 
+		now := time.Now()
 		rs := runner.ComputeReadyState(
 			now, result.AllPass, result.Components, firstPass,
 			opts.StabilityWindow, opts.PollInterval,
