@@ -26,26 +26,50 @@ exclude:
 # Reviewed: 2026-05-06
 ignore:
   - vulnerability: CVE-2026-6100
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "python upstream — no fix available (Critical)"
   - vulnerability: CVE-2026-3298
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "python upstream — no fix available (High)"
   - vulnerability: CVE-2026-4786
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "python upstream — no fix available (High)"
   - vulnerability: CVE-2026-5450
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "libc 2.41 — won't fix in Debian trixie (Critical)"
   - vulnerability: CVE-2026-4437
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "libc 2.41 — won't fix in Debian trixie (High)"
   - vulnerability: CVE-2026-4046
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "libc 2.41 — won't fix in Debian trixie (High)"
   - vulnerability: CVE-2026-5435
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "libc 2.41 — won't fix in Debian trixie (High)"
   - vulnerability: CVE-2026-5928
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "libc 2.41 — won't fix in Debian trixie (High)"
   - vulnerability: CVE-2026-4878
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "libcap2 — won't fix in Debian trixie (High)"
   - vulnerability: CVE-2025-69720
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "ncurses 6.5 — won't fix in Debian trixie (High)"
   - vulnerability: GHSA-whj4-6x5x-4v2j
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "pillow — fix in 12.2.0, pinned by aiperf (High)"
   - vulnerability: GHSA-pwv6-vv43-88gr
+    vex-status: not_affected
+    vex-justification: vulnerable_code_not_in_execute_path
     reason: "pillow — pinned by aiperf (High)"
