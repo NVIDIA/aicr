@@ -21,28 +21,16 @@ exclude:
   - './aicrd'
   - './dist/**'
 
-# High/Critical CVE suppressions for the aiperf-bench base image
-# (python:3.13-slim, Debian trixie). Status + justification + per-CVE
-# reachability evidence live in `.openvex.json`, consumed by
+# CVE suppressions for the aiperf-bench base image (python:3.13-slim,
+# Debian trixie) are managed in `.openvex.json` and consumed by
 # scan-action via the `vex:` input in
-# `.github/workflows/vuln-scan-images.yaml`.
+# `.github/workflows/vuln-scan-images.yaml`. The OpenVEX document
+# carries the structured status + justification + per-CVE
+# reachability evidence and is self-sufficient for suppression.
 #
-# `vex-status` / `vex-justification` are intentionally NOT set on
-# these inline rules. In Grype v0.112 those fields act as matchers
-# against incoming external VEX statements; setting them here would
-# break suppression. The OpenVEX document is the canonical source of
-# the structured claim.
+# When scanning the aiperf-bench image locally, pass `--vex
+# .openvex.json` alongside `-c .grype.yaml`. Scans of the AICR Go
+# source tree (`make scan` → `grype dir:.`) don't need VEX since the
+# suppressed CVEs are all in Python / glibc / libcap2 / ncurses /
+# pillow and never surface against Go source.
 # Reviewed: 2026-06-01
-ignore:
-  - vulnerability: CVE-2026-6100
-  - vulnerability: CVE-2026-3298
-  - vulnerability: CVE-2026-4786
-  - vulnerability: CVE-2026-5450
-  - vulnerability: CVE-2026-4437
-  - vulnerability: CVE-2026-4046
-  - vulnerability: CVE-2026-5435
-  - vulnerability: CVE-2026-5928
-  - vulnerability: CVE-2026-4878
-  - vulnerability: CVE-2025-69720
-  - vulnerability: GHSA-whj4-6x5x-4v2j
-  - vulnerability: GHSA-pwv6-vv43-88gr
