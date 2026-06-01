@@ -21,55 +21,46 @@ exclude:
   - './aicrd'
   - './dist/**'
 
-# CVE suppressions for aiperf-bench base image (python:3.13-slim, Debian trixie).
-# All are either unfixed upstream or won't-fix in Debian.
-# Reviewed: 2026-05-06
+# High/Critical CVE suppressions for the aiperf-bench base image
+# (python:3.13-slim, Debian trixie). All entries are upstream residuals
+# with no fix available — Debian trixie marks them won't-fix, upstream
+# Python has not released a patched 3.13 yet, and the pillow CVEs are
+# fixed in 12.2.0 but pinned by aiperf to 12.1.x.
+#
+# Structured VEX statements (status + justification + per-CVE
+# reachability evidence) live in `.openvex.json` and are consumed by
+# scan-action via the `vex:` input in
+# `.github/workflows/vuln-scan-images.yaml`. The reason strings below
+# are short audit hints; see `.openvex.json` for the full rationale.
+#
+# Note: `vex-status` / `vex-justification` are intentionally NOT set on
+# these inline rules. In Grype v0.112 those fields act as matchers
+# against incoming external VEX statements; setting them here would
+# break suppression. The OpenVEX document is the canonical source of
+# the structured claim.
+# Reviewed: 2026-06-01
 ignore:
   - vulnerability: CVE-2026-6100
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "python upstream — no fix available (Critical)"
+    reason: "cpython UAF in lzma/bz2/gzip decompressor reuse; aiperf has no such imports (Critical) — see .openvex.json"
   - vulnerability: CVE-2026-3298
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "python upstream — no fix available (High)"
+    reason: "asyncio.ProactorEventLoop OOB write; Windows-only, Linux build does not ship the class (High) — see .openvex.json"
   - vulnerability: CVE-2026-4786
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "python upstream — no fix available (High)"
+    reason: "webbrowser.open command injection; only on `aiperf plot` path, image runs `aiperf profile` (High) — see .openvex.json"
   - vulnerability: CVE-2026-5450
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "libc 2.41 — won't fix in Debian trixie (Critical)"
+    reason: "glibc scanf %mc heap overflow; specifier unused by CPython and aiperf deps (Critical) — see .openvex.json"
   - vulnerability: CVE-2026-4437
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+    reason: "glibc gethostbyaddr OOB read; aiohttp uses getaddrinfo, not the legacy path (High) — see .openvex.json"
   - vulnerability: CVE-2026-4046
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+    reason: "glibc iconv() DoS on IBM1390/IBM1399; aiperf transports UTF-8 JSON (High) — see .openvex.json"
   - vulnerability: CVE-2026-5435
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+    reason: "glibc ns_printrrf/ns_printrr/fp_nquery OOB write; deprecated, not exposed to Python (High) — see .openvex.json"
   - vulnerability: CVE-2026-5928
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "libc 2.41 — won't fix in Debian trixie (High)"
+    reason: "glibc ungetwc under-read; requires non-Unicode wide-char encoding, aiperf is UTF-8 (High) — see .openvex.json"
   - vulnerability: CVE-2026-4878
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "libcap2 — won't fix in Debian trixie (High)"
+    reason: "libcap2 cap_set_file TOCTOU; aiperf-bench runs as uid 10001 and never calls libcap (High) — see .openvex.json"
   - vulnerability: CVE-2025-69720
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "ncurses 6.5 — won't fix in Debian trixie (High)"
+    reason: "ncurses analyze_string lives in infocmp utility; aiperf-bench never invokes infocmp (High) — see .openvex.json"
   - vulnerability: GHSA-whj4-6x5x-4v2j
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "pillow — fix in 12.2.0, pinned by aiperf (High)"
+    reason: "pillow FITS decompression bomb; text-LLM benchmark never loads images (High) — see .openvex.json"
   - vulnerability: GHSA-pwv6-vv43-88gr
-    vex-status: not_affected
-    vex-justification: vulnerable_code_not_in_execute_path
-    reason: "pillow — pinned by aiperf (High)"
+    reason: "pillow PSD OOB write; text-LLM benchmark never loads images (High) — see .openvex.json"
