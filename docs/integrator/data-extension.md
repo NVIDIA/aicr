@@ -232,7 +232,7 @@ Typical organization patterns:
 ## Related
 
 - [Recipe Development](recipe-development.md) — overlay schema, criteria fields, mixins, base recipe
-- [Data Architecture](../contributor/data.md) — internals of the layered data provider and criteria registry
+- [Data Architecture](../contributor/recipe.md) — internals of the layered data provider and criteria registry
 - [CLI Reference](../user/cli-reference.md) — `--data`, `--criteria-strict`, `--debug` flag definitions
 - [Component Catalog](../user/component-catalog.md) — embedded component list (the baseline you're extending)
 - [Validator Extension](validator-extension.md) — adding custom validators (also via `--data`)

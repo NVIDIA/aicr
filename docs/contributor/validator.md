@@ -1,349 +1,293 @@
 # Validator Development Guide
 
-Learn how to add new validation checks to AICR.
+AICR has **four** distinct validation surfaces. Picking the wrong one
+is the single most common source of wasted PRs. Read the table first,
+then jump to the matching section. The rest of this page is the
+contributor view for all four.
 
-## Overview
+| Surface | When it runs | Where it lives | Mechanism |
+|---------|-------------|----------------|-----------|
+| [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
+| [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
+| [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
+| [**Chainsaw health check**](#chainsaw-health-checks) | `make check-health` post-deploy | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML assertions |
 
-AICR uses a container-per-validator model. Each validation check runs as an isolated Kubernetes Job with access to the cluster, a snapshot, and the recipe. Validators are organized into three phases:
+Rule of thumb: declarative constraint against a snapshot value → surface 1.
+Active probe of a live cluster → surface 2 or 4. Pre-deployment sanity
+gate on the resolved recipe → surface 3.
+
+## Constraints (declarative)
+
+A **constraint** is a declarative expression — `K8s.server.version >=
+1.32.4` — declared in a recipe overlay's `validation:` block and
+evaluated by `pkg/constraints` against a measurement from a snapshot.
+No code change is needed to add a constraint to an existing recipe;
+only to add a new **operator**.
+
+**Where they live in YAML:**
+
+```yaml
+# recipes/overlays/<name>.yaml
+spec:
+  validation:
+    constraints:
+      - name: K8s.server.version
+        value: ">= 1.32.4"
+      - name: OS.name
+        value: "ubuntu"
+    deployment:
+      checks: [operator-health, expected-resources]
+    performance:
+      checks: [nccl-all-reduce-bw]
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 450"            # GB/s
+```
+
+Top-level `constraints` are evaluated as a **pre-flight gate** before
+phase checks run; phase-specific `constraints` are evaluated against
+each container check's reported metrics.
+
+**Supported operators** (`pkg/constraints/constraint.go`):
+
+| Operator | Use | Notes |
+|----------|-----|-------|
+| `>=`, `<=`, `>`, `<` | Version / numeric comparison | Always treated as a version comparison; parsed via `pkg/version` |
+| `==`, `!=` | Explicit equality / inequality | Version compare if either side parses as version, else string |
+| *(none)* | `OperatorExact` | Case-sensitive string equality — `value: "ubuntu"` |
+
+The parser is operator-prefix-longest-first so `>=` wins over `>`.
+Anything matching the version heuristic (starts with digit, contains a
+dot, optional `v` prefix) is parsed via `pkg/version`. Anything else
+falls back to string comparison.
+
+**Evaluation flow:** `ParseConstraintExpression(expr)` →
+`ParsedConstraint{Operator, Value, IsVersionComparison}` →
+`pc.Evaluate(actual)` returns `(bool, error)`. The evaluator returns
+an error (not `false`) when a value claimed to be a version fails to
+parse — callers in `pkg/validator/validator.go::checkReadiness` treat
+parse errors as `ErrCodeInvalidRequest`, fail-closed.
+
+**Adding a new operator:**
+
+1. Add an `Operator` constant in `pkg/constraints/constraint.go`.
+2. Insert it in the operator slice in `ParseConstraintExpression` —
+   **longest prefix first** (e.g. `~=` before `~`).
+3. Add a `case` arm in `(*ParsedConstraint).Evaluate`. Return an
+   `errors.WrapWithContext(ErrCodeInvalidRequest, ...)` for malformed
+   inputs; never fall back to string compare silently.
+4. Extend the `TestParseConstraintExpression` / `TestEvaluate` table
+   in `constraint_test.go`. Both happy path and parse-error path.
+5. If the operator implies a numeric range or tolerance, the
+   *interpretation* lives in the validator phase (e.g.
+   `validators/performance` evaluates NCCL bandwidth with a 10%
+   tolerance baked into the check, not the operator).
+
+## Container-per-validator checks
+
+A **check** is a Go function that runs inside a Kubernetes Job spawned
+by `aicr validate` against a live cluster. One Job per check, isolated
+per run. Per-phase containers are built from
+`validators/<phase>/main.go`; the catalog in
+`recipes/validators/catalog.yaml` is the authoritative list.
+
+**Three phases**, evaluated in this fixed order
+(`pkg/validator/phases.go`):
 
 | Phase | Purpose | Example |
 |-------|---------|---------|
-| `deployment` | Verify components are installed and healthy | GPU operator pods running, expected resources present |
-| `performance` | Verify system meets performance thresholds | NCCL all-reduce bandwidth (training), AIPerf inference throughput & TTFT p99 (inference+Dynamo) |
-| `conformance` | Verify workload-specific requirements | DRA support, gang scheduling, autoscaling |
+| `deployment` | Components installed and healthy | GPU operator pods running |
+| `performance` | Cluster meets perf thresholds | NCCL bandwidth, AIPerf TTFT p99 |
+| `conformance` | Workload-specific requirements | DRA, gang scheduling, autoscaling |
 
-**Architecture:**
+`PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
+`ParsePhaseSelection` collapses it to nil-meaning-everything. It is
+**exclusive** — combining `all` with any other phase is rejected.
 
-- **Declarative Catalog**: Validators are defined in `recipes/validators/catalog.yaml`
-- **Container Contract**: Exit code 0 = pass, 1 = fail, 2 = skip
-- **Evidence via stdout**: Check output printed to stdout is captured as CTRF evidence
-- **Debug via stderr**: Structured logs go to stderr and are streamed to the user
-- **CTRF Reports**: Results are aggregated into [Common Test Report Format](https://ctrf.io/) JSON
+### Quick start
 
-## Quick Start
+Three steps to add a check to an existing validator container.
 
-Adding a new check to an existing validator container requires three steps.
-
-### Step 1: Implement the Check Function
-
-Create a new file in the appropriate phase directory (e.g., `validators/deployment/`):
+**1. Implement** in `validators/<phase>/my_check.go`:
 
 ```go
-package main
-
-import (
-    "fmt"
-    "log/slog"
-
-    "github.com/NVIDIA/aicr/pkg/errors"
-    "github.com/NVIDIA/aicr/validators"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
 func checkMyComponent(ctx *validators.Context) error {
-    slog.Info("checking my-component health")
-
+    slog.Info("checking my-component")
     pods, err := ctx.Clientset.CoreV1().Pods("my-namespace").List(
-        ctx.Ctx,
-        metav1.ListOptions{LabelSelector: "app=my-component"},
-    )
+        ctx.Ctx, metav1.ListOptions{LabelSelector: "app=my-component"})
     if err != nil {
         return errors.Wrap(errors.ErrCodeInternal, "failed to list pods", err)
     }
-
     if len(pods.Items) == 0 {
         return errors.New(errors.ErrCodeNotFound, "no my-component pods found")
     }
-
-    // Evidence to stdout (captured in CTRF report)
-    fmt.Printf("Found %d my-component pod(s)\n", len(pods.Items))
-    for _, pod := range pods.Items {
-        fmt.Printf("  %s: %s\n", pod.Name, pod.Status.Phase)
-    }
-
+    fmt.Printf("Found %d my-component pod(s)\n", len(pods.Items)) // → CTRF evidence
     return nil
 }
 ```
 
-### Step 2: Register in `main.go`
-
-Add the check function to the dispatch map in `validators/deployment/main.go`:
+**2. Register** in `validators/<phase>/main.go`:
 
 ```go
-func main() {
-    validators.Run(map[string]validators.CheckFunc{
-        "operator-health":    checkOperatorHealth,
-        "expected-resources": checkExpectedResources,
-        // Add your check here:
-        "my-component":       checkMyComponent,
-    })
-}
+validators.Run(map[string]validators.CheckFunc{
+    "my-component": checkMyComponent,
+})
 ```
 
-### Step 3: Add Catalog Entry
-
-Add an entry to `recipes/validators/catalog.yaml`:
+**3. Add a catalog entry** in `recipes/validators/catalog.yaml`:
 
 ```yaml
-validators:
-  # ... existing entries ...
-
-  - name: my-component
-    phase: deployment
-    description: "Verify my-component pods are running and healthy"
-    image: ghcr.io/nvidia/aicr-validators/deployment:latest
-    timeout: 2m
-    args: ["my-component"]
-    env: []
+- name: my-component
+  phase: deployment
+  description: "Verify my-component pods are running"
+  image: ghcr.io/nvidia/aicr-validators/deployment:latest
+  timeout: 2m
+  args: ["my-component"]   # must match the registered dispatch key
 ```
 
-The `args` field must match the key used in the `validators.Run()` dispatch map.
+### Container contract
 
-## Container Contract
+| Exit code | Meaning | CTRF |
+|-----------|---------|------|
+| `0` | passed | `passed` |
+| `1` | failed | `failed` |
+| `2` | skipped | `skipped` — return `validators.Skip(reason)` |
 
-Every validator container must follow this contract:
+| Channel | Captured as |
+|---------|-------------|
+| **stdout** | CTRF `message` (human-readable evidence) — use `fmt.Printf` |
+| **stderr** | Streamed live to the user — use `slog.*` |
+| `/dev/termination-log` | Failure reason (≤ 4096 bytes), written on `return error` |
 
-### Exit Codes
+**Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/recipe/recipe.yaml`
+(override via `AICR_SNAPSHOT_PATH`, `AICR_RECIPE_PATH`).
 
-| Code | Meaning | CTRF Status |
-|------|---------|-------------|
-| `0` | Check passed | `passed` |
-| `1` | Check failed | `failed` |
-| `2` | Check skipped (not applicable) | `skipped` |
+**Environment** (set by the Job deployer from the catalog entry):
 
-### I/O Channels
+| Variable | Purpose |
+|----------|---------|
+| `AICR_NAMESPACE` | Validation namespace (fallback) |
+| `AICR_CHECK_TIMEOUT` | Go-duration timeout for the check; honored by `ctx.Ctx`. Falls back to `defaults.CheckExecutionTimeout` if unset or malformed (logged WARN). |
+| `AICR_VALIDATOR_IMAGE_REGISTRY` | Override the image registry prefix (CLI passes through to inner workloads). |
+| `AICR_VALIDATOR_IMAGE_TAG` | Override resolved tag (e.g. `latest`) for feature-branch dev builds. Forwarded to inner workloads. |
+| `AICR_NODE_SELECTOR` | Comma-separated `key=value`; read via `ctx.NodeSelector` |
+| `AICR_TOLERATIONS` | Comma-separated `key=value:effect`; read via `ctx.Tolerations` |
 
-| Channel | Purpose | Captured By |
-|---------|---------|-------------|
-| **stdout** | Evidence output (human-readable check results) | CTRF report `message` field |
-| **stderr** | Debug/progress logs (`slog` output) | Streamed live to user terminal |
-| `/dev/termination-log` | Failure reason (max 4096 bytes) | CTRF report on failure |
+**RBAC.** The engine creates a per-run ServiceAccount and
+ClusterRoleBinding named `aicr-validator-<runID>`. Per-run naming
+prevents concurrent runs from clobbering each other's RBAC. External
+tooling selects by label `app.kubernetes.io/name=aicr-validator`, not
+literal name.
 
-### RBAC
+**Image-pull policy** is computed by `v1.ImagePullPolicy(image)` in
+`pkg/validator/v1/job_plan.go`:
+side-loaded (`ko.local/*`, `kind.local/*`) → `Never`;
+digest-pinned (`name@sha256:…`) → `IfNotPresent`;
+`AICR_VALIDATOR_IMAGE_TAG` set or `:latest` suffix → `Always`;
+otherwise → `IfNotPresent`. Both the outer validator Job and any
+inner workload Job share this helper so policy cannot drift.
 
-The validator engine creates a per-run ServiceAccount and ClusterRoleBinding for every `aicr validate` invocation. Both are named `aicr-validator-<runID>` where `<runID>` is the unique identifier generated at the start of the run (see `pkg/validator/job/rbac.go`). Per-run naming prevents concurrent validation runs from clobbering each other's RBAC and ensures cleanup at run end deletes only the resources owned by that run.
+### `validators.Context` API
 
-External tooling that needs to match validator RBAC (e.g., for monitoring or cleanup) should select by the `app.kubernetes.io/name=aicr-validator` label rather than by literal resource name, since the suffix changes every run.
-
-### Mounted Data
-
-The validator engine mounts snapshot and recipe data as ConfigMaps:
-
-| Path | Content | Environment Override |
-|------|---------|---------------------|
-| `/data/snapshot/snapshot.yaml` | Cluster snapshot | `AICR_SNAPSHOT_PATH` |
-| `/data/recipe/recipe.yaml` | Recipe with constraints | `AICR_RECIPE_PATH` |
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `AICR_NAMESPACE` | Validation namespace (fallback if ServiceAccount namespace unavailable) |
-| `AICR_SNAPSHOT_PATH` | Override snapshot mount path |
-| `AICR_RECIPE_PATH` | Override recipe mount path |
-| `AICR_VALIDATOR_IMAGE_REGISTRY` | Override image registry prefix (set by user) |
-| `AICR_CHECK_TIMEOUT` | Parent-context timeout for the check, injected by the Job deployer from the catalog entry's `timeout` field (Go duration string, e.g. `30m`). Falls back to `defaults.CheckExecutionTimeout` when unset or malformed; a malformed value is logged at WARN. Use `ctx.Ctx` (set by `LoadContext`) to honor it. |
-| `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved image tag (e.g. `latest`). Bypasses the default `:v<version>` / `:sha-<commit>` resolution for feature-branch dev builds whose commit has no published image. |
-| `AICR_NODE_SELECTOR` | User-provided node selector override for inner workloads (comma-separated `key=value` pairs). Set by the `--node-selector` CLI flag. Use `ctx.NodeSelector` to access the parsed value. |
-| `AICR_TOLERATIONS` | User-provided toleration override for inner workloads (comma-separated `key=value:effect` entries). Set by the `--toleration` CLI flag. Use `ctx.Tolerations` to access the parsed value. |
-
-### `inference-perf` benchmark tuning
-
-The `inference-perf` performance check warms vLLM before measuring, so the one-time CUDA-graph/JIT compile cost is excluded from the reported throughput and p99 time-to-first-token (TTFT). These knobs (set on the `inference-perf` catalog entry's `env`, overridable via `aicr ... --data`) retune the benchmark without rebuilding the validator image. An unset knob uses the default below; a value that is not a positive integer **fails the check with `ErrCodeInvalidRequest`** — validated up front, before any workload is deployed — rather than silently falling back to a default and reporting a pass/fail the operator never configured. They are validation *methodology* knobs and live with the validator/catalog; the per-accelerator pass/fail thresholds stay in the recipe overlays.
-
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU` | `16` | Concurrent requests per GPU; total concurrency is this × free GPUs on the chosen node. |
-| `AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY` | `1` | Warmup requests per concurrency slot (excluded from stats); one full wave primes every in-flight slot. |
-| `AICR_INFERENCE_PERF_MIN_REQUESTS` | `1000` | Floor on measured request count, so small nodes still get a stable steady-state window. |
-| `AICR_INFERENCE_PERF_REQUESTS_PER_CONCURRENCY` | `8` | Scales measured request count with concurrency; actual count is `max(MIN_REQUESTS, concurrency × this)`. |
-| `AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN` | `128` | Mean prompt input tokens per request. |
-| `AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN` | `128` | Mean prompt output tokens per request. |
-
-## Context API
-
-The `validators.Context` struct provides all dependencies a check needs:
+`LoadContext()` builds it from the container environment and returns
+the only struct a `CheckFunc` ever sees:
 
 ```go
 type Context struct {
-    Ctx             context.Context        // Parent context with timeout
-    Cancel          context.CancelFunc     // Release resources (caller must defer)
-    Clientset       kubernetes.Interface   // Typed K8s client
-    RESTConfig      *rest.Config           // For exec, port-forward, dynamic client
-    DynamicClient   dynamic.Interface      // For CRD access
-    Snapshot        *snapshotter.Snapshot  // Captured cluster state
-    ValidationInput *v1.ValidationInput    // Validation specification (config + context)
-    Namespace       string                 // Validation namespace
-    NodeSelector    map[string]string      // User-provided node selector override (nil = use defaults)
-    Tolerations     []corev1.Toleration    // User-provided toleration override (nil = use defaults)
+    Ctx             context.Context
+    Cancel          context.CancelFunc
+    Clientset       kubernetes.Interface
+    RESTConfig      *rest.Config
+    DynamicClient   dynamic.Interface
+    Snapshot        *snapshotter.Snapshot
+    ValidationInput *v1.ValidationInput
+    Namespace       string
+    NodeSelector    map[string]string   // nil = use defaults
+    Tolerations     []corev1.Toleration // nil = use defaults
 }
 ```
 
-`LoadContext()` builds this from the container environment: reads mounted ConfigMaps, creates in-cluster K8s clients, and sets the parent-context timeout via `validators/context.go:checkTimeoutFromEnv` — which honors `AICR_CHECK_TIMEOUT` (injected by the Job deployer from the catalog entry's `timeout` field) and falls back to `defaults.CheckExecutionTimeout` when unset or malformed.
+`ctx.Timeout(d)` returns a child context with a shorter deadline.
+`validators.Run(map)` is the container entry point; it dispatches by
+`os.Args[1]`, maps `Skip` → exit 2, errors → exit 1, nil → exit 0.
 
-### Scheduling Overrides
+**Scheduling overrides.** When creating inner workloads, check
+`ctx.NodeSelector` and `ctx.Tolerations` before applying hardcoded
+platform selectors. `nodeName` pinning (e.g. nvidia-smi, DRA
+isolation) bypasses the scheduler and should not apply
+`ctx.NodeSelector`.
 
-When creating inner workloads (pods, Jobs, TrainJobs), check `ctx.NodeSelector` and `ctx.Tolerations` before applying hardcoded platform selectors. If non-nil, these override the default scheduling constraints to support clusters with non-standard GPU node labels or taints.
+### `PodLifecycle` helper
+
+For checks that deploy a single test pod (training NCCL, conformance
+DRA isolation, nvidia-smi probes), use `validators/helper/pod.go`
+rather than reimplementing watch/cleanup:
 
 ```go
-// Apply scheduling overrides when creating inner workload pods.
-nodeSelector := map[string]string{"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb"}
-if ctx.NodeSelector != nil {
-    nodeSelector = ctx.NodeSelector // user override replaces platform default
-}
+lc := &helper.PodLifecycle{Clientset: ctx.Clientset, Namespace: ctx.Namespace}
+pod, err := lc.CreatePodFromTemplate(ctx.Ctx, "testdata/probe.yaml.tmpl", subs)
+if err != nil { return errors.Wrap(...) }
+defer func() { _ = lc.CleanupPod(context.Background(), pod) }() // deferred cleanup uses fresh ctx
 
-tolerations := []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
-if ctx.Tolerations != nil {
-    tolerations = ctx.Tolerations // user override replaces default tolerate-all
-}
-```
-
-Validators that use `nodeName` pinning (e.g., nvidia-smi, DRA isolation) bypass the scheduler entirely and should not apply `ctx.NodeSelector`.
-
-### Helper Methods
-
-**`ctx.Timeout(d)`** — Create a child context with a specific timeout:
-
-```go
-subCtx, cancel := ctx.Timeout(30 * time.Second)
-defer cancel()
-pods, err := ctx.Clientset.CoreV1().Pods(ns).List(subCtx, opts)
-```
-
-### Runner Utilities
-
-**`validators.Run(checks)`** — Main entry point for validator containers. Handles context loading, check dispatch by `os.Args[1]`, exit codes, and termination log writing.
-
-**`validators.Skip(reason)`** — Return from a `CheckFunc` to indicate the check is not applicable. The runner exits with code 2:
-
-```go
-func checkFeatureX(ctx *validators.Context) error {
-    if ctx.ValidationInput == nil {
-        return validators.Skip("no validation input provided")
-    }
-    // ... actual check logic ...
-    return nil
+if err := lc.WaitForPodSuccess(ctx.Ctx, pod, defaults.PodSuccessTimeout); err != nil {
+    logs, _ := lc.GetPodLogs(context.Background(), pod)
+    return errors.WrapWithContext(errors.ErrCodeInternal, "probe failed", err,
+        map[string]any{"logs": logs})
 }
 ```
 
-## Catalog Entry Schema
+`WaitForPodSuccess`/`WaitForPodRunning` use the watch API
+(`pkg/k8s/pod`) — no polling, no sleep loops. The cleanup goroutine
+must use `context.Background()` because the parent is canceled on
+return; this is one of the two CLAUDE.md-sanctioned uses of `Background()`.
 
-Each entry in `recipes/validators/catalog.yaml`:
+### Pre-flight gates are fail-closed
 
-```yaml
-- name: operator-health           # Unique identifier, used in Job names
-  phase: deployment               # deployment | performance | conformance
-  description: "Human-readable"   # Shown in CTRF report
-  image: ghcr.io/.../img:latest   # OCI image reference
-  timeout: 2m                     # Job activeDeadlineSeconds
-  args: ["operator-health"]       # Container args (check name)
-  env:                            # Optional environment variables
-    - name: MY_VAR
-      value: "my-value"
-  resources:                      # Optional resource requests (omit for defaults)
-    cpu: "100m"
-    memory: "128Mi"
-```
+`pkg/validator/validator.go::checkReadiness` evaluates top-level
+`validation.constraints` *before* any phase runs. A parse error or a
+failing constraint returns `ErrCodeInvalidRequest` and aborts the
+entire run. **Do not** `slog.Warn; continue` on an evaluator
+error — that masquerades a broken validation YAML as a passing
+constraint, which is an explicit anti-pattern in CLAUDE.md.
 
-**Image tag resolution** (applied by `catalog.LoadWithDataProvider`):
+The `dependencyAffinity` pre-flight (validator catalog entries
+declaring a required dependency) follows the same rule.
 
-1. `:latest` tags are replaced with the CLI version (e.g., `:v0.9.5`) for release builds
-2. On non-release dev builds with a valid commit, `:latest` becomes `:sha-<commit>` (matches the tags `on-push.yaml` pushes for merges to `main`)
-3. Explicit version tags (e.g., `:v1.2.3`) are not modified by steps 1-2
-4. `AICR_VALIDATOR_IMAGE_TAG` overrides the resolved tag on every validator image, including explicit catalog tags. Use this when running `aicr validate` from a feature-branch dev build whose commit has not been merged to `main` (no `:sha-<commit>` image has been published). Typical value: `latest`. Example: `AICR_VALIDATOR_IMAGE_TAG=latest aicr validate --phase performance ...`
-5. `AICR_VALIDATOR_IMAGE_REGISTRY` overrides the registry prefix
+### Performance benchmark tuning
 
-**Digest-pinned references** (`name@sha256:…`) are not rewritten by step 4. A tag override is meaningless against a content-addressable pin, and naive rewriting would corrupt the digest. Step 5's registry override still applies — only the registry prefix changes, the digest is preserved verbatim.
+Performance checks ship validation *methodology* knobs as env vars on
+the catalog entry (overridable via `aicr validate ... --data`).
+Pass/fail thresholds live in the recipe overlay constraints; methodology
+lives with the validator. A value that fails to parse fails the check
+with `ErrCodeInvalidRequest` *before* any workload deploys — never
+silently fall back.
 
-**Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.LoadWithDataProvider`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
+Full list (defaults, semantics) is in the `validators/performance`
+package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
+`nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Inference:
+`inference-perf` (Dynamo + AIPerf).
 
-**Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `v1.ImagePullPolicy(image)` helper (`pkg/validator/v1/job_plan.go`). The rule, in precedence order, is:
+> **Constraint-name contract.** Each NCCL variant looks up a
+> constraint with the *exact* same name as the check. A recipe
+> running the `-net` or `-nvls` variant **must** declare a same-named
+> constraint; the variant will Skip if only the generic
+> `nccl-all-reduce-bw` constraint is present.
 
-1. **Side-loaded refs** (`ko.local/*`, `kind.local/*`) → `Never` (no registry to pull from).
-2. **Digest-pinned refs** (`name@sha256:…`) → `IfNotPresent`. Cryptographic immutability means a cached copy is always correct; forcing `Always` here would make kubelet re-contact the registry every run, which breaks disconnected / air-gapped clusters even though the image itself was never overridden.
-3. **`AICR_VALIDATOR_IMAGE_TAG` is set** → `Always`. Override values are typically mutable (`latest`, `edge`, `main`, or any tag `on-push.yaml` recreates on every merge), so `IfNotPresent` would let a node's previously cached image win over the tag's current target.
-4. **`:latest` suffix** → `Always`. Mutable tag by convention.
-5. **Otherwise** → `IfNotPresent`. Versioned tag assumed immutable enough that caching is a win.
-
-Callers in this repo: the outer validator Job (via `v1.RenderPlan()` in `pkg/validator/v1/job_plan.go`) and the inner AIPerf benchmark pod spec in `buildAIPerfJob` (`validators/performance/inference_perf_constraint.go`). They both delegate to the same helper so their policy can't drift. When adding a new inner workload Job in `validators/<phase>/*`, set `ImagePullPolicy: v1.ImagePullPolicy(<resolved image>)` on the container to keep the invariant.
-
-**Performance phase example — inference perf:**
-
-```yaml
-- name: inference-perf
-  phase: performance
-  description: "Verify inference throughput and TTFT p99 meet thresholds using AIPerf"
-  image: ghcr.io/nvidia/aicr-validators/performance:latest
-  timeout: 50m
-  args: ["inference-perf"]
-```
-
-Paired constraints in an overlay (one per metric the check produces):
-
-```yaml
-validation:
-  performance:
-    checks: [inference-perf]
-    constraints:
-      - name: inference-throughput   # output tokens/sec, >= threshold
-        value: ">= 5000"
-      - name: inference-ttft-p99     # time-to-first-token p99 in ms, <= threshold
-        value: "<= 200"
-```
-
-## Performance Validators
-
-Four performance checks ship today (see [`recipes/validators/catalog.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/validators/catalog.yaml) for the authoritative list), registered in `validators/performance/main.go`:
-
-| Check | Intent | Workload | Constraints |
-|-------|--------|----------|-------------|
-| `nccl-all-reduce-bw` | training | NCCL `all_reduce_perf` under a Kubeflow `TrainJob` | `nccl-all-reduce-bw >= N GB/s` |
-| `nccl-all-reduce-bw-net` | training | NCCL `all_reduce_perf` over network fabric | `nccl-all-reduce-bw-net >= N GB/s` |
-| `nccl-all-reduce-bw-nvls` | training | NCCL `all_reduce_perf` with NVLink Sharp | `nccl-all-reduce-bw-nvls >= N GB/s` |
-| `inference-perf` | inference+Dynamo | `DynamoGraphDeployment` (vLLM, Qwen/Qwen3-0.6B) + AIPerf Job | `inference-throughput >= N tok/s`, `inference-ttft-p99 <= N ms` |
-
-> **Constraint-name contract.** Each NCCL variant looks up a constraint with the *exact* same name as the check (`constraintNameForVariant` in `validators/performance/nccl_all_reduce_bw.go`). A recipe that runs the `-net` or `-nvls` variant **must** declare a same-named constraint; a generic `nccl-all-reduce-bw` constraint only satisfies the legacy default variant and the variant checks will Skip when it's the only one present.
-
-Both follow a consistent lifecycle:
-
-1. **Deploy** a fresh benchmark workload. `inference-perf` always provisions its own `DynamoGraphDeployment` into a per-run namespace (`aicr-inference-perf-<hash>`) derived from `AICR_RUN_ID`, so two concurrent runs cannot collide and a prior run's leftovers cannot be silently adopted. An earlier design sketch had a "discover existing frontend" path — it was intentionally dropped because it admitted ambiguity about which service was being benchmarked on shared clusters.
-2. **Wait for readiness** via the watch API (not polling) on the workload CR's status.
-3. **Run the benchmark** in a K8s Job, capturing stdout with sentinels that survive noisy logs.
-4. **Parse and evaluate** against recipe constraints with a 10% tolerance.
-5. **Defer cleanup** — the per-run namespace is torn down on both success and failure so leaked workloads from interrupted prior runs are reaped on the next invocation.
-
-The inference check injects pod-scheduling (nodeSelector, tolerations, DRA `resourceClaims`) into the unstructured `DynamoGraphDeployment` programmatically rather than via text substitution, to avoid YAML-escape issues with taint values.
-
-**AIPerf runner image.** The benchmark Job spawned by `inference-perf` pulls a pre-built image (`ghcr.io/nvidia/aicr-validators/aiperf-bench:<tag>`) with `aiperf` already `pip install`-ed. The image is published by the same `on-tag.yaml` workflow that publishes the three Go validator images; its Dockerfile at `validators/performance/aiperf-bench.Dockerfile` pins the `AIPERF_VERSION` build arg. Baking the install at release time (rather than `pip install` on every benchmark pod) removes the PyPI runtime dependency, eliminates a ~30 s warmup, and keeps the check air-gap-friendly on clusters with only ghcr.io access.
-
-## Code Walkthrough
-
-The `operator_health.go` check demonstrates the standard pattern:
+### Code walkthrough
 
 ```go
 // validators/deployment/operator_health.go
-
 func checkOperatorHealth(ctx *validators.Context) error {
-    // 1. Use slog for debug output (goes to stderr, streamed to user)
-    slog.Info("listing pods", "namespace", gpuOperatorNamespace)
-
-    // 2. Use ctx.Clientset for K8s API calls
+    slog.Info("listing pods", "namespace", gpuOperatorNamespace)            // → stderr
     pods, err := ctx.Clientset.CoreV1().Pods(gpuOperatorNamespace).List(
-        ctx.Ctx,
-        metav1.ListOptions{LabelSelector: gpuOperatorLabel},
-    )
+        ctx.Ctx, metav1.ListOptions{LabelSelector: gpuOperatorLabel})
     if err != nil {
-        // 3. Return wrapped errors for failures
         return errors.Wrap(errors.ErrCodeInternal, "failed to list pods", err)
     }
-
-    // 4. Print evidence to stdout (captured in CTRF report)
-    fmt.Printf("Found %d gpu-operator pod(s):\n", len(pods.Items))
-    for _, pod := range pods.Items {
-        fmt.Printf("  %s: %s\n", pod.Name, pod.Status.Phase)
+    fmt.Printf("Found %d gpu-operator pod(s):\n", len(pods.Items))          // → CTRF evidence
+    for _, p := range pods.Items {
+        fmt.Printf("  %s: %s\n", p.Name, p.Status.Phase)
     }
-
-    // 5. Return nil for pass, non-nil error for fail
     if runningCount == 0 {
         return errors.New(errors.ErrCodeInternal, "no pods in Running state")
     }
@@ -351,184 +295,247 @@ func checkOperatorHealth(ctx *validators.Context) error {
 }
 ```
 
-**Key patterns:**
+`slog.*` → stderr → streamed live. `fmt.Printf` → stdout → captured
+as CTRF evidence. `return nil` → 0, `return error` → 1,
+`return validators.Skip(reason)` → 2.
 
-- `slog.*` → stderr → streamed live to user
-- `fmt.Printf` → stdout → captured as CTRF evidence
-- `return nil` → exit 0 → passed
-- `return errors.*` → exit 1 → failed (message written to termination log)
-- `return validators.Skip(reason)` → exit 2 → skipped
+### Directory layout
 
-## Directory Layout
-
-```
+```text
 validators/
-├── context.go              # Shared Context type and LoadContext()
-├── runner.go               # Run() entry point, exit code handling
-├── deployment/             # Deployment phase validators
-│   ├── main.go             # Check dispatch map
-│   ├── Dockerfile          # Container image build
-│   ├── operator_health.go  # Individual check implementation
-│   ├── expected_resources.go
-│   └── ...
-├── performance/            # Performance phase validators
-│   ├── main.go                       # Registers nccl-all-reduce-bw, inference-perf
-│   ├── Dockerfile
-│   ├── nccl_all_reduce_bw.go             # Training: NCCL CheckFunc wrapper
-│   ├── nccl_all_reduce_bw_constraint.go  # Training: NCCL pipeline (deploy → bench → parse)
-│   ├── inference_perf.go                 # Inference: AIPerf CheckFunc wrapper (constraint eval)
-│   ├── inference_perf_constraint.go      # Inference: Dynamo deploy → AIPerf → parse pipeline
-│   ├── aiperf-bench.Dockerfile           # Pre-built AIPerf benchmark runner image
-│   └── testdata/                         # Workload YAML templates (NCCL TrainJob, Dynamo CR, DRA claim)
-├── conformance/            # Conformance phase validators
-│   ├── main.go
-│   ├── Dockerfile
-│   └── ...
-└── chainsaw/               # Chainsaw test runner utilities
-    └── ...
+├── context.go                # LoadContext, Context type
+├── runner.go                 # Run() entry, exit-code mapping
+├── helper/pod.go             # PodLifecycle (watch, logs, cleanup)
+├── deployment/               # phase image: deployment
+├── performance/              # phase image: performance (+ aiperf-bench.Dockerfile)
+└── conformance/              # phase image: conformance
 ```
 
-Each phase directory produces one container image. Multiple checks are compiled into a single binary and selected via the first argument.
+Each phase directory compiles to one container image; multiple checks
+share the binary, selected by `os.Args[1]`.
 
-## Testing
+## Component validations (bundle-time)
 
-### Unit Tests
+A **component validation** is an in-process Go function that runs
+during `aicr bundle` to catch component misconfigurations the recipe
+parser and Helm chart won't catch on their own — required flags
+unset, incompatible host-resource requests, missing dependency
+components.
 
-Use fake K8s clients for isolated testing:
+Runs **in-process**, no network, no Kubernetes. Anything requiring a
+real cluster belongs in a container-per-validator check or chainsaw
+health check, not here.
 
-```go
-func TestCheckMyComponent(t *testing.T) {
-    tests := []struct {
-        name    string
-        pods    []corev1.Pod
-        wantErr bool
-    }{
-        {
-            name: "healthy pods",
-            pods: []corev1.Pod{
-                {
-                    ObjectMeta: metav1.ObjectMeta{
-                        Name:   "my-pod",
-                        Labels: map[string]string{"app": "my-component"},
-                    },
-                    Status: corev1.PodStatus{Phase: corev1.PodRunning},
-                },
-            },
-            wantErr: false,
-        },
-        {
-            name:    "no pods found",
-            pods:    []corev1.Pod{},
-            wantErr: true,
-        },
-    }
+### Declaring a validation
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            objects := make([]runtime.Object, len(tt.pods))
-            for i := range tt.pods {
-                objects[i] = &tt.pods[i]
-            }
-            ctx := &validators.Context{
-                Ctx:       context.TODO(),
-                Clientset: fake.NewClientset(objects...),
-                Namespace: "test",
-            }
-            err := checkMyComponent(ctx)
-            if (err != nil) != tt.wantErr {
-                t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
-            }
-        })
-    }
-}
-```
-
-### Local Testing with Docker
-
-Build and run a validator locally against mounted data:
-
-```shell
-# Build the validator image
-docker build -f validators/deployment/Dockerfile -t my-validator .
-
-# Run with mounted snapshot and recipe
-docker run --rm \
-  -v ./snapshot.yaml:/data/snapshot/snapshot.yaml \
-  -v ./recipe.yaml:/data/recipe/recipe.yaml \
-  my-validator my-component
-
-# Check exit code
-echo $?  # 0=pass, 1=fail, 2=skip
-```
-
-Note: K8s API calls will fail locally unless you mount a kubeconfig. For checks that only read snapshot/recipe data, this works without cluster access.
-
-## Testing with Custom Images
-
-When developing validators, you can build and push a custom image to test on a live cluster before merging.
-
-Edit the embedded catalog to point at your custom image and rebuild the CLI:
+Add a `validations:` block to the component entry in
+`recipes/registry.yaml`:
 
 ```yaml
-# recipes/validators/catalog.yaml
-  - name: nccl-all-reduce-bw
-    phase: performance
-    image: my-registry.example.com/my-validator:dev  # custom image
-    timeout: 30m
-    args: ["nccl-all-reduce-bw"]
+components:
+  - name: nodewright-customizations
+    validations:
+      - function: CheckWorkloadSelectorMissing
+        severity: warning              # warning (non-blocking) | error (blocking)
+        conditions:
+          intent: [training]           # AND across keys, OR within a key
+        message: "May cause nodewright to evict running training jobs."
 ```
 
-```shell
-make build
-./dist/aicr_*/aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
-  --image-pull-secret my-registry-secret
+| Field | Required | Notes |
+|-------|----------|-------|
+| `function` | yes | Must match a name registered in `pkg/bundler/validations/checks.go::init()` |
+| `severity` | yes | `warning` appends to report; `error` stops the bundle |
+| `conditions` | no | Keys are criteria fields from `pkg/recipe/criteria.go`. Empty = always runs |
+| `message` | no | Actionable detail appended to function output |
+
+Conditions are evaluated via `checkConditions(recipeResult, conditions)`.
+Keys = AND across, values within a key = OR. When a new accelerator,
+service, OS, intent, or platform is added to `pkg/recipe/criteria.go`,
+audit existing condition blocks per CLAUDE.md's enum-expansion rule.
+
+### Shipping functions
+
+| Function | Checks |
+|----------|--------|
+| `CheckWorkloadSelectorMissing` | nodewright `--workload-selector` set when conditions match |
+| `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set |
+| `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
+
+Registered in `pkg/bundler/validations/checks.go::init()`.
+
+### ValidationFunc signature
+
+Fixed (`pkg/bundler/validations/interface.go`):
+
+```go
+type ValidationFunc func(
+    ctx context.Context,
+    componentName string,
+    recipeResult *recipe.RecipeResult,
+    bundlerConfig *config.Config,
+    conditions map[string][]string,
+) (warnings []string, errors []error)
 ```
 
-The catalog is embedded in the binary at build time, so a rebuild is required. Revert before pushing:
+- `componentName` is the registry name; resolve component refs via `recipeResult.ComponentRefs`.
+- `bundlerConfig` exposes CLI flags and merged values.
+- `conditions` is the YAML block, not the resolved criteria — use `checkConditions(recipeResult, conditions)` to gate.
 
-```shell
-git checkout -- recipes/validators/catalog.yaml
+### Adding a new function
+
+1. Implement in `pkg/bundler/validations/checks.go` matching `ValidationFunc`.
+2. Register: `registerCheck("CheckMyCondition", CheckMyCondition)` in `init()`.
+3. Wire into a component's `validations:` block in `registry.yaml`.
+4. Add a table-driven test in `checks_test.go` exercising every condition branch with synthetic `RecipeResult` and `bundlerConfig`. No cluster, no network.
+
+### Common pitfalls
+
+- **Function name typo in YAML.** Silently skipped — no error raised.
+  Add a test that calls `Get("...")` (or `RegistryHas(...)`) for every
+  shipping check.
+- **Returning an error when you mean a warning.** Errors stop the
+  bundle. If the user can ship through it, return a warning.
+- **Network or K8s calls.** Bundle must work offline. Push cluster
+  probes to surface 2 or 4.
+
+## Chainsaw health checks
+
+A **chainsaw health check** is a YAML test in
+`recipes/checks/<component>/health-check.yaml` that asserts a
+deployed component's state. Runs against a real cluster (typically a
+Kind cluster after `aicr bundle` + `helm install`) via the
+[Chainsaw](https://kyverno.github.io/chainsaw/) test runner. The
+separation from container-per-validator checks: chainsaw is
+**post-deploy** Helm-chart-author sanity, declarative YAML, no Go
+code. Container checks are **part of `aicr validate`** and run as
+part of the AICR validation contract.
+
+**Registration.** A component opts in by declaring
+`healthCheck.assertFile` in `recipes/registry.yaml`:
+
+```yaml
+components:
+  - name: nfd
+    healthCheck:
+      assertFile: checks/nfd/health-check.yaml
 ```
 
-**Use a unique tag for every rebuild.** Catalog entries use pinned image tags, which Kubernetes resolves with `imagePullPolicy: IfNotPresent` by default — so re-pushing the same tag (e.g., `:dev`) leaves previously-pulled nodes running the stale image. In dev loops, suffix the tag per iteration (`:dev-v1`, `:dev-v2`, or `:dev-$(git rev-parse --short HEAD)`) so every rebuild forces a fresh pull cluster-wide. Release builds avoid this entirely because `on-tag.yaml` publishes semver tags that are never reused.
+The path is relative to `recipes/`. `make check-health
+COMPONENT=<name>` invokes Chainsaw against
+`recipes/checks/<name>/health-check.yaml` (no-cluster flag has no
+effect here — chainsaw always needs a real cluster).
 
-### Private Registry Authentication
+**Assertion file** is plain Chainsaw:
 
-If your image is in a private registry, create an image pull secret in the validation namespace and pass it to the CLI with `--image-pull-secret`:
-
-```shell
-# Create the secret (use --dry-run=client | apply for idempotent create-or-update)
-kubectl create secret docker-registry my-registry-secret \
-  --docker-server=nvcr.io \
-  --docker-username='$oauthtoken' \
-  --docker-password=$NGC_API_KEY \
-  -n aicr-validation \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# Run validation with the secret
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --image-pull-secret my-registry-secret
+```yaml
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-health-check
+spec:
+  timeouts: { assert: 5m }
+  steps:
+    - name: validate-deployment-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata: { name: gpu-operator, namespace: gpu-operator }
+              status: { (availableReplicas > `0`): true }
 ```
 
-The secret must be of type `kubernetes.io/dockerconfigjson` and exist in the validation namespace. The `--image-pull-secret` flag can be repeated for multiple registries.
+Use Chainsaw's `assert` (expected match), `error` (unexpected match
+must not exist), and `script` (shell). Always include an existence
+guard before phase assertions so an empty namespace can't yield a
+vacuous pass. Full Chainsaw operator reference:
+<https://kyverno.github.io/chainsaw/latest/operations/check/assert/>.
 
-## Checklist
+**Running:**
 
-When adding a new upstream check:
+```bash
+make check-health COMPONENT=gpu-operator   # one component
+make check-health-all                      # everything in recipes/checks/
+make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
+```
 
-1. Create `validators/{phase}/my_check.go` implementing `CheckFunc`
-2. Register in `validators/{phase}/main.go` dispatch map
-3. Add catalog entry in `recipes/validators/catalog.yaml`
-4. Add the check name to the recipe's `validation.{phase}.checks[]` (or omit to run all)
-5. Write table-driven unit tests with fake K8s clients
-6. Test locally with `docker run` and mounted data
-7. Run `make test` with race detector
+## Constraint evaluation algorithm
+
+`pkg/constraints` is shared by surface 1, surface 2's recipe
+constraints, and the readiness pre-flight gate. The evaluation flow:
+
+1. **Parse.** `ParseConstraintExpression(expr)` strips whitespace,
+   finds the **longest** matching operator prefix (so `>=` wins over
+   `>`), splits into `{Operator, Value}`. Empty value → `ErrCodeInvalidRequest`.
+2. **Classify.** Operators other than `Exact`/`EQ`/`NE` are always
+   version comparisons. `EQ`/`NE` are version comparisons iff the
+   value passes `looksLikeVersion` (starts with digit, has a dot,
+   optional `v` prefix). Everything else is string.
+3. **Evaluate** against the snapshot measurement. Version compares
+   route through `pkg/version.Compare` (semver-aware). String
+   compares are case-sensitive equality.
+4. **Errors propagate, not bools.** A value declared as `>= 1.32.4`
+   that fails to parse as a version returns
+   `errors.WrapWithContext(ErrCodeInvalidRequest, "cannot parse
+   actual version", err, ...)` — not `false`. The caller (validator
+   pre-flight gate) must surface this as a failed constraint, not a
+   passing one. This is the fail-closed invariant.
+
+Tolerance and range semantics (e.g. NCCL's 10% slack) live in the
+**check** that produces the measurement, not in the operator. The
+operator vocabulary stays minimal on purpose.
+
+## Testing checklist
+
+Patterns common to all four surfaces.
+
+- **`--no-cluster` is mandatory** for any test that touches
+  `pkg/validator` or `aicr validate` outside an explicit live-cluster
+  fixture. `validator.New(validator.WithNoCluster(true))` for unit
+  tests; the `--no-cluster` CLI flag for e2e and chainsaw. When
+  `NoCluster` is true, RBAC and Jobs are skipped, all checks report
+  `skipped - no-cluster mode`, but constraints still evaluate.
+- **Table-driven tests.** Required for multi-case logic per CLAUDE.md.
+  See `pkg/constraints/constraint_test.go` and
+  `pkg/bundler/validations/checks_test.go` for the canonical shapes.
+- **Synthetic inputs.** Component validations take a hand-built
+  `RecipeResult` and `bundlerConfig`. Container checks take a
+  `validators.Context` with `fake.NewClientset(...)`.
+- **Chainsaw against Kind.** `make check-health COMPONENT=<name>`
+  runs against the local Kind cluster set up by `make dev-env`. KWOK
+  cannot host chainsaw checks that need real workloads — see
+  [tests.md](tests.md#kwok-matrix-testing) for what KWOK does and doesn't
+  cover.
+- **CTRF output.** Container checks emit JSON via the runner. Assert
+  on status/message in integration tests, not raw stdout.
+
+## Common pitfalls
+
+- **`slog.Warn; continue` on a constraint or `ValidationFunc` parse
+  error.** Masquerades broken YAML as passing. Fail closed — return
+  `ErrCodeInvalidRequest`. (CLAUDE.md anti-pattern.)
+- **Function-name typo in `registry.yaml` `validations:` block.**
+  Silently skipped, no error. Add a registry-lookup test for every
+  shipping function.
+- **`yaml.Marshal` on `map[string]any` for output that feeds CTRF or
+  a digest.** `yaml.v3` walks randomized Go map order. Use
+  `serializer.MarshalYAMLDeterministic`.
+- **Container check that requires a real GPU node profile.** KWOK
+  fakes labels and topology but not GPU runtime. Gate such checks
+  behind a `nvidia.com/gpu` resource check that lets KWOK runs Skip
+  cleanly.
+- **Network calls in a component validation.** Bundle must work
+  offline. Push to a container check or chainsaw check instead.
+- **Re-pushing the same image tag during dev (`:dev`).** K8s default
+  `IfNotPresent` keeps the stale image on previously-pulled nodes.
+  Suffix per iteration (`:dev-v1`, `:dev-$(git rev-parse --short HEAD)`).
 
 ## See Also
 
-- [Validator Extension Guide](../integrator/validator-extension.md) — External validators via `--data`
-- [Validator Catalog Reference](https://github.com/NVIDIA/aicr/tree/main/recipes/validators) — Catalog schema and entries
-- [Validator V2 ADR](https://github.com/NVIDIA/aicr/blob/main/docs/design/002-validatorv2-adr.md) — Architecture decision record
-- [CLI Reference](../user/cli-reference.md#aicr-validate) — Validate command flags
+- [recipe.md](recipe.md) — recipe overlays and the `validation:` block
+- [tests.md](tests.md#kwok-matrix-testing) — recipe matrix tests without GPU hardware
+- [Validator Extension Guide](../integrator/validator-extension.md) — external validators via `--data`
+- [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md) — anti-patterns: fail-closed gates, `slog.Warn; continue`, watch-over-poll, `--no-cluster`
+- [Validator V2 ADR](https://github.com/NVIDIA/aicr/blob/main/docs/design/002-validatorv2-adr.md) — container-per-validator architecture decision
+- [Validator Catalog](https://github.com/NVIDIA/aicr/tree/main/recipes/validators) — authoritative `catalog.yaml`

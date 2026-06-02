@@ -86,7 +86,7 @@ This setting filters by source IP only; it does not add TLS or authentication to
 
 ## Adding Components
 
-New components are added declaratively in `recipes/registry.yaml` — no Go code required. See the [Contributing Guide](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) and [Bundler Development](../contributor/component.md) docs for details.
+New components are added declaratively in `recipes/registry.yaml` — no Go code required. See the [Contributing Guide](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) and [Components](../contributor/component.md) docs for details.
 
 ## Upgrade Notes
 

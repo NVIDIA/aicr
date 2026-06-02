@@ -18,6 +18,12 @@
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
           }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
         }
       ],
       "status": "not_affected",
@@ -34,6 +40,12 @@
           "@id": "pkg:oci/aicr-aiperf-bench",
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
           }
         }
       ],
@@ -52,6 +64,12 @@
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
           }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
         }
       ],
       "status": "not_affected",
@@ -68,6 +86,12 @@
           "@id": "pkg:oci/aicr-aiperf-bench",
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
           }
         }
       ],
@@ -86,6 +110,12 @@
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
           }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
         }
       ],
       "status": "not_affected",
@@ -102,6 +132,12 @@
           "@id": "pkg:oci/aicr-aiperf-bench",
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
           }
         }
       ],
@@ -120,6 +156,12 @@
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
           }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
         }
       ],
       "status": "not_affected",
@@ -136,6 +178,12 @@
           "@id": "pkg:oci/aicr-aiperf-bench",
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
           }
         }
       ],
@@ -154,6 +202,12 @@
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
           }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
         }
       ],
       "status": "not_affected",
@@ -170,6 +224,12 @@
           "@id": "pkg:oci/aicr-aiperf-bench",
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
           }
         }
       ],
@@ -188,6 +248,12 @@
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
           }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
         }
       ],
       "status": "not_affected",
@@ -204,6 +270,12 @@
           "@id": "pkg:oci/aicr-aiperf-bench",
           "identifiers": {
             "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
           }
         }
       ],

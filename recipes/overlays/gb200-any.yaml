@@ -32,7 +32,7 @@
 # inherited checks — same-name constraints from the leaf win, additional
 # checks are appended.
 #
-# See docs/contributor/data.md#criteria-wildcard-overlays for details.
+# See docs/contributor/recipe.md#criteria-wildcard-overlays for details.
 
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1

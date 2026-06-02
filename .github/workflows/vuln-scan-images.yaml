@@ -238,27 +238,51 @@ jobs:
           # images in the matrix.
           vex: .openvex.json
 
-      - name: Extract severity counts
+      - name: Extract severity counts and IDs
         shell: bash
         env:
           IMAGE: ${{ matrix.image }}
         run: |
           set -euo pipefail
           JSON_FILE="${{ steps.scan.outputs.json }}"
-          if [[ -f "${JSON_FILE}" ]]; then
-            CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' "${JSON_FILE}")
-            HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' "${JSON_FILE}")
-            MEDIUM=$(jq '[.matches[] | select(.vulnerability.severity == "Medium")] | length' "${JSON_FILE}")
-            LOW=$(jq '[.matches[] | select(.vulnerability.severity == "Low")] | length' "${JSON_FILE}")
-            NEGLIGIBLE=$(jq '[.matches[] | select(.vulnerability.severity == "Negligible")] | length' "${JSON_FILE}")
-          else
-            CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0; NEGLIGIBLE=0
-          fi
-
           SHORT_NAME="${IMAGE##*/}"
           mkdir -p scan-results
-          echo "${SHORT_NAME}: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low, ${NEGLIGIBLE} negligible" \
-            > "scan-results/${SHORT_NAME}.txt"
+          OUT="scan-results/${SHORT_NAME}.txt"
+
+          if [[ ! -f "${JSON_FILE}" ]]; then
+            echo "${SHORT_NAME}: scan output missing" > "${OUT}"
+            exit 0
+          fi
+
+          # Severity counts from non-suppressed matches.
+          CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' "${JSON_FILE}")
+          HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' "${JSON_FILE}")
+          MEDIUM=$(jq '[.matches[] | select(.vulnerability.severity == "Medium")] | length' "${JSON_FILE}")
+          LOW=$(jq '[.matches[] | select(.vulnerability.severity == "Low")] | length' "${JSON_FILE}")
+          NEGLIGIBLE=$(jq '[.matches[] | select(.vulnerability.severity == "Negligible")] | length' "${JSON_FILE}")
+          # ignoredMatches conflates grype's internal filters with VEX
+          # suppressions, so report VEX hits separately to make it
+          # obvious when a statement actually applied.
+          VEX_APPLIED=$(jq '[.ignoredMatches[]? | select((.appliedIgnoreRules // []) | any(.namespace == "vex"))] | length' "${JSON_FILE}")
+
+          # HIGH+ identifiers for triage. Emits primary ID (often a GHSA)
+          # plus any related CVE aliases so reviewers can cross-reference
+          # NVD without re-running the scan.
+          HIGH_IDS=$(jq -r '
+            [ .matches[]
+              | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
+              | (.artifact.name + " " + .vulnerability.id
+                 + ( (.relatedVulnerabilities // [] | map(.id) | join(","))
+                     | if . == "" then "" else " (" + . + ")" end )) ]
+            | join(", ")' "${JSON_FILE}")
+
+          {
+            echo "${SHORT_NAME}: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low, ${NEGLIGIBLE} negligible (${VEX_APPLIED} VEX-suppressed)"
+            if [[ "${CRITICAL}" -gt 0 || "${HIGH}" -gt 0 ]]; then
+              echo "  HIGH+: ${HIGH_IDS}"
+            fi
+          } > "${OUT}"
+          cat "${OUT}"
 
       - name: Upload scan result
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -306,11 +330,15 @@ jobs:
           RESULTS=""
           for f in scan-results/*.txt; do
             [[ -f "$f" ]] || continue
-            LINE=$(cat "$f")
-            RESULTS="${RESULTS}\\n• ${LINE}"
-            # Parse "name: N critical, N high, ..."
-            C=$(echo "${LINE}" | grep -oP '\d+(?= critical)' || echo 0)
-            H=$(echo "${LINE}" | grep -oP '\d+(?= high)' || echo 0)
+            # First line: summary counts. Subsequent lines (when present):
+            # HIGH+ CVE/GHSA IDs for triage. Both flow into the Slack message.
+            HEADER=$(head -1 "$f")
+            BODY=$(cat "$f")
+            RESULTS="${RESULTS}\\n• ${BODY//$'\n'/\\n  }"
+            # Parse counts from the header line only so trailing ID lines
+            # never contaminate the totals.
+            C=$(echo "${HEADER}" | grep -oP '\d+(?= critical)' || echo 0)
+            H=$(echo "${HEADER}" | grep -oP '\d+(?= high)' || echo 0)
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + C))
             TOTAL_HIGH=$((TOTAL_HIGH + H))
           done

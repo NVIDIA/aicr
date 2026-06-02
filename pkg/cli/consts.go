@@ -31,6 +31,18 @@ const (
 	flagFormat = "format"
 )
 
+// Keyless-signing / OCI-push flag names shared by `validate`, `bundle`,
+// and `evidence publish`. Extracted so the same literal is declared once
+// (goconst flags a string repeated ≥3 times across the package) and the
+// flag wiring stays consistent across the commands that sign+push.
+const (
+	flagIdentityToken  = "identity-token"
+	flagOIDCDeviceFlow = "oidc-device-flow"
+	flagInsecureTLS    = "insecure-tls"
+	flagPlainHTTP      = "plain-http"
+	flagPush           = "push"
+)
+
 // Category labels (urfave/cli flag.Category values, grouping flags in help output).
 const (
 	catInput             = "Input"

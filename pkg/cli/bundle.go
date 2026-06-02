@@ -124,10 +124,10 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		attest:                    boolFlagOrConfig(cmd, "attest", resolved.Attest),
 		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", resolved.VendorCharts),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
-		identityToken:             cmd.String("identity-token"),
-		oidcDeviceFlow:            boolFlagOrConfig(cmd, "oidc-device-flow", resolved.OIDCDeviceFlow),
-		insecureTLS:               boolFlagOrConfig(cmd, "insecure-tls", resolved.InsecureTLS),
-		plainHTTP:                 boolFlagOrConfig(cmd, "plain-http", resolved.PlainHTTP),
+		identityToken:             cmd.String(flagIdentityToken),
+		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
+		insecureTLS:               boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
+		plainHTTP:                 boolFlagOrConfig(cmd, flagPlainHTTP, resolved.PlainHTTP),
 		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
 	}
 
@@ -556,13 +556,13 @@ Package with explicit tag (overrides CLI version):
 				Category: catDeployment,
 			},
 			&cli.StringFlag{
-				Name:     "identity-token",
+				Name:     flagIdentityToken,
 				Usage:    "Pre-fetched OIDC identity token for --attest keyless signing. Skips ambient/browser/device-code flows. Prefer COSIGN_IDENTITY_TOKEN on shared hosts; flag values are visible in process listings (ps, /proc/<pid>/cmdline).",
 				Sources:  cli.EnvVars("COSIGN_IDENTITY_TOKEN"),
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{
-				Name:     "oidc-device-flow",
+				Name:     flagOIDCDeviceFlow,
 				Usage:    "Use the OAuth 2.0 device authorization grant for --attest OIDC instead of opening a browser callback. Useful on headless hosts (bastions, remote build boxes) when --identity-token / COSIGN_IDENTITY_TOKEN and ambient GitHub Actions OIDC are both unavailable.",
 				Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 				Category: catDeployment,
@@ -571,12 +571,12 @@ Package with explicit tag (overrides CLI version):
 			dataFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
 			&cli.BoolFlag{
-				Name:     "insecure-tls",
+				Name:     flagInsecureTLS,
 				Usage:    "Skip TLS certificate verification for OCI registry",
 				Category: catOCIRegistry,
 			},
 			&cli.BoolFlag{
-				Name:     "plain-http",
+				Name:     flagPlainHTTP,
 				Usage:    "Use HTTP instead of HTTPS for OCI registry (for local development)",
 				Category: catOCIRegistry,
 			},

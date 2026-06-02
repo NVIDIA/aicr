@@ -195,6 +195,17 @@ surface item 1 below for the full schema).
    `--emit-attestation`, not a separate command — generation, OCI push,
    signing, and pointer population happen in one invocation.
 
+   **Decoupled publish (post-V1 addition).** `aicr validate
+   --emit-attestation` *without* `--push` leaves an unsigned bundle on
+   disk; `aicr evidence publish <dir> --push <ref>` then runs the
+   sign+push+pointer leg against that pre-built bundle. This lets the
+   cluster-bound validate step (corporate VPN) and the
+   Fulcio/Rekor-bound signing step (Sigstore egress) run on different
+   hosts. Because the bundle is content-addressable and the predicate
+   (with its baked-in `attestedAt`) is signed verbatim from disk, the
+   signed artifact is identical to the one-shot path. See the CLI
+   reference for `aicr evidence publish`.
+
    **Canonical invocation: `--config aicr.yaml`.** PR-A extends
    `pkg/config.AICRConfig` with a `ValidateSpec` sibling of
    `RecipeSpec`/`BundleSpec`, reusing `AttestationSpec` and

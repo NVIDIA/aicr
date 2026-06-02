@@ -6,9 +6,9 @@ Recipe metadata and component configurations for the AICR bundler. Files in this
 
 | Task | Documentation |
 |------|--------------|
-| Recipe architecture | [Data Architecture](../docs/contributor/data.md) |
+| Recipe architecture | [Data Architecture](../docs/contributor/recipe.md) |
 | Create/modify recipes | [Recipe Development Guide](../docs/integrator/recipe-development.md) |
-| Create new bundlers | [Bundler Development Guide](../docs/contributor/component.md) |
+| Add or modify components | [Components](../docs/contributor/component.md) |
 | CLI commands | [CLI Reference](../docs/user/cli-reference.md) |
 
 ## Directory Structure
@@ -52,10 +52,10 @@ go test -v ./pkg/recipe/... -run TestAllMetadataFilesConformToSchema
 go test -v ./pkg/recipe/... -run TestNoDuplicateCriteriaAcrossOverlays
 ```
 
-For details, see [Automated Validation](../docs/contributor/data.md#automated-validation).
+For details, see [Automated Validation](../docs/contributor/recipe.md#automated-validation).
 
 ## See Also
 
-- [Data Architecture](../docs/contributor/data.md)
+- [Data Architecture](../docs/contributor/recipe.md)
 - [Recipe Development Guide](../docs/integrator/recipe-development.md)
-- [Bundler Development Guide](../docs/contributor/component.md)
+- [Components](../docs/contributor/component.md)

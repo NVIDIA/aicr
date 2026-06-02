@@ -22,7 +22,7 @@
 # concrete leaves that declare their own `deployment:` block add to or
 # override this floor without dropping its inherited checks.
 #
-# See docs/contributor/data.md#criteria-wildcard-overlays for details.
+# See docs/contributor/recipe.md#criteria-wildcard-overlays for details.
 
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1

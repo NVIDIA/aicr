@@ -1,484 +1,269 @@
-# Bundler Development Guide
+# Components
 
-Learn how to add new components to AICR.
+A **component** in AICR is a registry entry pointing to a Helm chart or
+Kustomize source that recipes can pull. The catalog lives in
+[`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml);
+per-component default values live under
+[`recipes/components/<name>/`](https://github.com/NVIDIA/aicr/tree/main/recipes/components).
+Overlays bind a component to a cluster shape; bundlers turn that
+binding into a deployer-specific artifact.
 
-## Overview
+Most components need **no Go code**. The declarative path is one
+registry entry plus a `values.yaml`. The legacy
+[`pkg/component/generic.go::ComponentConfig`](https://github.com/NVIDIA/aicr/blob/main/pkg/component/generic.go)
+is marked `Deprecated` — it is unused in production. The live schema
+is [`pkg/recipe/components.go::ComponentConfig`](https://github.com/NVIDIA/aicr/blob/main/pkg/recipe/components.go).
 
-The bundler system converts RecipeInput objects into deployment artifacts (Helm values files, Kubernetes manifests, optional custom manifests). READMEs are generated at the deployer level, not by individual component bundlers.
+For the recipe data model — overlays, mixins, criteria, merge order
+— see [recipe.md](recipe.md). This page is the contributor view for
+adding or changing components.
 
-**Architecture:** Component configuration is declarative in `recipes/registry.yaml` — adding a component requires only a registry entry and values files, no Go code. `pkg/bundler.DefaultBundler` generates Helm per-component bundles from recipes; components are selected by `componentRefs`. CLI `--set` overrides flow through `ApplyMapOverrides()`. The registry declares paths for injecting node selectors / tolerations. Errors use `pkg/errors` codes.
+## Where Does My Change Go?
 
-### Local Format (Shared Bundle Layout)
-
-`pkg/bundler/deployer/localformat` writes the uniform numbered `NNN-<component>/` bundle layout consumed by every deployer. It owns per-folder content (Chart.yaml, values.yaml, cluster-values.yaml, install.sh, templates/, upstream.env). Deployers (`helm`, `helmfile` per [#632](https://github.com/NVIDIA/aicr/issues/632), `argocd`, `argocd-helm`, `flux`) call `localformat.Write()` and then add their own top-level orchestration files (deploy.sh, helmfile.yaml, Application CRs, etc.) — they never re-classify components or duplicate the per-folder writer.
-
-**Classification rule** (single source of truth, in `localformat.classify`):
-
-| Recipe shape | Folder kind | Notes |
+| I want to... | Edit | Guide |
 |---|---|---|
-| `helm.defaultRepository` set, no `manifestFiles` | `KindUpstreamHelm` | upstream chart referenced via `upstream.env`; no Chart.yaml |
-| `helm.defaultRepository` set + `manifestFiles` (mixed) | `KindUpstreamHelm` (primary) + `KindLocalHelm` (`-post` injected) | two adjacent folders; raw manifests deploy post-install |
-| `helm.defaultRepository == ""` + `manifestFiles` | `KindLocalHelm` | manifest-only wrapped chart |
-| `kustomize` (Tag/Path set) | `KindLocalHelm` | `kustomize build` at bundle time → `templates/manifest.yaml` |
+| Make an existing chart or kustomization available to recipes | `recipes/registry.yaml` entry | this page |
+| Set default values for the chart | `recipes/components/<name>/values.yaml` | this page |
+| Pin a chart version for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
+| Add a bundle-time validation warning | `registry.yaml` `validations:` block | [validator.md](validator.md#component-validations-bundle-time) |
+| Add a chainsaw health check | `registry.yaml` `healthCheck.assertFile` + `recipes/checks/<name>/health-check.yaml` | [validator.md](validator.md) |
+| Adjust where node selectors land in chart values | `registry.yaml` `nodeScheduling` paths | this page |
 
-**Load-bearing invariants** (don't violate without changing the design):
+## Helm vs Kustomize
 
-1. **`localformat` never writes deployer-specific files.** `deploy.sh`, `helmfile.yaml`, argocd `Application` CRs, Flux `HelmRelease`s — all produced by the respective deployer after `Write()` returns. This separation is what makes a single layout consumable by every deployer.
-2. **`install.sh` is never name-customized.** It is rendered from one of exactly two templates (`install-upstream-helm.sh.tmpl`, `install-local-helm.sh.tmpl`), parameterized only by data (name, namespace, upstream ref). Name-keyed quirks (kai-scheduler async timeout, nodewright-operator taint cleanup, DRA restart, orphan-CRD scan) stay in `deploy.sh` as name-matched blocks — not in `install.sh`. This is the structural barrier that prevents per-folder scripts from accumulating drift.
-3. **`Write` is deterministic and idempotent.** Same inputs → same on-disk bytes → same `Folder` slice. Map iteration is sorted; no timestamps or random suffixes are embedded.
+A component declares **either** `helm:` **or** `kustomize:` — never
+both. `ComponentRegistry.Validate` rejects the mixed shape at load.
 
-For the full classification table, base-format invariants, and the helm deployer's call site, see `pkg/bundler/deployer/localformat/doc.go` (godoc) and `pkg/bundler/deployer/helm/helm.go::Generate`. Further design history: ticket [#662](https://github.com/NVIDIA/aicr/issues/662).
+| Use `helm:` when | Use `kustomize:` when |
+|---|---|
+| Upstream ships a published Helm chart | Upstream ships only a Git source with `kustomization.yaml` |
+| You need `--set` value overrides | You can accept no `--set` support |
+| You want `nodeScheduling` injection | You will configure scheduling out-of-band (Kustomize ignores Helm value paths) |
 
-## Quick Start
+Kustomize limitations to know up front:
 
-### Adding a New Component (Declarative Approach)
+- `--set <key>:<path>=<value>` flows through Helm value rendering only; Kustomize components silently ignore overrides.
+- `nodeScheduling.system` / `accelerated` paths target Helm values; they do not apply to Kustomize sources.
+- The bundler runs `kustomize build` at bundle time and wraps the output as `templates/manifest.yaml` inside the standard local-format folder (see [index.md](index.md) for the classification rule).
 
-Adding a new component requires **no Go code**. Simply add an entry to the component registry:
+## Adding a Helm Component
 
-**Step 1: Add to `recipes/registry.yaml`**
-
-```yaml
-components:
-  # ... existing components ...
-
-  - name: my-operator
-    displayName: My Operator
-    valueOverrideKeys:
-      - myoperator
-    helm:
-      defaultRepository: https://charts.example.com
-      defaultChart: example/my-operator
-      defaultVersion: v1.0.0
-    nodeScheduling:
-      system:
-        nodeSelectorPaths:
-          - operator.nodeSelector
-        tolerationPaths:
-          - operator.tolerations
-```
-
-**Step 2: Add component values file**
-
-Create `recipes/components/my-operator/values.yaml`:
+**1. Add the registry entry** to `recipes/registry.yaml`:
 
 ```yaml
-# My Operator Helm values
-operator:
-  replicas: 1
-  image:
-    repository: example/my-operator
-    tag: v1.0.0
-```
-
-**Step 3: Reference in recipe**
-
-Add the component to a recipe overlay in `recipes/overlays/`:
-
-```yaml
-componentRefs:
-  - name: my-operator
-    type: Helm
-    version: v1.0.0
-    source: https://charts.example.com
-    valuesFile: components/my-operator/values.yaml
-```
-
-That's it! The bundler system automatically:
-- Loads component configuration from the registry
-- Extracts values from the recipe's valuesFile
-- Applies user value overrides from CLI `--set` flags
-- Applies node selectors and tolerations to configured paths
-- Generates the per-component bundle with the component's values and manifests
-
-### Optional: Custom Manifests
-
-For components that need additional Kubernetes manifests (beyond the Helm chart), add them to `recipes/components/<name>/manifests/`:
-
-**Step 1: Create manifest file**
-
-Create the manifest under `recipes/components/<name>/manifests/`. Files are
-rendered as Helm templates, so they can reference component values via
-`{{ index .Values "<component>" }}` when needed. Abbreviated skeleton (the
-in-tree `recipes/components/network-operator/manifests/nfd-network-rule.yaml`
-is the complete real-world example):
-
-```yaml
-# NFD NodeFeatureRule for Mellanox InfiniBand NICs
-apiVersion: nfd.k8s-sigs.io/v1alpha1
-kind: NodeFeatureRule
-metadata:
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-  name: nfd-network-rule
-spec:
-  rules:
-    - name: nfd-network-rule
-      labels:
-        feature.node.kubernetes.io/pci-15b3.present: "true"
-      # ...matchFeatures elided; see nfd-network-rule.yaml in-tree.
-```
-
-**Step 2: Reference in recipe**
-
-Add the manifest to the component's `manifestFiles` in the recipe:
-
-```yaml
-componentRefs:
-  - name: network-operator
-    type: Helm
-    manifestFiles:
-      - components/network-operator/manifests/nfd-network-rule.yaml
-```
-
-The bundler automatically includes manifest files in the component's `manifests/` directory.
-
-**When to inline values instead.** If the upstream chart already exposes a
-templating hook for the resource you want to ship (e.g. the gpu-operator
-chart renders a dcgm-exporter ConfigMap directly from
-`dcgmExporter.config.data`), put the content in the component's
-`values.yaml` instead of adding a post-manifest. Inlining keeps the resource
-in the same Helm release as its consumer, so install ordering and upgrades
-are handled by Helm and an extra `kubectl apply` pass is unnecessary.
-
-### Registry Configuration Reference
-
-The component registry (`recipes/registry.yaml`) supports these fields:
-
-**Helm Component Configuration:**
-
-```yaml
-- name: component-name              # Required: Component identifier
-  displayName: Component Name       # Required: Human-readable name
-  valueOverrideKeys:               # Optional: Alternative --set prefixes
-    - componentname
-  helm:
-    defaultRepository: https://...  # Optional: Default Helm repo URL
-    defaultChart: repo/chart        # Optional: Default chart name
-    defaultVersion: v1.0.0          # Optional: Default chart version
-  nodeScheduling:
-    system:                        # For system/control-plane components
-      nodeSelectorPaths:
-        - operator.nodeSelector
-      tolerationPaths:
-        - operator.tolerations
-    accelerated:                   # For GPU workload components
-      nodeSelectorPaths:
-        - daemonsets.nodeSelector
-      tolerationPaths:
-        - daemonsets.tolerations
-```
-
-**Kustomize Component Configuration:**
-
-```yaml
-- name: my-kustomize-app            # Required: Component identifier
-  displayName: My Kustomize App     # Required: Human-readable name
-  valueOverrideKeys:               # Optional: Alternative --set prefixes
-    - mykustomize
-  kustomize:
-    defaultSource: https://github.com/example/my-app  # Required: Git repo or OCI reference
-    defaultPath: deploy/production  # Optional: Path to kustomization
-    defaultTag: v1.0.0              # Optional: Git tag, branch, or commit
-```
-
-**Note:** A component must have either `helm` OR `kustomize` configuration, not both. The system will detect the component type based on which configuration is present.
-
-**Note:**
-- Values are written directly to `values.yaml`, not via templates
-- Deployment documentation (README) is generated at the deployer level (helm, argocd, flux)
-- The `pkg/component` package provides helper utilities if custom bundler logic is needed
-
-## Best Practices
-
-### Adding Components
-
-- **Prefer declarative configuration**: Add entries to `registry.yaml` rather than writing Go code
-- Use consistent naming: component name should match the Helm chart name (e.g., `gpu-operator`)
-- Define `valueOverrideKeys` for user-friendly `--set` prefixes (e.g., `gpuoperator` allows `--set gpuoperator:key=value`)
-- Configure `nodeScheduling` paths only for components that need workload placement
-- Create values files under `recipes/components/<name>/` for reusable configurations
-
-### Values Files
-
-- Keep base values (`values.yaml`) minimal and widely applicable
-- Create overlay values (`values-<context>.yaml`) for specific scenarios
-- Document non-obvious settings with comments
-- Use consistent formatting (2-space indent for YAML)
-- **Override release name prefix**: Use `fullnameOverride` to avoid the `aicr-stack-` prefix in resource names. This makes resource names cleaner and more predictable. For example, in `kube-prometheus-stack/values.yaml`:
-  ```yaml
-  # Override release name prefix to avoid aicr-stack- prefix in resource names
-  fullnameOverride: kube-prometheus
-  ```
-  Without this override, resources would be named `aicr-stack-kube-prometheus-*` instead of `kube-prometheus-*`.
-
-### Custom Manifests
-
-- Only add custom manifests when the Helm chart doesn't provide needed functionality
-- Use Helm template syntax (not Go templates) for manifest files
-- Reference values via <code>&#123;&#123; index .Values "component-name" &#125;&#125;</code>
-- Make manifests conditional with <code>&#123;&#123;- if &#125;&#125;</code> blocks
-
-### Testing
-
-- Run `make test` to validate all recipe data
-- Test recipe generation: `aicr recipe --service eks --accelerator gb200`
-- Test bundle generation: `aicr bundle -r recipe.yaml -o ./test-bundle`
-- Verify generated `values.yaml` contains expected settings
-
-#### Testing in a Local Kind Cluster
-
-**Step 0: Create a local kind cluster**
-
-Create a local kind cluster for end-to-end testing.
-
-```bash
-make dev-env
-```
-
-This creates a kind cluster with two nodes and starts Tilt.
-
-**Step 1: Build the aicr binary**
-
-Build the CLI with embedded recipe data and install it:
-
-```bash
-make build && cp dist/aicr_darwin_all/aicr /usr/local/bin/
-```
-
-This compiles the Go code and embeds all files from `recipes/` into the binary. The binary is copied to `/usr/local/bin/` for global access.
-
-**Step 2: Generate the recipe**
-
-Generate a recipe optimized for Kind clusters:
-
-```bash
-aicr recipe --service kind -o recipe.yaml
-```
-
-This creates a `recipe.yaml` file with:
-- Components configured for local development (reduced resources, emptyDir storage)
-- GPU operator with driver installation disabled (uses host drivers via passthrough)
-- cert-manager with extended startupapicheck timeout
-- nvsentinel with network policy disabled
-
-**Step 3: Generate the Helm bundle**
-
-Convert the recipe into a Helm per-component bundle:
-
-```bash
-aicr bundle --recipe recipe.yaml --output bundle
-```
-
-This generates a `bundle/` directory containing:
-- `deploy.sh` - One-command deployment script
-- `README.md` - Deployment guide with ordered steps
-- `recipe.yaml` - Copy of input recipe
-- `<component>/values.yaml` - Component-specific Helm values
-- `<component>/README.md` - Per-component install/upgrade/uninstall
-- `<component>/manifests/` - Additional manifests (if any)
-
-**Step 4: Deploy the bundle**
-
-Run the deployment script:
-
-```bash
-cd bundle
-chmod +x deploy.sh && ./deploy.sh
-```
-
-**Step 5: Verify the deployment**
-
-Check that all pods are running:
-
-```bash
-kubectl get pods -n aicr-stack
-```
-
-All pods should show `Running` or `Completed` status. Common issues:
-- **Pending pods**: Check for resource constraints with `kubectl describe pod <name> -n aicr-stack`
-- **CrashLoopBackOff**: Check logs with `kubectl logs <pod-name> -n aicr-stack`
-- **ImagePullBackOff**: Verify network connectivity and image registry access
-
-**Cleanup:**
-
-To remove the deployment:
-
-```bash
-helm uninstall aicr-stack -n aicr-stack
-kubectl delete namespace aicr-stack
-```
-
-Note: Some cluster-scoped resources (CRDs, ClusterRoles, Webhooks) may need manual cleanup:
-
-```bash
-# Delete leftover webhooks
-kubectl delete mutatingwebhookconfiguration,validatingwebhookconfiguration -l app.kubernetes.io/instance=aicr-stack
-
-# Delete leftover cluster roles
-kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance=aicr-stack
-```
-
-### Documentation
-
-- Update `recipes/README.md` when adding new components
-- Document component-specific settings in values file comments
-- Add examples to `examples/` directory for common use cases
-
-## Common Patterns
-
-### Component Registry Structure
-
-Components are configured in `recipes/registry.yaml`. Here's an example entry:
-
-```yaml
-- name: gpu-operator
-  displayName: GPU Operator
+- name: my-operator
+  displayName: My Operator
   valueOverrideKeys:
-    - gpuoperator
+    - myoperator
   helm:
-    defaultRepository: https://helm.ngc.nvidia.com/nvidia
-    defaultChart: nvidia/gpu-operator
-    defaultVersion: v25.3.3
+    defaultRepository: https://charts.example.com
+    defaultChart: example/my-operator
+    defaultVersion: v1.0.0
+    defaultNamespace: my-operator
   nodeScheduling:
     system:
-      nodeSelectorPaths:
-        - operator.nodeSelector
-        - node-feature-discovery.gc.nodeSelector
-        - node-feature-discovery.master.nodeSelector
-      tolerationPaths:
-        - operator.tolerations
-        - node-feature-discovery.gc.tolerations
-        - node-feature-discovery.master.tolerations
-    accelerated:
-      nodeSelectorPaths:
-        - daemonsets.nodeSelector
-        - node-feature-discovery.worker.nodeSelector
-      tolerationPaths:
-        - daemonsets.tolerations
-        - node-feature-discovery.worker.tolerations
+      nodeSelectorPaths: [operator.nodeSelector]
+      tolerationPaths:   [operator.tolerations]
 ```
 
-### Node Scheduling Configuration
+**2. Create `recipes/components/my-operator/values.yaml`** with the
+chart defaults you want every recipe to start from. Keep this file
+minimal and widely applicable — cluster-specific tweaks belong in
+`values-<context>.yaml` siblings referenced from an overlay.
 
-The bundle command supports `--system-node-selector`, `--system-node-toleration`, `--accelerated-node-selector`, `--accelerated-node-toleration`, and `--nodes` flags.
-
-**How it works:**
-1. Paths are defined in `registry.yaml` under `nodeScheduling` (e.g. `nodeSelectorPaths`, `tolerationPaths`, `nodeCountPaths`)
-2. The bundler automatically applies CLI flag values to those paths
-3. Values are written to the component's `values.yaml` in its per-component bundle directory
-
-The `--nodes` flag (bundle-time only) sets the estimated GPU node count. Components that declare `nodeCountPaths` in the registry receive this value at those paths in their generated Helm values.
-
-**Example CLI usage:**
-```bash
-aicr bundle -r recipe.yaml \
-  --system-node-selector nodeGroup=system-pool \
-  --accelerated-node-selector nvidia.com/gpu.present=true \
-  -o ./bundles
-```
-
-### Value Overrides
-
-Override component values at bundle generation time:
-
-```bash
-# Override GPU Operator driver version
-aicr bundle -r recipe.yaml --set gpuoperator:driver.version=580.82.07 -o ./bundles
-
-# Multiple overrides
-aicr bundle -r recipe.yaml \
-  --set gpuoperator:driver.version=580.82.07 \
-  --set gpuoperator:gds.enabled=true \
-  -o ./bundles
-```
-
-The prefix before `:` matches the component's `valueOverrideKeys` in the registry.
-
-## Deployer Integration
-
-After bundlers generate deployment artifacts, deployers transform them into deployment-specific formats. The deployer framework is separate from bundlers but works with their output.
-
-### How Bundlers and Deployers Work Together
-
-```mermaid
-flowchart LR
-    R[RecipeResult] --> B[Bundlers]
-    B --> A[Artifacts]
-    A --> D[Deployers]
-    D --> O[Deployment Output]
-
-    subgraph "Bundler Output"
-        A1[values.yaml]
-        A2[manifests/]
-        A3[checksums.txt]
-    end
-
-    subgraph "Deployer Output"
-        O1[Argo CD Applications]
-        O2[Helm Charts]
-        O3[README.md]
-    end
-```
-
-### Deployment Order
-
-Deployers respect the `deploymentOrder` field from the recipe to ensure components are deployed in the correct sequence:
-
-| Deployer | Ordering Mechanism |
-|----------|-------------------|
-| `helm` | Components listed in order in README |
-| `argocd` | `sync-wave` annotations (0, 1, 2...) |
-
-**Example Recipe with Deployment Order**:
 ```yaml
-componentRefs:
-  - name: cert-manager
-    version: v1.20.2
-  - name: gpu-operator
-    version: v25.3.3
-  - name: network-operator
-    version: v25.4.0
-deploymentOrder:
-  - cert-manager
-  - gpu-operator
-  - network-operator
+# fullnameOverride avoids the aicr-stack- prefix on resource names.
+fullnameOverride: my-operator
+
+operator:
+  replicas: 1
 ```
 
-### Bundler Output for Deployers
+**3. Optional blocks** on the registry entry:
 
-When the `--deployer` flag is set, bundlers generate standard artifacts that deployers then transform:
+- `validations:` — bundle-time misconfiguration warnings ([validator.md](validator.md#component-validations-bundle-time))
+- `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
+- `storageClassPaths:` — where `--storage-class` is injected
+- `podScheduling.workload.workloadSelectorPaths` — for workload-pod placement
+- `gkeCriticalPriority`, `hasSelfRefCRDs` — narrow service-specific quirks (see godoc on `ComponentConfig` for when these apply)
 
-**For Helm** (`--deployer helm`, default):
-- Generates per-component bundle directories with individual values.yaml
-- Creates component-specific values with installation scripts
-- Includes manifests and deployment instructions per component
+**4. Run `make bom-docs`** and commit the regenerated
+`docs/user/container-images.md` in the same PR. CLAUDE.md treats this
+as a hard rule whenever you change `registry.yaml`, a component's
+`values.yaml`, or any chart version pin. See [BOM regeneration](#bom-regeneration).
 
-**For Argo CD** (`--deployer argocd`):
-- Bundler generates `values.yaml` and `manifests/`
-- Deployer creates `<component>/argocd/application.yaml` with sync-wave annotations
-- Deployer creates `app-of-apps.yaml` at bundle root
-- Applications use multi-source to reference values.yaml and manifests from GitOps repo
+**5. Run `make qualify`** — covers tests, lint, and the recipe-resolution
+suite that parses every registry entry.
 
-### Using Deployers with Bundlers
+## Adding a Kustomize Component
 
-The deployer is specified at bundle generation time:
-
-```bash
-# Default: Helm per-component bundle
-aicr bundle -r recipe.yaml -o ./bundles
-
-# Generate bundles with Argo CD deployer (use --repo to set Git repository URL)
-aicr bundle -r recipe.yaml -o ./bundles --deployer argocd \
-  --repo https://github.com/my-org/my-gitops-repo.git
+```yaml
+- name: my-kustomize-app
+  displayName: My Kustomize App
+  valueOverrideKeys:
+    - mykustomize
+  kustomize:
+    defaultSource: https://github.com/example/my-app
+    defaultPath: deploy/production
+    defaultTag: v1.0.0
 ```
 
-See [CLI Architecture](cli.md#deployer-framework-gitops-integration) for detailed deployer documentation.
+No `recipes/components/<name>/values.yaml` is required — Kustomize
+reads its inputs from the upstream source. Reminder: no `--set`
+overrides, and `nodeScheduling` paths do not apply.
+
+## Schema Reference
+
+Authoritative definitions live in
+[`pkg/recipe/components.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/recipe/components.go).
+One-liner per field:
+
+| Field | Purpose |
+|---|---|
+| `name` | Component identifier; must match `componentRefs[].name` in overlays |
+| `displayName` | Human-readable label used in CLI output and bundle templates |
+| `valueOverrideKeys` | Alt prefixes for `--set <key>:path=value` matching |
+| `helm.defaultRepository` | Helm repo URL injected when an overlay leaves it empty |
+| `helm.defaultChart` | Chart name (e.g. `nvidia/gpu-operator`) |
+| `helm.defaultVersion` | Default chart version |
+| `helm.defaultNamespace` | Install namespace |
+| `kustomize.defaultSource` | Git or OCI source URL |
+| `kustomize.defaultPath` | Subpath within the source |
+| `kustomize.defaultTag` | Git ref / OCI tag |
+| `nodeScheduling.system` | Helm value paths that receive the **control-plane** node selector / tolerations / taints |
+| `nodeScheduling.accelerated` | Helm value paths that receive the **GPU node** selector / tolerations / taints |
+| `nodeScheduling.nodeCountPaths` | Where `--nodes` is written |
+| `podScheduling.workload.workloadSelectorPaths` | Workload-pod placement |
+| `storageClassPaths` | Where `--storage-class` is written |
+| `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
+| `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
+| `gkeCriticalPriority`, `hasSelfRefCRDs` | Narrow service-specific flags (see godoc) |
+
+## `nodeScheduling.system` vs `accelerated`
+
+This is the field most contributors get wrong on first PR.
+
+- `system` — paths into chart values for workloads that must land on
+  **management / control-plane nodes** (e.g., operators, controllers,
+  webhooks). The bundler writes the `--system-node-selector` and
+  `--system-node-toleration` values here.
+- `accelerated` — paths into chart values for workloads that must
+  land on **GPU nodes** (e.g., device-plugin DaemonSets,
+  driver-validation, DCGM exporters). The bundler writes the
+  `--accelerated-node-selector` and `--accelerated-node-toleration`
+  values here.
+
+Concrete example from `gpu-operator`:
+
+```yaml
+nodeScheduling:
+  system:
+    nodeSelectorPaths:
+      - operator.nodeSelector
+      - node-feature-discovery.master.nodeSelector
+    tolerationPaths:
+      - operator.tolerations
+  accelerated:
+    nodeSelectorPaths:
+      - daemonsets.nodeSelector
+      - node-feature-discovery.worker.nodeSelector
+    tolerationPaths:
+      - daemonsets.tolerations
+```
+
+Wrong column = workloads land on the wrong node class. A DaemonSet
+placed under `system` will miss GPU nodes; an operator under
+`accelerated` will refuse to schedule on a cluster with tainted GPU
+nodes only.
+
+## `valueOverrideKeys`
+
+`--set <key>:<path>=<value>` matches via `GetByOverrideKey`:
+
+1. The component `name` is checked first.
+2. Each entry in `valueOverrideKeys` is then checked.
+
+For `gpu-operator` with `valueOverrideKeys: [gpuoperator]`, both
+`--set gpu-operator:driver.version=...` and
+`--set gpuoperator:driver.version=...` resolve to the same component.
+Pick a key that is easier to type (no hyphens) and document it in the
+displayName-adjacent comments if non-obvious. Override keys are
+globally unique — `ComponentRegistry.Validate` rejects duplicates.
+
+## `deploymentOrder`
+
+`RecipeResult.DeploymentOrder` is **derived**, not authored.
+`TopologicalSort` in `pkg/recipe/metadata_store.go` orders components
+by `componentRefs[].dependencyRefs` declared in the overlay. When no
+dependencies are declared, the order falls back to the order in
+which components are listed in the overlay's `componentRefs`. Express
+ordering by declaring `dependencyRefs` on the dependent component, not
+by writing a separate `deploymentOrder` block.
+
+## Local Format and Bundle Classification
+
+The bundler emits a uniform `NNN-<component>/` layout via
+[`pkg/bundler/deployer/localformat`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer/localformat).
+Classification (single source of truth in `localformat.classify`):
+
+| Recipe shape | Folder kind |
+|---|---|
+| `helm.defaultRepository` set, no `manifestFiles` | `KindUpstreamHelm` |
+| `helm.defaultRepository` set + `manifestFiles` | `KindUpstreamHelm` + `KindLocalHelm` (`-post` injected) |
+| `helm.defaultRepository == ""` + `manifestFiles` | `KindLocalHelm` |
+| `kustomize.*Tag` or `*Path` set | `KindLocalHelm` (`kustomize build` → `templates/manifest.yaml`) |
+
+If both `helm` and `kustomize` fields are populated, `Validate`
+rejects the registry entry — there is no precedence rule because the
+shape is invalid. `manifestFiles` are added post-chart; `preManifestFiles`
+ship at sync-wave N-1 (e.g., a Namespace with PSS labels the chart
+pods depend on).
+
+## Deployers
+
+AICR ships five output adapters in
+[`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
+`helm`, `helmfile`, `argocd`, `argocdhelm`, `flux`. Each calls
+`localformat.Write()` and then layers its own orchestration files
+(`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Flux
+`HelmRelease`s). **Components do not need to be deployer-aware** —
+the bundler renders per-deployer from one component definition.
+
+See [index.md](index.md#community-standard-deployment-targets) for
+the deployer matrix.
+
+## BOM Regeneration
+
+`docs/user/container-images.md` is rendered fresh from each Helm
+chart's actual templates by `make bom-docs`. Run it and commit the
+regenerated file in the **same PR** whenever you:
+
+- Add or remove a component
+- Bump a chart version (in `registry.yaml`, an overlay, or a mixin)
+- Change a `values.yaml` in a way that affects which images render
+  (image-repo override, subchart enable/disable, etc.)
+
+`make bom-check` verifies the committed BOM matches a fresh regen
+but is **opt-in only** — not wired into `make qualify`, `make lint`,
+or the merge gate. Do not rely on CI to catch a missed regen.
+
+## Boundary: Components Are Metadata
+
+A component entry describes *what* to deploy and where its values
+land. Components do **not** carry apply, wait, uninstall, rollback,
+or readiness-polling logic — those concerns belong to the deployer
+that consumes the bundle. If you find yourself writing custom apply
+code inside the bundler or under `pkg/component/`, you are on the
+wrong side of the boundary — see
+[index.md "What AICR Is Not"](index.md#what-aicr-is-not).
 
 ## See Also
 
-- [Architecture Overview](index.md) - Complete bundler framework architecture
-- [CLI Architecture](cli.md) - Deployer framework and GitOps integration
-- [CLI Reference](../user/cli-reference.md) - Bundle generation commands
-- [API Reference](../user/api-reference.md) - Programmatic access (recipe generation only)
-- [Component Registry](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) - Declarative component configuration
-- [Recipe Data](https://github.com/NVIDIA/aicr/tree/main/recipes) - Recipe and component data overview
+- [recipe.md](recipe.md) — overlays, mixins, criteria, the recipe data model
+- [validator.md](validator.md#component-validations-bundle-time) — bundle-time component validation checks
+- [validator.md](validator.md) — chainsaw health checks and validator runner
+- [index.md](index.md) — contributor index and architectural boundary
+- [integrator/recipe-development.md](../integrator/recipe-development.md) — end-user recipe authoring
+- [user/component-catalog.md](../user/component-catalog.md) — end-user component catalog
+- [`pkg/recipe/components.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/recipe/components.go) — `ComponentConfig` source of truth
+- [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) — live component catalog

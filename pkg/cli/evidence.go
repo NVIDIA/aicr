@@ -18,27 +18,31 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// evidenceCmd is the parent verb-group for offline operations on
-// recipe-evidence bundles produced by `aicr validate --emit-attestation`.
+// evidenceCmd is the parent verb-group for operations on recipe-evidence
+// bundles produced by `aicr validate --emit-attestation`. Most subcommands
+// are offline; `publish` reaches the registry and Sigstore.
 func evidenceCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "evidence",
 		Category: functionalCategoryName,
-		Usage:    "Inspect and verify recipe evidence bundles.",
-		Description: `Offline operations on recipe-evidence v1 bundles.
+		Usage:    "Manage recipe evidence bundles: digest, publish, verify.",
+		Description: `Operations on recipe-evidence v1 bundles.
 
 Bundles are produced by ` + "`aicr validate --emit-attestation`" + ` and consumed
 by maintainers and CI to verify a recipe contribution without re-running
-the validators against hardware they may not have access to.
+the validators against hardware they may not have access to. Most
+subcommands are offline; ` + "`publish`" + ` reaches the OCI registry and Sigstore.
 
 Subcommands:
 
-  digest  Print the canonical digest of a resolved recipe.
-  verify  Verify a bundle's integrity claims.
+  digest   Print the canonical digest of a resolved recipe.
+  publish  Sign and push an already-emitted bundle, then write its pointer.
+  verify   Verify a bundle's integrity claims.
 
 See docs/design/007-recipe-evidence.md for the trust model.`,
 		Commands: []*cli.Command{
 			evidenceDigestCmd(),
+			evidencePublishCmd(),
 			evidenceVerifyCmd(),
 		},
 	}

@@ -106,26 +106,16 @@ func MaterializeBundle(
 // containing it. Bundles are recognized by recipe.yaml + manifest.json
 // at the candidate root.
 func materializeDir(input string) (*MaterializedBundle, error) {
-	if hasBundleMarkers(input) {
+	if attestation.HasBundleMarkers(input) {
 		return &MaterializedBundle{BundleDir: filepath.Clean(input)}, nil
 	}
 	candidate := filepath.Join(input, attestation.SummaryBundleDirName)
-	if hasBundleMarkers(candidate) {
+	if attestation.HasBundleMarkers(candidate) {
 		return &MaterializedBundle{BundleDir: filepath.Clean(candidate)}, nil
 	}
 	return nil, errors.New(errors.ErrCodeInvalidRequest,
 		"directory "+input+" does not look like a summary bundle "+
 			"(no recipe.yaml / manifest.json at root or under summary-bundle/)")
-}
-
-func hasBundleMarkers(dir string) bool {
-	for _, f := range []string{attestation.RecipeFilename, attestation.ManifestFilename} {
-		info, err := os.Stat(filepath.Join(dir, f))
-		if err != nil || info.IsDir() {
-			return false
-		}
-	}
-	return true
 }
 
 // materializeFromPointer pulls the OCI artifact named in the pointer's
@@ -367,11 +357,11 @@ func fetchAndWriteReferrerLayer(ctx context.Context, repo referrerFetcher, refer
 // resolveBundleDir picks the bundle root from a temp dir holding the
 // pulled or extracted layer contents.
 func resolveBundleDir(dir string) (string, error) {
-	if hasBundleMarkers(dir) {
+	if attestation.HasBundleMarkers(dir) {
 		return dir, nil
 	}
 	candidate := filepath.Join(dir, attestation.SummaryBundleDirName)
-	if hasBundleMarkers(candidate) {
+	if attestation.HasBundleMarkers(candidate) {
 		return candidate, nil
 	}
 	return "", errors.New(errors.ErrCodeInvalidRequest,

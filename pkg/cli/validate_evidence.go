@@ -61,16 +61,25 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 	return &recipeEvidenceConfig{
 		OutDir:      out,
 		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOM),
-		Push:        stringFlagOrConfig(cmd, "push", att.Push),
-		PlainHTTP:   boolFlagOrConfig(cmd, "plain-http", att.PlainHTTP),
-		InsecureTLS: boolFlagOrConfig(cmd, "insecure-tls", att.InsecureTLS),
-		OIDCResolve: bundleattest.ResolveOptions{
-			IdentityToken: cmd.String("identity-token"),
-			AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-			AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-			DeviceFlow:    cmd.Bool("oidc-device-flow"),
-			PromptWriter:  os.Stderr,
-		},
+		Push:        stringFlagOrConfig(cmd, flagPush, att.Push),
+		PlainHTTP:   boolFlagOrConfig(cmd, flagPlainHTTP, att.PlainHTTP),
+		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),
+		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
+	}
+}
+
+// oidcResolveOptionsFromFlags builds the keyless-signing OIDC resolution
+// options from the shared --identity-token / --oidc-device-flow flag pair
+// plus the GitHub Actions ambient-OIDC env vars. Shared by every command
+// that signs an evidence bundle (`validate --push`, `evidence publish`) so
+// the source-precedence wiring stays in one place.
+func oidcResolveOptionsFromFlags(cmd *cli.Command) bundleattest.ResolveOptions {
+	return bundleattest.ResolveOptions{
+		IdentityToken: cmd.String(flagIdentityToken),
+		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+		DeviceFlow:    cmd.Bool(flagOIDCDeviceFlow),
+		PromptWriter:  os.Stderr,
 	}
 }
 

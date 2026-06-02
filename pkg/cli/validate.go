@@ -542,7 +542,7 @@ func validateCmdFlags() []cli.Flag {
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
-			Name: "push",
+			Name: flagPush,
 			Usage: `OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to.
 	Sigstore keyless OIDC signing uses the same precedence chain as ` + "`aicr bundle --attest`" + `:
 	--identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
@@ -550,23 +550,23 @@ func validateCmdFlags() []cli.Flag {
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
-			Name:     "plain-http",
+			Name:     flagPlainHTTP,
 			Usage:    "Use HTTP instead of HTTPS when pushing the evidence OCI artifact (local registry tests).",
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
-			Name:     "insecure-tls",
+			Name:     flagInsecureTLS,
 			Usage:    "Skip TLS verification when pushing the evidence OCI artifact (self-signed registries).",
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
-			Name:     "identity-token",
+			Name:     flagIdentityToken,
 			Usage:    "Pre-fetched OIDC identity token for --push keyless signing. Skips ambient/browser/device-code flows. Prefer COSIGN_IDENTITY_TOKEN on shared hosts; flag values are visible in process listings (ps, /proc/<pid>/cmdline).",
 			Sources:  cli.EnvVars("COSIGN_IDENTITY_TOKEN"),
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
-			Name:     "oidc-device-flow",
+			Name:     flagOIDCDeviceFlow,
 			Usage:    "Use the OAuth 2.0 device authorization grant for --push OIDC instead of opening a browser callback. Useful on headless hosts when --identity-token / COSIGN_IDENTITY_TOKEN and ambient GitHub Actions OIDC are both unavailable.",
 			Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 			Category: catEvidence,
@@ -613,7 +613,7 @@ Run validation without failing on check errors (informational mode):
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "push", "identity-token"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", flagPush, flagIdentityToken); err != nil {
 				return err
 			}
 
