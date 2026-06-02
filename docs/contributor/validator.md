@@ -457,8 +457,9 @@ spec:
 Use Chainsaw's `assert` (expected match), `error` (unexpected match
 must not exist), and `script` (shell). Always include an existence
 guard before phase assertions so an empty namespace can't yield a
-vacuous pass. Full Chainsaw operator reference:
-<https://kyverno.github.io/chainsaw/latest/operations/check/assert/>.
+vacuous pass. See the
+[Chainsaw assert reference](https://kyverno.github.io/chainsaw/latest/operations/check/assert/)
+for the full operator list.
 
 **Running:**
 
