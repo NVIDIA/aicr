@@ -1064,7 +1064,9 @@ aicr bundle [flags]
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
-| `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
+| `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. |
+| `--set-json` | | string[] | Override values with a JSON-encoded **list or object** (repeatable, format: `component:path=<json>`, e.g. `--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'`). Object values deep-merge into existing maps; lists and scalars replace. Takes precedence over `--set` on the same path. See [List and Object Value Overrides](#list-and-object-value-overrides). |
+| `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge semantics. |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
@@ -1243,9 +1245,11 @@ Override any value in the generated bundle files using dot notation:
 
 **Behavior:**
 - **Duplicate keys**: When the same `bundler:path` is specified multiple times, the **last value wins**
-- **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). Arrays can only be replaced entirely via recipe overrides, not via `--set` flags. Use recipe-level overrides in `componentRefs[].overrides` if you need to replace an entire array.
+- **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). `--set` is **scalar-only** — pointing it at a list/object field writes a bare string and produces type-invalid output. To replace an entire array or object from the CLI, use [`--set-json` / `--set-file`](#list-and-object-value-overrides); recipe-level overrides in `componentRefs[].overrides` are the alternative.
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
 - **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes the component; `--set <component>:enabled=true` re-enables a recipe-disabled component. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
+- **Aliases merge**: overrides supplied under both a component's canonical name and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are **combined, not dropped**; the canonical name wins on any shared path. (Same alias-merge behavior as [`--set-json` / `--set-file`](#list-and-object-value-overrides).)
+- **Repeat to add; commas are literal**: To supply multiple overrides, repeat the flag (`--set a:x=1 --set b:y=2`). On the `bundle` command, commas inside a single slice-flag value are taken **literally** (not treated as a value separator), so a value containing a comma — and the comma-heavy JSON passed to `--set-json` — is preserved intact. This applies to all repeatable `bundle` flags (`--set`, `--set-json`, `--set-file`, `--dynamic`, `--*-node-selector`, `--*-node-toleration`, `--workload-selector`).
 
 **Examples:**
 ```shell
@@ -1281,7 +1285,89 @@ aicr bundle -r recipe.yaml \
 aicr bundle -r recipe.yaml \
   --set awsebscsidriver:enabled=false \
   -o ./bundles
+```
 
+#### List and Object Value Overrides
+
+`--set` is scalar-only: it cannot express a list or object value. Pointing it
+at a list field such as `agentgateway.allowedSourceRanges` exits 0 but writes a
+**bare string** at that path, producing a type-invalid manifest — the value may
+be dropped or rejected at apply time. Use `--set-json` (inline) or `--set-file`
+(from a file) for any list or object override.
+
+**Format:** `component:path=<value>` where:
+- `component` / `path` — same component name and dot-separated path as `--set`
+- `<value>` — for `--set-json`, a JSON-encoded value; for `--set-file`, a path
+  to a **regular file** containing a **single** JSON or YAML value (one
+  document — in a multi-document YAML file only the first document is read). A
+  non-regular path (directory, FIFO/named pipe, device, socket) is rejected
+  with a fast validation error rather than hanging or failing later.
+
+**Behavior:**
+- **Object values deep-merge** into any existing map at the path (partial
+  object overrides compose with recipe/base values), matching how inline recipe
+  `componentRefs[].overrides` merge. Within a merged object, a JSON `null`
+  **deletes** that key from the result (same explicit-null semantics as recipe
+  overrides).
+- **Lists and scalars replace** the value at the path.
+- **Precedence**: applied after `--set`, so a `--set-json` / `--set-file` entry
+  wins over a scalar `--set` on the same path. Between the two typed flags, an
+  inline `--set-json` wins over a `--set-file` on the same `component:path`
+  (mirroring Helm's `--set` taking precedence over `-f` value files). Within a
+  single flag, the last entry for a given `component:path` wins.
+- **Overlapping nested paths**: when one override targets a parent object and
+  another targets a key beneath it (e.g. `comp:driver.env=<object>` plus
+  `comp:driver.env.HTTPS_PROXY=<value>`), the deeper, more-specific path wins
+  on the keys they share — regardless of the order the flags are given. The
+  parent object's other keys are preserved.
+- **Aliases merge**: overrides supplied under both a component's canonical name
+  and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are combined,
+  not dropped; the canonical name wins on any shared path.
+- **Node-scheduling paths deep-merge with CLI injection (asymmetric with
+  `--set`)**: a typed override on a node-scheduling path (e.g. `--set-json
+  gpu-operator:nodeSelector=<object>`) **deep-merges into** the selectors and
+  tolerations injected by `--accelerated-node-selector` /
+  `--system-node-selector` / `--*-node-toleration`, rather than suppressing that
+  injection. This is intentional — deep-merge is the point of the typed path —
+  but it differs from scalar `--set`: `--set comp:nodeSelector.x=y` marks that
+  path as user-populated and suppresses CLI injection on it, whereas a typed
+  override composes with the injected keys (so system-injected selector keys
+  remain present alongside it). Use scalar `--set`, or omit the node-scheduling
+  flags, when you need to fully replace an injected selector instead of merging
+  into it.
+- **CLI-only**: `--set-json` / `--set-file` have no `AICRConfig`
+  (`spec.bundle.deployment.set`) or HTTP API (`?set=`) equivalent — those
+  surfaces remain scalar-only. To set a list or object value outside the CLI,
+  use a recipe overlay or `componentRefs[].overrides`.
+- **Not for `enabled`**: the special `enabled` component toggle is honored only
+  via scalar `--set`; passing it through `--set-json` / `--set-file` is rejected
+  with an error (it would not toggle the component and would leak a stray
+  `enabled:` value into the chart).
+
+**Examples:**
+
+```shell
+# Scope the agentgateway inference-gateway to trusted CIDRs (inline JSON list)
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30","10.0.0.0/8"]' \
+  -o ./bundles
+
+# Same override, read from a file (JSON or YAML)
+cat > ranges.yaml <<'EOF'
+- 216.228.127.128/30
+- 10.0.0.0/8
+EOF
+aicr bundle -r recipe.yaml \
+  --set-file agentgateway:allowedSourceRanges=ranges.yaml \
+  -o ./bundles
+
+# Override object keys (deep-merges into the existing map)
+aicr bundle -r recipe.yaml \
+  --set-json gpuoperator:driver.env='{"HTTPS_PROXY":"http://proxy:3128"}' \
+  -o ./bundles
+```
+
+```shell
 # Schedule system components on specific node pool
 aicr bundle -r recipe.yaml \
   --system-node-selector nodeGroup=system-pool \

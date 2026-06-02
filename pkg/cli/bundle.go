@@ -46,6 +46,7 @@ type bundleCmdOptions struct {
 	deployer                   config.DeployerType
 	repoURL                    string
 	valueOverrides             []config.ComponentPath
+	valueOverridesTyped        []config.TypedComponentPath
 	systemNodeSelector         map[string]string
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
@@ -264,6 +265,9 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", resolved.ValueOverrides, config.ParseValueOverrides); err != nil {
 		return nil, err
 	}
+	if opts.valueOverridesTyped, err = resolveTypedOverrides(cmd); err != nil {
+		return nil, err
+	}
 	if opts.dynamicValues, err = resolveComponentPaths(cmd, "dynamic", resolved.DynamicValues, config.ParseDynamicValues); err != nil {
 		return nil, err
 	}
@@ -364,9 +368,21 @@ func resolveOutputTarget(cmd *cli.Command, resolved *appcfg.BundleResolved) (*oc
 //nolint:funlen // bundle command is inherently large (flags + description + action)
 func bundleCmd() *cli.Command {
 	return &cli.Command{
-		Name:     "bundle",
-		Category: functionalCategoryName,
-		Usage:    "Generate deployment bundle from a given recipe.",
+		Name: "bundle",
+		// Treat commas literally in repeatable slice flags rather than as
+		// value separators. Required so --set-json / --set-file can carry
+		// JSON lists/objects (which are comma-heavy) in a single flag, and it
+		// removes a latent footgun where a --set string value containing a
+		// comma would be silently split. urfave/cli splits slice-flag values
+		// on commas by default, and this disables that for EVERY slice flag on
+		// the command (--set, --dynamic, --*-node-selector/-toleration,
+		// --workload-selector) — not just the typed ones. Repeat-to-add is the
+		// only documented form in AICR; comma-packing multiple values into one
+		// flag was never part of AICR's documented contract, so the only
+		// affected usage is a CI script that relied on the framework default.
+		DisableSliceFlagSeparator: true,
+		Category:                  functionalCategoryName,
+		Usage:                     "Generate deployment bundle from a given recipe.",
 		Description: `Generates a deployment bundle from a given recipe.
 Use --deployer argocd to generate Argo CD Applications.
 Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
@@ -428,6 +444,10 @@ Generate Helmfile release graph:
 Override values in generated bundle:
   aicr bundle --recipe recipe.yaml --set gpuoperator:driver.version=570.133.20
 
+Override a list/object value (--set cannot express these):
+  aicr bundle --recipe recipe.yaml \
+    --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'
+
 Set node selectors for GPU workloads:
   aicr bundle --recipe recipe.yaml \
     --accelerated-node-selector nodeGroup=gpu-nodes \
@@ -464,7 +484,26 @@ Package with explicit tag (overrides CLI version):
 				Usage: `Override values in generated bundle files
 	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
 	Use the special 'enabled' key to include/exclude components at bundle time
-	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver)`,
+	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver).
+	--set is scalar-only; use --set-json / --set-file for list or object values.`,
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
+				Name: "set-json",
+				Usage: `Override values with a JSON-encoded scalar, list, or object
+	(format: component:path.to.field=<json>, can be repeated). Use this for
+	typed fields that --set cannot express, e.g.
+	--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'.
+	Object values deep-merge into existing maps; lists and scalars replace.
+	Takes precedence over --set on the same path.`,
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
+				Name: "set-file",
+				Usage: `Override values by reading a JSON/YAML value from a file
+	(format: component:path.to.field=<filepath>, can be repeated). The file
+	holds a single value (list, object, or scalar) for larger structures than
+	--set-json. Merge semantics match --set-json.`,
 				Category: catDeployment,
 			},
 			&cli.StringSliceFlag{
@@ -701,6 +740,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithAttest(opts.attest),
 		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
 		config.WithValueOverridePaths(opts.valueOverrides),
+		config.WithValueOverridesTypedPaths(opts.valueOverridesTyped),
 		config.WithDynamicValuePaths(opts.dynamicValues),
 		config.WithSystemNodeSelector(opts.systemNodeSelector),
 		config.WithSystemNodeTolerations(opts.systemNodeTolerations),

@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -154,6 +155,13 @@ type Config struct {
 	// Map structure: bundler_name -> (path -> value)
 	valueOverrides map[string]map[string]string
 
+	// valueOverridesTyped holds structured (--set-json / --set-file) value
+	// overrides per component. Map structure: component_name -> (path ->
+	// decoded value). Unlike valueOverrides, the values are already-decoded
+	// lists/objects/scalars so list and object fields render as real YAML
+	// structures instead of the bare string `--set` would produce. See #1161.
+	valueOverridesTyped map[string]map[string]any
+
 	// systemNodeSelector contains node selector labels for system components.
 	systemNodeSelector map[string]string
 
@@ -274,6 +282,24 @@ func (c *Config) ValueOverrides() map[string]map[string]string {
 		for path, value := range paths {
 			overrides[bundler][path] = value
 		}
+	}
+	return overrides
+}
+
+// ValueOverridesTyped returns a deep copy of the structured (--set-json /
+// --set-file) value overrides to prevent callers from mutating the Config's
+// backing maps/slices. Returns nil when no typed overrides were supplied.
+func (c *Config) ValueOverridesTyped() map[string]map[string]any {
+	if len(c.valueOverridesTyped) == 0 {
+		return nil
+	}
+	overrides := make(map[string]map[string]any, len(c.valueOverridesTyped))
+	for component, paths := range c.valueOverridesTyped {
+		copied := make(map[string]any, len(paths))
+		for path, value := range paths {
+			copied[path] = serializer.DeepCopyAny(value)
+		}
+		overrides[component] = copied
 	}
 	return overrides
 }
@@ -700,13 +726,14 @@ func WithAppName(name string) Option {
 // NewConfig returns a Config with default values.
 func NewConfig(options ...Option) *Config {
 	c := &Config{
-		deployer:         DeployerHelm,
-		includeChecksums: true,
-		includeReadme:    true,
-		valueOverrides:   make(map[string]map[string]string),
-		dynamicValues:    make(map[string][]string),
-		verbose:          false,
-		version:          "dev",
+		deployer:            DeployerHelm,
+		includeChecksums:    true,
+		includeReadme:       true,
+		valueOverrides:      make(map[string]map[string]string),
+		valueOverridesTyped: make(map[string]map[string]any),
+		dynamicValues:       make(map[string][]string),
+		verbose:             false,
+		version:             "dev",
 	}
 	for _, opt := range options {
 		opt(c)
