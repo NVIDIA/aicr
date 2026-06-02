@@ -18,7 +18,8 @@ scope / You Aren't Gonna Need It (YAGNI)). The review found that an
 evidence-driven
 "validation posture" axis and two of the originally proposed structural
 signals could not satisfy this ADR's own hermeticity and trust constraints
-while `recipes/evidence/` is empty and KWOK results are ephemeral. Those
+while `recipes/evidence/` is empty and Kubernetes WithOut Kubelet (KWOK)
+results are ephemeral. Those
 pieces are preserved as documented intent in *What V1 does not ship*, each
 with a concrete pull-trigger. See *Review notes* at the end.
 
@@ -74,7 +75,7 @@ conservatively, and from signals that are fully reproducible in CI.
    **hermetic, offline, and deterministic** — reproducible from a checkout,
    no GPU, no network.
 3. A single conservative, user-facing **public matrix**, generated and kept
-   current with the same machinery the BOM already uses.
+   current with the same machinery the Bill of Materials (BOM) already uses.
 4. **No false confidence.** Structural signals must never be rendered as
    "validated and performant." Runtime/validation claims come only from
    evidence, and are out of V1 scope (see Non-Goals).
@@ -251,20 +252,21 @@ overstate:
 
 #### V1 public rendering
 
-The matrix leads with the **rolled-up structural
-status** (`pass | warn | fail`), which varies across recipes and is real
-today. It carries a
-**Coverage** column derived from `declared_coverage` — a compact per-phase
-summary (e.g. `R:2 D:4 P:1 C:10`, counts of declared checks per phase) so a
-reader sees at a glance which validations each recipe defines; the detailed
-view (`$GITHUB_STEP_SUMMARY`) lists the named checks per phase in full. It
-also carries a secondary **Evidence** column showing a literal `pending` for
-every recipe in V1 (honest: no evidence exists yet), plus a one-line prose
-note in the hand-written header explaining why. The conservative tri-state vocabulary
-(Supported / Preview / Experimental) is introduced in v1.1 *with* the
-validation axis, when it can actually differentiate recipes — folding
-everything into a uniform "Preview" today would convey no information and
-undersell structurally sound recipes.
+The matrix surfaces, per recipe:
+
+- **Rolled-up structural status** (`pass | warn | fail`) — the lead signal,
+  which varies across recipes and is real today.
+- **Coverage** column, derived from `declared_coverage` — a compact per-phase
+  summary (e.g. `R:2 D:4 P:1 C:10`, counts of declared checks per phase) so a
+  reader sees at a glance which validations each recipe defines; the detailed
+  view (`$GITHUB_STEP_SUMMARY`) lists the named checks per phase in full.
+- **Evidence** column — a literal `pending` for every recipe in V1 (honest:
+  no evidence exists yet), with a one-line prose note in the hand-written
+  header explaining why.
+- **Conservative tri-state vocabulary** (Supported / Preview / Experimental)
+  — introduced in v1.1 *with* the validation axis, when it can actually
+  differentiate recipes; folding everything into a uniform "Preview" today
+  would convey no information and undersell structurally sound recipes.
 
 ### 4. Tooling surface
 
