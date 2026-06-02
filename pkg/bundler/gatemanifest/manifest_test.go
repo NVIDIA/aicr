@@ -61,6 +61,31 @@ func TestRender(t *testing.T) {
 	}
 }
 
+func TestRender_ClusterScopedNamesAreNamespaceQualified(t *testing.T) {
+	got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	s := string(got)
+
+	// Cluster-scoped ClusterRole/ClusterRoleBinding/roleRef must carry the
+	// namespace token suffix so same-component bundles in different namespaces
+	// do not collide (#1011). The namespace token is left for bundle-time
+	// resolution by manifest.Render.
+	const qualified = "gpu-operator-readiness-gate-{{ .Release.Namespace }}"
+	if want := strings.Count(s, "name: "+qualified); want != 3 {
+		t.Errorf("expected 3 namespace-qualified cluster-scoped names (ClusterRole, ClusterRoleBinding, roleRef), got %d", want)
+	}
+
+	// The namespaced ServiceAccount subject and Job stay on the bare name —
+	// identical names in distinct namespaces never collide. Match the exact
+	// line so the suffixed form is not counted.
+	const bare = "  name: gpu-operator-readiness-gate\n"
+	if want := strings.Count(s, bare); want != 3 {
+		t.Errorf("expected 3 bare namespaced names (ServiceAccount, subject, Job), got %d", want)
+	}
+}
+
 func TestRender_HelmHooks(t *testing.T) {
 	got, err := Render("gpu-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerHelm)
 	if err != nil {

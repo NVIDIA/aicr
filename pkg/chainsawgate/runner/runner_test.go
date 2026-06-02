@@ -29,7 +29,7 @@ func TestEvaluate(t *testing.T) {
 	defer func() { runComponentFn = orig }()
 
 	t.Run("all pass", func(t *testing.T) {
-		runComponentFn = func(_ context.Context, _ time.Duration, _, _ string) ComponentResult {
+		runComponentFn = func(_ context.Context, _ time.Duration, _, _, _ string) ComponentResult {
 			return ComponentResult{Result: ResultPass}
 		}
 		bundle := map[string]string{
@@ -54,7 +54,7 @@ func TestEvaluate(t *testing.T) {
 	})
 
 	t.Run("one fail flips AllPass", func(t *testing.T) {
-		runComponentFn = func(_ context.Context, _ time.Duration, _, compDir string) ComponentResult {
+		runComponentFn = func(_ context.Context, _ time.Duration, _, _, compDir string) ComponentResult {
 			if strings.Contains(compDir, "bad") {
 				return ComponentResult{Result: ResultFail, Message: "boom"}
 			}
@@ -81,7 +81,7 @@ func TestEvaluate(t *testing.T) {
 
 	t.Run("component name strips .yaml suffix", func(t *testing.T) {
 		var seenDirs []string
-		runComponentFn = func(_ context.Context, _ time.Duration, _, compDir string) ComponentResult {
+		runComponentFn = func(_ context.Context, _ time.Duration, _, _, compDir string) ComponentResult {
 			seenDirs = append(seenDirs, filepath.Base(compDir))
 			return ComponentResult{Result: ResultPass}
 		}
@@ -98,8 +98,24 @@ func TestEvaluate(t *testing.T) {
 		}
 	})
 
+	t.Run("ConfigPath is forwarded to component runner", func(t *testing.T) {
+		var seenConfig []string
+		runComponentFn = func(_ context.Context, _ time.Duration, _, configPath, _ string) ComponentResult {
+			seenConfig = append(seenConfig, configPath)
+			return ComponentResult{Result: ResultPass}
+		}
+		bundle := map[string]string{"comp.yaml": "# stub"}
+		if _, err := Evaluate(context.Background(), bundle,
+			Options{Namespace: "ns", ConfigPath: "/etc/chainsaw/config.yaml"}); err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+		if len(seenConfig) != 1 || seenConfig[0] != "/etc/chainsaw/config.yaml" {
+			t.Errorf("ConfigPath forwarded: got %v, want [/etc/chainsaw/config.yaml]", seenConfig)
+		}
+	})
+
 	t.Run("empty bundle returns AllPass=true", func(t *testing.T) {
-		runComponentFn = func(_ context.Context, _ time.Duration, _, _ string) ComponentResult {
+		runComponentFn = func(_ context.Context, _ time.Duration, _, _, _ string) ComponentResult {
 			t.Fatalf("runComponentFn should not be called for empty bundle")
 			return ComponentResult{}
 		}

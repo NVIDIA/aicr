@@ -7,7 +7,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: gpu-operator-readiness-gate
+  name: gpu-operator-readiness-gate-gpu-operator
 rules:
   - apiGroups: [""]
     resources: ["pods", "nodes", "namespaces", "services", "configmaps", "events"]
@@ -28,7 +28,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: gpu-operator-readiness-gate
+  name: gpu-operator-readiness-gate-gpu-operator
 subjects:
   - kind: ServiceAccount
     name: gpu-operator-readiness-gate
@@ -36,7 +36,7 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: gpu-operator-readiness-gate
+  name: gpu-operator-readiness-gate-gpu-operator
 ---
 apiVersion: v1
 kind: ConfigMap

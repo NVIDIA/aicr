@@ -32,6 +32,13 @@ import (
 // the localformat writer's manifest.Render against the component's resolved
 // namespace); the gate image and the embedded chainsaw Test are baked in
 // literally.
+//
+// The cluster-scoped ClusterRole and ClusterRoleBinding are namespace-qualified
+// (name suffixed with the resolved namespace) so two bundles deploying the same
+// component to different namespaces (the multi-tenant --app-name case, #1011)
+// do not overwrite each other's cluster-scoped objects. The namespaced
+// ServiceAccount, ConfigMap, and Job keep the bare component name — identical
+// names in distinct namespaces never collide.
 func Render(componentName, image string, testYAML []byte, deployer config.DeployerType) ([]byte, error) {
 	if componentName == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "readiness gate: empty component name")
@@ -53,7 +60,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: %[1]s
+  name: %[1]s-{{ .Release.Namespace }}
 rules:
   - apiGroups: [""]
     resources: ["pods", "nodes", "namespaces", "services", "configmaps", "events"]
@@ -74,7 +81,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: %[1]s
+  name: %[1]s-{{ .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: %[1]s
@@ -82,7 +89,7 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: %[1]s
+  name: %[1]s-{{ .Release.Namespace }}
 ---
 apiVersion: v1
 kind: ConfigMap

@@ -16,6 +16,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -117,6 +119,46 @@ func TestLoop_StabilityWindowAfterEvalLatency(t *testing.T) {
 			t.Fatal("loop did not exit after full stability window")
 		}
 	})
+}
+
+func TestRun_ChainsawConfigFlag(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "comp.yaml"), []byte("# stub"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := evaluateFn
+	defer func() { evaluateFn = orig }()
+
+	var seenConfig string
+	evaluateFn = func(_ context.Context, _ map[string]string, opts runner.Options) (runner.EvalResult, error) {
+		seenConfig = opts.ConfigPath
+		return runner.EvalResult{
+			AllPass:    true,
+			Components: map[string]runner.ComponentResult{"comp": {Result: runner.ResultPass}},
+		}, nil
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"default", []string{"--bundle-dir", dir, "--stability-window=0"}, defaultChainsawConfig},
+		{"override", []string{"--bundle-dir", dir, "--stability-window=0", "--chainsaw-config=/tmp/custom.yaml"}, "/tmp/custom.yaml"},
+		{"empty omits", []string{"--bundle-dir", dir, "--stability-window=0", "--chainsaw-config="}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seenConfig = "sentinel"
+			if got := run(tt.args); got != exitOK {
+				t.Fatalf("run = %d, want %d", got, exitOK)
+			}
+			if seenConfig != tt.want {
+				t.Errorf("ConfigPath = %q, want %q", seenConfig, tt.want)
+			}
+		})
+	}
 }
 
 func TestLoop_DeadlineExceeded(t *testing.T) {

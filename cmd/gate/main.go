@@ -53,6 +53,12 @@ const (
 	exitSignal    = 130 // 128 + SIGINT; SIGTERM caller can read $? as 143
 )
 
+// defaultChainsawConfig is the in-image path of the chainsaw Configuration
+// baked into the aicr-gate image (see cmd/gate/Dockerfile). It pins
+// chainsaw's cleanup behavior so the gate's read-only RBAC contract holds
+// regardless of base-image default drift. Local runs can override or unset it.
+const defaultChainsawConfig = "/etc/chainsaw/config.yaml"
+
 func main() {
 	logging.SetDefaultStructuredLogger("gate", version)
 	os.Exit(run(os.Args[1:]))
@@ -76,7 +82,9 @@ func run(args []string) int {
 		pollInterval    = fs.Duration("poll-interval", 5*time.Minute, "sleep between evaluations")
 		stabilityWindow = fs.Duration("stability-window", 60*time.Second,
 			"continuous-pass duration required for success (0 to disable)")
-		maxWait = fs.Duration("max-wait", 3*time.Hour, "upper bound on total wait time (0 to disable, wait forever)")
+		maxWait        = fs.Duration("max-wait", 3*time.Hour, "upper bound on total wait time (0 to disable, wait forever)")
+		chainsawConfig = fs.String("chainsaw-config", defaultChainsawConfig,
+			"path to a chainsaw Configuration passed via --config (empty to omit)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return exitConfigErr
@@ -106,6 +114,7 @@ func run(args []string) int {
 		PollInterval:    *pollInterval,
 		StabilityWindow: *stabilityWindow,
 		MaxWait:         *maxWait,
+		ConfigPath:      *chainsawConfig,
 	}
 
 	return loop(ctx, bundle, opts, time.Now())

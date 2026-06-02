@@ -68,6 +68,13 @@ type Options struct {
 	// MaxWait is the upper bound on how long the caller may keep waiting
 	// for the bundle to pass before giving up. 0 disables the ceiling.
 	MaxWait time.Duration
+
+	// ConfigPath, when non-empty, is passed to chainsaw via --config. It pins
+	// chainsaw's runtime behavior (e.g. cleanup.skipDelete) so the gate's
+	// contract does not drift with the base image's chainsaw defaults across
+	// version bumps. Empty omits the flag, so local/CLI runs without a
+	// baked-in config still work.
+	ConfigPath string
 }
 
 // ComponentResult is the outcome of running one component's chainsaw test once.
@@ -116,7 +123,7 @@ func Evaluate(ctx context.Context, bundle map[string]string, opts Options) (Eval
 		if wErr := os.WriteFile(filepath.Join(compDir, "chainsaw-test.yaml"), []byte(testYAML), 0o600); wErr != nil {
 			return EvalResult{}, errors.Wrap(errors.ErrCodeInternal, "write test file for "+comp, wErr)
 		}
-		res := runComponentFn(ctx, opts.Timeout, opts.Namespace, compDir)
+		res := runComponentFn(ctx, opts.Timeout, opts.Namespace, opts.ConfigPath, compDir)
 		components[comp] = res
 		if res.Result != ResultPass {
 			allPass = false
@@ -126,18 +133,26 @@ func Evaluate(ctx context.Context, bundle map[string]string, opts Options) (Eval
 	return EvalResult{Components: components, AllPass: allPass}, nil
 }
 
-// RunComponent execs `chainsaw test --no-color --namespace <ns> <compDir>` with
-// the given timeout. On failure, Message holds up to maxMsgLen trailing bytes
-// of combined stdout+stderr. On context timeout, Result is ResultUnknown.
-func RunComponent(ctx context.Context, timeout time.Duration, namespace, compDir string) ComponentResult {
+// RunComponent execs `chainsaw test --no-color --namespace <ns> [--config
+// <configPath>] <compDir>` with the given timeout. A non-empty configPath pins
+// chainsaw's behavior via --config. On failure, Message holds up to maxMsgLen
+// trailing bytes of combined stdout+stderr. On context timeout, Result is
+// ResultUnknown.
+func RunComponent(ctx context.Context, timeout time.Duration, namespace, configPath, compDir string) ComponentResult {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	args := []string{"test", "--no-color", "--namespace", namespace}
+	if configPath != "" {
+		args = append(args, "--config", configPath)
+	}
+	args = append(args, compDir)
+
 	var buf bytes.Buffer
-	// G204: the command is a constant ("chainsaw"); namespace and compDir are
-	// operator-/runner-controlled inputs (a flag value and a temp dir), not
-	// attacker-reachable shell strings.
-	cmd := exec.CommandContext(tctx, "chainsaw", "test", "--no-color", "--namespace", namespace, compDir) //nolint:gosec // see comment above
+	// G204: the command is a constant ("chainsaw"); namespace, configPath, and
+	// compDir are operator-/runner-controlled inputs (flag values and a temp
+	// dir), not attacker-reachable shell strings.
+	cmd := exec.CommandContext(tctx, "chainsaw", args...) //nolint:gosec // see comment above
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 

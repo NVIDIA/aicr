@@ -51,5 +51,10 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /out/gate /gate
 COPY --from=chainsaw /ko-app/chainsaw /usr/local/bin/chainsaw
 
+# Pinned chainsaw Configuration (cleanup.skipDelete: true) passed to
+# `chainsaw test --config` by the gate. The default --chainsaw-config flag
+# points here; see cmd/gate/main.go (defaultChainsawConfig).
+COPY cmd/gate/chainsaw-config.yaml /etc/chainsaw/config.yaml
+
 USER nonroot
 ENTRYPOINT ["/gate"]
