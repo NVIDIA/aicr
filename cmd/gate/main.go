@@ -131,6 +131,13 @@ func loop(ctx context.Context, bundle map[string]string, opts runner.Options, st
 	for {
 		result, err := evaluateFn(ctx, bundle, opts)
 		if err != nil {
+			// A canceled context (SIGINT/SIGTERM) surfaces here as an error
+			// from Evaluate; treat it as an interrupt (130), not a config
+			// error (2).
+			if ctx.Err() != nil {
+				slog.Warn("interrupted")
+				return exitSignal
+			}
 			slog.Error("evaluate failed", "error", err)
 			return exitConfigErr
 		}
@@ -203,11 +210,7 @@ func progressLine(elapsed time.Duration, components map[string]runner.ComponentR
 // shortMsg keeps progress lines readable when chainsaw output is long.
 func shortMsg(s string) string {
 	const maxLen = 60
-	s = strings.TrimSpace(s)
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
+	return runner.TruncHead(strings.TrimSpace(s), maxLen)
 }
 
 // summaryReason picks a short reason for the final deadline-exceeded message.

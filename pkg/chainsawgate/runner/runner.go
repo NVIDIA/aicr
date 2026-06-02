@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -45,7 +46,39 @@ const (
 	ResultUnknown = "Unknown"
 
 	maxMsgLen = 120
+
+	// ellipsis marks where TruncHead/TruncTail dropped bytes.
+	ellipsis = "..."
 )
+
+// TruncHead caps s to at most n bytes, backing off to a UTF-8 rune boundary so
+// a multi-byte rune is never split, and appends an ellipsis when truncation
+// occurred. n is a byte budget, not a rune count. Used for head-trimmed
+// progress/summary lines.
+func TruncHead(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + ellipsis
+}
+
+// TruncTail keeps the last (up to) n bytes of s, advancing to the next UTF-8
+// rune boundary so the retained tail never starts mid-rune, and prefixes an
+// ellipsis when truncation occurred. n is a byte budget, not a rune count.
+// Used for chainsaw failure output where the tail carries the error.
+func TruncTail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	start := len(s) - n
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return ellipsis + s[start:]
+}
 
 // Options holds the parameters that govern one or more evaluations. The gate
 // CLI populates all fields from its flags; the runner reads each field as
@@ -115,6 +148,13 @@ func Evaluate(ctx context.Context, bundle map[string]string, opts Options) (Eval
 	allPass := true
 
 	for key, testYAML := range bundle {
+		// Honor cancellation between components so a SIGINT/SIGTERM (or a
+		// caller deadline) stops the loop instead of spawning more chainsaw
+		// execs. The caller distinguishes this from a config error via ctx.
+		if err := ctx.Err(); err != nil {
+			return EvalResult{}, errors.Wrap(errors.ErrCodeTimeout, "evaluation canceled", err)
+		}
+
 		comp := strings.TrimSuffix(key, ".yaml")
 		compDir := filepath.Join(tmpDir, comp)
 		if mkErr := os.MkdirAll(compDir, 0o700); mkErr != nil {
@@ -157,10 +197,7 @@ func RunComponent(ctx context.Context, timeout time.Duration, namespace, configP
 	cmd.Stderr = &buf
 
 	if err := cmd.Run(); err != nil {
-		out := buf.String()
-		if len(out) > maxMsgLen {
-			out = "..." + out[len(out)-maxMsgLen:]
-		}
+		out := TruncTail(buf.String(), maxMsgLen)
 		if tctx.Err() != nil {
 			return ComponentResult{Result: ResultUnknown, Message: "chainsaw timed out: " + out}
 		}

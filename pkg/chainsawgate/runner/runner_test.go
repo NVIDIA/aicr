@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestEvaluate(t *testing.T) {
@@ -130,6 +131,78 @@ func TestEvaluate(t *testing.T) {
 			t.Errorf("Components on empty bundle: got %d, want 0", len(res.Components))
 		}
 	})
+}
+
+func TestEvaluate_HonorsContextCancellation(t *testing.T) {
+	orig := runComponentFn
+	defer func() { runComponentFn = orig }()
+
+	var calls int
+	runComponentFn = func(_ context.Context, _ time.Duration, _, _, _ string) ComponentResult {
+		calls++
+		return ComponentResult{Result: ResultPass}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before Evaluate runs
+
+	bundle := map[string]string{"a.yaml": "# stub", "b.yaml": "# stub"}
+	_, err := Evaluate(ctx, bundle, Options{Namespace: "ns", Timeout: time.Second})
+	if err == nil {
+		t.Fatal("expected error when context is cancelled, got nil")
+	}
+	if calls != 0 {
+		t.Errorf("expected no component execs after cancellation, got %d", calls)
+	}
+}
+
+func TestTruncHead(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"under budget", "hello", 10, "hello"},
+		{"exact budget", "hello", 5, "hello"},
+		{"ascii truncated", "hello world", 5, "hello..."},
+		{"does not split rune", "aé", 2, "a..."}, // é is 2 bytes at index 1; cut at 2 backs off to 1
+		{"keeps whole multibyte", "aébc", 4, "aéb..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TruncHead(tt.in, tt.n); got != tt.want {
+				t.Errorf("TruncHead(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
+			}
+			if !utf8.ValidString(TruncHead(tt.in, tt.n)) {
+				t.Errorf("TruncHead(%q, %d) produced invalid UTF-8", tt.in, tt.n)
+			}
+		})
+	}
+}
+
+func TestTruncTail(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"under budget", "hello", 10, "hello"},
+		{"exact budget", "hello", 5, "hello"},
+		{"ascii truncated", "hello world", 5, "...world"},
+		{"does not split rune", "éz", 2, "...z"}, // é is 2 bytes; tail start at len-2=1 lands mid-rune -> advance to 2
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TruncTail(tt.in, tt.n); got != tt.want {
+				t.Errorf("TruncTail(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
+			}
+			if !utf8.ValidString(TruncTail(tt.in, tt.n)) {
+				t.Errorf("TruncTail(%q, %d) produced invalid UTF-8", tt.in, tt.n)
+			}
+		})
+	}
 }
 
 func TestLoadBundleDir(t *testing.T) {
