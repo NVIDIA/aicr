@@ -179,7 +179,7 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
    make test
    ```
 
-→ See [Bundler Development Guide](../docs/contributor/component.md) for full details
+→ See [Components](../docs/contributor/component.md) for full details
 
 ### I Need To: Add New API Endpoint
 
@@ -384,7 +384,7 @@ aicr bundle -r recipe.yaml \
 - **[Development Guide](../DEVELOPMENT.md)** – Local development, Make targets, Tilt/Kind setup
 - **[Release Process](../RELEASING.md)** – Maintainer guide for releases, verification, hotfixes
 - **[Architecture Overview](../docs/contributor/index.md)** – System design
-- **[Bundler Development](../docs/contributor/component.md)** – Create new bundlers
+- **[Components](../docs/contributor/component.md)** – Create new bundlers
 - **[API Reference](../docs/user/api-reference.md)** – REST API endpoints
 - **[GitHub Actions README](actions/README.md)** – CI/CD architecture
 - **[API Specification](../api/aicr/v1/server.yaml)** – OpenAPI spec

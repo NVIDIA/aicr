@@ -525,7 +525,7 @@ make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 
 Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates scheduling (node selectors, tolerations, resource requests) but not runtime behavior (no container execution or GPU functionality).
 
-For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Matrix Testing](docs/contributor/kwok-testing.md).
+For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Matrix Testing](docs/contributor/tests.md).
 
 | Command | Description |
 |---------|-------------|
@@ -883,8 +883,8 @@ This comprehensive guide covers:
 ### Project Documentation
 - [Architecture Overview](docs/contributor/index.md) - System design and components
 - [CLI Architecture](docs/contributor/cli.md) - CLI command structure
-- [Data Architecture](docs/contributor/data.md) - Recipe data model
-- [Bundler Development](docs/contributor/component.md) - Creating new bundlers
+- [Data Architecture](docs/contributor/recipe.md) - Recipe data model
+- [Components](docs/contributor/component.md) - Creating new bundlers
 
 ### External Resources
 - [Go Documentation](https://golang.org/doc/)

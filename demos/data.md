@@ -231,7 +231,7 @@ Integrity of the metadata is paramount!
 - [This Demo](https://github.com/NVIDIA/aicr/blob/main/demos/data.md) - Full architecture documentation
 
 ### Documentation
-- [Data Architecture](https://github.com/NVIDIA/aicr/blob/main/docs/contributor/data.md) - Full architecture documentation
+- [Data Architecture](https://github.com/NVIDIA/aicr/blob/main/docs/contributor/recipe.md) - Full architecture documentation
 - [Recipe Development Guide](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/recipe-development.md) - Adding/modifying recipes
 - [CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md) - Recipe command options
 

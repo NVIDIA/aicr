@@ -55,7 +55,7 @@ Recipe metadata files define component configurations for GPU-accelerated Kubern
 
 Recipe files in `recipes/` are embedded at compile time. Integrators can extend or override using the `--data` flag (see [Advanced Topics](#advanced-topics)).
 
-For query matching and overlay merging internals, see [Data Architecture](../contributor/data.md).
+For query matching and overlay merging internals, see [Data Architecture](../contributor/recipe.md).
 
 ## Recipe Structure
 
@@ -113,7 +113,7 @@ spec:
     platform: kubeflow
 ```
 
-Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/data.md#mixin-composition) for details.
+Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/recipe.md#mixin-composition) for details.
 
 Some platforms declare their full component stack inline per leaf overlay rather than via a platform mixin. This is the case for `--platform slurm` and `--platform dynamo`, where each leaf carries hardware-specific tuning (GPU GRES strings, accelerator resource limits) that the mixin merge path cannot represent cleanly. Other platforms like `--platform kubeflow` and `--platform inference` still use the `platform-kubeflow` / `platform-inference` mixins shown above, since their leaf-specific tuning is minimal.
 
@@ -148,7 +148,7 @@ spec:
           value: ">= v25.10.0"
 ```
 
-Only use this pattern when the content is truly uniform across the wildcard dimension — if values diverge per service, keep them inline in each service-specific overlay. NCCL performance thresholds, for example, are explicitly **not** a good fit for this pattern: each service has a different network fabric (EFA, TCPXO, RoCE, etc.) and the same bandwidth number is rarely correct across two fabrics. The intent-scoped `gb200-any-training.yaml` shape that previously carried a cross-service NCCL threshold was retired in #1052 in favor of per-leaf performance blocks. See [Data Architecture](../contributor/data.md#criteria-wildcard-overlays) for when to use wildcard overlays vs mixins.
+Only use this pattern when the content is truly uniform across the wildcard dimension — if values diverge per service, keep them inline in each service-specific overlay. NCCL performance thresholds, for example, are explicitly **not** a good fit for this pattern: each service has a different network fabric (EFA, TCPXO, RoCE, etc.) and the same bandwidth number is rarely correct across two fabrics. The intent-scoped `gb200-any-training.yaml` shape that previously carried a cross-service NCCL threshold was retired in #1052 in favor of per-leaf performance blocks. See [Data Architecture](../contributor/recipe.md#criteria-wildcard-overlays) for when to use wildcard overlays vs mixins.
 
 **Merge order:** `base.yaml` (lowest) → intermediate → leaf → mixins (highest)
 
@@ -693,8 +693,8 @@ valid exempt path — see the bypass policy's "Inappropriate uses."
 
 ## See Also
 
-- [Data Architecture](../contributor/data.md) - Recipe generation process, overlay system, query matching algorithm
-- [Bundler Development Guide](../contributor/component.md) - Creating new bundlers
+- [Data Architecture](../contributor/recipe.md) - Recipe generation process, overlay system, query matching algorithm
+- [Components](../contributor/component.md) - Creating new bundlers
 - [Maintaining Recipe Contributions](../contributor/maintaining.md) - Maintainer runbook for evidence-backed recipe PRs
 - [CLI Reference](../user/cli-reference.md) - CLI commands for recipe and bundle generation
 - [API Reference](../user/api-reference.md) - Programmatic recipe access

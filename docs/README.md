@@ -140,13 +140,15 @@ For developers contributing code, extending functionality, or working on AICR in
 
 | Document | Description |
 |----------|-------------|
-| [Architecture Overview](contributor/index.md) | System design, patterns, and deployment topologies |
-| [CLI Architecture](contributor/cli.md) | Detailed CLI implementation and workflow diagrams |
-| [API Server Architecture](contributor/api-server.md) | HTTP server design, middleware, and endpoints |
-| [API Server Extension Patterns](contributor/api-server-extending.md) | Forward-looking guidance: future enhancements, deployment patterns, reliability/perf/security extensions |
-| [Data Architecture](contributor/data.md) | Recipe metadata system, criteria matching, and inheritance |
-| [Bundler Development](contributor/component.md) | Guide for creating new bundlers |
-| [Validator Development](contributor/validator.md) | Writing upstream Go validator checks |
+| [Architecture Overview](contributor/index.md) | System design, boundaries, package map, "where does my change go" decision matrix |
+| [Recipes, Overlays, and Mixins](contributor/recipe.md) | Recipe data model: registry, overlays, mixins, resolver internals |
+| [Components](contributor/component.md) | Adding a Helm or Kustomize component to the registry |
+| [Collectors](contributor/collector.md) | Adding a snapshot collector for cluster, OS, or GPU state |
+| [Validators](contributor/validator.md) | All four validation surfaces: constraints, container-per-validator, bundle-time, chainsaw |
+| [CLI](contributor/cli.md) | CLI internals, command inventory, `pkg/client/v1` facade boundary |
+| [API Server](contributor/api-server.md) | `aicrd` middleware chain, handler-as-adapter pattern, adding an endpoint |
+| [Testing](contributor/tests.md) | Unit, chainsaw, KWOK matrix, e2e — and the `make qualify` gate |
+| [Maintaining AICR](contributor/maintaining.md) | Release runbook and recipe-evidence review workflow |
 
 ### Integrator Documentation
 
