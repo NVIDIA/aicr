@@ -166,8 +166,8 @@ so the line between "ship" and "defer" is explicit and revisitable.
 
 Each combination is scored from signals that are **all hermetic and offline**
 (reproducible from a checkout, no GPU, no network). Three signals are
-**graded** (they move the `A`–`F` grade); one is a captured **descriptor**
-(surfaced, never graded):
+**graded** (they move the rolled-up status); one is a captured **descriptor**
+(surfaced, never scored):
 
 | Dimension | Role | Signal | Source |
 |---|---|---|---|
@@ -183,17 +183,34 @@ check-nvidia-smi]`), not merely whether a phase is present. It is the
 **declared** (static) side of validation coverage; the **declared-vs-run**
 side needs the evidence predicate's executed phases and is deferred with the
 validation axis (`coverage_declared_vs_run`, deferred table). It is rendered
-informationally and **does not move the grade** — a deliberately-minimal
+informationally and **does not move the status** — a deliberately-minimal
 recipe (e.g. the Slurm leaf that drops K8s checks) must not be penalized for
 declaring fewer checks.
 
 Per-dimension state (graded dimensions): `pass | warn | fail |
-not-applicable | unknown`. Grade: `A` all `pass`; `B` one `warn`; `C` ≥2
-`warn` or a non-blocking `not-applicable` gap; `D` one `fail` outside
-`resolves`; `F` `resolves: fail`. Transient resolver errors
+not-applicable | unknown`. These roll up to a single **status** per recipe:
+`fail` if any graded dimension fails (including `resolves`), else `warn` if
+any warns, else `pass`. Transient resolver errors
 (`ErrCodeTimeout`/`ErrCodeInternal`) yield `unknown` and are **held, not
-graded** — re-run rather than penalize. `unknown` is a representable value in
-the serialized grade, never an empty field a consumer could misread as `A`.
+rolled up** — re-run rather than penalize; `unknown` is a representable value,
+never an empty field a consumer could misread as `pass`.
+
+V1 deliberately surfaces only this tri-state, **not** an A–F letter grade. A
+letter on a surface labelled "health" reads as a deploy-readiness verdict
+beyond what v1 computes, and one symbol overloads two distinct questions —
+*how structurally sound?* and *how validated?* — that a reader correctly
+reads as one (a `B` could mean either). This is the same argument §3 applies
+to the Supported/Preview/Experimental vocabulary, applied to the grade:
+letter grades are deferred until the validation axis can fuse into them
+(deferred table).
+
+**Compute budget.** The dominant cost is the `--no-cluster` constraint replay
+across the ~50 leaf combos. The target is a sub-minute generator run, well
+inside the weekly cadence's tolerance. If it grows past a few minutes, the
+redesign levers — in order — are: cache per-combo results keyed by the
+resolved-recipe digest; parallelize the replay; or drop inline replay from
+the scheduled job and gate it to PRs touching `recipes/**`. None are needed
+at v1 scale.
 
 **Two originally proposed structural signals are deferred, not dropped:**
 - `chart_drift` (upstream image drift on a pinned chart) requires a live
@@ -232,8 +249,9 @@ overstate:
   will distinguish `unattested` (never validated) from aged-but-verified
   states; these are different trust statements and will not share a label.
 
-**V1 public rendering.** The matrix leads with the **structural grade**
-(`A`–`F`), which varies across recipes and is real today. It carries a
+**V1 public rendering.** The matrix leads with the **rolled-up structural
+status** (`pass | warn | fail`), which varies across recipes and is real
+today. It carries a
 **Coverage** column derived from `declared_coverage` — a compact per-phase
 summary (e.g. `R:2 D:4 P:1 C:10`, counts of declared checks per phase) so a
 reader sees at a glance which validations each recipe defines; the detailed
@@ -277,7 +295,7 @@ follow existing conventions (`pkg/cli/root.go`, `pkg/cli/consts.go`):
 `--format json|yaml|table` (serialization; reuse `formatFlag()`, default
 `table`), `-o`/`--output` (destination), `--data`, `--criteria-strict`. The
 `table` view has **one column per criteria dimension** (service / accelerator
-/ os / intent / platform) plus the leaf name, structural grade, and a compact
+/ os / intent / platform) plus the leaf name, structural status, and a compact
 declared-coverage summary, so a row maps 1:1 to
 `aicr recipe --service … --accelerator …` — i.e. users can round-trip
 enumeration → generate/bundle. The `json`/`yaml` views emit the full
@@ -291,12 +309,15 @@ report does not serialize usefully through the generic table writer
 user-facing verb. Pull-trigger: a user asks to compute health for one
 ad-hoc combo outside the generated doc.
 
-**Business logic — new `pkg/health` package.** Not `pkg/recipe`:
-`pkg/evidence/attestation` already imports `pkg/recipe`, so placing health
-in `pkg/recipe` and importing evidence (needed by the deferred axis) would
-close a `recipe → evidence → recipe` cycle. A standalone `pkg/health` that
-depends on both is acyclic. V1 dependencies: `pkg/recipe`, `pkg/serializer`,
-`pkg/errors`, `pkg/defaults`. Sketch:
+**Business logic — new `pkg/health` package.** V1 has no dependency on
+`pkg/evidence`, so health hosted in `pkg/recipe` would compile cleanly today;
+the standalone package is a **forward-looking boundary choice, not a v1
+requirement.** It exists to keep the v1.1 evidence import acyclic:
+`pkg/evidence/attestation` already imports `pkg/recipe`, so once the
+validation axis imports evidence, health living in `pkg/recipe` would close a
+`recipe → evidence → recipe` cycle. A standalone `pkg/health` depending on
+both stays acyclic and avoids a v1.1 package move. V1 dependencies:
+`pkg/recipe`, `pkg/serializer`, `pkg/errors`, `pkg/defaults`. Sketch:
 
 ```go
 package health
@@ -319,7 +340,7 @@ type DeclaredCoverage struct {
 }
 
 type StructureHealth struct {
-    Grade      string            // A–F, or "unknown" (held); from graded dimensions only
+    Status     string            // pass | warn | fail | unknown (held); rolled up from graded dimensions
     Dimensions map[string]string // graded dimension → state
     Detail     map[string]string // graded dimension → human note
     Coverage   DeclaredCoverage  // descriptor: which validations are defined (not graded)
@@ -403,6 +424,7 @@ an owner, an advisory matrix silently goes stale — and a stale public
 | OCI-sourced evidence freshness | A trusted-registry allowlist for attestation pulls in CI |
 | `/v1/health` REST endpoint | A first hosted/automation consumer that needs health per request |
 | Conservative tri-state public vocabulary (Supported/Preview/Experimental) | The validation axis lands and can differentiate recipes |
+| Letter grades (A–F) on the matrix | The validation axis lands and can fuse into a single graded verdict |
 | Blocking merge gate on health | Health signals mature enough that failures are author-fixable |
 | External dashboard / Pages site / status badges | Demand for a surface outside the docs site |
 
