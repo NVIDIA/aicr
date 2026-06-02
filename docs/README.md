@@ -1,222 +1,110 @@
-# AI Cluster Runtime (AICR): An Overview
+# AI Cluster Runtime (AICR)
 
-NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the complexity of deploying GPU-accelerated Kubernetes infrastructure. By moving away from static documentation and toward automated configuration generation, AICR ensures that AI/ML workloads run on infrastructure that is validated, optimized, and secure.
+NVIDIA AI Cluster Runtime (AICR) generates validated, reproducible
+configuration artifacts for GPU-accelerated Kubernetes clusters.
+Given a description of your environment — cloud, accelerator, OS,
+intent — AICR emits the Helm, Argo CD, Flux, or Helmfile artifacts
+your deployment tool consumes. The output is hardware-aware,
+version-locked, and backed by SLSA Level 3 provenance.
+
+For the project pitch, supported environments, and a feature
+overview, see the [repository README](https://github.com/NVIDIA/aicr).
+
+## Find Your Path
+
+| If you are a... | Start here |
+|-----------------|-----------|
+| **User** — operator deploying AICR to provision or validate a cluster | [User Guide](user/index.md) |
+| **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](integrator/automation.md) |
+| **Contributor** — developer extending AICR or shipping recipes | [Contributor Guide](contributor/index.md) |
+
+### User Guide
+
+For operators running `aicr` against real clusters.
+
+| Topic | Doc |
+|-------|-----|
+| Install the CLI | [Installation](user/installation.md) |
+| Every command and flag | [CLI Reference](user/cli-reference.md) |
+| REST API for `aicrd` | [API Reference](user/api-reference.md) |
+| Run the snapshot agent in-cluster | [Agent Deployment](user/agent-deployment.md) |
+| Validate a recipe against a live cluster | [Validation](user/validation.md) |
+| Components that can appear in a recipe | [Component Catalog](user/component-catalog.md) |
+| Air-gapped mirroring | [Air-Gap Mirror](user/air-gap-mirror.md) |
+
+### Integrator Guide
+
+For pipelines and platforms that call AICR programmatically or host
+`aicrd`.
+
+| Topic | Doc |
+|-------|-----|
+| CI/CD integration patterns | [Automation](integrator/automation.md) |
+| Self-host `aicrd` on Kubernetes | [Kubernetes Deployment](integrator/kubernetes-deployment.md) |
+| Add or modify recipe metadata | [Recipe Development](integrator/recipe-development.md) |
+| Ship custom validators via `--data` | [Validator Extension](integrator/validator-extension.md) |
+| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE networking](integrator/gke-tcpxo-networking.md), [Talos](integrator/talos-integration.md) |
+
+### Contributor Guide
+
+For developers working on AICR itself.
+
+| Topic | Doc |
+|-------|-----|
+| Architecture, boundaries, package map | [Architecture Overview](contributor/index.md) |
+| Recipes, overlays, mixins | [Recipes](contributor/recipe.md) |
+| Adding a component | [Components](contributor/component.md) |
+| Adding a snapshot collector | [Collectors](contributor/collector.md) |
+| All four validation surfaces | [Validators](contributor/validator.md) |
+| CLI internals | [CLI](contributor/cli.md) |
+| API server internals | [API Server](contributor/api-server.md) |
+| Testing surfaces and the `make qualify` gate | [Testing](contributor/tests.md) |
+| Release runbook | [Maintaining AICR](contributor/maintaining.md) |
+
+## The Four-Stage Workflow
+
+```text
+┌──────────┐    ┌────────┐    ┌──────────┐    ┌────────┐
+│ Snapshot │───▶│ Recipe │───▶│ Validate │───▶│ Bundle │
+└──────────┘    └────────┘    └──────────┘    └────────┘
+   capture       generate       check          emit
+   cluster       optimized      constraints    deployment
+   state         config         vs. actual     artifacts
+```
+
+Each stage produces a serializable artifact and is independently
+invocable. Stages can be chained or run standalone, and inputs and
+outputs flow through files, stdout, or Kubernetes ConfigMaps
+(`cm://namespace/name`). For the CLI walkthrough see
+[CLI Reference](user/cli-reference.md); for the architecture see
+[contributor/index.md](contributor/index.md).
 
 ## Glossary
 
-| Term | Description |
-|------|-------------|
-| **Snapshot** | A captured state of a system including OS, kernel, Kubernetes, GPU, and SystemD configuration. Created by `aicr snapshot` or the Kubernetes agent. |
-| **Recipe** | A generated configuration recommendation containing component references, constraints, and deployment order. Created by `aicr recipe` based on criteria or snapshot analysis. |
-| **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke/kind/lke/bcm), `accelerator` (h100/h200/gb200/b200/a100/l40/rtx-pro-6000), `intent` (training/inference), `os` (ubuntu/rhel/cos/amazonlinux/talos), `platform` (dynamo, kubeflow, nim, runai, slurm), and `nodes`. |
-| **Overlay** | A recipe metadata file that extends the base recipe for specific environments. Overlays are matched against criteria using asymmetric matching. |
-| **Mixin** | A composable recipe fragment (`kind: RecipeMixin`) that carries only `constraints` and `componentRefs`. Mixins live in `recipes/mixins/`, are excluded from overlay discovery, and are referenced by leaf overlays via `spec.mixins` to share orthogonal content (e.g., OS constraints, platform components) without duplication. See [ADR-005](design/005-overlay-refactoring.md). |
-| **Bundle** | Deployment artifacts generated from a recipe: Helm values files, Kubernetes manifests, installation scripts, and checksums. |
-| **Bundler** | A plugin that generates bundle artifacts for a specific component (e.g., GPU Operator bundler, Network Operator bundler). |
-| **Deployer** | A plugin that transforms bundle artifacts into deployment-specific formats: `helm` (per-component bundles, default), `argocd` and `argocd-helm` (Applications with sync-waves), `flux` (HelmReleases with dependsOn ordering), `helmfile` (declarative release graph driven by the upstream helmfile CLI). |
-| **Component** | A deployable software package (e.g., GPU Operator, Network Operator, cert-manager). Components have versions, Helm sources, and configuration values. |
-| **ComponentRef** | A reference to a component in a recipe, including version, source repository, values file, and dependency references. |
-| **Constraint** | A validation rule in a recipe specifying required system conditions (e.g., `K8s.server.version >= 1.31`, `OS.release.ID == ubuntu`). Constraints can have severity (error/warning), remediation guidance, and units. |
-| **Validation Phase** | A stage of validation in the deployment lifecycle: deployment (components), performance (system), conformance (workloads). Readiness constraints are evaluated implicitly before any phase. |
-| **ValidationConfig** | Configuration in a recipe defining phase-specific checks, constraints, expected resources, and node selection for validation. |
-| **Measurement** | A captured data point from the system organized by type (K8s, OS, GPU, SystemD), subtype, and key-value readings. |
-| **Specificity** | A score indicating how specific a recipe's criteria is (number of non-"any" fields). More specific recipes are applied later during merge. |
-| **Asymmetric Matching** | The criteria matching algorithm where recipe "any" = wildcard (matches any query), but query "any" ≠ specific recipe (prevents overly-specific matches). |
-| **ConfigMap URI** | A URI format (`cm://namespace/name`) for reading/writing snapshots and recipes directly to Kubernetes ConfigMaps. |
-| **SLSA** | Supply-chain Levels for Software Artifacts. AICR releases achieve SLSA Build Level 3 with provenance attestations. |
-| **SBOM** | Software Bill of Materials. A complete inventory of dependencies provided for binaries (SPDX via GoReleaser) and containers (SPDX JSON via Syft). |
+Reference for the terms used across the docs site.
 
-## Why AICR?
-
-Deploying high-performance AI infrastructure is historically complex. Administrators must navigate a "matrix" of dependencies, ensuring compatibility between the Operating System, Kubernetes version, GPU drivers, and container runtimes.
-
-### The Challenge: The "Old Way"
-
-Previously, administrators relied on static documentation and manual installation guides. This approach presented several significant challenges:
-*   **Complexity:** Administrators had to manually track compatibility matrices across dozens of components (e.g., matching a specific GPU Operator version to a specific driver and K8s version).
-*   **Human Error:** Manual copy-pasting of commands and flags often led to configuration drift or broken deployments.
-*   **Documentation Drift:** Static guides (like Markdown files) quickly become outdated as new software versions are released, leading to "documentation drift".
-*   **Lack of Optimization:** Generic installation guides rarely account for specific hardware differences (e.g., H100 vs. GB200) or workload intents (Training vs. Inference).
-
-### The Solution: Automated Approach
-
-AICR replaces manual interpretation of documentation with an **automated approach**. It treats infrastructure configuration as code, providing a deterministic engine that generates the exact artifacts needed for a specific environment.
-
-**Key Benefits:**
-1.  **Deterministic & Validated:** The system guarantees that the inputs (your system state) always produce the same valid outputs, tested against NVIDIA hardware.
-2.  **Hardware-Aware Optimization:** AICR detects the specific GPU type (e.g., H100, A100, GB200) and OS to apply hardware-specific tuning automatically.
-3.  **Speed:** Deployment preparation drops from hours of reading and configuration to minutes of automated generation.
-4.  **Supply Chain Security:** All artifacts are backed by SLSA Build Level 3 attestations and Software Bill of Materials (SBOMs), ensuring the software stack is secure and verifiable.
-
-## How AICR Works
-
-AICR simplifies operations through a logical four-stage workflow handled by the `aicr` command-line tool. This workflow transforms a raw system state into a deployable package.
-
-### Step 1: Snapshot (Capture Reality)
-
-Before configuring anything, AICR needs to understand the environment.
-*   **What it does:** The system captures the state of the OS, SystemD services, Kubernetes version, and GPU hardware.
-*   **How it helps:** It eliminates guesswork. Instead of assuming what hardware is present, AICR measures it directly using the CLI or a Kubernetes Agent.
-*   **Automation:** The agent can run as a Kubernetes Job, writing the snapshot directly to a ConfigMap, enabling fully automated auditing without manual intervention.
-
-### Step 2: Recipe (Generate Recommendations)
-
-Once the system state is known, AICR generates a "Recipe"—a set of configuration recommendations.
-*   **What it does:** It matches the snapshot against a database of validated rules (overlays). It selects the correct driver versions, kernel modules, and settings for that specific environment.
-*   **Intent-Based Tuning:** Users can specify an "Intent" (e.g., `training` or `inference`). AICR adjusts the recipe to optimize for throughput (training) or latency (inference).
-*   **Asymmetric Matching:** The criteria matching algorithm ensures generic queries (e.g., `--service eks --intent training`) only match generic recipes, not hardware-specific ones. Recipe "any" = wildcard, query "any" ≠ specific recipe.
-*   **How it helps:** It ensures version compatibility and applies expert-level optimizations automatically, acting as a dynamic compatibility matrix.
-
-### Step 3: Validate (Check Compatibility)
-
-Before deploying, AICR can validate that a target cluster meets the recipe requirements using multi-phase validation.
-*   **What it does:** It compares recipe constraints (version requirements, configuration settings) against actual measurements from a cluster snapshot across different validation phases.
-*   **Validation Phases:**
-    - **Readiness**: Validates infrastructure prerequisites (K8s version, OS, kernel, GPU hardware)
-    - **Deployment**: Validates component deployment health and expected resources
-    - **Performance**: Validates system performance and network fabric health
-    - **Conformance**: Validates workload-specific requirements
-*   **Constraint Types:** Supports version comparisons (`>=`, `<=`, `>`, `<`), equality (`==`, `!=`), and exact match for configuration values.
-*   **How it helps:** It catches compatibility issues before deployment, validates component health after deployment, and ensures performance requirements are met. Ideal for CI/CD pipelines with `--fail-on-error` flag and phased deployment validation.
-
-### Step 4: Bundle (Create Artifacts)
-
-Finally, AICR converts the abstract Recipe into concrete deployment files.
-*   **What it does:** It generates a "Bundle" containing Helm values, Kubernetes manifests, installation scripts, and a custom README.
-*   **Deployer Options:** Supports multiple deployment methods: `helm` (per-component bundle, default), `argocd` and `argocd-helm` (Applications with sync-wave ordering), `flux` (HelmReleases with dependsOn ordering), `helmfile` (declarative release graph driven by the upstream helmfile CLI).
-*   **How it helps:** Users receive deployer-specific artifacts ready for standard operational workflows: the `helm` deployer emits a per-component `install.sh` plus a top-level `deploy.sh` wrapper; `argocd` and `argocd-helm` emit `Application` manifests; `flux` emits `HelmRelease` + `Kustomization` manifests; `helmfile` emits a declarative `helmfile.yaml` release graph driven by the upstream `helmfile` CLI.
-*   **Parallel Execution:** Multiple "Bundlers" (e.g., GPU Operator, Network Operator) can run simultaneously to generate a full stack configuration in seconds.
-
-## Key Capabilities
-
-### Kubernetes-Native Integration
-
-AICR is designed to work natively within Kubernetes.
-*   **ConfigMap Support:** You don't need to manage local files. You can read and write Snapshots and Recipes directly to Kubernetes ConfigMaps using the URI format `cm://namespace/name`.
-*   **No Persistent Volumes:** The automated Agent writes data directly to the Kubernetes API, simplifying deployment in restricted environments.
-
-### Integration & Automation
-
-*   **CI/CD Ready:** The `aicr` CLI and API server are built for pipelines. Teams can use AICR to detect "Configuration Drift" by periodically taking snapshots and comparing them to a baseline.
-*   **API Server:** For programmatic access, AICR provides a production-ready HTTP REST API to generate recipes dynamically.
-
-### Security
-
-AICR prioritizes trust in the software supply chain.
-*   **Verifiable Builds:** Every release includes provenance data showing exactly how and where it was built (SLSA Level 3).
-*   **SBOMs:** Complete inventories of all dependencies are provided for both binaries and container images, enabling automated vulnerability scanning.
-
-## Project Structure
-
-- `api/` — OpenAPI specifications for the REST API
-- `cmd/` — Entry points for CLI (`aicr`) and API server (`aicrd`)
-- `recipes/` — Recipe overlays, component values, and validation checks
-- `docs/` — User-facing documentation, guides, and architecture docs
-- `examples/` — Example snapshots, recipes, and comparisons
-- `infra/` — Infrastructure as code (Terraform) for deployments
-- `pkg/` — Core Go packages (collectors, recipe engine, bundlers, serializers)
-- `tools/` — Build scripts, E2E testing, and utilities
-
-## Documentation
-
-Documentation is organized by persona to help you find what you need quickly.
-
-### User Documentation
-
-For platform operators deploying and operating GPU-accelerated Kubernetes clusters.
-
-| Document | Description |
-|----------|-------------|
-| [Installation](user/installation.md) | Installing the `aicr` CLI |
-| [CLI Reference](user/cli-reference.md) | Complete CLI command reference with examples |
-| [API Reference](user/api-reference.md) | Quick start for the REST API |
-| [Agent Deployment](user/agent-deployment.md) | Running the snapshot agent as a Kubernetes Job |
-| [Component Catalog](user/component-catalog.md) | Available components and their configuration |
-| [Validation](user/validation.md) | Validation phases and check semantics |
-
-### Contributor Documentation
-
-For developers contributing code, extending functionality, or working on AICR internals.
-
-| Document | Description |
-|----------|-------------|
-| [Architecture Overview](contributor/index.md) | System design, boundaries, package map, "where does my change go" decision matrix |
-| [Recipes, Overlays, and Mixins](contributor/recipe.md) | Recipe data model: registry, overlays, mixins, resolver internals |
-| [Components](contributor/component.md) | Adding a Helm or Kustomize component to the registry |
-| [Collectors](contributor/collector.md) | Adding a snapshot collector for cluster, OS, or GPU state |
-| [Validators](contributor/validator.md) | All four validation surfaces: constraints, container-per-validator, bundle-time, chainsaw |
-| [CLI](contributor/cli.md) | CLI internals, command inventory, `pkg/client/v1` facade boundary |
-| [API Server](contributor/api-server.md) | `aicrd` middleware chain, handler-as-adapter pattern, adding an endpoint |
-| [Testing](contributor/tests.md) | Unit, chainsaw, KWOK matrix, e2e — and the `make qualify` gate |
-| [Maintaining AICR](contributor/maintaining.md) | Release runbook and recipe-evidence review workflow |
-
-### Integrator Documentation
-
-For engineers integrating AICR into CI/CD pipelines, GitOps workflows, or larger platforms.
-
-| Document | Description |
-|----------|-------------|
-| [Automation](integrator/automation.md) | CI/CD integration patterns |
-| [Data Flow](integrator/data-flow.md) | Understanding recipe data architecture |
-| [Kubernetes Deployment](integrator/kubernetes-deployment.md) | Self-hosted API server deployment |
-| [Recipe Development](integrator/recipe-development.md) | Adding and modifying recipe metadata |
-| [Validator Extension](integrator/validator-extension.md) | Custom validators via `--data` |
-| [AKS GPU Setup](integrator/aks-gpu-setup.md) | Azure Kubernetes Service GPU node setup |
-| [EKS Dynamo Networking](integrator/eks-dynamo-networking.md) | EKS networking for Dynamo workloads |
-| [GKE TCPXO Networking](integrator/gke-tcpxo-networking.md) | GKE TCPXO networking integration |
-| [Talos Integration](integrator/talos-integration.md) | Running AICR on Talos Linux |
-
-## Quick Start
-
-### Install CLI
-
-```shell
-# Homebrew (macOS/Linux)
-brew tap NVIDIA/aicr
-brew install aicr
-
-# Or use the install script
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
-```
-
-See the [Installation Guide](user/installation.md) for manual installation, building from source, and container images.
-
-### Generate Recipe
-
-```shell
-# Query mode: direct parameters
-aicr recipe --service eks --accelerator h100 --intent training --platform kubeflow
-
-# Snapshot mode: analyze captured state
-aicr snapshot -o snapshot.yaml
-aicr recipe --snapshot snapshot.yaml --intent training --platform kubeflow
-```
-
-### Validate Configuration
-
-```shell
-# Validate recipe against snapshot (readiness constraints run implicitly)
-aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
-
-# Validate all phases
-aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase all
-```
-
-### Create Bundle
-
-```shell
-aicr bundle --recipe recipe.yaml --output ./bundles
-```
-
-### Deploy
-
-```shell
-cd bundles
-chmod +x deploy.sh && ./deploy.sh
-```
+| Term | Definition |
+|------|------------|
+| **Snapshot** | Captured state of a target system (OS, kernel, Kubernetes, GPU, SystemD). Produced by `aicr snapshot` or the in-cluster snapshot Job. |
+| **Recipe** | Resolved configuration spec — component refs, constraints, deployment order — produced by `aicr recipe` from criteria or from a snapshot. |
+| **Criteria** | Query parameters that select a recipe: `service`, `accelerator`, `intent`, `os`, `platform`, `nodes`. |
+| **Overlay** | A recipe metadata file (`kind: RecipeMetadata`) under `recipes/overlays/` matched by criteria. Composes via single-parent inheritance (`spec.base`). |
+| **Mixin** | A composable fragment (`kind: RecipeMixin`) under `recipes/mixins/` carrying only `constraints` and `componentRefs`, referenced via `spec.mixins`. |
+| **Bundle** | Deployment artifacts emitted by `aicr bundle`: Helm values, manifests, install scripts, checksums. |
+| **Bundler** | A per-component generator that emits the bundle inputs (e.g., GPU Operator bundler). |
+| **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocdhelm`, `flux`. |
+| **Component** | A deployable software package (e.g., GPU Operator, Network Operator). Lives in `recipes/registry.yaml`. |
+| **ComponentRef** | A reference to a component inside a recipe — version, source, values file, dependencies. |
+| **Constraint** | A declarative validation rule on a recipe (e.g., `K8s.server.version >= 1.32.4`). |
+| **Validation Phase** | A stage of `aicr validate`: readiness (always implicit), deployment, performance, conformance. |
+| **Measurement** | A snapshot data point keyed by type (K8s, OS, GPU, SystemD), subtype, and reading. |
+| **Specificity** | A score counting non-`any` criteria fields. More-specific overlays merge later. |
+| **Asymmetric matching** | Criteria-matching rule: recipe `any` is a wildcard; query `any` does not match a specific recipe. |
+| **ConfigMap URI** | `cm://namespace/name` — read or write snapshots and recipes directly to Kubernetes ConfigMaps. |
+| **SLSA / SBOM** | Supply-chain Levels for Software Artifacts (releases reach Build Level 3) and Software Bill of Materials shipped with binaries and images. |
 
 ## Links
 
-- **GitHub Repository:** [github.com/NVIDIA/aicr](https://github.com/NVIDIA/aicr)
-- **Contributing:** [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md)
-- **Security:** [SECURITY.md](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md)
+- [GitHub](https://github.com/NVIDIA/aicr) · [Releases](https://github.com/NVIDIA/aicr/releases) · [Issues](https://github.com/NVIDIA/aicr/issues)
+- [Contributing](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) · [Security](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) · [Roadmap](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
+- Slack: [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) on Kubernetes Slack
