@@ -185,13 +185,13 @@ func writeValuesFile(values map[string]any) (string, error) {
 
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name()) //nolint:gosec // G703: path is from f.Name() created by CreateTemp above
 		return "", errors.Wrap(errors.ErrCodeInternal, "write temp values file", err)
 	}
 
 	closeErr := f.Close()
 	if closeErr != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name()) //nolint:gosec // G703: path is from f.Name() created by CreateTemp above
 		return "", errors.Wrap(errors.ErrCodeInternal, "close temp values file", closeErr)
 	}
 

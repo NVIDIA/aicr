@@ -675,3 +675,26 @@ components:
           - nodesets.slinky.podSpec.nodeSelector
         tolerationPaths:
           - nodesets.slinky.podSpec.tolerations
+
+  - name: gatekeeper
+    displayName: Gatekeeper
+    valueOverrideKeys:
+      - gatekeeper
+    healthCheck:
+      assertFile: checks/gatekeeper/health-check.yaml
+    helm:
+      defaultRepository: https://open-policy-agent.github.io/gatekeeper/charts
+      defaultChart: gatekeeper/gatekeeper
+      defaultVersion: 3.22.2
+      defaultNamespace: gatekeeper-system
+    nodeScheduling:
+      # Gatekeeper is an admission controller — it has no GPU-bound workload,
+      # so only system-tier paths are wired. Both long-running deployments
+      # (controller-manager, audit) accept the same selectors/tolerations.
+      system:
+        nodeSelectorPaths:
+          - controllerManager.nodeSelector
+          - audit.nodeSelector
+        tolerationPaths:
+          - controllerManager.tolerations
+          - audit.tolerations
