@@ -105,6 +105,14 @@ type BundleResolved struct {
 	// OIDCDeviceFlow is spec.bundle.attestation.oidcDeviceFlow.
 	OIDCDeviceFlow bool
 
+	// FulcioURL is spec.bundle.attestation.fulcioURL; empty leaves the
+	// public-good Sigstore default in place.
+	FulcioURL string
+
+	// RekorURL is spec.bundle.attestation.rekorURL; empty leaves the
+	// public-good Sigstore default in place.
+	RekorURL string
+
 	// InsecureTLS is spec.bundle.registry.insecureTLS.
 	InsecureTLS bool
 
@@ -232,6 +240,15 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 		out.Attest = b.Attestation.Enabled
 		out.CertIDRegexp = b.Attestation.CertificateIdentityRegexp
 		out.OIDCDeviceFlow = b.Attestation.OIDCDeviceFlow
+		// Validate the signing endpoints at the conversion boundary so a
+		// malformed config value fails here with spec-path attribution
+		// (and is caught for non-CLI callers of Resolve too), rather than
+		// only later in CLI flag parsing.
+		if err := validateAttestationEndpoints(b.Attestation); err != nil {
+			return nil, err
+		}
+		out.FulcioURL = b.Attestation.FulcioURL
+		out.RekorURL = b.Attestation.RekorURL
 	}
 
 	if b.Registry != nil {
@@ -240,6 +257,16 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 	}
 
 	return out, nil
+}
+
+// validateAttestationEndpoints rejects malformed private Sigstore endpoints in
+// the bundle attestation spec. ValidateHTTPSURL returns a pkg/errors
+// StructuredError with the right code, so its result is returned as-is.
+func validateAttestationEndpoints(a *AttestationSpec) error {
+	if err := bundlercfg.ValidateHTTPSURL("spec.bundle.attestation.fulcioURL", a.FulcioURL); err != nil {
+		return err
+	}
+	return bundlercfg.ValidateHTTPSURL("spec.bundle.attestation.rekorURL", a.RekorURL)
 }
 
 // ValidateResolved is the typed-domain projection of ValidateSpec produced

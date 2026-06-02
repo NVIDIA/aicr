@@ -38,11 +38,11 @@ type SignOptions struct {
 	OIDCToken string
 
 	// FulcioURL is the Fulcio certificate authority URL. Empty falls
-	// back to DefaultFulcioURL.
+	// back to defaults.SigstoreFulcioURL.
 	FulcioURL string
 
 	// RekorURL is the Rekor transparency log URL. Empty falls back to
-	// DefaultRekorURL.
+	// defaults.SigstoreRekorURL.
 	RekorURL string
 }
 
@@ -98,11 +98,11 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 
 	fulcioURL := opts.FulcioURL
 	if fulcioURL == "" {
-		fulcioURL = DefaultFulcioURL
+		fulcioURL = defaults.SigstoreFulcioURL
 	}
 	rekorURL := opts.RekorURL
 	if rekorURL == "" {
-		rekorURL = DefaultRekorURL
+		rekorURL = defaults.SigstoreRekorURL
 	}
 
 	content := &sign.DSSEData{

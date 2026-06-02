@@ -86,6 +86,12 @@ type bundleCmdOptions struct {
 	// (RFC 8628) for headless hosts where a browser callback is unavailable.
 	oidcDeviceFlow bool
 
+	// fulcioURL and rekorURL override the public-good Sigstore endpoints so
+	// keyless signing targets a private Fulcio CA and/or Rekor transparency
+	// log. Empty leaves the public defaults in place. See #408.
+	fulcioURL string
+	rekorURL  string
+
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
 	plainHTTP     bool
@@ -110,7 +116,7 @@ type bundleCmdOptions struct {
 // config-supplied fields happens at the conversion boundary in Resolve;
 // errors from that boundary carry "spec.bundle.<path>" attribution.
 //
-//nolint:gocyclo // option resolution is inherently long but linear
+//nolint:gocyclo,funlen // option resolution is inherently long but linear
 func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmdOptions, error) {
 	resolved, err := cfg.Bundle().Resolve()
 	if err != nil {
@@ -126,6 +132,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
 		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
+		fulcioURL:                 stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
+		rekorURL:                  stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
 		insecureTLS:               boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
 		plainHTTP:                 boolFlagOrConfig(cmd, flagPlainHTTP, resolved.PlainHTTP),
 		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
@@ -299,7 +307,25 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.storageClass = resolved.StorageClass
 	}
 
+	// Validate any private Sigstore endpoints up front so a malformed
+	// --fulcio-url / --rekor-url fails before bundling instead of at sign
+	// time. Both must be HTTPS (#408): keyless signing exchanges OIDC
+	// credentials with these endpoints, so plaintext transport is rejected.
+	if err := validateSigstoreEndpoints(opts); err != nil {
+		return nil, err
+	}
+
 	return opts, nil
+}
+
+// validateSigstoreEndpoints rejects malformed --fulcio-url / --rekor-url
+// values (non-empty endpoints that are not absolute https:// URLs). The
+// HTTPS check is shared with the config layer via config.ValidateHTTPSURL.
+func validateSigstoreEndpoints(opts *bundleCmdOptions) error {
+	if err := config.ValidateHTTPSURL("fulcio URL", opts.fulcioURL); err != nil {
+		return err
+	}
+	return config.ValidateHTTPSURL("rekor URL", opts.rekorURL)
 }
 
 // resolveOutputTarget returns the parsed *oci.Reference for --output,
@@ -567,6 +593,18 @@ Package with explicit tag (overrides CLI version):
 				Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 				Category: catDeployment,
 			},
+			&cli.StringFlag{
+				Name:     flagFulcioURL,
+				Usage:    "Override the Fulcio CA URL for --attest keyless signing (e.g. a private Sigstore instance). Must be an absolute https:// URL with no embedded credentials. Defaults to the public-good Fulcio. Also reads AICR_FULCIO_URL.",
+				Sources:  cli.EnvVars("AICR_FULCIO_URL"),
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name:     flagRekorURL,
+				Usage:    "Override the Rekor transparency-log URL for --attest keyless signing (e.g. a private Sigstore instance). Must be an absolute https:// URL with no embedded credentials. Defaults to the public-good Rekor. Also reads AICR_REKOR_URL.",
+				Sources:  cli.EnvVars("AICR_REKOR_URL"),
+				Category: catDeployment,
+			},
 			kubeconfigFlag(),
 			dataFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
@@ -593,7 +631,7 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name"); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name", flagFulcioURL, flagRekorURL); err != nil {
 		return err
 	}
 
@@ -755,6 +793,8 @@ func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.At
 		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
 		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
 		DeviceFlow:    opts.oidcDeviceFlow,
+		FulcioURL:     opts.fulcioURL,
+		RekorURL:      opts.rekorURL,
 		// Prompts (verification URL + user code) go to stderr so they don't
 		// pollute stdout when callers redirect bundle output.
 		PromptWriter: os.Stderr,

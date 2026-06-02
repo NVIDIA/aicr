@@ -720,6 +720,32 @@ func TestValidateAppName(t *testing.T) {
 	}
 }
 
+func TestValidateHTTPSURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"empty is allowed (means use default)", "", false},
+		{"valid https URL", "https://fulcio.internal.example.com", false},
+		{"valid https URL with port and path", "https://rekor.example.com:8443/api", false},
+		{"http scheme rejected", "http://fulcio.internal.example.com", true},
+		{"embedded credentials rejected", "https://user:pass@fulcio.internal.example.com", true},
+		{"missing scheme rejected", "fulcio.internal.example.com", true},
+		{"relative path rejected", "not-a-url", true},
+		{"scheme without host rejected", "https://", true},
+		{"non-http scheme rejected", "ftp://example.com", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateHTTPSURL("fulcio URL", tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateHTTPSURL(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestWithBundleChartName verifies the override flows to BundleChartName,
 // that the default is empty (so the argocd-helm deployer falls back to
 // its own "aicr-bundle" default), and that the most-recent option wins

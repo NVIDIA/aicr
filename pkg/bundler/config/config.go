@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -103,6 +104,32 @@ func ValidateAppName(name string) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid app name %q: must be a DNS-1123 subdomain (%s)",
 				name, strings.Join(errs, "; ")))
+	}
+	return nil
+}
+
+// ValidateHTTPSURL reports whether raw is a usable absolute https:// endpoint.
+// The empty string is allowed (callers treat it as "use the default"); any
+// non-empty value must parse as an absolute URL with an https scheme and a
+// host, and must not embed credentials. label names the field for the error
+// message (e.g. "fulcio URL"). Used to fail malformed signing endpoints at
+// bundle/parse time rather than at sign time. See #408.
+func ValidateHTTPSURL(label, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s %q", label, raw), err)
+	}
+	// Reject embedded credentials: url.Parse stashes "user:pass@" in u.User
+	// while leaving Scheme/Host intact, so a scheme+host-only check would
+	// otherwise accept "https://user:pass@host". Credentials have no place in
+	// a signing endpoint and would leak via config/flags/process listings.
+	if u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s %q: must be an absolute https:// URL without embedded credentials", label, raw))
 	}
 	return nil
 }
