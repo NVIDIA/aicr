@@ -63,12 +63,13 @@ for dir in "${SEARCH_DIRS[@]}"; do
         line = $0
         gsub(/`[^`]*`/, "", line)
       }
-      # Bare { not preceded by backslash escape
-      line ~ /[^\\]{/ {
+      # Bare { not preceded by backslash escape. The leading
+      # (^|[^\\]) form catches { in column 1 as well.
+      line ~ /(^|[^\\])\{/ {
         printf "MDX: bare { outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
-      /<!--/ {
+      line ~ /<!--/ {
         printf "MDX: HTML comment outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
