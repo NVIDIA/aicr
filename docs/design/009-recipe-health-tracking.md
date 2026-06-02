@@ -222,7 +222,7 @@ at v1 scale.
 
 **Failure modes (fail honestly, never silently pass).**
 - A non-transient resolution error for one combo renders that combo as
-  `fail`, with the error captured; the report still emits for all other
+  `fail`, with the error captured. The report still emits for all other
   combos — one broken recipe must not blank the matrix.
 - Self-resolution is *not* assumed clean: although a leaf's own criteria
   always matches itself (`Criteria.Matches` is asymmetric,
@@ -249,7 +249,9 @@ overstate:
   will distinguish `unattested` (never validated) from aged-but-verified
   states; these are different trust statements and will not share a label.
 
-**V1 public rendering.** The matrix leads with the **rolled-up structural
+#### V1 public rendering
+
+The matrix leads with the **rolled-up structural
 status** (`pass | warn | fail`), which varies across recipes and is real
 today. It carries a
 **Coverage** column derived from `declared_coverage` — a compact per-phase
@@ -266,7 +268,9 @@ undersell structurally sound recipes.
 
 ### 4. Tooling surface
 
-**Enumeration is leaf-driven, not cartesian.** The product of all criteria
+#### Enumeration is leaf-driven, not cartesian
+
+The product of all criteria
 values (~6,000) is wrong — most combinations resolve to nothing but `base`.
 The canonical list is the de-duplicated `spec.criteria` of the
 *maximal-leaf* overlays. Expose a new, explicitly-named seam on
@@ -288,7 +292,9 @@ func (s *MetadataStore) LeafCriteria() []LeafCombo
 Each combo is resolved back through `BuildFromCriteria` to prove
 resolvability. ~50 guaranteed-resolvable combos.
 
-**CLI — `aicr recipe list` only in V1.** Added as a subcommand of the
+#### CLI — `aicr recipe list` only in V1
+
+Added as a subcommand of the
 existing `recipe` command, which retains its current bare generate action
 (urfave/cli supports a command with both an Action and subcommands). Flags
 follow existing conventions (`pkg/cli/root.go`, `pkg/cli/consts.go`):
@@ -309,7 +315,9 @@ report does not serialize usefully through the generic table writer
 user-facing verb. Pull-trigger: a user asks to compute health for one
 ad-hoc combo outside the generated doc.
 
-**Business logic — new `pkg/health` package.** V1 has no dependency on
+#### Business logic — new `pkg/health` package
+
+V1 has no dependency on
 `pkg/evidence`, so health hosted in `pkg/recipe` would compile cleanly today;
 the standalone package is a **forward-looking boundary choice, not a v1
 requirement.** It exists to keep the v1.1 evidence import acyclic:
