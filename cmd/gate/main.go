@@ -50,7 +50,10 @@ const (
 	exitOK        = 0
 	exitDeadline  = 1
 	exitConfigErr = 2
-	exitSignal    = 130 // 128 + SIGINT; SIGTERM caller can read $? as 143
+	// exitSignal is returned for either SIGINT or SIGTERM: signal.NotifyContext
+	// collapses both into one cancellation and loop returns this constant, so
+	// the process always exits 130 on a handled signal (not 143 for SIGTERM).
+	exitSignal = 130
 )
 
 // defaultChainsawConfig is the in-image path of the chainsaw Configuration
