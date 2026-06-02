@@ -49,7 +49,7 @@ All server code lives in [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main
 ## Middleware Chain
 
 Composition lives in `withMiddleware` in
-[`middleware.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/server/middleware.go#L45-L61).
+[`pkg/server/middleware.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/server/middleware.go).
 Order is **outermost first**:
 
 | # | Layer | Purpose |
@@ -113,7 +113,7 @@ if err := json.NewDecoder(bounded).Decode(&recipeResult); err != nil {
 ### Error responses and the 5xx cause-leak rule
 
 All errors flow through
-[`WriteErrorFromErr`](https://github.com/NVIDIA/aicr/blob/main/pkg/server/errors.go#L127).
+[`WriteErrorFromErr`](https://github.com/NVIDIA/aicr/blob/main/pkg/server/errors.go).
 It maps a `*errors.StructuredError` to an HTTP status via `httpStatusFromCode`
 and serializes the `ErrorResponse` shape (`code`, `message`, `details`,
 `requestId`, `timestamp`, `retryable`).

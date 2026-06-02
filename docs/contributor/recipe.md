@@ -292,7 +292,12 @@ proceeds in fixed precedence (low → high):
 
 ```text
 registry defaults → mixin → base chain → overlay leaf → CLI/API --set
+(lowest priority)                                       (highest priority)
 ```
+
+Each step wins over everything to its left — `--set` overrides the
+overlay leaf, the leaf overrides the base chain, and so on. Read as
+priority, not as temporal order.
 
 Implementation notes:
 

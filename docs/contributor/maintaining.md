@@ -59,7 +59,7 @@ A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
 2. **The BOM stays in sync.** `make bom-docs` must have been run; the
    `docs/user/container-images.md` change must be present in the PR
    when a chart pin or values file changed. See
-   [recipe.md](recipe.md#bom-regeneration-rule).
+   [recipe.md](recipe.md#bom-regeneration).
 3. **The configuration is correct on the target hardware.** This is
    the hard one — maintainers cannot run a contributor's GB200 recipe
    on an H100. ADR-007 closes that gap with bundled evidence.
