@@ -221,8 +221,8 @@ at v1 scale.
   until `kwok-recipes.yaml` commits a per-recipe result artifact.
 
 **Failure modes (fail honestly, never silently pass).**
-- A non-transient resolution error for one combo renders that combo as `F`
-  (broken), with the error captured; the report still emits for all other
+- A non-transient resolution error for one combo renders that combo as
+  `fail`, with the error captured; the report still emits for all other
   combos — one broken recipe must not blank the matrix.
 - Self-resolution is *not* assumed clean: although a leaf's own criteria
   always matches itself (`Criteria.Matches` is asymmetric,
