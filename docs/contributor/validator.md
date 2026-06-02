@@ -104,6 +104,14 @@ per run. Per-phase containers are built from
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.
 
+`readiness` is also a field on `ValidationConfig` (see
+`pkg/recipe/validation.go`) and appears in overlay examples, but it
+is **not** a container-per-validator phase. Readiness runs as
+inline constraint evaluation in
+`pkg/validator/validator.go::checkReadiness` before any phase
+container is scheduled — see [Constraints](#constraints-declarative)
+above for how the evaluator works.
+
 ### Quick start
 
 Three steps to add a check to an existing validator container.
