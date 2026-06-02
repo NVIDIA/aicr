@@ -45,7 +45,8 @@ v2.49+). RELEASING.md §Container Attestations has both `gh` and
 `cosign` flows.
 
 **Cloud Run demo deploy fails after tag push.** Check
-`deploy-demo.yaml` workflow; the most common cause is GHCR pull
+`deploy-demo.yaml` workflow; the most common cause is GitHub Container
+Registry (GHCR) pull
 failure during the first 60s after tag publish. Re-run the workflow.
 
 ## Reviewing Recipe Contributions
@@ -97,7 +98,7 @@ items 6–8 are maintainer judgement calls.
 3. **Signer identity is acceptable.** Open the sticky comment, find
    the recipe's `<details>` section, and review the signer block. See
    [Signer Identity Trust Patterns](#signer-identity-trust-patterns).
-4. **Bundle OCI ref matches PR description.** The recipe PR template
+4. **Bundle Open Container Initiative (OCI) ref matches PR description.** The recipe PR template
    asks the contributor to paste the `bundle.oci` field; confirm the
    sticky comment shows the same ref.
 5. **Material slice digest matches.** Verifier step 6a recomputes

@@ -8,7 +8,7 @@ Recipe metadata and component configurations for the AICR bundler. Files in this
 |------|--------------|
 | Recipe architecture | [Data Architecture](../docs/contributor/recipe.md) |
 | Create/modify recipes | [Recipe Development Guide](../docs/integrator/recipe-development.md) |
-| Create new bundlers | [Components](../docs/contributor/component.md) |
+| Add or modify components | [Components](../docs/contributor/component.md) |
 | CLI commands | [CLI Reference](../docs/user/cli-reference.md) |
 
 ## Directory Structure

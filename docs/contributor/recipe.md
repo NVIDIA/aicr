@@ -21,7 +21,7 @@ resolver in `pkg/recipe`.
 
 ## Layered Model
 
-```
+```text
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
 │   Registry   │  │    Mixin     │  │   Overlay    │
 │ recipes/     │  │ recipes/     │  │ recipes/     │
@@ -290,7 +290,7 @@ for content genuinely uniform across the wildcard dimension.
 The resolver lives in `pkg/recipe/metadata_store.go`. The merge
 proceeds in fixed precedence (low → high):
 
-```
+```text
 registry defaults → mixin → base chain → overlay leaf → CLI/API --set
 ```
 

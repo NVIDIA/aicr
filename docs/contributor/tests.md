@@ -200,7 +200,7 @@ healthy: pods Ready, services resolve, CRDs `Established`, custom
 resources reach a known phase. The asserts live alongside the
 component:
 
-```
+```text
 recipes/checks/<component>/health-check.yaml
 ```
 

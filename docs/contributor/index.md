@@ -34,7 +34,7 @@ Each stage produces a serializable artifact (file, stdout, or
 ConfigMap) and is independently invocable. Reproducibility — same
 inputs, same outputs — is non-negotiable.
 
-```
+```text
 ┌──────────┐    ┌────────┐    ┌──────────┐    ┌────────┐
 │ Snapshot │───▶│ Recipe │───▶│ Validate │───▶│ Bundle │
 └──────────┘    └────────┘    └──────────┘    └────────┘
@@ -143,7 +143,7 @@ familiarity with the anti-patterns table is the difference between
 Three layers. The separation is the single most enforced rule in
 review.
 
-```
+```text
    ┌─────────────────────┐     ┌─────────────────────┐
    │   pkg/cli           │     │   pkg/server        │   user interaction
    │   (CLI commands)    │     │   (HTTP handlers)   │   — no business logic
@@ -282,8 +282,11 @@ fights them tends to read as a re-architecture.
   Fail-fast is the default; best-effort partial collection would
   hide systemic problems behind partial data.
 - **Pluggable collectors via factory.** Collectors implement a
-  common interface and self-register. Adding a state source does
-  not modify existing collectors.
+  common interface and are constructed by `pkg/collector.Factory`,
+  then wired into the snapshot run by `pkg/snapshotter`. Adding a
+  state source means a new `Factory` method and one `g.Go(...)`
+  line in the snapshotter — no edits to existing collectors. See
+  [collector.md](collector.md).
 - **Immutable recipe store.** Read-only after init. Mutations on
   per-request clones. No locks; API server is safe for concurrent
   reads.

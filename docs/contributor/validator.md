@@ -301,7 +301,7 @@ as CTRF evidence. `return nil` → 0, `return error` → 1,
 
 ### Directory layout
 
-```
+```text
 validators/
 ├── context.go                # LoadContext, Context type
 ├── runner.go                 # Run() entry, exit-code mapping
