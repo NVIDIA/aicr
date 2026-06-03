@@ -1,0 +1,68 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reusable shard for the Tier 3 KWOK full matrix. GitHub caps a single job's
+# matrix at 256 configurations; the caller (kwok-recipes.yaml) splits the full
+# recipe × deployer cross-product into batches of <= 256 pairs and invokes this
+# workflow once per batch, so the per-shard matrix always stays under the cap.
+name: KWOK Tier 3 Shard
+
+on:
+  workflow_call:
+    inputs:
+      pairs:
+        # Caller batches at TIER3_BATCH_SIZE (kwok-recipes.yaml); must never
+        # exceed GitHub's hard cap of 256 matrix configurations per job.
+        description: 'JSON array of {recipe, deployer} objects to test (<= 256 entries)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 'Tier 3: ${{ matrix.pair.recipe }} (${{ matrix.pair.deployer }})'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: ${{ fromJSON(inputs.pairs) }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run KWOK test
+        uses: ./.github/actions/kwok-test
+        with:
+          recipe: ${{ matrix.pair.recipe }}
+          deployer: ${{ matrix.pair.deployer }}
+          go_version: ${{ steps.versions.outputs.go }}
+          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
+          kind_version: ${{ steps.versions.outputs.kind }}
+          helm_version: ${{ steps.versions.outputs.helm }}
+          kwok_version: ${{ steps.versions.outputs.kwok }}
+          kubectl_version: ${{ steps.versions.outputs.kubectl }}
+          yq_version: ${{ steps.versions.outputs.yq }}
+          flux_version: ${{ steps.versions.outputs.flux }}
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
+          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
