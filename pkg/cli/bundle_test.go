@@ -314,6 +314,84 @@ func TestParseBundleCmdOptions_AppName(t *testing.T) {
 	})
 }
 
+// TestParseBundleCmdOptions_SigstoreURLs covers the --fulcio-url / --rekor-url
+// flags: valid HTTPS endpoints land on the parsed options, unset leaves them
+// empty (public-good defaults apply downstream), and a non-HTTPS endpoint is
+// rejected at parse time. See issue #408.
+func TestParseBundleCmdOptions_SigstoreURLs(t *testing.T) {
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	out := filepath.Join(tmp, "out")
+	base := []string{"--recipe", recipePath, "--output", out}
+
+	t.Run("unset leaves both empty", func(t *testing.T) {
+		opts := captureBundleOpts(t, base)
+		if opts.fulcioURL != "" || opts.rekorURL != "" {
+			t.Errorf("expected empty URLs, got fulcio=%q rekor=%q", opts.fulcioURL, opts.rekorURL)
+		}
+	})
+
+	t.Run("env vars populate the endpoints", func(t *testing.T) {
+		t.Setenv("AICR_FULCIO_URL", "https://fulcio.env.example.com")
+		t.Setenv("AICR_REKOR_URL", "https://rekor.env.example.com")
+		opts := captureBundleOpts(t, base)
+		if opts.fulcioURL != "https://fulcio.env.example.com" {
+			t.Errorf("fulcioURL from env = %q", opts.fulcioURL)
+		}
+		if opts.rekorURL != "https://rekor.env.example.com" {
+			t.Errorf("rekorURL from env = %q", opts.rekorURL)
+		}
+	})
+
+	t.Run("explicit flags override env vars", func(t *testing.T) {
+		t.Setenv("AICR_FULCIO_URL", "https://fulcio.env.example.com")
+		t.Setenv("AICR_REKOR_URL", "https://rekor.env.example.com")
+		opts := captureBundleOpts(t, append(append([]string{}, base...),
+			"--fulcio-url", "https://fulcio.flag.example.com",
+			"--rekor-url", "https://rekor.flag.example.com"))
+		if opts.fulcioURL != "https://fulcio.flag.example.com" {
+			t.Errorf("fulcioURL = %q, want the flag value to win over AICR_FULCIO_URL", opts.fulcioURL)
+		}
+		if opts.rekorURL != "https://rekor.flag.example.com" {
+			t.Errorf("rekorURL = %q, want the flag value to win over AICR_REKOR_URL", opts.rekorURL)
+		}
+	})
+
+	t.Run("valid HTTPS endpoints flow to opts", func(t *testing.T) {
+		opts := captureBundleOpts(t, append(append([]string{}, base...),
+			"--fulcio-url", "https://fulcio.internal.example.com",
+			"--rekor-url", "https://rekor.internal.example.com"))
+		if opts.fulcioURL != "https://fulcio.internal.example.com" {
+			t.Errorf("fulcioURL = %q", opts.fulcioURL)
+		}
+		if opts.rekorURL != "https://rekor.internal.example.com" {
+			t.Errorf("rekorURL = %q", opts.rekorURL)
+		}
+	})
+
+	t.Run("non-HTTPS fulcio-url is rejected", func(t *testing.T) {
+		_, err := tryCaptureBundleOpts(t, append(append([]string{}, base...),
+			"--fulcio-url", "http://fulcio.internal.example.com"))
+		if err == nil {
+			t.Fatal("expected error rejecting non-HTTPS --fulcio-url")
+		}
+		if !strings.Contains(err.Error(), "https") {
+			t.Errorf("error should mention https requirement, got: %v", err)
+		}
+	})
+
+	t.Run("malformed rekor-url is rejected", func(t *testing.T) {
+		_, err := tryCaptureBundleOpts(t, append(append([]string{}, base...),
+			"--rekor-url", "not-a-url"))
+		if err == nil {
+			t.Fatal("expected error rejecting malformed --rekor-url")
+		}
+	})
+}
+
 // TestPrintArgoCDHelmOCIInstructions exercises the post-#1051 install-hint
 // contract: `helm install` against the full OCI artifact reference, and
 // `--set repoURL` carrying only the parent namespace (chart name omitted

@@ -18,13 +18,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-)
-
-// Sigstore public-good instance URLs.
-const (
-	DefaultFulcioURL = "https://fulcio.sigstore.dev"
-	DefaultRekorURL  = "https://rekor.sigstore.dev"
 )
 
 // KeylessAttester signs bundle content using Sigstore keyless OIDC signing
@@ -36,13 +31,22 @@ type KeylessAttester struct {
 	identity  string
 }
 
-// NewKeylessAttester returns a new KeylessAttester configured for Sigstore
-// public-good infrastructure.
-func NewKeylessAttester(oidcToken string) *KeylessAttester {
+// NewKeylessAttester returns a new KeylessAttester targeting the given Fulcio
+// and Rekor endpoints. Empty fulcioURL or rekorURL falls back to the Sigstore
+// public-good default, so callers that do not run private infrastructure pass
+// "" for both. Non-empty values point signing at a private Sigstore instance
+// (issue #408).
+func NewKeylessAttester(oidcToken, fulcioURL, rekorURL string) *KeylessAttester {
+	if fulcioURL == "" {
+		fulcioURL = defaults.SigstoreFulcioURL
+	}
+	if rekorURL == "" {
+		rekorURL = defaults.SigstoreRekorURL
+	}
 	return &KeylessAttester{
 		oidcToken: oidcToken,
-		fulcioURL: DefaultFulcioURL,
-		rekorURL:  DefaultRekorURL,
+		fulcioURL: fulcioURL,
+		rekorURL:  rekorURL,
 	}
 }
 

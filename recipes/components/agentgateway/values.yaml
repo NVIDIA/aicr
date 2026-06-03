@@ -46,11 +46,17 @@ inferenceExtension:
 # firewall every downstream deployment to NVIDIA's network and lock external
 # operators out of their own gateway.
 #
-# Each operator should scope this to their trusted networks. Do NOT use `--set`
-# for this key: `--set agentgateway:allowedSourceRanges=<cidr>` exits 0 but
-# renders loadBalancerSourceRanges as a bare string instead of a list, producing
-# a type-invalid Service (the gateway may stay open at 0.0.0.0/0, or the CR apply
-# is rejected). Set it through a recipe overlay / componentRef override, e.g.:
+# Each operator should scope this to their trusted networks. Do NOT use plain
+# `--set` for this key: `--set agentgateway:allowedSourceRanges=<cidr>` exits 0
+# but renders loadBalancerSourceRanges as a bare string instead of a list,
+# producing a type-invalid Service (the gateway may stay open at 0.0.0.0/0, or
+# the CR apply is rejected). Use the list-aware CLI flag `--set-json` (or
+# `--set-file` for a file), e.g.:
+#
+#   aicr bundle -r recipe.yaml \
+#     --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'
+#
+# or set it through a recipe overlay / componentRef override:
 #
 #   componentRefs:
 #     - name: agentgateway

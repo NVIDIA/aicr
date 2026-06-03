@@ -16,10 +16,12 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -107,6 +109,32 @@ func ValidateAppName(name string) error {
 	return nil
 }
 
+// ValidateHTTPSURL reports whether raw is a usable absolute https:// endpoint.
+// The empty string is allowed (callers treat it as "use the default"); any
+// non-empty value must parse as an absolute URL with an https scheme and a
+// host, and must not embed credentials. label names the field for the error
+// message (e.g. "fulcio URL"). Used to fail malformed signing endpoints at
+// bundle/parse time rather than at sign time. See #408.
+func ValidateHTTPSURL(label, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s %q", label, raw), err)
+	}
+	// Reject embedded credentials: url.Parse stashes "user:pass@" in u.User
+	// while leaving Scheme/Host intact, so a scheme+host-only check would
+	// otherwise accept "https://user:pass@host". Credentials have no place in
+	// a signing endpoint and would leak via config/flags/process listings.
+	if u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s %q: must be an absolute https:// URL without embedded credentials", label, raw))
+	}
+	return nil
+}
+
 // Config provides immutable configuration options for bundlers.
 // All fields are read-only after creation to prevent accidental modifications.
 // Use Clone() to create a modified copy or Merge() to combine configurations.
@@ -126,6 +154,13 @@ type Config struct {
 	// valueOverrides contains user-specified value overrides per bundler.
 	// Map structure: bundler_name -> (path -> value)
 	valueOverrides map[string]map[string]string
+
+	// valueOverridesTyped holds structured (--set-json / --set-file) value
+	// overrides per component. Map structure: component_name -> (path ->
+	// decoded value). Unlike valueOverrides, the values are already-decoded
+	// lists/objects/scalars so list and object fields render as real YAML
+	// structures instead of the bare string `--set` would produce. See #1161.
+	valueOverridesTyped map[string]map[string]any
 
 	// systemNodeSelector contains node selector labels for system components.
 	systemNodeSelector map[string]string
@@ -247,6 +282,24 @@ func (c *Config) ValueOverrides() map[string]map[string]string {
 		for path, value := range paths {
 			overrides[bundler][path] = value
 		}
+	}
+	return overrides
+}
+
+// ValueOverridesTyped returns a deep copy of the structured (--set-json /
+// --set-file) value overrides to prevent callers from mutating the Config's
+// backing maps/slices. Returns nil when no typed overrides were supplied.
+func (c *Config) ValueOverridesTyped() map[string]map[string]any {
+	if len(c.valueOverridesTyped) == 0 {
+		return nil
+	}
+	overrides := make(map[string]map[string]any, len(c.valueOverridesTyped))
+	for component, paths := range c.valueOverridesTyped {
+		copied := make(map[string]any, len(paths))
+		for path, value := range paths {
+			copied[path] = serializer.DeepCopyAny(value)
+		}
+		overrides[component] = copied
 	}
 	return overrides
 }
@@ -673,13 +726,14 @@ func WithAppName(name string) Option {
 // NewConfig returns a Config with default values.
 func NewConfig(options ...Option) *Config {
 	c := &Config{
-		deployer:         DeployerHelm,
-		includeChecksums: true,
-		includeReadme:    true,
-		valueOverrides:   make(map[string]map[string]string),
-		dynamicValues:    make(map[string][]string),
-		verbose:          false,
-		version:          "dev",
+		deployer:            DeployerHelm,
+		includeChecksums:    true,
+		includeReadme:       true,
+		valueOverrides:      make(map[string]map[string]string),
+		valueOverridesTyped: make(map[string]map[string]any),
+		dynamicValues:       make(map[string][]string),
+		verbose:             false,
+		version:             "dev",
 	}
 	for _, opt := range options {
 		opt(c)

@@ -188,3 +188,55 @@ func TestResolveAttesterLazy_DisabledShortCircuits(t *testing.T) {
 		t.Errorf("expected *NoOpAttester, got %T", att)
 	}
 }
+
+// TestResolveAttester_ThreadsSigstoreURLs verifies the eager resolver carries
+// private Fulcio/Rekor endpoints from ResolveOptions onto the constructed
+// KeylessAttester. The identity-token branch resolves synchronously (no
+// network), so the returned attester can be inspected directly. See #408.
+func TestResolveAttester_ThreadsSigstoreURLs(t *testing.T) {
+	const (
+		privFulcio = "https://fulcio.internal.example.com"
+		privRekor  = "https://rekor.internal.example.com"
+	)
+	att, err := ResolveAttester(context.Background(), ResolveOptions{
+		Attest:        true,
+		IdentityToken: "pre-fetched-token",
+		FulcioURL:     privFulcio,
+		RekorURL:      privRekor,
+	})
+	if err != nil {
+		t.Fatalf("ResolveAttester returned error: %v", err)
+	}
+	keyless, ok := att.(*KeylessAttester)
+	if !ok {
+		t.Fatalf("expected *KeylessAttester, got %T", att)
+	}
+	if keyless.fulcioURL != privFulcio {
+		t.Errorf("fulcioURL = %q, want %q", keyless.fulcioURL, privFulcio)
+	}
+	if keyless.rekorURL != privRekor {
+		t.Errorf("rekorURL = %q, want %q", keyless.rekorURL, privRekor)
+	}
+}
+
+// TestNewLazyKeylessAttester_RetainsSigstoreURLs verifies the lazy attester
+// retains the private-Sigstore endpoints in its deferred options so the
+// KeylessAttester it builds on first Attest() targets the same infrastructure
+// as the eager path. See #408.
+func TestNewLazyKeylessAttester_RetainsSigstoreURLs(t *testing.T) {
+	const (
+		privFulcio = "https://fulcio.internal.example.com"
+		privRekor  = "https://rekor.internal.example.com"
+	)
+	lazy := NewLazyKeylessAttester(ResolveOptions{
+		Attest:    true,
+		FulcioURL: privFulcio,
+		RekorURL:  privRekor,
+	})
+	if lazy.opts.FulcioURL != privFulcio {
+		t.Errorf("opts.FulcioURL = %q, want %q", lazy.opts.FulcioURL, privFulcio)
+	}
+	if lazy.opts.RekorURL != privRekor {
+		t.Errorf("opts.RekorURL = %q, want %q", lazy.opts.RekorURL, privRekor)
+	}
+}
