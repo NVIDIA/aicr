@@ -1324,9 +1324,9 @@ be dropped or rejected at apply time. Use `--set-json` (inline) or `--set-file`
   and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are combined,
   not dropped; the canonical name wins on any shared path.
 - **Node-scheduling paths deep-merge with CLI injection (asymmetric with
-  `--set`)**: a typed override on a node-scheduling path (e.g. `--set-json
-  gpu-operator:nodeSelector=<object>`) **deep-merges into** the selectors and
-  tolerations injected by `--accelerated-node-selector` /
+  `--set`)**: a typed override on a node-scheduling path
+  (e.g. `--set-json gpu-operator:nodeSelector=<object>`) **deep-merges into**
+  the selectors and tolerations injected by `--accelerated-node-selector` /
   `--system-node-selector` / `--*-node-toleration`, rather than suppressing that
   injection. This is intentional — deep-merge is the point of the typed path —
   but it differs from scalar `--set`: `--set comp:nodeSelector.x=y` marks that
