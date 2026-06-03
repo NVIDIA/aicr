@@ -203,8 +203,8 @@ tag at runtime so the validators match the `aicr` binary that launched
 them:
 
 1. **Stamped build** — the binary's version + commit resolve the tag to
-   `:sha-<commit>`, the immutable per-commit image CI publishes on merge
-   to `main`.
+   `:sha-<commit>`, the immutable per-commit image CI publishes for
+   `main` pushes (only — see the caveat below the table).
 2. **`AICR_VALIDATOR_IMAGE_TAG` set** — overrides step 1 for *all* catalog
    images uniformly, including the inner `aiperf-bench` runner the
    `performance` validator launches (so both must exist at that tag).
@@ -213,12 +213,24 @@ What CI publishes:
 
 | Trigger | Tags built (`on-push.yaml` / `on-tag.yaml`) |
 |---------|----------------------------------------------|
-| Merge to `main` | `:sha-<full-commit>` (immutable) **and** `:edge` (moving → always `main` HEAD) |
-| Release tag `vX.Y.Z` | `:vX.Y.Z` **and** `:latest` |
+| Push to `main`, not docs-only | `:sha-<full-commit>` (immutable) **and** `:edge` (moving → latest validator-image build) |
+| Stable release `vX.Y.Z` | `:vX.Y.Z` **and** `:latest` |
+| Pre-release `vX.Y.Z-rc…` | `:vX.Y.Z-rc…` only — **not** `:latest` |
 
-**`:latest` is the last _release_, never `main`.** It is built only by the
-on-tag release pipeline, so a validator change merged to `main` after the
-last release is absent from `:latest` until the next release. Running
+`on-push.yaml` runs **only on `main`** and is skipped when a push touches
+*only* docs (`paths-ignore: **.md`, `docs/**`, `LICENSE`). So no
+`:sha-<commit>` is built — and `:edge` is not advanced — for a docs-only
+`main` commit, nor for any feature-branch / PR commit (the build job is
+gated to `refs/heads/main`). `:edge` therefore tracks the last `main`
+commit that ran the image build, *not necessarily* HEAD, and
+`sha-$(git rev-parse origin/main)` can 404 right after a docs-only merge.
+Confirm the tag exists (see below) and fall back to `:edge` or the last
+published SHA.
+
+**`:latest` is the last _stable_ release, never `main`.** It is moved only
+by the on-tag release pipeline for stable tags (the `:latest` step is gated
+on a non-pre-release tag), so a validator change merged to `main` after the
+last stable release is absent from `:latest` until the next one. Running
 `AICR_VALIDATOR_IMAGE_TAG=latest` against a `main`-tracking recipe can
 therefore silently run *older* validator behavior — e.g. a
 `performance.constraints` pin such as `inference-model` /
@@ -228,25 +240,29 @@ compiled default, which can surface as a misleading result rather than a
 clear version error.
 
 **To run the validator built on `main`** (e.g. testing a recipe whose pins
-are not yet in a release), point at `:edge` or the `main`-HEAD commit —
+are not yet in a release), point at `:edge` or a published `main` commit —
 *not* `:latest`:
 
 ```shell
-# Moving tag — always main HEAD, no lookup:
+# Moving tag — latest main validator-image build:
 AICR_VALIDATOR_IMAGE_TAG=edge aicr validate -r recipe.yaml -s snapshot.yaml --phase performance
 
-# Immutable pin — reproducible:
-AICR_VALIDATOR_IMAGE_TAG=sha-$(git rev-parse origin/main) aicr validate -r recipe.yaml -s snapshot.yaml ...
+# Immutable pin (reproducible) — use a published main commit, not blindly HEAD
+# (a docs-only HEAD has no image; verify with the registry check below):
+AICR_VALIDATOR_IMAGE_TAG=sha-<published-main-commit> aicr validate -r recipe.yaml -s snapshot.yaml ...
 ```
 
-A bare `go build` stamps `commit: unknown`, so step 1 cannot resolve a
-`:sha-<commit>` tag and the override is required; `make build` stamps the
-commit and resolves it automatically (no override needed). Only an
-un-pushed feature branch — whose commit has no published image — needs a
-moving tag, and even then `:edge` (current `main`) is closer than
-`:latest` (last release).
+A bare `go build` stamps `commit: unknown`, so step 1 can't resolve a
+`:sha-<commit>` tag and the override is required. `make build` stamps the
+commit — but CI publishes `:sha-<commit>` images **only for `main`** (the
+build job is gated to `refs/heads/main`), so auto-resolution works only
+when you build from a `main` commit whose image exists. Any feature-branch,
+fork, or PR build (pushed or not) stamps a SHA with **no** published image
+and still needs `AICR_VALIDATOR_IMAGE_TAG=edge` (or a published `main`
+SHA) — `:edge` is the closest tag to your branch.
 
-Find or trace the `main` tag against GHCR (public read):
+Find or trace the `main` tag against GitHub Container Registry (GHCR) —
+public read:
 
 ```shell
 REPO=nvidia/aicr-validators/performance
