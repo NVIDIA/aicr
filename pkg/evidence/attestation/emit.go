@@ -215,11 +215,19 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 		return emitOutcome{}, nil
 	}
 
+	// Resolve the push target. When the operator omits a tag, derive a
+	// per-recipe one from the bundle rather than defaulting to a shared
+	// constant, so distinct attestations never collide on one tag.
+	pushRef, err := effectiveEvidenceRef(opts.Push, bundle)
+	if err != nil {
+		return emitOutcome{}, err
+	}
+
 	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
 	defer pushCancel()
 	summary, err := Push(pushCtx, PushOptions{
 		SourceDir:   bundle.SummaryDir,
-		Reference:   opts.Push,
+		Reference:   pushRef,
 		AICRVersion: opts.AICRVersion,
 		PlainHTTP:   opts.PlainHTTP,
 		InsecureTLS: opts.InsecureTLS,
@@ -272,7 +280,7 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 	attachCtx, attachCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
 	defer attachCancel()
 	referrer, attachErr := AttachSigstoreBundleAsReferrer(attachCtx, AttachReferrerOptions{
-		Reference:  opts.Push,
+		Reference:  pushRef,
 		BundleJSON: signRes.BundleJSON,
 		MainArtifact: MainArtifactDescriptor{
 			Digest:    summary.Digest,
