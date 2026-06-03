@@ -173,6 +173,30 @@ done
 count=$(echo "$affected" | jq 'length')
 echo "Affected leaf overlays: ${count}"
 
+# Orphan-pointer check. The loop above only iterates existing overlays,
+# so a pointer added/modified for a slug with no matching leaf overlay
+# (a typo'd slug, or evidence for a retired recipe) never gets checked —
+# it would pass the gate unverified, defeating its purpose. Diff the
+# changed evidence pointers against the overlay set to surface those.
+# Only pointers present on disk at HEAD count: a *deleted* pointer is
+# absent here and is not an orphan (if its recipe still exists it is
+# already flagged via Rule 4 and reported as missing-pointer). This
+# shares the gate's basename==slug assumption (see header note 1).
+orphans="[]"
+while IFS= read -r pf; do
+  if [[ -z "$pf" ]]; then continue; fi
+  case "$pf" in
+    recipes/evidence/*.yaml) ;;
+    *) continue ;;
+  esac
+  pslug=$(basename "$pf" .yaml)
+  if [[ -f "$pf" && ! -f "recipes/overlays/${pslug}.yaml" ]]; then
+    orphans=$(echo "$orphans" | jq -c --arg s "$pslug" '. + [$s]')
+  fi
+done < <(printf '%s\n' "$changed_files")
+orphan_count=$(echo "$orphans" | jq 'length')
+echo "Orphan evidence pointers: ${orphan_count}"
+
 # --- Report build ------------------------------------------------------
 
 mkdir -p "$(dirname "$REPORT_OUT")"
@@ -191,7 +215,7 @@ mkdir -p "$(dirname "$REPORT_OUT")"
 
 warnings=0
 
-if [[ "$count" -eq 0 ]]; then
+if [[ "$count" -eq 0 && "$orphan_count" -eq 0 ]]; then
   {
     echo "No leaf overlays affected by this PR."
     echo
@@ -201,12 +225,14 @@ if [[ "$count" -eq 0 ]]; then
   exit 0
 fi
 
-{
-  echo "Affected leaf overlays: **${count}**"
-  echo
-  echo "| Recipe | Pointer | Verify | Digest match |"
-  echo "|---|---|---|---|"
-} >> "$REPORT_OUT"
+if [[ "$count" -gt 0 ]]; then
+  {
+    echo "Affected leaf overlays: **${count}**"
+    echo
+    echo "| Recipe | Pointer | Verify | Digest match |"
+    echo "|---|---|---|---|"
+  } >> "$REPORT_OUT"
+fi
 
 rows_written=0
 rows_truncated=0
@@ -305,6 +331,26 @@ if [[ "$rows_truncated" -gt 0 ]]; then
   echo "| _… +${rows_truncated} more (truncated; raise MAX_ROWS or split the PR)_ | | | |" >> "$REPORT_OUT"
 fi
 
+if [[ "$orphan_count" -gt 0 ]]; then
+  {
+    echo
+    echo "### Orphan evidence pointers"
+    echo
+    echo "Added or modified, but with **no matching leaf overlay** (\`recipes/overlays/<slug>.yaml\`)."
+    echo "This gate keys evidence to a recipe by filename, so an orphan pointer is never verified —"
+    echo "usually a typo'd slug or evidence left behind for a retired recipe. Rename it to match the"
+    echo "overlay, or remove it."
+    echo
+    echo "| Pointer | Issue |"
+    echo "|---|---|"
+  } >> "$REPORT_OUT"
+  while IFS= read -r oslug; do
+    if [[ -z "$oslug" ]]; then continue; fi
+    echo "| \`recipes/evidence/${oslug}.yaml\` | :warning: no \`recipes/overlays/${oslug}.yaml\` |" >> "$REPORT_OUT"
+    warnings=$((warnings + 1))
+  done < <(echo "$orphans" | jq -r '.[]')
+fi
+
 {
   echo
   if [[ "$warnings" -gt 0 ]]; then
@@ -333,3 +379,4 @@ fi
 echo "warnings=${warnings}"
 echo "rows_written=${rows_written}"
 echo "rows_truncated=${rows_truncated}"
+echo "orphan_pointers=${orphan_count}"
