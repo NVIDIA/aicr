@@ -19,9 +19,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // PointerInputs carries the pointer-file fields that are not derived
@@ -58,13 +57,20 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 	}, nil
 }
 
-// MarshalPointer renders a pointer as YAML with deterministic output
-// (sorted keys via yaml.v3 default behavior, trailing newline).
+// MarshalPointer renders a pointer as deterministic YAML (recursively
+// sorted keys, 2-space indent) via serializer.MarshalYAMLDeterministic —
+// the same serializer emit.go uses for the recipe/snapshot, keeping the
+// evidence outputs consistent.
+//
+// The 2-space indent is load-bearing: the pointer is committed to
+// recipes/evidence/<recipe>.yaml, where the repo's .yamllint (spaces: 2)
+// lints it. yaml.v3's default 4-space sequence indent would fail
+// `make lint` and break the documented publish -> commit -> PR workflow.
 func MarshalPointer(p *Pointer) ([]byte, error) {
 	if p == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "pointer is required")
 	}
-	body, err := yaml.Marshal(p)
+	body, err := serializer.MarshalYAMLDeterministic(p)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal pointer", err)
 	}
