@@ -7,6 +7,11 @@
 # bundle, and compare its signed digest against the current recipe's
 # canonical digest. Writes a Markdown report; never blocks the PR.
 #
+# A recipe is "affected" when the PR touches its overlay, an ancestor
+# overlay in its base chain, a referenced component values file, or its
+# own evidence pointer (recipes/evidence/<slug>.yaml) — so a pointer-only
+# "refresh evidence" PR is verified rather than silently skipped.
+#
 # Required env:
 #   AICR        path to the aicr binary (built from a trusted source)
 #   BASE_SHA    PR base SHA (target branch tip at PR creation)
@@ -146,6 +151,18 @@ for overlay in recipes/overlays/*.yaml; do
         break
       fi
     done <<<"$values_files"
+  fi
+
+  # Rule 4: the recipe's own evidence pointer was added or modified.
+  # Refreshing evidence (`cp ./out/pointer.yaml recipes/evidence/<slug>.yaml`)
+  # touches no overlay or values file, so without this rule a pointer-only
+  # PR — the canonical "refresh evidence" workflow — would slip through
+  # unverified. `grep -qxF` matches the whole line, so a sibling like
+  # `recipes/evidence/${name}.yaml.bak` doesn't trigger it.
+  if [[ "$include" == "false" ]]; then
+    if printf '%s\n' "$changed_files" | grep -qxF "recipes/evidence/${name}.yaml"; then
+      include=true
+    fi
   fi
 
   if [[ "$include" == "true" ]]; then
