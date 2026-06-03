@@ -1,0 +1,12 @@
+schemaVersion: 1.0.0
+recipe: h100-gke-cos-inference-dynamo
+attestations:
+  - bundle:
+      oci: ghcr.io/nvidia/aicr-evidence:v1
+      digest: sha256:6a59465f829489b5bf30eb56904817a573864f28afcce5022f2425f022ddb74d
+      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+    signer:
+      identity: yuanchen97@gmail.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 1706764289
+    attestedAt: 2026-06-03T00:42:43Z

@@ -1,0 +1,12 @@
+schemaVersion: 1.0.0
+recipe: h100-eks-ubuntu-inference-dynamo
+attestations:
+  - bundle:
+      oci: ghcr.io/nvidia/aicr-evidence:v1
+      digest: sha256:da9d8838e1ce4032256b04d75e27dc7248a3fd230bd7fd0f112bd306bc367317
+      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+    signer:
+      identity: yuanchen97@gmail.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 1706788485
+    attestedAt: 2026-06-03T00:52:58Z
