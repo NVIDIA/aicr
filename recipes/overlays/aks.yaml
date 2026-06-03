@@ -42,7 +42,7 @@ spec:
     # AKS pre-installs NVIDIA container toolkit; disable toolkit installation
     - name: gpu-operator
       type: Helm
-      version: "v26.3.1"
+      version: "v26.3.2"
       valuesFile: components/gpu-operator/values-aks.yaml
       dependencyRefs:
         - network-operator

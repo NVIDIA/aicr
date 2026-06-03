@@ -23,7 +23,7 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v26.3.1
+      version: v26.3.2
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
       overrides:
         driver:
@@ -197,7 +197,7 @@ together in an overlay rather than relying on the global defaults for the inputs
 componentRefs:
   - name: gpu-operator
     type: Helm
-    version: v26.3.1
+    version: v26.3.2
     valuesFile: components/gpu-operator/values.yaml
     overrides:
       driver:
@@ -381,7 +381,7 @@ spec:
     intent: training
   componentRefs:
     - name: gpu-operator
-      version: v26.3.1
+      version: v26.3.2
       valuesFile: components/gpu-operator/eks-gb200-training.yaml
 ```
 
@@ -392,7 +392,7 @@ spec:
 # Update component version
 componentRefs:
   - name: gpu-operator
-    version: v26.3.1  # Changed from v26.3.0
+    version: v26.3.2  # Changed from v26.3.1
 ```
 
 **Adding components:**
