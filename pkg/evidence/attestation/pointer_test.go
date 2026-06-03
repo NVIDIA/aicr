@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,58 @@ import (
 )
 
 func ptrInt64(v int64) *int64 { return &v }
+
+// TestMarshalPointer_TwoSpaceIndent guards the indentation contract: the
+// pointer is committed to recipes/evidence/<recipe>.yaml, where the repo's
+// .yamllint (spaces: 2) lints it. yaml.v3's default 4-space sequence indent
+// would fail `make lint`, so MarshalPointer must emit 2-space indentation.
+func TestMarshalPointer_TwoSpaceIndent(t *testing.T) {
+	bundle := &Bundle{
+		RecipeName: "h100-eks-ubuntu-inference-dynamo",
+		Predicate: &Predicate{
+			SchemaVersion: PredicateSchemaVersion,
+			AttestedAt:    time.Date(2026, 6, 3, 0, 52, 58, 0, time.UTC),
+		},
+	}
+	rekorIdx := int64(1706788485)
+	p, err := BuildPointer(PointerInputs{
+		Bundle:     bundle,
+		BundleOCI:  "ghcr.io/nvidia/aicr-evidence:v1",
+		BundleHash: "sha256:da9d8838",
+		Signer:     &PointerSigner{Identity: "test@example.com", Issuer: "https://oauth.example.com", RekorLogIndex: &rekorIdx},
+	})
+	if err != nil {
+		t.Fatalf("BuildPointer: %v", err)
+	}
+	out, err := MarshalPointer(p)
+	if err != nil {
+		t.Fatalf("MarshalPointer: %v", err)
+	}
+	got := string(out)
+
+	// The attestations sequence item must sit at 2-space indent, not 4.
+	// (Keys are sorted, so attestations may be the first top-level key.)
+	if !strings.Contains(got, "attestations:\n  - ") {
+		t.Errorf("attestations sequence not at 2-space indent:\n%s", got)
+	}
+	if strings.Contains(got, "\n    - ") {
+		t.Errorf("found 4-space sequence indent (would fail yamllint spaces:2):\n%s", got)
+	}
+	// Every indented line must use an even number of leading spaces.
+	for _, line := range strings.Split(got, "\n") {
+		if n := len(line) - len(strings.TrimLeft(line, " ")); n%2 != 0 {
+			t.Errorf("odd leading-space count (%d) on line %q", n, line)
+		}
+	}
+	// Round-trips to an equivalent pointer (re-indentation preserves content).
+	var rt Pointer
+	if err := yaml.Unmarshal(out, &rt); err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if rt.Recipe != p.Recipe || len(rt.Attestations) != 1 || rt.Attestations[0].Bundle.OCI != p.Attestations[0].Bundle.OCI {
+		t.Errorf("round-trip mismatch: %+v", rt)
+	}
+}
 
 func TestBuildPointer_RequiresBundle(t *testing.T) {
 	if _, err := BuildPointer(PointerInputs{}); err == nil {

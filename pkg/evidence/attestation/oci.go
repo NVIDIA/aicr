@@ -17,6 +17,7 @@ package attestation
 import (
 	"context"
 	"os"
+	"strings"
 
 	digestpkg "github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -37,9 +38,11 @@ type PushOptions struct {
 	// SourceDir is the bundle directory to package (summary or logs).
 	SourceDir string
 
-	// Reference is an OCI URI like "oci://ghcr.io/myorg/aicr-evidence"
-	// (or a non-prefixed equivalent). When the reference omits a tag,
-	// the bundle's content digest is used as the tag.
+	// Reference is an OCI URI like
+	// "oci://ghcr.io/myorg/aicr-evidence:<tag>" (or a non-prefixed
+	// equivalent). A tag is required at this level; the emit/publish
+	// orchestration derives a per-recipe tag from the bundle when the
+	// operator's --push omits one (see effectiveEvidenceRef).
 	Reference string
 
 	// AICRVersion is recorded in the OCI manifest's
@@ -86,8 +89,11 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "Reference must be an OCI registry reference")
 	}
 	if ref.Tag == "" {
-		// Placeholder tag; the OCI digest is the canonical address.
-		ref = ref.WithTag(defaultEvidenceTag)
+		// The emit/publish orchestration derives a per-recipe tag from the
+		// bundle before calling Push (see effectiveEvidenceRef); a tag is
+		// required here so we never silently fall back to a shared constant.
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"evidence reference must include a tag")
 	}
 
 	tmpOut, err := os.MkdirTemp("", "aicr-evidence-oci-")
@@ -130,6 +136,82 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 		MediaType: res.MediaType,
 		Size:      res.Size,
 	}, nil
+}
+
+// maxEvidenceTagSlug caps the recipe-slug portion of a derived tag so the
+// slug plus "-" plus the 12-char fingerprint stays well under the 128-char
+// OCI tag limit.
+const maxEvidenceTagSlug = 80
+
+// effectiveEvidenceRef resolves the OCI reference to push a bundle to. When
+// the operator's reference omits a tag, a per-attestation tag derived from
+// the bundle (see deriveEvidenceTag) is applied, so distinct attestations
+// never collide on a shared tag. Verification pins on the content digest
+// regardless, so the tag is a human-readable label, not the trust anchor.
+func effectiveEvidenceRef(userRef string, bundle *Bundle) (string, error) {
+	ref, err := oci.ParseOutputTarget(oci.EnsureScheme(userRef))
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid reference")
+	}
+	if !ref.IsOCI {
+		return "", errors.New(errors.ErrCodeInvalidRequest, "Reference must be an OCI registry reference")
+	}
+	if ref.Tag == "" {
+		ref = ref.WithTag(deriveEvidenceTag(bundle))
+	}
+	return ref.String(), nil
+}
+
+// deriveEvidenceTag builds a human-readable, per-attestation OCI tag for a
+// bundle pushed without one: "<recipe-slug>-<fingerprint>", where the
+// fingerprint is the first 12 hex chars of the bundle's manifest digest.
+// The slug keeps the tag readable; the fingerprint keeps it unique per
+// attestation so a later push never silently floats an existing tag.
+func deriveEvidenceTag(bundle *Bundle) string {
+	slug := sanitizeOCITag(bundle.RecipeName)
+	fp := manifestFingerprint(bundle)
+	if fp == "" {
+		return slug
+	}
+	return slug + "-" + fp
+}
+
+// sanitizeOCITag coerces s into a valid OCI tag: lowercased, with any
+// character outside [a-z0-9_.-] replaced by '-', leading/trailing '-' and
+// '.' trimmed, and the result capped at maxEvidenceTagSlug. Falls back to
+// defaultRecipeName when nothing usable remains.
+func sanitizeOCITag(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '.', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-.")
+	if len(out) > maxEvidenceTagSlug {
+		out = strings.Trim(out[:maxEvidenceTagSlug], "-.")
+	}
+	if out == "" {
+		return defaultRecipeName
+	}
+	return out
+}
+
+// manifestFingerprint returns the first 12 hex chars of the bundle's
+// manifest digest, identifying this attestation's content. Empty when the
+// digest is unavailable.
+func manifestFingerprint(bundle *Bundle) string {
+	if bundle == nil || bundle.Predicate == nil {
+		return ""
+	}
+	hexDigest := strings.TrimPrefix(bundle.Predicate.Manifest.Digest, "sha256:")
+	if len(hexDigest) < 12 {
+		return hexDigest
+	}
+	return hexDigest[:12]
 }
 
 // AttachSigstoreBundleAsReferrer pushes a Sigstore Bundle blob as an OCI
