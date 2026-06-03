@@ -135,8 +135,8 @@ End-to-end, the smallest viable patch:
 4. **Extend the factory.** Add a `CreateXxxCollector() Collector`
    method on `Factory` and `DefaultFactory` in
    [`pkg/collector/factory.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/collector/factory.go).
-5. **Wire into snapshotter.** Add one `g.Go(collectSafe(gctx, "<kind>",
-   n.Factory.CreateXxxCollector()))` line in
+5. **Wire into snapshotter.** Add one
+   `g.Go(collectSafe(gctx, "<kind>", n.Factory.CreateXxxCollector()))` line in
    [`pkg/snapshotter/snapshot.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/snapshotter/snapshot.go).
 6. **Test.** `<kind>_test.go` with table-driven tests. Use
    `k8s.io/client-go/kubernetes/fake` for K8s collectors. Cover the

@@ -51,6 +51,14 @@ type JobPlan struct {
 	// Image is the validator container image
 	Image string
 
+	// ImageTagOverride is the value of AICR_VALIDATOR_IMAGE_TAG when set
+	// (empty otherwise). The override is already applied to Image; this field
+	// preserves the "override in effect" signal so the renderers force
+	// PullAlways for a mutable override tag (e.g. :edge), matching the AIPerf
+	// sidecar. Without it a node silently reuses a cached older :edge image on
+	// the main validator container. See #1177.
+	ImageTagOverride string
+
 	// Args are container arguments
 	Args []string
 
@@ -256,6 +264,7 @@ func BuildJobPlan(
 		JobName:          generateJobName(entry.Name),
 		Namespace:        namespace,
 		Image:            entry.Image,
+		ImageTagOverride: imageTagOverride,
 		Args:             entry.Args,
 		Env:              env,
 		Volumes:          volumes,
@@ -279,9 +288,10 @@ func RenderPlan(plan JobPlan) *batchv1.Job {
 		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: secret})
 	}
 
-	// Determine image pull policy
-	// Note: imageTagOverride already applied to plan.Image during BuildJobPlan
-	pullPolicy := ImagePullPolicy(plan.Image, "")
+	// Determine image pull policy. Pass plan.ImageTagOverride (not "") so a
+	// mutable override tag like :edge forces PullAlways and the node does not
+	// silently reuse a cached older image on the main validator. See #1177.
+	pullPolicy := ImagePullPolicy(plan.Image, plan.ImageTagOverride)
 
 	jobObj := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -344,9 +354,10 @@ func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobAppl
 			applycorev1.LocalObjectReference().WithName(secret))
 	}
 
-	// Determine image pull policy
-	// Note: imageTagOverride already applied to plan.Image during BuildJobPlan
-	pullPolicy := ImagePullPolicy(plan.Image, "")
+	// Determine image pull policy. Pass plan.ImageTagOverride (not "") so a
+	// mutable override tag like :edge forces PullAlways and the node does not
+	// silently reuse a cached older image on the main validator. See #1177.
+	pullPolicy := ImagePullPolicy(plan.Image, plan.ImageTagOverride)
 
 	// Build environment variables
 	envApply := buildEnvVarApply(plan.Env)

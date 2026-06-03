@@ -19,6 +19,9 @@
 #   3. HTML comments (<!-- -->) outside fenced code blocks
 #   4. Autolinks (<https://...> / <http://...>) outside fenced and inline code
 #      — MDX tries to parse them as JSX tags and chokes on the `://`.
+#   5. Bare angle-bracket placeholders (<word>) outside fenced and inline code
+#      — MDX interprets them as JSX component tags and fails on unexpected
+#      content that follows.
 
 set -euo pipefail
 
@@ -49,7 +52,7 @@ for dir in "${SEARCH_DIRS[@]}"; do
   done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) ! -name "${EXCLUDE}" 2>/dev/null)
 done
 
-# --- Checks 2, 3, 4: bare braces, HTML comments, and autolinks ---
+# --- Checks 2, 3, 4, 5: bare braces, HTML comments, autolinks, bare tags ---
 # All evaluated outside fenced code blocks; inline code spans are stripped
 # before the line is scanned so legitimate uses inside backticks don't trip.
 for dir in "${SEARCH_DIRS[@]}"; do
@@ -62,6 +65,9 @@ for dir in "${SEARCH_DIRS[@]}"; do
         # Strip inline code spans so backticked tokens don'\''t trigger.
         line = $0
         gsub(/`[^`]*`/, "", line)
+        # Strip backslash-escaped angle brackets (\<word\>) — these are
+        # valid markdown escapes and MDX-safe.
+        gsub(/\\<[^>]*\\>/, "", line)
       }
       # Bare { not preceded by backslash escape. The leading
       # (^|[^\\]) form catches { in column 1 as well.
@@ -77,6 +83,13 @@ for dir in "${SEARCH_DIRS[@]}"; do
       # JSX tag parser. Use markdown link syntax [text](url) instead.
       line ~ /<https?:\/\// {
         printf "MDX: autolink outside code fence: %s:%d: %s\n", FILENAME, NR, $0
+        errors++
+      }
+      # Bare angle-bracket placeholders: <word> that are not void HTML
+      # elements (check 1) or autolinks (check 4). MDX interprets these
+      # as JSX component tags.
+      line ~ /<[a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
+        printf "MDX: bare <word> tag outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
       END { exit (errors > 0) ? 1 : 0 }
@@ -95,6 +108,7 @@ if [[ ${ERRORS} -gt 0 ]]; then
   echo "  <br>  → <br />          <img src=...>  → <img src=... />"
   echo "  {foo} → \\{foo\\}        <!-- ... -->   → remove or use {/* ... */}"
   echo "  <https://example.com>  → [example](https://example.com)"
+  echo "  <name>                 → \`<name>\`     or &lt;name&gt;"
   exit 1
 fi
 
