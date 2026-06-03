@@ -126,30 +126,51 @@ with `cancel-in-progress: false`. The nightly schedule provides a backstop — i
 merge run is lost due to operational issues, the nightly run catches it.
 
 ```yaml
-# Tier 3 concurrency: never cancel main runs
+# Tier 3 concurrency: never cancel main runs. The batch-id suffix keeps every
+# shard of a single run in its own group so they run in parallel (see
+# "Tier 3 matrix sharding" below); the SHA keeps successive merges independent.
 concurrency:
-  group: kwok-tier3-${{ github.sha }}
+  group: kwok-tier3-${{ github.sha }}-${{ matrix.batch.id }}
   cancel-in-progress: false
 ```
 
+### Tier 3 matrix sharding (GitHub 256-config cap)
+
+Tier 3 tests the full `recipe × deployer` cross-product. GitHub Actions caps a
+single job's matrix at **256 configurations**; once the testable overlay set
+reached 72 recipes, `72 × 4 deployers = 288` exceeded the cap and the job was
+rejected before any leg ran.
+
+To stay under the limit without sacrificing coverage, the `discover` job builds
+the `{recipe, deployer}` pairs and chunks them into batches of `TIER3_BATCH_SIZE`
+(200, with headroom under 256), emitting a `tier3_batches` output of
+`{id, pairs}` objects. `test-tier3` is a thin matrix over those batches that fans
+each one out to the **`kwok-tier3-shard.yaml`** reusable workflow, which expands
+its batch as its own (≤ 256) matrix. Batch count grows automatically as overlays
+are added — no manual job duplication. A fail-closed guard in `discover` errors
+loudly if `TIER3_BATCH_SIZE` is ever raised past 256, rather than resurfacing
+GitHub's opaque rejection mid-fan-out.
+
 ### Workflow structure
 
-The single `kwok-recipes.yaml` workflow splits into three jobs:
+The `kwok-recipes.yaml` workflow splits into a discovery job, three test tiers,
+and a summary. Tier 3 fans out to a reusable shard workflow (see above):
 
 ```
 discover
-├── tier1-recipes: [eks, aks, gke, kind, ...]          # generic only
-├── tier2-recipes: [h100-eks-ubuntu-training, ...]     # diff-affected only
-└── tier3-recipes: [all 36+]                           # full matrix
+├── tier1: [eks, aks, gke, kind, ...]               # generic only
+├── tier2: [h100-eks-ubuntu-training, ...]           # diff-affected only
+├── tier3: [all 72+]                                 # full overlay set
+└── tier3_batches: [{id, pairs:[{recipe,deployer}]}] # cross-product, chunked ≤256
 
 test-tier1  (PR + push to main)
-  matrix: tier1-recipes
+  matrix: tier1 × deployer
 
 test-tier2  (PR only, skip if empty)
-  matrix: tier2-recipes
+  matrix: tier2 × deployer
 
 test-tier3  (push to main + schedule, skip on PR)
-  matrix: tier3-recipes
+  matrix: tier3_batches → uses kwok-tier3-shard.yaml (matrix: pairs)
 
 summary
   needs: [test-tier1, test-tier2, test-tier3]
