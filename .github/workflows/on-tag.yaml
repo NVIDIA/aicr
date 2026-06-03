@@ -211,6 +211,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     needs: [tests]
     timeout-minutes: 15
+    # contents: read to checkout the source for the docker build; packages:
+    # write to push the per-arch aicr-gate image to GHCR (ghcr.io/nvidia/aicr-gate).
     permissions:
       contents: read
       packages: write
