@@ -326,72 +326,108 @@ func TestParseAIPerfOutput(t *testing.T) {
 }
 
 func TestIsDynamoDeploymentReady(t *testing.T) {
+	// dgd builds a DynamoGraphDeployment with the given spec replica counts and
+	// status.services entries (each entry is a field->count map, e.g.
+	// {"replicas": 8, "readyReplicas": 8}).
+	dgd := func(state string, spec map[string]int64, status map[string]map[string]int64) *unstructured.Unstructured {
+		specSvc := map[string]interface{}{}
+		for name, r := range spec {
+			specSvc[name] = map[string]interface{}{"replicas": r}
+		}
+		statSvc := map[string]interface{}{}
+		for name, fields := range status {
+			m := map[string]interface{}{}
+			for k, v := range fields {
+				m[k] = v
+			}
+			statSvc[name] = m
+		}
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"spec":   map[string]interface{}{"services": specSvc},
+			"status": map[string]interface{}{"state": state, "services": statSvc},
+		}}
+	}
 	tests := []struct {
 		name  string
 		input *unstructured.Unstructured
 		want  bool
 	}{
-		{
-			name:  "nil object",
-			input: nil,
-			want:  false,
-		},
+		{name: "nil object", input: nil, want: false},
 		{
 			name:  "no status",
 			input: &unstructured.Unstructured{Object: map[string]interface{}{"spec": map[string]interface{}{}}},
 			want:  false,
 		},
 		{
-			name: "state != successful",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"status": map[string]interface{}{"state": "pending"},
-			}},
-			want: false,
+			name:  "state != successful",
+			input: dgd("pending", map[string]int64{"VllmDecodeWorker": 8}, map[string]map[string]int64{"VllmDecodeWorker": {"replicas": 8, "readyReplicas": 8}}),
+			want:  false,
 		},
 		{
-			name: "successful but per-service status not yet populated",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"status": map[string]interface{}{"state": "successful"},
-			}},
-			want: false,
+			name:  "successful but status.services empty",
+			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{}),
+			want:  false,
 		},
 		{
-			name: "successful but a worker replica not ready",
+			// Codex review gap: operator populates status.services
+			// incrementally; the worker service is not represented yet.
+			name:  "successful but worker absent from status",
+			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{"Frontend": {"replicas": 1, "readyReplicas": 1}}),
+			want:  false,
+		},
+		{
+			name:  "successful but worker not all ready (5/8)",
+			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{"Frontend": {"replicas": 1, "readyReplicas": 1}, "VllmDecodeWorker": {"replicas": 8, "readyReplicas": 5}}),
+			want:  false,
+		},
+		{
+			// Scale-up window: status.replicas lags spec (6 of 8 created), all
+			// 6 ready. Comparing against spec (8) must still report not-ready.
+			name:  "successful but worker still scaling up (6/8 desired)",
+			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{"Frontend": {"replicas": 1, "readyReplicas": 1}, "VllmDecodeWorker": {"replicas": 6, "readyReplicas": 6}}),
+			want:  false,
+		},
+		{
+			name:  "successful and all desired services ready (readyReplicas)",
+			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{"Frontend": {"replicas": 1, "readyReplicas": 1}, "VllmDecodeWorker": {"replicas": 8, "readyReplicas": 8}}),
+			want:  true,
+		},
+		{
+			name:  "successful with scaling-group availableReplicas fallback",
+			input: dgd("successful", map[string]int64{"VllmDecodeWorker": 8}, map[string]map[string]int64{"VllmDecodeWorker": {"replicas": 8, "availableReplicas": 8}}),
+			want:  true,
+		},
+		{
+			// spec replicas omitted → defaults to 1; one ready replica satisfies it.
+			name: "spec replicas omitted defaults to 1",
 			input: &unstructured.Unstructured{Object: map[string]interface{}{
+				"spec": map[string]interface{}{"services": map[string]interface{}{
+					"VllmDecodeWorker": map[string]interface{}{}, // no replicas field
+				}},
 				"status": map[string]interface{}{
 					"state": "successful",
 					"services": map[string]interface{}{
-						"Frontend":         map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
-						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "readyReplicas": int64(5)},
+						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
 					},
 				},
 			}},
-			want: false,
+			want: true,
 		},
 		{
-			name: "successful and all replicas ready (readyReplicas)",
+			// Present-but-wrong-typed spec replicas must fail closed, not default to 1.
+			name: "spec replicas wrong type fails closed",
 			input: &unstructured.Unstructured{Object: map[string]interface{}{
+				"spec": map[string]interface{}{"services": map[string]interface{}{
+					"VllmDecodeWorker": map[string]interface{}{"replicas": "eight"},
+				}},
 				"status": map[string]interface{}{
 					"state": "successful",
 					"services": map[string]interface{}{
-						"Frontend":         map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
 						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "readyReplicas": int64(8)},
 					},
 				},
 			}},
-			want: true,
-		},
-		{
-			name: "successful with scaling-group availableReplicas fallback",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"status": map[string]interface{}{
-					"state": "successful",
-					"services": map[string]interface{}{
-						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "availableReplicas": int64(8)},
-					},
-				},
-			}},
-			want: true,
+			want: false,
 		},
 	}
 	for _, tt := range tests {

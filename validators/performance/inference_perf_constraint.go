@@ -1120,15 +1120,21 @@ func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWork
 	}
 }
 
-// isDynamoDeploymentReady returns true when the object's status.state equals "successful".
-// isDynamoDeploymentReady reports whether every service in the
+// isDynamoDeploymentReady reports whether *every desired* service in the
 // DynamoGraphDeployment has all of its replicas Ready — not just that the
 // operator reported a top-level state of "successful". The benchmark pins one
 // data-parallel worker per GPU; if it starts while some workers are still
 // loading (common when model-cache reads stagger, e.g. 8 workers reading an 8B
 // model concurrently from one RWO EBS cache), it measures an under-provisioned
-// deployment and reports falsely low throughput / high TTFT. Gating on
-// per-service replica readiness prevents that. See #1181.
+// deployment and reports falsely low throughput / high TTFT. See #1181.
+//
+// Readiness is keyed off spec.services (the desired set), and each service's
+// status.readyReplicas is compared against its spec replica count. This guards
+// two failure modes that checking status.services alone misses: (1) the
+// operator may populate status.services incrementally, so a desired service
+// (e.g. the worker) can be entirely absent while the frontend already reports
+// ready; (2) during scale-up status.replicas lags the spec count, so comparing
+// ready against status.replicas can pass at, say, 6/8.
 func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 	if obj == nil {
 		return false
@@ -1138,30 +1144,55 @@ func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 		return false
 	}
 
-	// status.services maps each component (Frontend, VllmDecodeWorker, ...) to
-	// its replica counts. Require every service to have all replicas Ready;
-	// "successful" alone can be reported before the worker pods finish loading.
-	services, found, err := unstructured.NestedMap(obj.Object, "status", "services")
-	if err != nil || !found || len(services) == 0 {
+	desired, found, err := unstructured.NestedMap(obj.Object, "spec", "services")
+	if err != nil || !found || len(desired) == 0 {
 		return false
 	}
-	for _, raw := range services {
-		svc, ok := raw.(map[string]interface{})
+	statusServices, found, err := unstructured.NestedMap(obj.Object, "status", "services")
+	if err != nil || !found {
+		return false
+	}
+
+	for name, draw := range desired {
+		dsvc, ok := draw.(map[string]interface{})
 		if !ok {
 			return false
 		}
-		replicas, found, err := unstructured.NestedInt64(svc, "replicas")
-		if err != nil || !found || replicas < 1 {
+		// Desired replica count from the spec. DGD services default to 1
+		// replica when unset; a 0-replica service has nothing to await.
+		want, wfound, werr := unstructured.NestedInt64(dsvc, "replicas")
+		if werr != nil {
+			// Present but wrong-typed replicas: fail closed rather than
+			// silently defaulting to 1, which could pass the gate early in
+			// the same under-provisioned class this guards against.
+			return false
+		}
+		if !wfound {
+			want = 1
+		}
+		if want < 1 {
+			continue
+		}
+
+		// The desired service must be represented in status — not just the
+		// subset the operator has populated so far.
+		sraw, ok := statusServices[name]
+		if !ok {
+			return false
+		}
+		ssvc, ok := sraw.(map[string]interface{})
+		if !ok {
 			return false
 		}
 		// readyReplicas is populated for Deployment/PodClique/LeaderWorkerSet;
-		// PodCliqueScalingGroup reports availableReplicas instead. Accept
-		// whichever the operator set for this component kind.
-		ready, found, err := unstructured.NestedInt64(svc, "readyReplicas")
-		if err != nil || !found {
-			ready, found, err = unstructured.NestedInt64(svc, "availableReplicas")
+		// PodCliqueScalingGroup reports availableReplicas instead. Compare
+		// against the desired (spec) count so a scale-up window does not read
+		// as ready.
+		ready, rfound, err := unstructured.NestedInt64(ssvc, "readyReplicas")
+		if err != nil || !rfound {
+			ready, rfound, err = unstructured.NestedInt64(ssvc, "availableReplicas")
 		}
-		if err != nil || !found || ready < replicas {
+		if err != nil || !rfound || ready < want {
 			return false
 		}
 	}
