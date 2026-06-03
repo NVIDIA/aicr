@@ -159,6 +159,37 @@ Only use this pattern when the content is truly uniform across the wildcard dime
 - Criteria: not inherited (each recipe defines its own)
 - Mixin constraints/components must not conflict with the inheritance chain or other mixins
 
+### Inference performance constraints
+
+The `inference-perf` performance check reads up to four entries from
+`validation.performance.constraints`, all keyed by name. Two are pass/fail
+**thresholds** (comparator values, 10% tolerance applied by the evaluator) and
+two are optional **inputs** that tune the benchmark per accelerator (bare
+values, no comparator):
+
+```yaml
+validation:
+  performance:
+    checks: [inference-perf]
+    constraints:
+      - name: inference-throughput          # >= only; output tokens/sec
+        value: ">= 50000"
+      - name: inference-ttft-p99            # <= only; TTFT p99 in ms
+        value: "<= 1000"
+      - name: inference-model               # optional; HF model ID
+        value: Qwen/Qwen3-8B
+      - name: inference-concurrency-per-gpu # optional; positive integer
+        value: "256"
+```
+
+`inference-model` and `inference-concurrency-per-gpu` resolve with precedence
+**recipe constraint > `AICR_INFERENCE_PERF_*` catalog env > compiled default**
+(Qwen3-8B at 256/GPU). Set them per overlay to pick the right model and load for
+each accelerator — exactly as the throughput/TTFT thresholds already vary per
+overlay — while the compiled defaults cover overlays that omit them. Because the
+thresholds are only meaningful at a specific model + concurrency, pin all four
+together in an overlay rather than relying on the global defaults for the inputs.
+
 ### Component Types
 
 **Helm components** (most common):
@@ -597,6 +628,14 @@ mkdir -p recipes/evidence
 cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
 git add recipes/evidence/<recipe-name>.yaml
 ```
+
+The `--push` example omits the tag, so aicr derives a unique per-recipe one,
+`<recipe-slug>-<short-fingerprint>` (e.g.
+`gb200-eks-ubuntu-training-3f9a1c2b4d5e`). The bundle is always pinned by its
+`sha256:` digest (what `evidence verify` and the pointer use, pulling by
+digest), so the tag is only a human-readable label and tag choice never
+affects verification. The derived tag keeps distinct attestations on
+distinct refs; pass an explicit tag to override.
 
 `--push` triggers cosign keyless signing through Sigstore's
 public-good infrastructure. The CLI resolves an OIDC token through

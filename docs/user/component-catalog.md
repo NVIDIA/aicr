@@ -24,7 +24,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
-| **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
+| **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work zero-config. Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **kai-scheduler** | DRA-aware gang scheduler with hierarchical queues and topology-aware placement. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
@@ -70,7 +70,14 @@ Inference recipes include the **agentgateway** component, which deploys an `infe
 
 To restrict it to trusted networks, set `agentgateway.allowedSourceRanges` to a list of CIDR (Classless Inter-Domain Routing) blocks. The values are rendered into the generated Service's `spec.loadBalancerSourceRanges`, which the AWS, GCP, Azure, and OCI cloud load balancers all honor — so one setting locks the gateway down on every platform.
 
-Do **not** use `--set` for this key. `--set agentgateway:allowedSourceRanges=<cidr>` exits 0 but renders `loadBalancerSourceRanges` as a bare string instead of a list, producing a type-invalid Service (the gateway may stay open to `0.0.0.0/0`, or the CR apply is rejected). Scope the gateway through a recipe overlay or `componentRef` override instead:
+Do **not** use plain `--set` for this key. `--set agentgateway:allowedSourceRanges=<cidr>` exits 0 but renders `loadBalancerSourceRanges` as a bare string instead of a list, producing a type-invalid Service (the gateway may stay open to `0.0.0.0/0`, or the CR apply is rejected). Use the list-aware [`--set-json` / `--set-file`](cli-reference.md#list-and-object-value-overrides) flags from the CLI:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'
+```
+
+or scope the gateway through a recipe overlay or `componentRef` override:
 
 ```yaml
 componentRefs:

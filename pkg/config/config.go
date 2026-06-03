@@ -201,6 +201,12 @@ type AttestationSpec struct {
 	Enabled                   bool   `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	CertificateIdentityRegexp string `yaml:"certificateIdentityRegexp,omitempty" json:"certificateIdentityRegexp,omitempty"`
 	OIDCDeviceFlow            bool   `yaml:"oidcDeviceFlow,omitempty" json:"oidcDeviceFlow,omitempty"`
+
+	// FulcioURL and RekorURL override the public-good Sigstore endpoints so
+	// keyless signing targets a private Fulcio CA and/or Rekor transparency
+	// log. Empty leaves the public defaults in place. See issue #408.
+	FulcioURL string `yaml:"fulcioURL,omitempty" json:"fulcioURL,omitempty"`
+	RekorURL  string `yaml:"rekorURL,omitempty" json:"rekorURL,omitempty"`
 }
 
 // RegistrySpec captures OCI-registry transport options for bundle push.

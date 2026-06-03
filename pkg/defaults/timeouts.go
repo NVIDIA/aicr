@@ -88,12 +88,18 @@ const (
 	SnapshotOperationTimeout = 5 * time.Minute
 
 	// ValidationOperationTimeout is the facade-level upper bound for
-	// Client.ValidateState when the caller's context has no deadline.
-	// Sized to comfortably exceed CheckExecutionTimeout (45m) so the
-	// inner per-check Job timeout fires before the orchestration cap —
-	// that ordering surfaces a stuck check as a per-check error rather
-	// than as the wrapping context's deadline-exceeded.
-	ValidationOperationTimeout = 60 * time.Minute
+	// Client.ValidateState when the caller's context has no deadline
+	// (controller/library callers; the CLI runs uncapped). It must exceed the
+	// LARGEST per-check Job timeout so that inner timeout fires first and the
+	// run surfaces a structured per-check error rather than the wrapping
+	// context's bare deadline-exceeded. The largest is the inference-perf
+	// catalog timeout (65m, which covers the model-cache populate + cold-start
+	// benchmark phases), not CheckExecutionTimeout (55m, the fallback when no
+	// catalog timeout is set). 75m keeps margin above 65m for orchestration
+	// overhead (snapshot agent, RBAC, namespace setup, cleanup). The
+	// catalog-vs-facade relationship is asserted in
+	// pkg/validator/catalog/catalog_test.go.
+	ValidationOperationTimeout = 75 * time.Minute
 )
 
 // Server timeouts for HTTP server configuration.
@@ -273,17 +279,21 @@ const (
 	// The ceiling is set by the cold-start inference benchmark, which runs
 	// the following phases serially under the parent ctx:
 	//   InferenceNamespaceTerminationWait ( 5m, prior run's namespace drain)
-	// + InferenceWorkloadReadyTimeout     (10m, image pull + model load)
+	// + InferenceWorkloadReadyTimeout     (10m, model-cache populate download —
+	//                                           the cache is on by default)
+	// + InferenceWorkloadReadyTimeout     (10m, image pull + worker model load)
 	// + InferenceHealthTimeout            ( 5m, endpoint readiness probe)
 	// + InferencePerfPodTimeout           ( 5m, AIPerf pod scheduling)
 	// + InferencePerfJobTimeout           (15m, AIPerf benchmark runtime)
 	// ──────────────────────────────────────
-	// = 40m worst-case phase sum; 45m ceiling gives 5m headroom for slow
+	// = 50m worst-case phase sum; 55m ceiling gives 5m headroom for slow
 	//   image registries and slog/K8s API round-trips between phases.
-	// Deferred cleanup (K8sCleanupTimeout, ~30s) runs under a fresh
-	// context.Background and doesn't consume this budget — but see the
-	// inference-perf catalog entry for the corresponding Job-level bump.
-	CheckExecutionTimeout = 45 * time.Minute
+	// This is the fallback for a standalone validator invocation; normal runs
+	// use the larger inference-perf catalog `timeout` (AICR_CHECK_TIMEOUT, 65m),
+	// which also accounts for the cache-populate phase. Deferred cleanup
+	// (K8sCleanupTimeout, ~30s) runs under a fresh context.Background and does
+	// not consume this budget.
+	CheckExecutionTimeout = 55 * time.Minute
 
 	// DRATestPodTimeout is the timeout for the DRA test pod to complete.
 	// The pod runs a simple CUDA device check but may need time for image pull.

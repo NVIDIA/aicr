@@ -71,6 +71,10 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 // digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 const digestAlgoSHA256 = "sha256"
 
+// errCtxKeyComponent is the structured-error context key carrying the
+// component name in bundle value-override failures.
+const errCtxKeyComponent = "component"
+
 // DefaultBundler generates Helm per-component bundles from recipes.
 //
 // The per-component approach produces a directory per component, each with its
@@ -620,7 +624,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 					"failed to apply --set value overrides",
 					applyErr,
-					map[string]any{"component": ref.Name})
+					map[string]any{errCtxKeyComponent: ref.Name})
 			}
 		}
 
@@ -634,16 +638,97 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
 		b.applyNodeSchedulingOverrides(ref.Name, values, provider, policy)
 
+		// Apply structured --set-json / --set-file overrides last so they take
+		// precedence over base values, scalar --set, and scheduling injection.
+		// Unlike --set, these carry lists/objects: object values deep-merge into
+		// any existing map at the path, while lists and scalars replace it. This
+		// is the type-safe path for list/object fields like
+		// agentgateway.allowedSourceRanges that --set cannot express. See #1161.
+		if typedOverrides := b.getTypedValueOverridesForComponent(ref.Name, provider); len(typedOverrides) > 0 {
+			// Reject the "enabled" toggle on the typed path here — below the CLI
+			// boundary — so non-CLI/SDK callers that build TypedComponentPath
+			// values directly are guarded too, not just the CLI flag parser.
+			// Routing it through --set-json/--set-file would write a stray
+			// literal `enabled:` into chart values rather than toggle the
+			// component; it is honored only via scalar --set.
+			if _, hasEnabled := typedOverrides[config.ComponentEnabledKey]; hasEnabled {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q: %q is the enable/disable toggle and must be set with --set "+
+						"(e.g. --set %s:%s=false), not --set-json/--set-file",
+						ref.Name, config.ComponentEnabledKey, ref.Name, config.ComponentEnabledKey))
+			}
+			if applyErr := component.ApplyTypedOverrides(values, typedOverrides); applyErr != nil {
+				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+					"failed to apply --set-json/--set-file value overrides",
+					applyErr,
+					map[string]any{errCtxKeyComponent: ref.Name})
+			}
+		}
+
 		componentValues[ref.Name] = values
 	}
 
 	return componentValues, nil
 }
 
-// getValueOverridesForComponent returns value overrides for a specific component.
-// Uses the component registry to match both exact names and alternative override keys.
-// The provider argument scopes the registry lookup to the recipe's bound DataProvider;
-// a nil provider falls back to the package-global registry via GetComponentRegistryFor.
+// componentOverrideKeys returns the candidate override-map keys for
+// componentName, in priority order: the exact name first, then either its
+// non-hyphenated form (when the registry is unavailable) or the registry's
+// ValueOverrideKeys aliases. Shared by the string (--set) and typed
+// (--set-json / --set-file) override lookups so both resolve component
+// aliases identically. The provider argument scopes the registry lookup to
+// the recipe's bound DataProvider; a nil provider falls back to the
+// package-global registry via GetComponentRegistryFor.
+func (b *DefaultBundler) componentOverrideKeys(componentName string, provider recipe.DataProvider) []string {
+	keys := []string{componentName}
+
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		// Registry unavailable: fall back to the non-hyphenated form only.
+		if nonHyphenated := removeHyphens(componentName); nonHyphenated != componentName {
+			keys = append(keys, nonHyphenated)
+		}
+		return keys
+	}
+
+	if comp := registry.Get(componentName); comp != nil {
+		keys = append(keys, comp.ValueOverrideKeys...)
+	}
+
+	return keys
+}
+
+// mergeOverridesAcrossKeys merges the per-path override maps stored under every
+// candidate key (the exact component name plus its registry aliases) into a
+// single map, so overrides supplied under a mix of canonical and alias names —
+// e.g. both gpu-operator and gpuoperator — are all honored rather than the
+// first-matching key silently dropping the rest. When the same path appears
+// under more than one key, the higher-priority key (earlier in keys: the exact
+// name before its aliases) wins. Returns nil when no candidate key has
+// overrides, preserving the callers' "no overrides" contract.
+func mergeOverridesAcrossKeys[V any](allOverrides map[string]map[string]V, keys []string) map[string]V {
+	var merged map[string]V
+	// Apply in reverse priority order so earlier (higher-priority) keys
+	// overwrite later ones on a path collision.
+	for i := len(keys) - 1; i >= 0; i-- {
+		overrides, ok := allOverrides[keys[i]]
+		if !ok {
+			continue
+		}
+		if merged == nil {
+			merged = make(map[string]V, len(overrides))
+		}
+		for path, value := range overrides {
+			merged[path] = value
+		}
+	}
+	return merged
+}
+
+// getValueOverridesForComponent returns scalar (--set) value overrides for a
+// specific component, merging overrides supplied under both the exact name and
+// any registry override-key aliases via componentOverrideKeys. Returns nil when
+// none apply.
 func (b *DefaultBundler) getValueOverridesForComponent(componentName string, provider recipe.DataProvider) map[string]string {
 	if b.Config == nil {
 		return nil
@@ -654,38 +739,24 @@ func (b *DefaultBundler) getValueOverridesForComponent(componentName string, pro
 		return nil
 	}
 
-	// Check exact name first
-	if overrides, ok := allOverrides[componentName]; ok {
-		return overrides
-	}
+	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
+}
 
-	// Use component registry to find component by any override key
-	registry, err := recipe.GetComponentRegistryFor(provider)
-	if err != nil {
-		// Fall back to non-hyphenated check if registry fails
-		nonHyphenated := removeHyphens(componentName)
-		if nonHyphenated != componentName {
-			if overrides, ok := allOverrides[nonHyphenated]; ok {
-				return overrides
-			}
-		}
+// getTypedValueOverridesForComponent returns structured (--set-json /
+// --set-file) value overrides for a specific component, resolving and merging
+// component aliases the same way getValueOverridesForComponent does. Returns
+// nil when none apply.
+func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string, provider recipe.DataProvider) map[string]any {
+	if b.Config == nil {
 		return nil
 	}
 
-	// Get the component config to access its value override keys
-	comp := registry.Get(componentName)
-	if comp == nil {
+	allOverrides := b.Config.ValueOverridesTyped()
+	if allOverrides == nil {
 		return nil
 	}
 
-	// Check each alternative override key
-	for _, key := range comp.ValueOverrideKeys {
-		if overrides, ok := allOverrides[key]; ok {
-			return overrides
-		}
-	}
-
-	return nil
+	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
 }
 
 // getSetEnabledOverride checks if --set overrides contain an "enabled" key
@@ -709,7 +780,7 @@ func (b *DefaultBundler) getSetEnabledOverride(componentName string, provider re
 	if parseErr != nil {
 		return false, false, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 			"invalid --set enabled value", parseErr,
-			map[string]any{"component": componentName, "value": val})
+			map[string]any{errCtxKeyComponent: componentName, "value": val})
 	}
 	return parsed, true, nil
 }

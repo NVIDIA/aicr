@@ -297,7 +297,7 @@ func runValidation(
 		aicr.WithValidationImageTagOverride(cfg.imageTagOverride),
 		// Uncap the facade-level validation deadline (0 = no cap) so an
 		// all-phase run isn't cut short by ValidationOperationTimeout — the
-		// per-validator timeouts (incl. the 50m inference-perf check) govern,
+		// per-validator timeouts (incl. the 65m inference-perf check) govern,
 		// matching the pre-facade CLI behavior. WithValidationTolerations
 		// above is always passed (even when resolved tolerations are nil) so
 		// the override always clears the validator's default tolerate-all.

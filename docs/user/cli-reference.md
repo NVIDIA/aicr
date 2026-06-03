@@ -648,7 +648,7 @@ aicr validate [flags]
 | `--feature` | `-f` | string[] | | CNCF evidence-collection feature(s) to scope (repeatable). Valid names: `dra-support`, `gang-scheduling`, `secure-access`, `accelerator-metrics`, `ai-service-metrics`, `inference-gateway`, `robust-operator`, `pod-autoscaling`, `cluster-autoscaling`. Empty selects all features. |
 | `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [ADR-007](../design/007-recipe-evidence.md). |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
-| `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
+| `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -782,7 +782,7 @@ aicr validate \
 aicr validate \
   --recipe recipe.yaml --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/myorg/aicr-evidence
+  --push ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
 # After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
 
 # Validate on a cluster with custom GPU node labels (non-standard labels that AICR doesn't
@@ -845,7 +845,7 @@ spec:
       attestation:                       # --emit-attestation / --bom / --push / ...
         out: ./out/attestation
         bom: dist/bom/bom.cdx.json       # optional; auto-generated from recipe + validators when absent
-        push: ghcr.io/myorg/aicr-evidence
+        push: ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
         plainHTTP: false
         insecureTLS: false
 ```
@@ -940,10 +940,10 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "duration": 612000,
         "suite": ["performance"],
         "stdout": [
-          "RESULT: Inference throughput: 37961.24 tokens/sec",
-          "RESULT: Inference TTFT p99: 146.30 ms",
-          "Throughput constraint: >= 5000 → PASS",
-          "TTFT p99 constraint: <= 200 → PASS"
+          "RESULT: Inference throughput: 108789.87 tokens/sec",
+          "RESULT: Inference TTFT p99: 687.50 ms",
+          "Throughput constraint: >= 50000 → PASS",
+          "TTFT p99 constraint: <= 1000 → PASS"
         ]
       },
       {
@@ -1064,7 +1064,9 @@ aicr bundle [flags]
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
-| `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
+| `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. |
+| `--set-json` | | string[] | Override values with a JSON-encoded **list or object** (repeatable, format: `component:path=<json>`, e.g. `--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'`). Object values deep-merge into existing maps; lists and scalars replace. Takes precedence over `--set` on the same path. See [List and Object Value Overrides](#list-and-object-value-overrides). |
+| `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge semantics. |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
@@ -1087,6 +1089,8 @@ aicr bundle [flags]
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
 | `--oidc-device-flow` | | bool | Use the OAuth 2.0 device authorization grant for `--attest` instead of opening a browser callback. Useful on headless hosts that can still reach Sigstore (`--identity-token` and CI ambient OIDC are alternatives). Also reads `AICR_OIDC_DEVICE_FLOW`. |
+| `--fulcio-url` | | string | Override the Fulcio CA URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Fulcio when omitted. Also reads `AICR_FULCIO_URL`. |
+| `--rekor-url` | | string | Override the Rekor transparency-log URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Rekor when omitted. Also reads `AICR_REKOR_URL`. The two URLs are independent — a private Fulcio can pair with the public Rekor or vice versa. |
 
 #### Bundle Config File Mode
 
@@ -1117,6 +1121,11 @@ spec:
       storageClass: gp3
     attestation:
       enabled: false
+      # Optional: target a private Sigstore instead of the public-good
+      # endpoints. Each defaults to public Sigstore when omitted; both must
+      # be absolute https:// URLs with no embedded credentials.
+      fulcioURL: https://fulcio.internal.example.com
+      rekorURL: https://rekor.internal.example.com
     registry:
       insecureTLS: false
       plainHTTP: false
@@ -1236,9 +1245,11 @@ Override any value in the generated bundle files using dot notation:
 
 **Behavior:**
 - **Duplicate keys**: When the same `bundler:path` is specified multiple times, the **last value wins**
-- **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). Arrays can only be replaced entirely via recipe overrides, not via `--set` flags. Use recipe-level overrides in `componentRefs[].overrides` if you need to replace an entire array.
+- **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). `--set` is **scalar-only** — pointing it at a list/object field writes a bare string and produces type-invalid output. To replace an entire array or object from the CLI, use [`--set-json` / `--set-file`](#list-and-object-value-overrides); recipe-level overrides in `componentRefs[].overrides` are the alternative.
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
 - **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes the component; `--set <component>:enabled=true` re-enables a recipe-disabled component. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
+- **Aliases merge**: overrides supplied under both a component's canonical name and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are **combined, not dropped**; the canonical name wins on any shared path. (Same alias-merge behavior as [`--set-json` / `--set-file`](#list-and-object-value-overrides).)
+- **Repeat to add; commas are literal**: To supply multiple overrides, repeat the flag (`--set a:x=1 --set b:y=2`). On the `bundle` command, commas inside a single slice-flag value are taken **literally** (not treated as a value separator), so a value containing a comma — and the comma-heavy JSON passed to `--set-json` — is preserved intact. This applies to all repeatable `bundle` flags (`--set`, `--set-json`, `--set-file`, `--dynamic`, `--*-node-selector`, `--*-node-toleration`, `--workload-selector`).
 
 **Examples:**
 ```shell
@@ -1274,7 +1285,89 @@ aicr bundle -r recipe.yaml \
 aicr bundle -r recipe.yaml \
   --set awsebscsidriver:enabled=false \
   -o ./bundles
+```
 
+#### List and Object Value Overrides
+
+`--set` is scalar-only: it cannot express a list or object value. Pointing it
+at a list field such as `agentgateway.allowedSourceRanges` exits 0 but writes a
+**bare string** at that path, producing a type-invalid manifest — the value may
+be dropped or rejected at apply time. Use `--set-json` (inline) or `--set-file`
+(from a file) for any list or object override.
+
+**Format:** `component:path=<value>` where:
+- `component` / `path` — same component name and dot-separated path as `--set`
+- `<value>` — for `--set-json`, a JSON-encoded value; for `--set-file`, a path
+  to a **regular file** containing a **single** JSON or YAML value (one
+  document — in a multi-document YAML file only the first document is read). A
+  non-regular path (directory, FIFO/named pipe, device, socket) is rejected
+  with a fast validation error rather than hanging or failing later.
+
+**Behavior:**
+- **Object values deep-merge** into any existing map at the path (partial
+  object overrides compose with recipe/base values), matching how inline recipe
+  `componentRefs[].overrides` merge. Within a merged object, a JSON `null`
+  **deletes** that key from the result (same explicit-null semantics as recipe
+  overrides).
+- **Lists and scalars replace** the value at the path.
+- **Precedence**: applied after `--set`, so a `--set-json` / `--set-file` entry
+  wins over a scalar `--set` on the same path. Between the two typed flags, an
+  inline `--set-json` wins over a `--set-file` on the same `component:path`
+  (mirroring Helm's `--set` taking precedence over `-f` value files). Within a
+  single flag, the last entry for a given `component:path` wins.
+- **Overlapping nested paths**: when one override targets a parent object and
+  another targets a key beneath it (e.g. `comp:driver.env=<object>` plus
+  `comp:driver.env.HTTPS_PROXY=<value>`), the deeper, more-specific path wins
+  on the keys they share — regardless of the order the flags are given. The
+  parent object's other keys are preserved.
+- **Aliases merge**: overrides supplied under both a component's canonical name
+  and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are combined,
+  not dropped; the canonical name wins on any shared path.
+- **Node-scheduling paths deep-merge with CLI injection (asymmetric with
+  `--set`)**: a typed override on a node-scheduling path (e.g. `--set-json
+  gpu-operator:nodeSelector=<object>`) **deep-merges into** the selectors and
+  tolerations injected by `--accelerated-node-selector` /
+  `--system-node-selector` / `--*-node-toleration`, rather than suppressing that
+  injection. This is intentional — deep-merge is the point of the typed path —
+  but it differs from scalar `--set`: `--set comp:nodeSelector.x=y` marks that
+  path as user-populated and suppresses CLI injection on it, whereas a typed
+  override composes with the injected keys (so system-injected selector keys
+  remain present alongside it). Use scalar `--set`, or omit the node-scheduling
+  flags, when you need to fully replace an injected selector instead of merging
+  into it.
+- **CLI-only**: `--set-json` / `--set-file` have no `AICRConfig`
+  (`spec.bundle.deployment.set`) or HTTP API (`?set=`) equivalent — those
+  surfaces remain scalar-only. To set a list or object value outside the CLI,
+  use a recipe overlay or `componentRefs[].overrides`.
+- **Not for `enabled`**: the special `enabled` component toggle is honored only
+  via scalar `--set`; passing it through `--set-json` / `--set-file` is rejected
+  with an error (it would not toggle the component and would leak a stray
+  `enabled:` value into the chart).
+
+**Examples:**
+
+```shell
+# Scope the agentgateway inference-gateway to trusted CIDRs (inline JSON list)
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30","10.0.0.0/8"]' \
+  -o ./bundles
+
+# Same override, read from a file (JSON or YAML)
+cat > ranges.yaml <<'EOF'
+- 216.228.127.128/30
+- 10.0.0.0/8
+EOF
+aicr bundle -r recipe.yaml \
+  --set-file agentgateway:allowedSourceRanges=ranges.yaml \
+  -o ./bundles
+
+# Override object keys (deep-merges into the existing map)
+aicr bundle -r recipe.yaml \
+  --set-json gpuoperator:driver.env='{"HTTPS_PROXY":"http://proxy:3128"}' \
+  -o ./bundles
+```
+
+```shell
 # Schedule system components on specific node pool
 aicr bundle -r recipe.yaml \
   --system-node-selector nodeGroup=system-pool \
@@ -1831,6 +1924,10 @@ When `--attest` is passed, the bundle command performs five steps:
 
 Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
 
+**Private Sigstore infrastructure:** organizations running their own Fulcio CA or Rekor log can redirect signing with `--fulcio-url` and `--rekor-url` (both must be absolute `https://` URLs with no embedded credentials). The two are independent, so a private Fulcio can pair with the public Rekor or vice versa. Public Sigstore remains the default when the flags are omitted.
+
+> **Verification caveat:** these flags redirect **signing** only. `aicr verify` does not yet support a custom Sigstore trust root, so bundles signed against private Fulcio/Rekor **cannot be verified with `aicr verify` today** — public Sigstore is currently the only supported verification root. Verifier support for private trust roots is tracked under [#1149](https://github.com/NVIDIA/aicr/issues/1149) / [#1153](https://github.com/NVIDIA/aicr/issues/1153).
+
 ##### OIDC Token Sources
 
 `--attest` resolves an OIDC identity token from the first matching source, in
@@ -2228,7 +2325,7 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
+| `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omit the tag and aicr derives a unique per-recipe one (`<recipe-slug>-<short-fingerprint>`); pass an explicit tag to override. See [`aicr validate --push`](#aicr-validate). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
 | `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
 | `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS when pushing the OCI artifact (local-registry tests). |
@@ -2247,7 +2344,8 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 # On VPN: produce an unsigned bundle from a passing validation.
 aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out
 
-# Off VPN: sign, push, and write the pointer.
+# Off VPN: sign, push, and write the pointer. Omit the tag and aicr derives
+# a unique per-recipe one (<recipe-slug>-<fingerprint>).
 aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence
 ```
 
@@ -2266,18 +2364,21 @@ aicr evidence verify <input> [flags]
 
 The positional argument is auto-detected as one of:
 
-* `recipes/evidence/<recipe>.yaml` — pointer file (verifier fetches the OCI artifact named inside).
-* `ghcr.io/<owner>/aicr-evidence@sha256:...` or `oci://...` — OCI reference.
+* `recipes/evidence/<recipe>.yaml` — **pointer file (preferred)**. The verifier pulls **by digest** — `registry/repo@<bundle.digest>`, with the registry/repo taken from `bundle.oci` and the digest as the pin — so it fetches the exact attested bytes even if the `bundle.oci` tag has since been moved to a different artifact. This is the input to use in nearly all cases.
+* `ghcr.io/<owner>/aicr-evidence@sha256:...` or `oci://...@sha256:...` — a **digest-pinned** OCI reference. A tag-only ref (such as the `bundle.oci` value copied from a pointer, e.g. `...aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`) is refused by default because tags are registry-rewritable; see `--allow-unpinned-tag`.
 * `./out/summary-bundle/` (or a parent containing it) — unpacked directory.
 
+> **Do not extract `bundle.oci` from a pointer and pass it to `verify` as a raw OCI argument.** As a raw ref it carries no companion `bundle.digest`, so a tag-only ref is refused (tags are registry-rewritable). Pass the pointer file itself — the verifier reads `bundle.digest` from it and pulls `registry/repo@<digest>`, ignoring the tag. If you must verify a raw OCI ref, use the digest form (`...@sha256:<hex>`), not the tag.
+
 **Flags:**
+
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | | Write output to this file. When empty, output goes to stdout. |
 | `--format` | `-t` | string | `text` | Output format: `text` (Markdown) or `json`. Applies regardless of destination. |
 | `--expected-issuer` | | string | | Pin the OIDC issuer URL on the signing certificate. Empty allows any issuer. |
 | `--expected-identity-regexp` | | string | | Pin the signer's `SubjectAlternativeName` via regex. Empty allows any identity. |
-| `--bundle` | | string | | OCI reference override when the pointer carries no `bundle.oci`. |
+| `--bundle` | | string | | OCI reference override for a local-only pointer that carries no `bundle.oci`. Use a digest-pinned ref (`...@sha256:<hex>`); a tag-only ref is refused unless `--allow-unpinned-tag` is set. |
 | `--registry-plain-http` | | bool | `false` | Use HTTP for registry traffic (local-registry tests only). |
 | `--registry-insecure-tls` | | bool | `false` | Skip TLS verification for the registry (self-signed certificates). |
 | `--allow-unpinned-tag` | | bool | `false` | Accept tag-only OCI references. By default the verifier refuses unpinned refs because tags are registry-rewritable; opt in only for one-off debugging. Pointer-driven flows ignore this flag when the pointer carries a `sha256:` digest. |

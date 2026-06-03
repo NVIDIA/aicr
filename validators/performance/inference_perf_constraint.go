@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -72,13 +73,24 @@ const (
 	// two sentinels to isolate the benchmark JSON.
 	aiperfResultSentinel = "===AIPERF-RESULT==="
 
-	// inferenceModel is the small model used for performance validation.
-	// Qwen3-0.6B is the default in all Dynamo deploy templates — canonical smoke test model.
-	inferenceModel = "Qwen/Qwen3-0.6B"
+	// inferenceModel is the default model for performance validation —
+	// representative of a real serving workload (not a token smoke test), so the
+	// default run exercises GPU compute rather than serving overhead. Override
+	// per accelerator via the `inference-model` recipe constraint, globally via
+	// AICR_INFERENCE_PERF_MODEL, or fall through to this default
+	// (see resolveModel / resolveInferenceModel). An 8B model is large enough to
+	// benefit from the model-weights cache — enable it (MODEL_CACHE_SIZE) so the
+	// workers skip the per-worker Hugging Face download.
+	inferenceModel = "Qwen/Qwen3-8B"
 
-	// aiperfConcurrencyPerGPU is the number of concurrent requests per GPU.
-	// 16 per GPU saturates without overwhelming, based on empirical testing.
-	aiperfConcurrencyPerGPU = 16
+	// aiperfConcurrencyPerGPU is the default number of concurrent requests per
+	// GPU. 256/GPU is the empirical throughput sweet spot across RTX PRO 6000,
+	// GB200, and H100 (EKS + GKE) on an 8B model: at or essentially at peak
+	// throughput on every platform while staying below the over-saturation knee
+	// (≥512/GPU degrades goodput and explodes TTFT on GB200 and EKS H100).
+	// Override per accelerator via the `inference-concurrency-per-gpu` recipe
+	// constraint, or globally via AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU.
+	aiperfConcurrencyPerGPU = 256
 
 	// aiperfWarmupPerConcurrency is the number of warmup requests sent per
 	// in-flight concurrency slot before measurement begins. vLLM compiles CUDA
@@ -125,6 +137,37 @@ const (
 	envRequestsPerConcurrency = "AICR_INFERENCE_PERF_REQUESTS_PER_CONCURRENCY"
 	envInputTokensMean        = "AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN"  //nolint:gosec // G101: env var name for a token-count knob, not a credential
 	envOutputTokensMean       = "AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN" //nolint:gosec // G101: env var name for a token-count knob, not a credential
+	envModel                  = "AICR_INFERENCE_PERF_MODEL"
+	// envWorkloadReadyTimeout overrides how long to wait for the
+	// DynamoGraphDeployment to become ready (image pull + model load + worker
+	// health). Default is defaults.InferenceWorkloadReadyTimeout (tuned for the
+	// small smoke-test model). Large models load far slower, so raise this for
+	// characterization — but it is bounded by the parent check deadline
+	// (AICR_CHECK_TIMEOUT, from the catalog entry's `timeout`), which must be
+	// raised in tandem for a large value to take full effect.
+	envWorkloadReadyTimeout = "AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT"
+	// envHealthTimeout overrides how long the endpoint-readiness probe
+	// (waitForEndpointReady) waits for the frontend to serve a real
+	// chat-completion after the workload reports Ready. Default is
+	// defaults.InferenceHealthTimeout (5m). This window covers Dynamo
+	// worker→frontend registration and the worker's first model-load read;
+	// when many workers load a large model concurrently from a single RWO
+	// cache PVC, that read contends on the volume and can run past 5m, so raise
+	// this for large-model / high-worker-count runs. Like the workload-ready
+	// knob it is bounded by the parent check deadline (AICR_CHECK_TIMEOUT, from
+	// the catalog entry's `timeout`), which must be raised in tandem.
+	envHealthTimeout = "AICR_INFERENCE_PERF_HEALTH_TIMEOUT"
+
+	// perfConstraintModel / perfConstraintConcurrency name the recipe
+	// performance.constraints entries that let an overlay set the benchmark
+	// model and per-GPU concurrency per accelerator — symmetric with how the
+	// inference-throughput / inference-ttft-p99 thresholds already live in the
+	// recipe. Resolution precedence is recipe > catalog env > compiled default
+	// (see resolveModel / resolveConcurrencyPerGPU). Unlike the throughput/TTFT
+	// entries these carry a bare value (an HF model ID, a positive integer), not
+	// a comparator expression.
+	perfConstraintModel       = "inference-model"
+	perfConstraintConcurrency = "inference-concurrency-per-gpu"
 
 	// inferenceDeploymentName is the DynamoGraphDeployment name for the benchmark
 	// workload. Passed to the template via ${DEPLOYMENT_NAME}.
@@ -137,6 +180,20 @@ const (
 	// inferenceClaimTemplateName is the DRA ResourceClaimTemplate name used to
 	// allocate one GPU per worker pod. Passed to the template via ${CLAIM_TEMPLATE_NAME}.
 	inferenceClaimTemplateName = "aicr-inference-gpu-claim"
+
+	// hfTokenSecretName / hfTokenSecretKey name the optional Secret that carries
+	// a Hugging Face token. The deploy template references it via an optional
+	// secretKeyRef on each container, so when the Secret is absent (no token)
+	// workers fall back to anonymous downloads (unchanged default). A token is
+	// only needed to lift HF rate limits when many workers pull a large model
+	// concurrently (small smoke-test models never hit the limit).
+	hfTokenSecretName = "aicr-hf-token" //nolint:gosec // G101: Kubernetes Secret resource name, not a credential
+	hfTokenSecretKey  = "token"         //nolint:gosec // G101: Secret data key, not a credential
+
+	// envHFToken is the validator's own env var carrying the HF token, forwarded
+	// from the CLI process by the orchestrator (never sourced from the in-repo
+	// catalog). When set, deployInferenceWorkload provisions hfTokenSecretName.
+	envHFToken = "HF_TOKEN" //nolint:gosec // G101: env var name, not a hardcoded credential
 
 	// inferenceFrontendPort is the port exposed by the Dynamo frontend service
 	// (contract from the dynamo-frontend chart). Used in the deploy path to
@@ -177,6 +234,11 @@ type inferenceResult struct {
 	throughput float64 // output tokens/sec
 	ttftP99Ms  float64 // time to first token p99, milliseconds
 	status     string  // "ok" or "skipped - reason"
+	// GPU counts for scaling the (full-node) throughput gate to what was
+	// actually benchmarked: gpuCount = free GPUs the workload was sized to,
+	// gpuCountPerNode = the chosen node's full allocatable count.
+	gpuCount        int
+	gpuCountPerNode int
 }
 
 // aiperfOutput represents the JSON output structure from AIPerf.
@@ -206,15 +268,18 @@ type aiperfMetricPercentiles struct {
 // are typed (not YAML strings) so they can be injected into the unstructured
 // DynamoGraphDeployment object safely, without string templating.
 type inferenceWorkloadConfig struct {
-	runID           string // unique per run; suffix for namespace + aiperfJobName
-	gpuCount        int
-	gpuCountPerNode int
-	concurrency     int
-	gpuNodeSelector map[string]string
-	gpuTolerations  []v1.Toleration
-	namespace       string // per-run; derived from runID
-	aiperfJobName   string // per-run; derived from runID
-	deployedByUs    bool   // true if we (or a prior run we own) created the workload
+	runID                  string // unique per run; suffix for namespace + aiperfJobName
+	gpuCount               int
+	gpuCountPerNode        int
+	concurrency            int
+	gpuNodeSelector        map[string]string
+	gpuTolerations         []v1.Toleration
+	namespace              string // per-run; derived from runID
+	aiperfJobName          string // per-run; derived from runID
+	model                  string // HF model ID; resolved recipe > env > default (see resolveModel)
+	deployedByUs           bool   // true if we (or a prior run we own) created the workload
+	modelCacheSize         string // PVC size (e.g. "100Gi") enabling the model-weights cache; empty = disabled
+	modelCacheStorageClass string // StorageClass for the cache PVC; empty = cluster default
 }
 
 // validateInferencePerf orchestrates the full inference performance pipeline:
@@ -284,7 +349,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Wait for the endpoint to be ready to serve requests. Callee returns
 	// ErrCodeTimeout on deadline exhaustion, ErrCodeInternal on
 	// request-construction errors; both classifications are lost if we rewrap.
-	if readyErr := waitForEndpointReady(ctx.Ctx, endpoint, inferenceModel); readyErr != nil {
+	if readyErr := waitForEndpointReady(ctx.Ctx, endpoint, config.model); readyErr != nil {
 		return nil, readyErr
 	}
 
@@ -292,7 +357,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// CTRF report contains enough signal to diagnose (pip install errors,
 	// aiperf CLI failures, connection refused, etc.). Without this, the
 	// error chain alone ("pod failed") is unactionable.
-	logs, err := runAIPerfJob(ctx, endpoint, config.concurrency, config.aiperfJobName)
+	logs, err := runAIPerfJob(ctx, endpoint, config.model, config.concurrency, config.aiperfJobName)
 	if err != nil {
 		if logs != "" {
 			fmt.Printf("AIPerf pod logs:\n%s\n", logs)
@@ -308,10 +373,15 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Carry the benchmarked GPU counts up so the throughput gate can be scaled
+	// to the free-GPU sizing buildInferenceConfig chose (see checkInferencePerf).
+	result.gpuCount = config.gpuCount
+	result.gpuCountPerNode = config.gpuCountPerNode
 
 	slog.Info("Inference benchmark results",
 		"throughput_tok/s", result.throughput,
-		"ttft_p99_ms", result.ttftP99Ms)
+		"ttft_p99_ms", result.ttftP99Ms,
+		"gpus", result.gpuCount, "nodeGPUs", result.gpuCountPerNode)
 
 	return result, nil
 }
@@ -420,19 +490,38 @@ func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, er
 			"node", chosen.Name, "allocatable", gpuCountPerNode, "inUse", gpuCountPerNode-freeGPUs, "free", freeGPUs)
 	}
 
-	concurrencyPerGPU, err := intFromEnv(envConcurrencyPerGPU, aiperfConcurrencyPerGPU)
+	concurrencyPerGPU, err := resolveConcurrencyPerGPU(ctx)
 	if err != nil {
+		return nil, err
+	}
+
+	// Cache is on by default (100Gi); operator can resize or disable via env.
+	cacheSize, _, err := parseModelCacheSize(os.Getenv(envModelCacheSize))
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate the resolved model ID up front. It is interpolated into the
+	// DynamoGraphDeployment YAML template (value: ${MODEL}, --model ${MODEL}),
+	// so a value with YAML/shell metacharacters would either break the parse
+	// with an opaque error or be unsafe; fail closed with a clear message
+	// instead. Symmetric with the AIPerf path, which passes the model via env.
+	model := resolveModel(ctx)
+	if err := validateModelID(model); err != nil {
 		return nil, err
 	}
 
 	runID := deriveRunID()
 	config := &inferenceWorkloadConfig{
-		runID:           runID,
-		gpuCount:        gpuCount,
-		gpuCountPerNode: gpuCountPerNode,
-		concurrency:     concurrencyPerGPU * gpuCount,
-		namespace:       fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
-		aiperfJobName:   fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
+		runID:                  runID,
+		gpuCount:               gpuCount,
+		gpuCountPerNode:        gpuCountPerNode,
+		concurrency:            concurrencyPerGPU * gpuCount,
+		namespace:              fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
+		aiperfJobName:          fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
+		model:                  model,
+		modelCacheSize:         cacheSize,
+		modelCacheStorageClass: strings.TrimSpace(os.Getenv(envModelCacheStorageClass)),
 	}
 
 	// Pin every worker to the specific chosen node via kubernetes.io/hostname
@@ -637,12 +726,28 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
 	}
 
-	// Mark deployed early so cleanup runs even on partial failure below.
+	// Mark deployed early (namespace now exists) so cleanup tears down the
+	// namespace — and everything created in it below (secret, cache PVC/Job,
+	// DynamoGraphDeployment) — even on a partial failure.
 	config.deployedByUs = true
+
+	// Provision the optional Hugging Face token Secret before deploying so the
+	// workers' secretKeyRef resolves. No-op when no token is set in the
+	// validator env (anonymous downloads — unchanged default).
+	if err := ensureHFTokenSecret(ctx, config.namespace); err != nil {
+		return err
+	}
+
+	// Provision the optional model-weights cache (PVC + one-time populate Job)
+	// before deploying, so workers mount a pre-populated cache and skip the
+	// Hugging Face download. No-op when the cache is disabled.
+	if err := ensureModelCache(ctx, config); err != nil {
+		return err
+	}
 
 	templateData := map[string]string{
 		"NAMESPACE":           config.namespace,
-		"MODEL":               inferenceModel,
+		"MODEL":               config.model,
 		"GPU_COUNT":           strconv.Itoa(config.gpuCount),
 		"DEPLOYMENT_NAME":     inferenceDeploymentName,
 		"QUEUE_NAME":          inferenceQueueName,
@@ -758,11 +863,75 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 			extraPodSpec["resourceClaims"] = claimBindings
 		}
 
+		// When the model-weights cache is enabled, mount the pre-populated PVC
+		// read-only and point HF_HOME at it (offline) so the worker/frontend
+		// load weights locally instead of re-downloading from Hugging Face.
+		if modelCacheEnabled(config) {
+			injectModelCacheMounts(extraPodSpec)
+		}
+
 		svc["extraPodSpec"] = extraPodSpec
 		services[svcName] = svc
 	}
 
 	return unstructured.SetNestedMap(obj.Object, services, "spec", "services")
+}
+
+// ensureHFTokenSecret provisions the optional Hugging Face token Secret in the
+// benchmark namespace when the validator's environment carries HF_TOKEN (itself
+// forwarded from the CLI, never the in-repo catalog). When unset it is a no-op
+// and workers download anonymously — the unchanged default for smoke-test
+// models. The token only matters to lift HF rate limits for large models pulled
+// by many workers at once. Uses create-or-update so a re-used namespace from a
+// prior run does not retain a stale token.
+func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
+	secrets := ctx.Clientset.CoreV1().Secrets(namespace)
+	token := strings.TrimSpace(os.Getenv(envHFToken))
+
+	// Bound the Secret API calls so a slow/wedged apiserver can't burn the
+	// check's overall deadline during setup, before the workload is even deployed.
+	opCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	// Read any existing secret first so an update carries the current
+	// resourceVersion (an Update without it can be rejected by the apiserver)
+	// and so an unset token can clear a stale one.
+	existing, getErr := secrets.Get(opCtx, hfTokenSecretName, metav1.GetOptions{})
+	if getErr != nil && !apierrors.IsNotFound(getErr) {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read HF token secret", getErr)
+	}
+	exists := getErr == nil
+
+	if token == "" {
+		// Anonymous run: delete any leftover token so a reused per-run namespace
+		// can't silently inject stale credentials via the workers' optional
+		// secretKeyRefs.
+		if exists {
+			if err := secrets.Delete(opCtx, hfTokenSecretName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to delete stale HF token secret", err)
+			}
+			slog.Info("Cleared stale Hugging Face token secret (HF_TOKEN unset; anonymous downloads)", "namespace", namespace)
+		}
+		return nil
+	}
+
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: hfTokenSecretName, Namespace: namespace},
+		Type:       v1.SecretTypeOpaque,
+		StringData: map[string]string{hfTokenSecretKey: token},
+	}
+	if exists {
+		secret.ResourceVersion = existing.ResourceVersion
+		if _, err := secrets.Update(opCtx, secret, metav1.UpdateOptions{}); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to update HF token secret", err)
+		}
+		return nil
+	}
+	if _, err := secrets.Create(opCtx, secret, metav1.CreateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create HF token secret", err)
+	}
+	slog.Info("Provisioned Hugging Face token secret for model downloads", "namespace", namespace)
+	return nil
 }
 
 // ensureNamespace creates a namespace if it doesn't exist, waiting for any
@@ -890,7 +1059,11 @@ func createOrUpdateFromTemplate(ctx *validators.Context, gvr schema.GroupVersion
 func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	slog.Info("Waiting for DynamoGraphDeployment to become ready...")
 
-	waitCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.InferenceWorkloadReadyTimeout)
+	readyTimeout, err := durationFromEnv(envWorkloadReadyTimeout, defaults.InferenceWorkloadReadyTimeout)
+	if err != nil {
+		return err
+	}
+	waitCtx, cancel := context.WithTimeout(ctx.Ctx, readyTimeout)
 	defer cancel()
 
 	existing, err := ctx.DynamicClient.Resource(dynamoDeploymentGVR).
@@ -1059,19 +1232,24 @@ func inferServicePort(svc v1.Service) int32 {
 // real inference probe is the only signal that's both necessary and sufficient
 // for the endpoint to serve a benchmark workload.
 func waitForEndpointReady(ctx context.Context, endpoint, model string) error {
-	return waitForEndpointReadyWithInterval(ctx, endpoint, model, defaults.InferenceHealthPollInterval)
+	timeout, err := durationFromEnv(envHealthTimeout, defaults.InferenceHealthTimeout)
+	if err != nil {
+		return err
+	}
+	return waitForEndpointReadyWithInterval(ctx, endpoint, model, defaults.InferenceHealthPollInterval, timeout)
 }
 
 // waitForEndpointReadyWithInterval is the testable seam: production callers go
-// through waitForEndpointReady (10 s poll); tests pass a tighter interval so
-// the success / timeout paths run in milliseconds.
-func waitForEndpointReadyWithInterval(ctx context.Context, endpoint, model string, pollInterval time.Duration) error {
+// through waitForEndpointReady (10 s poll, env-resolved timeout); tests pass a
+// tighter interval and timeout so the success / timeout paths run in
+// milliseconds.
+func waitForEndpointReadyWithInterval(ctx context.Context, endpoint, model string, pollInterval, timeout time.Duration) error {
 	chatURL := endpoint + "/v1/chat/completions"
-	slog.Info("Waiting for inference endpoint to serve requests", "url", chatURL, "model", model)
+	slog.Info("Waiting for inference endpoint to serve requests", "url", chatURL, "model", model, "timeout", timeout)
 
 	client := &http.Client{Timeout: defaults.HTTPClientTimeout}
 
-	pollCtx, cancel := context.WithTimeout(ctx, defaults.InferenceHealthTimeout)
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	bodyTmpl := `{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":4}`
@@ -1128,7 +1306,7 @@ func waitForEndpointReadyWithInterval(ctx context.Context, endpoint, model strin
 // endpoint. jobName must be unique per run (see buildInferenceConfig, which
 // derives it from AICR_RUN_ID) so two concurrent validate invocations can't
 // delete each other's Job, wait on the wrong pod, or collect the wrong logs.
-func runAIPerfJob(ctx *validators.Context, endpoint string, concurrency int, jobName string) (string, error) {
+func runAIPerfJob(ctx *validators.Context, endpoint, model string, concurrency int, jobName string) (string, error) {
 	// Propagate image pull secrets from the outer validator pod so the inner
 	// aiperf benchmark pod can pull from the same authenticated registry.
 	// Without this, setups using AICR_VALIDATOR_IMAGE_REGISTRY pointing at a
@@ -1137,7 +1315,7 @@ func runAIPerfJob(ctx *validators.Context, endpoint string, concurrency int, job
 	// ImagePullBackOff.
 	pullSecrets := getOwnPullSecrets(ctx)
 
-	job, params, err := buildAIPerfJob(ctx.Namespace, jobName, endpoint, concurrency, pullSecrets)
+	job, params, err := buildAIPerfJob(ctx.Namespace, jobName, endpoint, model, concurrency, pullSecrets)
 	if err != nil {
 		return "", err
 	}
@@ -1147,7 +1325,7 @@ func runAIPerfJob(ctx *validators.Context, endpoint string, concurrency int, job
 	// overrides), not the bare constant defaults.
 	slog.Info("Running AIPerf benchmark",
 		"endpoint", endpoint,
-		"model", inferenceModel,
+		"model", model,
 		"concurrency", concurrency,
 		"requests", params.requestCount,
 		"warmup", params.warmupCount,
@@ -1234,6 +1412,89 @@ func getOwnPullSecrets(ctx *validators.Context) []v1.LocalObjectReference {
 	return out
 }
 
+// resolveInferenceModel returns the Hugging Face model ID used for the
+// benchmark. Override via AICR_INFERENCE_PERF_MODEL to characterize a larger
+// model (e.g., Qwen/Qwen3-32B) without rebuilding the validator image; unset or
+// empty falls back to the default model (inferenceModel, Qwen/Qwen3-8B). A
+// non-existent model ID surfaces as a deploy / endpoint-ready timeout
+// (fail-closed), never a silent pass.
+func resolveInferenceModel() string {
+	if m := strings.TrimSpace(os.Getenv(envModel)); m != "" {
+		return m
+	}
+	return inferenceModel
+}
+
+// modelIDPattern matches a Hugging Face model ID — an optional org prefix and a
+// name — using only characters HF repo IDs allow. It excludes quotes, colons,
+// whitespace, and other YAML/shell metacharacters so a recipe/env-supplied
+// model can't break the DynamoGraphDeployment YAML (where it is interpolated as
+// `${MODEL}`) or be unsafe.
+var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+
+// validateModelID fails closed with ErrCodeInvalidRequest when the resolved
+// model ID contains characters outside the safe HF repo-ID set, surfacing a
+// clear error up front instead of an opaque YAML parse failure at deploy.
+func validateModelID(model string) error {
+	if !modelIDPattern.MatchString(model) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid inference model %q: must be a Hugging Face model ID (characters %s)", model, "[A-Za-z0-9._/-]"))
+	}
+	return nil
+}
+
+// resolveModel returns the HF model ID with precedence recipe > catalog env >
+// compiled default. A per-accelerator overlay sets it via the
+// `inference-model` performance constraint; absent (or blank) there, it falls
+// back to resolveInferenceModel (AICR_INFERENCE_PERF_MODEL, then inferenceModel).
+func resolveModel(ctx *validators.Context) string {
+	if c, ok := findPerformanceConstraint(ctx, perfConstraintModel); ok {
+		if m := strings.TrimSpace(c.Value); m != "" {
+			return m
+		}
+	}
+	return resolveInferenceModel()
+}
+
+// resolveConcurrencyPerGPU returns the per-GPU concurrency with precedence
+// recipe > catalog env > compiled default. A per-accelerator overlay sets it
+// via the `inference-concurrency-per-gpu` performance constraint (a bare
+// positive integer); absent (or blank) there, it falls back to the
+// AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU env knob, then aiperfConcurrencyPerGPU.
+// A non-positive / non-integer recipe value fails closed with
+// ErrCodeInvalidRequest so a typo aborts the check rather than silently
+// benchmarking under a value the operator never set.
+func resolveConcurrencyPerGPU(ctx *validators.Context) (int, error) {
+	if c, ok := findPerformanceConstraint(ctx, perfConstraintConcurrency); ok {
+		if raw := strings.TrimSpace(c.Value); raw != "" {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v <= 0 {
+				return 0, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid %s=%q: must be a positive integer", perfConstraintConcurrency, raw))
+			}
+			return v, nil
+		}
+	}
+	return intFromEnv(envConcurrencyPerGPU, aiperfConcurrencyPerGPU)
+}
+
+// durationFromEnv reads a Go duration string (e.g. "30m") from the named env
+// var, falling back to def when unset. A malformed or non-positive value aborts
+// the check with ErrCodeInvalidRequest — same fail-closed contract as
+// intFromEnv, so a typo can't silently run under the default.
+func durationFromEnv(name string, def time.Duration) (time.Duration, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid %s=%q: must be a positive Go duration (e.g. 30m)", name, raw))
+	}
+	return d, nil
+}
+
 // intFromEnv reads a positive-integer tuning knob from the named env var. It
 // returns def when the var is unset, the parsed value when it is a positive
 // integer, and an ErrCodeInvalidRequest error when it is set but not a positive
@@ -1255,10 +1516,11 @@ func intFromEnv(name string, def int) (int, error) {
 }
 
 // validatePerfTuningEnvs fails closed if any AICR_INFERENCE_PERF_* knob is set
-// to a non-integer or non-positive value, returning ErrCodeInvalidRequest so a
-// catalog/env typo aborts the check up front — before the (multi-minute)
-// benchmark workload is deployed — instead of silently benchmarking under
-// defaults and reporting a pass/fail the operator did not ask for.
+// to an invalid value (non-positive integer, or non-positive/malformed duration
+// for the timeout knob), returning ErrCodeInvalidRequest so a catalog/env typo
+// aborts the check up front — before the (multi-minute) benchmark workload is
+// deployed — instead of silently benchmarking under defaults and reporting a
+// pass/fail the operator did not ask for.
 func validatePerfTuningEnvs() error {
 	for _, name := range []string{
 		envConcurrencyPerGPU, envWarmupPerConcurrency, envMinRequests,
@@ -1267,6 +1529,15 @@ func validatePerfTuningEnvs() error {
 		if _, err := intFromEnv(name, 1); err != nil {
 			return err
 		}
+	}
+	if _, err := durationFromEnv(envWorkloadReadyTimeout, defaults.InferenceWorkloadReadyTimeout); err != nil {
+		return err
+	}
+	if _, err := durationFromEnv(envHealthTimeout, defaults.InferenceHealthTimeout); err != nil {
+		return err
+	}
+	if _, _, err := parseModelCacheSize(os.Getenv(envModelCacheSize)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1292,7 +1563,7 @@ type aiperfRunParams struct {
 // chain aiperf + echo + cat for sentinel framing. /bin/sh is POSIX-sufficient
 // for everything in the script (set -e, line continuation, echo, cat) and is
 // present in the python:3.12-slim base image, avoiding a bash dependency.
-func buildAIPerfJob(namespace, jobName, endpoint string, concurrency int, pullSecrets []v1.LocalObjectReference) (*batchv1.Job, aiperfRunParams, error) {
+func buildAIPerfJob(namespace, jobName, endpoint, model string, concurrency int, pullSecrets []v1.LocalObjectReference) (*batchv1.Job, aiperfRunParams, error) {
 	// AIPerf requires request_count >= concurrency. Scale the measured request
 	// count with concurrency so larger GPU counts still get a multi-wave
 	// steady-state window, with a fixed floor for small nodes. Tuning-env reads
@@ -1329,8 +1600,13 @@ func buildAIPerfJob(namespace, jobName, endpoint string, concurrency int, pullSe
 	// were mutated between two calls (matters in tests; cheap in prod).
 	aiperfImage := resolveAiperfImage()
 
+	// The model is passed via the AICR_MODEL container env var and referenced as
+	// "$AICR_MODEL", not interpolated into the script text. A recipe /
+	// AICR_INFERENCE_PERF_MODEL value with shell metacharacters (e.g. $(...))
+	// would otherwise be command-substituted by /bin/sh -c even inside double
+	// quotes; "$AICR_MODEL" expands to the literal value without re-scanning it.
 	script := fmt.Sprintf(`set -e
-aiperf profile "%s" \
+aiperf profile "$AICR_MODEL" \
   --url %s \
   --endpoint-type chat \
   --streaming \
@@ -1344,7 +1620,7 @@ aiperf profile "%s" \
 echo '%s'
 cat %s/profile_export_aiperf.json
 echo '%s'`,
-		inferenceModel, endpoint,
+		endpoint,
 		concurrency, requestCount, warmupCount,
 		inputTokensMean, outputTokensMean,
 		aiperfArtifactDir,
@@ -1389,8 +1665,12 @@ echo '%s'`,
 							// `:edge`, `:main`, and similar rolling tags
 							// on-push.yaml recreates on every merge.
 							ImagePullPolicy: validatorv1.ImagePullPolicy(aiperfImage, os.Getenv("AICR_VALIDATOR_IMAGE_TAG")),
-							Command:         []string{"/bin/sh", "-c"},
-							Args:            []string{script},
+							// Model passed as env and referenced as "$AICR_MODEL"
+							// in the script so a value with shell metacharacters
+							// can't be command-substituted (see script above).
+							Env:     []v1.EnvVar{{Name: "AICR_MODEL", Value: model}},
+							Command: []string{"/bin/sh", "-c"},
+							Args:    []string{script},
 						},
 					},
 				},

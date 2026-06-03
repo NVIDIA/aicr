@@ -192,6 +192,37 @@ func TestBundleResolve_EmptySpec(t *testing.T) {
 	}
 }
 
+func TestBundleResolve_RejectsMalformedSigstoreURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		attest  *config.AttestationSpec
+		wantSub string
+	}{
+		{
+			name:    "non-https fulcioURL fails with spec-path attribution",
+			attest:  &config.AttestationSpec{FulcioURL: "http://fulcio.internal.example.com"},
+			wantSub: "spec.bundle.attestation.fulcioURL",
+		},
+		{
+			name:    "malformed rekorURL fails with spec-path attribution",
+			attest:  &config.AttestationSpec{RekorURL: "https://user:pass@rekor.internal.example.com"},
+			wantSub: "spec.bundle.attestation.rekorURL",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &config.BundleSpec{Attestation: tt.attest}
+			_, err := b.Resolve()
+			if err == nil {
+				t.Fatal("expected error for malformed Sigstore URL, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q must contain %q", err.Error(), tt.wantSub)
+			}
+		})
+	}
+}
+
 func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	b := &config.BundleSpec{
 		Input:  &config.BundleInputSpec{Recipe: "recipe.yaml"},
@@ -216,6 +247,8 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 			Enabled:                   true,
 			CertificateIdentityRegexp: ".+",
 			OIDCDeviceFlow:            true,
+			FulcioURL:                 "https://fulcio.internal.example.com",
+			RekorURL:                  "https://rekor.internal.example.com",
 		},
 		Registry: &config.RegistrySpec{InsecureTLS: true, PlainHTTP: true},
 	}
@@ -271,6 +304,9 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	if !got.Attest || got.CertIDRegexp != ".+" || !got.OIDCDeviceFlow {
 		t.Errorf("Attestation fields: got attest=%v cert=%q oidc=%v",
 			got.Attest, got.CertIDRegexp, got.OIDCDeviceFlow)
+	}
+	if got.FulcioURL != "https://fulcio.internal.example.com" || got.RekorURL != "https://rekor.internal.example.com" {
+		t.Errorf("Sigstore URLs: got fulcio=%q rekor=%q", got.FulcioURL, got.RekorURL)
 	}
 	if !got.InsecureTLS || !got.PlainHTTP {
 		t.Errorf("Registry: got insecure=%v plain=%v", got.InsecureTLS, got.PlainHTTP)

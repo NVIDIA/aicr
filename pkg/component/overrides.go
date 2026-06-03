@@ -16,12 +16,14 @@ package component
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // ApplyMapOverrides applies overrides to a map[string]any using dot-notation paths.
@@ -48,6 +50,125 @@ func ApplyMapOverrides(target map[string]any, overrides map[string]string) error
 	}
 
 	return nil
+}
+
+// ApplyTypedOverrides applies structured (--set-json / --set-file) overrides
+// to target using dot-notation paths. For each path, a map value is
+// deep-merged into any existing map at that path (so partial object overrides
+// compose with recipe/base values); every other value kind — scalar or list —
+// replaces what is at the path. Values are deep-copied so the override source
+// is never aliased into target. Intermediate path segments that exist but are
+// not maps are an error (strict mode), matching ApplyMapOverrides.
+//
+// Paths are applied shallowest-first (by segment count, then lexicographically)
+// rather than in Go's randomized map-iteration order. This makes the result
+// deterministic when two paths overlap by prefix — e.g. "driver.env" (an
+// object) and "driver.env.HTTPS_PROXY" (a scalar): the parent object is merged
+// first, then the deeper, more-specific override lands last and wins. Without
+// the sort, the apply order — and thus the bundle output — would vary run to
+// run, violating the project's "same inputs -> same outputs" guarantee.
+func ApplyTypedOverrides(target map[string]any, overrides map[string]any) error {
+	if target == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "target map cannot be nil")
+	}
+
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	var errs []string
+	for _, path := range sortedOverridePaths(overrides) {
+		if err := mergeTypedValueByPath(target, path, overrides[path]); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", path, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to apply typed overrides: %s", strings.Join(errs, "; ")))
+	}
+
+	return nil
+}
+
+// sortedOverridePaths returns the override paths ordered shallowest-first by
+// dot-separated segment count, breaking ties lexicographically. A path that is
+// a strict dot-prefix of another always has fewer segments, so it is always
+// applied before the path that extends it — making overlapping-path merges
+// deterministic and letting the deeper override win.
+func sortedOverridePaths(overrides map[string]any) []string {
+	paths := make([]string, 0, len(overrides))
+	for path := range overrides {
+		paths = append(paths, path)
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		di, dj := strings.Count(paths[i], "."), strings.Count(paths[j], ".")
+		if di != dj {
+			return di < dj
+		}
+		return paths[i] < paths[j]
+	})
+	return paths
+}
+
+// mergeTypedValueByPath resolves the parent map for a dot-notation path
+// (creating intermediate maps as needed) and merges value at the final key:
+// map-into-map deep-merges, everything else replaces (deep-copied).
+//
+// A map value is always routed through mergeAnyMap — even when there is no
+// existing map at the key — so its explicit-null delete semantics apply
+// uniformly. A bare DeepCopyAny would instead store a `null` child verbatim
+// (rendering `key: null` rather than dropping it) when the destination is
+// absent, contradicting the documented "null deletes the key" behavior.
+func mergeTypedValueByPath(target map[string]any, path string, value any) error {
+	parent, key, err := getOrCreateNestedMap(target, path, true)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to resolve override path", err)
+	}
+
+	if srcMap, srcIsMap := value.(map[string]any); srcIsMap {
+		if dstMap, dstIsMap := parent[key].(map[string]any); dstIsMap {
+			mergeAnyMap(dstMap, srcMap)
+			return nil
+		}
+		// No existing map at the key: merge into a fresh map so null-valued
+		// keys are dropped rather than stored as literal nulls.
+		clean := make(map[string]any, len(srcMap))
+		mergeAnyMap(clean, srcMap)
+		parent[key] = clean
+		return nil
+	}
+
+	parent[key] = serializer.DeepCopyAny(value)
+	return nil
+}
+
+// mergeAnyMap recursively merges src into dst: nested maps merge key-by-key,
+// all other values (scalars, slices) replace and are deep-copied, and a nil
+// src value deletes the key. Mirrors the recipe overlay merge semantics so
+// --set-json object overrides compose the same way inline recipe overrides do.
+func mergeAnyMap(dst, src map[string]any) {
+	for k, sv := range src {
+		if sv == nil {
+			delete(dst, k)
+			continue
+		}
+		if svMap, ok := sv.(map[string]any); ok {
+			if dvMap, ok := dst[k].(map[string]any); ok {
+				mergeAnyMap(dvMap, svMap)
+				continue
+			}
+			// No existing map at the key: merge into a fresh map (rather than
+			// deep-copying verbatim) so nested null-valued keys are dropped
+			// instead of stored as literal nulls — matching the top-level
+			// behavior in mergeTypedValueByPath and the documented "null
+			// deletes the key" semantics at every depth.
+			clean := make(map[string]any, len(svMap))
+			mergeAnyMap(clean, svMap)
+			dst[k] = clean
+			continue
+		}
+		dst[k] = serializer.DeepCopyAny(sv)
+	}
 }
 
 // getOrCreateNestedMap traverses a dot-separated path in a nested map,

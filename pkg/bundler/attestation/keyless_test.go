@@ -27,18 +27,54 @@ import (
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	protocommon "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
 func TestNewKeylessAttester(t *testing.T) {
-	attester := NewKeylessAttester("test-oidc-token")
+	attester := NewKeylessAttester("test-oidc-token", "", "")
 
 	if attester == nil {
 		t.Fatal("NewKeylessAttester() returned nil")
 	}
 }
 
+// TestNewKeylessAttester_SigstoreURLs covers the private-Sigstore override:
+// non-empty Fulcio/Rekor URLs are honored verbatim, and empty strings fall
+// back to the public-good defaults so existing callers keep their behavior.
+// See issue #408.
+func TestNewKeylessAttester_SigstoreURLs(t *testing.T) {
+	const (
+		privFulcio = "https://fulcio.internal.example.com"
+		privRekor  = "https://rekor.internal.example.com"
+	)
+	tests := []struct {
+		name       string
+		fulcio     string
+		rekor      string
+		wantFulcio string
+		wantRekor  string
+	}{
+		{"both empty fall back to public defaults", "", "", defaults.SigstoreFulcioURL, defaults.SigstoreRekorURL},
+		{"both overridden are honored", privFulcio, privRekor, privFulcio, privRekor},
+		{"private Fulcio with public Rekor", privFulcio, "", privFulcio, defaults.SigstoreRekorURL},
+		{"public Fulcio with private Rekor", "", privRekor, defaults.SigstoreFulcioURL, privRekor},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := NewKeylessAttester("test-oidc-token", tt.fulcio, tt.rekor)
+			if a.fulcioURL != tt.wantFulcio {
+				t.Errorf("fulcioURL = %q, want %q", a.fulcioURL, tt.wantFulcio)
+			}
+			if a.rekorURL != tt.wantRekor {
+				t.Errorf("rekorURL = %q, want %q", a.rekorURL, tt.wantRekor)
+			}
+		})
+	}
+}
+
 func TestKeylessAttester_Identity(t *testing.T) {
-	attester := NewKeylessAttester("test-oidc-token")
+	attester := NewKeylessAttester("test-oidc-token", "", "")
 
 	// Identity is not known until after Attest() succeeds (Fulcio returns it).
 	// Before signing, identity should be empty.
@@ -48,7 +84,7 @@ func TestKeylessAttester_Identity(t *testing.T) {
 }
 
 func TestKeylessAttester_HasRekorEntry(t *testing.T) {
-	attester := NewKeylessAttester("test-oidc-token")
+	attester := NewKeylessAttester("test-oidc-token", "", "")
 
 	if !attester.HasRekorEntry() {
 		t.Error("HasRekorEntry() = false, want true (keyless always uses Rekor)")

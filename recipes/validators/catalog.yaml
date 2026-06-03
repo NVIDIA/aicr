@@ -67,29 +67,58 @@ validators:
     phase: performance
     description: "Verify inference throughput and TTFT p99 meet thresholds using AIPerf"
     image: ghcr.io/nvidia/aicr-validators/performance:latest
-    # Must exceed CheckExecutionTimeout (45m). The parent ctx accommodates:
-    # namespace-termination (5m) + workload-ready (10m) + health (5m) +
-    # AIPerf pod scheduling (5m) + AIPerf benchmark (15m) = 40m worst case
-    # phase sum, with 5m headroom inside the ctx for inter-phase overhead.
-    # The Job's activeDeadlineSeconds is set from this value and kills the
-    # pod only after the ctx has surfaced a clean timeout; 50m leaves 5m
-    # for deferred cleanup + termination-log / CTRF-tail work after the
-    # ctx itself has expired.
-    timeout: 50m
+    # Worst-case serial phase sum (all under the parent ctx), cache on by default:
+    #   model-cache populate (up to WORKLOAD_READY_TIMEOUT, 10m)
+    # + namespace-termination (5m) + workload-ready (10m) + health (5m)
+    # + AIPerf pod scheduling (5m) + AIPerf benchmark (15m)
+    # = 50m. The 65m timeout = that 50m sum + 15m headroom for inter-phase
+    # overhead (slow registries, K8s API round-trips) and deferred cleanup /
+    # CTRF-tail work. The Job's activeDeadlineSeconds derives from this value and
+    # kills the pod only after the ctx has surfaced a clean timeout. Raising the
+    # model (or disabling the cache) shifts this budget — see the knobs below.
+    timeout: 65m
     args: ["inference-perf"]
     # Benchmark tuning knobs (optional). AIPerf warms up before measuring so
     # vLLM's one-time CUDA-graph/JIT cost is excluded from the reported p99
     # TTFT/throughput. Override any of these to retune without rebuilding the
     # validator image; an unset knob uses the default shown, while a value that
     # is not a positive integer aborts the check (ErrCodeInvalidRequest) instead
-    # of silently defaulting. The per-accelerator pass/fail thresholds live in
-    # the recipe overlays, not here.
-    #   AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU      (default 16)
+    # of silently defaulting.
+    #
+    # Model and concurrency-per-GPU are also settable PER ACCELERATOR in the
+    # recipe overlay's performance.constraints (symmetric with the throughput /
+    # TTFT thresholds, which already live there):
+    #     - name: inference-model
+    #       value: Qwen/Qwen3-8B
+    #     - name: inference-concurrency-per-gpu
+    #       value: "256"
+    # Resolution precedence is recipe > catalog env (below) > compiled default.
+    # The per-accelerator pass/fail thresholds live in the recipe overlays only.
+    #   AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU      (default 256 — empirical throughput
+    #     sweet spot on 8B across RTX PRO 6000 / GB200 / H100; below the over-saturation knee)
     #   AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY   (default 1; warmup reqs per slot)
     #   AICR_INFERENCE_PERF_MIN_REQUESTS             (default 1000; measured-request floor)
     #   AICR_INFERENCE_PERF_REQUESTS_PER_CONCURRENCY (default 8; scales requests w/ concurrency)
     #   AICR_INFERENCE_PERF_INPUT_TOKENS_MEAN        (default 128)
     #   AICR_INFERENCE_PERF_OUTPUT_TOKENS_MEAN       (default 128)
+    #   AICR_INFERENCE_PERF_MODEL                    (default Qwen/Qwen3-8B; HF model ID)
+    #   AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT   (default 10m; Go duration. Large models
+    #     load slower — raise this AND the `timeout` field above in tandem, since the parent
+    #     check deadline derives from `timeout`.)
+    #   AICR_INFERENCE_PERF_HEALTH_TIMEOUT           (default 5m; Go duration. How long to wait
+    #     for the endpoint to serve a real chat-completion after the workload reports Ready —
+    #     covers worker→frontend registration and the first model-load read. Raise it when many
+    #     workers load a large model concurrently from one RWO cache PVC, where volume IO
+    #     contention can push first-serve past 5m. Bounded by the `timeout` field, like the
+    #     workload-ready knob.)
+    #   AICR_INFERENCE_PERF_MODEL_CACHE_SIZE         (ON BY DEFAULT at 100Gi: the model is
+    #     downloaded once into a PVC and mounted read-only into workers, so the N workers don't
+    #     each re-download from Hugging Face — needs RWO storage and pins all workers to one node.
+    #     Set a different K8s quantity to resize, or off/0/none/disabled to turn it off.)
+    #   AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS (cache PVC StorageClass; unset = cluster
+    #     default. On a cluster with no default StorageClass and no value here, the check fails
+    #     fast with guidance rather than leaving the PVC Pending. AICR-deployed EKS gets a default
+    #     gp3 SC from the aws-ebs-csi-driver component; GKE has standard-rwo by default.)
     env: []
   # Conformance phase
   - name: dra-support

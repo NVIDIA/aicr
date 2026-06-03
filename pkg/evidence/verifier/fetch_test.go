@@ -100,3 +100,59 @@ func TestParseOCIReference(t *testing.T) {
 		})
 	}
 }
+
+func TestPointerPullRef(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	tests := []struct {
+		name    string
+		ref     string
+		digest  string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:   "tag ref with digest pins by digest",
+			ref:    "ghcr.io/owner/aicr-evidence:h100-eks-ubuntu-training",
+			digest: digest,
+			want:   "ghcr.io/owner/aicr-evidence@" + digest,
+		},
+		{
+			name:   "scheme-prefixed tag ref with digest",
+			ref:    "oci://ghcr.io/owner/aicr-evidence:v1",
+			digest: digest,
+			want:   "ghcr.io/owner/aicr-evidence@" + digest,
+		},
+		{
+			name:   "already digest ref with digest re-pins to same digest",
+			ref:    "ghcr.io/owner/aicr-evidence@" + digest,
+			digest: digest,
+			want:   "ghcr.io/owner/aicr-evidence@" + digest,
+		},
+		{
+			name:   "empty digest returns ref unchanged",
+			ref:    "ghcr.io/owner/aicr-evidence:v1",
+			digest: "",
+			want:   "ghcr.io/owner/aicr-evidence:v1",
+		},
+		{
+			name:    "invalid ref with digest errors",
+			ref:     "::not-a-ref",
+			digest:  digest,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := pointerPullRef(tt.ref, tt.digest)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got != tt.want {
+				t.Errorf("pointerPullRef(%q, %q) = %q, want %q", tt.ref, tt.digest, got, tt.want)
+			}
+		})
+	}
+}

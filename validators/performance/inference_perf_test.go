@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -454,6 +456,58 @@ func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
 	}
 }
 
+// TestParseDynamoTemplate_ScalarModelStaysString guards the quoting of
+// value: "${MODEL}" at testdata/inference/dynamo-deployment.yaml:43. A
+// scalar-looking model ID (pure-numeric / boolean-like / null-like) that
+// passes validateModelID must round-trip through ${MODEL} substitution and
+// YAML unmarshal as a *string*, not a YAML int/bool/null — otherwise the
+// DynamoGraphDeployment would carry a typed SERVED_MODEL_NAME the controller
+// rejects. If someone unquotes the template again, this fails.
+func TestParseDynamoTemplate_ScalarModelStaysString(t *testing.T) {
+	deployPath := filepath.Join("testdata", "inference", "dynamo-deployment.yaml")
+	// Each model ID below is accepted by validateModelID yet looks like a
+	// non-string YAML scalar when left unquoted.
+	for _, model := range []string{"123", "1.5", "true", "null"} {
+		t.Run(model, func(t *testing.T) {
+			if err := validateModelID(model); err != nil {
+				t.Fatalf("precondition: validateModelID(%q) = %v, want nil", model, err)
+			}
+			obj, err := parseYAMLTemplate(deployPath, map[string]string{
+				"NAMESPACE":       "aicr-test",
+				"MODEL":           model,
+				"GPU_COUNT":       "1",
+				"DEPLOYMENT_NAME": "aicr-inference",
+			})
+			if err != nil {
+				t.Fatalf("parseYAMLTemplate() error: %v", err)
+			}
+			envs, _, err := unstructured.NestedSlice(obj.Object, "spec", "services", "Frontend", "envs")
+			if err != nil {
+				t.Fatalf("read Frontend envs: %v", err)
+			}
+			var got interface{}
+			var found bool
+			for _, e := range envs {
+				m, ok := e.(map[string]interface{})
+				if ok && m["name"] == "SERVED_MODEL_NAME" {
+					got, found = m["value"], true
+					break
+				}
+			}
+			if !found {
+				t.Fatal("SERVED_MODEL_NAME env not found in Frontend envs")
+			}
+			s, ok := got.(string)
+			if !ok {
+				t.Fatalf("SERVED_MODEL_NAME value = %T(%v), want string", got, got)
+			}
+			if s != model {
+				t.Errorf("SERVED_MODEL_NAME = %q, want %q", s, model)
+			}
+		})
+	}
+}
+
 func TestBuildAIPerfJob_PrebuiltImageAndSentinel(t *testing.T) {
 	// Isolate from the caller's environment: buildAIPerfJob resolves the
 	// container image through resolveAiperfImage() which honors
@@ -588,7 +642,7 @@ func TestBuildAIPerfJob_ImagePullPolicy(t *testing.T) {
 // directly instead.
 func mustBuildAIPerfJob(t *testing.T, namespace, jobName, endpoint string, concurrency int, pullSecrets []v1.LocalObjectReference) *batchv1.Job {
 	t.Helper()
-	job, _, err := buildAIPerfJob(namespace, jobName, endpoint, concurrency, pullSecrets)
+	job, _, err := buildAIPerfJob(namespace, jobName, endpoint, "Qwen/Qwen3-8B", concurrency, pullSecrets)
 	if err != nil {
 		t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
 	}
@@ -604,8 +658,40 @@ func clearTuningEnvs(t *testing.T) {
 	for _, e := range []string{
 		envConcurrencyPerGPU, envWarmupPerConcurrency, envMinRequests,
 		envRequestsPerConcurrency, envInputTokensMean, envOutputTokensMean,
+		envModel, envWorkloadReadyTimeout, envHealthTimeout, envModelCacheSize,
 	} {
 		t.Setenv(e, "")
+	}
+}
+
+// TestBuildAIPerfJob_ModelViaEnvNotShell verifies the model is passed through a
+// container env var and referenced as "$AICR_MODEL" in the script, never
+// interpolated into the /bin/sh -c text — so a model containing shell
+// metacharacters cannot be command-substituted before the benchmark runs.
+func TestBuildAIPerfJob_ModelViaEnvNotShell(t *testing.T) {
+	clearTuningEnvs(t)
+	malicious := "$(touch /tmp/pwned)"
+	job, _, err := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", malicious, 16, nil)
+	if err != nil {
+		t.Fatalf("buildAIPerfJob: %v", err)
+	}
+	ctr := job.Spec.Template.Spec.Containers[0]
+	script := ctr.Args[0]
+	if strings.Contains(script, malicious) {
+		t.Errorf("script must not interpolate the model verbatim (injection risk); script:\n%s", script)
+	}
+	if !strings.Contains(script, `"$AICR_MODEL"`) {
+		t.Errorf("script must reference the model via \"$AICR_MODEL\"; script:\n%s", script)
+	}
+	var got string
+	found := false
+	for _, e := range ctr.Env {
+		if e.Name == "AICR_MODEL" {
+			got, found = e.Value, true
+		}
+	}
+	if !found || got != malicious {
+		t.Errorf("AICR_MODEL env = %q (found=%v), want the raw model %q carried as data", got, found, malicious)
 	}
 }
 
@@ -724,6 +810,291 @@ func TestValidatePerfTuningEnvs(t *testing.T) {
 			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 		}
 	})
+	t.Run("malformed timeout knob → ErrCodeInvalidRequest", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envWorkloadReadyTimeout, "soon") // not a Go duration
+		err := validatePerfTuningEnvs()
+		if err == nil {
+			t.Fatal("expected an error for a malformed duration knob")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+	t.Run("malformed health-timeout knob → ErrCodeInvalidRequest", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envHealthTimeout, "soon") // not a Go duration
+		err := validatePerfTuningEnvs()
+		if err == nil {
+			t.Fatal("expected an error for a malformed health-timeout knob")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+	t.Run("valid health-timeout knob → ok", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envHealthTimeout, "15m")
+		if err := validatePerfTuningEnvs(); err != nil {
+			t.Errorf("unexpected error for valid health timeout: %v", err)
+		}
+	})
+	t.Run("malformed model-cache size → ErrCodeInvalidRequest", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envModelCacheSize, "lots-of-space") // not a quantity
+		err := validatePerfTuningEnvs()
+		if err == nil {
+			t.Fatal("expected an error for a malformed cache-size knob")
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+		}
+	})
+	t.Run("valid model-cache size → ok", func(t *testing.T) {
+		clearTuningEnvs(t)
+		t.Setenv(envModelCacheSize, "100Gi")
+		if err := validatePerfTuningEnvs(); err != nil {
+			t.Errorf("unexpected error for valid cache size: %v", err)
+		}
+	})
+}
+
+// TestResolveInferenceModel verifies the model knob: unset/empty/whitespace
+// falls back to the default smoke-test model, and a set value overrides it
+// (trimmed). This is what lets characterization runs select a larger model
+// without rebuilding the validator image.
+func TestResolveInferenceModel(t *testing.T) {
+	tests := []struct {
+		name string
+		val  string
+		set  bool
+		want string
+	}{
+		{"unset → default", "", false, inferenceModel},
+		{"empty → default", "", true, inferenceModel},
+		{"whitespace → default", "   ", true, inferenceModel},
+		{"override", "Qwen/Qwen3-8B", true, "Qwen/Qwen3-8B"},
+		{"override trimmed", "  Qwen/Qwen3-32B  ", true, "Qwen/Qwen3-32B"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.set {
+				t.Setenv(envModel, tt.val)
+			} else {
+				t.Setenv(envModel, "")
+			}
+			if got := resolveInferenceModel(); got != tt.want {
+				t.Errorf("resolveInferenceModel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ctxWithPerfConstraints builds a validators.Context whose recipe carries the
+// given performance constraints, for exercising the recipe > env > default
+// resolution.
+func ctxWithPerfConstraints(cs ...recipe.Constraint) *validators.Context {
+	return &validators.Context{ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{
+			Performance: &recipe.ValidationPhase{Constraints: cs},
+		},
+	})}
+}
+
+// TestResolveModel verifies the model resolution precedence recipe > env >
+// default: a per-accelerator `inference-model` constraint wins over the env
+// knob, the env knob wins over the compiled default, and a blank/absent recipe
+// value falls through.
+func TestResolveModel(t *testing.T) {
+	modelC := func(v string) recipe.Constraint { return recipe.Constraint{Name: perfConstraintModel, Value: v} }
+	tests := []struct {
+		name   string
+		ctx    *validators.Context
+		envVal string
+		want   string
+	}{
+		{"recipe wins over env", ctxWithPerfConstraints(modelC("Qwen/Qwen3-32B")), "Qwen/Qwen3-8B", "Qwen/Qwen3-32B"},
+		{"recipe trimmed", ctxWithPerfConstraints(modelC("  meta-llama/Llama-3.1-70B  ")), "", "meta-llama/Llama-3.1-70B"},
+		{"no recipe → env", ctxWithPerfConstraints(), "Qwen/Qwen3-14B", "Qwen/Qwen3-14B"},
+		{"blank recipe → env", ctxWithPerfConstraints(modelC("   ")), "Qwen/Qwen3-14B", "Qwen/Qwen3-14B"},
+		{"no recipe, no env → default", ctxWithPerfConstraints(), "", inferenceModel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModel, tt.envVal)
+			if got := resolveModel(tt.ctx); got != tt.want {
+				t.Errorf("resolveModel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateModelID accepts well-formed Hugging Face model IDs and rejects
+// values with YAML/shell metacharacters that could break the Dynamo deploy YAML.
+func TestValidateModelID(t *testing.T) {
+	for _, ok := range []string{"Qwen/Qwen3-8B", "meta-llama/Llama-3.1-70B-Instruct", "gpt2", "org_x/model.v2"} {
+		if err := validateModelID(ok); err != nil {
+			t.Errorf("validateModelID(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"$(touch x)", "a:b", `a"b`, "a b", "a\nb", "", "../etc"} {
+		if err := validateModelID(bad); err == nil {
+			t.Errorf("validateModelID(%q) = nil, want ErrCodeInvalidRequest", bad)
+		} else if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Errorf("validateModelID(%q) error code = %v, want ErrCodeInvalidRequest", bad, err)
+		}
+	}
+}
+
+// TestResolveConcurrencyPerGPU verifies recipe > env > default precedence and
+// that an invalid recipe value fails closed with ErrCodeInvalidRequest.
+func TestResolveConcurrencyPerGPU(t *testing.T) {
+	concC := func(v string) recipe.Constraint {
+		return recipe.Constraint{Name: perfConstraintConcurrency, Value: v}
+	}
+	tests := []struct {
+		name    string
+		ctx     *validators.Context
+		envVal  string
+		want    int
+		wantErr bool
+	}{
+		{"recipe wins over env", ctxWithPerfConstraints(concC("256")), "999", 256, false},
+		{"recipe trimmed", ctxWithPerfConstraints(concC("  128  ")), "", 128, false},
+		{"no recipe → env", ctxWithPerfConstraints(), "64", 64, false},
+		{"blank recipe → env", ctxWithPerfConstraints(concC("   ")), "64", 64, false},
+		{"no recipe, no env → default", ctxWithPerfConstraints(), "", aiperfConcurrencyPerGPU, false},
+		{"recipe non-integer → error", ctxWithPerfConstraints(concC("lots")), "", 0, true},
+		{"recipe zero → error", ctxWithPerfConstraints(concC("0")), "", 0, true},
+		{"recipe negative → error", ctxWithPerfConstraints(concC("-8")), "", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envConcurrencyPerGPU, tt.envVal)
+			got, err := resolveConcurrencyPerGPU(tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveConcurrencyPerGPU() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("resolveConcurrencyPerGPU() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDurationFromEnv verifies the duration knob reader: unset → default, a
+// valid Go duration parses, and a malformed / non-positive value returns
+// ErrCodeInvalidRequest so a typo aborts the check rather than silently
+// running under the default.
+func TestDurationFromEnv(t *testing.T) {
+	const env = "AICR_INFERENCE_PERF_TEST_DURATION"
+	def := 10 * time.Minute
+	tests := []struct {
+		name    string
+		val     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"empty/unset → default", "", def, false},
+		{"valid → override", "30m", 30 * time.Minute, false},
+		{"zero → error", "0s", 0, true},
+		{"negative → error", "-5m", 0, true},
+		{"malformed → error", "soon", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(env, tt.val)
+			got, err := durationFromEnv(env, def)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("durationFromEnv(%q=%q) err = %v, wantErr %v", env, tt.val, err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("durationFromEnv(%q=%q) = %v, want %v", env, tt.val, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEnsureHFTokenSecret verifies the optional HF-token Secret is provisioned
+// only when HF_TOKEN is set in the validator env, holds the token under the
+// expected key, and is updated (not duplicated/erroring) when it already exists
+// from a re-used namespace.
+func TestEnsureHFTokenSecret(t *testing.T) {
+	const ns = "aicr-inference-perf-test"
+
+	t.Run("no token → no secret", func(t *testing.T) {
+		t.Setenv(envHFToken, "")
+		client := fake.NewClientset()
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if err := ensureHFTokenSecret(ctx, ns); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, err := client.CoreV1().Secrets(ns).Get(context.Background(), hfTokenSecretName, metav1.GetOptions{}); err == nil {
+			t.Error("secret should not exist when HF_TOKEN is unset")
+		}
+	})
+
+	t.Run("token set → secret created with token", func(t *testing.T) {
+		t.Setenv(envHFToken, "hf_testtoken")
+		client := fake.NewClientset()
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if err := ensureHFTokenSecret(ctx, ns); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		sec, err := client.CoreV1().Secrets(ns).Get(context.Background(), hfTokenSecretName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("secret not created: %v", err)
+		}
+		if got := sec.StringData[hfTokenSecretKey]; got != "hf_testtoken" {
+			// fake client preserves StringData; real API moves it to Data.
+			if gotData := string(sec.Data[hfTokenSecretKey]); gotData != "hf_testtoken" && got != "hf_testtoken" {
+				t.Errorf("secret %s=%q/%q, want hf_testtoken", hfTokenSecretKey, got, gotData)
+			}
+		}
+	})
+
+	t.Run("existing secret → updated to new token", func(t *testing.T) {
+		t.Setenv(envHFToken, "hf_new")
+		client := fake.NewClientset(&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: hfTokenSecretName, Namespace: ns, ResourceVersion: "7"},
+			StringData: map[string]string{hfTokenSecretKey: "hf_old"},
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if err := ensureHFTokenSecret(ctx, ns); err != nil {
+			t.Fatalf("unexpected error updating existing secret: %v", err)
+		}
+		sec, err := client.CoreV1().Secrets(ns).Get(context.Background(), hfTokenSecretName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("secret missing after update: %v", err)
+		}
+		// fake client keeps StringData; a real API moves it to Data — accept either.
+		if got, gotData := sec.StringData[hfTokenSecretKey], string(sec.Data[hfTokenSecretKey]); got != "hf_new" && gotData != "hf_new" {
+			t.Errorf("token after update = %q/%q, want hf_new (stale hf_old must be replaced)", got, gotData)
+		}
+	})
+
+	t.Run("unset token clears a stale secret", func(t *testing.T) {
+		// A reused per-run namespace must not silently inject an old token via
+		// the workers' optional secretKeyRefs when this run is anonymous.
+		t.Setenv(envHFToken, "")
+		client := fake.NewClientset(&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: hfTokenSecretName, Namespace: ns},
+			StringData: map[string]string{hfTokenSecretKey: "hf_stale"},
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if err := ensureHFTokenSecret(ctx, ns); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, err := client.CoreV1().Secrets(ns).Get(context.Background(), hfTokenSecretName, metav1.GetOptions{}); err == nil {
+			t.Error("stale HF token secret should be deleted when HF_TOKEN is unset")
+		}
+	})
 }
 
 // TestBuildAIPerfJob_EnvOverrides verifies the AICR_INFERENCE_PERF_* knobs flow
@@ -758,7 +1129,7 @@ func TestBuildAIPerfJob_ReturnedParams(t *testing.T) {
 		// 128*8 = 1024 exceeds the 1000 floor, so the count is the scaled value
 		// — exactly the case the old log (which printed the 1000 constant) got
 		// wrong.
-		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", 128, nil)
+		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", "Qwen/Qwen3-8B", 128, nil)
 		if err != nil {
 			t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
 		}
@@ -774,7 +1145,7 @@ func TestBuildAIPerfJob_ReturnedParams(t *testing.T) {
 		t.Setenv(envMinRequests, "2000")
 		t.Setenv(envRequestsPerConcurrency, "4") // 100*4=400 < 2000 floor
 		t.Setenv(envWarmupPerConcurrency, "3")   // 100*3=300
-		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", 100, nil)
+		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", "Qwen/Qwen3-8B", 100, nil)
 		if err != nil {
 			t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
 		}
@@ -1075,6 +1446,32 @@ func TestNodeGPUCount(t *testing.T) {
 	}
 }
 
+func TestScaledThroughputThreshold(t *testing.T) {
+	tests := []struct {
+		name            string
+		threshold       float64
+		gpuCount        int
+		gpuCountPerNode int
+		want            float64
+	}{
+		{"full node is a no-op", 50000, 8, 8, 50000},
+		{"half node scales by half", 50000, 4, 8, 25000},
+		{"two of eight GPUs", 50000, 2, 8, 12500},
+		{"unknown node count unchanged", 50000, 2, 0, 50000},
+		{"zero gpuCount unchanged", 50000, 0, 8, 50000},
+		{"over-count clamps to no-op", 50000, 9, 8, 50000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := scaledThroughputThreshold(tt.threshold, tt.gpuCount, tt.gpuCountPerNode)
+			if got != tt.want {
+				t.Errorf("scaledThroughputThreshold(%v, %d, %d) = %v, want %v",
+					tt.threshold, tt.gpuCount, tt.gpuCountPerNode, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRequireComparatorPrefix(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1181,7 +1578,7 @@ func TestWaitForEndpointReady_AcceptsOnFirstRealCompletion(t *testing.T) {
 	// a stuck loop.
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
-	if err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond); err != nil {
+	if err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond, defaults.InferenceHealthTimeout); err != nil {
 		t.Fatalf("waitForEndpointReady returned error: %v", err)
 	}
 	if got := calls.Load(); got != 3 {
@@ -1204,7 +1601,7 @@ func TestWaitForEndpointReady_TimesOutWhenAlwaysEmpty(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond)
+	err := waitForEndpointReadyWithInterval(ctx, srv.URL, "test-model", time.Millisecond, defaults.InferenceHealthTimeout)
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}

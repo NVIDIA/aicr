@@ -46,6 +46,7 @@ type bundleCmdOptions struct {
 	deployer                   config.DeployerType
 	repoURL                    string
 	valueOverrides             []config.ComponentPath
+	valueOverridesTyped        []config.TypedComponentPath
 	systemNodeSelector         map[string]string
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
@@ -86,6 +87,12 @@ type bundleCmdOptions struct {
 	// (RFC 8628) for headless hosts where a browser callback is unavailable.
 	oidcDeviceFlow bool
 
+	// fulcioURL and rekorURL override the public-good Sigstore endpoints so
+	// keyless signing targets a private Fulcio CA and/or Rekor transparency
+	// log. Empty leaves the public defaults in place. See #408.
+	fulcioURL string
+	rekorURL  string
+
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
 	plainHTTP     bool
@@ -110,7 +117,7 @@ type bundleCmdOptions struct {
 // config-supplied fields happens at the conversion boundary in Resolve;
 // errors from that boundary carry "spec.bundle.<path>" attribution.
 //
-//nolint:gocyclo // option resolution is inherently long but linear
+//nolint:gocyclo,funlen // option resolution is inherently long but linear
 func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmdOptions, error) {
 	resolved, err := cfg.Bundle().Resolve()
 	if err != nil {
@@ -126,6 +133,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
 		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
+		fulcioURL:                 stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
+		rekorURL:                  stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
 		insecureTLS:               boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
 		plainHTTP:                 boolFlagOrConfig(cmd, flagPlainHTTP, resolved.PlainHTTP),
 		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
@@ -256,6 +265,9 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", resolved.ValueOverrides, config.ParseValueOverrides); err != nil {
 		return nil, err
 	}
+	if opts.valueOverridesTyped, err = resolveTypedOverrides(cmd); err != nil {
+		return nil, err
+	}
 	if opts.dynamicValues, err = resolveComponentPaths(cmd, "dynamic", resolved.DynamicValues, config.ParseDynamicValues); err != nil {
 		return nil, err
 	}
@@ -299,7 +311,25 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.storageClass = resolved.StorageClass
 	}
 
+	// Validate any private Sigstore endpoints up front so a malformed
+	// --fulcio-url / --rekor-url fails before bundling instead of at sign
+	// time. Both must be HTTPS (#408): keyless signing exchanges OIDC
+	// credentials with these endpoints, so plaintext transport is rejected.
+	if err := validateSigstoreEndpoints(opts); err != nil {
+		return nil, err
+	}
+
 	return opts, nil
+}
+
+// validateSigstoreEndpoints rejects malformed --fulcio-url / --rekor-url
+// values (non-empty endpoints that are not absolute https:// URLs). The
+// HTTPS check is shared with the config layer via config.ValidateHTTPSURL.
+func validateSigstoreEndpoints(opts *bundleCmdOptions) error {
+	if err := config.ValidateHTTPSURL("fulcio URL", opts.fulcioURL); err != nil {
+		return err
+	}
+	return config.ValidateHTTPSURL("rekor URL", opts.rekorURL)
 }
 
 // resolveOutputTarget returns the parsed *oci.Reference for --output,
@@ -338,9 +368,21 @@ func resolveOutputTarget(cmd *cli.Command, resolved *appcfg.BundleResolved) (*oc
 //nolint:funlen // bundle command is inherently large (flags + description + action)
 func bundleCmd() *cli.Command {
 	return &cli.Command{
-		Name:     "bundle",
-		Category: functionalCategoryName,
-		Usage:    "Generate deployment bundle from a given recipe.",
+		Name: "bundle",
+		// Treat commas literally in repeatable slice flags rather than as
+		// value separators. Required so --set-json / --set-file can carry
+		// JSON lists/objects (which are comma-heavy) in a single flag, and it
+		// removes a latent footgun where a --set string value containing a
+		// comma would be silently split. urfave/cli splits slice-flag values
+		// on commas by default, and this disables that for EVERY slice flag on
+		// the command (--set, --dynamic, --*-node-selector/-toleration,
+		// --workload-selector) — not just the typed ones. Repeat-to-add is the
+		// only documented form in AICR; comma-packing multiple values into one
+		// flag was never part of AICR's documented contract, so the only
+		// affected usage is a CI script that relied on the framework default.
+		DisableSliceFlagSeparator: true,
+		Category:                  functionalCategoryName,
+		Usage:                     "Generate deployment bundle from a given recipe.",
 		Description: `Generates a deployment bundle from a given recipe.
 Use --deployer argocd to generate Argo CD Applications.
 Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
@@ -402,6 +444,10 @@ Generate Helmfile release graph:
 Override values in generated bundle:
   aicr bundle --recipe recipe.yaml --set gpuoperator:driver.version=570.133.20
 
+Override a list/object value (--set cannot express these):
+  aicr bundle --recipe recipe.yaml \
+    --set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'
+
 Set node selectors for GPU workloads:
   aicr bundle --recipe recipe.yaml \
     --accelerated-node-selector nodeGroup=gpu-nodes \
@@ -438,7 +484,26 @@ Package with explicit tag (overrides CLI version):
 				Usage: `Override values in generated bundle files
 	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
 	Use the special 'enabled' key to include/exclude components at bundle time
-	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver)`,
+	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver).
+	--set is scalar-only; use --set-json / --set-file for list or object values.`,
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
+				Name: "set-json",
+				Usage: `Override values with a JSON-encoded scalar, list, or object
+	(format: component:path.to.field=<json>, can be repeated). Use this for
+	typed fields that --set cannot express, e.g.
+	--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'.
+	Object values deep-merge into existing maps; lists and scalars replace.
+	Takes precedence over --set on the same path.`,
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
+				Name: "set-file",
+				Usage: `Override values by reading a JSON/YAML value from a file
+	(format: component:path.to.field=<filepath>, can be repeated). The file
+	holds a single value (list, object, or scalar) for larger structures than
+	--set-json. Merge semantics match --set-json.`,
 				Category: catDeployment,
 			},
 			&cli.StringSliceFlag{
@@ -567,6 +632,18 @@ Package with explicit tag (overrides CLI version):
 				Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 				Category: catDeployment,
 			},
+			&cli.StringFlag{
+				Name:     flagFulcioURL,
+				Usage:    "Override the Fulcio CA URL for --attest keyless signing (e.g. a private Sigstore instance). Must be an absolute https:// URL with no embedded credentials. Defaults to the public-good Fulcio. Also reads AICR_FULCIO_URL.",
+				Sources:  cli.EnvVars("AICR_FULCIO_URL"),
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name:     flagRekorURL,
+				Usage:    "Override the Rekor transparency-log URL for --attest keyless signing (e.g. a private Sigstore instance). Must be an absolute https:// URL with no embedded credentials. Defaults to the public-good Rekor. Also reads AICR_REKOR_URL.",
+				Sources:  cli.EnvVars("AICR_REKOR_URL"),
+				Category: catDeployment,
+			},
 			kubeconfigFlag(),
 			dataFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
@@ -593,7 +670,7 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name"); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name", flagFulcioURL, flagRekorURL); err != nil {
 		return err
 	}
 
@@ -663,6 +740,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithAttest(opts.attest),
 		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
 		config.WithValueOverridePaths(opts.valueOverrides),
+		config.WithValueOverridesTypedPaths(opts.valueOverridesTyped),
 		config.WithDynamicValuePaths(opts.dynamicValues),
 		config.WithSystemNodeSelector(opts.systemNodeSelector),
 		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
@@ -755,6 +833,8 @@ func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.At
 		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
 		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
 		DeviceFlow:    opts.oidcDeviceFlow,
+		FulcioURL:     opts.fulcioURL,
+		RekorURL:      opts.rekorURL,
 		// Prompts (verification URL + user code) go to stderr so they don't
 		// pollute stdout when callers redirect bundle output.
 		PromptWriter: os.Stderr,
