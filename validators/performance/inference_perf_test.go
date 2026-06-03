@@ -349,9 +349,47 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "state == successful",
+			name: "successful but per-service status not yet populated",
 			input: &unstructured.Unstructured{Object: map[string]interface{}{
 				"status": map[string]interface{}{"state": "successful"},
+			}},
+			want: false,
+		},
+		{
+			name: "successful but a worker replica not ready",
+			input: &unstructured.Unstructured{Object: map[string]interface{}{
+				"status": map[string]interface{}{
+					"state": "successful",
+					"services": map[string]interface{}{
+						"Frontend":         map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
+						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "readyReplicas": int64(5)},
+					},
+				},
+			}},
+			want: false,
+		},
+		{
+			name: "successful and all replicas ready (readyReplicas)",
+			input: &unstructured.Unstructured{Object: map[string]interface{}{
+				"status": map[string]interface{}{
+					"state": "successful",
+					"services": map[string]interface{}{
+						"Frontend":         map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
+						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "readyReplicas": int64(8)},
+					},
+				},
+			}},
+			want: true,
+		},
+		{
+			name: "successful with scaling-group availableReplicas fallback",
+			input: &unstructured.Unstructured{Object: map[string]interface{}{
+				"status": map[string]interface{}{
+					"state": "successful",
+					"services": map[string]interface{}{
+						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "availableReplicas": int64(8)},
+					},
+				},
 			}},
 			want: true,
 		},

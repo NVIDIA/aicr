@@ -1121,12 +1121,51 @@ func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWork
 }
 
 // isDynamoDeploymentReady returns true when the object's status.state equals "successful".
+// isDynamoDeploymentReady reports whether every service in the
+// DynamoGraphDeployment has all of its replicas Ready — not just that the
+// operator reported a top-level state of "successful". The benchmark pins one
+// data-parallel worker per GPU; if it starts while some workers are still
+// loading (common when model-cache reads stagger, e.g. 8 workers reading an 8B
+// model concurrently from one RWO EBS cache), it measures an under-provisioned
+// deployment and reports falsely low throughput / high TTFT. Gating on
+// per-service replica readiness prevents that. See #1181.
 func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 	if obj == nil {
 		return false
 	}
 	state, found, _ := unstructured.NestedString(obj.Object, "status", "state")
-	return found && state == "successful"
+	if !found || state != "successful" {
+		return false
+	}
+
+	// status.services maps each component (Frontend, VllmDecodeWorker, ...) to
+	// its replica counts. Require every service to have all replicas Ready;
+	// "successful" alone can be reported before the worker pods finish loading.
+	services, found, err := unstructured.NestedMap(obj.Object, "status", "services")
+	if err != nil || !found || len(services) == 0 {
+		return false
+	}
+	for _, raw := range services {
+		svc, ok := raw.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		replicas, found, err := unstructured.NestedInt64(svc, "replicas")
+		if err != nil || !found || replicas < 1 {
+			return false
+		}
+		// readyReplicas is populated for Deployment/PodClique/LeaderWorkerSet;
+		// PodCliqueScalingGroup reports availableReplicas instead. Accept
+		// whichever the operator set for this component kind.
+		ready, found, err := unstructured.NestedInt64(svc, "readyReplicas")
+		if err != nil || !found {
+			ready, found, err = unstructured.NestedInt64(svc, "availableReplicas")
+		}
+		if err != nil || !found || ready < replicas {
+			return false
+		}
+	}
+	return true
 }
 
 // existingResourceVersion returns the ResourceVersion from an Unstructured
