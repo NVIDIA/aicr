@@ -472,6 +472,56 @@ func TestRenderPlan(t *testing.T) {
 	}
 }
 
+// TestRenderPlanTagOverridePullPolicy is the regression guard for #1177: a
+// mutable image tag override (e.g. :edge) must force PullAlways on the MAIN
+// validator container, not just the inner AIPerf sidecar — otherwise a node
+// that cached an older :edge silently reuses stale validator logic. Both
+// render paths (typed RenderPlan and the server-side-apply
+// RenderPlanToApplyConfig) must honor plan.ImageTagOverride.
+func TestRenderPlanTagOverridePullPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		image    string
+		override string
+		want     corev1.PullPolicy
+	}{
+		{name: "mutable :edge with override → Always", image: "ghcr.io/nvidia/aicr-validators/performance:edge", override: "edge", want: corev1.PullAlways},
+		{name: "mutable :edge without override → IfNotPresent", image: "ghcr.io/nvidia/aicr-validators/performance:edge", override: "", want: corev1.PullIfNotPresent},
+		{name: "immutable :sha pin, no override → IfNotPresent", image: "ghcr.io/nvidia/aicr-validators/performance:sha-abc1234", override: "", want: corev1.PullIfNotPresent},
+		// Digest pin + override → IfNotPresent: the @digest short-circuit wins
+		// over the override, so air-gap/disconnected behavior is preserved on
+		// the main container too (the explicit invariant this fix advertises).
+		{name: "digest pin with override → IfNotPresent (air-gap-safe; digest wins)", image: "ghcr.io/nvidia/aicr-validators/performance@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", override: "edge", want: corev1.PullIfNotPresent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := JobPlan{
+				JobName:          "j",
+				Namespace:        "ns",
+				Image:            tt.image,
+				ImageTagOverride: tt.override,
+				Timeout:          300,
+			}
+
+			// Typed render path (job_plan.go RenderPlan).
+			job := RenderPlan(plan)
+			if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != tt.want {
+				t.Errorf("RenderPlan main container ImagePullPolicy = %q, want %q", got, tt.want)
+			}
+
+			// Server-side-apply render path (RenderPlanToApplyConfig).
+			jobApply := RenderPlanToApplyConfig(plan, "j")
+			gotApply := jobApply.Spec.Template.Spec.Containers[0].ImagePullPolicy
+			if gotApply == nil {
+				t.Fatal("RenderPlanToApplyConfig main container ImagePullPolicy is nil")
+			}
+			if *gotApply != tt.want {
+				t.Errorf("RenderPlanToApplyConfig main container ImagePullPolicy = %q, want %q", *gotApply, tt.want)
+			}
+		})
+	}
+}
+
 func TestRenderPlanToApplyConfig(t *testing.T) {
 	plan := JobPlan{
 		ValidatorName:    "test-validator",
