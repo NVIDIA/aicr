@@ -187,8 +187,8 @@ prevents concurrent runs from clobbering each other's RBAC. External
 tooling selects by label `app.kubernetes.io/name=aicr-validator`, not
 literal name.
 
-**Image-pull policy** is computed by `v1.ImagePullPolicy(image)` in
-`pkg/validator/v1/job_plan.go`:
+**Image-pull policy** is computed by `v1.ImagePullPolicy(image,
+imageTagOverride)` in `pkg/validator/v1/job_plan.go`:
 side-loaded (`ko.local/*`, `kind.local/*`) → `Never`;
 digest-pinned (`name@sha256:…`) → `IfNotPresent`;
 `AICR_VALIDATOR_IMAGE_TAG` set or `:latest` suffix → `Always`;
@@ -202,9 +202,12 @@ The catalog declares every validator image as `…:latest`;
 tag at runtime so the validators match the `aicr` binary that launched
 them:
 
-1. **Stamped build** — the binary's version + commit resolve the tag to
-   `:sha-<commit>`, the immutable per-commit image CI publishes for
-   `main` pushes (only — see the caveat below the table).
+1. **Stamped build** — the binary's version + commit resolve the tag.
+   `ResolveImage` checks the version first: a **release** build → that
+   release's version tag (`:vX.Y.Z`, or `:vX.Y.Z-rc…` for a pre-release);
+   otherwise a dev/`main` build →
+   `:sha-<commit>`, the immutable per-commit image CI publishes for `main`
+   pushes (only — see the caveat below the table).
 2. **`AICR_VALIDATOR_IMAGE_TAG` set** — overrides step 1 for *all* catalog
    images uniformly, including the inner `aiperf-bench` runner the
    `performance` validator launches (so both must exist at that tag).
