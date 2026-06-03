@@ -620,7 +620,7 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence
+  --push ghcr.io/<owner>/aicr-evidence:gb200-eks-ubuntu-training
 
 # 3. Commit the pointer. The bundle bytes live in OCI; the repo
 #    only stores the locator.
@@ -628,6 +628,14 @@ mkdir -p recipes/evidence
 cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
 git add recipes/evidence/<recipe-name>.yaml
 ```
+
+Tag the `--push` ref with the recipe slug (`:gb200-eks-ubuntu-training`
+above) so each recipe's evidence gets its own tag. If you omit the tag,
+aicr applies `:v1`, and every untagged push overwrites that single tag —
+collapsing unrelated recipes' evidence onto one human-readable ref. The
+bundle is always pinned by its `sha256:` digest (what `evidence verify`
+and the pointer use), so a colliding tag doesn't corrupt verification, but
+it does make the registry ref ambiguous.
 
 `--push` triggers cosign keyless signing through Sigstore's
 public-good infrastructure. The CLI resolves an OIDC token through

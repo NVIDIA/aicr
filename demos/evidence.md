@@ -55,14 +55,18 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence
+  --push ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training
 ```
 
 `--push` opens a browser for OIDC sign-in (or uses ambient GitHub Actions
-OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). The tag may be omitted as
-shown — the emitter applies `:v1` as a placeholder since the OCI digest
-is the canonical address; the pointer file (below) records both. After
-it finishes:
+OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). **Tag the ref with the
+recipe slug** (`:h100-eks-ubuntu-training` here) so each recipe's evidence
+lands on its own tag. The OCI digest is always the canonical address — but
+if you omit the tag, aicr applies `:v1` as a placeholder, and *every*
+untagged push overwrites that same `:v1` tag. Evidence for unrelated
+recipes then collides under one human-readable ref, even though each
+bundle is still independently pinned by digest. The pointer file (below)
+records both the tag and the digest. After it finishes:
 
 ```text
 ./out
@@ -92,7 +96,8 @@ aicr validate \
   --emit-attestation ./out
 
 # Off the VPN (CI runner, jump box, hotspot) — sign, push, write pointer.
-aicr evidence publish ./out --push ghcr.io/<owner>/aicr-evidence
+# Same recipe-slug tag as the one-shot path above.
+aicr evidence publish ./out --push ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training
 ```
 
 The bundle is content-addressable and `evidence publish` signs the predicate
@@ -117,8 +122,8 @@ schemaVersion: 1.0.0
 recipe: h100-eks-ubuntu-training
 attestations:
 - bundle:
-    oci: ghcr.io/<owner>/aicr-evidence:v1
-    digest: sha256:f0c1...
+    oci: ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training  # human-readable locator
+    digest: sha256:f0c1...                                       # canonical pin — verify uses this
     predicateType: https://aicr.nvidia.com/recipe-evidence/v1
   signer:
     identity: https://github.com/<owner>/<repo>/.github/workflows/validate.yaml@refs/heads/main
@@ -129,6 +134,14 @@ attestations:
 
 It's a locator, not a cache — every other field (fingerprint, phase counts,
 BOM info) lives in the predicate inside the pulled artifact.
+
+`bundle.oci` is the human-readable ref; `bundle.digest` is the
+content-addressable pin. Verification (next section) keys off
+`bundle.digest`, so the floating tag never affects what gets pulled.
+**Don't copy `bundle.oci` out of the pointer and feed it to `aicr evidence
+verify`** — pass the pointer file itself (or a digest-pinned ref). The tag
+ref is refused by default because tags are registry-rewritable; see
+§4 and `--allow-unpinned-tag`.
 
 ## 3. Verify from the pointer (maintainer path)
 
@@ -184,7 +197,19 @@ aicr evidence verify ghcr.io/<owner>/aicr-evidence@sha256:f0c1...
 ```
 
 Same five checks, no repo checkout required. Useful for auditing a
-contribution before merge.
+contribution before merge. Note the `@sha256:...` digest form — take the
+digest from the pointer's `bundle.digest` (or the push output), **not** the
+`:tag` from `bundle.oci`. A tag-only ref is refused:
+
+```text
+OCI reference ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training is
+tag-only — refusing to pull an unpinned reference. Use a digest-bound
+reference (registry/repo@sha256:<hex>), supply a pointer with bundle.digest
+set, or pass --allow-unpinned-tag for one-off debugging.
+```
+
+In practice, prefer verifying from the pointer file (§3) — it carries the
+digest, so you never handle the ref by hand.
 
 ## 5. Verify locally without push (contributor self-debug, no signature)
 
