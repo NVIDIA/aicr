@@ -299,15 +299,16 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence:<recipe-slug>
+  --push ghcr.io/<owner>/aicr-evidence
 ```
 
 The `--push` tag is just a human-readable label — the `sha256:` digest is
-what pins the bundle, so tag choice never affects verification. Omit the tag
-and it defaults to `:v1`; that's harmless (the pointer pins by digest), it
-just leaves several recipes sharing one ref. Tagging with the recipe slug
-(e.g. `ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training`) is a simple
-convention to keep refs distinct — any scheme works.
+what pins the bundle, so tag choice never affects verification (the verifier
+pulls by digest). Omit the tag, as above, and aicr derives a unique
+per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g.
+`ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so
+distinct attestations never collide on a shared tag. Pass an explicit tag to
+override.
 
 After the command finishes:
 
@@ -340,7 +341,7 @@ aicr evidence verify recipes/evidence/<recipe>.yaml
 | Flag | What it does |
 |------|--------------|
 | `--emit-attestation <dir>` | Write the bundle to `<dir>`. Required to produce evidence. |
-| `--push <oci-ref>` | Sign via cosign keyless OIDC and push to the registry. The digest pins the bundle, so the tag is just a label; omit it and it defaults to `:v1`. A recipe-slug tag is an optional way to keep refs distinct. Without `--push`, the bundle is unsigned (development/self-debug only). |
+| `--push <oci-ref>` | Sign via cosign keyless OIDC and push to the registry. The digest pins the bundle, so the tag is just a label; omit it and aicr derives a unique per-recipe tag (`<recipe-slug>-<short-fingerprint>`). Pass an explicit tag to override. Without `--push`, the bundle is unsigned (development/self-debug only). |
 | `--bom <path>` | Embed an existing CycloneDX BOM instead of the auto-generated one. Pass `make bom` output for an exhaustive BOM that includes chart-default sub-images. |
 | `--identity-token <token>` | Pre-fetched OIDC identity token, skipping the browser flow. Reads `COSIGN_IDENTITY_TOKEN`. |
 | `--oidc-device-flow` | Use OAuth device-code flow instead of opening a browser. Reads `AICR_OIDC_DEVICE_FLOW`. |

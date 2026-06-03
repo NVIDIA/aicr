@@ -118,13 +118,15 @@ func materializeDir(input string) (*MaterializedBundle, error) {
 			"(no recipe.yaml / manifest.json at root or under summary-bundle/)")
 }
 
-// materializeFromPointer pulls the OCI artifact named in the pointer's
-// first attestation, or falls back to opts.BundleRef when the pointer
-// has no OCI ref. The pointer's digest claim is cross-checked against
-// the actual pulled digest. A tag-only ref is allowed only when the
-// pointer carries a sha256-prefixed bundle.digest (the validator in
-// pointer.go rejects any other shape when bundle.oci is set) — that
-// digest is the pin.
+// materializeFromPointer pulls the OCI artifact for the pointer's first
+// attestation. When the pointer carries a content digest (bundle.digest),
+// it pulls by digest — registry/repo@sha256:... derived from bundle.oci —
+// rather than by the rewritable tag in bundle.oci, so the exact attested
+// bytes are fetched even if that tag has since been re-pushed to a
+// different artifact. The bundle.oci value then supplies only the
+// registry/repo; the digest is the pin. Without a digest (a local-only
+// pointer plus an --bundle override), it falls back to pulling the ref
+// directly and refusing a tag-only ref unless --allow-unpinned-tag.
 func materializeFromPointer(
 	ctx context.Context,
 	pointer *attestation.Pointer,
@@ -143,20 +145,43 @@ func materializeFromPointer(
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"pointer carries no bundle.oci — re-run with --bundle <oci-ref> or point at the unpacked directory")
 	}
-	// Pointer-driven path: pointer.bundle.digest is the pin. When it
-	// is empty (e.g., a local-only pointer plus --bundle override),
-	// fall through to the direct-OCI digest-pinning rule.
-	requirePin := !opts.AllowUnpinnedTag && att.Bundle.Digest == ""
-	mat, err := materializeOCIRefRequireDigest(ctx, ref, opts, requirePin)
+	// Pull by digest when the pointer pins one; the tag in bundle.oci is
+	// only a human-readable label and may have floated to another artifact.
+	pullRef, err := pointerPullRef(ref, att.Bundle.Digest)
 	if err != nil {
 		return nil, err
 	}
+	// pullRef is digest-pinned whenever bundle.digest is set, so a tag-only
+	// bundle.oci is fine there. Only the no-digest fallback must refuse an
+	// unpinned ref.
+	requirePin := !opts.AllowUnpinnedTag && att.Bundle.Digest == ""
+	mat, err := materializeOCIRefRequireDigest(ctx, pullRef, opts, requirePin)
+	if err != nil {
+		return nil, err
+	}
+	// Defense in depth: when we pulled by digest this always holds, but a
+	// misbehaving registry that returned other content is caught here.
 	if att.Bundle.Digest != "" && mat.Digest != "" && att.Bundle.Digest != mat.Digest {
 		mat.Cleanup()
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"pointer digest "+att.Bundle.Digest+" does not match pulled digest "+mat.Digest)
 	}
 	return mat, nil
+}
+
+// pointerPullRef returns the OCI reference to pull for a pointer-driven
+// verification. With a sha256 digest it returns registry/repo@digest
+// (derived from ref, any tag dropped) so the pull is content-addressed and
+// immune to tag drift; with an empty digest it returns ref unchanged.
+func pointerPullRef(ref, digest string) (string, error) {
+	if digest == "" {
+		return ref, nil
+	}
+	registry, repo, _, err := parseOCIReference(ref)
+	if err != nil {
+		return "", err
+	}
+	return formatOCIReference(registry, repo, digest), nil
 }
 
 // materializeOCIRefRequireDigest pulls an OCI artifact into a temp

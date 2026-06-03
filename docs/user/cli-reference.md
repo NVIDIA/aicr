@@ -648,7 +648,7 @@ aicr validate [flags]
 | `--feature` | `-f` | string[] | | CNCF evidence-collection feature(s) to scope (repeatable). Valid names: `dra-support`, `gang-scheduling`, `secure-access`, `accelerator-metrics`, `ai-service-metrics`, `inference-gateway`, `robust-operator`, `pod-autoscaling`, `cluster-autoscaling`. Empty selects all features. |
 | `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [ADR-007](../design/007-recipe-evidence.md). |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
-| `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. If you omit the tag, aicr applies `:v1` as a placeholder; every untagged push then shares that one tag, which is harmless for pulls (the pointer pins by digest) but ambiguous to read once several recipes pile onto `:v1`. A simple convention to keep refs distinct is the recipe slug (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training`), but any scheme works. |
+| `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -782,7 +782,7 @@ aicr validate \
 aicr validate \
   --recipe recipe.yaml --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training  # optional tag; slug keeps refs distinct (else :v1)
+  --push ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
 # After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
 
 # Validate on a cluster with custom GPU node labels (non-standard labels that AICR doesn't
@@ -845,7 +845,7 @@ spec:
       attestation:                       # --emit-attestation / --bom / --push / ...
         out: ./out/attestation
         bom: dist/bom/bom.cdx.json       # optional; auto-generated from recipe + validators when absent
-        push: ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training  # optional tag; slug keeps refs distinct (else :v1)
+        push: ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
         plainHTTP: false
         insecureTLS: false
 ```
@@ -2228,7 +2228,7 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omitting the tag defaults to `:v1` — harmless, since the pointer pins by digest, but several recipes then share one ref. A recipe-slug tag like `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training` is an optional convention to keep refs distinct; see [`aicr validate --push`](#aicr-validate). |
+| `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omit the tag and aicr derives a unique per-recipe one (`<recipe-slug>-<short-fingerprint>`); pass an explicit tag to override. See [`aicr validate --push`](#aicr-validate). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
 | `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
 | `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS when pushing the OCI artifact (local-registry tests). |
@@ -2247,9 +2247,9 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 # On VPN: produce an unsigned bundle from a passing validation.
 aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out
 
-# Off VPN: sign, push, and write the pointer. The tag is optional — a
-# recipe-slug tag just keeps this recipe's evidence on its own ref (else :v1).
-aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training
+# Off VPN: sign, push, and write the pointer. Omit the tag and aicr derives
+# a unique per-recipe one (<recipe-slug>-<fingerprint>).
+aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence
 ```
 
 ---
@@ -2267,13 +2267,14 @@ aicr evidence verify <input> [flags]
 
 The positional argument is auto-detected as one of:
 
-* `recipes/evidence/<recipe>.yaml` — **pointer file (preferred)**. The verifier pulls the bundle by the pointer's `bundle.digest` (a content-addressable `sha256:` pin), not by the human-readable `bundle.oci` tag. This is the input to use in nearly all cases.
-* `ghcr.io/<owner>/aicr-evidence@sha256:...` or `oci://...@sha256:...` — a **digest-pinned** OCI reference. A tag-only ref (such as the `bundle.oci` value from a pointer, e.g. `...aicr-evidence:h100-eks-ubuntu-training`) is refused by default because tags are registry-rewritable; see `--allow-unpinned-tag`.
+* `recipes/evidence/<recipe>.yaml` — **pointer file (preferred)**. The verifier pulls **by digest** — `registry/repo@<bundle.digest>`, with the registry/repo taken from `bundle.oci` and the digest as the pin — so it fetches the exact attested bytes even if the `bundle.oci` tag has since been moved to a different artifact. This is the input to use in nearly all cases.
+* `ghcr.io/<owner>/aicr-evidence@sha256:...` or `oci://...@sha256:...` — a **digest-pinned** OCI reference. A tag-only ref (such as the `bundle.oci` value copied from a pointer, e.g. `...aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`) is refused by default because tags are registry-rewritable; see `--allow-unpinned-tag`.
 * `./out/summary-bundle/` (or a parent containing it) — unpacked directory.
 
-> **Do not extract `bundle.oci` from a pointer and pass it to `verify`.** That field is a human-readable locator (a tag ref), not the verification input. Pass the pointer file itself — the verifier reads `bundle.digest` from it and pins the pull by digest. If you must verify a raw OCI ref, use the digest form (`...@sha256:<hex>`), not the tag.
+> **Do not extract `bundle.oci` from a pointer and pass it to `verify` as a raw OCI argument.** As a raw ref it carries no companion `bundle.digest`, so a tag-only ref is refused (tags are registry-rewritable). Pass the pointer file itself — the verifier reads `bundle.digest` from it and pulls `registry/repo@<digest>`, ignoring the tag. If you must verify a raw OCI ref, use the digest form (`...@sha256:<hex>`), not the tag.
 
 **Flags:**
+
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | | Write output to this file. When empty, output goes to stdout. |

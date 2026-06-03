@@ -620,7 +620,7 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --push ghcr.io/<owner>/aicr-evidence:gb200-eks-ubuntu-training
+  --push ghcr.io/<owner>/aicr-evidence
 
 # 3. Commit the pointer. The bundle bytes live in OCI; the repo
 #    only stores the locator.
@@ -629,13 +629,13 @@ cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
 git add recipes/evidence/<recipe-name>.yaml
 ```
 
-The example tags the `--push` ref with the recipe slug
-(`:gb200-eks-ubuntu-training`) — a suggested convention, not a requirement.
-The bundle is always pinned by its `sha256:` digest (what `evidence verify`
-and the pointer use), so the tag is only a human-readable label and tag
-choice never affects verification. Omit it and aicr applies `:v1`; that's
-harmless, it just leaves unrelated recipes sharing one ref, so a per-recipe
-tag like the slug simply keeps the registry readable.
+The `--push` example omits the tag, so aicr derives a unique per-recipe one,
+`<recipe-slug>-<short-fingerprint>` (e.g.
+`gb200-eks-ubuntu-training-3f9a1c2b4d5e`). The bundle is always pinned by its
+`sha256:` digest (what `evidence verify` and the pointer use, pulling by
+digest), so the tag is only a human-readable label and tag choice never
+affects verification. The derived tag keeps distinct attestations on
+distinct refs; pass an explicit tag to override.
 
 `--push` triggers cosign keyless signing through Sigstore's
 public-good infrastructure. The CLI resolves an OIDC token through
