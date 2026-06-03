@@ -1,0 +1,55 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Gatekeeper Helm values
+# Base configuration for the open-policy-agent/gatekeeper admission controller.
+#
+# This is an OPTIONAL component — it is not referenced by recipes/overlays/base.yaml.
+# Recipes opt in by adding gatekeeper directly to spec.componentRefs.
+
+# Replicas. The top-level `replicas` field in the upstream chart governs
+# controller-manager replica count; 3 is appropriate for an admission
+# webhook on the request path.
+replicas: 3
+
+# Resources — conservative caps. These match the upstream chart defaults
+# at v3.22.x and are pinned to make the bundle reproducible.
+controllerManager:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+audit:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+# Mutating admission is gated behind a chart flag. Leave disabled by default
+# so the component installs as a validating-only admission controller.
+disableMutation: true
+
+# Audit interval (seconds). 60s is the upstream default and is suitable for
+# both small and large clusters.
+auditInterval: 60
+
+# Constraint violations limit per Constraint resource. Upstream default.
+constraintViolationsLimit: 20
