@@ -16,7 +16,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sigstore/protobuf-specs v0.5.1
 	github.com/sigstore/sigstore v1.10.8
-	github.com/sigstore/sigstore-go v1.1.4
+	github.com/sigstore/sigstore-go v1.2.0
 	github.com/stretchr/testify v1.11.1
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	github.com/urfave/cli/v3 v3.9.0
@@ -64,15 +64,15 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-openapi/analysis v0.25.1 // indirect
+	github.com/go-openapi/analysis v0.25.2 // indirect
 	github.com/go-openapi/errors v0.22.7 // indirect
 	github.com/go-openapi/jsonpointer v0.23.1 // indirect
-	github.com/go-openapi/jsonreference v0.21.5 // indirect
+	github.com/go-openapi/jsonreference v0.21.6 // indirect
 	github.com/go-openapi/loads v0.23.3 // indirect
-	github.com/go-openapi/runtime v0.32.2 // indirect
+	github.com/go-openapi/runtime v0.32.3 // indirect
 	github.com/go-openapi/runtime/server-middleware v0.32.2 // indirect
-	github.com/go-openapi/spec v0.22.4 // indirect
-	github.com/go-openapi/strfmt v0.26.2 // indirect
+	github.com/go-openapi/spec v0.22.5 // indirect
+	github.com/go-openapi/strfmt v0.26.3 // indirect
 	github.com/go-openapi/swag v0.26.0 // indirect
 	github.com/go-openapi/swag/cmdutils v0.26.0 // indirect
 	github.com/go-openapi/swag/conv v0.26.0 // indirect
@@ -85,7 +85,7 @@ require (
 	github.com/go-openapi/swag/stringutils v0.26.0 // indirect
 	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
-	github.com/go-openapi/validate v0.25.2 // indirect
+	github.com/go-openapi/validate v0.25.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/cel-go v0.28.1 // indirect
@@ -123,14 +123,14 @@ require (
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sigstore/rekor v1.5.2 // indirect
-	github.com/sigstore/rekor-tiles/v2 v2.2.1 // indirect
-	github.com/sigstore/timestamp-authority/v2 v2.1.0 // indirect
+	github.com/sigstore/rekor-tiles/v2 v2.2.2-0.20260601073857-5d098a2b6443 // indirect
+	github.com/sigstore/timestamp-authority/v2 v2.1.2 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/theupdateframework/go-tuf v0.7.0 // indirect
-	github.com/transparency-dev/formats v0.1.0 // indirect
+	github.com/transparency-dev/formats v0.1.1 // indirect
 	github.com/transparency-dev/merkle v0.0.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
