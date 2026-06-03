@@ -59,14 +59,14 @@ aicr validate \
 ```
 
 `--push` opens a browser for OIDC sign-in (or uses ambient GitHub Actions
-OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). **Tag the ref with the
-recipe slug** (`:h100-eks-ubuntu-training` here) so each recipe's evidence
-lands on its own tag. The OCI digest is always the canonical address — but
-if you omit the tag, aicr applies `:v1` as a placeholder, and *every*
-untagged push overwrites that same `:v1` tag. Evidence for unrelated
-recipes then collides under one human-readable ref, even though each
-bundle is still independently pinned by digest. The pointer file (below)
-records both the tag and the digest. After it finishes:
+OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). The OCI digest is always
+the canonical address, so the tag is just a human-readable label — tag
+choice never affects verification. The example tags with the recipe slug
+(`:h100-eks-ubuntu-training`), but that's a suggestion, not a requirement.
+Omit the tag and aicr applies `:v1` as a placeholder; every untagged push
+then shares that one tag — harmless for pulls (the pointer pins by digest),
+just ambiguous to read once several recipes pile onto `:v1`. The pointer
+file (below) records both the tag and the digest. After it finishes:
 
 ```text
 ./out
@@ -96,7 +96,7 @@ aicr validate \
   --emit-attestation ./out
 
 # Off the VPN (CI runner, jump box, hotspot) — sign, push, write pointer.
-# Same recipe-slug tag as the one-shot path above.
+# Same tag as the one-shot path above (optional convention; else :v1).
 aicr evidence publish ./out --push ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training
 ```
 

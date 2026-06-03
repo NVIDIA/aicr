@@ -629,13 +629,13 @@ cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
 git add recipes/evidence/<recipe-name>.yaml
 ```
 
-Tag the `--push` ref with the recipe slug (`:gb200-eks-ubuntu-training`
-above) so each recipe's evidence gets its own tag. If you omit the tag,
-aicr applies `:v1`, and every untagged push overwrites that single tag —
-collapsing unrelated recipes' evidence onto one human-readable ref. The
-bundle is always pinned by its `sha256:` digest (what `evidence verify`
-and the pointer use), so a colliding tag doesn't corrupt verification, but
-it does make the registry ref ambiguous.
+The example tags the `--push` ref with the recipe slug
+(`:gb200-eks-ubuntu-training`) — a suggested convention, not a requirement.
+The bundle is always pinned by its `sha256:` digest (what `evidence verify`
+and the pointer use), so the tag is only a human-readable label and tag
+choice never affects verification. Omit it and aicr applies `:v1`; that's
+harmless, it just leaves unrelated recipes sharing one ref, so a per-recipe
+tag like the slug simply keeps the registry readable.
 
 `--push` triggers cosign keyless signing through Sigstore's
 public-good infrastructure. The CLI resolves an OIDC token through
