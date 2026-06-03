@@ -595,8 +595,8 @@ components:
       assertFile: checks/nfd/health-check.yaml
 ```
 
-The path is relative to `recipes/`. `make check-health
-COMPONENT=<name>` invokes Chainsaw against
+The path is relative to `recipes/`. `make check-health COMPONENT=<name>`
+invokes Chainsaw against
 `recipes/checks/<name>/health-check.yaml` (no-cluster flag has no
 effect here — chainsaw always needs a real cluster).
 
