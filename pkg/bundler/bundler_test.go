@@ -1915,6 +1915,107 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 	}
 }
 
+// TestAgentgatewayComponentExistsInRegistry locks agentgatewayComponentName to a
+// real registry entry. warnAgentgatewayOpenExposure keys into componentValues by
+// this name; if the "agentgateway" component were renamed in recipes/registry.yaml,
+// the lookup would silently return nil and the open-exposure warning would never
+// fire — with no other test failing. Mirrors the validator-side
+// TestEmbeddedCatalog_InferenceGatewayEntryExists guard. See #1160.
+func TestAgentgatewayComponentExistsInRegistry(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	if registry.Get(agentgatewayComponentName) == nil {
+		t.Fatalf("no registry component named %q (open-exposure warning would silently no-op)", agentgatewayComponentName)
+	}
+}
+
+func TestWarnAgentgatewayOpenExposure(t *testing.T) {
+	tests := []struct {
+		name        string
+		values      map[string]any
+		present     bool
+		wantWarning bool
+	}{
+		{
+			name:        "warns when allowedSourceRanges is unset",
+			values:      map[string]any{"fullnameOverride": "agentgateway"},
+			present:     true,
+			wantWarning: true,
+		},
+		{
+			name:        "warns when allowedSourceRanges is an empty list",
+			values:      map[string]any{"allowedSourceRanges": []any{}},
+			present:     true,
+			wantWarning: true,
+		},
+		{
+			name:        "warns when allowedSourceRanges is a bare string (mistaken --set)",
+			values:      map[string]any{"allowedSourceRanges": "216.228.127.128/30"},
+			present:     true,
+			wantWarning: true,
+		},
+		{
+			name:        "does not warn when allowedSourceRanges is a non-empty list",
+			values:      map[string]any{"allowedSourceRanges": []any{"216.228.127.128/30"}},
+			present:     true,
+			wantWarning: false,
+		},
+		{
+			name:        "warns when allowedSourceRanges is an explicit 0.0.0.0/0",
+			values:      map[string]any{"allowedSourceRanges": []any{"0.0.0.0/0"}},
+			present:     true,
+			wantWarning: true,
+		},
+		{
+			name:        "warns when allowedSourceRanges is an explicit ::/0",
+			values:      map[string]any{"allowedSourceRanges": []any{"::/0"}},
+			present:     true,
+			wantWarning: true,
+		},
+		{
+			name:        "warns when a scoped range is mixed with an any-source CIDR",
+			values:      map[string]any{"allowedSourceRanges": []any{"10.0.0.0/8", "0.0.0.0/0"}},
+			present:     true,
+			wantWarning: true,
+		},
+		{
+			name:        "does not warn when agentgateway is absent",
+			present:     false,
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New(WithConfig(config.NewConfig()))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			componentValues := map[string]map[string]any{}
+			if tt.present {
+				componentValues[agentgatewayComponentName] = tt.values
+			}
+
+			b.warnAgentgatewayOpenExposure(componentValues)
+
+			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			}
+			if tt.wantWarning {
+				warning := b.warnings[0]
+				for _, want := range []string{"inference-gateway", "0.0.0.0/0", "allowedSourceRanges"} {
+					if !strings.Contains(warning, want) {
+						t.Errorf("warning = %q, want substring %q", warning, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestCollectComponentManifests(t *testing.T) {
 	bundler, err := New()
 	if err != nil {

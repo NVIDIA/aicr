@@ -278,7 +278,7 @@ Valid feature names (from `pkg/evidence/cncf/collector.go`):
 | `secure-access` | Cluster authn/authz posture for AI workloads |
 | `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config |
 | `ai-service-metrics` | Inference-service metrics via custom-metrics API |
-| `inference-gateway` | Gateway API + Inference Extension installation |
+| `inference-gateway` | Gateway API + Inference Extension installation; also records the gateway `LoadBalancer` network exposure (open `0.0.0.0/0` vs scoped source ranges). Fails on an open gateway only when `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`. |
 | `robust-operator` | Operator readiness and leader-election posture |
 | `pod-autoscaling` | HPA / custom-metrics-driven pod autoscaling |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |

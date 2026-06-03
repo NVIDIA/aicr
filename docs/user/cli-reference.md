@@ -1207,6 +1207,8 @@ When `--storage-class` is not set, any `storageClassName` values already defined
 
 If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
 
+Similarly, when a bundle includes the `agentgateway` component with an unscoped `allowedSourceRanges` — empty, or including an any-source CIDR such as `0.0.0.0/0` or `::/0` — `aicr bundle` emits a non-blocking warning that the inference-gateway will be provisioned as an internet-facing `LoadBalancer` open to `0.0.0.0/0`. Scope it to trusted CIDRs via a recipe `componentRef` override or the list-aware [`--set-json`](#list-and-object-value-overrides) flag (`agentgateway:allowedSourceRanges='["<cidr>"]'`). See [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
+
 #### Deployment Methods
 
 The `--deployer` flag controls how deployment artifacts are generated:

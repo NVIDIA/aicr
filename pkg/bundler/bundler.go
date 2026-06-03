@@ -43,6 +43,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/netutil"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -295,6 +296,8 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
+
+	b.warnAgentgatewayOpenExposure(componentValues)
 
 	// Run component-specific validations
 	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
@@ -1106,6 +1109,85 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 	}
 
 	return nil
+}
+
+// agentgateway component name and the value path that renders into the
+// inference-gateway Service's spec.loadBalancerSourceRanges.
+const (
+	agentgatewayComponentName    = "agentgateway"
+	agentgatewaySourceRangesPath = "allowedSourceRanges"
+)
+
+// warnAgentgatewayOpenExposure emits a bundle note when the agentgateway
+// component is included but its allowedSourceRanges does not scope the
+// inference-gateway LoadBalancer — i.e. the list is empty/unset or includes an
+// any-source CIDR (0.0.0.0/0 or ::/0) — leaving it reachable from any source.
+// The open-by-default behavior is intentional (#1138) — a baked-in
+// CIDR would lock external operators out of their own gateway — but it is
+// otherwise silent: nothing in bundle output flags that the gateway is
+// internet-facing. This surfaces the exposure so scoping it becomes a conscious
+// choice, mirroring the storageClassName PVC warning. See #1160.
+func (b *DefaultBundler) warnAgentgatewayOpenExposure(componentValues map[string]map[string]any) {
+	values := componentValues[agentgatewayComponentName]
+	if values == nil {
+		return
+	}
+	if sourceRangesAreScoped(values, agentgatewaySourceRangesPath) {
+		return
+	}
+
+	msg := fmt.Sprintf(
+		"%s: inference-gateway will be provisioned as an internet-facing LoadBalancer open to 0.0.0.0/0 "+
+			"(%s is empty or includes an any-source CIDR). Scope it to trusted networks via a recipe componentRef override or "+
+			"--set-json %s:%s='[\"<cidr>\"]'. See docs/user/component-catalog.md.",
+		agentgatewayComponentName, agentgatewaySourceRangesPath,
+		agentgatewayComponentName, agentgatewaySourceRangesPath,
+	)
+	b.appendWarning(msg)
+	slog.Warn("agentgateway inference-gateway is open to 0.0.0.0/0 (allowedSourceRanges empty or any-source)",
+		"component", agentgatewayComponentName,
+		"path", agentgatewaySourceRangesPath,
+	)
+}
+
+// sourceRangesAreScoped reports whether the value at path is a non-empty list
+// of CIDRs that actually scopes the LoadBalancer — i.e. it omits any-source
+// ranges (0.0.0.0/0, ::/0). A missing value, an empty list, a non-list value
+// (e.g. a bare string from a mistaken scalar --set, which would itself render
+// an invalid Service), or a list that includes an any-source CIDR all count as
+// "not scoped" so the open-exposure warning still fires. See #1160.
+func sourceRangesAreScoped(values map[string]any, path string) bool {
+	v, ok := component.GetValueByPath(values, path)
+	if !ok || v == nil {
+		return false
+	}
+	var items []string
+	switch list := v.(type) {
+	case []any:
+		items = make([]string, 0, len(list))
+		for _, e := range list {
+			s, ok := e.(string)
+			if !ok {
+				// A non-string entry can't be a valid CIDR; the rendered
+				// Service would be invalid, so treat it as not-scoped.
+				return false
+			}
+			items = append(items, s)
+		}
+	case []string:
+		items = list
+	default:
+		return false
+	}
+	if len(items) == 0 {
+		return false
+	}
+	for _, r := range items {
+		if netutil.IsAnySourceCIDR(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func storageClassPathHasPVCSpec(values map[string]any, path string) bool {
