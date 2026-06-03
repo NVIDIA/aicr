@@ -19,6 +19,8 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [query.md](query.md) | Querying hydrated recipes with dot-path selectors |
 | [attestation.md](attestation.md) | Bundle attestation demo |
 | [evidence.md](evidence.md) | Recipe evidence demo (validate emit + verify) |
+| [evidence-demo-slides.html](evidence-demo-slides.html) | Recipe evidence demo — slide deck (talking point) |
+| [evidence-demo.sh](evidence-demo.sh) | Interactive split-leg evidence walkthrough (validate on VPN → publish off VPN → verify) |
 | [s3c.md](s3c.md) | Supply chain security demo |
 
 ## Recording Test Runs
