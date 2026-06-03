@@ -29,4 +29,10 @@ const (
 	// from a corrupted or hostile file. A typical spec is well under 64KiB;
 	// 1 MiB provides generous headroom for embedded status payloads.
 	MaxSpecFileBytes = 1 * 1024 * 1024 // 1 MiB
+
+	// MaxSetFileBytes is the maximum size in bytes for a value file referenced
+	// by `aicr bundle --set-file component:path=<file>`. The file holds a
+	// single JSON/YAML value override; 1 MiB is far above any legitimate
+	// value snippet and bounds the read against a corrupted or hostile path.
+	MaxSetFileBytes int64 = 1 * 1024 * 1024 // 1 MiB
 )

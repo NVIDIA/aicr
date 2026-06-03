@@ -38,6 +38,8 @@ const (
 const (
 	flagIdentityToken  = "identity-token"
 	flagOIDCDeviceFlow = "oidc-device-flow"
+	flagFulcioURL      = "fulcio-url"
+	flagRekorURL       = "rekor-url"
 	flagInsecureTLS    = "insecure-tls"
 	flagPlainHTTP      = "plain-http"
 	flagPush           = "push"

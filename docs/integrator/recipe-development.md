@@ -629,6 +629,14 @@ cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
 git add recipes/evidence/<recipe-name>.yaml
 ```
 
+The `--push` example omits the tag, so aicr derives a unique per-recipe one,
+`<recipe-slug>-<short-fingerprint>` (e.g.
+`gb200-eks-ubuntu-training-3f9a1c2b4d5e`). The bundle is always pinned by its
+`sha256:` digest (what `evidence verify` and the pointer use, pulling by
+digest), so the tag is only a human-readable label and tag choice never
+affects verification. The derived tag keeps distinct attestations on
+distinct refs; pass an explicit tag to override.
+
 `--push` triggers cosign keyless signing through Sigstore's
 public-good infrastructure. The CLI resolves an OIDC token through
 the precedence chain documented under

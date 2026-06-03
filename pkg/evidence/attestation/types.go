@@ -76,11 +76,6 @@ const (
 	// DefaultCycloneDXVersion is the BOM spec version we record when callers
 	// don't override it. Mirrors what `make bom` produces today.
 	DefaultCycloneDXVersion = "1.6"
-
-	// defaultEvidenceTag is the OCI tag used when the operator gives a
-	// reference without one. The OCI digest is the canonical address;
-	// the tag exists to satisfy registries that require one.
-	defaultEvidenceTag = "v1"
 )
 
 // Phase enumerates the validation phases that may appear in the bundle.

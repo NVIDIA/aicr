@@ -47,6 +47,14 @@ type ResolveOptions struct {
 	// (RFC 8628) for headless hosts where a browser callback is unavailable.
 	DeviceFlow bool
 
+	// FulcioURL and RekorURL point keyless signing at a private Sigstore
+	// instance (a self-hosted Fulcio CA and/or Rekor transparency log).
+	// Empty falls back to the public-good defaults (defaults.SigstoreFulcioURL
+	// / defaults.SigstoreRekorURL); the two are independent, so an org can run
+	// private Fulcio with public Rekor or vice versa. See issue #408.
+	FulcioURL string
+	RekorURL  string
+
 	// PromptWriter receives user-facing prompts emitted by the interactive
 	// and device-code flows (verification URL + short code). Pass os.Stderr
 	// for typical CLI behavior, io.Discard to suppress, or nil (treated as
@@ -102,7 +110,7 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 	if err != nil {
 		return nil, err
 	}
-	return NewKeylessAttester(token), nil
+	return NewKeylessAttester(token, opts.FulcioURL, opts.RekorURL), nil
 }
 
 // ResolveAttesterLazy is the deferred-token variant of ResolveAttester.
@@ -161,7 +169,7 @@ func (l *LazyKeylessAttester) Attest(ctx context.Context, subject AttestSubject)
 			l.mu.Unlock()
 			return nil, err
 		}
-		l.inner = NewKeylessAttester(token)
+		l.inner = NewKeylessAttester(token, l.opts.FulcioURL, l.opts.RekorURL)
 	}
 	inner := l.inner
 	l.mu.Unlock()

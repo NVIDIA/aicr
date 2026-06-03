@@ -28,6 +28,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -544,6 +546,114 @@ func TestMake_WithValueOverrides(t *testing.T) {
 	}
 }
 
+// TestMake_WithTypedValueOverrides verifies that a --set-json / --set-file list
+// override is rendered into the generated values.yaml as a real YAML sequence
+// (not the bare string scalar --set would produce). This is the regression
+// guard for the agentgateway.allowedSourceRanges trap described in #1161.
+func TestMake_WithTypedValueOverrides(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+			{
+				Component: "gpu-operator",
+				Path:      "allowedSourceRanges",
+				Value:     []any{"216.228.127.128/30", "10.0.0.0/8"},
+			},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Version: "v25.3.3",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+	}
+
+	if _, makeErr := bundler.Make(ctx, recipeResult, tmpDir); makeErr != nil {
+		t.Fatalf("Make() error = %v", makeErr)
+	}
+
+	valuesPath := filepath.Join(tmpDir, "001-gpu-operator", "values.yaml")
+	data, err := os.ReadFile(valuesPath)
+	if err != nil {
+		t.Fatalf("read values.yaml: %v", err)
+	}
+
+	var values map[string]any
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		t.Fatalf("unmarshal values.yaml: %v", err)
+	}
+
+	got, ok := values["allowedSourceRanges"].([]any)
+	if !ok {
+		t.Fatalf("allowedSourceRanges is %T, want a YAML list ([]any); raw:\n%s", values["allowedSourceRanges"], data)
+	}
+	want := []any{"216.228.127.128/30", "10.0.0.0/8"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("allowedSourceRanges = %#v, want %#v", got, want)
+	}
+}
+
+// TestMake_TypedOverrideWinsOverSet locks in the precedence contract: when
+// scalar --set and structured --set-json/--set-file target the same path, the
+// typed override wins (it is applied last in buildComponentValues). Guards
+// against a future reordering silently flipping precedence.
+func TestMake_TypedOverrideWinsOverSet(t *testing.T) {
+	const path = "driver.version"
+
+	cfg := config.NewConfig(
+		config.WithValueOverrides(map[string]map[string]string{
+			"gpu-operator": {path: "from-set"},
+		}),
+		config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+			{Component: "gpu-operator", Path: path, Value: "from-json"},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+		},
+	}
+
+	tmpDir := t.TempDir()
+	if _, makeErr := bundler.Make(context.Background(), recipeResult, tmpDir); makeErr != nil {
+		t.Fatalf("Make() error = %v", makeErr)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, "001-gpu-operator", "values.yaml"))
+	if err != nil {
+		t.Fatalf("read values.yaml: %v", err)
+	}
+	var values map[string]any
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		t.Fatalf("unmarshal values.yaml: %v", err)
+	}
+
+	got, _ := component.GetValueByPath(values, path)
+	if got != "from-json" {
+		t.Errorf("%s = %#v, want \"from-json\" (typed --set-json must win over scalar --set)", path, got)
+	}
+}
+
 func TestMake_WithNodeSelectors(t *testing.T) {
 	cfg := config.NewConfig(
 		config.WithSystemNodeSelector(map[string]string{
@@ -949,6 +1059,143 @@ func TestGetValueOverridesForComponent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGetTypedValueOverridesForComponent verifies that --set-json / --set-file
+// overrides resolve component aliases the same way scalar --set overrides do.
+func TestGetTypedValueOverridesForComponent(t *testing.T) {
+	tests := []struct {
+		name          string
+		paths         []config.TypedComponentPath
+		componentName string
+		wantOverrides bool
+		wantKey       string
+		wantValue     any
+	}{
+		{
+			name:          "no overrides returns nil",
+			componentName: "agentgateway",
+			wantOverrides: false,
+		},
+		{
+			name: "exact name match with list value",
+			paths: []config.TypedComponentPath{
+				{Component: "agentgateway", Path: "allowedSourceRanges", Value: []any{"10.0.0.0/8"}},
+			},
+			componentName: "agentgateway",
+			wantOverrides: true,
+			wantKey:       "allowedSourceRanges",
+			wantValue:     []any{"10.0.0.0/8"},
+		},
+		{
+			name: "override key match via registry alias",
+			paths: []config.TypedComponentPath{
+				{Component: "gpuoperator", Path: "driver.env", Value: map[string]any{"A": "b"}},
+			},
+			componentName: "gpu-operator",
+			wantOverrides: true,
+			wantKey:       "driver.env",
+			wantValue:     map[string]any{"A": "b"},
+		},
+		{
+			name: "no match returns nil",
+			paths: []config.TypedComponentPath{
+				{Component: "network-operator", Path: "list", Value: []any{"x"}},
+			},
+			componentName: "gpu-operator",
+			wantOverrides: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(config.WithValueOverridesTypedPaths(tt.paths))
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			result := b.getTypedValueOverridesForComponent(tt.componentName, nil)
+			if tt.wantOverrides && result == nil {
+				t.Fatal("expected overrides, got nil")
+			}
+			if !tt.wantOverrides && result != nil {
+				t.Errorf("expected nil overrides, got %v", result)
+			}
+			if tt.wantOverrides {
+				if !reflect.DeepEqual(result[tt.wantKey], tt.wantValue) {
+					t.Errorf("override[%q] = %#v, want %#v", tt.wantKey, result[tt.wantKey], tt.wantValue)
+				}
+			}
+		})
+	}
+}
+
+// TestGetTypedValueOverridesForComponent_MergesAcrossAliases verifies that when
+// typed overrides are supplied under BOTH the canonical name and a registry
+// alias for the same component, all of them are honored — none are silently
+// dropped — and that the canonical (higher-priority) key wins on a path that
+// collides across keys.
+func TestGetTypedValueOverridesForComponent_MergesAcrossAliases(t *testing.T) {
+	cfg := config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+		{Component: "gpu-operator", Path: "driver.env", Value: map[string]any{"A": "b"}},
+		{Component: "gpuoperator", Path: "allowedSourceRanges", Value: []any{"10.0.0.0/8"}},
+		// Collision: both the exact name and the alias set the same path.
+		{Component: "gpu-operator", Path: "shared", Value: "from-exact"},
+		{Component: "gpuoperator", Path: "shared", Value: "from-alias"},
+	}))
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result := b.getTypedValueOverridesForComponent("gpu-operator", nil)
+	if result == nil {
+		t.Fatal("expected merged overrides, got nil")
+	}
+	if !reflect.DeepEqual(result["driver.env"], map[string]any{"A": "b"}) {
+		t.Errorf("driver.env (exact-name override) = %#v, want {A:b}", result["driver.env"])
+	}
+	if !reflect.DeepEqual(result["allowedSourceRanges"], []any{"10.0.0.0/8"}) {
+		t.Errorf("allowedSourceRanges (alias override) = %#v, want [10.0.0.0/8] — alias override was dropped", result["allowedSourceRanges"])
+	}
+	if result["shared"] != "from-exact" {
+		t.Errorf("shared = %#v, want \"from-exact\" (canonical name must win on collision)", result["shared"])
+	}
+}
+
+// TestMake_TypedEnabledToggleRejectedBelowCLI verifies the bundler rejects an
+// "enabled" toggle supplied on the typed path even when it reaches the config
+// directly (i.e. not through the CLI flag parser) — guarding non-CLI/SDK
+// callers, not just the CLI. Routing the toggle through --set-json/--set-file
+// would write a stray literal `enabled:` into chart values instead of toggling
+// the component.
+func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+			{Component: "gpu-operator", Path: config.ComponentEnabledKey, Value: false},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+		},
+	}
+
+	_, makeErr := bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if makeErr == nil {
+		t.Fatal("expected error: typed 'enabled' override must be rejected below the CLI boundary")
+	}
+	if !strings.Contains(makeErr.Error(), config.ComponentEnabledKey) || !strings.Contains(makeErr.Error(), "--set") {
+		t.Errorf("error %q must name the enabled toggle and point to --set", makeErr.Error())
 	}
 }
 
