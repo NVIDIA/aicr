@@ -709,6 +709,33 @@ func TestWrite_KustomizeWithManifestsRejected(t *testing.T) {
 	}
 }
 
+func TestWrite_ReadinessSuffixReserved(t *testing.T) {
+	// A component literally named "<x>-readiness" must be rejected: the helm
+	// deploy.sh applies gate wait-semantics to every release matching its
+	// static "*-readiness)" glob, so the suffix is reserved at bundle time.
+	_, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: t.TempDir(),
+		Components: []localformat.Component{{
+			Name:       "foo-readiness",
+			Namespace:  "ns",
+			Repository: "https://example.com",
+		}},
+	})
+	if err == nil {
+		t.Fatalf("want error rejecting reserved -readiness suffix, got nil")
+	}
+	var structErr *errors.StructuredError
+	if !stderrors.As(err, &structErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+	if structErr.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("code = %v, want ErrCodeInvalidRequest", structErr.Code)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "foo-readiness") || !strings.Contains(msg, "reserved") {
+		t.Errorf("error should name the component and mention it is reserved; got: %s", msg)
+	}
+}
+
 func TestWrite_PathContainment(t *testing.T) {
 	_, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: t.TempDir(),

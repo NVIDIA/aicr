@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"text/template"
 
 	stderrors "errors"
@@ -270,6 +271,19 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		declared[c.Name] = struct{}{}
 	}
 	for _, c := range opts.Components {
+		// The "-readiness" suffix is reserved: the helm deploy.sh applies gate
+		// wait-semantics to every release matching its static "*-readiness)"
+		// glob (see helm/templates/deploy.sh.tmpl). A declared component
+		// literally named "<x>-readiness" would silently inherit that
+		// force---wait, gate-timeout behavior even without --readiness-hooks, so
+		// reject it at bundle time. Unlike the -pre/-post guards below
+		// (collision-only), this reserves the suffix unconditionally because the
+		// glob match is name-driven, not gate-driven.
+		if strings.HasSuffix(c.Name, "-readiness") {
+			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q uses the reserved %q suffix, which is synthesized for readiness gate folders/releases and matches the deploy.sh \"*-readiness\" wait-semantics glob — rename the component",
+					c.Name, "-readiness"))
+		}
 		// <name>-pre collision: any component with preManifestFiles would
 		// inject a "<name>-pre" folder/release. Unlike the post check
 		// below, no Repository-guard: pre injection runs regardless of
@@ -295,10 +309,12 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			}
 		}
 		// <name>-readiness collision: a component with readiness manifests
-		// injects a "<name>-readiness" folder/release. Checked for every
-		// component kind (unlike -post, readiness is not gated on
-		// Repository/VendorCharts), so this check sits before the
-		// VendorCharts short-circuit below.
+		// injects a "<name>-readiness" folder/release. The "-readiness" suffix
+		// is already globally reserved above, so a clash here is unreachable in
+		// practice; the check stays as defense-in-depth for the gate-bearing
+		// case. Checked for every component kind (unlike -post, readiness is not
+		// gated on Repository/VendorCharts), so it sits before the VendorCharts
+		// short-circuit below.
 		if len(opts.ComponentReadiness[c.Name]) > 0 {
 			if _, clash := declared[c.Name+"-readiness"]; clash {
 				return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
