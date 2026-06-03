@@ -177,7 +177,7 @@ validators.Run(map[string]validators.CheckFunc{
 | `AICR_NAMESPACE` | Validation namespace (fallback) |
 | `AICR_CHECK_TIMEOUT` | Go-duration timeout for the check; honored by `ctx.Ctx`. Falls back to `defaults.CheckExecutionTimeout` if unset or malformed (logged WARN). |
 | `AICR_VALIDATOR_IMAGE_REGISTRY` | Override the image registry prefix (CLI passes through to inner workloads). |
-| `AICR_VALIDATOR_IMAGE_TAG` | Override resolved tag (e.g. `latest`) for feature-branch dev builds. Forwarded to inner workloads. |
+| `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved tag when the binary's stamped commit has no published image (e.g. `edge` or `sha-<commit>`). See [Validator image tags](#validator-image-tags). Forwarded to inner workloads (including `aiperf-bench`). |
 | `AICR_NODE_SELECTOR` | Comma-separated `key=value`; read via `ctx.NodeSelector` |
 | `AICR_TOLERATIONS` | Comma-separated `key=value:effect`; read via `ctx.Tolerations` |
 
@@ -194,6 +194,74 @@ digest-pinned (`name@sha256:…`) → `IfNotPresent`;
 `AICR_VALIDATOR_IMAGE_TAG` set or `:latest` suffix → `Always`;
 otherwise → `IfNotPresent`. Both the outer validator Job and any
 inner workload Job share this helper so policy cannot drift.
+
+### Validator image tags
+
+The catalog declares every validator image as `…:latest`;
+`catalog.ResolveImage` (`pkg/validator/catalog/catalog.go`) rewrites that
+tag at runtime so the validators match the `aicr` binary that launched
+them:
+
+1. **Stamped build** — the binary's version + commit resolve the tag to
+   `:sha-<commit>`, the immutable per-commit image CI publishes on merge
+   to `main`.
+2. **`AICR_VALIDATOR_IMAGE_TAG` set** — overrides step 1 for *all* catalog
+   images uniformly, including the inner `aiperf-bench` runner the
+   `performance` validator launches (so both must exist at that tag).
+
+What CI publishes:
+
+| Trigger | Tags built (`on-push.yaml` / `on-tag.yaml`) |
+|---------|----------------------------------------------|
+| Merge to `main` | `:sha-<full-commit>` (immutable) **and** `:edge` (moving → always `main` HEAD) |
+| Release tag `vX.Y.Z` | `:vX.Y.Z` **and** `:latest` |
+
+**`:latest` is the last _release_, never `main`.** It is built only by the
+on-tag release pipeline, so a validator change merged to `main` after the
+last release is absent from `:latest` until the next release. Running
+`AICR_VALIDATOR_IMAGE_TAG=latest` against a `main`-tracking recipe can
+therefore silently run *older* validator behavior — e.g. a
+`performance.constraints` pin such as `inference-model` /
+`inference-concurrency-per-gpu` is only honored by a validator new enough
+to read it; an older `:latest` validator ignores the pin and runs its
+compiled default, which can surface as a misleading result rather than a
+clear version error.
+
+**To run the validator built on `main`** (e.g. testing a recipe whose pins
+are not yet in a release), point at `:edge` or the `main`-HEAD commit —
+*not* `:latest`:
+
+```shell
+# Moving tag — always main HEAD, no lookup:
+AICR_VALIDATOR_IMAGE_TAG=edge aicr validate -r recipe.yaml -s snapshot.yaml --phase performance
+
+# Immutable pin — reproducible:
+AICR_VALIDATOR_IMAGE_TAG=sha-$(git rev-parse origin/main) aicr validate -r recipe.yaml -s snapshot.yaml ...
+```
+
+A bare `go build` stamps `commit: unknown`, so step 1 cannot resolve a
+`:sha-<commit>` tag and the override is required; `make build` stamps the
+commit and resolves it automatically (no override needed). Only an
+un-pushed feature branch — whose commit has no published image — needs a
+moving tag, and even then `:edge` (current `main`) is closer than
+`:latest` (last release).
+
+Find or trace the `main` tag against GHCR (public read):
+
+```shell
+REPO=nvidia/aicr-validators/performance
+SHA=$(git rev-parse origin/main)
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:${REPO}:pull" | jq -r .token)
+
+# Does the image for this main commit exist? (200 = yes)
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
+  -H 'Accept: application/vnd.oci.image.index.v1+json' \
+  "https://ghcr.io/v2/${REPO}/manifests/sha-${SHA}"
+```
+
+To go the other way — which commit built a given image — read the OCI
+labels baked in by CI: `org.opencontainers.image.revision=<commit>` and
+`org.opencontainers.image.version=main-<commit>`.
 
 ### `validators.Context` API
 
