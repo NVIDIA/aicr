@@ -719,6 +719,17 @@ func TestWithValidationFailFast_RoundTrip(t *testing.T) {
 				if cfg.failFast != nil {
 					t.Fatalf("failFast = %v, want nil", *cfg.failFast)
 				}
+				// An unset failFast must emit NO validator option. Pre-seed a
+				// validator with FailFast=true, apply the translated options,
+				// and confirm none flipped it back: a regression that dropped
+				// the nil-guard and always emitted validator.WithFailFast(false)
+				// would fail here (the "set false" case alone can't catch it,
+				// since false is also the validator's zero value).
+				valOpts := validateOptionsFromConfig(cfg)
+				v := validator.New(append([]validator.Option{validator.WithFailFast(true)}, valOpts...)...)
+				if !v.FailFast {
+					t.Error("validateOptionsFromConfig emitted a WithFailFast option for unset failFast; want none")
+				}
 				return
 			}
 			if cfg.failFast == nil {
