@@ -536,6 +536,32 @@ func TestDetectGPUPlacementMismatch(t *testing.T) {
 	}
 }
 
+func TestWarnOnGPUPlacementMismatch(t *testing.T) {
+	// warnOnGPUPlacementMismatch has no return value; we verify it doesn't panic
+	// under both the mismatch and no-mismatch conditions.
+	t.Run("no-op when no mismatch", func(t *testing.T) {
+		snap := &Snapshot{Measurements: []*measurement.Measurement{
+			{Type: measurement.TypeGPU, Subtypes: []measurement.Subtype{{
+				Name: "smi",
+				Data: map[string]measurement.Reading{measurement.KeyGPUCount: measurement.Int(2)},
+			}}},
+		}}
+		warnOnGPUPlacementMismatch(snap) // must not panic
+	})
+
+	t.Run("warns when mismatch detected", func(t *testing.T) {
+		snap := &Snapshot{Measurements: []*measurement.Measurement{
+			{Type: measurement.TypeNodeTopology, Subtypes: []measurement.Subtype{{
+				Name: "label",
+				Data: map[string]measurement.Reading{
+					"nvidia.com/gpu.present": measurement.Str("true|node1"),
+				},
+			}}},
+		}}
+		warnOnGPUPlacementMismatch(snap) // must not panic; warning emitted to slog
+	})
+}
+
 func TestParseOSEnv(t *testing.T) {
 	// "unset" is the truly-absent case (the env var is removed). The other
 	// cases set AICR_OS to a literal value via t.Setenv.

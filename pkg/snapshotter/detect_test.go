@@ -23,10 +23,10 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func gpuNode(name string) *corev1.Node {
+func gpuNode() *corev1.Node {
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name: "gpu-node-1",
 			Labels: map[string]string{
 				"nvidia.com/gpu.present": "true",
 			},
@@ -38,7 +38,7 @@ func TestMaybeInjectGPUNodeSelector(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("injects selector when GPU nodes exist and no constraints set", func(t *testing.T) {
-		clientset := fake.NewClientset(gpuNode("gpu-node-1"))
+		clientset := fake.NewClientset(gpuNode())
 		cfg := &AgentConfig{}
 
 		injected := maybeInjectGPUNodeSelector(ctx, clientset, cfg)
@@ -56,7 +56,7 @@ func TestMaybeInjectGPUNodeSelector(t *testing.T) {
 	})
 
 	t.Run("no-op when GPU nodes exist but NodeSelector already set", func(t *testing.T) {
-		clientset := fake.NewClientset(gpuNode("gpu-node-1"))
+		clientset := fake.NewClientset(gpuNode())
 		existing := map[string]string{"kubernetes.io/hostname": "my-gpu-node"}
 		cfg := &AgentConfig{NodeSelector: existing}
 
@@ -71,7 +71,7 @@ func TestMaybeInjectGPUNodeSelector(t *testing.T) {
 	})
 
 	t.Run("no-op when RequireGPU is true", func(t *testing.T) {
-		clientset := fake.NewClientset(gpuNode("gpu-node-1"))
+		clientset := fake.NewClientset(gpuNode())
 		cfg := &AgentConfig{RequireGPU: true}
 
 		injected := maybeInjectGPUNodeSelector(ctx, clientset, cfg)
@@ -85,7 +85,7 @@ func TestMaybeInjectGPUNodeSelector(t *testing.T) {
 	})
 
 	t.Run("no-op when RuntimeClassName is set", func(t *testing.T) {
-		clientset := fake.NewClientset(gpuNode("gpu-node-1"))
+		clientset := fake.NewClientset(gpuNode())
 		cfg := &AgentConfig{RuntimeClassName: "nvidia"}
 
 		injected := maybeInjectGPUNodeSelector(ctx, clientset, cfg)
