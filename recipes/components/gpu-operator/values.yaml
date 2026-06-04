@@ -152,7 +152,7 @@ gfd:
   enabled: true
 
 driver:
-  # NVIDIA's recommended driver for the v26.3.1 chart; matches the
+  # NVIDIA's recommended driver for the v26.3.2 chart; matches the
   # GB200+EFA floor so a single global pin covers H100/B200/GB200 EKS.
   version: 580.126.20
   enabled: true
@@ -161,7 +161,7 @@ driver:
   rdma:
     # Default off: nvidia_peermem only loads against Mellanox MOFED
     # symbols. AWS EFA (EKS p4d/p5/p5e) and Linode have no MOFED, so
-    # peermem fails to load and v26.3.1's stricter driver-validation
+    # peermem fails to load and v26.3.2's stricter driver-validation
     # init container blocks the rest of the GPU stack. Overlays that
     # ship MOFED (AKS via network-operator) explicitly re-enable this.
     enabled: false

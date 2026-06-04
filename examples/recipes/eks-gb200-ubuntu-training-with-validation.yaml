@@ -61,9 +61,9 @@ validation:
   deployment:
     constraints:
       - name: gpu-operator.version
-        value: "== v26.3.1"
+        value: "== v26.3.2"
         severity: warning
-        remediation: "Update GPU Operator to v26.3.1"
+        remediation: "Update GPU Operator to v26.3.2"
     checks:
       - expected-resources
 
@@ -100,7 +100,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v26.3.1
+    version: v26.3.2
     valuesFile: components/gpu-operator/values-eks-training.yaml
     expectedResources:
       - kind: Deployment
