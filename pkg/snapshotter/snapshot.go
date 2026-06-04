@@ -215,31 +215,17 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 }
 
 // hasGPUData returns true when snap contains a GPU measurement with gpu-count > 0.
-// Handles int, int64, and float64 — integers unmarshal as float64 from YAML/JSON,
-// so the type switch is required for snapshots parsed from bytes.
+// Uses st.GetInt64 which handles int, int64, and float64 (YAML/JSON round-trips
+// deliver integers as float64).
 func hasGPUData(snap *Snapshot) bool {
 	for _, m := range snap.Measurements {
 		if m.Type != measurement.TypeGPU {
 			continue
 		}
-		for _, st := range m.Subtypes {
-			r, ok := st.Data[measurement.KeyGPUCount]
-			if !ok {
-				continue
-			}
-			switch v := r.Any().(type) {
-			case int:
-				if v > 0 {
-					return true
-				}
-			case int64:
-				if v > 0 {
-					return true
-				}
-			case float64:
-				if v > 0 {
-					return true
-				}
+		for i := range m.Subtypes {
+			count, err := m.Subtypes[i].GetInt64(measurement.KeyGPUCount)
+			if err == nil && count > 0 {
+				return true
 			}
 		}
 	}
@@ -256,15 +242,8 @@ func verifyGPUCollected(snap *Snapshot) error {
 		"--require-gpu was set but no GPU was detected (neither NFD PCI enumeration nor nvidia-smi found GPUs)")
 }
 
-// labelPrefixesGPUNodes are NFD/GFD label key prefixes that indicate
-// GPU-capable nodes. Clusters without GPU Operator + NFD are not detected.
-var labelPrefixesGPUNodes = []string{
-	"nvidia.com/gpu.present",
-	"nvidia.com/gpu.product",
-}
-
-// hasGPUNodesInTopology returns true when any topology label key is prefixed
-// with a known GPU node label (nvidia.com/gpu.present or nvidia.com/gpu.product).
+// hasGPUNodesInTopology returns true when any topology label key starts with
+// "nvidia.com/gpu." (covers both gpu.present and gpu.product NFD labels).
 func hasGPUNodesInTopology(snap *Snapshot) bool {
 	for _, m := range snap.Measurements {
 		if m.Type != measurement.TypeNodeTopology {
@@ -275,10 +254,8 @@ func hasGPUNodesInTopology(snap *Snapshot) bool {
 				continue
 			}
 			for key := range st.Data {
-				for _, prefix := range labelPrefixesGPUNodes {
-					if strings.HasPrefix(key, prefix) {
-						return true
-					}
+				if strings.HasPrefix(key, "nvidia.com/gpu.") {
+					return true
 				}
 			}
 		}
