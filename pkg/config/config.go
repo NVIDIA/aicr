@@ -307,8 +307,8 @@ type ValidateExecutionSpec struct {
 	FailOnError *bool    `yaml:"failOnError,omitempty" json:"failOnError,omitempty"`
 	// FailFast, when true, stops validation after the first failed phase.
 	// Pointer so nil means "unset; inherit CLI default (false)".
-	FailFast  *bool `yaml:"failFast,omitempty" json:"failFast,omitempty"`
-	NoCluster bool  `yaml:"noCluster,omitempty" json:"noCluster,omitempty"`
-	NoCleanup   bool     `yaml:"noCleanup,omitempty" json:"noCleanup,omitempty"`
-	Timeout     string   `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	FailFast  *bool  `yaml:"failFast,omitempty" json:"failFast,omitempty"`
+	NoCluster bool   `yaml:"noCluster,omitempty" json:"noCluster,omitempty"`
+	NoCleanup bool   `yaml:"noCleanup,omitempty" json:"noCleanup,omitempty"`
+	Timeout   string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }

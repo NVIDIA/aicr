@@ -218,6 +218,7 @@ func (v *Validator) runPhases(
 	cat *catalog.ValidatorCatalog,
 	phases []Phase,
 ) ([]*PhaseResult, error) {
+
 	results := make([]*PhaseResult, 0, len(phases))
 	anyFailed := false
 
