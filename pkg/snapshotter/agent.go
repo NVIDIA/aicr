@@ -286,6 +286,8 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse snapshot data", err)
 	}
 
+	warnOnGPUPlacementMismatch(&snap)
+
 	return &snap, nil
 }
 
@@ -511,6 +513,13 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	snapshotData, err := deployAndWaitForResult(ctx, clientset, n.AgentConfig, agentOutput)
 	if err != nil {
 		return err
+	}
+
+	// Post-collection safety net: warn if no GPU data but cluster shows GPU nodes.
+	// Unmarshal into a local Snapshot for the check only; output path uses raw bytes.
+	var snapForCheck Snapshot
+	if unmarshalErr := yaml.Unmarshal(snapshotData, &snapForCheck); unmarshalErr == nil {
+		warnOnGPUPlacementMismatch(&snapForCheck)
 	}
 
 	// If template is specified, process the snapshot through the template
