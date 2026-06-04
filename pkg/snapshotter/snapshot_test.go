@@ -381,6 +381,85 @@ func (m *mockCollector) Collect(ctx context.Context) (*measurement.Measurement, 
 	}, nil
 }
 
+func TestHasGPUData(t *testing.T) {
+	tests := []struct {
+		name string
+		snap *Snapshot
+		want bool
+	}{
+		{
+			name: "gpu-count int > 0 returns true",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeGPU, Subtypes: []measurement.Subtype{{
+					Name: "smi",
+					Data: map[string]measurement.Reading{measurement.KeyGPUCount: measurement.Int(2)},
+				}}},
+			}},
+			want: true,
+		},
+		{
+			name: "gpu-count float64 > 0 returns true (YAML round-trip)",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeGPU, Subtypes: []measurement.Subtype{{
+					Name: "smi",
+					Data: map[string]measurement.Reading{measurement.KeyGPUCount: measurement.Float64(2.0)},
+				}}},
+			}},
+			want: true,
+		},
+		{
+			name: "gpu-count int64 > 0 returns true",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeGPU, Subtypes: []measurement.Subtype{{
+					Name: "smi",
+					Data: map[string]measurement.Reading{measurement.KeyGPUCount: measurement.Int64(4)},
+				}}},
+			}},
+			want: true,
+		},
+		{
+			name: "gpu-count zero returns false",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeGPU, Subtypes: []measurement.Subtype{{
+					Name: "smi",
+					Data: map[string]measurement.Reading{measurement.KeyGPUCount: measurement.Int(0)},
+				}}},
+			}},
+			want: false,
+		},
+		{
+			name: "no GPU measurement returns false",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeK8s, Subtypes: []measurement.Subtype{}},
+			}},
+			want: false,
+		},
+		{
+			name: "empty measurements returns false",
+			snap: NewSnapshot(),
+			want: false,
+		},
+		{
+			name: "hardware subtype with gpu-count > 0 returns true",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeGPU, Subtypes: []measurement.Subtype{{
+					Name: "hardware",
+					Data: map[string]measurement.Reading{measurement.KeyGPUCount: measurement.Int(4)},
+				}}},
+			}},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasGPUData(tt.snap)
+			if got != tt.want {
+				t.Errorf("hasGPUData() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseOSEnv(t *testing.T) {
 	// "unset" is the truly-absent case (the env var is removed). The other
 	// cases set AICR_OS to a literal value via t.Setenv.
