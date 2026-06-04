@@ -82,7 +82,7 @@ aicr snapshot [flags]
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
-| `--node-selector` | | string[] | | Node selector for agent scheduling (key=value, repeatable) |
+| `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [GPU Node Auto-Targeting](#gpu-node-auto-targeting). Pass an explicit selector to override. |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
@@ -129,7 +129,12 @@ aicr snapshot --format table
 # With custom kubeconfig
 aicr snapshot --kubeconfig ~/.kube/prod-cluster
 
-# Targeting specific nodes
+# Auto-target GPU nodes (default when no placement flag is set)
+# On a cluster with nvidia.com/gpu.present=true nodes, the agent is
+# steered onto a GPU node automatically — see GPU Node Auto-Targeting.
+aicr snapshot --namespace gpu-operator
+
+# Targeting specific nodes (explicit selector disables auto-targeting)
 aicr snapshot \
   --namespace gpu-operator \
   --node-selector accelerator=nvidia-h100 \
@@ -267,6 +272,48 @@ When running against a cluster, AICR deploys a Kubernetes Job to capture the sna
 - Kubernetes cluster access (via kubeconfig)
 - Cluster admin permissions (for RBAC creation)
 - GPU nodes with nvidia-smi (for GPU metrics)
+
+#### GPU Node Auto-Targeting
+
+The agent Job defaults to an empty node selector that tolerates all taints, so on a
+mixed CPU+GPU cluster the scheduler can place it on a non-GPU node where `nvidia-smi`
+is absent — the snapshot then completes successfully but contains no GPU data. To close
+that silent failure mode, `aicr snapshot` applies two safeguards:
+
+**Proactive auto-targeting.** Before deploying the Job, if no placement constraint is
+set (`--node-selector`, `--require-gpu`, and `--runtime-class` are all unset) and the
+cluster has nodes labeled `nvidia.com/gpu.present=true`, the agent auto-injects that
+selector so the Job lands on a GPU node:
+
+```
+auto-targeting GPU nodes: selector=nvidia.com/gpu.present=true (pass --node-selector to override)
+```
+
+- Passing any of `--node-selector`, `--require-gpu`, or `--runtime-class` disables
+  auto-targeting — your explicit intent is always preserved.
+- Detection relies on Node Feature Discovery / GPU Feature Discovery (NFD/GFD) labels.
+  Clusters without those labels (e.g., before the GPU Operator is installed) are not
+  auto-detected; target nodes explicitly with `--node-selector kubernetes.io/hostname=<gpu-node>`.
+- The pre-flight node check is presence-only (`limit=1`), bounded by a 5s timeout, and
+  **fails open**: an API error logs a warning and the snapshot proceeds without
+  injection rather than blocking.
+- A GPU node can be cordoned between detection and pod scheduling. When that happens the
+  Job pends until `--timeout`; the timeout error names the auto-injected selector so the
+  cause is clear.
+
+**Reactive placement-mismatch warning.** After collection, if the snapshot has no GPU
+data but the cluster topology shows GPU-capable nodes (via NFD labels), the agent emits
+a loud warning so the result is not silently trusted:
+
+```
+snapshot has no GPU data but cluster topology shows GPU-capable nodes — agent likely ran on a non-GPU node
+```
+
+The warning lists remediation options:
+- `--node-selector nvidia.com/gpu.present=true` (after GPU Operator/NFD)
+- `--node-selector kubernetes.io/hostname=<gpu-node>` (before GPU Operator)
+- `--require-gpu` (requests the `nvidia.com/gpu` resource; needs the Device Plugin)
+- `--runtime-class nvidia` (nvidia-smi access without consuming a GPU slot)
 
 #### ConfigMap Output
 
