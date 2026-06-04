@@ -158,16 +158,17 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 func TestValidateCmdFlags_FailFastDefault(t *testing.T) {
 	cmd := validateCmd()
 	for _, f := range cmd.Flags {
-		bf, ok := f.(*cli.BoolFlag)
-		if !ok {
+		if !hasFlag(f, "fail-fast") {
 			continue
 		}
-		if bf.Name == "fail-fast" {
-			if bf.Value {
-				t.Error("--fail-fast default should be false")
-			}
-			return
+		bf, ok := f.(*cli.BoolFlag)
+		if !ok {
+			t.Fatal("--fail-fast should be a *cli.BoolFlag")
 		}
+		if bf.Value {
+			t.Error("--fail-fast default should be false")
+		}
+		return
 	}
 	t.Error("--fail-fast flag not found in validateCmd flags")
 }
