@@ -87,6 +87,10 @@ type validateConfig struct {
 	commit                string
 	imageRegistryOverride string
 	imageTagOverride      string
+
+	// failFast, when non-nil true, stops validation after the first phase that
+	// reports StatusFailed. nil means "unset; use validator default (false)".
+	failFast *bool
 }
 
 // buildValidateConfig replays each WithValidation* option into a fresh
@@ -146,6 +150,9 @@ func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
 	}
 	if cfg.imageTagOverride != "" {
 		out = append(out, validator.WithImageTagOverride(cfg.imageTagOverride))
+	}
+	if cfg.failFast != nil {
+		out = append(out, validator.WithFailFast(*cfg.failFast))
 	}
 	return out
 }
@@ -282,6 +289,13 @@ func WithValidationImageRegistryOverride(registry string) ValidateOption {
 // Empty means "no override" — the validator keeps its resolved tag.
 func WithValidationImageTagOverride(tag string) ValidateOption {
 	return func(c *validateConfig) { c.imageTagOverride = tag }
+}
+
+// WithValidationFailFast controls whether ValidateState stops after the
+// first phase that reports StatusFailed. Default: false (all phases run
+// and produce results). Set true to restore stop-on-first-failure behavior.
+func WithValidationFailFast(failFast bool) ValidateOption {
+	return func(c *validateConfig) { c.failFast = &failFast }
 }
 
 // cloneStringSlice returns a shallow copy of s, preserving the
