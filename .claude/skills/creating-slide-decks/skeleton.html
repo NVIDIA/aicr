@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<!-- Self-contained slide deck skeleton. Copy, rename, and fill in the slides.
+     No build, no dependencies, no network — inline CSS + inline SVG only.
+     See the creating-slide-decks skill and demos/evidence-demo-slides.html. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVIDIA AICR · &lt;deck title&gt;</title>
+<style>
+  :root {
+    --bg: #0b0d10; --panel: #14181d; --panel-2: #1b2026; --border: #2a313a;
+    --text: #e6edf3; --dim: #9aa7b4;
+    --green: #76b900; --green-bright: #93d22a; --green-tint: rgba(118,185,0,0.12);
+    --amber: #e3a008; --red: #e5534b;
+    --sans: "NVIDIA Sans", "NVIDIASans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text);
+         font-family: var(--sans); font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  code.inl { font-family: var(--mono); font-size: 0.9em; background: var(--panel-2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 5px; }
+
+  /* chrome */
+  .deck-top { position: fixed; top: 0; left: 0; right: 0; height: 48px; z-index: 30; display: flex; align-items: center; padding: 0 22px; background: rgba(11,13,16,.9); border-bottom: 1px solid var(--border); }
+  .deck-top .brand { font-weight: 700; font-size: 14px; }
+  .deck-top .brand .sub { color: var(--dim); font-weight: 500; }
+  .deck-top .sect { margin-left: auto; color: var(--green-bright); font-family: var(--mono); font-size: 12.5px; }
+  .deck-bottom { position: fixed; bottom: 3px; left: 0; right: 0; height: 50px; z-index: 30; display: flex; align-items: center; gap: 16px; padding: 0 22px; background: rgba(11,13,16,.9); border-top: 1px solid var(--border); }
+  .navbtn { font-size: 22px; line-height: 1; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; width: 40px; height: 32px; cursor: pointer; }
+  .navbtn:hover { color: var(--green-bright); border-color: var(--green); }
+  .deck-bottom .meter { margin: 0 auto; display: flex; align-items: center; gap: 16px; }
+  #counter { font-family: var(--mono); font-size: 13px; }
+  .hint { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }
+  .progress { position: fixed; bottom: 0; left: 0; right: 0; height: 3px; background: var(--border); z-index: 31; }
+  .progress > i { display: block; height: 100%; width: 0; background: var(--green); transition: width .2s ease; }
+
+  /* slides — only .active shows */
+  .slide { position: fixed; inset: 0; z-index: 10; display: none; flex-direction: column; justify-content: center; align-items: center; padding: 70px 48px 80px; }
+  .slide.active { display: flex; }
+  .slide-inner { width: 100%; max-width: 1000px; max-height: 86vh; overflow-y: auto; }
+  .slide.center .slide-inner { text-align: center; }
+  .label { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--green); margin-bottom: 8px; }
+  .slide h1 { font-size: clamp(38px, 6vw, 62px); line-height: 1.08; margin: 0 0 18px; font-weight: 800; letter-spacing: -.02em; }
+  .slide h2 { font-size: clamp(26px, 3.6vw, 40px); margin: 0 0 16px; font-weight: 750; }
+  .slide p { color: #cdd6df; max-width: 74ch; }
+  .lede { font-size: clamp(17px, 2.2vw, 22px); color: var(--dim); margin: 0 auto 22px; max-width: 60ch; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .chip { font-size: 14px; background: var(--panel-2); border: 1px solid var(--border); padding: 6px 13px; border-radius: 999px; }
+  .chip b { color: var(--green-bright); }
+  .note { border-left: 3px solid var(--green); background: var(--green-tint); padding: 13px 18px; border-radius: 0 10px 10px 0; margin: 16px 0; text-align: left; }
+  .note .t { font-weight: 700; color: var(--green-bright); display: block; margin-bottom: 4px; }
+
+  /* code block */
+  .code { background: #0e1116; border: 1px solid var(--border); border-radius: 10px; margin: 14px 0; overflow: hidden; text-align: left; }
+  .code .bar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+  .code .dot { width: 11px; height: 11px; border-radius: 50%; }
+  pre { margin: 0; padding: 15px; overflow-x: auto; font-family: var(--mono); font-size: 13.5px; line-height: 1.6; color: #d7dee6; }
+  pre .p { color: var(--green-bright); } pre .c { color: #6b7785; }
+
+  /* inline-SVG diagrams — one concept per slide */
+  svg.diagram { display: block; margin: 8px auto 0; width: auto; height: auto; max-width: min(940px, 90vw); max-height: 52vh; }
+  .diagram text { font-family: var(--sans); fill: var(--text); }
+  .diagram .nlabel { font-weight: 650; font-size: 14px; }
+  .diagram .nsub { fill: var(--dim); font-size: 11.5px; }
+  .diagram .elabel { fill: var(--dim); font-size: 11px; }
+  .diagram .node { fill: var(--panel-2); stroke: var(--border); }
+  .diagram .node-g { fill: rgba(118,185,0,.10); stroke: var(--green); }
+  .diagram .ttl-g { fill: var(--green-bright); }
+  .diagram .edge { stroke: #46525f; stroke-width: 1.6; fill: none; }
+  .diagram .edge-g { stroke: var(--green); stroke-width: 2; fill: none; }
+  .diagram figcaption, .fig figcaption { color: var(--dim); font-size: 13.5px; text-align: center; padding: 8px 0 0; }
+  .fig { margin: 0; }
+</style>
+</head>
+<body>
+
+<div class="deck-top">
+  <span class="brand">NVIDIA AICR<span class="sub">&nbsp;· &lt;topic&gt;</span></span>
+  <span class="sect" id="sect"></span>
+</div>
+
+<!-- 1 · TITLE ----------------------------------------------------------------->
+<section class="slide center" data-title="">
+  <div class="slide-inner">
+    <div class="label">&lt;eyebrow / product line&gt;</div>
+    <h1>&lt;deck title&gt;</h1>
+    <p class="lede">&lt;one factual sentence: what this is and why it matters&gt;</p>
+    <div class="chips">
+      <span class="chip"><b>&lt;point&gt;</b> &lt;detail&gt;</span>
+      <span class="chip"><b>&lt;point&gt;</b> &lt;detail&gt;</span>
+    </div>
+    <p class="hint" style="margin-top:30px">←  →  or  Space  to navigate  ·  F for fullscreen</p>
+  </div>
+</section>
+
+<!-- 2 · ONE IDEA + ONE VISUAL (diagram / code / table) ------------------------>
+<section class="slide" data-title="&lt;short nav title&gt;">
+  <div class="slide-inner">
+    <div class="label">01 · &lt;section&gt;</div>
+    <h2>&lt;the one idea for this slide&gt;</h2>
+
+    <!-- Hand-author the diagram. One concept; viewBox + the max-height CSS scales it. -->
+    <figure class="fig">
+      <svg class="diagram" viewBox="0 0 720 200" role="img" aria-label="&lt;describe the diagram&gt;">
+        <defs>
+          <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#46525f"/></marker>
+        </defs>
+        <rect class="node" x="40" y="74" width="200" height="52" rx="10"/>
+        <text class="nlabel" x="140" y="98" text-anchor="middle">&lt;node A&gt;</text>
+        <text class="nsub" x="140" y="116" text-anchor="middle">&lt;subtitle&gt;</text>
+
+        <rect class="node-g" x="480" y="74" width="200" height="52" rx="10"/>
+        <text class="nlabel ttl-g" x="580" y="98" text-anchor="middle">&lt;node B&gt;</text>
+        <text class="nsub" x="580" y="116" text-anchor="middle">&lt;subtitle&gt;</text>
+
+        <line class="edge" x1="240" y1="100" x2="476" y2="100" marker-end="url(#arrow)"/>
+        <text class="elabel" x="360" y="92" text-anchor="middle">&lt;relationship&gt;</text>
+      </svg>
+      <figcaption>&lt;one-line takeaway&gt;</figcaption>
+    </figure>
+
+    <!-- Or a code block instead of (or below) the diagram: -->
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span></div>
+<pre><span class="p">$</span> &lt;the real command&gt;
+<span class="c"># &lt;what it shows&gt;</span></pre>
+    </div>
+
+    <div class="note"><span class="t">&lt;key point&gt;</span>&lt;the honest, accurate detail — no fluff&gt;</div>
+  </div>
+</section>
+
+<!-- Add more <section class="slide" data-title="..."> blocks. The script counts them automatically. -->
+
+<div class="deck-bottom">
+  <button class="navbtn" id="prev" aria-label="Previous slide">‹</button>
+  <div class="meter"><span id="counter">1 / 1</span><span class="hint">←  →  ·  Space  ·  F fullscreen</span></div>
+  <button class="navbtn" id="next" aria-label="Next slide">›</button>
+</div>
+<div class="progress"><i id="pfill"></i></div>
+
+<script>
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var counter = document.getElementById('counter');
+  var pfill = document.getElementById('pfill');
+  var sect = document.getElementById('sect');
+  var i = 0;
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('active', k === i); });
+    counter.textContent = (i + 1) + ' / ' + slides.length;
+    pfill.style.width = ((i + 1) / slides.length * 100) + '%';
+    sect.textContent = slides[i].getAttribute('data-title') || '';
+    var h = '#' + (i + 1);
+    if (location.hash !== h) history.replaceState(null, '', h);
+    slides[i].querySelector('.slide-inner').scrollTop = 0;
+  }
+  document.getElementById('next').addEventListener('click', function () { show(i + 1); });
+  document.getElementById('prev').addEventListener('click', function () { show(i - 1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); show(i + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); show(0); }
+    else if (e.key === 'End') { e.preventDefault(); show(slides.length - 1); }
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) { (document.documentElement.requestFullscreen || function () {}).call(document.documentElement); }
+      else { (document.exitFullscreen || function () {}).call(document); }
+    }
+  });
+  var start = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(start) ? 0 : start - 1);
+  window.addEventListener('hashchange', function () {
+    var n = parseInt((location.hash || '').slice(1), 10);
+    if (!isNaN(n) && n - 1 !== i) show(n - 1);
+  });
+</script>
+</body>
+</html>
