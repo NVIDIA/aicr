@@ -230,7 +230,7 @@ func (v *Validator) runPhases(
 		}
 
 		if anyFailed && v.FailFast {
-			pr := v.phaseSkipped(cat, phase, "skipped due to previous phase failure (--fail-fast)")
+			pr := v.phaseSkipped(cat, phase, "skipped due to previous phase failure")
 			results = append(results, pr)
 			slog.Info("skipping phase due to fail-fast", "phase", phase)
 			continue

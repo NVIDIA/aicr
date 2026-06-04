@@ -691,7 +691,6 @@ The `deployment` phase verifies that the cluster is actually ready for GPU workl
 **Phase Dependencies:**
 - Phases run sequentially when using `--phase all`
 - All phases run by default and produce results regardless of earlier failures. Use `--fail-fast` to stop after the first phase that fails (e.g., to skip a 65-minute inference-perf run when deployment already failed).
-- If a phase fails, subsequent phases are skipped
 - Use individual phases for targeted validation during specific deployment stages
 
 #### Constraint Format

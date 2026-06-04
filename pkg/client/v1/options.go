@@ -116,7 +116,7 @@ func buildValidateConfig(opts []ValidateOption) *validateConfig {
 // here and zero edits on the facade surface. phases is intentionally NOT
 // translated here — it is passed directly to ValidatePhases by the caller.
 func validateOptionsFromConfig(cfg *validateConfig) []validator.Option {
-	out := make([]validator.Option, 0, 10)
+	out := make([]validator.Option, 0, 11)
 	if cfg.namespace != nil {
 		out = append(out, validator.WithNamespace(*cfg.namespace))
 	}
