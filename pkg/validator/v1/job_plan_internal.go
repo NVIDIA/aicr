@@ -21,6 +21,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,11 @@ const (
 	InferenceGatewayCheckName = "inference-gateway"
 
 	requireScopedInferenceGatewayEnv = "AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY"
+
+	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
+	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
+	// for post-mortem inspection. Forwarded only to the inference-perf pod.
+	inferencePerfNoCleanupEnv = "AICR_INFERENCE_PERF_NO_CLEANUP"
 )
 
 // hfTokenEnvVar is the environment variable name used to forward the
@@ -149,6 +155,19 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: requireScopedInferenceGatewayEnv, Value: v})
 	}
 
+	// Forward the inference-perf no-cleanup debug toggle into that validator pod.
+	// Cleanup runs inside the Job, so it can't see the CLI process environment
+	// unless the orchestrator carries the value across. Scoped to the
+	// inference-perf entry. Gated on strconv.ParseBool — the same truthiness the
+	// runtime cleanup gate uses — so a value like "yes"/"2" can't be forwarded
+	// here yet parsed false there (half-enabling the toggle). Forwards a
+	// canonical "1" so the pod-side check is unambiguous. When set, a
+	// failed/anomalous run leaves the namespace, DGD, workers, frontend, and
+	// AIPerf Job in place for inspection.
+	if on, _ := strconv.ParseBool(os.Getenv(inferencePerfNoCleanupEnv)); on && entry.Name == InferencePerfCheckName {
+		env = append(env, corev1.EnvVar{Name: inferencePerfNoCleanupEnv, Value: "1"})
+	}
+
 	// Add catalog entry's custom env vars. Orchestrator-controlled env vars are
 	// deliberately skipped here: they must come only from the process
 	// environment (forwarded above), never from the in-repo catalog. Appending
@@ -156,7 +175,7 @@ func buildEnv(
 	// forwarded value (k8s takes the last duplicate), breaking that trust
 	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv {
+		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

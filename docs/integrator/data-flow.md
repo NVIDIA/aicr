@@ -468,7 +468,7 @@ Results are output in [CTRF](https://ctrf.io/) (Common Test Report Format) JSON:
           "RESULT: Inference throughput: 108789.87 tokens/sec",
           "RESULT: Inference TTFT p99: 687.50 ms",
           "Throughput constraint: >= 50000 → PASS",
-          "TTFT p99 constraint: <= 1000 → PASS"
+          "TTFT p99 constraint: <= 2000 → PASS"
         ]
       }
     ]

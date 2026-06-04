@@ -175,7 +175,7 @@ validation:
       - name: inference-throughput          # >= only; output tokens/sec
         value: ">= 50000"
       - name: inference-ttft-p99            # <= only; TTFT p99 in ms
-        value: "<= 1000"
+        value: "<= 2000"
       - name: inference-model               # optional; HF model ID
         value: Qwen/Qwen3-8B
       - name: inference-concurrency-per-gpu # optional; positive integer

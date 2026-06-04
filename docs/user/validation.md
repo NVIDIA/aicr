@@ -118,6 +118,14 @@ reflect steady state, not cold start. Warm-up scales with concurrency and is
 tunable via `AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY` (see the
 [validator reference](../contributor/validator.md#inference-perf-benchmark-tuning)).
 
+**Determinism:** the benchmark is driven reproducibly so the verdict reflects the
+deployment, not run-to-run RNG — a fixed random seed, fixed input/output token
+counts (stddev 0), a pinned synthetic-prompt pool, and greedy decoding
+(`temperature: 0`). Note that throughput (not the latency tail) is the stable,
+discriminating signal at high concurrency; TTFT p99 near the saturation knee can
+still vary with batching/scheduling, which is why the TTFT constraint is a
+generous ceiling rather than a tight target.
+
 ```bash
 # Capture snapshot, generate inference recipe, validate the performance phase.
 aicr snapshot --output snapshot.yaml
@@ -143,7 +151,7 @@ validation:
       - name: inference-throughput   # output tokens/sec
         value: ">= 50000"
       - name: inference-ttft-p99     # time-to-first-token p99 in ms
-        value: "<= 1000"
+        value: "<= 2000"
       # Optional per-accelerator inputs (bare value, no comparator).
       # Precedence: recipe > AICR_INFERENCE_PERF_* env > compiled default.
       - name: inference-model                # HF model ID; default Qwen/Qwen3-8B
@@ -173,6 +181,18 @@ catalog overlay in the `aicr validate --data <dir>` directory), or disable the c
 **not** read from the shell environment of the process running `aicr validate`
 (only `HF_TOKEN` is). AICR-deployed EKS clusters get a default `gp3` StorageClass
 from the `aws-ebs-csi-driver` component, so the cache works there with no knob.
+
+**Debugging a failed run with `AICR_INFERENCE_PERF_NO_CLEANUP`.** By default the
+validator deletes the per-run namespace (DGD, workers, frontend, AIPerf Job) on
+both success and failure. To investigate a failure — e.g. a `timed out waiting
+for inference endpoint to serve requests` — set `AICR_INFERENCE_PERF_NO_CLEANUP=1`
+and the validator leaves everything in place so you can `kubectl logs` the
+frontend/workers and curl `/v1/models` and `/v1/chat/completions` live. Unlike the
+other `AICR_INFERENCE_PERF_*` knobs, this one is read from the **shell
+environment** of the process running `aicr validate` (forwarded to the
+inference-perf pod, like `HF_TOKEN`), not from the catalog. Debug-only: you must
+delete the `aicr-inference-perf-<suffix>` namespace manually afterward, or it
+keeps GPU workers running.
 
 Expected flow (~5–7 min on H100): readiness pre-flight → deploy
 `ResourceClaimTemplate` + `DynamoGraphDeployment` in a per-run namespace
@@ -205,7 +225,7 @@ A passing CTRF entry (measured on EKS H100, 8 × H100 GPUs, Qwen/Qwen3-8B at 256
     "RESULT: Inference throughput: 108789.87 tokens/sec",
     "RESULT: Inference TTFT p99: 687.50 ms",
     "Throughput constraint: >= 50000 → PASS",
-    "TTFT p99 constraint: <= 1000 → PASS"
+    "TTFT p99 constraint: <= 2000 → PASS"
   ]
 }
 ```

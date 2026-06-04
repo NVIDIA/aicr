@@ -399,7 +399,7 @@ validation:
       - name: inference-throughput
         value: ">= 50000"
       - name: inference-ttft-p99
-        value: "<= 1000"
+        value: "<= 2000"
 ```
 
 Resolution precedence is **recipe constraint > catalog env knob > compiled
@@ -452,6 +452,65 @@ ModelExpress server is the alternative (see #1116).
 > per-GPU concurrency) so a healthy per-GPU result on a partially occupied node
 > is not failed against a full-node number. TTFT is a per-request latency and
 > is **not** scaled.
+
+#### Methodology: a baseline gate, and reading run-to-run fluctuation
+
+`inference-perf` is a **conformance baseline**, not a tuned peak-throughput
+benchmark — pass/fail answers *"is this deployment serving acceptably,"* not
+*"what is the maximum."* Read the numbers as a health floor, not a leaderboard.
+Design choices follow from that, and from what we measured debugging
+run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
+
+- **Throughput is the stable, discriminating signal; TTFT p99 is noisy at high
+  concurrency.** Near the saturation knee the p99 curve is steep, so batching /
+  scheduling timing produces large run-to-run swings on an otherwise healthy
+  deployment. That is why the `inference-ttft-p99` constraint is a **generous
+  ceiling** (catches gross stalls — real ones ran 9–45 s — while tolerating
+  normal knee jitter), not a tight target.
+- **The verdict should reflect the deployment, not RNG.** The AIPerf workload is
+  pinned for reproducibility — fixed random seed, fixed input/output token
+  counts (stddev 0), a pinned prompt pool, and greedy decoding
+  (`temperature: 0`). Input determinism stabilizes *throughput*; it does not
+  remove system-side p99 jitter at the knee.
+- **Routing matters.** Dynamo defaults to **round-robin**, which is
+  capacity-blind — if one worker transiently slows, round-robin keeps feeding it
+  its share and its queue backs up (observed as one worker pinned near
+  `max_num_seqs` while peers idle). A load-aware mode (`least-loaded`, dynamo
+  1.2.x) routes around a slow worker; until then, prefer round-robin over `kv`
+  (whose prefix-affinity *concentrates* load on AIPerf's low-diversity synthetic
+  prompts).
+- **The AIPerf load generator co-locates with the GPU workers, but that is not
+  resource contention.** It is CPU-only and the GPU node has ample CPU headroom
+  (measured node CPU pressure ≈ 0 across runs); co-location does not starve the
+  workers. Do not add worker CPU/memory requests to "fix" contention that the
+  data does not show.
+- **Triaging an anomalous run:** the severe stalls we saw were **stochastic and
+  often not reproducible** — re-run before concluding. Verify GPU health
+  (clocks, ECC, throttle reasons, XID) to rule out hardware. And note
+  `nvidia-smi` *utilization* is a duty-cycle metric (kernel-present time), **not**
+  compute saturation — a worker can read 100% util while under-fed; cross-check
+  **power draw and achieved throughput**, not utilization alone.
+- **A GPU driver restart needs a DRA plugin restart.** If you restart the GPU
+  driver pod (`nvidia-driver-daemonset-*`) on a node — e.g. to clear suspected
+  driver state between runs — also restart the NVIDIA DRA kubelet-plugin
+  (`nvidia-dra-driver-gpu-kubelet-plugin-*`) on that node. Otherwise it serves
+  stale CDI specs and every worker `ResourceClaim` fails with
+  `FailedPrepareDynamicResources: … empty device edits`, leaving the decode
+  workers stuck in `ContainerCreating` until the phase times out.
+- **The serve-readiness probe tolerates cold-start first-token latency.** A fresh
+  worker's first inference captures CUDA graphs / JIT-warms kernels — measured at
+  ~42 s on RTX PRO 6000. The readiness probe (`waitForEndpointReady`) therefore
+  uses a generous **120 s** per-request timeout (`InferenceEndpointProbeTimeout`),
+  not the generic 30 s `HTTPClientTimeout`; the latter cancelled the legitimate
+  first request mid-warmup and failed healthy deployments with
+  `timed out waiting for inference endpoint to serve requests` — the *same* outer
+  symptom as the (fixed) #1192 discovery panic but a different root cause. AIPerf's
+  own warmup absorbs steady-state once the probe passes.
+- **Inspecting a failed run.** `AICR_INFERENCE_PERF_NO_CLEANUP=1` leaves the
+  namespace, DGD, workers, frontend, and AIPerf Job in place after the run so a
+  serve-wait / generate hang can be examined live (`kubectl logs` the frontend,
+  ping `/v1/models` and `/v1/chat/completions`). Debug-only — delete the namespace
+  manually afterward.
 
 ### Code walkthrough
 

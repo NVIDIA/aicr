@@ -429,6 +429,99 @@ func TestBuildJobPlan_ForwardsScopedInferenceGatewayEnv(t *testing.T) {
 	})
 }
 
+// TestBuildJobPlan_ForwardsInferencePerfNoCleanupEnv verifies the no-cleanup
+// debug toggle is carried from the CLI process into the inference-perf validator
+// Job (where cleanupInferenceWorkload reads it), and only that validator.
+func TestBuildJobPlan_ForwardsInferencePerfNoCleanupEnv(t *testing.T) {
+	build := func(entry ValidatorEntry) map[string]string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		m := make(map[string]string)
+		for _, e := range plan.Env {
+			m[e.Name] = e.Value
+		}
+		return m
+	}
+
+	perfEntry := ValidatorEntry{Name: InferencePerfCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+
+	t.Run("forwarded to inference-perf", func(t *testing.T) {
+		t.Setenv(inferencePerfNoCleanupEnv, "1")
+		if got := build(perfEntry)[inferencePerfNoCleanupEnv]; got != "1" {
+			t.Errorf("%s env = %q, want 1", inferencePerfNoCleanupEnv, got)
+		}
+	})
+	t.Run("empty value omitted", func(t *testing.T) {
+		t.Setenv(inferencePerfNoCleanupEnv, "")
+		if _, present := build(perfEntry)[inferencePerfNoCleanupEnv]; present {
+			t.Errorf("%s should not be in Job env when empty", inferencePerfNoCleanupEnv)
+		}
+	})
+	t.Run("not forwarded to other validators", func(t *testing.T) {
+		t.Setenv(inferencePerfNoCleanupEnv, "1")
+		other := ValidatorEntry{Name: InferenceGatewayCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+		if _, present := build(other)[inferencePerfNoCleanupEnv]; present {
+			t.Errorf("%s must not be forwarded to a non-inference-perf validator", inferencePerfNoCleanupEnv)
+		}
+	})
+	t.Run("truthy forwarded as canonical 1", func(t *testing.T) {
+		t.Setenv(inferencePerfNoCleanupEnv, "true")
+		if got := build(perfEntry)[inferencePerfNoCleanupEnv]; got != "1" {
+			t.Errorf("%s env = %q, want 1 (normalized)", inferencePerfNoCleanupEnv, got)
+		}
+	})
+	t.Run("non-bool value not forwarded", func(t *testing.T) {
+		// Aligns the forwarding gate with the runtime ParseBool gate: a value
+		// that parses false there must not be forwarded here.
+		for _, v := range []string{"yes", "2", "on", "garbage"} {
+			t.Setenv(inferencePerfNoCleanupEnv, v)
+			if _, present := build(perfEntry)[inferencePerfNoCleanupEnv]; present {
+				t.Errorf("%s=%q should not be forwarded (not ParseBool-truthy)", inferencePerfNoCleanupEnv, v)
+			}
+		}
+	})
+
+	// values is a helper that collects every occurrence of the env var (not just
+	// the last) so we can assert the catalog value is dropped, not merely shadowed.
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == inferencePerfNoCleanupEnv {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+
+	t.Run("catalog value cannot override forwarded value", func(t *testing.T) {
+		t.Setenv(inferencePerfNoCleanupEnv, "1")
+		entry := ValidatorEntry{
+			Name: InferencePerfCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute,
+			Env: []EnvVar{{Name: inferencePerfNoCleanupEnv, Value: "0"}},
+		}
+		if got := values(entry); len(got) != 1 || got[0] != "1" {
+			t.Errorf("%s env = %v, want exactly [1] (catalog value must be dropped)", inferencePerfNoCleanupEnv, got)
+		}
+	})
+
+	t.Run("catalog value alone cannot enable", func(t *testing.T) {
+		t.Setenv(inferencePerfNoCleanupEnv, "")
+		entry := ValidatorEntry{
+			Name: InferencePerfCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute,
+			Env: []EnvVar{{Name: inferencePerfNoCleanupEnv, Value: "1"}},
+		}
+		if got := values(entry); len(got) != 0 {
+			t.Errorf("%s env = %v, want none (catalog must not enable no-cleanup without shell env)", inferencePerfNoCleanupEnv, got)
+		}
+	})
+}
+
 func TestBuildJobPlanWithDefaults(t *testing.T) {
 	// Test with minimal entry (no custom resources, no tolerations, no node selector)
 	entry := ValidatorEntry{

@@ -90,7 +90,7 @@ spec:
         - name: inference-throughput
           value: ">= 50000"
         - name: inference-ttft-p99
-          value: "<= 1000"
+          value: "<= 2000"
     conformance:
       checks:
         - platform-health

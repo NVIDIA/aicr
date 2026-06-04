@@ -384,6 +384,17 @@ const (
 	// probe described on InferenceHealthTimeout.
 	InferenceHealthPollInterval = 10 * time.Second
 
+	// InferenceEndpointProbeTimeout is the per-request timeout for the readiness
+	// probe's chat-completion against the inference endpoint. It must exceed the
+	// cold-start first-token latency: a fresh worker captures CUDA graphs / JIT-
+	// warms kernels on its first inference, which was measured at ~40s and can
+	// reach 60-90s on some GPUs (e.g. RTX PRO 6000). The generic 30s
+	// HTTPClientTimeout canceled that legitimate first request, so the probe
+	// never saw a success and the phase failed before AIPerf (which has its own
+	// warmup) could start. 120s clears observed cold-start with margin while
+	// still fitting several polls inside InferenceHealthTimeout.
+	InferenceEndpointProbeTimeout = 120 * time.Second
+
 	// InferencePerfJobTimeout is the maximum time for the AIPerf benchmark Job
 	// to complete. AIPerf with 100 requests at concurrency 16 typically finishes
 	// in a few minutes; this provides headroom for model loading and warmup.

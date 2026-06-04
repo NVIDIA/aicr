@@ -72,6 +72,8 @@ navigation:
         path: contributor/collector.md
       - page: Validators
         path: contributor/validator.md
+      - page: Inference-Perf Fluctuation (investigation)
+        path: contributor/inference-perf-fluctuation.md
       - page: CLI
         path: contributor/cli.md
       - page: API Server
