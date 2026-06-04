@@ -35,7 +35,7 @@ nfd:
 # building its own bundled MOFED — required for the network-operator
 # integration to actually work end-to-end. The global default in
 # components/gpu-operator/values.yaml is off because EFA / non-MOFED
-# fabrics trip v26.3.1's driver-validation gate.
+# fabrics trip v26.3.2's driver-validation gate.
 driver:
   rdma:
     enabled: true

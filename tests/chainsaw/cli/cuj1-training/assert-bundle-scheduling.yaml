@@ -39,7 +39,7 @@ daemonsets:
 
 # ── Driver: nvidia_peermem off on EKS (AWS EFA path uses aws-ofi-nccl)
 # nvidia_peermem only loads against Mellanox MOFED symbols; on AWS EFA
-# (p4d/p5/p5e) it fails to load and v26.3.1's strict driver-validation
+# (p4d/p5/p5e) it fails to load and v26.3.2's strict driver-validation
 # init container blocks the rest of the GPU stack. NCCL multi-node on
 # EFA uses libfabric via aws-ofi-nccl, not nvidia_peermem.
 driver:

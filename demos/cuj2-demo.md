@@ -126,7 +126,7 @@
 │  h100-eks-ubuntu-training.yaml      │  (Ubuntu constraints)               │
 │  (Ubuntu constraints)               │      │                              │
 │      │                              │  h100-eks-ubuntu-inference-dynamo   │
-│  h100-eks-ubuntu-training-kubeflow  │  ├── gpu-operator (v26.3.1, CDI)    │
+│  h100-eks-ubuntu-training-kubeflow  │  ├── gpu-operator (v26.3.2, CDI)    │
 │  └── kubeflow-trainer       ◀── NEW │  ├── nvidia-dra-driver (gpuRes)◀─NEW│
 │                                     │  ├── dynamo-crds             ◀─ NEW │
 │                                     │  └── dynamo-platform         ◀─ NEW │

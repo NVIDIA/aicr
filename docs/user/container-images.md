@@ -37,7 +37,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | dynamo-platform | helm | dynamo-platform | 1.0.2 | 1 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.3.1 | 14 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.3.2 | 14 |
 | grove | helm | grove-charts | v0.1.0-alpha.6 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -101,7 +101,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b`
+- `ubuntu:24.04@sha256:786a8b558f7be160c6c8c4a54f9a57274f3b4fb1491cf65146521ae77ff1dc54`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -109,16 +109,16 @@ _No images extracted._
 - `nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.5.2`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.0`
-- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.10.0`
-- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.14.0`
+- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.11.0`
+- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.14.2`
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.27.3`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.3`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.4.2`
 - `nvcr.io/nvidia/driver:580.126.20`
-- `nvcr.io/nvidia/gpu-operator:v26.3.1`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.19.0`
-- `nvcr.io/nvidia/k8s/container-toolkit:v1.19.0`
-- `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.1-4.8.0-distroless`
+- `nvcr.io/nvidia/gpu-operator:v26.3.2`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.19.2`
+- `nvcr.io/nvidia/k8s/container-toolkit:v1.19.1`
+- `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless`
 - `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.5.0`
 
 ### grove

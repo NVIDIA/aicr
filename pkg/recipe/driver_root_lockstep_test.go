@@ -73,7 +73,7 @@ import (
 // **Why "explicitly set" matters for the lockstep case.** An empty value
 // falls through to the upstream chart's bundled default, which the test
 // cannot read — and per-component defaults differ (GPU Operator chart
-// 26.3.1 defaults driverInstallDir to /run/nvidia/driver, but DRA chart
+// 26.3.2 defaults driverInstallDir to /run/nvidia/driver, but DRA chart
 // 25.12.0 defaults nvidiaDriverRoot to /). Relying on chart defaults is
 // itself drift waiting to happen on the next chart bump, so when the
 // lockstep applies the test treats "not explicitly set on both" as a
@@ -173,7 +173,7 @@ func TestDriverRootLockstep(t *testing.T) {
 				t.Errorf(
 					"overlay %q: both nvidia-dra-driver-gpu.nvidiaDriverRoot and gpu-operator.hostPaths.driverInstallDir are unset.\n"+
 						"  Both must be set explicitly to the same path. Chart defaults differ across components\n"+
-						"  (gpu-operator chart 26.3.1: /run/nvidia/driver; dra chart 25.12.0: /), so an unset value\n"+
+						"  (gpu-operator chart 26.3.2: /run/nvidia/driver; dra chart 25.12.0: /), so an unset value\n"+
 						"  is drift waiting to happen on the next chart bump.\n"+
 						"  See issue #1087.",
 					name)

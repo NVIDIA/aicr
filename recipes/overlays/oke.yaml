@@ -40,7 +40,7 @@ spec:
     # (BM.GPU.B200, BM.GPU.H100, etc.). Disable both to avoid conflicts.
     - name: gpu-operator
       type: Helm
-      version: v26.3.1
+      version: v26.3.2
       valuesFile: components/gpu-operator/values-oke.yaml
 
     # Prometheus persistent storage (provide --storage-class at bundle time, e.g. oci-bv)
