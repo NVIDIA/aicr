@@ -221,6 +221,7 @@ type validationConfig struct {
 
 	// Behavior
 	failOnError bool
+	failFast    bool
 
 	// Evidence
 	evidenceDir string
@@ -302,6 +303,7 @@ func runValidation(
 		// above is always passed (even when resolved tolerations are nil) so
 		// the override always clears the validator's default tolerate-all.
 		aicr.WithValidationTimeout(0),
+		aicr.WithValidationFailFast(cfg.failFast),
 	}
 	// Pass phases only when explicitly selected. cfg.phases is nil when the
 	// user requested all phases (or used the "all" wildcard), and
@@ -441,6 +443,12 @@ func validateCmdFlags() []cli.Flag {
 			Name:     "fail-on-error",
 			Value:    true,
 			Usage:    "Exit with non-zero status if any check fails validation",
+			Category: catValidationControl,
+		},
+		&cli.BoolFlag{
+			Name:     "fail-fast",
+			Value:    false,
+			Usage:    "Stop validation after the first phase that fails. By default all phases run and produce results.",
 			Category: catValidationControl,
 		},
 		&cli.BoolFlag{
@@ -663,6 +671,7 @@ Run validation without failing on check errors (informational mode):
 			}
 
 			failOnError := boolFlagOrConfig(cmd, "fail-on-error", derefBoolOr(resolved.FailOnError, true))
+			failFast := boolFlagOrConfig(cmd, "fail-fast", derefBoolOr(resolved.FailFast, false))
 			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
 
 			// Resolve shared fields once, before the snapshot/agent split, so
@@ -776,6 +785,7 @@ Run validation without failing on check errors (informational mode):
 				output:                cmd.String("output"),
 				outFormat:             serializer.FormatJSON,
 				failOnError:           failOnError,
+				failFast:              failFast,
 				validationNamespace:   shared.namespace,
 				cleanup:               !shared.noCleanup,
 				imagePullSecrets:      shared.imagePullSecrets,
