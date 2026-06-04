@@ -104,6 +104,11 @@ per run. Per-phase containers are built from
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.
 
+By default all phases run and produce results regardless of earlier failures —
+a performance threshold miss no longer silences conformance results. Pass
+`--fail-fast` (or set `spec.validate.execution.failFast: true` in config) to
+restore stop-on-first-failure behavior for cost-sensitive runs.
+
 `readiness` is also a field on `ValidationConfig` (see
 `pkg/recipe/validation.go`) and appears in overlay examples, but it
 is **not** a container-per-validator phase. Readiness runs as

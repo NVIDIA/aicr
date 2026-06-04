@@ -248,7 +248,10 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 # equivalent to: --phase deployment --phase performance --phase conformance
 ```
 
-Phases run sequentially. If any phase fails, subsequent phases are skipped.
+Phases run sequentially. By default all phases run and produce results
+regardless of earlier failures. Pass `--fail-fast` to stop after the first
+phase that fails (e.g., to skip a 65-minute inference-perf run when deployment
+already failed).
 
 ## Scoping CNCF submission evidence to specific features
 
@@ -487,7 +490,7 @@ Skips are always deliberate and always carry a reason, but the location of the
 reason in the CTRF entry depends on how the skip happened:
 
 - **Check-level skips** (the CheckFunc ran and returned `validators.Skip(reason)` — e.g., Guards A/B/C on inference, `--no-cluster` from inside a check): reason appears in `stdout` as `level=INFO msg=SKIP reason="…"`.
-- **Phase-level skips** (the CheckFunc never ran — e.g., a prior phase failed, so subsequent phases synthesize skip entries; also `--no-cluster` for checks that the runner marks skipped before dispatch): reason appears in `message`, not `stdout`.
+- **Phase-level skips** (the CheckFunc never ran — e.g., with `--fail-fast`, a prior phase failed so subsequent phases synthesize skip entries; also `--no-cluster` for checks that the runner marks skipped before dispatch): reason appears in `message`, not `stdout`.
 
 Common reasons and their cause:
 
@@ -497,7 +500,7 @@ Common reasons and their cause:
 | `dynamo-platform not in recipe components` | `stdout` | Inference check selected but `dynamo-platform` absent from `componentRefs` | Use `--platform dynamo` when generating the recipe |
 | `DynamoGraphDeployment CRD not installed` | `stdout` | Recipe declares `dynamo-platform` but the operator is not deployed | Run `aicr bundle` + `./deploy.sh` first, or wait for bootstrap to complete |
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
-| `skipped due to previous phase failure` | `message` | An earlier phase failed and subsequent phases are skipped | Fix the earlier phase first, then re-run |
+| `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
 ### `ai-service-metrics` fails with "Prometheus unreachable"
 

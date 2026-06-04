@@ -73,6 +73,10 @@ type Validator struct {
 	// dev builds whose commit SHA has no published image; typical value: "latest".
 	ImageTagOverride string
 
+	// FailFast, when true, stops validation after the first phase that reports
+	// StatusFailed. By default (false) all phases run and produce results.
+	FailFast bool
+
 	// dataProvider supplies the recipe data files used to load the validator
 	// catalog. When nil, catalog.Load falls back to the package-global provider.
 	dataProvider recipe.DataProvider

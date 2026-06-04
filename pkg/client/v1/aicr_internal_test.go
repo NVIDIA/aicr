@@ -697,6 +697,58 @@ func TestWithValidationTimeout_OptIn(t *testing.T) {
 	}
 }
 
+// TestWithValidationFailFast_RoundTrip pins that WithValidationFailFast captures
+// the bool into validateConfig.failFast (nil when unset, non-nil when set) and
+// that validateOptionsFromConfig emits validator.WithFailFast when the field is
+// non-nil, landing the value on the Validator.
+func TestWithValidationFailFast_RoundTrip(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    []ValidateOption
+		wantNil bool
+		wantVal bool
+	}{
+		{"unset", nil, true, false},
+		{"set true", []ValidateOption{WithValidationFailFast(true)}, false, true},
+		{"set false", []ValidateOption{WithValidationFailFast(false)}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := buildValidateConfig(tt.opts)
+			if tt.wantNil {
+				if cfg.failFast != nil {
+					t.Fatalf("failFast = %v, want nil", *cfg.failFast)
+				}
+				// An unset failFast must emit NO validator option. Pre-seed a
+				// validator with FailFast=true, apply the translated options,
+				// and confirm none flipped it back: a regression that dropped
+				// the nil-guard and always emitted validator.WithFailFast(false)
+				// would fail here (the "set false" case alone can't catch it,
+				// since false is also the validator's zero value).
+				valOpts := validateOptionsFromConfig(cfg)
+				v := validator.New(append([]validator.Option{validator.WithFailFast(true)}, valOpts...)...)
+				if !v.FailFast {
+					t.Error("validateOptionsFromConfig emitted a WithFailFast option for unset failFast; want none")
+				}
+				return
+			}
+			if cfg.failFast == nil {
+				t.Fatal("failFast is nil, want set")
+			}
+			if *cfg.failFast != tt.wantVal {
+				t.Errorf("failFast = %v, want %v", *cfg.failFast, tt.wantVal)
+			}
+
+			// Verify validateOptionsFromConfig emits the validator option.
+			valOpts := validateOptionsFromConfig(cfg)
+			v := validator.New(valOpts...)
+			if v.FailFast != tt.wantVal {
+				t.Errorf("validator.FailFast = %v after options, want %v", v.FailFast, tt.wantVal)
+			}
+		})
+	}
+}
+
 // TestValidateState_ThreadsClientVersion pins FIX B: ValidateState threads
 // the Client's version into the validator (it rewrites :latest images and
 // populates AICR_CLI_VERSION). Run in no-cluster mode so no Kubernetes

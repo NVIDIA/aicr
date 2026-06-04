@@ -52,6 +52,10 @@ const (
 	requireScopedInferenceGatewayEnv = "AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY"
 )
 
+// hfTokenEnvVar is the environment variable name used to forward the
+// Hugging Face API token to the inference performance validator.
+const hfTokenEnvVar = "HF_TOKEN" //nolint:gosec // G101: env var name, not a hardcoded credential
+
 // buildEnv creates environment variables for the validator container.
 func buildEnv(
 	entry ValidatorEntry,
@@ -133,8 +137,8 @@ func buildEnv(
 	// low-sensitivity, easily-rotated rate-limit token and a per-run ephemeral
 	// namespace, the exposure does not justify the orchestrator-side Secret
 	// plumbing. Revisit if a higher-privilege credential ever flows this path.
-	if tok := os.Getenv("HF_TOKEN"); tok != "" && entry.Name == InferencePerfCheckName {
-		env = append(env, corev1.EnvVar{Name: "HF_TOKEN", Value: tok})
+	if tok := os.Getenv(hfTokenEnvVar); tok != "" && entry.Name == InferencePerfCheckName {
+		env = append(env, corev1.EnvVar{Name: hfTokenEnvVar, Value: tok})
 	}
 
 	// Forward the enforcement toggle for the inference-gateway exposure check
@@ -152,7 +156,7 @@ func buildEnv(
 	// forwarded value (k8s takes the last duplicate), breaking that trust
 	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == "HF_TOKEN" || e.Name == requireScopedInferenceGatewayEnv {
+		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

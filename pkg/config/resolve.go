@@ -320,6 +320,10 @@ type ValidateResolved struct {
 	// the CLI flag's default.
 	FailOnError *bool
 
+	// FailFast is spec.validate.execution.failFast. Nil means "not set in
+	// config; fall back to CLI flag default (false)".
+	FailFast *bool
+
 	// NoCluster is spec.validate.execution.noCluster.
 	NoCluster bool
 
@@ -434,6 +438,10 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		if v.Execution.FailOnError != nil {
 			b := *v.Execution.FailOnError
 			out.FailOnError = &b
+		}
+		if v.Execution.FailFast != nil {
+			b := *v.Execution.FailFast
+			out.FailFast = &b
 		}
 		if v.Execution.Timeout != "" {
 			d, err := time.ParseDuration(v.Execution.Timeout)

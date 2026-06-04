@@ -50,6 +50,9 @@ func TestNewDefaults(t *testing.T) {
 	if len(v.Tolerations) != 1 || v.Tolerations[0].Operator != corev1.TolerationOpExists {
 		t.Errorf("Tolerations should default to tolerate-all, got %v", v.Tolerations)
 	}
+	if v.FailFast {
+		t.Error("FailFast should default to false")
+	}
 }
 
 func TestNewWithOptions(t *testing.T) {
@@ -408,5 +411,107 @@ func TestExtractResultSummaries(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWithFailFast_SetsField(t *testing.T) {
+	v := New(WithFailFast(true))
+	if !v.FailFast {
+		t.Error("WithFailFast(true): FailFast should be true")
+	}
+}
+
+// newFakeRunner returns a runner that returns the given status for every phase
+// and records how many times it was called.
+func newFakeRunner(status string, calls *int) func(Phase) (*PhaseResult, error) {
+	return func(phase Phase) (*PhaseResult, error) {
+		*calls++
+		return &PhaseResult{
+			Phase:  phase,
+			Status: status,
+			Report: ctrf.NewBuilder("aicr", "test", string(phase)).Build(),
+		}, nil
+	}
+}
+
+func TestRunPhases_Default_AllPhasesRun(t *testing.T) {
+	v := New(WithVersion("1.0.0")) // FailFast defaults to false
+	cat := loadEmbeddedCatalog(t)
+
+	calls := 0
+	results, err := v.runPhases(context.Background(), newFakeRunner(ctrf.StatusFailed, &calls), cat, PhaseOrder)
+	if err != nil {
+		t.Fatalf("runPhases() error = %v", err)
+	}
+	if calls != len(PhaseOrder) {
+		t.Errorf("runner called %d times, want %d (no fail-fast)", calls, len(PhaseOrder))
+	}
+	if len(results) != len(PhaseOrder) {
+		t.Fatalf("results len = %d, want %d", len(results), len(PhaseOrder))
+	}
+	for _, pr := range results {
+		if pr.Status != ctrf.StatusFailed {
+			t.Errorf("phase %q status = %q, want %q", pr.Phase, pr.Status, ctrf.StatusFailed)
+		}
+	}
+}
+
+func TestRunPhases_FailFast_StopsAfterFirstFailure(t *testing.T) {
+	v := New(WithVersion("1.0.0"), WithFailFast(true))
+	cat := loadEmbeddedCatalog(t)
+
+	calls := 0
+	results, err := v.runPhases(context.Background(), newFakeRunner(ctrf.StatusFailed, &calls), cat, PhaseOrder)
+	if err != nil {
+		t.Fatalf("runPhases() error = %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("runner called %d times, want 1 (fail-fast after first failure)", calls)
+	}
+	if len(results) != len(PhaseOrder) {
+		t.Fatalf("results len = %d, want %d", len(results), len(PhaseOrder))
+	}
+	if results[0].Status != ctrf.StatusFailed {
+		t.Errorf("results[0].Status = %q, want %q", results[0].Status, ctrf.StatusFailed)
+	}
+	for _, pr := range results[1:] {
+		if pr.Status != ctrf.StatusSkipped {
+			t.Errorf("phase %q status = %q, want %q (skipped by fail-fast)", pr.Phase, pr.Status, ctrf.StatusSkipped)
+		}
+	}
+}
+
+func TestRunPhases_FailFast_PassedPhaseDoesNotGate(t *testing.T) {
+	// Phase[0]=passed, Phase[1]=failed → Phase[2] skipped; runner called twice.
+	v := New(WithVersion("1.0.0"), WithFailFast(true))
+	cat := loadEmbeddedCatalog(t)
+
+	statuses := []string{ctrf.StatusPassed, ctrf.StatusFailed}
+	idx := 0
+	runner := func(phase Phase) (*PhaseResult, error) {
+		status := statuses[idx]
+		idx++
+		return &PhaseResult{
+			Phase:  phase,
+			Status: status,
+			Report: ctrf.NewBuilder("aicr", "test", string(phase)).Build(),
+		}, nil
+	}
+
+	results, err := v.runPhases(context.Background(), runner, cat, PhaseOrder)
+	if err != nil {
+		t.Fatalf("runPhases() error = %v", err)
+	}
+	if idx != 2 {
+		t.Errorf("runner called %d times, want 2", idx)
+	}
+	if results[0].Status != ctrf.StatusPassed {
+		t.Errorf("results[0].Status = %q, want passed", results[0].Status)
+	}
+	if results[1].Status != ctrf.StatusFailed {
+		t.Errorf("results[1].Status = %q, want failed", results[1].Status)
+	}
+	if results[2].Status != ctrf.StatusSkipped {
+		t.Errorf("results[2].Status = %q, want skipped", results[2].Status)
 	}
 }

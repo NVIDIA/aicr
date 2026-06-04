@@ -602,7 +602,7 @@ func TestValidateResolve_EmptySpec(t *testing.T) {
 	}
 	if got.RecipePath != "" || got.SnapshotPath != "" || got.Namespace != "" ||
 		got.Timeout != nil || got.NoCluster || got.NoCleanup || got.RequireGPU ||
-		got.FailOnError != nil || got.Phases != nil ||
+		got.FailOnError != nil || got.FailFast != nil || got.Phases != nil ||
 		got.NodeSelector != nil || got.Tolerations != nil || got.ImagePullSecrets != nil {
 
 		t.Errorf("expected all zero, got %+v", got)
@@ -629,6 +629,7 @@ func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
 		Execution: &config.ValidateExecutionSpec{
 			Phases:      []string{"deployment", "conformance"},
 			FailOnError: &tr,
+			FailFast:    &tr,
 			NoCluster:   true,
 			NoCleanup:   true,
 			Timeout:     "5m",
@@ -660,6 +661,9 @@ func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
 	}
 	if got.FailOnError == nil || !*got.FailOnError {
 		t.Errorf("FailOnError = %v", got.FailOnError)
+	}
+	if got.FailFast == nil || !*got.FailFast {
+		t.Errorf("FailFast = %v, want true", got.FailFast)
 	}
 	if !got.NoCluster || !got.NoCleanup {
 		t.Errorf("flags = %+v", got)

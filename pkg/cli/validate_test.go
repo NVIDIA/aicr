@@ -155,6 +155,24 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 	}
 }
 
+func TestValidateCmdFlags_FailFastDefault(t *testing.T) {
+	cmd := validateCmd()
+	for _, f := range cmd.Flags {
+		if !hasFlag(f, "fail-fast") {
+			continue
+		}
+		bf, ok := f.(*cli.BoolFlag)
+		if !ok {
+			t.Fatal("--fail-fast should be a *cli.BoolFlag")
+		}
+		if bf.Value {
+			t.Error("--fail-fast default should be false")
+		}
+		return
+	}
+	t.Error("--fail-fast flag not found in validateCmd flags")
+}
+
 func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 	tests := []struct {
 		name        string

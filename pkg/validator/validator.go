@@ -157,9 +157,10 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
 	}
 }
 
-// ValidatePhases runs the specified phases sequentially. If a phase fails,
-// subsequent phases are skipped. Returns one PhaseResult per phase.
-// Pass nil or empty phases to run all phases.
+// ValidatePhases runs the specified phases sequentially and returns one
+// PhaseResult per phase. Pass nil or empty phases to run all phases.
+// By default all phases run and produce results regardless of failures.
+// Set FailFast to stop after the first phase that reports StatusFailed.
 func (v *Validator) ValidatePhases(
 	ctx context.Context,
 	phases []Phase,
@@ -196,8 +197,30 @@ func (v *Validator) ValidatePhases(
 	defer close(cs.stopCh)
 	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
+	results, err := v.runPhases(ctx, func(phase Phase) (*PhaseResult, error) {
+		return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
+	}, cat, phases)
+	if err != nil {
+		return results, err
+	}
+
+	slog.Info("all phases completed", "runID", v.RunID, "phases", len(results))
+	return results, nil
+}
+
+// runPhases drives the phase loop for ValidatePhases. It is extracted
+// as a separate method so the orchestration logic (fail-fast, skip
+// recording) can be unit-tested without a live cluster by injecting a
+// fake runner.
+func (v *Validator) runPhases(
+	ctx context.Context,
+	runner func(Phase) (*PhaseResult, error),
+	cat *catalog.ValidatorCatalog,
+	phases []Phase,
+) ([]*PhaseResult, error) {
+
 	results := make([]*PhaseResult, 0, len(phases))
-	overallFailed := false
+	anyFailed := false
 
 	for _, phase := range phases {
 		select {
@@ -206,26 +229,23 @@ func (v *Validator) ValidatePhases(
 		default:
 		}
 
-		if overallFailed {
-			// Skip with a CTRF report showing all validators as skipped
+		if anyFailed && v.FailFast {
 			pr := v.phaseSkipped(cat, phase, "skipped due to previous phase failure")
 			results = append(results, pr)
-			slog.Info("skipping phase due to previous failure", "phase", phase)
+			slog.Info("skipping phase due to fail-fast", "phase", phase)
 			continue
 		}
 
-		pr, phaseErr := v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
+		pr, phaseErr := runner(phase)
 		if phaseErr != nil {
 			return results, phaseErr
 		}
 		results = append(results, pr)
 
 		if pr.Status == ctrf.StatusFailed {
-			overallFailed = true
+			anyFailed = true
 		}
 	}
-
-	slog.Info("all phases completed", "runID", v.RunID, "phases", len(results))
 	return results, nil
 }
 

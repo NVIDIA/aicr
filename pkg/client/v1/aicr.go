@@ -1130,9 +1130,10 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 //     failures surface as ErrCodeInvalidRequest, infrastructure
 //     failures as ErrCodeInternal.
 //
-// Phase-by-phase short-circuiting matches pkg/validator.ValidatePhases:
-// when one phase fails, subsequent phases are reported as skipped
-// rather than executed. Callers wanting per-phase control can
+// All phases run by default and produce results regardless of earlier
+// failures. Pass WithValidationFailFast(true) to stop after the first
+// failed phase (useful for skipping expensive checks like inference-perf
+// when deployment already failed). Callers wanting per-phase control can
 // reach into pkg/validator.ValidatePhase directly.
 func (c *Client) ValidateState(
 	ctx context.Context,

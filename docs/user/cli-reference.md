@@ -630,6 +630,7 @@ aicr validate [flags]
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
+| `--fail-fast` | | bool | false | Stop after the first phase that fails. By default all phases run and produce results. |
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`), or stdout |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (used when `--recipe`, `--snapshot`, or `--output` is a ConfigMap URI) |
 | `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
@@ -669,7 +670,7 @@ Validation can be run in different phases to validate different aspects of the d
 | `deployment` | Validates component deployment completeness plus post-install GPU readiness signals (see below) | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
-| `all` | Runs all phases sequentially with dependency logic | Complete end-to-end validation |
+| `all` | Runs all phases sequentially; results collected regardless of failures | Complete end-to-end validation |
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
 
@@ -689,7 +690,7 @@ The `deployment` phase verifies that the cluster is actually ready for GPU workl
 
 **Phase Dependencies:**
 - Phases run sequentially when using `--phase all`
-- If a phase fails, subsequent phases are skipped
+- All phases run by default and produce results regardless of earlier failures. Use `--fail-fast` to stop after the first phase that fails (e.g., to skip a 65-minute inference-perf run when deployment already failed).
 - Use individual phases for targeted validation during specific deployment stages
 
 #### Constraint Format

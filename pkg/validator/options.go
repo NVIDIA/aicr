@@ -122,3 +122,12 @@ func WithDataProvider(dp recipe.DataProvider) Option {
 		v.dataProvider = dp
 	}
 }
+
+// WithFailFast controls whether ValidatePhases stops after the first phase
+// that reports StatusFailed. Default: false (all phases run regardless of
+// earlier failures). Set true to restore the historical fail-fast behavior.
+func WithFailFast(failFast bool) Option {
+	return func(v *Validator) {
+		v.FailFast = failFast
+	}
+}

@@ -36,8 +36,9 @@ const (
 	PhaseConformance = v1.PhaseConformance
 )
 
-// PhaseOrder defines the mandatory execution order.
-// If a phase fails, subsequent phases are skipped.
+// PhaseOrder defines the execution order for ValidatePhases.
+// All phases run by default; set Validator.FailFast to stop after the
+// first phase that reports StatusFailed.
 //
 // Note: Readiness phase is NOT included. It remains in pkg/validator
 // and uses inline constraint evaluation (no containers).

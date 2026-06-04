@@ -54,8 +54,9 @@ const (
 	// cluster has no default SC (which would otherwise leave the PVC Pending until
 	// the populate-Job timeout). The beta key is still emitted by older clusters /
 	// installers, so both are honored.
-	defaultStorageClassAnnotation     = "storageclass.kubernetes.io/is-default-class"
-	defaultStorageClassAnnotationBeta = "storageclass.beta.kubernetes.io/is-default-class"
+	defaultStorageClassAnnotation      = "storageclass.kubernetes.io/is-default-class"
+	defaultStorageClassAnnotationBeta  = "storageclass.beta.kubernetes.io/is-default-class"
+	defaultStorageClassAnnotationValue = "true"
 
 	// envModelCacheStorageClass sets the StorageClass for the cache PVC.
 	// Required on clusters without a default StorageClass — otherwise the PVC
@@ -164,7 +165,7 @@ func clusterHasDefaultStorageClass(ctx *validators.Context) (bool, error) {
 	}
 	for i := range scs.Items {
 		ann := scs.Items[i].Annotations
-		if ann[defaultStorageClassAnnotation] == "true" || ann[defaultStorageClassAnnotationBeta] == "true" {
+		if ann[defaultStorageClassAnnotation] == defaultStorageClassAnnotationValue || ann[defaultStorageClassAnnotationBeta] == defaultStorageClassAnnotationValue {
 			return true, nil
 		}
 	}
