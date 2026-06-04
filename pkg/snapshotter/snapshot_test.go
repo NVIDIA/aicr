@@ -460,6 +460,82 @@ func TestHasGPUData(t *testing.T) {
 	}
 }
 
+func TestDetectGPUPlacementMismatch(t *testing.T) {
+	gpuPresent := func(key string) *Snapshot {
+		return &Snapshot{Measurements: []*measurement.Measurement{
+			{Type: measurement.TypeNodeTopology, Subtypes: []measurement.Subtype{{
+				Name: "label",
+				Data: map[string]measurement.Reading{
+					key: measurement.Str("true|node1,node2"),
+				},
+			}}},
+		}}
+	}
+
+	tests := []struct {
+		name string
+		snap *Snapshot
+		want bool
+	}{
+		{
+			name: "no GPU data and topology has gpu.present label — mismatch detected",
+			snap: gpuPresent("nvidia.com/gpu.present"),
+			want: true,
+		},
+		{
+			name: "no GPU data and topology has disambiguated gpu.present.true label — mismatch detected",
+			snap: gpuPresent("nvidia.com/gpu.present.true"),
+			want: true,
+		},
+		{
+			name: "no GPU data and topology has gpu.product label — mismatch detected",
+			snap: gpuPresent("nvidia.com/gpu.product.NVIDIA-H100-80GB-HBM3"),
+			want: true,
+		},
+		{
+			name: "GPU data present — no mismatch",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeGPU, Subtypes: []measurement.Subtype{{
+					Name: "smi",
+					Data: map[string]measurement.Reading{measurement.KeyGPUCount: measurement.Int(2)},
+				}}},
+				{Type: measurement.TypeNodeTopology, Subtypes: []measurement.Subtype{{
+					Name: "label",
+					Data: map[string]measurement.Reading{
+						"nvidia.com/gpu.present": measurement.Str("true|node1"),
+					},
+				}}},
+			}},
+			want: false,
+		},
+		{
+			name: "no GPU data and no topology GPU labels — no mismatch (pre-Operator cluster)",
+			snap: &Snapshot{Measurements: []*measurement.Measurement{
+				{Type: measurement.TypeNodeTopology, Subtypes: []measurement.Subtype{{
+					Name: "label",
+					Data: map[string]measurement.Reading{
+						"kubernetes.io/hostname": measurement.Str("node1|node1"),
+					},
+				}}},
+			}},
+			want: false,
+		},
+		{
+			name: "empty snapshot — no mismatch",
+			snap: NewSnapshot(),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectGPUPlacementMismatch(tt.snap)
+			if got != tt.want {
+				t.Errorf("detectGPUPlacementMismatch() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseOSEnv(t *testing.T) {
 	// "unset" is the truly-absent case (the env var is removed). The other
 	// cases set AICR_OS to a literal value via t.Setenv.

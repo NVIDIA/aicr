@@ -255,3 +255,55 @@ func verifyGPUCollected(snap *Snapshot) error {
 	return errors.New(errors.ErrCodeNotFound,
 		"--require-gpu was set but no GPU was detected (neither NFD PCI enumeration nor nvidia-smi found GPUs)")
 }
+
+// labelPrefixesGPUNodes are NFD/GFD label key prefixes that indicate
+// GPU-capable nodes. Clusters without GPU Operator + NFD are not detected.
+var labelPrefixesGPUNodes = []string{
+	"nvidia.com/gpu.present",
+	"nvidia.com/gpu.product",
+}
+
+// hasGPUNodesInTopology returns true when any topology label key is prefixed
+// with a known GPU node label (nvidia.com/gpu.present or nvidia.com/gpu.product).
+func hasGPUNodesInTopology(snap *Snapshot) bool {
+	for _, m := range snap.Measurements {
+		if m.Type != measurement.TypeNodeTopology {
+			continue
+		}
+		for _, st := range m.Subtypes {
+			if st.Name != "label" {
+				continue
+			}
+			for key := range st.Data {
+				for _, prefix := range labelPrefixesGPUNodes {
+					if strings.HasPrefix(key, prefix) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// detectGPUPlacementMismatch returns true when the snapshot has no GPU data
+// but the cluster topology shows GPU-capable nodes via NFD labels.
+// This indicates the agent Job likely ran on a non-GPU node.
+func detectGPUPlacementMismatch(snap *Snapshot) bool {
+	return !hasGPUData(snap) && hasGPUNodesInTopology(snap)
+}
+
+// warnOnGPUPlacementMismatch emits a slog.Warn when detectGPUPlacementMismatch
+// returns true, providing actionable remediation steps.
+func warnOnGPUPlacementMismatch(snap *Snapshot) {
+	if !detectGPUPlacementMismatch(snap) {
+		return
+	}
+	slog.Warn("snapshot has no GPU data but cluster topology shows GPU-capable nodes — agent likely ran on a non-GPU node",
+		slog.String("detection_note", "relies on nvidia.com/gpu.present/product labels (NFD); clusters without these labels are not detected"),
+		slog.String("fix_1", "--node-selector nvidia.com/gpu.present=true (after GPU Operator/NFD)"),
+		slog.String("fix_2", "--node-selector kubernetes.io/hostname=<gpu-node> (before GPU Operator)"),
+		slog.String("fix_3", "--require-gpu (requests nvidia.com/gpu resource; needs Device Plugin)"),
+		slog.String("fix_4", "--runtime-class nvidia (nvidia-smi access without consuming a GPU slot)"),
+	)
+}
