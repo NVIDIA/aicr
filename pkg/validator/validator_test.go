@@ -50,6 +50,9 @@ func TestNewDefaults(t *testing.T) {
 	if len(v.Tolerations) != 1 || v.Tolerations[0].Operator != corev1.TolerationOpExists {
 		t.Errorf("Tolerations should default to tolerate-all, got %v", v.Tolerations)
 	}
+	if v.FailFast {
+		t.Error("FailFast should default to false")
+	}
 }
 
 func TestNewWithOptions(t *testing.T) {
@@ -408,5 +411,12 @@ func TestExtractResultSummaries(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWithFailFast_SetsField(t *testing.T) {
+	v := New(WithFailFast(true))
+	if !v.FailFast {
+		t.Error("WithFailFast(true): FailFast should be true")
 	}
 }
