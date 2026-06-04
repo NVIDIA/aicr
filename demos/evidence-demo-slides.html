@@ -1,4 +1,20 @@
 <!DOCTYPE html>
+<!--
+ Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -145,8 +161,8 @@
   <div class="slide-inner">
     <div class="label">NVIDIA AI Cluster Runtime</div>
     <h1>Recipe evidence</h1>
-    <p class="lede">Signed, verifiable proof that a recipe passed <code class="inl">aicr validate</code> on real
-      hardware — reviewable without re-running it.</p>
+    <p class="lede">Signed, non-falsifiable. and verifiable proof that a recipe passed <code class="inl">aicr validate</code> 
+      without access to that service/hardware/OS/platform combination.</p>
     <div class="chips">
       <span class="chip"><b>Keyless</b> cosign + Fulcio</span>
       <span class="chip"><b>Public</b> Rekor transparency log</span>
@@ -162,9 +178,8 @@
   <div class="slide-inner">
     <div class="label">01 · The problem</div>
     <h2>The reachability gap</h2>
-    <p>AICR ships recipes across a large matrix of services, accelerators, operating systems, intents, and
-      platforms. No single team can access every combination — contributions for unreachable hardware either
-      stall or merge on trust.</p>
+    <p class="lede">AICR ships recipes across a large matrix of services, accelerators, operating systems, intents, and platforms. 
+      No single team can access every combination at all time — contributions for unreachable hardware either stall or get merged on trust alone.</p>
     <table class="r">
       <thead><tr><th>Dimension</th><th>Values</th></tr></thead>
       <tbody>
@@ -292,10 +307,10 @@
       </svg>
     </figure>
     <div class="note honest">
-      <span class="t">The honest scope</span>
+      <span class="t">What does that mean?</span>
       Evidence is <strong>signer-identity-bound, not cluster-physicality-bound</strong>. It proves <em>this identity
-      signed this (recipe, snapshot, results, BOM) tuple at this time</em> — tamper-evident and publicly logged — not
-      that the cluster physically existed. Closing that gap is a deferred follow-up. See ADR-007 §Trust model.
+      signed this (recipe, snapshot, results, BOM) combo at this time</em> — tamper-evident and publicly logged — not
+      that the cluster physically existed. Closing that gap is a deferred follow-up. See <a href="https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md#trust-model">Trust model</a> section in ADR-007.
     </div>
   </div>
 </section>
@@ -453,8 +468,8 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + SBOM on every published image and CLI binary, signed by NVIDIA CI. <code class="inl">demos/s3c.md</code></p></div>
-      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <code class="inl">demos/attestation.md</code></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + SBOM on every published image and CLI binary, signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
+      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
       <div class="mini"><h4>Recipe evidence</h4><p>The signed validation result for a recipe on real hardware, OCI-distributed with an in-tree pointer.</p></div>
       <div class="mini"><h4>Next, demand-driven</h4><p>Gate hardening to required · multi-cluster evidence per recipe · identity tiers.</p></div>
     </div>

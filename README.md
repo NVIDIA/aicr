@@ -20,6 +20,8 @@ Every AICR recipe is:
 - **Validated** — Passes automated constraint and compatibility checks before publishing.
 - **Reproducible** — Same inputs produce identical deployments every time.
 
+Every AICR recipe also carries two kinds of cryptographic proof: **where it came from** (provenance — signed by NVIDIA CI, verifiable offline) and **that it actually works on real hardware** (validity — including signed validation results from contributors with cluster access NVIDIA doesn't have). See [SECURITY.md](SECURITY.md) and the [bundle attestation](demos/bundle-attestation.md), [recipe evidence](demos/evidence.md), and [build provenance](demos/provenance.md) demos for the full chain.
+
 ## Quick Start
 
 ```bash
