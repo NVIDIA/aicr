@@ -21,6 +21,7 @@
 # Usage:  ./demos/<name>.sh
 #
 # Config (env vars; required ones fail fast, the rest default):
+#   BIN=/path/to/mycli     the binary the demo drives (default: mycli on PATH)
 #   REQUIRED_INPUT=...     required — <what it is>
 #   OPTIONAL_INPUT=foo     optional — <what it is> (default: foo)
 #   DEMO_NO_PAUSE=1        unattended: skip the "Press Enter" prompts
@@ -29,6 +30,7 @@
 set -euo pipefail
 
 # --- configuration (one block; override only what differs) --------------------
+BIN="${BIN:-mycli}"                 # the binary the demo drives (override: BIN=/path/to/mycli)
 REQUIRED_INPUT="${REQUIRED_INPUT:-}"
 OPTIONAL_INPUT="${OPTIONAL_INPUT:-foo}"
 WORKDIR="${WORKDIR:-/tmp/demo}"   # scratch for the pre-staged artifact
@@ -70,8 +72,13 @@ run_expect_fail() {
 }
 
 # --- preflight: validate inputs needed in ALL modes, fail fast ----------------
+# The binary is needed by every mode (setup AND the skip path), so check it here.
 # Inputs only the producer step needs are validated inside the producer branch
 # below — so a SKIP_SETUP=1 run doesn't demand inputs it won't use.
+if ! command -v "$BIN" >/dev/null 2>&1 && [ ! -x "$BIN" ]; then
+  printf '%sERROR: %q not found. Set BIN=/path/to/mycli.%s\n' "$RED" "$BIN" "$RESET" >&2
+  exit 1
+fi
 
 # === 1. FRAME — why this matters (no commands) ================================
 banner "Why this matters"
@@ -99,13 +106,13 @@ else
   banner "<slow setup step>"
   note "<what this produces — the multi-minute part>"
   pause "Press Enter to run <slow setup>"
-  run echo "replace with the producer command that writes $OUT, using $REQUIRED_INPUT"
+  run echo "replace with the producer command (e.g. \"$BIN\" ...) that writes $OUT, using $REQUIRED_INPUT"
 fi
 
 banner "<live step — fast>"
 note "<what this step proves>"
 pause "Press Enter to run <live step>"
-run echo "replace with the fast/consumer command that reads $OUT / $OPTIONAL_INPUT"
+run echo "replace with the fast/consumer command (e.g. \"$BIN\" ...) that reads $OUT / $OPTIONAL_INPUT"
 # A step whose failure IS the point (e.g. a safety refusal) uses run_expect_fail.
 
 # === 4. CLOSE — recap + pointers ==============================================

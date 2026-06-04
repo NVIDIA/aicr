@@ -1,6 +1,6 @@
 ---
 name: creating-guided-demos
-description: Use when building an interactive, self-paced walkthrough of a CLI or workflow (e.g. a demos/*.sh) — for driving a live demo to an audience, or for a user stepping through the flow themselves to learn or reproduce it.
+description: Scaffolds an interactive guided demo script (demos/*.sh), live or self-paced, with the Frame → Tell → Show → Close pattern. Triggers on "demo script", "guided walkthrough", "demos/*.sh", "live demo".
 ---
 
 # Creating Guided Demos
