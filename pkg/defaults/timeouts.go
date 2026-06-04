@@ -152,6 +152,12 @@ const (
 	// diagnostic — a slow apiserver shouldn't delay Job deploy, and the
 	// scheduler itself will eventually surface any mismatch as Pending.
 	PodAffinitySelectorLookupTimeout = 5 * time.Second
+
+	// GPUNodeDetectionTimeout bounds the pre-deployment node List call that
+	// checks for nvidia.com/gpu.present=true nodes. A single paginated List
+	// with limit=1 against a local apiserver is fast; 5s matches
+	// PodAffinitySelectorLookupTimeout (same best-effort preflight category).
+	GPUNodeDetectionTimeout = 5 * time.Second
 )
 
 // Local filesystem timeouts.
