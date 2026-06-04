@@ -1092,6 +1092,22 @@ func TestEmbeddedCatalog_InferencePerfEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q (HF_TOKEN forwarding would silently no-op)", v1.InferencePerfCheckName)
 }
 
+func TestEmbeddedCatalog_InferenceGatewayEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.InferenceGatewayCheckName {
+			if v.Phase != "conformance" {
+				t.Errorf("%q phase = %q, want conformance", v1.InferenceGatewayCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q (AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY forwarding would silently no-op)", v1.InferenceGatewayCheckName)
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {

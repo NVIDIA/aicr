@@ -360,6 +360,75 @@ func TestBuildJobPlan_ForwardsHFToken(t *testing.T) {
 	})
 }
 
+// TestBuildJobPlan_ForwardsScopedInferenceGatewayEnv verifies the
+// inference-gateway enforcement toggle is carried from the CLI process into the
+// validator Job where the conformance check actually reads it.
+func TestBuildJobPlan_ForwardsScopedInferenceGatewayEnv(t *testing.T) {
+	build := func(entry ValidatorEntry) map[string]string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		m := make(map[string]string)
+		for _, e := range plan.Env {
+			m[e.Name] = e.Value
+		}
+		return m
+	}
+
+	entry := ValidatorEntry{Name: InferenceGatewayCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+
+	t.Run("truthy value forwarded", func(t *testing.T) {
+		t.Setenv(requireScopedInferenceGatewayEnv, "true")
+		if got := build(entry)[requireScopedInferenceGatewayEnv]; got != "true" {
+			t.Errorf("%s env = %q, want true", requireScopedInferenceGatewayEnv, got)
+		}
+	})
+	t.Run("false value forwarded", func(t *testing.T) {
+		t.Setenv(requireScopedInferenceGatewayEnv, "false")
+		if got := build(entry)[requireScopedInferenceGatewayEnv]; got != "false" {
+			t.Errorf("%s env = %q, want false", requireScopedInferenceGatewayEnv, got)
+		}
+	})
+	t.Run("empty value omitted", func(t *testing.T) {
+		t.Setenv(requireScopedInferenceGatewayEnv, "")
+		if _, present := build(entry)[requireScopedInferenceGatewayEnv]; present {
+			t.Errorf("%s should not be in Job env when empty in orchestrator", requireScopedInferenceGatewayEnv)
+		}
+	})
+	t.Run("other entry omitted", func(t *testing.T) {
+		t.Setenv(requireScopedInferenceGatewayEnv, "true")
+		other := ValidatorEntry{Name: "pod-autoscaling", Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+		if _, present := build(other)[requireScopedInferenceGatewayEnv]; present {
+			t.Errorf("%s must not be forwarded to a non-inference-gateway validator", requireScopedInferenceGatewayEnv)
+		}
+	})
+	t.Run("catalog value cannot override forwarded value", func(t *testing.T) {
+		t.Setenv(requireScopedInferenceGatewayEnv, "true")
+		entry := ValidatorEntry{
+			Name:    InferenceGatewayCheckName,
+			Phase:   "conformance",
+			Image:   "img:v1",
+			Timeout: time.Minute,
+			Env:     []EnvVar{{Name: requireScopedInferenceGatewayEnv, Value: "false"}},
+		}
+		var values []string
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		for _, e := range plan.Env {
+			if e.Name == requireScopedInferenceGatewayEnv {
+				values = append(values, e.Value)
+			}
+		}
+		if len(values) != 1 || values[0] != "true" {
+			t.Errorf("%s env = %v, want exactly [true] (catalog value must be dropped)",
+				requireScopedInferenceGatewayEnv, values)
+		}
+	})
+}
+
 func TestBuildJobPlanWithDefaults(t *testing.T) {
 	// Test with minimal entry (no custom resources, no tolerations, no node selector)
 	entry := ValidatorEntry{

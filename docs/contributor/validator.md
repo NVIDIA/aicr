@@ -180,6 +180,7 @@ validators.Run(map[string]validators.CheckFunc{
 | `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved tag when the binary's stamped commit has no published image (e.g. `edge` or `sha-<commit>`). See [Validator image tags](#validator-image-tags). Forwarded to inner workloads (including `aiperf-bench`). |
 | `AICR_NODE_SELECTOR` | Comma-separated `key=value`; read via `ctx.NodeSelector` |
 | `AICR_TOLERATIONS` | Comma-separated `key=value:effect`; read via `ctx.Tolerations` |
+| `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | When truthy, the `inference-gateway` check fails if the gateway's `LoadBalancer` Service is open to `0.0.0.0/0` — its `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`). Default (unset): the open exposure is recorded and warned but the check still passes. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
 ClusterRoleBinding named `aicr-validator-<runID>`. Per-run naming

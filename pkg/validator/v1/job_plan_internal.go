@@ -30,14 +30,27 @@ import (
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
 
-// InferencePerfCheckName is the catalog name of the inference performance check.
-// Used to scope HF_TOKEN forwarding to that validator only (it is the sole
-// check that downloads models from Hugging Face). Exported so the catalog
-// package can assert (in TestEmbeddedCatalog_InferencePerfEntryExists) that an
-// embedded entry with this exact name exists — renaming the catalog entry
-// without updating this constant would otherwise silently no-op HF_TOKEN
-// forwarding with no test failure.
-const InferencePerfCheckName = "inference-perf"
+const (
+	// InferencePerfCheckName is the catalog name of the inference performance check.
+	// Used to scope HF_TOKEN forwarding to that validator only (it is the sole
+	// check that downloads models from Hugging Face). Exported so the catalog
+	// package can assert (in TestEmbeddedCatalog_InferencePerfEntryExists) that an
+	// embedded entry with this exact name exists — renaming the catalog entry
+	// without updating this constant would otherwise silently no-op HF_TOKEN
+	// forwarding with no test failure.
+	InferencePerfCheckName = "inference-perf"
+
+	// InferenceGatewayCheckName is the catalog name of the inference gateway
+	// check. Used to scope AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY forwarding to
+	// that validator only. Exported so the catalog package can assert (in
+	// TestEmbeddedCatalog_InferenceGatewayEntryExists) that an embedded entry
+	// with this exact name exists — renaming the catalog entry without updating
+	// this constant would otherwise silently no-op enforcement forwarding with
+	// no test failure.
+	InferenceGatewayCheckName = "inference-gateway"
+
+	requireScopedInferenceGatewayEnv = "AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY"
+)
 
 // buildEnv creates environment variables for the validator container.
 func buildEnv(
@@ -124,13 +137,22 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: "HF_TOKEN", Value: tok})
 	}
 
-	// Add catalog entry's custom env vars. HF_TOKEN is deliberately skipped here:
-	// the token must come only from the orchestrator's environment (forwarded
-	// above), never from the in-repo catalog — appending it from entry.Env would
-	// let a catalog value silently override the forwarded token (k8s takes the
-	// last duplicate), breaking that trust boundary.
+	// Forward the enforcement toggle for the inference-gateway exposure check
+	// into that validator pod. The check runs inside the Kubernetes Job, so it
+	// cannot observe the CLI process environment unless the orchestrator carries
+	// this value across here.
+	if v, ok := os.LookupEnv(requireScopedInferenceGatewayEnv); ok && v != "" && entry.Name == InferenceGatewayCheckName {
+		env = append(env, corev1.EnvVar{Name: requireScopedInferenceGatewayEnv, Value: v})
+	}
+
+	// Add catalog entry's custom env vars. Orchestrator-controlled env vars are
+	// deliberately skipped here: they must come only from the process
+	// environment (forwarded above), never from the in-repo catalog. Appending
+	// them from entry.Env would let a catalog value silently override the
+	// forwarded value (k8s takes the last duplicate), breaking that trust
+	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == "HF_TOKEN" {
+		if e.Name == "HF_TOKEN" || e.Name == requireScopedInferenceGatewayEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

@@ -92,6 +92,13 @@ The default is intentionally empty rather than a fixed CIDR: a baked-in range wo
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
 
+### Exposure guardrails
+
+Because the open-by-default load balancer is otherwise silent, AICR surfaces it in two places:
+
+- **Bundle-time warning.** When a bundle includes `agentgateway` with an unscoped `allowedSourceRanges` — empty, or including an any-source CIDR such as `0.0.0.0/0` or `::/0` — `aicr bundle` prints a warning that the inference-gateway will be provisioned open to `0.0.0.0/0`, with the remediation above. This mirrors the existing storage-class PVC warning and does not block bundle generation.
+- **Conformance check.** The `inference-gateway` conformance check (run during `aicr validate --phase conformance` on a live cluster) inspects the gateway's `LoadBalancer` Service and records its exposure as evidence — the source ranges if scoped, or an explicit "open to `0.0.0.0/0`" finding if not. By default an open gateway is a non-fatal warning (open-by-default is intentional). Set `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true` on the validator environment to escalate an open gateway to a check **failure** (fail-closed policy).
+
 ## Adding Components
 
 New components are added declaratively in `recipes/registry.yaml` — no Go code required. See the [Contributing Guide](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) and [Components](../contributor/component.md) docs for details.
