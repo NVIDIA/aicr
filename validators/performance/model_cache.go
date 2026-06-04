@@ -91,7 +91,7 @@ const (
 	// ResolveImage for registry-override parity is tracked in #1159. Note that
 	// registry parity alone is not air-gap support: the populate Job's
 	// snapshot_download still reaches huggingface.co for the weights.
-	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0"
+	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.2"
 
 	// Resource requests for the populate container. snapshot_download is
 	// network/IO-bound, not compute-bound, so requests stay small; they exist so

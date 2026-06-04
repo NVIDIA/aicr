@@ -18,7 +18,7 @@
 # No HuggingFace token required.
 #
 # Requires DYN_STORE_KV=mem and DYN_EVENT_PLANE=zmq because etcd/nats
-# are disabled in the dynamo-platform v0.9.0 deployment.
+# are disabled in the dynamo-platform v1.0.2 deployment.
 #
 # Usage:
 #   kubectl apply -f tests/manifests/dynamo-vllm-smoke-test.yaml -n dynamo-system
@@ -44,7 +44,7 @@ spec:
           value: zmq
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.2
     VllmDecodeWorker:
       componentType: worker
       replicas: 1
@@ -65,7 +65,7 @@ spec:
           - name: gpu
             resourceClaimName: vllm-smoke-gpu-claim
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.2
           workingDir: /workspace/examples/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args: ["--model", "Qwen/Qwen3-0.6B"]

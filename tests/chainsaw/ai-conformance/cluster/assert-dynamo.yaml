@@ -13,11 +13,11 @@
 # limitations under the License.
 
 # Assert Dynamo platform components are healthy.
-# Chart: dynamo-platform 0.9.0
+# Chart: dynamo-platform 1.0.2
 # Provides NVIDIA Dynamo inference serving: OpenAI-compatible endpoints,
 # KV-cache-aware routing, disaggregated prefill/decode, SLA-driven autoscaling.
 #
-# v0.9.0: etcd and NATS are disabled — Kubernetes-native discovery replaces
+# v1.0.2: etcd and NATS are disabled — Kubernetes-native discovery replaces
 # etcd, ZMQ event plane replaces NATS. Only operator and grove are deployed.
 
 # Dynamo Operator — manages DynamoComponent and DynamoGraphDeployment CRs
