@@ -243,20 +243,19 @@ func verifyGPUCollected(snap *Snapshot) error {
 }
 
 // hasGPUNodesInTopology returns true when any topology label key starts with
-// "nvidia.com/gpu." (covers both gpu.present and gpu.product NFD labels).
+// gpuNodeLabelPrefix (covers both gpu.present and gpu.product NFD labels).
 func hasGPUNodesInTopology(snap *Snapshot) bool {
 	for _, m := range snap.Measurements {
 		if m.Type != measurement.TypeNodeTopology {
 			continue
 		}
-		for _, st := range m.Subtypes {
-			if st.Name != "label" {
-				continue
-			}
-			for key := range st.Data {
-				if strings.HasPrefix(key, "nvidia.com/gpu.") {
-					return true
-				}
+		labels := m.GetSubtype("label")
+		if labels == nil {
+			continue
+		}
+		for key := range labels.Data {
+			if strings.HasPrefix(key, gpuNodeLabelPrefix) {
+				return true
 			}
 		}
 	}
