@@ -54,7 +54,7 @@ const (
 
 // hfTokenEnvVar is the environment variable name used to forward the
 // Hugging Face API token to the inference performance validator.
-const hfTokenEnvVar = "HF_TOKEN"
+const hfTokenEnvVar = "HF_TOKEN" //nolint:gosec // G101: env var name, not a hardcoded credential
 
 // buildEnv creates environment variables for the validator container.
 func buildEnv(
