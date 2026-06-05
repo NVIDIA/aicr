@@ -178,7 +178,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 		lastErr = validateErr
 		if lastErr == nil {
 			recordRawTextArtifact(ctx, "Apply test manifest",
-				"kubectl apply -f docs/conformance/cncf/manifests/hpa-gpu-scale-test.yaml",
+				"# cluster-autoscaling test resources (HPA + GPU deployment + Karpenter NodePool) constructed via the Kubernetes API; no static manifest",
 				fmt.Sprintf("Created namespace=%s deployment=%s hpa=%s for nodePool=%s",
 					report.Namespace, report.DeploymentName, report.HPAName, report.NodePoolName))
 			recordRawTextArtifact(ctx, "Cluster Autoscaling Behavioral Test",

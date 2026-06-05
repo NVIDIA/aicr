@@ -15,7 +15,7 @@
 # Gang scheduling test with PodGroup, DRA ResourceClaims, and KAI scheduler.
 # Demonstrates all-or-nothing scheduling: both pods must be scheduled together.
 # Requires: KAI scheduler with PodGroup CRD, DRA driver (gpu.nvidia.com)
-# Usage: kubectl apply -f pkg/evidence/scripts/manifests/gang-scheduling-test.yaml
+# Usage: kubectl apply -f pkg/evidence/cncf/scripts/manifests/gang-scheduling-test.yaml
 ---
 apiVersion: v1
 kind: Namespace

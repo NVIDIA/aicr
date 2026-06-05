@@ -92,13 +92,19 @@ per run. Per-phase containers are built from
 `recipes/validators/catalog.yaml` is the authoritative list.
 
 **Three phases**, evaluated in this fixed order
-(`pkg/validator/phases.go`):
+(`pkg/validator/phases.go`): **deployment → conformance → performance**.
 
 | Phase | Purpose | Example |
 |-------|---------|---------|
 | `deployment` | Components installed and healthy | GPU operator pods running |
-| `performance` | Cluster meets perf thresholds | NCCL bandwidth, AIPerf TTFT p99 |
 | `conformance` | Workload-specific requirements | DRA, gang scheduling, autoscaling |
+| `performance` | Cluster meets perf thresholds | NCCL bandwidth, AIPerf TTFT p99 |
+
+Performance runs **last** on purpose: its inference-perf benchmark saturates
+every GPU on the node and tears the DynamoGraphDeployment (and its DRA
+ResourceClaims) down asynchronously. Running it before conformance starved
+conformance's GPU-needing checks (notably `dra-support`, whose 1-GPU test pod
+failed to schedule with "cannot allocate all claims" on single-node clusters).
 
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is

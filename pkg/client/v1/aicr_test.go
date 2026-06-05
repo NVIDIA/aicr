@@ -1297,7 +1297,7 @@ func TestValidateState_PhaseSelection(t *testing.T) {
 		{
 			name:   "unset runs all phases",
 			phases: nil,
-			want:   []aicr.Phase{aicr.PhaseDeployment, aicr.PhasePerformance, aicr.PhaseConformance},
+			want:   []aicr.Phase{aicr.PhaseDeployment, aicr.PhaseConformance, aicr.PhasePerformance},
 		},
 	}
 

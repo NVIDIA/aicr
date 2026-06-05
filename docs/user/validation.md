@@ -2,8 +2,8 @@
 
 Task-oriented walkthrough for running `aicr validate` against a GPU cluster — from
 capturing a snapshot through interpreting results. Covers both training and
-inference workloads and all three validation phases (deployment, performance,
-conformance).
+inference workloads and all three validation phases (deployment, conformance,
+performance).
 
 For per-flag reference, see [CLI reference: aicr validate](cli-reference.md#aicr-validate).
 For the architectural view of how snapshot + recipe flow into the validator, see
@@ -14,8 +14,8 @@ For the architectural view of how snapshot + recipe flow into the validator, see
 | Phase | What it answers | Typical trigger |
 |-------|-----------------|-----------------|
 | `deployment` | Are the components the recipe asks for actually installed and healthy? | After `./deploy.sh` finishes, before running any workload |
-| `performance` | Does the cluster hit expected bandwidth / throughput thresholds? | After components are ready; before going to production |
 | `conformance` | Does the cluster support workload-specific capabilities (DRA, gang scheduling, autoscaling, ...)? | Before opening the cluster to real workloads |
+| `performance` | Does the cluster hit expected bandwidth / throughput thresholds? | After components are ready; before going to production |
 
 Readiness pre-flight constraints (K8s version, OS, kernel) run implicitly before
 any phase. If pre-flight fails, no validator Jobs are deployed.
@@ -265,7 +265,7 @@ Guards fire before any cluster mutation, so skips are cheap (typically < 10 s).
 
 ```bash
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
-# equivalent to: --phase deployment --phase performance --phase conformance
+# equivalent to: --phase deployment --phase conformance --phase performance
 ```
 
 Phases run sequentially. By default all phases run and produce results

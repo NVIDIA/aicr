@@ -242,7 +242,7 @@ EOF
 
 Deploy a test pod that requests 1 GPU via ResourceClaim and verifies device access.
 
-**Test manifest:** `pkg/evidence/scripts/manifests/dra-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/cncf/scripts/manifests/dra-gpu-test.yaml`
 EOF
     echo '```yaml' >> "${EVIDENCE_FILE}"
     cat "${SCRIPT_DIR}/manifests/dra-gpu-test.yaml" >> "${EVIDENCE_FILE}"
@@ -311,7 +311,7 @@ EOF
 Deploy a PodGroup with minMember=2 and two GPU pods. KAI scheduler ensures both
 pods are scheduled atomically.
 
-**Test manifest:** `pkg/evidence/scripts/manifests/gang-scheduling-test.yaml`
+**Test manifest:** `pkg/evidence/cncf/scripts/manifests/gang-scheduling-test.yaml`
 EOF
     echo '```yaml' >> "${EVIDENCE_FILE}"
     cat "${SCRIPT_DIR}/manifests/gang-scheduling-test.yaml" >> "${EVIDENCE_FILE}"
@@ -1824,7 +1824,7 @@ EOF
 Deploy a GPU workload running CUDA N-Body Simulation to generate sustained GPU utilization,
 then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
-**Test manifest:** `pkg/evidence/scripts/manifests/hpa-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/cncf/scripts/manifests/hpa-gpu-test.yaml`
 EOF
     echo '```yaml' >> "${EVIDENCE_FILE}"
     cat "${SCRIPT_DIR}/manifests/hpa-gpu-test.yaml" >> "${EVIDENCE_FILE}"

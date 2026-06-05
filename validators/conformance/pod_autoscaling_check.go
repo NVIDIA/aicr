@@ -185,7 +185,7 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 		return err
 	}
 	recordRawTextArtifact(ctx, "Apply test manifest",
-		"kubectl apply -f docs/conformance/cncf/manifests/hpa-gpu-test.yaml",
+		"kubectl apply -f pkg/evidence/cncf/scripts/manifests/hpa-gpu-test.yaml",
 		fmt.Sprintf("Created namespace=%s deployment=%s hpa=%s via Kubernetes API",
 			hpaReport.Namespace, hpaReport.DeploymentName, hpaReport.HPAName))
 	recordRawTextArtifact(ctx, "HPA Behavioral Test",

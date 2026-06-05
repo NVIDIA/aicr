@@ -90,7 +90,11 @@ const (
 	PhaseConformance Phase = "conformance"
 )
 
-// AllPhases is the canonical iteration order for deterministic output.
+// AllPhases is the canonical iteration order for deterministic attestation
+// output. It is intentionally fixed and independent of the validator's
+// execution order (pkg/validator.PhaseOrder, which runs performance last) —
+// freezing it keeps attestation predicate bytes reproducible across releases
+// regardless of execution-order changes.
 var AllPhases = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
 
 // Predicate is the body of the signed in-toto Statement. It serializes

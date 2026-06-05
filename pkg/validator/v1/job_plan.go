@@ -169,7 +169,7 @@ func Plan(
 	}
 
 	// Iterate through all phases
-	phases := []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
+	phases := []Phase{PhaseDeployment, PhaseConformance, PhasePerformance}
 	for _, phase := range phases {
 		// Get all entries for this phase
 		allEntries := cat.ForPhase(phase)
