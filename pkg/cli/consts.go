@@ -49,6 +49,7 @@ const (
 	flagOIDCDeviceFlow = "oidc-device-flow"
 	flagFulcioURL      = "fulcio-url"
 	flagRekorURL       = "rekor-url"
+	flagSigningKey     = "signing-key"
 	flagInsecureTLS    = "insecure-tls"
 	flagPlainHTTP      = "plain-http"
 	flagPush           = "push"

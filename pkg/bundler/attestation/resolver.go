@@ -55,6 +55,13 @@ type ResolveOptions struct {
 	FulcioURL string
 	RekorURL  string
 
+	// SigningKey selects KMS-backed (key-based) signing instead of keyless OIDC.
+	// When non-empty it is a cosign-style KMS URI (awskms:// | gcpkms:// |
+	// azurekms://) and takes precedence over all OIDC source fields, which are
+	// keyless-only. Mutual exclusivity with the keyless flags is enforced at the
+	// CLI boundary (pkg/cli). See issue #407.
+	SigningKey string
+
 	// PromptWriter receives user-facing prompts emitted by the interactive
 	// and device-code flows (verification URL + short code). Pass os.Stderr
 	// for typical CLI behavior, io.Discard to suppress, or nil (treated as
@@ -106,6 +113,9 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 	if !opts.Attest {
 		return NewNoOpAttester(), nil
 	}
+	if opts.SigningKey != "" {
+		return NewKMSAttester(opts.SigningKey, opts.RekorURL), nil
+	}
 	token, err := ResolveOIDCToken(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -130,6 +140,9 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 func ResolveAttesterLazy(_ context.Context, opts ResolveOptions) (Attester, error) {
 	if !opts.Attest {
 		return NewNoOpAttester(), nil
+	}
+	if opts.SigningKey != "" {
+		return NewKMSAttester(opts.SigningKey, opts.RekorURL), nil
 	}
 	return NewLazyKeylessAttester(opts), nil
 }

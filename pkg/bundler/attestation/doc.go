@@ -12,13 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package attestation provides bundle attestation using Sigstore keyless signing.
+// Package attestation provides bundle attestation using Sigstore signing.
 //
-// It implements the Attester interface with two implementations:
+// It implements the Attester interface with three implementations:
 //   - KeylessAttester: Signs using OIDC-based Fulcio certificates and logs to Rekor.
 //     The OIDC token can come from any of the helpers below or be supplied directly
 //     by the caller (e.g., a token fetched out of band).
+//   - KMSAttester: Signs with a cloud-KMS-backed key (awskms:// | gcpkms:// |
+//     azurekms://) instead of OIDC, for CI/CD environments without an OIDC token.
+//     The resulting Sigstore bundle carries public-key verification material (no
+//     Fulcio certificate) and, by default, still logs to Rekor.
 //   - NoOpAttester: Returns nil (used when --attest is not set).
+//
+// # Signing Composition
+//
+// Signing decomposes into two orthogonal, composable axes consumed by the
+// SignStatementWith primitive:
+//   - SigningIdentity (identity.go): supplies the signing keypair and, for
+//     keyless, the Fulcio certificate provider. keylessIdentity uses an
+//     ephemeral key + Fulcio; kmsIdentity uses a KMS key and no certificate.
+//   - TransparencyPolicy (transparency.go): selects the Rekor transparency log
+//     or none (the latter reserved for offline/air-gapped signing, #409).
+//
+// SignStatement is the keyless specialization (keyless identity + Rekor);
+// KMSAttester pairs a KMS identity with Rekor. This keeps the keyless and KMS
+// paths a single composition apart rather than parallel code.
+//
+// HashiCorp Vault (hashivault://) is intentionally unsupported: its client
+// libraries are MPL-2.0, which this project's license policy disallows.
 //
 // Attestations use industry-standard formats:
 //   - DSSE (Dead Simple Signing Envelope) as the transport format
@@ -48,9 +69,11 @@
 // package stays usable from non-CLI consumers (pass io.Discard to suppress
 // or os.Stderr for typical CLI behavior).
 //
-// ResolveAttester walks the four-tier source precedence (identity-token →
-// ambient → device-flow → interactive) and returns a ready-to-use Attester.
-// CLI/API callers should populate ResolveOptions from their own surface
-// (flags, env vars, request bodies) and call ResolveAttester rather than
-// re-implementing the precedence — the resolver itself reads no environment.
+// ResolveAttester returns a ready-to-use Attester from ResolveOptions. A
+// non-empty SigningKey selects the KMS path (KMSAttester); otherwise it walks
+// the four-tier keyless OIDC source precedence (identity-token → ambient →
+// device-flow → interactive). CLI/API callers should populate ResolveOptions
+// from their own surface (flags, env vars, request bodies) and call
+// ResolveAttester rather than re-implementing the precedence — the resolver
+// itself reads no environment.
 package attestation
