@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "0"
+    name: gpu-operator
+    namespace: argocd
+spec:
+    destination:
+        namespace: gpu-operator
+        server: https://kubernetes.default.svc
+    project: default
+    source:
+        chart: gpu-operator
+        helm:
+            values: |-
+                {{- $static := (.Files.Get "static/gpu-operator.yaml") | fromYaml | default dict -}}
+                {{- $dynamic := index .Values "gpuoperator" | default dict -}}
+                {{- mustMergeOverwrite $static $dynamic | toYaml | nindent 16 }}
+        repoURL: https://helm.ngc.nvidia.com/nvidia
+        targetRevision: 25.3.3
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+        syncOptions:
+            - CreateNamespace=true
+            - ServerSideApply=true

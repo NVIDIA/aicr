@@ -1126,6 +1126,7 @@ aicr bundle [flags]
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
+| `--readiness-hooks` | | bool | Emit a per-component readiness gate (`NNN-<name>-readiness/`) for each component that ships a `recipes/components/<name>/readiness.yaml` Chainsaw test. The gate runs as a post-component Job so the deploy blocks on component-specific readiness signals (e.g. `ClusterPolicy` state). Supported with `--deployer helm`, `argocd`, and `argocd-helm`. Off by default. See [Readiness Gates](#readiness-gates). |
 | `--flux-oci-source-name` | | string | Name of the OCIRepository CR that Flux uses to pull the bundle (default: `aicr-bundle`). Used with `--deployer flux` and OCI output. Must match the OCIRepository deployed in the target cluster. See [Flux OCI Mode](#flux-oci-mode). |
 | `--flux-namespace` | | string | Kubernetes namespace where Flux CRs (HelmRelease, sources, ArtifactGenerator) are deployed (default: `flux-system`). Must match the namespace of the Flux installation in the target cluster. |
 | `--app-name` | | string | Parent Argo Application name (default: `aicr-stack` for `--deployer argocd-helm`, `nvidia-stack` for `--deployer argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `--deployer argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected on other deployers (`helm`, `flux`, `helmfile`). |
@@ -1533,6 +1534,25 @@ aicr bundle --recipe recipe.yaml --vendor-charts -o ./bundle
 HELM_REPOSITORY_USERNAME=robot \
 HELM_REPOSITORY_PASSWORD=secret \
   aicr bundle --recipe recipe.yaml --vendor-charts -o ./bundle
+```
+
+#### Readiness Gates
+
+The `--readiness-hooks` flag makes a deploy block on **component-specific readiness signals** rather than just the chart's own resources reporting Ready. A component opts in by shipping a `recipes/components/<name>/readiness.yaml` Chainsaw test that asserts the signal that actually means "ready" — for example, `gpu-operator` waits for its `ClusterPolicy` to reach `status.state: ready`, which Helm and Argo CD cannot assess natively.
+
+With the flag set, the bundler emits an extra folder, `NNN-<name>-readiness/`, immediately after each opted-in component. The folder is a small chart containing a Kubernetes `Job` (plus the ServiceAccount/RBAC and a ConfigMap holding the Chainsaw test). The Job runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`, which embeds Chainsaw), which polls the test until it passes continuously for a stability window or a `--max-wait` ceiling elapses. The deploy blocks on that Job:
+
+- **`helm`** — `deploy.sh` runs the readiness folder with `helm upgrade --install --wait`. The gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`, so the latter is not needed. Helm's own `--timeout` is derived by the bundler from the gate's `--max-wait` plus a buffer, so the gate owns the deadline (Helm never preempts it).
+- **`argocd` / `argocd-helm`** — the readiness folder inherits the next sync-wave after its component, and Argo CD blocks that wave on the gate Job via its built-in `batch/Job` health (Progressing → Healthy on success, Degraded on failure). No custom health Lua and no direct `ClusterPolicy` watch — the readiness logic stays encapsulated in the Chainsaw test the Job runs.
+
+`flux` and `helmfile` are not yet supported and `--readiness-hooks` is rejected for them. Components without a `readiness.yaml` are unaffected. The gate image tracks the Chainsaw version pinned in `.settings.yaml`, so the in-cluster gate runs the same Chainsaw AICR validates with.
+
+```bash
+# Deploy and block on each component's readiness gate (helm)
+aicr bundle --recipe recipe.yaml --readiness-hooks -o ./bundle
+
+# Same, generating an Argo CD app-of-apps that gates per sync-wave
+aicr bundle --recipe recipe.yaml --readiness-hooks --deployer argocd -o ./bundle
 ```
 
 #### Dynamic Install-Time Values

@@ -247,6 +247,15 @@ type Config struct {
 	// each must supply a distinct appName so the parent Applications do not
 	// collide. See #1011.
 	appName string
+
+	// readinessHooks emits a standalone per-component readiness gate chart
+	// (NNN-<name>-readiness/) for each component that ships a
+	// recipes/components/<name>/readiness.yaml chainsaw Test. The chart runs
+	// the gate CLI as a post-component Job so deployers block on
+	// component-specific readiness signals (e.g. ClusterPolicy.status.state)
+	// that Helm/Argo CD/Flux cannot assess natively. Off by default so
+	// existing bundle output is unchanged; opt-in via --readiness-hooks. See #904.
+	readinessHooks bool
 }
 
 // Getter methods for read-only access
@@ -454,6 +463,13 @@ func (c *Config) BundleChartName() string {
 // and argocd deployers. Empty means "use the deployer's default". See #1011.
 func (c *Config) AppName() string {
 	return c.appName
+}
+
+// ReadinessHooks reports whether per-component readiness gate charts should
+// be emitted for components that ship a readiness.yaml. Off by default;
+// opt-in via --readiness-hooks on the CLI. See #904.
+func (c *Config) ReadinessHooks() bool {
+	return c.readinessHooks
 }
 
 // Validate checks if the Config has valid settings.
@@ -720,6 +736,17 @@ func WithBundleChartName(name string) Option {
 func WithAppName(name string) Option {
 	return func(c *Config) {
 		c.appName = name
+	}
+}
+
+// WithReadinessHooks enables emission of per-component readiness gate charts
+// for components that ship a recipes/components/<name>/readiness.yaml. Off by
+// default; when enabled, each such component gets a standalone
+// NNN-<name>-readiness/ chart that runs the gate CLI as a post-component Job.
+// See #904.
+func WithReadinessHooks(enabled bool) Option {
+	return func(c *Config) {
+		c.readinessHooks = enabled
 	}
 }
 

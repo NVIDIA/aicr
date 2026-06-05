@@ -276,6 +276,49 @@ const (
 	AssertRetryInterval = 5 * time.Second
 )
 
+// Readiness gate (deploy-time) configuration drives the `gate` CLI Job the
+// bundler emits for components that ship a readiness.yaml (see #904). The gate
+// re-runs the component's chainsaw Test in a poll loop until it passes
+// continuously for the stability window, or the max-wait deadline elapses.
+const (
+	// ReadinessGateExecTimeout bounds a single chainsaw exec inside the gate's
+	// poll loop. It only needs to cover one assert pass (the test's own
+	// spec.timeouts.assert), not the whole convergence — the gate owns the
+	// outer retry loop via ReadinessGateMaxWait.
+	ReadinessGateExecTimeout = 2 * time.Minute
+
+	// ReadinessGatePollInterval is the sleep between gate evaluations.
+	ReadinessGatePollInterval = 10 * time.Second
+
+	// ReadinessGateStabilityWindow is the continuous-pass duration the gate
+	// requires before declaring readiness, absorbing transient flaps in a
+	// CRD's status during rollout.
+	ReadinessGateStabilityWindow = 30 * time.Second
+
+	// ReadinessGateMaxWait is the gate's deadline — the single knob that owns
+	// how long a deploy blocks on component readiness. Sized for the slowest
+	// component gated today (gpu-operator, whose operand rollout — driver,
+	// toolkit, and device-plugin across every GPU node — can exceed an hour
+	// on a large cluster). The gate exits non-zero if this elapses before
+	// readiness.
+	ReadinessGateMaxWait = 90 * time.Minute
+
+	// ReadinessGateHelmTimeoutBuffer is added to ReadinessGateMaxWait to derive
+	// the helm --timeout for the gate's install. Helm cannot wait
+	// indefinitely — --wait/--wait-for-jobs is bounded by --timeout (default
+	// 5m; --timeout 0 is not infinite) — so the bundler sets
+	// helm --timeout = ReadinessGateMaxWait + this buffer. Large enough that
+	// helm never preempts the gate, small enough to still surface a genuinely
+	// hung gate process shortly after its own deadline.
+	ReadinessGateHelmTimeoutBuffer = 5 * time.Minute
+
+	// ReadinessGateBackoffLimit is the Kubernetes Job backoffLimit for the gate
+	// Job. The gate CLI handles its own retry loop internally; this limit
+	// absorbs transient pod disruption (drain, evict, OOM) by allowing the Job
+	// controller to create a fresh pod without failing the deploy outright.
+	ReadinessGateBackoffLimit = 6
+)
+
 // Conformance test timeouts for DRA and gang scheduling validation.
 const (
 	// CheckExecutionTimeout is the parent context timeout for checks running

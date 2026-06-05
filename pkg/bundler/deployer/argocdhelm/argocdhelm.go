@@ -188,6 +188,15 @@ type Generator struct {
 	// manifestFiles (today's broken behavior for manifest-only components).
 	ComponentPostManifests map[string]map[string][]byte
 
+	// ComponentReadiness maps component name → manifest path → rendered bytes
+	// for the per-component readiness gate. Forwarded to the delegated
+	// argocd.Generator, which emits it as a folder after the component's
+	// primary chart so the child Application inherits the next sync-wave and
+	// Argo CD blocks on the gate Job via built-in batch/Job health. Populated
+	// by the bundler from readiness.yaml only when --readiness-hooks is set.
+	// See #904.
+	ComponentReadiness map[string]map[string][]byte
+
 	// VendorCharts pulls upstream Helm chart bytes into the bundle at
 	// bundle time so the resulting artifact is air-gap deployable.
 	// Forwarded to the delegated argocd.Generator. Off by default.
@@ -241,6 +250,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		IncludeChecksums:       false, // we generate our own checksums
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
+		ComponentReadiness:     g.ComponentReadiness,
 		DynamicValues:          g.DynamicValues,
 		// Opt into the DynamicValues split: per-component values.yaml has
 		// dynamic paths removed; argocdhelm surfaces those paths at the
@@ -641,22 +651,23 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 			continue
 		}
 
-		// Mixed components emit synthetic `-pre` and `-post` folders for raw
-		// manifests that bracket the primary upstream-helm folder. Neither
-		// suffixed folder is a registered component on its own — both
-		// inherit overrides from the parent (e.g., 006-gpu-operator-pre and
-		// 010-gpu-operator-post both flow from gpu-operator). Resolve the
-		// parent before looking up the override key; if neither suffix
-		// matches a registered component, keep the original name and let
-		// resolveOverrideKey surface the registry miss.
+		// Components emit synthetic `-pre`, `-post`, and `-readiness` folders
+		// that bracket the primary upstream-helm folder. None of these
+		// suffixed folders is a registered component on its own — all inherit
+		// overrides from the parent (e.g., 006-gpu-operator-pre,
+		// 010-gpu-operator-post, and 011-gpu-operator-readiness all flow from
+		// gpu-operator). Resolve the parent before looking up the override
+		// key; if no suffix matches a registered component, keep the original
+		// name and let resolveOverrideKey surface the registry miss.
 		//
-		// Symmetry note: the previous version handled only `-post`. Recipes
-		// with PreManifestFiles (e.g. the gke-cos OS overlay's gpu-driver
-		// toolkit prereq) synthesize a `-pre` folder; without the matching
-		// strip, resolveOverrideKey was called with "gpu-operator-pre" and
-		// failed `component %q not found in registry` at bundle time.
+		// Symmetry note: an earlier version handled only `-post`, then `-pre`
+		// (PreManifestFiles, e.g. the gke-cos OS overlay's gpu-driver toolkit
+		// prereq). `-readiness` (--readiness-hooks, see #904) joins them:
+		// without the matching strip, resolveOverrideKey was called with
+		// "gpu-operator-readiness" and failed `component %q not found in
+		// registry` at bundle time.
 		parentComponent := folderComponent
-		for _, suffix := range []string{"-pre", "-post"} {
+		for _, suffix := range []string{"-pre", "-post", "-readiness"} {
 			if base, ok := strings.CutSuffix(folderComponent, suffix); ok {
 				if findComponentByName(g.RecipeResult.ComponentRefs, base) {
 					parentComponent = base

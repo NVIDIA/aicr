@@ -29,7 +29,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -985,6 +987,56 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 	}
 }
 
+// TestBundleGolden_ReadinessGate freezes the argocd-helm bundle output when a
+// component ships a readiness gate. The delegated argocd.Generator emits a
+// 002-<name>-readiness/ local-helm folder after the primary; the argocdhelm
+// transform flips it into a path-based child App (templates/<name>-readiness.yaml)
+// that inherits the next sync-wave, so Argo CD blocks on the gate Job via its
+// built-in batch/Job health. See #904.
+func TestBundleGolden_ReadinessGate(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		"templates/gpu-operator.yaml",           // multi-source primary
+		"templates/gpu-operator-readiness.yaml", // path-based readiness child
+		"002-gpu-operator-readiness/templates/readiness.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/readiness_gate", rel)
+	}
+}
+
 // TestHelmTemplate_RendersWithSetRepoURL is the live-render counterpart to
 // the golden tests: goldens freeze the pre-render template bytes, this
 // test verifies that running `helm template` against the generated bundle
@@ -1649,6 +1701,24 @@ func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
 	if !strings.Contains(string(out), "repoURL is required") {
 		t.Errorf("expected error message to mention 'repoURL is required', got:\n%s", out)
 	}
+}
+
+func readinessGateManifest(t *testing.T, deployer config.DeployerType) []byte {
+	t.Helper()
+	manifest, err := gatemanifest.Render(
+		"gpu-operator",
+		"ghcr.io/nvidia/aicr-gate:v0.0.0-golden",
+		[]byte(`apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-readiness
+`),
+		deployer,
+	)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	return manifest
 }
 
 // assertGolden reads outDir/relPath and diffs it against goldenDir/relPath.

@@ -304,21 +304,42 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
   # Derive wait args: global --wait/--no-wait behavior + per-component timeout.
   COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
   COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
+  COMPONENT_WAIT_ARGS=""
   case "${name}" in
     kai-scheduler)
       COMPONENT_HELM_TIMEOUT="20m"
       COMPONENT_MAX_RETRIES="1"
       ;;
+    *-readiness)
+      # Readiness gate folders run the gate CLI as a post-install/post-upgrade
+      # helm hook Job that polls component signals until they pass or the gate's
+      # own --max-wait deadline elapses. Helm --wait blocks on hook completion
+      # regardless of --wait-for-jobs, so only --timeout is needed here.
+      # The gate owns the deadline; helm cannot wait indefinitely (--wait is
+      # bounded by --timeout), so this --timeout is DERIVED by the bundler as
+      # gate --max-wait + a buffer — large enough that helm never preempts the
+      # gate, small enough to still surface a hung gate shortly after. The gate
+      # is a correctness barrier, so it ignores --no-wait and pins its args:
+      #   MAX_RETRIES=1    the gate owns its own poll/retry loop; re-running the
+      #                    whole Job on a transient helm error only doubles wait.
+      COMPONENT_HELM_TIMEOUT="{{ .ReadinessHelmTimeout }}"
+      COMPONENT_MAX_RETRIES="1"
+      COMPONENT_WAIT_ARGS="--wait --timeout ${COMPONENT_HELM_TIMEOUT}"
+      ;;
   esac
-  if [[ "${NO_WAIT}" == "true" ]]; then
-    COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
-  else
-    COMPONENT_WAIT_ARGS="--wait --timeout ${COMPONENT_HELM_TIMEOUT}"
-  fi
-  if echo "${ASYNC_COMPONENTS}" | grep -qw "${name}"; then
-    # Skip --wait (no readiness check) but keep --timeout for hook completion.
-    COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
-    echo "  (async component — skipping --wait, keeping --timeout for hooks)"
+  # Components that didn't pin their own wait args above honor the global
+  # --wait/--no-wait flag plus the async-component override.
+  if [[ -z "${COMPONENT_WAIT_ARGS}" ]]; then
+    if [[ "${NO_WAIT}" == "true" ]]; then
+      COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
+    else
+      COMPONENT_WAIT_ARGS="--wait --timeout ${COMPONENT_HELM_TIMEOUT}"
+    fi
+    if echo "${ASYNC_COMPONENTS}" | grep -qw "${name}"; then
+      # Skip --wait (no readiness check) but keep --timeout for hook completion.
+      COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
+      echo "  (async component — skipping --wait, keeping --timeout for hooks)"
+    fi
   fi
   export COMPONENT_WAIT_ARGS
 

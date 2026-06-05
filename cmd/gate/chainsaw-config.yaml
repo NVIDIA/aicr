@@ -1,0 +1,15 @@
+# Chainsaw Configuration baked into the aicr-gate image and passed to
+# `chainsaw test --config`. Pinning it here keeps the gate's runtime behavior
+# deterministic across chainsaw version bumps in .settings.yaml.
+#
+# cleanup.skipDelete: true prevents chainsaw from deleting any resource it
+# created or the release namespace at the end of a test. The gate's ClusterRole
+# is read-only (no delete verbs), so this both matches the least-privilege RBAC
+# and avoids spurious failures if a future chainsaw default were to change.
+apiVersion: chainsaw.kyverno.io/v1alpha2
+kind: Configuration
+metadata:
+  name: aicr-gate
+spec:
+  cleanup:
+    skipDelete: true

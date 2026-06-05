@@ -136,6 +136,108 @@ metadata:
 	assertGolden(t, outDir, "testdata/local_helm_manifest_only", "001-skyhook-customizations/templates/customization.yaml")
 }
 
+// TestWrite_ReadinessGate verifies that a component carrying ComponentReadiness
+// manifests emits a standalone "<name>-readiness" local-helm folder ordered
+// immediately after the component's primary chart, with {{ .Release.Namespace }}
+// resolved to the component namespace.
+func TestWrite_ReadinessGate(t *testing.T) {
+	outDir := t.TempDir()
+
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: outDir,
+		Components: []localformat.Component{{
+			Name:       "gpu-operator",
+			Namespace:  "privileged-gpu-operator", // exercises the relocated-namespace case
+			Repository: "https://nvidia.github.io/gpu-operator",
+			ChartName:  "nvidia/gpu-operator",
+			Version:    "v24.9.1",
+		}},
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": []byte(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-operator-readiness-gate
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-operator-readiness-gate
+  namespace: {{ .Release.Namespace }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: gate
+          image: ghcr.io/nvidia/aicr-gate:dev
+          args:
+            - --namespace={{ .Release.Namespace }}
+`),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	folders := res.Folders
+	if len(folders) != 2 {
+		t.Fatalf("want 2 folders (primary + readiness), got %d", len(folders))
+	}
+	if got, want := folders[0].Dir, "001-gpu-operator"; got != want {
+		t.Errorf("folders[0].Dir = %q, want %q", got, want)
+	}
+	if got, want := folders[1].Dir, "002-gpu-operator-readiness"; got != want {
+		t.Errorf("folders[1].Dir = %q, want %q", got, want)
+	}
+	if got, want := folders[1].Kind, localformat.KindLocalHelm; got != want {
+		t.Errorf("readiness folder kind = %v, want %v", got, want)
+	}
+
+	rendered, err := os.ReadFile(filepath.Join(outDir, "002-gpu-operator-readiness", "templates", "readiness.yaml"))
+	if err != nil {
+		t.Fatalf("read rendered readiness manifest: %v", err)
+	}
+	got := string(rendered)
+	if strings.Contains(got, "{{") {
+		t.Errorf("rendered readiness manifest still contains template tokens:\n%s", got)
+	}
+	if !strings.Contains(got, "namespace: privileged-gpu-operator") {
+		t.Errorf("rendered readiness manifest missing resolved namespace:\n%s", got)
+	}
+	if !strings.Contains(got, "--namespace=privileged-gpu-operator") {
+		t.Errorf("rendered gate args missing resolved namespace:\n%s", got)
+	}
+	if !strings.Contains(got, "image: ghcr.io/nvidia/aicr-gate:dev") {
+		t.Errorf("rendered readiness manifest missing gate image:\n%s", got)
+	}
+}
+
+// TestWrite_NoReadinessGate verifies that, absent ComponentReadiness entries,
+// the writer emits exactly the primary folder — readiness emission is opt-in
+// and must not change default output.
+func TestWrite_NoReadinessGate(t *testing.T) {
+	outDir := t.TempDir()
+
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: outDir,
+		Components: []localformat.Component{{
+			Name:       "gpu-operator",
+			Namespace:  "gpu-operator",
+			Repository: "https://nvidia.github.io/gpu-operator",
+			ChartName:  "nvidia/gpu-operator",
+			Version:    "v24.9.1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if len(res.Folders) != 1 {
+		t.Fatalf("want 1 folder (no readiness), got %d", len(res.Folders))
+	}
+}
+
 func TestWrite_Mixed(t *testing.T) {
 	outDir := t.TempDir()
 
@@ -604,6 +706,33 @@ func TestWrite_KustomizeWithManifestsRejected(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "busted-component") || !strings.Contains(msg, "kustomize") || !strings.Contains(msg, "manifests") {
 		t.Errorf("error message should mention component name + conflict; got: %s", msg)
+	}
+}
+
+func TestWrite_ReadinessSuffixReserved(t *testing.T) {
+	// A component literally named "<x>-readiness" must be rejected: the helm
+	// deploy.sh applies gate wait-semantics to every release matching its
+	// static "*-readiness)" glob, so the suffix is reserved at bundle time.
+	_, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: t.TempDir(),
+		Components: []localformat.Component{{
+			Name:       "foo-readiness",
+			Namespace:  "ns",
+			Repository: "https://example.com",
+		}},
+	})
+	if err == nil {
+		t.Fatalf("want error rejecting reserved -readiness suffix, got nil")
+	}
+	var structErr *errors.StructuredError
+	if !stderrors.As(err, &structErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+	if structErr.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("code = %v, want ErrCodeInvalidRequest", structErr.Code)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "foo-readiness") || !strings.Contains(msg, "reserved") {
+		t.Errorf("error should name the component and mention it is reserved; got: %s", msg)
 	}
 }
 

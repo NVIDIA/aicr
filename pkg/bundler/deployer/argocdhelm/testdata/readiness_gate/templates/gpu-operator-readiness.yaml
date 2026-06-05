@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "1"
+    name: gpu-operator-readiness
+    namespace: argocd
+spec:
+    destination:
+        namespace: gpu-operator
+        server: https://kubernetes.default.svc
+    project: default
+    source:
+        helm:
+            values: |-
+                {{- $dynamic := index .Values "gpuoperator" | default dict -}}
+                {{- toYaml $dynamic | nindent 16 }}
+        path: 002-gpu-operator-readiness
+        repoURL: '{{ required "repoURL is required: pass --set repoURL=<parent namespace> (e.g., oci://<registry>/<path>) — do NOT include the chart name; this template appends .Chart.Name to assemble the full OCI artifact reference" .Values.repoURL | trimSuffix "/" }}/{{ .Chart.Name }}'
+        targetRevision: '{{ .Values.targetRevision | default .Chart.Version }}'
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+        syncOptions:
+            - CreateNamespace=true
+            - ServerSideApply=true

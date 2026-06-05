@@ -339,6 +339,28 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		"dynamic_components", len(dynamicValues),
 	)
 
+	// Readiness gate emission is wired for the deployers whose ordering
+	// primitive can block on the gate Job:
+	//   - helm: deploy.sh runs the folder's install.sh with
+	//     `helm upgrade --install --wait --wait-for-jobs`.
+	//   - argocd / argocd-helm: the gate folder inherits the next sync-wave,
+	//     and Argo CD's built-in batch/Job health blocks that wave until the
+	//     Job completes.
+	// Flux and helmfile wrap each folder in HelmRelease / needs semantics that
+	// need dedicated gating wiring (not yet implemented). Fail clearly rather
+	// than silently dropping the opt-in flag and shipping a bundle without the
+	// readiness gate the user asked for. See #904.
+	if b.Config.ReadinessHooks() {
+		switch b.Config.Deployer() {
+		case config.DeployerHelm, config.DeployerArgoCD, config.DeployerArgoCDHelm:
+			// supported
+		case config.DeployerFlux, config.DeployerHelmfile:
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--readiness-hooks is not supported with --deployer %q; supported deployers: helm, argocd, argocd-helm",
+					b.Config.Deployer()))
+		}
+	}
+
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
 		// --repo is meaningful for --deployer argocd (baked into child
@@ -360,6 +382,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component post-manifests")
 		}
+		componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component readiness gates")
+		}
 		return &argocdhelm.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -371,6 +398,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:              dataFiles,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
+			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
 			ChartName:              b.Config.BundleChartName(),
 			AppName:                b.Config.AppName(),
@@ -391,6 +419,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component post-manifests")
 		}
+		componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component readiness gates")
+		}
 		return &argocd.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -401,6 +434,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:              dataFiles,
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
+			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
 			AppName:                b.Config.AppName(),
 			// Inline values when the bundle repo is OCI: Argo CD's $values
@@ -420,6 +454,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component post-manifests")
 		}
+		componentReadiness, err := b.collectComponentReadiness(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component readiness gates")
+		}
 		return &helm.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -427,6 +466,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			IncludeChecksums:       b.Config.IncludeChecksums(),
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
+			ComponentReadiness:     componentReadiness,
 			DataFiles:              dataFiles,
 			DynamicValues:          dynamicValues,
 			VendorCharts:           b.Config.VendorCharts(),

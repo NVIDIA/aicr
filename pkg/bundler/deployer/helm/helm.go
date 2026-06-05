@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -87,6 +88,13 @@ type Generator struct {
 	// Each component's manifests are placed in its own manifests/ subdirectory.
 	// Populated from ComponentRef.ManifestFiles.
 	ComponentPostManifests map[string]map[string][]byte
+
+	// ComponentReadiness maps component name → manifest path → content for the
+	// per-component readiness gate chart emitted after each component's
+	// primary chart. Populated by the bundler from readiness.yaml when
+	// --readiness-hooks is set; empty otherwise. Forwarded to
+	// localformat.Options.ComponentReadiness. See #904.
+	ComponentReadiness map[string]map[string][]byte
 
 	// DataFiles lists additional file paths (relative to output dir) to include
 	// in checksum generation. Used for external data files copied into the bundle.
@@ -157,6 +165,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		Components:             lfComponents,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
+		ComponentReadiness:     g.ComponentReadiness,
 		VendorCharts:           g.VendorCharts,
 	})
 	if err != nil {
@@ -359,6 +368,11 @@ func (g *Generator) generateDeployScript(ctx context.Context, components []Compo
 	data := deployTemplateData{
 		BundlerVersion: g.Version,
 		Components:     components,
+		// Helm cannot wait indefinitely on the readiness gate Job, so derive
+		// its --timeout from the gate's own deadline (max-wait) plus a buffer.
+		// Keeping this a derived value — rather than a second hand-tuned knob —
+		// guarantees helm --timeout > gate --max-wait can never silently drift.
+		ReadinessHelmTimeout: (defaults.ReadinessGateMaxWait + defaults.ReadinessGateHelmTimeoutBuffer).String(),
 	}
 
 	deployPath, deploySize, err := deployer.GenerateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
@@ -410,4 +424,9 @@ func reverseReleases(folders []localformat.Folder) []releaseRef {
 type deployTemplateData struct {
 	BundlerVersion string
 	Components     []ComponentData
+	// ReadinessHelmTimeout is the helm --timeout the deploy.sh applies to
+	// readiness gate folders, derived from defaults.ReadinessGateMaxWait +
+	// defaults.ReadinessGateHelmTimeoutBuffer (Go duration string, e.g.
+	// "1h35m0s"). See #904.
+	ReadinessHelmTimeout string
 }

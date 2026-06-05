@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"text/template"
 
 	stderrors "errors"
@@ -87,6 +88,16 @@ type Options struct {
 	// manifest-only wrapped charts.
 	ComponentPostManifests map[string]map[string][]byte
 
+	// ComponentReadiness maps component name → manifest path → rendered bytes
+	// for the readiness gate chart emitted AFTER each component's primary
+	// chart (and after any -post folder). Populated by the bundler from
+	// recipes/components/<name>/readiness.yaml when --readiness-hooks is set;
+	// empty otherwise. Each entry becomes a standalone NNN-<name>-readiness/
+	// local-helm chart whose install.sh runs `helm upgrade --install --wait`,
+	// so the gate Job blocks the deploy until component-specific readiness
+	// signals pass. See #904.
+	ComponentReadiness map[string]map[string][]byte
+
 	// VendorCharts pulls upstream Helm chart bytes into each Helm-typed
 	// component's folder at bundle time. When set, every Helm component
 	// emits a single wrapped folder with charts/<chart>-<version>.tgz +
@@ -137,8 +148,9 @@ func renderInputFor(c Component) manifest.RenderInput {
 type injectionPhase string
 
 const (
-	phasePre  injectionPhase = "pre"
-	phasePost injectionPhase = "post"
+	phasePre       injectionPhase = "pre"
+	phasePost      injectionPhase = "post"
+	phaseReadiness injectionPhase = "readiness"
 )
 
 // injectAuxiliaryFolder wraps the per-phase manifest list for component
@@ -155,6 +167,8 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 		manifests = opts.ComponentPreManifests[c.Name]
 	case phasePost:
 		manifests = opts.ComponentPostManifests[c.Name]
+	case phaseReadiness:
+		manifests = opts.ComponentReadiness[c.Name]
 	default:
 		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("unknown injection phase %q", phase))
@@ -220,6 +234,12 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		if !opts.VendorCharts && c.Repository != "" && len(opts.ComponentPostManifests[c.Name]) > 0 {
 			folderCount++ // <name>-post
 		}
+		// Readiness gate folder applies to every component kind (it runs
+		// after the primary regardless of upstream/local/vendored), so it
+		// is not gated on Repository/VendorCharts like the -post folder.
+		if len(opts.ComponentReadiness[c.Name]) > 0 {
+			folderCount++ // <name>-readiness
+		}
 	}
 	if folderCount > 999 {
 		return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
@@ -251,6 +271,19 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		declared[c.Name] = struct{}{}
 	}
 	for _, c := range opts.Components {
+		// The "-readiness" suffix is reserved: the helm deploy.sh applies gate
+		// wait-semantics to every release matching its static "*-readiness)"
+		// glob (see helm/templates/deploy.sh.tmpl). A declared component
+		// literally named "<x>-readiness" would silently inherit that
+		// force---wait, gate-timeout behavior even without --readiness-hooks, so
+		// reject it at bundle time. Unlike the -pre/-post guards below
+		// (collision-only), this reserves the suffix unconditionally because the
+		// glob match is name-driven, not gate-driven.
+		if strings.HasSuffix(c.Name, "-readiness") {
+			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q uses the reserved %q suffix, which is synthesized for readiness gate folders/releases and matches the deploy.sh \"*-readiness\" wait-semantics glob — rename the component",
+					c.Name, "-readiness"))
+		}
 		// <name>-pre collision: any component with preManifestFiles would
 		// inject a "<name>-pre" folder/release. Unlike the post check
 		// below, no Repository-guard: pre injection runs regardless of
@@ -273,6 +306,20 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			// path so a recipe author can fix the YAML directly.
 			if err := validatePreManifestNamespace(c.Name, c.Namespace, opts.ComponentPreManifests[c.Name]); err != nil {
 				return WriteResult{}, err
+			}
+		}
+		// <name>-readiness collision: a component with readiness manifests
+		// injects a "<name>-readiness" folder/release. The "-readiness" suffix
+		// is already globally reserved above, so a clash here is unreachable in
+		// practice; the check stays as defense-in-depth for the gate-bearing
+		// case. Checked for every component kind (unlike -post, readiness is not
+		// gated on Repository/VendorCharts), so it sits before the VendorCharts
+		// short-circuit below.
+		if len(opts.ComponentReadiness[c.Name]) > 0 {
+			if _, clash := declared[c.Name+"-readiness"]; clash {
+				return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q has a readiness gate and would inject %q-readiness, but a component named %q-readiness is already declared in the recipe — rename one to avoid collision",
+						c.Name, c.Name, c.Name))
 			}
 		}
 		if opts.VendorCharts {
@@ -346,6 +393,18 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 				"index", idx, "dir", dir, "parent", c.Name,
 				"chart", rec.Chart, "version", rec.Version, "sha256", rec.SHA256)
 			idx++
+			// Readiness gate applies to vendored components too — emit it
+			// after the wrapped chart so the gate Job runs once the
+			// vendored release has installed.
+			if rf, err := opts.injectAuxiliaryFolder(idx, c, phaseReadiness); err != nil {
+				return WriteResult{}, err
+			} else if rf != nil {
+				folders = append(folders, *rf)
+				slog.Info("wrote local chart folder",
+					"index", idx, "dir", rf.Dir,
+					"kind", KindLocalHelm.String(), "parent", c.Name)
+				idx++
+			}
 			continue
 		}
 
@@ -425,6 +484,19 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			}
 			folders = append(folders, f)
 			slog.Info("wrote local chart folder", "index", idx, "dir", dir, "kind", kind.String(), "parent", c.Name)
+			idx++
+		}
+
+		// Readiness gate (non-vendored path): emit after the primary (and
+		// any -post folder) so the gate Job runs once the component's
+		// release has installed. Applies to every component kind.
+		if rf, err := opts.injectAuxiliaryFolder(idx, c, phaseReadiness); err != nil {
+			return WriteResult{}, err
+		} else if rf != nil {
+			folders = append(folders, *rf)
+			slog.Info("wrote local chart folder",
+				"index", idx, "dir", rf.Dir,
+				"kind", KindLocalHelm.String(), "parent", c.Name)
 			idx++
 		}
 	}

@@ -19,6 +19,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,8 +27,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	sigsyaml "sigs.k8s.io/yaml"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1756,6 +1759,169 @@ func TestBundleGolden_MixedWithPre(t *testing.T) {
 	} {
 		assertGolden(t, outputDir, "testdata/mixed_with_pre", rel)
 	}
+}
+
+// TestBundleGolden_ReadinessGate freezes the bundle output when a component
+// ships a readiness gate (ComponentReadiness populated, as the bundler does
+// for --readiness-hooks). localformat emits the gate as a local-helm folder
+// immediately after the component's primary folder, so the argocd deployer
+// assigns it the next sync-wave (1 > the component's 0). Argo CD blocks that
+// wave on the gate Job via its built-in batch/Job health — no custom Lua.
+// See #904.
+//
+//	go test ./pkg/bundler/deployer/argocd/... -run TestBundleGolden -args -update
+func TestBundleGolden_ReadinessGate(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		// Mirrors the multi-doc manifest the bundler synthesizes from
+		// readiness.yaml via gatemanifest.Render.
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCD),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		// Primary: multi-source upstream-helm (sync-wave 0)
+		"001-gpu-operator/application.yaml",
+		"001-gpu-operator/values.yaml",
+		// Readiness gate: path-based single-source at the next sync-wave (1)
+		"002-gpu-operator-readiness/application.yaml",
+		"002-gpu-operator-readiness/Chart.yaml",
+		"002-gpu-operator-readiness/values.yaml",
+		"002-gpu-operator-readiness/templates/readiness.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/readiness_gate", rel)
+	}
+}
+
+// TestReadinessGateSyncWaveOrdering asserts the core ArgoCD gating invariant:
+// the readiness gate Application carries a strictly higher sync-wave than its
+// component's primary Application, so Argo CD applies — and blocks on — the
+// gate Job after the component installs. See #904.
+func TestReadinessGateSyncWaveOrdering(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v0.0.0-test",
+		RepoURL:         "https://github.com/example/aicr-bundles.git",
+		TargetRevision:  "main",
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": []byte("apiVersion: batch/v1\nkind: Job\nmetadata:\n" +
+					"  name: gpu-operator-readiness-gate\n  namespace: {{ .Release.Namespace }}\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	primaryWave := syncWaveOf(t, filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
+	readinessApp := filepath.Join(outputDir, "002-gpu-operator-readiness", "application.yaml")
+	readinessWave := syncWaveOf(t, readinessApp)
+
+	if readinessWave <= primaryWave {
+		t.Errorf("readiness sync-wave (%d) must be greater than component sync-wave (%d) so Argo gates after install",
+			readinessWave, primaryWave)
+	}
+
+	// The gate is wrapped as a local chart, so its Application is path-based.
+	content, err := os.ReadFile(readinessApp)
+	if err != nil {
+		t.Fatalf("read readiness application.yaml: %v", err)
+	}
+	if !strings.Contains(string(content), "path: 002-gpu-operator-readiness") {
+		t.Errorf("readiness Application should be path-based at its folder:\n%s", content)
+	}
+}
+
+// syncWaveOf parses the argocd.argoproj.io/sync-wave annotation from an
+// Application manifest and returns it as an int.
+func syncWaveOf(t *testing.T, appPath string) int {
+	t.Helper()
+	raw, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", appPath, err)
+	}
+	var app struct {
+		Metadata struct {
+			Annotations map[string]string `yaml:"annotations"`
+		} `yaml:"metadata"`
+	}
+	if err = yaml.Unmarshal(raw, &app); err != nil {
+		t.Fatalf("parse %s: %v", appPath, err)
+	}
+	wave := app.Metadata.Annotations["argocd.argoproj.io/sync-wave"]
+	n, err := strconv.Atoi(wave)
+	if err != nil {
+		t.Fatalf("sync-wave %q not an int in %s: %v", wave, appPath, err)
+	}
+	return n
+}
+
+func readinessGateManifest(t *testing.T, deployer config.DeployerType) []byte {
+	t.Helper()
+	manifest, err := gatemanifest.Render(
+		"gpu-operator",
+		"ghcr.io/nvidia/aicr-gate:v0.0.0-golden",
+		[]byte(`apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-readiness
+`),
+		deployer,
+	)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	return manifest
 }
 
 // assertGolden reads outDir/relPath and diffs it against goldenDir/relPath.

@@ -406,6 +406,36 @@ componentRefs:
 
 **Test changes:** `aicr recipe --service eks --accelerator gb200 --format yaml`
 
+### Adding a Component Readiness Gate
+
+A component can declare a **readiness gate** so that, when a bundle is built with `aicr bundle --readiness-hooks`, the deploy blocks until a component-specific signal is actually healthy — not just until the chart's own resources report Ready. This matters for operators whose true readiness lives in a custom resource the deployer can't assess natively (e.g. `gpu-operator`'s `ClusterPolicy` reaching `status.state: ready`).
+
+**Convention:** drop a [Chainsaw](https://kyverno.github.io/chainsaw/) `Test` at `recipes/components/<name>/readiness.yaml`. There is no registry field to set — the bundler discovers the file by path. Components without one are simply not gated.
+
+```yaml
+# recipes/components/gpu-operator/readiness.yaml
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-readiness
+spec:
+  # The gate CLI owns the outer retry/poll loop, so a single assert only needs
+  # a short window to confirm the current state.
+  timeouts:
+    assert: 30s
+  steps:
+    - name: clusterpolicy-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: nvidia.com/v1
+              kind: ClusterPolicy
+              status:
+                state: ready
+```
+
+When `--readiness-hooks` is set, the bundler wraps this test into a `NNN-<name>-readiness/` folder containing a `Job` that runs the `gate` CLI (`ghcr.io/nvidia/aicr-gate`, which embeds Chainsaw). The deploy blocks on that Job — via `helm --wait` for the helm deployer (the gate Job is a `post-install,post-upgrade` hook, and `--wait` blocks on hook completion regardless of `--wait-for-jobs`), or via Argo CD's built-in `batch/Job` health on the next sync-wave for the `argocd`/`argocd-helm` deployers. Keep `spec.timeouts.assert` shorter than the gate's per-test timeout so a single poll can't outlast one gate iteration. See [Readiness Gates](../user/cli-reference.md#readiness-gates) for the deploy-time behavior.
+
 ## Best Practices
 
 **Do:**

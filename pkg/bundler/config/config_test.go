@@ -100,6 +100,25 @@ func TestConfigVendorCharts(t *testing.T) {
 	}
 }
 
+func TestConfigReadinessHooks(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want bool
+	}{
+		{"default false", NewConfig(), false},
+		{"enabled true", NewConfig(WithReadinessHooks(true)), true},
+		{"explicit false", NewConfig(WithReadinessHooks(false)), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.ReadinessHooks(); got != tt.want {
+				t.Errorf("ReadinessHooks() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string
