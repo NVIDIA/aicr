@@ -136,4 +136,4 @@ For contributors:
 
 ## Contributing
 
-AI Cluster Runtime is Apache 2.0. Contributions are welcome: new recipes for environments we haven't covered, additional bundler formats, validation checks, or bug reports. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the PR process.
+AI Cluster Runtime is under Apache 2.0 [LICENSE](LICENSE). Contributions are welcome: new recipes for environments we haven't covered, additional bundler formats, validation checks, or bug reports. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the PR process.
