@@ -274,6 +274,21 @@ const (
 	// assertion retries. Assertions are retried at this interval until
 	// they pass or the ChainsawAssertTimeout expires.
 	AssertRetryInterval = 5 * time.Second
+
+	// JobEnvelopeMargin is the headroom added on top of ChainsawAssertTimeout
+	// when computing the validator Job's outer activeDeadlineSeconds and the
+	// expected-resources catalog timeout. Chainsaw needs time after the inner
+	// assert deadline elapses to terminate the binary process, clean up the
+	// temp test directory, and flush log output before the Job's SIGKILL
+	// arrives. Without this headroom the binary is killed mid-cleanup and
+	// operators see truncated output, masking the actual failure cause.
+	//
+	// 60s = 30s for the default Pod terminationGracePeriodSeconds (the
+	// SIGTERM→SIGKILL window — see K8sPodTerminationWaitTimeout above)
+	// plus 30s headroom for pre-chainsaw helper.VerifyResource iteration
+	// and chainsaw startup variance. Tune upward if chainsaw output
+	// truncation is observed in CI runs.
+	JobEnvelopeMargin = 60 * time.Second
 )
 
 // Readiness gate (deploy-time) configuration drives the `gate` CLI Job the

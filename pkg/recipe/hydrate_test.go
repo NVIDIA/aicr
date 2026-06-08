@@ -213,16 +213,14 @@ func TestHydrateHealthCheckAsserts_ReadError(t *testing.T) {
 	}
 }
 
-// TestHydrateHealthCheckAsserts_ExpectedResourcesWins verifies hydration is
-// skipped when the overlay also declared ExpectedResources. The deployment
-// validator's current mutex
-// (validators/deployment/expected_resources.go:86) only runs the chainsaw
-// path when ExpectedResources is empty, so hydrating in this case would
-// write inert content onto the resolved recipe. k8s-nim-operator is the
-// canonical example flagged in PR #1231 review (registry assertFile +
-// overlay expectedResources). PR #1220 will drop both the validator-side
-// mutex and this skip simultaneously.
-func TestHydrateHealthCheckAsserts_ExpectedResourcesWins(t *testing.T) {
+// TestHydrateHealthCheckAsserts_RunsAlongsideExpectedResources verifies
+// hydration is NOT skipped when the overlay also declared
+// ExpectedResources. PR #1220 dropped the deployment validator's
+// previous mutex (the chainsaw path used to only run when
+// ExpectedResources was empty) so both paths now execute side-by-side
+// with source-tagged output. The transitional skip added in PR #1234
+// was removed in lockstep.
+func TestHydrateHealthCheckAsserts_RunsAlongsideExpectedResources(t *testing.T) {
 	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	registry, err := GetComponentRegistryFor(provider)
 	if err != nil {
@@ -237,9 +235,9 @@ func TestHydrateHealthCheckAsserts_ExpectedResourcesWins(t *testing.T) {
 	if err := hydrateHealthCheckAsserts(provider, registry, refs); err != nil {
 		t.Fatalf("hydrateHealthCheckAsserts: %v", err)
 	}
-	if refs[0].HealthCheckAsserts != "" {
-		t.Fatalf("HealthCheckAsserts should remain empty when ExpectedResources is set, got %q",
-			refs[0].HealthCheckAsserts)
+	if refs[0].HealthCheckAsserts == "" {
+		t.Fatal("HealthCheckAsserts should be hydrated even when ExpectedResources is set " +
+			"(both paths run side-by-side under the deployment validator's PR #1220 contract)")
 	}
 }
 

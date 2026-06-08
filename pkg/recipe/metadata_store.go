@@ -1174,17 +1174,18 @@ func applyRegistryDefaults(provider DataProvider, refs []ComponentRef) error {
 //     path — see ComponentRef field doc), or
 //   - the overlay already declared HealthCheckAsserts inline (the inline
 //     value wins; never silently overwrite caller intent), or
-//   - the overlay declared ExpectedResources. The deployment validator's
-//     current mutex (`validators/deployment/expected_resources.go:86`)
-//     only runs the chainsaw path when ExpectedResources is empty;
-//     hydrating in that case would write inert content onto the resolved
-//     recipe — flagged in PR #1231 review against k8s-nim-operator
-//     (registry assertFile + overlay expectedResources). PR #1220 drops
-//     both this skip and the validator-side mutex so the two paths run
-//     side-by-side; until then, the registry assertFile is a fallback
-//     used only when no ExpectedResources are declared, and the artifact
-//     reflects what actually runs.
 //   - the registry has no assertFile entry for this component.
+//
+// Hydration runs unconditionally even when the overlay declares
+// ExpectedResources. The deployment validator's previous mutex
+// (`len(ref.ExpectedResources) == 0`) was dropped in PR #1220 so both
+// the chainsaw path and the ExpectedResources path now execute
+// side-by-side with source-tagged CLI output. The transitional skip
+// added in PR #1234 was removed in lockstep — see the
+// k8s-nim-operator case study in #660 for context on why both signals
+// are useful (registry asserts deeper Pod-level readiness; overlay
+// ExpectedResources asserts the operator-installed singleton Deployment
+// is healthy).
 //
 // Disabled components (overrides.enabled: false) ARE hydrated unconditionally
 // so the on-disk recipe.yaml artifact carries the same content regardless of
@@ -1206,9 +1207,6 @@ func hydrateHealthCheckAsserts(provider DataProvider, registry *ComponentRegistr
 			continue
 		}
 		if ref.HealthCheckAsserts != "" {
-			continue
-		}
-		if len(ref.ExpectedResources) > 0 {
 			continue
 		}
 		config := registry.Get(ref.Name)
