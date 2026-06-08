@@ -256,11 +256,21 @@ type LayeredProviderConfig struct {
 }
 
 const (
-	// sourceEmbedded is the source name for embedded files.
-	sourceEmbedded = "embedded"
+	// CatalogSourceEmbedded is the Source value for overlays shipped with the
+	// binary (built-in OSS recipes).
+	CatalogSourceEmbedded = "embedded"
 
-	// sourceExternal is the source name for external files.
-	sourceExternal = "external"
+	// CatalogSourceExternal is the Source value for overlays loaded from an
+	// external --data directory.
+	CatalogSourceExternal = "external"
+
+	// sourceEmbedded is the internal alias kept for backward compatibility
+	// within this package.
+	sourceEmbedded = CatalogSourceEmbedded
+
+	// sourceExternal is the internal alias kept for backward compatibility
+	// within this package.
+	sourceExternal = CatalogSourceExternal
 
 	// sourceMerged is the source name for files merged from both embedded and external.
 	sourceMerged = "merged (" + sourceEmbedded + " + " + sourceExternal + ")"

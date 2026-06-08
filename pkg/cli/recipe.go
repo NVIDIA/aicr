@@ -40,28 +40,28 @@ func recipeCmdFlags() []cli.Flag {
 	// validation still works regardless.
 	return []cli.Flag{
 		withCompletions(&cli.StringFlag{
-			Name:     "service",
+			Name:     flagService,
 			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.GetCriteriaServiceTypes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.GetCriteriaServiceTypes),
 		withCompletions(&cli.StringFlag{
-			Name:     "accelerator",
+			Name:     flagAccelerator,
 			Aliases:  []string{"gpu"},
 			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.GetCriteriaAcceleratorTypes),
 		withCompletions(&cli.StringFlag{
-			Name:     "intent",
+			Name:     flagIntent,
 			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.GetCriteriaIntentTypes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.GetCriteriaIntentTypes),
 		withCompletions(&cli.StringFlag{
-			Name:     "os",
+			Name:     flagOS,
 			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.GetCriteriaOSTypes),
 		withCompletions(&cli.StringFlag{
-			Name:     "platform",
+			Name:     flagPlatform,
 			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.GetCriteriaPlatformTypes),
@@ -98,6 +98,9 @@ func recipeCmd() *cli.Command {
 		Name:     cmdNameRecipe,
 		Category: functionalCategoryName,
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
+		Commands: []*cli.Command{
+			recipeListCmd(),
+		},
 		Description: `Generate configuration recipe based on specified environment parameters including:
   - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke, bcm)
   - Accelerator type (e.g. h100, h200, gb200, b200, a100, l40, rtx-pro-6000)
@@ -132,7 +135,7 @@ Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "config", "output", "format"); err != nil {
+			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, "snapshot", "config", flagOutput, flagFormat); err != nil {
 				return err
 			}
 
@@ -272,23 +275,23 @@ func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, 
 		return err
 	}
 	if resolved.Service != "" {
-		logCriteriaOverride("service", string(criteria.Service), string(resolved.Service))
+		logCriteriaOverride(flagService, string(criteria.Service), string(resolved.Service))
 		criteria.Service = resolved.Service
 	}
 	if resolved.Accelerator != "" {
-		logCriteriaOverride("accelerator", string(criteria.Accelerator), string(resolved.Accelerator))
+		logCriteriaOverride(flagAccelerator, string(criteria.Accelerator), string(resolved.Accelerator))
 		criteria.Accelerator = resolved.Accelerator
 	}
 	if resolved.Intent != "" {
-		logCriteriaOverride("intent", string(criteria.Intent), string(resolved.Intent))
+		logCriteriaOverride(flagIntent, string(criteria.Intent), string(resolved.Intent))
 		criteria.Intent = resolved.Intent
 	}
 	if resolved.OS != "" {
-		logCriteriaOverride("os", string(criteria.OS), string(resolved.OS))
+		logCriteriaOverride(flagOS, string(criteria.OS), string(resolved.OS))
 		criteria.OS = resolved.OS
 	}
 	if resolved.Platform != "" {
-		logCriteriaOverride("platform", string(criteria.Platform), string(resolved.Platform))
+		logCriteriaOverride(flagPlatform, string(criteria.Platform), string(resolved.Platform))
 		criteria.Platform = resolved.Platform
 	}
 	if resolved.Nodes > 0 {
@@ -305,7 +308,7 @@ func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, 
 // snapshot-extracted value with a different one. Empty/wildcard prior values
 // are not interesting (the field was effectively unset).
 func logCriteriaOverride(field, prior, override string) {
-	if prior == "" || prior == "any" || prior == override {
+	if prior == "" || prior == criteriaAny || prior == override {
 		return
 	}
 	slog.Info("config overriding snapshot-detected value",
@@ -331,66 +334,66 @@ func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig, reg
 // enum value against the supplied per-provider registry. Logs a warning when a
 // flag overrides a value detected from the snapshot.
 func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria, reg *recipe.CriteriaRegistry) error {
-	if s := cmd.String("service"); s != "" {
+	if s := cmd.String(flagService); s != "" {
 		parsed, err := reg.ParseService(s)
 		if err != nil {
 			return err
 		}
 		if criteria.Service != "" && criteria.Service != parsed {
 			slog.Info("CLI flag overriding snapshot-detected value",
-				"field", "service",
+				"field", flagService,
 				"detected", criteria.Service,
 				"override", parsed)
 		}
 		criteria.Service = parsed
 	}
-	if s := cmd.String("accelerator"); s != "" {
+	if s := cmd.String(flagAccelerator); s != "" {
 		parsed, err := reg.ParseAccelerator(s)
 		if err != nil {
 			return err
 		}
 		if criteria.Accelerator != "" && criteria.Accelerator != parsed {
 			slog.Info("CLI flag overriding snapshot-detected value",
-				"field", "accelerator",
+				"field", flagAccelerator,
 				"detected", criteria.Accelerator,
 				"override", parsed)
 		}
 		criteria.Accelerator = parsed
 	}
-	if s := cmd.String("intent"); s != "" {
+	if s := cmd.String(flagIntent); s != "" {
 		parsed, err := reg.ParseIntent(s)
 		if err != nil {
 			return err
 		}
 		if criteria.Intent != "" && criteria.Intent != parsed {
 			slog.Info("CLI flag overriding snapshot-detected value",
-				"field", "intent",
+				"field", flagIntent,
 				"detected", criteria.Intent,
 				"override", parsed)
 		}
 		criteria.Intent = parsed
 	}
-	if s := cmd.String("os"); s != "" {
+	if s := cmd.String(flagOS); s != "" {
 		parsed, err := reg.ParseOS(s)
 		if err != nil {
 			return err
 		}
 		if criteria.OS != "" && criteria.OS != parsed {
 			slog.Info("CLI flag overriding snapshot-detected value",
-				"field", "os",
+				"field", flagOS,
 				"detected", criteria.OS,
 				"override", parsed)
 		}
 		criteria.OS = parsed
 	}
-	if s := cmd.String("platform"); s != "" {
+	if s := cmd.String(flagPlatform); s != "" {
 		parsed, err := reg.ParsePlatform(s)
 		if err != nil {
 			return err
 		}
 		if criteria.Platform != "" && criteria.Platform != parsed {
 			slog.Info("CLI flag overriding snapshot-detected value",
-				"field", "platform",
+				"field", flagPlatform,
 				"detected", criteria.Platform,
 				"override", parsed)
 		}

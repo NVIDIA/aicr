@@ -316,6 +316,64 @@ func (c *Client) LoadCatalog(ctx context.Context) error {
 	return nil
 }
 
+// ListCatalog returns catalog entries for all overlays known to this Client,
+// optionally narrowed by the filter criteria. Call LoadCatalog first so the
+// catalog is fully populated before calling this.
+//
+// Each entry carries the overlay name, its criteria, whether it is a leaf
+// (IsLeaf=true means no other overlay inherits from it), and its data
+// provenance ("embedded" or "external"). Entries are returned in ascending
+// name order for deterministic output.
+//
+// When filter is non-nil, only overlays whose criteria carry the exact values
+// specified in each non-empty/non-"any" filter dimension are returned. Setting
+// a filter dimension to "" or "any" places no constraint on that dimension.
+//
+// Returns ErrCodeInvalidRequest on a nil or closed Client, and propagates
+// ErrCodeInternal if the underlying metadata store cannot be loaded.
+func (c *Client) ListCatalog(ctx context.Context, filter *Criteria) ([]CatalogEntry, error) {
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.RecipeOperationTimeout)
+	defer cancel()
+
+	store, err := recipe.LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load recipe catalog")
+	}
+
+	raw := store.ListCatalog(toInternalCriteria(filter))
+	entries := make([]CatalogEntry, len(raw))
+	for i, e := range raw {
+		var crit Criteria
+		if wrapped := WrapCriteria(e.Criteria); wrapped != nil {
+			crit = *wrapped
+		}
+		entries[i] = CatalogEntry{
+			Name:     e.Name,
+			Criteria: crit,
+			IsLeaf:   e.IsLeaf,
+			Source:   e.Source,
+		}
+	}
+	return entries, nil
+}
+
 // CriteriaRegistry returns the per-DataProvider criteria registry for THIS
 // Client. CLI/library callers use it to parse criteria values (so --data
 // overlay contributions validate) and to apply strict mode against the same

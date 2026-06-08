@@ -537,6 +537,82 @@ constraints:
 
 ---
 
+### aicr recipe list
+
+Enumerate overlay recipes in the catalog. Useful for discovering which criteria
+combinations have a dedicated leaf overlay versus an intermediate shared recipe.
+
+**Synopsis:**
+
+```shell
+aicr recipe list [flags]
+```
+
+**Flags:**
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--service` | | string | | Filter by Kubernetes service type (e.g. eks, gke, aks) |
+| `--accelerator` | `--gpu` | string | | Filter by accelerator/GPU type (e.g. h100, gb200) |
+| `--intent` | | string | | Filter by workload intent (e.g. training, inference) |
+| `--os` | | string | | Filter by worker-node OS (e.g. ubuntu, rhel, cos) |
+| `--platform` | | string | | Filter by platform/framework type (e.g. dynamo, kubeflow, nim) |
+| `--format` | `-t` | string | table | Output format: json, yaml, table |
+| `--data` | | string | | External data directory to include alongside embedded overlays |
+
+Filter flags narrow the output to overlays whose criteria carry that exact value.
+Unspecified flags match all overlays for that dimension. Multiple filters are combined
+with AND.
+
+**Output fields:**
+
+| Field | Description |
+|-------|-------------|
+| `name` | Overlay name (e.g. `h100-eks-ubuntu-training`) |
+| `criteria` | The full criteria dimensions the overlay targets |
+| `is_leaf` | `true` when the overlay is a leaf — no other overlay inherits from it |
+| `source` | Data provenance: `embedded` (built-in) or `external` (from `--data`) |
+
+**Examples:**
+
+```shell
+# List all overlays as a table (default)
+aicr recipe list
+
+# List all overlays as JSON
+aicr recipe list --format json
+
+# Filter to EKS training overlays
+aicr recipe list --service eks --intent training
+
+# Filter to H100 overlays and emit JSON
+aicr recipe list --accelerator h100 --format json
+
+# Include external overlays from a custom data directory
+aicr recipe list --data /etc/aicr/custom-recipes --format yaml
+```
+
+**Example JSON output:**
+
+```json
+[
+  {
+    "name": "gb200-eks-ubuntu-training",
+    "criteria": {"service": "eks", "accelerator": "gb200", "os": "ubuntu", "intent": "training"},
+    "is_leaf": true,
+    "source": "embedded"
+  },
+  {
+    "name": "h100-eks-ubuntu-training",
+    "criteria": {"service": "eks", "accelerator": "h100", "os": "ubuntu", "intent": "training"},
+    "is_leaf": true,
+    "source": "embedded"
+  }
+]
+```
+
+---
+
 ### aicr query
 
 Query a specific value from the fully hydrated recipe configuration. Resolves a recipe

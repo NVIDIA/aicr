@@ -59,6 +59,11 @@ type MetadataStore struct {
 	// Overlays is a list of overlay recipes indexed by name.
 	Overlays map[string]*RecipeMetadata
 
+	// OverlaySources maps overlay name to its data provenance string
+	// (e.g., "embedded", "external"). Populated during buildMetadataStore
+	// by calling provider.Source(path) for each overlay file.
+	OverlaySources map[string]string
+
 	// Mixins is a map of composable mixin fragments indexed by name.
 	Mixins map[string]*RecipeMixin
 
@@ -170,10 +175,11 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 	recipeCacheMisses.Inc()
 
 	store := &MetadataStore{
-		Overlays:    make(map[string]*RecipeMetadata),
-		Mixins:      make(map[string]*RecipeMixin),
-		ValuesFiles: make(map[string][]byte),
-		provider:    provider,
+		Overlays:       make(map[string]*RecipeMetadata),
+		OverlaySources: make(map[string]string),
+		Mixins:         make(map[string]*RecipeMixin),
+		ValuesFiles:    make(map[string][]byte),
+		provider:       provider,
 	}
 
 	// Staged criteria registry entries. Each overlay's criteria are
@@ -274,6 +280,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			store.Base = &metadata
 		} else {
 			store.Overlays[metadata.Metadata.Name] = &metadata
+			store.OverlaySources[metadata.Metadata.Name] = provider.Source(path)
 			// Stage this overlay's criteria for registration; the
 			// actual call to seedCriteriaRegistry is deferred until
 			// after every overlay parses cleanly, the base recipe is

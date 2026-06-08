@@ -351,6 +351,38 @@ type ComponentBundle struct {
 	Manifests []byte
 }
 
+// CatalogSource constants for CatalogEntry.Source comparisons.
+const (
+	// CatalogSourceEmbedded is the Source value for built-in OSS overlays.
+	CatalogSourceEmbedded = recipe.CatalogSourceEmbedded
+
+	// CatalogSourceExternal is the Source value for overlays loaded via --data.
+	CatalogSourceExternal = recipe.CatalogSourceExternal
+)
+
+// CatalogEntry describes one overlay in the recipe catalog, returned by
+// Client.ListCatalog.
+//
+// IsLeaf is true when the overlay is a leaf — no other overlay in the
+// catalog lists this one as its spec.base. Leaf overlays are the most
+// specific recipes for a given criteria combination.
+//
+// Source is one of CatalogSourceEmbedded or CatalogSourceExternal.
+type CatalogEntry struct {
+	// Name is the overlay name, e.g. "h100-eks-ubuntu-training".
+	Name string `json:"name" yaml:"name"`
+
+	// Criteria is the set of dimensions this overlay targets.
+	Criteria Criteria `json:"criteria" yaml:"criteria"`
+
+	// IsLeaf is true when this overlay is a catalog leaf (no other
+	// overlay inherits from it).
+	IsLeaf bool `json:"is_leaf" yaml:"is_leaf"`
+
+	// Source is the data provenance: "embedded" or "external".
+	Source string `json:"source" yaml:"source"`
+}
+
 // ComponentRef identifies a deployable recipe component.
 //
 // The Name/Chart distinction matters: Name is AICR's identifier

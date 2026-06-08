@@ -21,15 +21,24 @@ package cli
 
 // Command names (urfave/cli command.Name values).
 const (
-	cmdNameSnapshot = "snapshot"
-	cmdNameRecipe   = "recipe"
+	cmdNameSnapshot   = "snapshot"
+	cmdNameRecipe     = "recipe"
+	cmdNameRecipeList = "list"
 )
 
 // Flag names (urfave/cli flag.Name values).
 const (
-	flagOutput = "output"
-	flagFormat = "format"
+	flagOutput      = "output"
+	flagFormat      = "format"
+	flagService     = "service"
+	flagAccelerator = "accelerator"
+	flagIntent      = "intent"
+	flagOS          = "os"
+	flagPlatform    = "platform"
 )
+
+// criteriaAny is the wildcard value for any criteria dimension.
+const criteriaAny = "any"
 
 // Keyless-signing / OCI-push flag names shared by `validate`, `bundle`,
 // and `evidence publish`. Extracted so the same literal is declared once
