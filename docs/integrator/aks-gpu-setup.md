@@ -108,12 +108,21 @@ az aks nodepool add \
   --cluster-name <cluster> \
   --resource-group <rg> \
   --name gpupool \
-  --node-vm-size Standard_NC80adis_H100_v5 \
+  --node-vm-size Standard_ND96isr_H100_v5 \
   --gpu-driver none \
   --node-count 1
 ```
 
 No changes to AICR recipes are needed — this is the default configuration.
+
+`Standard_ND96isr_H100_v5` is the 8-GPU ND H100 v5 SKU. The AKS Dynamo
+inference throughput gate (`inference-throughput`) is a fixed absolute
+**full-node** floor calibrated on an 8-GPU H100 node, so this SKU is the
+supported happy path for that gate. Smaller NCads H100 SKUs
+(`Standard_NC80adis_H100_v5` = 2 GPUs, `Standard_NC40ads_H100_v5` = 1 GPU) run
+fine for deployment but will false-fail the throughput floor; gate on
+`inference-ttft-p99` only on those until the per-GPU normalization in
+[#1254](https://github.com/NVIDIA/aicr/issues/1254) lands.
 
 ### Alternative: Use the AKS-Managed Driver
 

@@ -82,6 +82,13 @@ spec:
       # not modest regressions. The TTFT p99 ceiling sits above the measured
       # value with margin. Model + concurrency are pinned so the gate stays
       # valid independent of the compiled defaults.
+      #
+      # NOTE: this is a full-node value calibrated on an 8-GPU H100 node. The
+      # evaluator's down-scaling only applies to PARTIAL occupancy of a node
+      # (fewer GPUs benchmarked than the node exposes) — it does NOT normalize
+      # across node sizes, so a smaller full H100 SKU (1-/2-GPU, e.g.
+      # a3-highgpu-1g/2g/4g) can false-fail. A normalized per-GPU floor is
+      # tracked in https://github.com/NVIDIA/aicr/issues/1254.
       constraints:
         - name: inference-model
           value: Qwen/Qwen3-8B

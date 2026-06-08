@@ -67,6 +67,31 @@ spec:
       constraints:
         - name: Deployment.gpu-operator.version
           value: ">= v24.6.0"
+    performance:
+      checks:
+        - inference-perf
+      # Conservative smoke gate mirrored from the H100 EKS/GKE Dynamo
+      # overlays until Azure-specific baselines are available. Model +
+      # concurrency are pinned so the gate stays valid independent of
+      # the compiled defaults.
+      #
+      # NOTE: inference-throughput here is a fixed absolute full-node value that
+      # assumes an 8-GPU ND H100 node (Standard_ND96isr_H100_v5 — the GPU
+      # nodepool the AKS setup guide documents). It is not normalized for GPU
+      # count, so a smaller NCads H100 SKU (Standard_NC80adis_H100_v5 = 2 GPUs,
+      # Standard_NC40ads_H100_v5 = 1 GPU) would false-fail; on those SKUs drop
+      # the throughput constraint and gate on inference-ttft-p99 only (a
+      # per-request latency, not GPU-count sensitive) until the per-GPU floor in
+      # https://github.com/NVIDIA/aicr/issues/1254 lands.
+      constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "256"
+        - name: inference-throughput
+          value: ">= 50000"
+        - name: inference-ttft-p99
+          value: "<= 2000"
     conformance:
       checks:
         - platform-health
