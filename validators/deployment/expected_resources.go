@@ -104,25 +104,40 @@ func checkExpectedResources(ctx *validators.Context) error {
 	failures = append(failures, verifyGPUReadinessSignals(ctx, enabledRefs)...)
 
 	if len(chainsawAsserts) > 0 {
-		slog.Info("running health check assertions", "components", len(chainsawAsserts))
-		fetcher, fetcherErr := buildResourceFetcher(ctx)
-		if fetcherErr != nil {
-			return fetcherErr
-		}
-		results := chainsaw.Run(ctx.Ctx, chainsawAsserts, defaults.ChainsawAssertTimeout, fetcher,
-			chainsaw.WithChainsawBinary(chainsaw.NewChainsawBinary()))
-		for _, r := range results {
-			if r.Passed {
-				fmt.Printf("  %s: chainsaw health check passed\n", r.Component)
-			} else {
-				msg := fmt.Sprintf("%s: chainsaw health check failed", r.Component)
-				if r.Output != "" {
-					msg += fmt.Sprintf(":\n%s", r.Output)
+		// Gate activation on chainsaw binary availability. Hydration of
+		// healthCheck.assertFile populates ref.HealthCheckAsserts upstream
+		// (pkg/recipe), but the deployment validator image does not ship the
+		// chainsaw binary yet — see issue #1220. Without this gate, every
+		// component with a registry-declared assertFile would trigger a
+		// failed binary invocation. When the binary is absent, log once and
+		// skip; this preserves the pre-hydration runtime behavior (these
+		// components had no validation path at all before).
+		bin := chainsaw.NewChainsawBinary()
+		if !bin.Available() {
+			slog.Warn("chainsaw binary not available; skipping registry-declared health check assertions",
+				"components", len(chainsawAsserts),
+				"hint", "ships in a later release; see https://github.com/NVIDIA/aicr/issues/1220")
+		} else {
+			slog.Info("running health check assertions", "components", len(chainsawAsserts))
+			fetcher, fetcherErr := buildResourceFetcher(ctx)
+			if fetcherErr != nil {
+				return fetcherErr
+			}
+			results := chainsaw.Run(ctx.Ctx, chainsawAsserts, defaults.ChainsawAssertTimeout, fetcher,
+				chainsaw.WithChainsawBinary(bin))
+			for _, r := range results {
+				if r.Passed {
+					fmt.Printf("  %s: chainsaw health check passed\n", r.Component)
+				} else {
+					msg := fmt.Sprintf("%s: chainsaw health check failed", r.Component)
+					if r.Output != "" {
+						msg += fmt.Sprintf(":\n%s", r.Output)
+					}
+					if r.Error != nil {
+						msg += fmt.Sprintf("\nerror: %v", r.Error)
+					}
+					failures = append(failures, msg)
 				}
-				if r.Error != nil {
-					msg += fmt.Sprintf("\nerror: %v", r.Error)
-				}
-				failures = append(failures, msg)
 			}
 		}
 	}

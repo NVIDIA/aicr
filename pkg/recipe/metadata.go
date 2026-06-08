@@ -133,6 +133,16 @@ type ComponentRef struct {
 	// expected-resources check runs Chainsaw CLI to evaluate assertions instead of
 	// the default auto-discovery + typed replica checks.
 	HealthCheckAsserts string `json:"healthCheckAsserts,omitempty" yaml:"healthCheckAsserts,omitempty"`
+
+	// HealthCheckSkip suppresses hydration of the registry-declared
+	// healthCheck.assertFile for this component. Set by a leaf overlay (or an
+	// external --data overlay) as the rollback path for a regressing upstream
+	// check: when true, ApplyRegistryDefaults leaves HealthCheckAsserts empty
+	// even if the registry declares an assertFile for this component. Merge
+	// semantics mirror Cleanup — set-if-true; descendants can opt in but not
+	// opt out without re-declaring the assert content inline via
+	// HealthCheckAsserts.
+	HealthCheckSkip bool `json:"healthCheckSkip,omitempty" yaml:"healthCheckSkip,omitempty"`
 }
 
 // IsEnabled returns whether this component is enabled for deployment.
@@ -196,12 +206,13 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 		}
 	}
 
-	// NOTE: healthCheck.assertFile content is intentionally NOT loaded here.
-	// The deployment validator image (distroless) does not include the chainsaw
-	// binary required to execute Chainsaw Test format assertions. Loading the
-	// content would activate chainsaw-based checks in expected-resources, causing
-	// runtime failures. Health check files are used by the conformance validator,
-	// which has its own chainsaw execution path.
+	// healthCheck.assertFile hydration is NOT performed in this method.
+	// ApplyRegistryDefaults runs per-ref against a registry config and has no
+	// DataProvider in scope, but assertFile content lives on disk (or in an
+	// external --data overlay) and must be loaded through the provider that
+	// produced this result. Hydration is performed by hydrateHealthCheckAsserts
+	// in metadata_store.go after the per-ref defaults pass, where the bound
+	// DataProvider is available. See issue #1219.
 }
 
 // ExpectedResource represents a Kubernetes resource that should exist after deployment.
@@ -829,6 +840,14 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 	// HealthCheckAsserts: overlay takes precedence if set
 	if overlay.HealthCheckAsserts != "" {
 		result.HealthCheckAsserts = overlay.HealthCheckAsserts
+	}
+
+	// HealthCheckSkip: overlay takes precedence if true (set-if-true,
+	// mirroring Cleanup). A descendant cannot opt back in to hydration
+	// once an ancestor has opted out; the explicit re-enable path is to
+	// declare HealthCheckAsserts inline in the descendant overlay.
+	if overlay.HealthCheckSkip {
+		result.HealthCheckSkip = true
 	}
 
 	return result

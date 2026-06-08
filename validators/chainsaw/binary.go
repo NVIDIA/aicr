@@ -30,21 +30,36 @@ type ChainsawBinary interface {
 	// RunTest executes chainsaw test against the given test directory.
 	// Returns whether all tests passed, the combined output, and any execution error.
 	RunTest(ctx context.Context, testDir string) (passed bool, output string, err error)
+	// Available reports whether the chainsaw binary is callable from this
+	// process. Used by the deployment validator to skip Chainsaw Test-format
+	// dispatch when the binary is absent (e.g., the validator image has not
+	// shipped chainsaw yet), preserving today's no-op behavior while
+	// registry-declared HealthCheckAsserts content hydrates upstream in
+	// pkg/recipe.
+	Available() bool
 }
 
 type chainsawBinary struct {
-	binPath string
+	binPath   string
+	available bool
 }
 
 // NewChainsawBinary creates a ChainsawBinary that invokes the chainsaw CLI.
 // It resolves the binary path from PATH, falling back to /usr/local/bin/chainsaw.
+// Availability is recorded at construction time so callers can branch on it
+// without repeating the exec.LookPath probe.
 func NewChainsawBinary() ChainsawBinary {
 	binPath, err := exec.LookPath("chainsaw")
 	if err != nil {
-		binPath = "/usr/local/bin/chainsaw"
+		// Fall through with the canonical install path; RunTest will surface
+		// the missing-binary error if invoked, but Available() reports false
+		// so the deployment validator can short-circuit upstream.
+		return &chainsawBinary{binPath: "/usr/local/bin/chainsaw", available: false}
 	}
-	return &chainsawBinary{binPath: binPath}
+	return &chainsawBinary{binPath: binPath, available: true}
 }
+
+func (b *chainsawBinary) Available() bool { return b.available }
 
 func (b *chainsawBinary) RunTest(ctx context.Context, testDir string) (bool, string, error) {
 	slog.Debug("executing chainsaw binary", "binPath", b.binPath, "testDir", testDir)
