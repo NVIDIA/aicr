@@ -785,3 +785,35 @@ func TestRecipeClientFromCmd_MissingRegistry(t *testing.T) {
 		t.Errorf("error should mention registry.yaml, got: %v", err)
 	}
 }
+
+func TestRecipeSignCatalogCmd_Registered(t *testing.T) {
+	cmd := recipeCmd()
+	var found bool
+	for _, sub := range cmd.Commands {
+		if sub.Name == "sign-catalog" {
+			found = true
+			if !sub.Hidden {
+				t.Error("sign-catalog should be hidden")
+			}
+		}
+	}
+	if !found {
+		t.Error("sign-catalog subcommand not found under recipe")
+	}
+}
+
+func TestRecipeVerifyCatalogCmd_Registered(t *testing.T) {
+	cmd := recipeCmd()
+	var found bool
+	for _, sub := range cmd.Commands {
+		if sub.Name == "verify-catalog" {
+			found = true
+			if sub.Hidden {
+				t.Error("verify-catalog should be visible (not hidden)")
+			}
+		}
+	}
+	if !found {
+		t.Error("verify-catalog subcommand not found under recipe")
+	}
+}

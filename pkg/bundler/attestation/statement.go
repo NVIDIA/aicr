@@ -30,6 +30,9 @@ import (
 const (
 	SLSAProvenanceType = "https://slsa.dev/provenance/v1"
 	BundleBuildType    = "https://aicr.nvidia.com/bundle/v1"
+
+	// CatalogBuildType is the SLSA buildType for recipe-catalog attestations.
+	CatalogBuildType = "https://aicr.nvidia.com/recipe-catalog/v1"
 )
 
 // StatementMetadata provides build context for the SLSA predicate.
@@ -65,6 +68,10 @@ type StatementMetadata struct {
 	// Required for SLSA-reproducible builds where two runs against
 	// identical inputs must produce byte-identical attestations.
 	Deterministic bool
+
+	// BuildType overrides the SLSA buildDefinition.buildType URI.
+	// Empty falls back to BundleBuildType ("https://aicr.nvidia.com/bundle/v1").
+	BuildType string
 }
 
 // aicrBundleNamespace is the UUIDv5 namespace for deterministic
@@ -137,9 +144,14 @@ func buildPredicate(subject AttestSubject, metadata StatementMetadata) (*structp
 		components = append(components, c)
 	}
 
+	buildType := BundleBuildType
+	if metadata.BuildType != "" {
+		buildType = metadata.BuildType
+	}
+
 	predicateMap := map[string]any{
 		"buildDefinition": map[string]any{
-			"buildType": BundleBuildType,
+			"buildType": buildType,
 			"externalParameters": map[string]any{
 				"recipe":       metadata.Recipe,
 				"recipeSource": metadata.RecipeSource,

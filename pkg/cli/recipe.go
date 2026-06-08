@@ -98,9 +98,6 @@ func recipeCmd() *cli.Command {
 		Name:     cmdNameRecipe,
 		Category: functionalCategoryName,
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
-		Commands: []*cli.Command{
-			recipeListCmd(),
-		},
 		Description: `Generate configuration recipe based on specified environment parameters including:
   - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke, bcm)
   - Accelerator type (e.g. h100, h200, gb200, b200, a100, l40, rtx-pro-6000)
@@ -133,6 +130,11 @@ Override config file values with flags:
 
 Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
+		Commands: []*cli.Command{
+			recipeListCmd(),
+			recipeSignCatalogCmd(),
+			recipeVerifyCatalogCmd(),
+		},
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, "snapshot", "config", flagOutput, flagFormat); err != nil {

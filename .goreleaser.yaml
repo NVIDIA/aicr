@@ -45,6 +45,17 @@ builds:
             --bundle "$(dirname "{{ .Path }}")/aicr-attestation.sigstore.json"
             --yes "{{ .Path }}"'
           output: true
+        ## Sign the embedded recipe catalog (registry.yaml + validators/catalog.yaml).
+        ## Runs once per release (linux/amd64) and only when SLSA_PREDICATE is set
+        ## (same gate as the binary attestation hook) so local goreleaser runs skip
+        ## the OIDC flow. Output bundle is published as a release asset (see
+        ## release.extra_files below).
+        - cmd: >-
+            bash -c 'if [ "{{ .Os }}/{{ .Arch }}" != "linux/amd64" ]; then exit 0; fi;
+            if [ -z "${SLSA_PREDICATE:-}" ]; then exit 0; fi;
+            "{{ .Path }}" recipe sign-catalog
+            --output "$(dirname "{{ .Path }}")/recipe-catalog.sigstore.json"'
+          output: true
     goos:
       - darwin
       - linux
@@ -104,6 +115,10 @@ release:
   # 'make release') at the repo root, so it survives 'goreleaser --clean'.
   extra_files:
     - glob: ./THIRD_PARTY_NOTICES.md
+    # Recipe catalog Sigstore bundle, produced by the aicr build's post-hook
+    # above for linux/amd64. The glob picks it up from goreleaser's per-build
+    # output dir.
+    - glob: ./dist/aicr_linux_amd64*/recipe-catalog.sigstore.json
 
 kos:
   - id: aicr
@@ -143,6 +158,8 @@ archives:
     name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - src: "dist/aicr_{{ .Os }}_{{ .Arch }}*/aicr-attestation.sigstore.json"
+        strip_parent: true
+      - src: "dist/aicr_linux_amd64*/recipe-catalog.sigstore.json"
         strip_parent: true
 
 changelog:

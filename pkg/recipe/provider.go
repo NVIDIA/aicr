@@ -275,11 +275,14 @@ const (
 	// sourceMerged is the source name for files merged from both embedded and external.
 	sourceMerged = "merged (" + sourceEmbedded + " + " + sourceExternal + ")"
 
-	// registryFileName is the name of the component registry file.
-	registryFileName = "registry.yaml"
+	// RegistryFileName is the name of the component registry file.
+	RegistryFileName = "registry.yaml"
 
-	// catalogFileName is the name of the validator catalog file.
-	catalogFileName = "validators/catalog.yaml"
+	// CatalogFileName is the name of the validator catalog file.
+	CatalogFileName = "validators/catalog.yaml"
+
+	registryFileName = RegistryFileName
+	catalogFileName  = CatalogFileName
 )
 
 // NewLayeredDataProvider creates a provider that layers external data over embedded.
