@@ -14,7 +14,7 @@
 
 # HPA Pod Autoscaling test with custom GPU metrics
 # Demonstrates HPA scaling based on gpu_utilization from prometheus-adapter
-# Usage: kubectl apply -f pkg/evidence/scripts/manifests/hpa-gpu-test.yaml
+# Usage: kubectl apply -f pkg/evidence/cncf/scripts/manifests/hpa-gpu-test.yaml
 ---
 apiVersion: v1
 kind: Namespace

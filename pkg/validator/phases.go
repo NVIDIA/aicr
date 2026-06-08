@@ -40,9 +40,18 @@ const (
 // All phases run by default; set Validator.FailFast to stop after the
 // first phase that reports StatusFailed.
 //
+// Order rationale: deployment (cheap install/health checks) → conformance
+// → performance. Performance runs LAST because its inference-perf benchmark
+// saturates every GPU on the node and the DynamoGraphDeployment teardown
+// releases those DRA ResourceClaims asynchronously; running it before
+// conformance starved conformance's GPU-needing checks (e.g. dra-support,
+// whose 1-GPU test pod failed "cannot allocate all claims" on single-node
+// clusters). Running performance last also keeps a flaky perf phase from
+// blocking conformance under FailFast.
+//
 // Note: Readiness phase is NOT included. It remains in pkg/validator
 // and uses inline constraint evaluation (no containers).
-var PhaseOrder = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
+var PhaseOrder = []Phase{PhaseDeployment, PhaseConformance, PhasePerformance}
 
 // PhaseAll is the wildcard string accepted by both the `aicr validate
 // --phase` CLI flag and the spec.validate.execution.phases config field

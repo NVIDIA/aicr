@@ -72,6 +72,10 @@ type bundleCmdOptions struct {
 	// the resulting artifact is self-contained and air-gap deployable.
 	vendorCharts bool
 
+	// readinessHooks emits a per-component readiness gate chart for each
+	// component that ships a readiness.yaml. Off by default. See #904.
+	readinessHooks bool
+
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
@@ -130,6 +134,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		repoURL:                   stringFlagOrConfig(cmd, "repo", resolved.Repo),
 		attest:                    boolFlagOrConfig(cmd, "attest", resolved.Attest),
 		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", resolved.VendorCharts),
+		readinessHooks:            cmd.Bool("readiness-hooks"),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
 		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
@@ -592,6 +597,18 @@ Package with explicit tag (overrides CLI version):
 	'helm' binary on PATH at bundle time.`,
 				Category: "Deployment",
 			},
+			&cli.BoolFlag{
+				Name: "readiness-hooks",
+				Usage: `Emit a standalone readiness gate chart (NNN-<name>-readiness/) for each
+	component that ships a recipes/components/<name>/readiness.yaml chainsaw
+	Test. The chart runs the gate CLI as a post-component Job so deployers
+	block on component-specific readiness signals (e.g. ClusterPolicy state)
+	that Helm/Argo CD cannot assess natively: helm waits via
+	--wait-for-jobs, Argo CD via the gate's sync-wave and built-in Job
+	health. Supported with --deployer helm, argocd, and argocd-helm; off by
+	default. See #904.`,
+				Category: catDeployment,
+			},
 			&cli.StringFlag{
 				Name: "flux-oci-source-name",
 				Usage: "Name of the OCIRepository CR that Flux uses to pull the bundle " +
@@ -751,6 +768,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 		config.WithStorageClass(opts.storageClass),
 		config.WithVendorCharts(opts.vendorCharts),
+		config.WithReadinessHooks(opts.readinessHooks),
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),

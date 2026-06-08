@@ -146,7 +146,7 @@ func validateDRAAllocation(ctx *validators.Context, dynClient dynamic.Interface)
 		return err
 	}
 	recordRawTextArtifact(ctx, "Apply test manifest",
-		"kubectl apply -f docs/conformance/cncf/manifests/dra-gpu-test.yaml",
+		"kubectl apply -f pkg/evidence/cncf/scripts/manifests/dra-gpu-test.yaml",
 		fmt.Sprintf("Created Namespace=%s ResourceClaim=%s Pod=%s via Kubernetes API",
 			draTestNamespace, run.claimName, run.podName))
 

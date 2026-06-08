@@ -3,8 +3,8 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-06-01T00:00:00Z",
-  "version": 1,
+  "timestamp": "2026-06-06T00:00:00Z",
+  "version": 2,
   "tooling": "manual; reachability verified against aiperf v0.7.0 source",
   "statements": [
     {
@@ -282,6 +282,29 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "Same reachability argument as GHSA-whj4-6x5x-4v2j: the AICR text-LLM benchmark workload never enters pillow's image-loading paths, and aiperf's ImageFormat allowlist restricts inputs to PNG/JPEG. PSD is not in the allowlist."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-7210",
+        "description": "cpython xml.parsers.expat and xml.etree.ElementTree use insufficient entropy for Expat hash-flooding protection, allowing a crafted XML document to trigger hash flooding (GHSA-wxv8-w48j-r2f4, CWE-331, Critical CVSS 9.8). Fix requires libexpat 2.8.0+ AND a CPython patch; as of 2026-06-06 the patch is merged only to cpython main/3.15 — no 3.13.x backport exists (cpython PR #149646 for 3.14 still open, no 3.13 PR filed)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The attack requires parsing a crafted (attacker-controlled) XML document through xml.parsers.expat or xml.etree.ElementTree to trigger hash flooding. AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go). That subcommand communicates with the inference endpoint via JSON over HTTP only; all data transport uses aiohttp + orjson/msgspec. aiperf v0.7.0's declared dependencies contain no XML parsing libraries — the runtime stack (aiohttp, msgspec, orjson, numpy, transformers, uvicorn, fastapi) is entirely JSON/binary-based. While xml.parsers.expat is present in the Python 3.13 stdlib image, no attacker-controlled XML document can enter the aiperf profile execution path, making the hash-flooding trigger unreachable."
     }
   ]
 }

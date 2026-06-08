@@ -30,7 +30,7 @@
 //     each component in a *RecipeResult.
 //   - CollectSnapshot — deploy the snapshotter Job and retrieve a *Snapshot.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
-//     running deployment / performance / conformance phases.
+//     running deployment / conformance / performance phases.
 //
 // All facade types (Snapshot, AgentConfig, Criteria, RecipeRequest,
 // RecipeResult, ComponentBundle, ComponentRef, PhaseResult, AllowLists)
@@ -1100,7 +1100,7 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 
 // ValidateState evaluates a resolved recipe against an observed cluster
 // snapshot, runs the selected validation phases (by default
-// PhaseDeployment, PhasePerformance, PhaseConformance) in order, and
+// PhaseDeployment, PhaseConformance, PhasePerformance) in order, and
 // returns one PhaseResult per phase run. Pass WithValidationPhases to
 // restrict the run to a subset.
 //

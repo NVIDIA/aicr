@@ -263,7 +263,10 @@ func TestCheckReadinessUnparseableConstraintFailsClosed(t *testing.T) {
 }
 
 func TestPhaseOrder(t *testing.T) {
-	expected := []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
+	// performance runs last: its benchmark saturates all node GPUs and releases
+	// DRA claims asynchronously, which would otherwise starve conformance's
+	// GPU-needing checks (e.g. dra-support).
+	expected := []Phase{PhaseDeployment, PhaseConformance, PhasePerformance}
 	if len(PhaseOrder) != len(expected) {
 		t.Fatalf("PhaseOrder length = %d, want %d", len(PhaseOrder), len(expected))
 	}

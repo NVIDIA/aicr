@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-operator-readiness-gate
+  namespace: gpu-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gpu-operator-readiness-gate-gpu-operator
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "namespaces", "services", "configmaps", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["nvidia.com"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gpu-operator-readiness-gate-gpu-operator
+subjects:
+  - kind: ServiceAccount
+    name: gpu-operator-readiness-gate
+    namespace: gpu-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gpu-operator-readiness-gate-gpu-operator
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-operator-readiness-bundle
+  namespace: gpu-operator
+data:
+  gpu-operator.yaml: |
+    apiVersion: chainsaw.kyverno.io/v1alpha1
+    kind: Test
+    metadata:
+      name: gpu-operator-readiness
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-operator-readiness-gate
+  namespace: gpu-operator
+  annotations:
+    argocd.argoproj.io/sync-options: Replace=true
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: gpu-operator-readiness-gate
+      containers:
+        - name: gate
+          image: ghcr.io/nvidia/aicr-gate:v0.0.0-golden
+          imagePullPolicy: IfNotPresent
+          args:
+            - --bundle-dir=/bundle
+            - --namespace=gpu-operator
+            - --timeout=2m0s
+            - --poll-interval=10s
+            - --stability-window=30s
+            - --max-wait=1h30m0s
+          volumeMounts:
+            - name: bundle
+              mountPath: /bundle
+              readOnly: true
+      volumes:
+        - name: bundle
+          configMap:
+            name: gpu-operator-readiness-bundle

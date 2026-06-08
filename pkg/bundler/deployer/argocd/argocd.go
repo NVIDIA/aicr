@@ -171,6 +171,18 @@ type Generator struct {
 	// appear in the map.
 	ComponentPostManifests map[string]map[string][]byte
 
+	// ComponentReadiness maps component name → manifest path → rendered bytes
+	// for the per-component readiness gate (a local Helm chart wrapping the
+	// gate Job + RBAC + ConfigMap). localformat.Write emits it as a folder
+	// immediately after the component's primary (and any -post) folder, so the
+	// generated Argo CD Application inherits the next sync-wave index. Argo CD
+	// blocks that wave on the gate Job via its built-in batch/Job health —
+	// Progressing until the Job completes, Healthy on success, Degraded on
+	// failure — the analog of helm --wait-for-jobs. No custom health Lua is
+	// required. Populated by the bundler from readiness.yaml only when
+	// --readiness-hooks is set; empty otherwise. See #904.
+	ComponentReadiness map[string]map[string][]byte
+
 	// DynamicValues maps component names to their dynamic value paths. The
 	// paths are removed from per-component values.yaml during the localformat
 	// split. The associated cluster-values.yaml is stripped from the final
@@ -391,6 +403,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		Components:             lfComponents,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
+		ComponentReadiness:     g.ComponentReadiness,
 		VendorCharts:           g.VendorCharts,
 	})
 	if lfErr != nil {

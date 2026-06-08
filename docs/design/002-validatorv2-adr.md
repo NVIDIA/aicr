@@ -10,7 +10,7 @@ containers in `validators/`. The v1 engine has been deleted.
 ## Context
 
 AICR validates GPU-accelerated Kubernetes clusters through a multi-phase pipeline
-(readiness, deployment, performance, conformance). The current implementation
+(readiness, deployment, conformance, performance). The current implementation
 (`pkg/validator`) uses Go's `testing.T` framework as a runtime execution engine
 inside Kubernetes Jobs:
 
@@ -178,7 +178,7 @@ ValidateAll(ctx, recipe, snapshot)
 ├── EnsureRBAC()                    # Once (SA + CRB)
 ├── ensureDataConfigMaps()          # Once (snapshot + recipe)
 │
-├── For phase in [deployment, performance, conformance]:
+├── For phase in [deployment, conformance, performance]:
 │   ├── Skip if previous phase failed
 │   ├── For each validator (sequentially):
 │   │   ├── Deploy Job

@@ -119,6 +119,17 @@ const (
 	// aiperfOutputTokensMean is the mean number of output tokens per request.
 	aiperfOutputTokensMean = 128
 
+	// Determinism knobs — make the benchmark reproducible run-to-run so the
+	// verdict reflects the deployment, not RNG. The benchmark is driven with a
+	// fixed random seed, fixed input/output token counts (stddev 0), a fixed
+	// dataset-entry pool, and greedy decoding (temperature 0 via --extra-inputs,
+	// AIPerf's recommended way to get deterministic output without ignore_eos).
+	// aiperfRandomSeed seeds prompt selection, ordering, and sampling.
+	aiperfRandomSeed = 100
+	// aiperfNumDatasetEntries pins the synthetic-prompt pool size (AIPerf's
+	// default is 100; pinned here so it's explicit and reproducible).
+	aiperfNumDatasetEntries = 100
+
 	// aiperfArtifactDir is where AIPerf writes benchmark result files.
 	aiperfArtifactDir = "/tmp/aiperf"
 
@@ -1228,10 +1239,30 @@ func resolveFrontendEndpoint(ctx *validators.Context, namespace string) string {
 	return fmt.Sprintf("http://%s.%s.svc:%d", svc.Name, svc.Namespace, port)
 }
 
+// inferencePerfNoCleanup reports whether AICR_INFERENCE_PERF_NO_CLEANUP is set
+// to a truthy value. When set, the inference-perf validator leaves the
+// namespace, DGD, workers, frontend, and AIPerf Job in place after the run so a
+// failed/anomalous run (e.g. serve-wait or generate hang) can be inspected
+// post-mortem. Debug-only; the operator must clean up the namespace manually.
+func inferencePerfNoCleanup() bool {
+	b, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("AICR_INFERENCE_PERF_NO_CLEANUP")))
+	return b
+}
+
 // cleanupInferenceWorkload removes the deployed benchmark workload and its namespace.
 // Safe to call even on partial failure — skips if deployedByUs is false.
 func cleanupInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) {
 	if !config.deployedByUs {
+		return
+	}
+
+	// Debug escape hatch: leave the namespace, DGD, workers, frontend, and
+	// AIPerf Job in place for post-mortem inspection (e.g. serve-wait / generate
+	// hangs). Set AICR_INFERENCE_PERF_NO_CLEANUP=1. Operator must delete the
+	// namespace manually afterward.
+	if inferencePerfNoCleanup() {
+		slog.Warn("AICR_INFERENCE_PERF_NO_CLEANUP set — leaving workload in place for inspection",
+			"namespace", config.namespace, "deployment", inferenceDeploymentName)
 		return
 	}
 
@@ -1317,7 +1348,7 @@ func waitForEndpointReadyWithInterval(ctx context.Context, endpoint, model strin
 	chatURL := endpoint + "/v1/chat/completions"
 	slog.Info("Waiting for inference endpoint to serve requests", "url", chatURL, "model", model, "timeout", timeout)
 
-	client := &http.Client{Timeout: defaults.HTTPClientTimeout}
+	client := &http.Client{Timeout: defaults.InferenceEndpointProbeTimeout}
 
 	pollCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -1684,7 +1715,12 @@ aiperf profile "$AICR_MODEL" \
   --request-count %d \
   --warmup-request-count %d \
   --prompt-input-tokens-mean %d \
+  --prompt-input-tokens-stddev 0 \
   --prompt-output-tokens-mean %d \
+  --prompt-output-tokens-stddev 0 \
+  --num-dataset-entries %d \
+  --random-seed %d \
+  --extra-inputs temperature:0 \
   --output-artifact-dir %s \
   --export-level summary
 echo '%s'
@@ -1693,6 +1729,7 @@ echo '%s'`,
 		endpoint,
 		concurrency, requestCount, warmupCount,
 		inputTokensMean, outputTokensMean,
+		aiperfNumDatasetEntries, aiperfRandomSeed,
 		aiperfArtifactDir,
 		aiperfResultSentinel,
 		aiperfArtifactDir,
@@ -1753,6 +1790,10 @@ echo '%s'`,
 // actual deletion. Synchronous wait prevents subsequent Create calls from
 // racing against an in-flight foreground deletion and hitting AlreadyExists.
 func cleanupAIPerfJob(ctx *validators.Context, jobName string) {
+	if inferencePerfNoCleanup() {
+		slog.Warn("AICR_INFERENCE_PERF_NO_CLEANUP set — leaving AIPerf Job in place", "job", jobName)
+		return
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 	defer cancel()
 
