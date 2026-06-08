@@ -340,11 +340,28 @@ jobs:
 
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
+      #
+      # The pinned actuator (EKS_IMAGE digest above) has no `destroy`
+      # subcommand — teardown is `apply` with .deployment.destroy=true (see
+      # the actuator's own help: "apply — Deploy or destroy infrastructure
+      # via Terraform"). The prior `destroy` invocation hit urfave/cli's
+      # unknown-command path, printed the help banner, and exited 0, so the
+      # `if` matched, "destroyed successfully" printed, and the GPU node
+      # leaked — holding the H100 capacity reservation across runs. Mirrors
+      # the GCP UAT teardown.
+      #
+      # The retry loop must fail the step if all attempts fail: `docker run`
+      # in an `if` condition does not trip `set -e`, so without the explicit
+      # post-loop guard a genuine destroy failure (e.g. orphaned ENIs/SGs
+      # blocking VPC deletion) would exit 0 and re-leak silently.
       - name: Destroy Cluster
         if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
         shell: bash
         run: |
           set -euxo pipefail
+          yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
+          cat "$CLUSTER_CONFIG"
+          destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
             if docker run \
@@ -353,10 +370,15 @@ jobs:
               -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
               -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
               -e AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
-              "${EKS_IMAGE}" destroy; then
+              "${EKS_IMAGE}" apply; then
               echo "Cluster destroyed successfully"
+              destroyed=true
               break
             fi
             echo "Destroy attempt ${attempt} failed, retrying..."
             sleep 30
           done
+          if [ "$destroyed" != true ]; then
+            echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
+            exit 1
+          fi
