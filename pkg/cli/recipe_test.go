@@ -817,3 +817,41 @@ func TestRecipeVerifyCatalogCmd_Registered(t *testing.T) {
 		t.Error("verify-catalog subcommand not found under recipe")
 	}
 }
+
+// findSubcommand returns the named subcommand under recipeCmd or t.Fatal's.
+func findSubcommand(t *testing.T, name string) *cli.Command {
+	t.Helper()
+	for _, sub := range recipeCmd().Commands {
+		if sub.Name == name {
+			return sub
+		}
+	}
+	t.Fatalf("subcommand %q not found under recipe", name)
+	return nil
+}
+
+// TestRecipeVerifyCatalog_RejectsMissingPositional exercises the Action's
+// argument-count guard. The CLI must return a structured invalid-request
+// error (not panic on Args().First() against an empty arg list) when invoked
+// without the <bundle-path> positional.
+func TestRecipeVerifyCatalog_RejectsMissingPositional(t *testing.T) {
+	verify := findSubcommand(t, "verify-catalog")
+	// Drive the command through urfave/cli so cmd.NArg() reflects reality.
+	parent := &cli.Command{
+		Name:     "aicr",
+		Commands: []*cli.Command{verify},
+		Writer:   testWriter{},
+	}
+	err := parent.Run(context.Background(), []string{"aicr", "verify-catalog"})
+	if err == nil {
+		t.Fatal("expected error for missing positional, got nil")
+	}
+	if !strings.Contains(err.Error(), "usage") {
+		t.Errorf("error should mention usage, got: %v", err)
+	}
+}
+
+// testWriter is a no-op io.Writer for cli.Command Writer fields in tests.
+type testWriter struct{}
+
+func (testWriter) Write(p []byte) (int, error) { return len(p), nil }

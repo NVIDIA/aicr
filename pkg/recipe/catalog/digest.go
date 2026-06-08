@@ -17,31 +17,39 @@ package catalog
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // digestAlgoSHA256 is the algorithm key used in SLSA-style digest maps.
 const digestAlgoSHA256 = "sha256"
 
+// catalogSubjectName is the AttestSubject.Name reported for catalog signing.
+const catalogSubjectName = "recipe-catalog"
+
 // ComputeDigest reads registry.yaml and validators/catalog.yaml through
-// provider, deterministically re-serializes each, and returns an
-// attestation.AttestSubject whose Digest is the SHA-256 of the concatenated
-// canonical bytes. ResolvedDependencies holds the individual file digests.
+// provider and returns an attestation.AttestSubject whose Digest is the
+// SHA-256 of an injective length-prefixed encoding of the two raw byte
+// streams: u64-BE(len(reg)) || reg || u64-BE(len(cat)) || cat.
+//
+// The combined digest covers the exact shipped bytes (no YAML normalization),
+// so it preserves comments and tolerates multi-document YAML — what the
+// consumer pulls out of the binary or release archive is what is signed.
+// The length prefixes make (registry, catalog) injectively encoded so two
+// different file-boundary splits cannot collide on the same combined digest.
+// Per-file SHA-256s are recorded in ResolvedDependencies for auditability.
 func ComputeDigest(ctx context.Context, provider recipe.DataProvider) (attestation.AttestSubject, error) {
-	regBytes, err := deterministicYAML(ctx, provider, recipe.RegistryFileName)
+	regBytes, err := provider.ReadFile(ctx, recipe.RegistryFileName)
 	if err != nil {
 		return attestation.AttestSubject{}, errors.PropagateOrWrap(err, errors.ErrCodeNotFound,
 			"failed to read registry file")
 	}
 
-	catBytes, err := deterministicYAML(ctx, provider, recipe.CatalogFileName)
+	catBytes, err := provider.ReadFile(ctx, recipe.CatalogFileName)
 	if err != nil {
 		return attestation.AttestSubject{}, errors.PropagateOrWrap(err, errors.ErrCodeNotFound,
 			"failed to read catalog file")
@@ -50,13 +58,20 @@ func ComputeDigest(ctx context.Context, provider recipe.DataProvider) (attestati
 	regHash := sha256.Sum256(regBytes)
 	catHash := sha256.Sum256(catBytes)
 
+	// Length-prefix each input so the encoding is injective: (regA, catBC) and
+	// (regAB, catC) hash differently. sha256.Hash.Write never errors.
 	combined := sha256.New()
-	combined.Write(regBytes)
-	combined.Write(catBytes)
+	var lenBuf [8]byte
+	binary.BigEndian.PutUint64(lenBuf[:], uint64(len(regBytes)))
+	_, _ = combined.Write(lenBuf[:])
+	_, _ = combined.Write(regBytes)
+	binary.BigEndian.PutUint64(lenBuf[:], uint64(len(catBytes)))
+	_, _ = combined.Write(lenBuf[:])
+	_, _ = combined.Write(catBytes)
 	combinedHex := hex.EncodeToString(combined.Sum(nil))
 
 	return attestation.AttestSubject{
-		Name: "recipe-catalog",
+		Name: catalogSubjectName,
 		Digest: map[string]string{
 			digestAlgoSHA256: combinedHex,
 		},
@@ -71,22 +86,4 @@ func ComputeDigest(ctx context.Context, provider recipe.DataProvider) (attestati
 			},
 		},
 	}, nil
-}
-
-// deterministicYAML reads a YAML file through provider and re-marshals it
-// with sorted keys so the output is byte-stable across runs.
-func deterministicYAML(ctx context.Context, provider recipe.DataProvider, path string) ([]byte, error) {
-	raw, err := provider.ReadFile(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	var v any
-	if unmarshalErr := yaml.Unmarshal(raw, &v); unmarshalErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse "+path, unmarshalErr)
-	}
-	data, err := serializer.MarshalYAMLDeterministic(v)
-	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to marshal "+path)
-	}
-	return data, nil
 }

@@ -50,13 +50,17 @@ type SignResult struct {
 // Sign computes the catalog digest, signs it via opts.Attester, and writes
 // the bundle to opts.Output (skipped when BundleJSON is nil).
 func Sign(ctx context.Context, provider recipe.DataProvider, opts SignOptions) (*SignResult, error) {
+	if opts.Attester == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "attester is required")
+	}
+
 	subject, err := ComputeDigest(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
 
 	subject.Metadata = attestation.StatementMetadata{
-		Recipe:        "recipe-catalog",
+		Recipe:        catalogSubjectName,
 		RecipeSource:  provider.Source(recipe.RegistryFileName),
 		BuildType:     attestation.CatalogBuildType,
 		ToolVersion:   opts.ToolVersion,

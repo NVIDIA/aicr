@@ -16,6 +16,7 @@ package catalog_test
 
 import (
 	"context"
+	stderrors "errors"
 	"io/fs"
 	"testing"
 
@@ -97,6 +98,9 @@ func TestComputeDigest_MissingRegistry(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing registry, got nil")
 	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("expected ErrCodeNotFound, got %v", err)
+	}
 }
 
 func TestComputeDigest_MissingCatalog(t *testing.T) {
@@ -110,6 +114,9 @@ func TestComputeDigest_MissingCatalog(t *testing.T) {
 	_, err := catalog.ComputeDigest(ctx, p)
 	if err == nil {
 		t.Fatal("expected error for missing catalog, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("expected ErrCodeNotFound, got %v", err)
 	}
 }
 

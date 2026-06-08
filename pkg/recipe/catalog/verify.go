@@ -66,6 +66,14 @@ func Verify(ctx context.Context, bundlePath string, provider recipe.DataProvider
 	if identityPattern == "" {
 		identityPattern = verifier.TrustedRepositoryPattern
 	}
+	// Enforce the NVIDIA/aicr repo-prefix invariant the field's godoc promises.
+	// Without this, --identity-pattern '.*' (or env override) silently disables
+	// repo pinning — leaving only the OIDC issuer pin, which any GitHub Actions
+	// workflow satisfies.
+	if validateErr := verifier.ValidateIdentityPattern(identityPattern); validateErr != nil {
+		return nil, errors.PropagateOrWrap(validateErr, errors.ErrCodeInvalidRequest,
+			"invalid catalog identity pattern")
+	}
 
 	identity, err := verifier.VerifyBinaryAttestation(ctx, bundlePath, identityPattern, digestBytes)
 	if err != nil {

@@ -46,10 +46,14 @@ builds:
             --yes "{{ .Path }}"'
           output: true
         ## Sign the embedded recipe catalog (registry.yaml + validators/catalog.yaml).
-        ## Runs once per release (linux/amd64) and only when SLSA_PREDICATE is set
-        ## (same gate as the binary attestation hook) so local goreleaser runs skip
-        ## the OIDC flow. Output bundle is published as a release asset (see
-        ## release.extra_files below).
+        ##
+        ## Two-axis filter: SLSA_PREDICATE presence (set only by the release
+        ## workflow — local goreleaser runs skip the OIDC flow), AND linux/amd64
+        ## (the binary-attestation hook above runs once per goos/goarch combination;
+        ## this one pins to a single combination so the catalog is signed exactly
+        ## once per release). The bundle is then published two ways: as a loose
+        ## release asset (release.extra_files) for easy curl-and-verify, and inside
+        ## every archive (archives.files — the signature is arch-independent).
         - cmd: >-
             bash -c 'if [ "{{ .Os }}/{{ .Arch }}" != "linux/amd64" ]; then exit 0; fi;
             if [ -z "${SLSA_PREDICATE:-}" ]; then exit 0; fi;
@@ -115,9 +119,12 @@ release:
   # 'make release') at the repo root, so it survives 'goreleaser --clean'.
   extra_files:
     - glob: ./THIRD_PARTY_NOTICES.md
-    # Recipe catalog Sigstore bundle, produced by the aicr build's post-hook
-    # above for linux/amd64. The glob picks it up from goreleaser's per-build
-    # output dir.
+    # Recipe catalog Sigstore bundle. Published as a loose release asset so
+    # `aicr recipe verify-catalog` users can curl the signature directly
+    # without downloading and extracting a tarball. Authority comes from the
+    # Sigstore signature (Fulcio cert + Rekor inclusion proof), not from the
+    # checksums manifest, so the loose-asset placement is intentional even
+    # though `checksums.txt` does not cover it.
     - glob: ./dist/aicr_linux_amd64*/recipe-catalog.sigstore.json
 
 kos:
@@ -159,6 +166,10 @@ archives:
     files:
       - src: "dist/aicr_{{ .Os }}_{{ .Arch }}*/aicr-attestation.sigstore.json"
         strip_parent: true
+      # The catalog signature is produced once (linux/amd64 build hook) but the
+      # signed artifact is arch-independent (it covers the embedded recipe data,
+      # not the binary). Ship the same bundle in every archive so users on any
+      # platform can verify the catalog without a second download.
       - src: "dist/aicr_linux_amd64*/recipe-catalog.sigstore.json"
         strip_parent: true
 

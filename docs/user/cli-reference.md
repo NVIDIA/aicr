@@ -613,6 +613,52 @@ aicr recipe list --data /etc/aicr/custom-recipes --format yaml
 
 ---
 
+### aicr recipe verify-catalog
+
+Verify the embedded recipe catalog (`registry.yaml` + `validators/catalog.yaml`)
+against its Sigstore bundle. The bundle is distributed as `recipe-catalog.sigstore.json`
+release asset alongside each tagged `aicr` binary.
+
+`aicr recipe verify-catalog` recomputes a deterministic SHA-256 over the embedded
+catalog content using a length-prefixed encoding of the two raw files, then
+verifies the digest against the Sigstore bundle using NVIDIA CI identity pinning.
+Exit code is 0 on success, non-zero on any verification failure.
+
+**Synopsis:**
+
+```shell
+aicr recipe verify-catalog <bundle-path> [flags]
+```
+
+**Flags:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--identity-pattern` | string | | Override the NVIDIA CI certificate identity regexp. Must contain `NVIDIA/aicr` — overrides that drop the repo prefix are rejected. Also reads `AICR_CATALOG_IDENTITY_PATTERN`. |
+
+**Examples:**
+
+```shell
+# Download the catalog signature for a tagged release and verify it.
+curl -Lo recipe-catalog.sigstore.json \
+  https://github.com/NVIDIA/aicr/releases/download/vX.Y.Z/recipe-catalog.sigstore.json
+
+aicr recipe verify-catalog recipe-catalog.sigstore.json
+```
+
+**Output:**
+
+On success, prints the verified content digest and the Fulcio certificate
+identity (the GitHub Actions workflow that signed the release):
+
+```text
+catalog verified
+  digest:   sha256:<hex>
+  identity: https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/vX.Y.Z
+```
+
+---
+
 ### aicr query
 
 Query a specific value from the fully hydrated recipe configuration. Resolves a recipe

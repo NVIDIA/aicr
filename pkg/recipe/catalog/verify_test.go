@@ -50,3 +50,27 @@ func TestVerify_InvalidBundle(t *testing.T) {
 		t.Fatal("expected error for invalid bundle, got nil")
 	}
 }
+
+// TestVerify_RejectsOverlyBroadIdentityPattern locks in the safety contract
+// documented on VerifyOptions.CertificateIdentityRegexp: an override that
+// does not contain "NVIDIA/aicr" must be rejected with ErrCodeInvalidRequest
+// rather than silently disabling effective repo pinning. Without this guard
+// `aicr recipe verify-catalog --identity-pattern '.*'` would treat any
+// GitHub Actions OIDC identity as valid.
+func TestVerify_RejectsOverlyBroadIdentityPattern(t *testing.T) {
+	ctx := context.Background()
+	bundlePath := filepath.Join(t.TempDir(), "bundle.sigstore.json")
+	if err := os.WriteFile(bundlePath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("seed bundle: %v", err)
+	}
+
+	_, err := catalog.Verify(ctx, bundlePath, newFullProvider(), catalog.VerifyOptions{
+		CertificateIdentityRegexp: ".*",
+	})
+	if err == nil {
+		t.Fatal("expected error for overly broad identity pattern, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+}

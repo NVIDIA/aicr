@@ -16,11 +16,13 @@ package catalog_test
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/catalog"
 )
@@ -121,5 +123,20 @@ func TestSign_MissingRegistry(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for missing registry, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("expected ErrCodeNotFound, got %v", err)
+	}
+}
+
+func TestSign_RejectsNilAttester(t *testing.T) {
+	_, err := catalog.Sign(context.Background(), newFullProvider(), catalog.SignOptions{
+		ToolVersion: "v0.0.0-test",
+	})
+	if err == nil {
+		t.Fatal("expected error for nil Attester, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }
