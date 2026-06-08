@@ -146,6 +146,45 @@ func TestResolveAttester(t *testing.T) {
 	}
 }
 
+// TestResolveAttesterKMS verifies the eager resolver returns a KMSAttester
+// when SigningKey is set, without resolving an OIDC token. A non-empty
+// SigningKey takes precedence over the keyless OIDC source fields. See #407.
+func TestResolveAttesterKMS(t *testing.T) {
+	// SigningKey takes precedence over keyless OIDC fields: even with an
+	// identity token and device flow set, the resolver selects the KMS
+	// attester and never attempts OIDC. (The CLI rejects this combination up
+	// front; the resolver's contract is precedence, not rejection.)
+	att, err := ResolveAttester(context.Background(), ResolveOptions{
+		Attest:        true,
+		SigningKey:    "awskms://arn:aws:kms:us-east-1:111:key/abc",
+		IdentityToken: "should-be-ignored",
+		DeviceFlow:    true,
+	})
+	if err != nil {
+		t.Fatalf("ResolveAttester: %v", err)
+	}
+	if _, ok := att.(*KMSAttester); !ok {
+		t.Errorf("got %T, want *KMSAttester", att)
+	}
+}
+
+// TestResolveAttesterLazyKMS verifies the lazy resolver returns a KMSAttester
+// when SigningKey is set, taking precedence over keyless OIDC fields. See #407.
+func TestResolveAttesterLazyKMS(t *testing.T) {
+	att, err := ResolveAttesterLazy(context.Background(), ResolveOptions{
+		Attest:        true,
+		SigningKey:    "awskms://arn:aws:kms:us-east-1:111:key/abc",
+		IdentityToken: "should-be-ignored",
+		DeviceFlow:    true,
+	})
+	if err != nil {
+		t.Fatalf("ResolveAttesterLazy: %v", err)
+	}
+	if _, ok := att.(*KMSAttester); !ok {
+		t.Errorf("got %T, want *KMSAttester", att)
+	}
+}
+
 // TestResolveAttesterLazy_DefersTokenResolution verifies the lazy entry
 // point does not touch the OIDC chain at construction time. Constructing
 // a lazy attester with a pre-canceled context plus a forced device-flow

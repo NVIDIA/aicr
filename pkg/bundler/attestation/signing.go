@@ -88,6 +88,10 @@ type SignedAttestation struct {
 // The returned SignedAttestation carries the Sigstore bundle plus the
 // signer-identity claims extracted from the Fulcio certificate so
 // callers do not need to re-parse the cert.
+//
+// SignStatement is the keyless specialization of the composable core
+// SignStatementWith: it builds a keyless Fulcio identity and a Rekor
+// transparency policy from opts and delegates the signing plumbing there.
 func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) (*SignedAttestation, error) {
 	if len(statementJSON) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
@@ -95,14 +99,25 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 	if opts.OIDCToken == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "OIDC token is required for keyless signing")
 	}
+	id := NewKeylessIdentity(opts.OIDCToken, opts.FulcioURL)
+	tlog := NewRekorPolicy(opts.RekorURL)
+	return SignStatementWith(ctx, statementJSON, id, tlog)
+}
 
-	fulcioURL := opts.FulcioURL
-	if fulcioURL == "" {
-		fulcioURL = defaults.SigstoreFulcioURL
+// SignStatementWith DSSE-wraps an in-toto Statement and signs it using the
+// given identity and transparency policy. It is the composable core shared by
+// keyless signing (SignStatement) and KMS signing (KMSAttester); #409 and
+// #1150 reuse it with different identity/policy pairings.
+//
+// When the identity supplies no Fulcio certificate (KMS), the resulting
+// Sigstore bundle carries a public-key verification material instead of a
+// certificate, and the signer identity is taken from id.FallbackIdentity().
+func SignStatementWith(ctx context.Context, statementJSON []byte, id SigningIdentity, tlog TransparencyPolicy) (*SignedAttestation, error) {
+	if len(statementJSON) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
 	}
-	rekorURL := opts.RekorURL
-	if rekorURL == "" {
-		rekorURL = defaults.SigstoreRekorURL
+	if id == nil || tlog == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "signing identity and transparency policy are required")
 	}
 
 	content := &sign.DSSEData{
@@ -110,27 +125,24 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 		PayloadType: "application/vnd.in-toto+json",
 	}
 
-	keypair, err := sign.NewEphemeralKeypair(nil)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create ephemeral keypair", err)
-	}
-
-	slog.Debug("signing in-toto statement", "fulcio", fulcioURL, "rekor", rekorURL)
-
-	// Bound the Fulcio + Rekor calls so a hung peer cannot block the CLI
+	// Bound the entire signing flow — key resolution (for KMS, the provider
+	// lookup and PublicKey RPC, which would otherwise escape this deadline)
+	// plus the Fulcio + Rekor calls — so a hung peer cannot block the CLI
 	// indefinitely. Honors any tighter deadline the caller already attached.
 	signCtx, cancel := context.WithTimeout(ctx, defaults.SigstoreSignTimeout)
 	defer cancel()
 
+	keypair, err := id.Keypair(signCtx)
+	if err != nil {
+		return nil, err // already classified by the identity
+	}
+
+	certProvider, certOpts := id.CertProvider()
 	bundle, err := sign.Bundle(content, keypair, sign.BundleOptions{
-		CertificateProvider: sign.NewFulcio(&sign.FulcioOptions{BaseURL: fulcioURL}),
-		CertificateProviderOptions: &sign.CertificateProviderOptions{
-			IDToken: opts.OIDCToken,
-		},
-		TransparencyLogs: []sign.Transparency{
-			sign.NewRekor(&sign.RekorOptions{BaseURL: rekorURL}),
-		},
-		Context: signCtx,
+		CertificateProvider:        certProvider,
+		CertificateProviderOptions: certOpts,
+		TransparencyLogs:           tlog.Logs(),
+		Context:                    signCtx,
 	})
 	if err != nil {
 		// Distinguish a SigstoreSignTimeout deadline from a generic
@@ -150,6 +162,9 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 	}
 
 	identity, issuer := extractSignerClaims(bundle)
+	if identity == "" {
+		identity = id.FallbackIdentity() // KMS: the key URI
+	}
 	rekorIndex := extractRekorLogIndex(bundle)
 
 	// Identity (Fulcio SAN) is user PII for interactive OIDC — keep it off the

@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	stderrors "errors"
 	"math/big"
 	"net/url"
 	"testing"
@@ -30,6 +31,10 @@ import (
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	protocommon "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	rekorv1 "github.com/sigstore/protobuf-specs/gen/pb-go/rekor/v1"
+	"github.com/sigstore/sigstore-go/pkg/sign"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestSignStatement_RejectsEmptyStatement(t *testing.T) {
@@ -272,4 +277,109 @@ func bundleFromTemplate(t *testing.T, template *x509.Certificate) *protobundle.B
 			},
 		},
 	}
+}
+
+// TestSignStatementWithRejectsNilStrategies verifies SignStatementWith returns
+// a structured ErrCodeInvalidRequest (rather than panicking) when the signing
+// identity and/or transparency policy is nil.
+func TestSignStatementWithRejectsNilStrategies(t *testing.T) {
+	tests := []struct {
+		name string
+		id   SigningIdentity
+		tlog TransparencyPolicy
+	}{
+		{"nil identity", nil, NewNoTLogPolicy()},
+		{"nil policy", newFakeKeyIdentity(t, "awskms://test/key"), nil},
+		{"both nil", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := SignStatementWith(context.Background(), validStatementJSON(t), tt.id, tt.tlog)
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+			}
+		})
+	}
+}
+
+// TestSignStatementWithKeyOnlyNoTLog exercises the composer's key-only,
+// no-certificate, no-transparency-log branch fully offline: a local ECDSA
+// signer (no KMS RPC) paired with NewNoTLogPolicy() (no Rekor call). It pins
+// the contract that key-based signing produces public-key verification
+// material, no tlog entries, and falls back to the identity's URI.
+func TestSignStatementWithKeyOnlyNoTLog(t *testing.T) {
+	id := newFakeKeyIdentity(t, "awskms://test/key")
+	res, err := SignStatementWith(context.Background(), validStatementJSON(t), id, NewNoTLogPolicy())
+	if err != nil {
+		t.Fatalf("SignStatementWith: %v", err)
+	}
+	if res.Identity != "awskms://test/key" {
+		t.Errorf("Identity = %q, want fallback URI", res.Identity)
+	}
+	if res.RekorLogIndex != 0 {
+		t.Errorf("RekorLogIndex = %d, want 0 (no tlog)", res.RekorLogIndex)
+	}
+	var b protobundle.Bundle
+	if err := protojson.Unmarshal(res.BundleJSON, &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.GetVerificationMaterial().GetPublicKey() == nil {
+		t.Error("want public-key verification material (no cert) for key-based signing")
+	}
+	if len(b.GetVerificationMaterial().GetTlogEntries()) != 0 {
+		t.Error("want no tlog entries")
+	}
+}
+
+// fakeKeyIdentity is a test SigningIdentity backed by a local ECDSA signer
+// (no KMS, no network) with no Fulcio certificate provider. It mirrors the
+// production kmsIdentity contract: public-key signing with a fixed fallback
+// URI as the audit identity.
+type fakeKeyIdentity struct {
+	signer kmsSigner
+	uri    string
+}
+
+// newFakeKeyIdentity returns a SigningIdentity whose Keypair is a local ECDSA
+// P-256 key wrapped via newKMSKeypairFromSigner, with no cert provider and the
+// given fallback URI. Used to drive SignStatementWith down its key-only path
+// offline.
+func newFakeKeyIdentity(t *testing.T, uri string) SigningIdentity {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return &fakeKeyIdentity{signer: &localECDSASigner{priv: priv}, uri: uri}
+}
+
+func (f *fakeKeyIdentity) Keypair(_ context.Context) (sign.Keypair, error) {
+	return newKMSKeypairFromSigner(f.signer)
+}
+
+func (f *fakeKeyIdentity) CertProvider() (sign.CertificateProvider, *sign.CertificateProviderOptions) {
+	return nil, nil
+}
+
+func (f *fakeKeyIdentity) FallbackIdentity() string { return f.uri }
+
+// validStatementJSON builds a valid protobuf-JSON in-toto statement via the
+// package's BuildStatement so the payload is spec-valid (no hand-rolled JSON).
+func validStatementJSON(t *testing.T) []byte {
+	t.Helper()
+	stmt, err := BuildStatement(
+		AttestSubject{
+			Name:   "checksums.txt",
+			Digest: map[string]string{"sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+		},
+		StatementMetadata{
+			Recipe:      "test-recipe",
+			ToolVersion: "v0.0.0-test",
+			BuilderID:   "awskms://test/key",
+		},
+	)
+	if err != nil {
+		t.Fatalf("BuildStatement: %v", err)
+	}
+	return stmt
 }

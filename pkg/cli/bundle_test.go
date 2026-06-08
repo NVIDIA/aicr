@@ -17,13 +17,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
+	"github.com/urfave/cli/v3"
 )
 
 // TestParseOutputTarget is now in pkg/oci/reference_test.go
@@ -497,5 +500,150 @@ func TestPrintArgoCDHelmOCIInstructions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// runExclusivityCheck drives validateSigningKeyExclusivity through a real
+// bundle command so cmd.IsSet reflects the parsed flags exactly as it would
+// at runtime. The Action is swapped to build opts from the parsed flags (with
+// no config, the resolved opts equal the flag values) and call only the
+// exclusivity helper, avoiding the full parse/bundle path.
+func runExclusivityCheck(t *testing.T, args []string) error {
+	t.Helper()
+	cmd := bundleCmd()
+	cmd.Action = func(_ context.Context, c *cli.Command) error {
+		opts := &bundleCmdOptions{
+			signingKey:     c.String(flagSigningKey),
+			identityToken:  c.String(flagIdentityToken),
+			oidcDeviceFlow: c.Bool(flagOIDCDeviceFlow),
+			fulcioURL:      c.String(flagFulcioURL),
+		}
+		return validateSigningKeyExclusivity(c, opts)
+	}
+	return cmd.Run(context.Background(), append([]string{"bundle"}, args...))
+}
+
+// TestValidateSigningKeyExclusivity verifies that --signing-key (KMS, key-based
+// signing) is rejected when combined with any keyless-OIDC-only flag, and is
+// accepted on its own. KMS and keyless OIDC are distinct signing paths; mixing
+// them is a request error rather than a silently-ignored flag. See #407.
+func TestValidateSigningKeyExclusivity(t *testing.T) {
+	const key = "awskms://arn:aws:kms:us-east-1:111:key/abc"
+
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{
+			name:    "signing-key alone is valid",
+			args:    []string{"--signing-key", key},
+			wantErr: false,
+		},
+		{
+			name:    "no signing-key is valid",
+			args:    []string{"--attest"},
+			wantErr: false,
+		},
+		{
+			name:    "empty signing-key is rejected",
+			args:    []string{"--signing-key", ""},
+			wantErr: true,
+		},
+		{
+			name:    "signing-key with identity-token is rejected",
+			args:    []string{"--signing-key", key, "--identity-token", "tok"},
+			wantErr: true,
+		},
+		{
+			name:    "signing-key with oidc-device-flow is rejected",
+			args:    []string{"--signing-key", key, "--oidc-device-flow"},
+			wantErr: true,
+		},
+		{
+			name:    "signing-key with fulcio-url is rejected",
+			args:    []string{"--signing-key", key, "--fulcio-url", "https://fulcio.example.com"},
+			wantErr: true,
+		},
+		{
+			// --rekor-url is orthogonal to keyless-vs-KMS: KMS signing uploads
+			// to Rekor too, so a private --rekor-url is valid with --signing-key.
+			name:    "signing-key with rekor-url is allowed",
+			args:    []string{"--signing-key", key, "--rekor-url", "https://rekor.example.com"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := runExclusivityCheck(t, tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestValidateSigningKeyExclusivity_ConfigSourcedConflict proves the check
+// catches a keyless option that arrives via config (resolved into opts) rather
+// than an explicit flag: cmd.IsSet is false for it, but the resolved opts field
+// is set, so the conflict must still be rejected.
+func TestValidateSigningKeyExclusivity_ConfigSourcedConflict(t *testing.T) {
+	cmd := bundleCmd() // unparsed: cmd.IsSet(...) is false for every flag
+	opts := &bundleCmdOptions{
+		signingKey: "awskms://arn:aws:kms:us-east-1:111:key/abc",
+		fulcioURL:  "https://fulcio.example.com", // as if sourced from config
+	}
+	err := validateSigningKeyExclusivity(cmd, opts)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("want ErrCodeInvalidRequest for config-sourced fulcio-url, got %v", err)
+	}
+}
+
+// TestBundleCmd_SigningKeyFlag verifies the --signing-key flag is wired onto
+// the bundle command.
+func TestBundleCmd_SigningKeyFlag(t *testing.T) {
+	cmd := bundleCmd()
+	for _, flag := range cmd.Flags {
+		for _, name := range flag.Names() {
+			if name == flagSigningKey {
+				return
+			}
+		}
+	}
+	t.Errorf("expected flag %q to be defined", flagSigningKey)
+}
+
+// TestParseBundleCmdOptions_SigningKey verifies --signing-key flows onto the
+// resolved options and that selectAttester forwards it into the attestation
+// resolver, yielding a *KMSAttester. The KMS-vs-keyless precedence itself is
+// covered by the attestation package's resolver tests; here we only confirm
+// the CLI wiring. See #407.
+func TestParseBundleCmdOptions_SigningKey(t *testing.T) {
+	const key = "awskms://arn:aws:kms:us-east-1:111:key/abc"
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	out := filepath.Join(tmp, "out")
+
+	opts := captureBundleOpts(t, []string{
+		"--recipe", recipePath, "--output", out,
+		"--attest", "--signing-key", key,
+	})
+	if opts.signingKey != key {
+		t.Fatalf("signingKey = %q, want %q", opts.signingKey, key)
+	}
+
+	att, err := selectAttester(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("selectAttester returned error: %v", err)
+	}
+	if _, ok := att.(*attestation.KMSAttester); !ok {
+		t.Errorf("expected *KMSAttester when signing-key is set, got %T", att)
 	}
 }

@@ -87,6 +87,11 @@ type bundleCmdOptions struct {
 	// --identity-token / COSIGN_IDENTITY_TOKEN.
 	identityToken string
 
+	// signingKey selects KMS-backed (key-based) signing for --attest instead of
+	// keyless OIDC. A non-empty value is a KMS key URI (awskms:// | gcpkms:// |
+	// azurekms://). Mutually exclusive with the keyless-only flags. See #407.
+	signingKey string
+
 	// oidcDeviceFlow opts in to the OAuth 2.0 Device Authorization Grant flow
 	// (RFC 8628) for headless hosts where a browser callback is unavailable.
 	oidcDeviceFlow bool
@@ -137,6 +142,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		readinessHooks:            cmd.Bool("readiness-hooks"),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
+		signingKey:                cmd.String(flagSigningKey),
 		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
 		fulcioURL:                 stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
 		rekorURL:                  stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
@@ -324,7 +330,55 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		return nil, err
 	}
 
+	// Reject --signing-key combined with keyless-only options. Checked against
+	// the resolved opts (not just cmd.IsSet) so config-sourced keyless values
+	// are caught too.
+	if err := validateSigningKeyExclusivity(cmd, opts); err != nil {
+		return nil, err
+	}
+
 	return opts, nil
+}
+
+// validateSigningKeyExclusivity rejects --signing-key combined with any
+// keyless-only flag. KMS (key-based) and keyless OIDC signing are distinct
+// paths; mixing them is a request error, not a silently-ignored flag.
+//
+// Only the flags that are meaningless under KMS signing conflict:
+// --identity-token / --oidc-device-flow (OIDC token sources) and --fulcio-url
+// (the certificate authority — KMS signing issues no Fulcio certificate).
+// --rekor-url is deliberately NOT in this set: the transparency log is
+// orthogonal to how the artifact is signed, and KMS signing uploads to Rekor
+// by default, so a private --rekor-url is valid alongside --signing-key (the
+// enterprise / air-gapped "KMS key + private Rekor" case).
+//
+// Conflicts are evaluated against the resolved opts (which merge flags, env,
+// and config) rather than cmd.IsSet alone, so a config-sourced keyless option
+// cannot bypass the check and then be silently ignored by the KMS path.
+func validateSigningKeyExclusivity(cmd *cli.Command, opts *bundleCmdOptions) error {
+	// A set-but-empty --signing-key would otherwise fall through to keyless
+	// resolution silently; reject it so the misconfiguration fails fast.
+	if cmd.IsSet(flagSigningKey) && strings.TrimSpace(opts.signingKey) == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "--"+flagSigningKey+" must not be empty")
+	}
+	if opts.signingKey == "" {
+		return nil // keyless mode; no exclusivity to enforce
+	}
+	conflicts := []struct {
+		name   string
+		active bool
+	}{
+		{flagIdentityToken, opts.identityToken != ""},
+		{flagOIDCDeviceFlow, opts.oidcDeviceFlow},
+		{flagFulcioURL, opts.fulcioURL != ""},
+	}
+	for _, c := range conflicts {
+		if c.active {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"--"+flagSigningKey+" is mutually exclusive with --"+c.name)
+		}
+	}
+	return nil
 }
 
 // validateSigstoreEndpoints rejects malformed --fulcio-url / --rekor-url
@@ -643,6 +697,11 @@ Package with explicit tag (overrides CLI version):
 				Sources:  cli.EnvVars("COSIGN_IDENTITY_TOKEN"),
 				Category: catDeployment,
 			},
+			&cli.StringFlag{
+				Name:     flagSigningKey,
+				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Combine with --rekor-url to log to a private Rekor. Verify with `cosign verify --key <uri>` until native `aicr verify --key` lands (#1152).",
+				Category: catDeployment,
+			},
 			&cli.BoolFlag{
 				Name:     flagOIDCDeviceFlow,
 				Usage:    "Use the OAuth 2.0 device authorization grant for --attest OIDC instead of opening a browser callback. Useful on headless hosts (bastions, remote build boxes) when --identity-token / COSIGN_IDENTITY_TOKEN and ambient GitHub Actions OIDC are both unavailable.",
@@ -687,7 +746,7 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name", flagFulcioURL, flagRekorURL); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
 		return err
 	}
 
@@ -848,6 +907,7 @@ func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.At
 	att, err := attestation.ResolveAttesterLazy(ctx, attestation.ResolveOptions{
 		Attest:        opts.attest,
 		IdentityToken: opts.identityToken,
+		SigningKey:    opts.signingKey,
 		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
 		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
 		DeviceFlow:    opts.oidcDeviceFlow,
