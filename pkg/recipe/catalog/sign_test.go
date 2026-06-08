@@ -72,6 +72,41 @@ func TestSign_ReturnsDigest(t *testing.T) {
 	}
 }
 
+// fakeAttester is a minimal Attester that returns canned bytes from Attest,
+// used to exercise Sign's bundle-write path without invoking real signing.
+type fakeAttester struct{ bundle []byte }
+
+func (f *fakeAttester) Attest(_ context.Context, _ attestation.AttestSubject) ([]byte, error) {
+	return f.bundle, nil
+}
+func (f *fakeAttester) Identity() string    { return "fake" }
+func (f *fakeAttester) HasRekorEntry() bool { return false }
+
+func TestSign_WritesBundleToFile(t *testing.T) {
+	ctx := context.Background()
+	outPath := filepath.Join(t.TempDir(), "bundle.sigstore.json")
+	want := []byte(`{"test":"bundle"}`)
+
+	result, err := catalog.Sign(ctx, newFullProvider(), catalog.SignOptions{
+		Attester:    &fakeAttester{bundle: want},
+		Output:      outPath,
+		ToolVersion: "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Sign failed: %v", err)
+	}
+	if string(result.BundleJSON) != string(want) {
+		t.Errorf("result.BundleJSON = %q, want %q", result.BundleJSON, want)
+	}
+	got, readErr := os.ReadFile(outPath)
+	if readErr != nil {
+		t.Fatalf("read output: %v", readErr)
+	}
+	if string(got) != string(want) {
+		t.Errorf("file content = %q, want %q", got, want)
+	}
+}
+
 func TestSign_MissingRegistry(t *testing.T) {
 	ctx := context.Background()
 	p := &stubProvider{

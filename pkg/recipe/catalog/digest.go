@@ -81,8 +81,12 @@ func deterministicYAML(ctx context.Context, provider recipe.DataProvider, path s
 		return nil, err
 	}
 	var v any
-	if err := yaml.Unmarshal(raw, &v); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse "+path, err)
+	if unmarshalErr := yaml.Unmarshal(raw, &v); unmarshalErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse "+path, unmarshalErr)
 	}
-	return serializer.MarshalYAMLDeterministic(v)
+	data, err := serializer.MarshalYAMLDeterministic(v)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to marshal "+path)
+	}
+	return data, nil
 }
