@@ -111,7 +111,6 @@ Include overlays from an external data directory:
 
 			var filter *aicr.Criteria
 			if hasAnyCriteriaFlag(cmd) {
-				var err error
 				filter, err = buildCatalogFilter(cmd, client)
 				if err != nil {
 					return err
