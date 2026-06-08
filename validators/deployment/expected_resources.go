@@ -104,26 +104,38 @@ func checkExpectedResources(ctx *validators.Context) error {
 	failures = append(failures, verifyGPUReadinessSignals(ctx, enabledRefs)...)
 
 	if len(chainsawAsserts) > 0 {
-		// Gate activation on chainsaw binary availability. Hydration of
-		// healthCheck.assertFile populates ref.HealthCheckAsserts upstream
-		// (pkg/recipe), but the deployment validator image does not ship the
-		// chainsaw binary yet — see issue #1220. Without this gate, every
-		// component with a registry-declared assertFile would trigger a
-		// failed binary invocation. When the binary is absent, log once and
-		// skip; this preserves the pre-hydration runtime behavior (these
-		// components had no validation path at all before).
+		// Partition asserts by dispatch path so the chainsaw-binary gate
+		// blocks only the Test-format subset. Raw K8s YAML asserts use the
+		// chainsaw Go library (assertRawResources) and need no external
+		// binary — they must run regardless of binary availability.
+		// Per-assert partitioning was flagged in PR #1231 review: the
+		// previous batch-level gate over-blocked raw-YAML asserts. All
+		// registry checks today happen to be Test-format, but the contract
+		// must be content-aware so this gate doesn't silently skip future
+		// raw-YAML checks once the deployment image ships chainsaw
+		// (#1220).
 		bin := chainsaw.NewChainsawBinary()
-		if !bin.Available() {
-			slog.Warn("chainsaw binary not available; skipping registry-declared health check assertions",
-				"components", len(chainsawAsserts),
+		runnable := make([]chainsaw.ComponentAssert, 0, len(chainsawAsserts))
+		var skippedTestFormat []string
+		for _, ca := range chainsawAsserts {
+			if chainsaw.IsChainsawTest(ca.AssertYAML) && !bin.Available() {
+				skippedTestFormat = append(skippedTestFormat, ca.Name)
+				continue
+			}
+			runnable = append(runnable, ca)
+		}
+		if len(skippedTestFormat) > 0 {
+			slog.Warn("chainsaw binary not available; skipping Chainsaw Test-format assertions",
+				"components", skippedTestFormat,
 				"hint", "ships in a later release; see https://github.com/NVIDIA/aicr/issues/1220")
-		} else {
-			slog.Info("running health check assertions", "components", len(chainsawAsserts))
+		}
+		if len(runnable) > 0 {
+			slog.Info("running health check assertions", "components", len(runnable))
 			fetcher, fetcherErr := buildResourceFetcher(ctx)
 			if fetcherErr != nil {
 				return fetcherErr
 			}
-			results := chainsaw.Run(ctx.Ctx, chainsawAsserts, defaults.ChainsawAssertTimeout, fetcher,
+			results := chainsaw.Run(ctx.Ctx, runnable, defaults.ChainsawAssertTimeout, fetcher,
 				chainsaw.WithChainsawBinary(bin))
 			for _, r := range results {
 				if r.Passed {

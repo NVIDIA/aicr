@@ -114,16 +114,19 @@ func Run(ctx context.Context, asserts []ComponentAssert, timeout time.Duration, 
 	return results
 }
 
-// isChainsawTest returns true if the YAML content is a Chainsaw Test
-// (apiVersion: chainsaw.kyverno.io/v1alpha1, kind: Test).
-func isChainsawTest(raw string) bool {
+// IsChainsawTest returns true if the YAML content is a Chainsaw Test
+// (apiVersion: chainsaw.kyverno.io/v1alpha1, kind: Test). Exported so the
+// deployment validator can partition Test-format asserts (which require
+// the chainsaw binary) from raw K8s resource YAML (which uses the Go
+// assertion library and does not need the binary) — see PR #1231.
+func IsChainsawTest(raw string) bool {
 	return strings.Contains(raw, "chainsaw.kyverno.io") && strings.Contains(raw, "kind: Test")
 }
 
 // assertComponent runs assertions for a single component.
 // Chainsaw Test format is dispatched to the binary; raw K8s YAML uses the Go library.
 func assertComponent(ctx context.Context, ca ComponentAssert, timeout time.Duration, fetcher ResourceFetcher, cfg *runConfig) Result {
-	if isChainsawTest(ca.AssertYAML) {
+	if IsChainsawTest(ca.AssertYAML) {
 		return runChainsawBinary(ctx, ca.Name, ca.AssertYAML, timeout, cfg)
 	}
 	return assertRawResources(ctx, ca, timeout, fetcher)

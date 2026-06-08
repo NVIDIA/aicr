@@ -213,6 +213,36 @@ func TestHydrateHealthCheckAsserts_ReadError(t *testing.T) {
 	}
 }
 
+// TestHydrateHealthCheckAsserts_ExpectedResourcesWins verifies hydration is
+// skipped when the overlay also declared ExpectedResources. The deployment
+// validator's current mutex
+// (validators/deployment/expected_resources.go:86) only runs the chainsaw
+// path when ExpectedResources is empty, so hydrating in this case would
+// write inert content onto the resolved recipe. k8s-nim-operator is the
+// canonical example flagged in PR #1231 review (registry assertFile +
+// overlay expectedResources). PR #1220 will drop both the validator-side
+// mutex and this skip simultaneously.
+func TestHydrateHealthCheckAsserts_ExpectedResourcesWins(t *testing.T) {
+	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	registry, err := GetComponentRegistryFor(provider)
+	if err != nil {
+		t.Fatalf("GetComponentRegistryFor: %v", err)
+	}
+	refs := []ComponentRef{{
+		Name: "nfd",
+		ExpectedResources: []ExpectedResource{
+			{Kind: "Deployment", Namespace: "node-feature-discovery", Name: "nfd-master"},
+		},
+	}}
+	if err := hydrateHealthCheckAsserts(provider, registry, refs); err != nil {
+		t.Fatalf("hydrateHealthCheckAsserts: %v", err)
+	}
+	if refs[0].HealthCheckAsserts != "" {
+		t.Fatalf("HealthCheckAsserts should remain empty when ExpectedResources is set, got %q",
+			refs[0].HealthCheckAsserts)
+	}
+}
+
 // TestHydrateHealthCheckAsserts_NoAssertFile verifies the no-op branch when
 // a component is in the registry but has no healthCheck.assertFile declared.
 // Uses a synthetic ComponentRegistry to isolate the branch from in-tree
