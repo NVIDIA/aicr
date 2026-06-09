@@ -10,7 +10,7 @@ contributor view for all four.
 | [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
-| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces: `make check-health` post-deploy locally, AND `aicr validate --phase deployment` in-cluster | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format runs via the pinned chainsaw binary shipped in the deployment validator image; raw K8s YAML via the chainsaw Go library) |
+| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces: `make check-health` post-deploy locally, AND `aicr validate --phase deployment` in-cluster | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format executed in-process by the deployment validator via `validators/chainsaw/inprocess.go`; raw K8s YAML via the chainsaw Go library) |
 
 Rule of thumb: declarative constraint against a snapshot value → surface 1.
 Active probe of a live cluster → surface 2 or 4. Pre-deployment sanity
@@ -659,12 +659,14 @@ The same assertion file now powers TWO surfaces:
 2. **`aicr validate --phase deployment`** — registry-declared content is
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
-   chainsaw runner (PR #1220). The deployment validator image
-   ships the pinned chainsaw binary at `/usr/local/bin/chainsaw`; the
-   version + sha256 come from `.settings.yaml` and are wired into the
-   image via Makefile build args. CLI output is source-tagged
-   `[chainsaw]` vs `[expectedResources]` so operators can disambiguate
-   when both paths report on the same component.
+   chainsaw runner (PR #1220). Since #1236 the runner is **pure Go**:
+   `validators/chainsaw/inprocess.go` unmarshals the
+   `chainsaw.kyverno.io/v1alpha1` Test, walks `spec.steps[].try[]`, and
+   dispatches `assert` / `error` to kyverno-json's `checks.Check` engine
+   against live cluster state. No external binary is shipped in the
+   deployment validator image. CLI output is source-tagged `[chainsaw]`
+   vs `[expectedResources]` so operators can disambiguate when both
+   paths report on the same component.
 
 **Registration.** A component opts in by declaring
 `healthCheck.assertFile` in `recipes/registry.yaml`:

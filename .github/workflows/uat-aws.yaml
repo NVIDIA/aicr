@@ -97,19 +97,13 @@ jobs:
         if: inputs.skip_tests != true
         run: |
           GO_VERSION="$(cat .go-version)"
-          # CHAINSAW_* args are required by validators/deployment/Dockerfile's
-          # chainsaw-fetch stage. Other phase Dockerfiles ignore unknown
-          # build-args, so passing them unconditionally is safe. See #1220.
-          CHAINSAW_VERSION="$(yq -r '.testing_tools.chainsaw' .settings.yaml)"
-          CHAINSAW_SHA256_LINUX_AMD64="$(yq -r '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)"
-          CHAINSAW_SHA256_LINUX_ARM64="$(yq -r '.testing_tools.chainsaw_checksums.linux_arm64' .settings.yaml)"
+          # CHAINSAW_* args dropped in #1236 — the deployment validator
+          # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
+          # Test format in-process via validators/chainsaw/inprocess.go.
           for phase in deployment performance conformance; do
             IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
             docker build -f "validators/${phase}/Dockerfile" \
               --build-arg "GO_VERSION=${GO_VERSION}" \
-              --build-arg "CHAINSAW_VERSION=${CHAINSAW_VERSION}" \
-              --build-arg "CHAINSAW_SHA256_LINUX_AMD64=${CHAINSAW_SHA256_LINUX_AMD64}" \
-              --build-arg "CHAINSAW_SHA256_LINUX_ARM64=${CHAINSAW_SHA256_LINUX_ARM64}" \
               -t "${IMAGE}" .
             docker push "${IMAGE}"
           done

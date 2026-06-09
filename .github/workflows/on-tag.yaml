@@ -193,15 +193,13 @@ jobs:
           file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
           platforms: ${{ matrix.platform }}
           push: true
-          # CHAINSAW_* args are required by validators/deployment/Dockerfile's
-          # chainsaw-fetch stage. Other phase Dockerfiles ignore unknown
-          # build-args, so passing them unconditionally for the whole matrix
-          # is safe and avoids per-phase branching. See issue #1220.
+          # CHAINSAW_* args were dropped in #1236 — the deployment validator
+          # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
+          # Test format in-process via validators/chainsaw/inprocess.go.
+          # (The separate build-gate job below still passes CHAINSAW_VERSION
+          # because the gate CLI image embeds chainsaw for its own use.)
           build-args: |
             GO_VERSION=${{ steps.go.outputs.version }}
-            CHAINSAW_VERSION=${{ steps.versions.outputs.chainsaw }}
-            CHAINSAW_SHA256_LINUX_AMD64=${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
-            CHAINSAW_SHA256_LINUX_ARM64=${{ steps.versions.outputs.chainsaw_sha256_linux_arm64 }}
           tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ github.ref_name }}-${{ matrix.arch }}
           provenance: false
           cache-from: type=gha

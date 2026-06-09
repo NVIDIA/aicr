@@ -157,8 +157,7 @@ func checkExpectedResources(ctx *validators.Context) error {
 		if fetcherErr != nil {
 			return fetcherErr
 		}
-		results := chainsaw.Run(ctx.Ctx, chainsawAsserts, defaults.ChainsawAssertTimeout, fetcher,
-			chainsaw.WithChainsawBinary(chainsaw.NewChainsawBinary()))
+		results := chainsaw.Run(ctx.Ctx, chainsawAsserts, defaults.ChainsawAssertTimeout, fetcher)
 		for _, r := range results {
 			if r.Passed {
 				fmt.Printf("  [chainsaw] %s: health check passed\n", r.Component)
