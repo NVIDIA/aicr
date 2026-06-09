@@ -20,20 +20,19 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // canonicalChainsawPath is the install location the deployment validator
-// image will use once the chainsaw binary ships (see issue #1220). Probed
-// as a fallback when exec.LookPath misses, e.g., when the image places
-// chainsaw at a known absolute path but does not extend PATH.
+// image ships chainsaw at (see issue #1220 / Dockerfile multi-stage
+// COPY). Used as a fallback when exec.LookPath misses — e.g., an
+// environment where /usr/local/bin is not on PATH but the binary is in
+// fact present at that absolute path.
 //
-// Mutable (var, not const) so tests can swap it for a TempDir entry — the
-// real /usr/local/bin/chainsaw may exist on developer machines, which
-// would otherwise make Available()==false assertions flake.
+// Mutable (var, not const) so tests can substitute a TempDir-resolved
+// path for the canonical one when needed.
 var canonicalChainsawPath = "/usr/local/bin/chainsaw"
 
 // ChainsawBinary abstracts chainsaw CLI invocation for testability.
@@ -41,62 +40,29 @@ type ChainsawBinary interface {
 	// RunTest executes chainsaw test against the given test directory.
 	// Returns whether all tests passed, the combined output, and any execution error.
 	RunTest(ctx context.Context, testDir string) (passed bool, output string, err error)
-	// Available reports whether the chainsaw binary is callable from this
-	// process. Used by the deployment validator to skip Chainsaw Test-format
-	// dispatch when the binary is absent (e.g., the validator image has not
-	// shipped chainsaw yet), preserving today's no-op behavior while
-	// registry-declared HealthCheckAsserts content hydrates upstream in
-	// pkg/recipe.
-	Available() bool
 }
 
 type chainsawBinary struct {
-	binPath   string
-	available bool
+	binPath string
 }
 
 // NewChainsawBinary creates a ChainsawBinary that invokes the chainsaw CLI.
-// It resolves the binary path from PATH first, then probes the canonical
-// install path (/usr/local/bin/chainsaw) for an executable file. The
-// rationale for the fallback probe: a container image may place chainsaw
-// at a known absolute path without extending PATH, in which case
-// exec.LookPath misses but the file is still callable directly. Without
-// the probe, Available() would report false while RunTest could in fact
-// succeed — an inconsistency flagged in PR #1231 review.
+// Resolves the binary path from PATH first, then falls back to the
+// canonical install path shipped in the deployment validator image
+// (#1220). If neither yields an executable, the constructor still
+// returns a binary pointing at the canonical path so a subsequent
+// RunTest invocation surfaces a clean "no such file or directory" — an
+// image regression that must fail loudly rather than silently no-op.
 //
-// Availability is recorded at construction time so callers can branch on
-// it without repeating the discovery.
+// The Available()-gated skip path that briefly existed in PR #1231 was
+// removed when #1220 made the chainsaw binary a hard requirement of the
+// deployment validator image.
 func NewChainsawBinary() ChainsawBinary {
 	if binPath, err := exec.LookPath("chainsaw"); err == nil {
-		return &chainsawBinary{binPath: binPath, available: true}
+		return &chainsawBinary{binPath: binPath}
 	}
-	if isExecutableFile(canonicalChainsawPath) {
-		return &chainsawBinary{binPath: canonicalChainsawPath, available: true}
-	}
-	// Fall through with the canonical install path so the eventual
-	// RunTest error names a real, expected location; Available() reports
-	// false so the deployment validator can short-circuit Test-format
-	// dispatch upstream.
-	return &chainsawBinary{binPath: canonicalChainsawPath, available: false}
+	return &chainsawBinary{binPath: canonicalChainsawPath}
 }
-
-// isExecutableFile reports whether path resolves to a regular file with
-// at least one execute bit set. Used by NewChainsawBinary's fallback
-// probe; symlinks resolve via os.Stat. Errors (ENOENT, EACCES) are
-// treated as "not executable" — the probe is best-effort and the
-// caller's downstream RunTest will surface any deeper issue.
-func isExecutableFile(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	if !info.Mode().IsRegular() {
-		return false
-	}
-	return info.Mode().Perm()&0o111 != 0
-}
-
-func (b *chainsawBinary) Available() bool { return b.available }
 
 func (b *chainsawBinary) RunTest(ctx context.Context, testDir string) (bool, string, error) {
 	slog.Debug("executing chainsaw binary", "binPath", b.binPath, "testDir", testDir)

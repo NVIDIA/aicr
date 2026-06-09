@@ -343,10 +343,18 @@ image: ## Builds and pushes container image (IMAGE_REGISTRY, IMAGE_TAG)
 .PHONY: image-validators
 image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
 	@set -e; \
+	CHAINSAW_VERSION=$$(yq -r '.testing_tools.chainsaw' .settings.yaml); \
+	CHAINSAW_SHA256_LINUX_AMD64=$$(yq -r '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml); \
+	CHAINSAW_SHA256_LINUX_ARM64=$$(yq -r '.testing_tools.chainsaw_checksums.linux_arm64' .settings.yaml); \
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
+		extra_args=""; \
+		if [ "$${phase}" = "deployment" ]; then \
+			extra_args="--build-arg CHAINSAW_VERSION=$${CHAINSAW_VERSION} --build-arg CHAINSAW_SHA256_LINUX_AMD64=$${CHAINSAW_SHA256_LINUX_AMD64} --build-arg CHAINSAW_SHA256_LINUX_ARM64=$${CHAINSAW_SHA256_LINUX_ARM64}"; \
+		fi; \
 		docker build -f validators/$${phase}/Dockerfile \
 			--build-arg GO_VERSION=$(GO_VERSION) \
+			$${extra_args} \
 			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
 		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
 			echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \

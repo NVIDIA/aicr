@@ -143,6 +143,8 @@ components:
     displayName: gke-nccl-tcpxo
     valueOverrideKeys:
       - gkenccltcpxo
+    healthCheck:
+      assertFile: checks/gke-nccl-tcpxo/health-check.yaml
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
@@ -302,6 +304,8 @@ components:
     displayName: prometheus-operator-crds
     valueOverrideKeys:
       - prometheusoperatorcrds
+    healthCheck:
+      assertFile: checks/prometheus-operator-crds/health-check.yaml
     # CRDs-only chart for the prometheus-operator; kube-prometheus-stack
     # (and any sibling chart that creates ServiceMonitor / PodMonitor /
     # Alertmanager / Prometheus / etc. CRs) consumes the kinds it
@@ -449,6 +453,8 @@ components:
     displayName: grove
     valueOverrideKeys:
       - grove
+    healthCheck:
+      assertFile: checks/grove/health-check.yaml
     helm:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts
@@ -484,6 +490,8 @@ components:
     displayName: agentgateway-crds
     valueOverrideKeys:
       - agentgatewaycrds
+    healthCheck:
+      assertFile: checks/agentgateway-crds/health-check.yaml
     # CRDs-only chart; agentgateway consumes the kinds it registers
     # via its templates, so agentgateway must declare this chart as a
     # DependencyRef for the DAG-stratified helmfile layout to install
@@ -593,6 +601,8 @@ components:
     valueOverrideKeys:
       - slinkyslurmoperatorcrds
       - slurmoperatorcrds
+    healthCheck:
+      assertFile: checks/slinky-slurm-operator-crds/health-check.yaml
     # CRDs-only chart; slinky-slurm-operator consumes the kinds it
     # registers via its templates, so slinky-slurm-operator must
     # declare this chart as a DependencyRef for the DAG-stratified

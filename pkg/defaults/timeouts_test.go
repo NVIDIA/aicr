@@ -87,6 +87,21 @@ func TestTimeoutConstants(t *testing.T) {
 	}
 }
 
+// TestJobEnvelopeMarginInvariant guards the contract that the deployment
+// validator Job's activeDeadlineSeconds exceeds the inner
+// ChainsawAssertTimeout by enough headroom for chainsaw to terminate, clean
+// up its temp dir, and flush logs before SIGKILL. See issue #1220.
+func TestJobEnvelopeMarginInvariant(t *testing.T) {
+	if JobEnvelopeMargin < 60*time.Second {
+		t.Errorf("JobEnvelopeMargin (%v) must be >= 60s (30s default Pod terminationGracePeriodSeconds + 30s pre-chainsaw helper iteration headroom)",
+			JobEnvelopeMargin)
+	}
+	envelope := ChainsawAssertTimeout + JobEnvelopeMargin
+	if envelope <= ChainsawAssertTimeout {
+		t.Errorf("envelope (%v) must exceed ChainsawAssertTimeout (%v)", envelope, ChainsawAssertTimeout)
+	}
+}
+
 func TestRecipeBuildTimeoutLessThanHandler(t *testing.T) {
 	// Recipe build timeout should be less than handler timeout
 	// to allow for error handling before the request times out

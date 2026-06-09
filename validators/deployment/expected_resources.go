@@ -15,6 +15,7 @@
 package main
 
 import (
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -78,78 +79,109 @@ func checkExpectedResources(ctx *validators.Context) error {
 
 	var chainsawAsserts []chainsaw.ComponentAssert
 	var failures []string
+	// firstStructuredErr captures the first structured error surfaced by
+	// chainsaw.Run results (e.g., ErrCodeInvalidRequest from
+	// ValidateTestReadOnly when a registry assert violates the read-only
+	// allowlist). Without this, the function would flatten such errors
+	// into the generic ErrCodeNotFound "expected resource check failed"
+	// summary at the bottom, losing the actionable classification. Per
+	// PR #1235 review.
+	var firstStructuredErr error
 	enabledRefs := enabledComponentRefs(ctx.ValidationInput.ComponentRefs)
 
 	failures = append(failures, verifyNamespacesActive(ctx, enabledRefs)...)
 
+	// When both ExpectedResources and HealthCheckAsserts are populated on
+	// the same ref, both paths execute. ExpectedResources is verified
+	// here via helper.VerifyResource; HealthCheckAsserts is queued for
+	// the chainsaw runner below. Output is source-tagged
+	// [expectedResources] / [chainsaw] so operators can disambiguate
+	// when both report on the same component. The previous
+	// mutual-exclusion gate (`len(ExpectedResources) == 0`) was dropped
+	// in #1220: the registry-declared assertFile is the deeper
+	// readiness signal and should always run alongside the overlay-
+	// declared resource list. The transitional hydration skip in
+	// pkg/recipe (added in #1234) was reverted in lockstep.
 	for _, ref := range enabledRefs {
-		if ref.HealthCheckAsserts != "" && len(ref.ExpectedResources) == 0 {
+		// Honor cancellation between components so a canceled run stops
+		// before issuing more API calls — per repo CLAUDE.md "Always
+		// check ctx.Done() in long-running operations and loops".
+		select {
+		case <-ctx.Ctx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"deployment validation canceled during expected-resources iteration",
+				ctx.Ctx.Err())
+		default:
+		}
+		if ref.HealthCheckAsserts != "" {
 			chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
 				Name:       ref.Name,
 				AssertYAML: ref.HealthCheckAsserts,
 			})
-			continue
 		}
-
 		for _, er := range ref.ExpectedResources {
 			if err := helper.VerifyResource(ctx.Ctx, ctx.Clientset, er); err != nil {
-				failures = append(failures, fmt.Sprintf("%s %s/%s (%s): %s",
+				failures = append(failures, fmt.Sprintf("[expectedResources] %s %s/%s (%s): %s",
 					er.Kind, er.Namespace, er.Name, ref.Name, err.Error()))
 			} else {
-				fmt.Printf("  %s %s/%s: healthy\n", er.Kind, er.Namespace, er.Name)
+				fmt.Printf("  [expectedResources] %s %s/%s: healthy\n", er.Kind, er.Namespace, er.Name)
 			}
 		}
 	}
 
-	failures = append(failures, verifyGPUReadinessSignals(ctx, enabledRefs)...)
+	gpuFailures, gpuStructuredErr := verifyGPUReadinessSignals(ctx, enabledRefs)
+	failures = append(failures, gpuFailures...)
+	// firstStructuredErr is guaranteed nil here (the chainsaw block
+	// below is the only other producer and hasn't run yet); we can
+	// assign unconditionally. The chainsaw block downstream checks
+	// firstStructuredErr == nil before its own assignment so the GPU
+	// error wins when both produce one.
+	if gpuStructuredErr != nil {
+		firstStructuredErr = gpuStructuredErr
+	}
 
 	if len(chainsawAsserts) > 0 {
-		// Partition asserts by dispatch path so the chainsaw-binary gate
-		// blocks only the Test-format subset. Raw K8s YAML asserts use the
-		// chainsaw Go library (assertRawResources) and need no external
-		// binary — they must run regardless of binary availability.
-		// Per-assert partitioning was flagged in PR #1231 review: the
-		// previous batch-level gate over-blocked raw-YAML asserts. All
-		// registry checks today happen to be Test-format, but the contract
-		// must be content-aware so this gate doesn't silently skip future
-		// raw-YAML checks once the deployment image ships chainsaw
-		// (#1220).
-		bin := chainsaw.NewChainsawBinary()
-		runnable := make([]chainsaw.ComponentAssert, 0, len(chainsawAsserts))
-		var skippedTestFormat []string
-		for _, ca := range chainsawAsserts {
-			if chainsaw.IsChainsawTest(ca.AssertYAML) && !bin.Available() {
-				skippedTestFormat = append(skippedTestFormat, ca.Name)
-				continue
-			}
-			runnable = append(runnable, ca)
+		// Bail out before paying chainsaw startup cost if the caller
+		// already canceled. chainsaw.Run honors ctx mid-flight too,
+		// but a short-circuit here skips fetcher construction and
+		// log noise on a doomed run.
+		select {
+		case <-ctx.Ctx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"deployment validation canceled before chainsaw dispatch",
+				ctx.Ctx.Err())
+		default:
 		}
-		if len(skippedTestFormat) > 0 {
-			slog.Warn("chainsaw binary not available; skipping Chainsaw Test-format assertions",
-				"components", skippedTestFormat,
-				"hint", "ships in a later release; see https://github.com/NVIDIA/aicr/issues/1220")
+		slog.Info("running health check assertions", "components", len(chainsawAsserts))
+		fetcher, fetcherErr := buildResourceFetcher(ctx)
+		if fetcherErr != nil {
+			return fetcherErr
 		}
-		if len(runnable) > 0 {
-			slog.Info("running health check assertions", "components", len(runnable))
-			fetcher, fetcherErr := buildResourceFetcher(ctx)
-			if fetcherErr != nil {
-				return fetcherErr
-			}
-			results := chainsaw.Run(ctx.Ctx, runnable, defaults.ChainsawAssertTimeout, fetcher,
-				chainsaw.WithChainsawBinary(bin))
-			for _, r := range results {
-				if r.Passed {
-					fmt.Printf("  %s: chainsaw health check passed\n", r.Component)
-				} else {
-					msg := fmt.Sprintf("%s: chainsaw health check failed", r.Component)
-					if r.Output != "" {
-						msg += fmt.Sprintf(":\n%s", r.Output)
-					}
-					if r.Error != nil {
-						msg += fmt.Sprintf("\nerror: %v", r.Error)
-					}
-					failures = append(failures, msg)
+		results := chainsaw.Run(ctx.Ctx, chainsawAsserts, defaults.ChainsawAssertTimeout, fetcher,
+			chainsaw.WithChainsawBinary(chainsaw.NewChainsawBinary()))
+		for _, r := range results {
+			if r.Passed {
+				fmt.Printf("  [chainsaw] %s: health check passed\n", r.Component)
+			} else {
+				msg := fmt.Sprintf("[chainsaw] %s: health check failed", r.Component)
+				if r.Output != "" {
+					msg += fmt.Sprintf(":\n%s", r.Output)
 				}
+				if r.Error != nil {
+					msg += fmt.Sprintf("\nerror: %v", r.Error)
+					// Capture the first structured error so we can
+					// preserve its code (e.g., ErrCodeInvalidRequest)
+					// when returning to the catalog layer. Subsequent
+					// structured errors still surface in the human-
+					// readable failures list above.
+					if firstStructuredErr == nil {
+						var se *errors.StructuredError
+						if stderrors.As(r.Error, &se) {
+							firstStructuredErr = r.Error
+						}
+					}
+				}
+				failures = append(failures, msg)
 			}
 		}
 	}
@@ -158,6 +190,15 @@ func checkExpectedResources(ctx *validators.Context) error {
 		fmt.Println("Failed resources:")
 		for _, f := range failures {
 			fmt.Printf("  %s\n", f)
+		}
+		// Prefer the first structured error (e.g.,
+		// ErrCodeInvalidRequest from a registry assert that violated
+		// the read-only allowlist) over the generic ErrCodeNotFound
+		// summary so downstream catalog/CLI surfaces classify the
+		// failure correctly. The human-readable failures list is still
+		// printed above for operator visibility.
+		if firstStructuredErr != nil {
+			return firstStructuredErr
 		}
 		return errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("expected resource check failed: %d issue(s):\n  %s",
@@ -206,28 +247,59 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 	return failures
 }
 
-func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentRef) []string {
+// verifyGPUReadinessSignals runs the three Go-resident deep checks
+// introduced by issue #611. Returns the human-readable failure strings
+// plus the first *errors.StructuredError encountered across all three
+// helpers so the caller can propagate the original error code (e.g.,
+// ErrCodeInternal from a discovery/RBAC failure) instead of flattening
+// it into the generic ErrCodeNotFound summary — per PR #1235 review.
+//
+// Migration disposition (per #1220 plan):
+//
+//   - clusterPolicyReady: candidate for migration to registry-declared
+//     Chainsaw YAML in recipes/checks/gpu-operator/health-check.yaml.
+//     Deferred to follow-up because the existing expected_resources_test.go
+//     suite mocks ClusterPolicy state extensively, and the migration must
+//     prove assertion equivalence rather than just code equivalence.
+//   - verifyNodewrightReady (formerly skyhookReady): stays in Go. Names
+//     are derived from the recipe's own ManifestFiles at validate-time
+//     (see expectedNodewrightNames), not from a stable label, so static
+//     Chainsaw YAML cannot express the dynamic-name selector.
+//   - verifyDRAKubeletPluginReady: stays in Go. The chart's full DaemonSet
+//     name is release-derived; expressing the same check in Chainsaw
+//     requires a chart-shape label upstream nvidia-dra-driver-gpu does
+//     not currently apply. Encoding a release-derived full name would
+//     violate the deployer-neutrality constraint (no
+//     app.kubernetes.io/instance dependence — see #660 issue body).
+func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentRef) ([]string, error) {
 	var failures []string
+	var firstStructured error
+	capture := func(err error) {
+		if err == nil {
+			return
+		}
+		failures = append(failures, err.Error())
+		if firstStructured == nil {
+			var se *errors.StructuredError
+			if stderrors.As(err, &se) {
+				firstStructured = err
+			}
+		}
+	}
 
 	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
-		if err := verifyNodewrightReady(ctx, ref); err != nil {
-			failures = append(failures, err.Error())
-		}
+		capture(verifyNodewrightReady(ctx, ref))
 	}
 
 	if _, ok := findEnabledComponent(refs, gpuOperatorComponent); ok {
-		if err := verifyClusterPolicyReady(ctx); err != nil {
-			failures = append(failures, err.Error())
-		}
+		capture(verifyClusterPolicyReady(ctx))
 	}
 
 	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
-		if err := verifyDRAKubeletPluginReady(ctx, ref.Namespace); err != nil {
-			failures = append(failures, err.Error())
-		}
+		capture(verifyDRAKubeletPluginReady(ctx, ref.Namespace))
 	}
 
-	return failures
+	return failures, firstStructured
 }
 
 func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.ComponentRef, bool) {

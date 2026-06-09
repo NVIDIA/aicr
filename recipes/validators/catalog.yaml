@@ -38,7 +38,17 @@ validators:
     phase: deployment
     description: "Verify expected Kubernetes resources exist and are healthy"
     image: ghcr.io/nvidia/aicr-validators/deployment:latest
-    timeout: 5m
+    # Must be strictly > defaults.ChainsawAssertTimeout (6m) +
+    # defaults.JobEnvelopeMargin (60s) so chainsaw has headroom to
+    # terminate, clean up its temp dir, and flush log output before the
+    # Job's SIGKILL AND so pre-chainsaw work (helper.VerifyResource
+    # iteration) can't starve the chainsaw budget. 8m provides 60s for
+    # cleanup plus another 60s for pre-chainsaw work. The invariant is
+    # verified by TestExpectedResourcesCatalogEnvelope in
+    # pkg/validator/catalog — raising ChainsawAssertTimeout without
+    # raising this in tandem will fail the test. See issue #1220 and
+    # PR #1235 review.
+    timeout: 8m
     args: ["expected-resources"]
     env: []
   - name: gpu-operator-version
