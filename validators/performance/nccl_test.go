@@ -396,7 +396,7 @@ func TestAcceleratorProductMatchers(t *testing.T) {
 
 func TestPlatformWorkerScheduling(t *testing.T) {
 	t.Run("EKS returns instance-type selector", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge")
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge", nil)
 		if ns["node.kubernetes.io/instance-type"] != "p5.48xlarge" {
 			t.Errorf("EKS nodeSelector = %v, want instance-type=p5.48xlarge", ns)
 		}
@@ -405,7 +405,7 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 		}
 	})
 	t.Run("GKE returns gke-accelerator selector", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceGKE, "")
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceGKE, "", nil)
 		if ns["cloud.google.com/gke-accelerator"] != "nvidia-h100-mega-80gb" {
 			t.Errorf("GKE nodeSelector = %v, want gke-accelerator=nvidia-h100-mega-80gb", ns)
 		}
@@ -413,18 +413,84 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("GKE tolerations count = %d, want 2", len(tols))
 		}
 	})
+	t.Run("OKE pins to shared gpu.product and tolerates taints", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+		}
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceOKE, "", nodes)
+		if ns[gpuProductLabel] != "NVIDIA-GB200" {
+			t.Errorf("OKE nodeSelector = %v, want %s=NVIDIA-GB200", ns, gpuProductLabel)
+		}
+		if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("OKE tolerations = %v, want tolerate-all", tols)
+		}
+	})
+	t.Run("OKE on non-GFD cluster omits selector but still tolerates taints", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}},
+		}
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceOKE, "", nodes)
+		if ns != nil {
+			t.Errorf("OKE non-GFD nodeSelector = %v, want nil", ns)
+		}
+		if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("OKE non-GFD tolerations = %v, want tolerate-all", tols)
+		}
+	})
 	t.Run("unknown service returns nil", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling("unknown", "")
+		ns, tols := platformWorkerScheduling("unknown", "", nil)
 		if ns != nil || tols != nil {
 			t.Errorf("unknown service should return nil, got ns=%v tols=%v", ns, tols)
 		}
 	})
 	t.Run("any service returns nil", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceAny, "")
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceAny, "", nil)
 		if ns != nil || tols != nil {
 			t.Errorf("any service should return nil, got ns=%v tols=%v", ns, tols)
 		}
 	})
+}
+
+func TestCommonGPUProduct(t *testing.T) {
+	tests := []struct {
+		name  string
+		nodes []corev1.Node
+		want  string
+	}{
+		{"empty", nil, ""},
+		{
+			"all share product",
+			[]corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+			},
+			"NVIDIA-GB200",
+		},
+		{
+			"mixed products",
+			[]corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-B200"}}},
+			},
+			"",
+		},
+		{
+			"one node missing label (non-GFD)",
+			[]corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}},
+			},
+			"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commonGPUProduct(tt.nodes); got != tt.want {
+				t.Errorf("commonGPUProduct() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestTemplatePath(t *testing.T) {
@@ -491,6 +557,14 @@ func TestTemplatePath(t *testing.T) {
 			variant:     variantNVLS,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"),
+		},
+		{
+			name:        "gb200 oke NVLS variant",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceOKE,
+			variant:     variantNVLS,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
 		},
 	}
 	for _, tt := range tests {
@@ -633,34 +707,69 @@ func TestBuildComputeDomain(t *testing.T) {
 }
 
 func TestNVLSRuntimeYAMLReferencesIMEXClaim(t *testing.T) {
-	// The runtime-nvls template hardcodes the same RCT name the Go code
+	// The runtime-nvls templates hardcode the same RCT name the Go code
 	// creates via buildComputeDomain. If these drift, the DRA driver
 	// generates one name and the worker pods reference another, and
 	// pod admission fails with an opaque "claim not found" error.
-	data, err := os.ReadFile(filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"))
-	if err != nil {
-		t.Fatalf("failed to read runtime-nvls.yaml: %v", err)
+	paths := []string{
+		filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"),
+		filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
 	}
-	s := string(data)
-	if !strings.Contains(s, "resourceClaimTemplateName: "+ncclIMEXClaimTemplateName) {
-		t.Errorf("runtime-nvls.yaml missing resourceClaimTemplateName: %s", ncclIMEXClaimTemplateName)
-	}
-	if !strings.Contains(s, "- name: imex-channel") {
-		t.Error("runtime-nvls.yaml missing 'name: imex-channel' in resourceClaims / claims blocks")
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("failed to read %s: %v", path, err)
+			}
+			s := string(data)
+			if !strings.Contains(s, "resourceClaimTemplateName: "+ncclIMEXClaimTemplateName) {
+				t.Errorf("%s missing resourceClaimTemplateName: %s", path, ncclIMEXClaimTemplateName)
+			}
+			if !strings.Contains(s, "- name: imex-channel") {
+				t.Errorf("%s missing 'name: imex-channel' in resourceClaims / claims blocks", path)
+			}
+		})
 	}
 }
 
 func TestSupportedNCCLCombinations_Variants(t *testing.T) {
-	if accels, ok := supportedNCCLCombinations[variantNET][recipe.CriteriaServiceEKS]; !ok {
-		t.Error("variantNET should support EKS")
-	} else if len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorGB200 {
-		t.Errorf("variantNET EKS accelerators = %v, want [GB200]", accels)
+	tests := []struct {
+		name    string
+		variant ncclVariant
+		service recipe.CriteriaServiceType
+		want    []recipe.CriteriaAcceleratorType
+	}{
+		{
+			name:    "NET EKS GB200",
+			variant: variantNET,
+			service: recipe.CriteriaServiceEKS,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			name:    "NVLS EKS GB200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceEKS,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			name:    "NVLS OKE GB200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceOKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
 	}
-	if accels, ok := supportedNCCLCombinations[variantNVLS][recipe.CriteriaServiceEKS]; !ok {
-		t.Error("variantNVLS should support EKS")
-	} else if len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorGB200 {
-		t.Errorf("variantNVLS EKS accelerators = %v, want [GB200]", accels)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accels, ok := supportedNCCLCombinations[tt.variant][tt.service]
+			if !ok {
+				t.Fatalf("%s should support %s", tt.variant, tt.service)
+			}
+			if !reflect.DeepEqual(accels, tt.want) {
+				t.Errorf("%s %s accelerators = %v, want %v", tt.variant, tt.service, accels, tt.want)
+			}
+		})
 	}
+
 	// Legacy default variant must still list the original combinations
 	// so existing recipes that reference "nccl-all-reduce-bw" keep working.
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceEKS]; len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorH100 {
@@ -668,6 +777,50 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 	}
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAny]; len(accels) != 2 {
 		t.Errorf("variantDefault Any count = %d, want 2 (B200, GB200)", len(accels))
+	}
+}
+
+func TestSupportedNCCLCombinationsHaveRuntimeTemplates(t *testing.T) {
+	// This is a wiring guard: every tuple advertised by
+	// supportedNCCLCombinations must have a syntactically valid runtime
+	// template. Transport viability is enforced by verifyTransportFromLogs
+	// against real NCCL logs during validation.
+	const efaIndent = "                      "
+	data := map[string]string{
+		"NAMESPACE":             "aicr-validation",
+		"WORKER_COUNT":          "2",
+		"GPU_COUNT_PER_NODE":    "8",
+		"GPU_COUNT":             "16",
+		"TEST_TYPE":             testType,
+		"MIN_MESSAGE_SIZE":      minMessageSize,
+		"MAX_MESSAGE_SIZE":      maxMessageSize,
+		"EFA_RESOURCE_LIMITS":   buildEFAResourceLine(1, efaIndent),
+		"EFA_RESOURCE_REQUESTS": buildEFAResourceLine(1, efaIndent),
+		"GKE_NETWORK_INTERFACES": buildGKENetworkInterfacesAnnotation([]string{
+			"gpu-nic-0",
+			"gpu-nic-1",
+			"gpu-nic-2",
+			"gpu-nic-3",
+			"gpu-nic-4",
+			"gpu-nic-5",
+			"gpu-nic-6",
+			"gpu-nic-7",
+		}),
+		"NRI_DEVICE_ANNOTATION": buildNRIDeviceAnnotation(8),
+	}
+
+	for variant, byService := range supportedNCCLCombinations {
+		for service, accelerators := range byService {
+			for _, accelerator := range accelerators {
+				name := strings.Join([]string{string(variant), string(service), string(accelerator)}, "/")
+				t.Run(name, func(t *testing.T) {
+					path := templatePath(accelerator, service, variant, "runtime.yaml")
+					if _, err := parseYAMLTemplate(path, data); err != nil {
+						t.Fatalf("supported NCCL combination has no parseable runtime template %s: %v", path, err)
+					}
+				})
+			}
+		}
 	}
 }
 

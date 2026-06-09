@@ -93,7 +93,7 @@ const (
 	ncclComputeDomainName = "nccl-all-reduce-cd"
 
 	// ncclIMEXClaimTemplateName must match the resourceClaimTemplateName
-	// field in testdata/gb200/eks/runtime-nvls.yaml — the DRA driver uses
+	// field in runtime-nvls.yaml templates — the DRA driver uses
 	// this name when auto-generating the RCT from the ComputeDomain CR.
 	ncclIMEXClaimTemplateName = "nccl-all-reduce-imex"
 )
@@ -159,6 +159,7 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	},
 	variantNVLS: {
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
 	},
 }
 
@@ -244,7 +245,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// For named variants, assert the expected transport actually carried traffic.
-	// This turns the variant label into a hard guarantee — a GB200/EKS cluster
+	// This turns the variant label into a hard guarantee — a GB200 cluster
 	// with a broken IMEX domain will fail loudly on the NVLS variant instead of
 	// silently falling back to EFA.
 	if err := verifyTransportFromLogs(logs, variant); err != nil {
@@ -598,9 +599,14 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	}
 
 	// Build effective worker scheduling: user override takes precedence over platform default.
-	defaultNodeSelector, defaultTolerations := platformWorkerScheduling(service, instanceType)
+	defaultNodeSelector, defaultTolerations := platformWorkerScheduling(service, instanceType, config.Nodes)
 	effectiveNodeSelector := defaultNodeSelector
-	if ctx.NodeSelector != nil {
+	// Gate on len() rather than != nil so an explicit but empty selector does
+	// not silently clear the platform default for scheduling while
+	// resolveTargetGPUNodes (which gates on len > 0) still narrows the counted
+	// set — that asymmetry would let workers schedule outside the cohort the
+	// job was sized for.
+	if len(ctx.NodeSelector) > 0 {
 		effectiveNodeSelector = ctx.NodeSelector
 		slog.Info("Using user-provided node selector override for NCCL workers", "selector", ctx.NodeSelector)
 	}
@@ -826,8 +832,11 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 }
 
 // platformWorkerScheduling returns the default nodeSelector and tolerations
-// for NCCL worker pods on the given service. instanceType is only used for EKS.
-func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string) (map[string]string, []v1.Toleration) {
+// for NCCL worker pods on the given service. instanceType is only used for EKS;
+// nodes (the accelerator-narrowed target set from resolveTargetGPUNodes) is
+// only used for OKE, where the selector is derived from the shared
+// nvidia.com/gpu.product label.
+func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration) {
 	switch service {
 	case recipe.CriteriaServiceEKS:
 		return map[string]string{
@@ -840,11 +849,48 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 				{Operator: v1.TolerationOpExists},
 				{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 			}
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceOKE, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM:
+	case recipe.CriteriaServiceOKE:
+		// OKE bare-metal GB200 pools are commonly tainted and may coexist
+		// with other GPU shapes under one control plane. Tolerate the pool
+		// taint (mirroring EKS/GKE) and pin workers to the same cohort the
+		// node count was sized against by reusing the GFD gpu.product label
+		// that resolveTargetGPUNodes -> narrowByAccelerator already filtered
+		// on. On non-GFD installs no shared product label exists, so emit no
+		// selector — matching the counting path's unfiltered fallback so the
+		// two stay aligned.
+		var nodeSelector map[string]string
+		if product := commonGPUProduct(nodes); product != "" {
+			nodeSelector = map[string]string{gpuProductLabel: product}
+		}
+		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM:
 		return nil, nil
 	default:
 		return nil, nil
 	}
+}
+
+// commonGPUProduct returns the nvidia.com/gpu.product label shared by every
+// node, or "" when the nodes disagree or any node lacks the label (e.g. a
+// non-GFD install). Used to stamp an OKE worker nodeSelector that matches
+// exactly the accelerator-narrowed target set resolveTargetGPUNodes counted,
+// so worker placement cannot diverge from the sizing. Returning "" on non-GFD
+// clusters keeps scheduling aligned with the counting fallback, which also
+// returns the unfiltered set when GFD labels are absent.
+func commonGPUProduct(nodes []v1.Node) string {
+	product := ""
+	for _, n := range nodes {
+		p := n.Labels[gpuProductLabel]
+		if p == "" {
+			return ""
+		}
+		if product == "" {
+			product = p
+		} else if p != product {
+			return ""
+		}
+	}
+	return product
 }
 
 // applyNCCLWorkerScheduling sets the nodeSelector and tolerations on the "node"

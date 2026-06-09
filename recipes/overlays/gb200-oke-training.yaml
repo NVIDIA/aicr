@@ -29,8 +29,13 @@ spec:
   # Specific constraints for GB200 on OKE training workloads
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
+    # GB200 NVLS performance validation provisions the IMEX channel through a
+    # DRA ComputeDomain that requires the GA resource.k8s.io/v1 API, which
+    # ships in Kubernetes 1.34+. Floor the recipe there so a DRA-incapable
+    # cluster is rejected up front instead of failing the performance phase
+    # at runtime when the v1 ResourceClaimTemplate never reconciles.
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.34"
 
   componentRefs:
     # GB200-specific GPU Operator overrides (inherits valuesFile from oke-training)
@@ -51,6 +56,14 @@ spec:
           enable: true
 
   validation:
+    performance:
+      # NVLS runtime support is OKE-specific. NET/RDMA is intentionally left
+      # out until OCI-specific pod RDMA exposure is verified on the testbed.
+      checks:
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 500"
     conformance:
       checks:
         - platform-health
