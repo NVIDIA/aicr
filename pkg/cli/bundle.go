@@ -699,7 +699,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     flagSigningKey,
-				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Combine with --rekor-url to log to a private Rekor. Verify with `cosign verify --key <uri>` until native `aicr verify --key` lands (#1152).",
+				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Combine with --rekor-url to log to a private Rekor. Verify the resulting bundle with `aicr verify --key <uri>`.",
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{

@@ -20,6 +20,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,18 +28,13 @@ import (
 	"runtime"
 	"strings"
 
-	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
-	"github.com/sigstore/sigstore-go/pkg/bundle"
-	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
 // readBoundedFile streams a file through io.LimitReader against maxBytes.
@@ -47,12 +43,15 @@ import (
 func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 	f, err := os.Open(path) //nolint:gosec // verifier paths are bundle-local
 	if err != nil {
-		return nil, err
+		// Wrap with a code while preserving the cause chain: callers propagate
+		// this error as-is, and the os.ErrNotExist sentinel stays reachable via
+		// errors.Is (StructuredError.Unwrap returns the cause).
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open file "+path, err)
 	}
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file "+path, err)
 	}
 	if int64(len(data)) > maxBytes {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -79,6 +78,13 @@ type VerifyOptions struct {
 	// for binary attestation verification. Must contain "NVIDIA/aicr".
 	// Defaults to TrustedRepositoryPattern if empty.
 	CertificateIdentityRegexp string
+
+	// Key selects public-key verification of the bundle attestation instead of
+	// keyless certificate-identity verification. A KMS key URI
+	// (awskms:// | gcpkms:// | azurekms://) or a local PEM public-key file.
+	// Independent of CertificateIdentityRegexp, which pins the (separate) binary
+	// attestation; the two coexist (see #1152).
+	Key string
 }
 
 // ValidateIdentityPattern checks that a certificate identity pattern contains
@@ -151,7 +157,15 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	checksumHash := sha256.Sum256(checksumData)
 	checksumDigest := checksumHash[:]
 
-	bundleCreator, err := verifySigstoreBundle(ctx, bundleAttestPath, checksumDigest)
+	var (
+		bundleCreator string
+		err           error
+	)
+	if opts.Key != "" {
+		bundleCreator, err = verifyKeySignedBundle(ctx, bundleAttestPath, checksumDigest, opts.Key)
+	} else {
+		bundleCreator, err = verifySigstoreBundle(ctx, bundleAttestPath, checksumDigest)
+	}
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("bundle attestation verification failed: %v", err))
 		result.setTrust(TrustUnknown, "bundle attestation verification failed")
@@ -224,7 +238,7 @@ func verifyChecksumStep(bundleDir string, result *VerifyResult) ([]byte, bool) {
 	}
 	checksumData, err := readBoundedFile(checksumPath, defaults.MaxChecksumFileBytes)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if stderrors.Is(err, os.ErrNotExist) {
 			result.setTrust(TrustUnknown, "checksums.txt not found")
 			result.Errors = append(result.Errors, "checksums.txt not found")
 			return nil, true
@@ -243,25 +257,6 @@ func verifyChecksumStep(bundleDir string, result *VerifyResult) ([]byte, bool) {
 	result.ChecksumsPassed = true
 	result.ChecksumFiles = checksum.CountEntries(bundleDir)
 	return checksumData, false
-}
-
-// containsCertChainError checks if an error message indicates a certificate chain
-// verification failure, which typically means the trusted root is stale.
-func containsCertChainError(errMsg string) bool {
-	staleIndicators := []string{
-		"certificate signed by unknown authority",
-		"certificate chain",
-		"x509",
-		"unable to verify certificate",
-		"root certificate",
-	}
-	lower := strings.ToLower(errMsg)
-	for _, indicator := range staleIndicators {
-		if strings.Contains(lower, indicator) {
-			return true
-		}
-	}
-	return false
 }
 
 // resolveExecutablePath returns the best path for reading the running binary.
@@ -284,7 +279,7 @@ func resolveExecutablePath() string {
 func parseDSSEPayload(bundlePath string) ([]byte, error) {
 	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read bundle file", err)
+		return nil, err // already coded by readBoundedFile
 	}
 
 	var raw map[string]json.RawMessage
@@ -371,30 +366,6 @@ func extractBinaryDigest(bundlePath string) ([]byte, error) {
 	return nil, errors.New(errors.ErrCodeNotFound, "no binary digest found in bundle attestation resolvedDependencies")
 }
 
-// loadSigstoreBundle reads a .sigstore.json file and returns a parsed Bundle.
-// Rejects files larger than defaults.MaxSigstoreBundleSize.
-func loadSigstoreBundle(path string) (*bundle.Bundle, error) {
-	// readBoundedFile is authoritative on size: a stat-then-read sequence
-	// races on symlink swaps and network mounts, but io.LimitReader bounds
-	// what we actually load into memory.
-	data, err := readBoundedFile(path, defaults.MaxSigstoreBundleSize)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read sigstore bundle: "+path, err)
-	}
-
-	var pb protobundle.Bundle
-	if unmarshalErr := protojson.Unmarshal(data, &pb); unmarshalErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse sigstore bundle", unmarshalErr)
-	}
-
-	b, err := bundle.NewBundle(&pb)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "invalid sigstore bundle", err)
-	}
-
-	return b, nil
-}
-
 // verifySigstoreBundle verifies a Sigstore bundle (.sigstore.json) against the
 // public-good trusted root, binding the attestation to the given artifact digest.
 // Requires a valid OIDC-issued certificate from any issuer (bundle attestation
@@ -406,14 +377,9 @@ func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest
 		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before bundle attestation verification", err)
 	}
 
-	b, err := loadSigstoreBundle(bundlePath)
+	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
 	if err != nil {
-		return "", err
-	}
-
-	trustedMaterial, err := trust.GetTrustedMaterial()
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to load trusted root", err)
+		return "", err // already coded by readBoundedFile (oversize -> ErrCodeInvalidRequest)
 	}
 
 	// Require any valid OIDC-issued certificate — confirms a real identity signed this
@@ -422,7 +388,35 @@ func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create bundle identity matcher", err)
 	}
 
-	return verifyBundle(b, trustedMaterial, identity, artifactDigest)
+	return attestation.VerifyStatementWith(ctx, data,
+		attestation.NewKeylessVerificationIdentity(identity),
+		attestation.NewRequireTLogPolicy(), artifactDigest)
+}
+
+// verifyKeySignedBundle verifies a public-key-signed bundle attestation (#407
+// KMS signing or a local PEM) against the key named by keyRef, binding it to
+// artifactDigest. Returns the key identity (KMS URI or pem:<fp>) as the bundle
+// creator, since a key-signed bundle has no certificate SAN.
+func verifyKeySignedBundle(ctx context.Context, bundlePath string, artifactDigest []byte, keyRef string) (string, error) {
+	id, err := attestation.NewKeyVerificationIdentity(ctx, keyRef)
+	if err != nil {
+		return "", err // already classified (ErrCodeInvalidRequest / ErrCodeUnavailable)
+	}
+	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
+	if err != nil {
+		return "", err // already coded by readBoundedFile (oversize -> ErrCodeInvalidRequest)
+	}
+	signer, err := attestation.VerifyStatementWith(ctx, data, id, attestation.NewRequireTLogPolicy(), artifactDigest)
+	if err != nil {
+		return "", err
+	}
+	if signer == "" {
+		// Key-signed bundles carry no cert SAN; fall back to the key identity.
+		if ki, ok := id.(interface{ Identity() string }); ok {
+			return ki.Identity(), nil
+		}
+	}
+	return signer, nil
 }
 
 // VerifyBinaryAttestation verifies the binary attestation with identity pinning
@@ -433,14 +427,9 @@ func VerifyBinaryAttestation(ctx context.Context, bundlePath string, identityPat
 		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before binary attestation verification", err)
 	}
 
-	b, err := loadSigstoreBundle(bundlePath)
+	data, err := readBoundedFile(bundlePath, defaults.MaxSigstoreBundleSize)
 	if err != nil {
-		return "", err
-	}
-
-	trustedMaterial, err := trust.GetTrustedMaterial()
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to load trusted root", err)
+		return "", err // already coded by readBoundedFile (oversize -> ErrCodeInvalidRequest)
 	}
 
 	// Pin identity to NVIDIA CI using the provided pattern
@@ -452,51 +441,7 @@ func VerifyBinaryAttestation(ctx context.Context, bundlePath string, identityPat
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create identity matcher", err)
 	}
 
-	return verifyBundle(b, trustedMaterial, identity, artifactDigest)
-}
-
-// verifyBundle performs sigstore-go verification on a bundle.
-// Both identity and artifactDigest are required — verification refuses to proceed
-// without content binding (artifact digest) and signer validation (identity).
-// Returns the SubjectAlternativeName from the signing certificate.
-func verifyBundle(b *bundle.Bundle, trustedMaterial root.TrustedMaterial, identity verify.CertificateIdentity, artifactDigest []byte) (string, error) {
-	v, err := verify.NewVerifier(trustedMaterial,
-		verify.WithTransparencyLog(1),
-		verify.WithObserverTimestamps(1),
-	)
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create sigstore verifier", err)
-	}
-
-	// Artifact digest is required — refuse to verify without content binding
-	if len(artifactDigest) == 0 {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
-			"artifact digest is required for attestation verification")
-	}
-
-	policy := verify.NewPolicy(
-		verify.WithArtifactDigest("sha256", artifactDigest),
-		verify.WithCertificateIdentity(identity),
-	)
-
-	result, err := v.Verify(b, policy)
-	if err != nil {
-		// Detect staleness: if the error mentions certificate chain issues,
-		// suggest updating the trusted root
-		errMsg := err.Error()
-		if containsCertChainError(errMsg) {
-			return "", errors.New(errors.ErrCodeUnauthorized,
-				"sigstore verification failed — the signing certificate may have been issued "+
-					"by a CA not present in your trusted root. This usually means Sigstore rotated "+
-					"their keys since your last update.\n\n  To fix: aicr trust update")
-		}
-		return "", errors.Wrap(errors.ErrCodeUnauthorized, "sigstore verification failed", err)
-	}
-
-	// Extract signer identity from certificate
-	if result != nil && result.Signature != nil && result.Signature.Certificate != nil {
-		return result.Signature.Certificate.SubjectAlternativeName, nil
-	}
-
-	return "", nil
+	return attestation.VerifyStatementWith(ctx, data,
+		attestation.NewKeylessVerificationIdentity(identity),
+		attestation.NewRequireTLogPolicy(), artifactDigest)
 }

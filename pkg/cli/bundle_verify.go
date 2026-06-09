@@ -88,6 +88,10 @@ Output as JSON:
 				Usage: `Override the certificate identity pattern for binary attestation verification.
 	Must contain "NVIDIA/aicr". Default pins to the release workflow on tag refs.`,
 			},
+			&cli.StringFlag{
+				Name:  "key",
+				Usage: "Verify a key-signed bundle attestation against a KMS key URI (awskms:// | gcpkms:// | azurekms://) or a local PEM public-key file. The counterpart to `bundle --signing-key`. Coexists with --certificate-identity-regexp (which pins the separate binary attestation).",
+			},
 			withCompletions(&cli.StringFlag{
 				Name:  flagFormat,
 				Value: verifyFormatText,
@@ -126,6 +130,7 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		}
 		verifyOpts.CertificateIdentityRegexp = identityRegexp
 	}
+	verifyOpts.Key = cmd.String("key")
 
 	// Run verification
 	result, err := verifier.Verify(ctx, absDir, verifyOpts)

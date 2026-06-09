@@ -647,6 +647,13 @@ const (
 	// would allocate the whole file into memory.
 	MaxManifestFileBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
+	// MaxPublicKeyPEMBytes caps the size of a local PEM public-key file passed
+	// to `aicr verify --key` (#1152). A PEM-encoded ECDSA P-256 or RSA-4096
+	// public key is well under 2 KiB; 64 KiB is generous headroom while
+	// bounding an attacker-influenced --key path (symlink to /proc, NFS mount,
+	// FUSE filesystem) before the bytes are read into memory.
+	MaxPublicKeyPEMBytes int64 = 64 * 1024 // 64 KiB
+
 	// MaxExternalDataFileBytes caps the size of recipe/registry data files
 	// read from the external data directory by LayeredDataProvider. This is
 	// the single source of truth for the external-data size limit:
