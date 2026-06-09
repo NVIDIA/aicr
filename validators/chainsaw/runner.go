@@ -125,8 +125,13 @@ func IsChainsawTest(raw string) bool {
 
 // assertComponent runs assertions for a single component.
 // Chainsaw Test format is dispatched to the binary; raw K8s YAML uses the Go library.
+// Test-format content is checked against the read-only operation allowlist
+// (assert, error) before dispatch — see ValidateTestReadOnly.
 func assertComponent(ctx context.Context, ca ComponentAssert, timeout time.Duration, fetcher ResourceFetcher, cfg *runConfig) Result {
 	if IsChainsawTest(ca.AssertYAML) {
+		if err := ValidateTestReadOnly(ca.Name, ca.AssertYAML); err != nil {
+			return Result{Component: ca.Name, Error: err}
+		}
 		return runChainsawBinary(ctx, ca.Name, ca.AssertYAML, timeout, cfg)
 	}
 	return assertRawResources(ctx, ca, timeout, fetcher)

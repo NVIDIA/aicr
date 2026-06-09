@@ -97,7 +97,7 @@ components:
 | `podScheduling` | `PodSchedulingConfig` | no | Helm value paths for workload pod scheduling injection |
 | `storageClassPaths` | []string | no | Helm value paths where `--storage-class` is written |
 | `validations` | []`ComponentValidationConfig` | no | Bundle-time validation checks (function, severity, conditions, message) |
-| `healthCheck.assertFile` | string | no | Chainsaw assert YAML (relative to data dir) for conformance phase |
+| `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `validators/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 
@@ -403,17 +403,31 @@ externally-visible product. Fields beyond `ComponentRefs` and
 2. **Write the YAML** in the correct directory. For an overlay, set
    `spec.base` to the most specific shared ancestor and let the chain
    carry shared constraints; only declare what differs.
-3. **Run `make bom-docs` and commit `docs/user/container-images.md`**
+3. **Ship the chainsaw health check** (registry entries only). Every
+   new component in `recipes/registry.yaml` MUST declare
+   `healthCheck.assertFile` pointing at
+   `recipes/checks/<name>/health-check.yaml`, and that file MUST use
+   only the read-only `assert` / `error` operation allowlist (no
+   `script`, `apply`, `wait`, `command`, etc. — see
+   `validators/chainsaw/allowlist.go`). The contract is enforced at
+   PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck`
+   and `validators/chainsaw.TestValidateTestReadOnly_RegistryContent`
+   — both gate `make qualify`. See #1223 and the
+   [chainsaw health check section in validator.md](validator.md#chainsaw-health-checks)
+   for the assertion patterns currently in use (DaemonSet
+   `numberReady == desiredNumberScheduled`, Deployment
+   `Available=True`, CRD `Established=True`).
+4. **Run `make bom-docs` and commit `docs/user/container-images.md`**
    if your change touches `registry.yaml`, a component's `values.yaml`,
    or a chart version pin (see [BOM regeneration](#bom-regeneration)).
-4. **Unit tests.** `make test` runs the recipe-resolution suite —
+5. **Unit tests.** `make test` runs the recipe-resolution suite —
    `pkg/recipe/yaml_test.go` (static catalog: parse, refs, enum
    values, inheritance depth, no cycles) and
    `pkg/recipe/metadata_test.go` (runtime merge, topological sort).
    Both gate `make qualify`. If your change adds a registry entry, a
    new overlay file, or a mixin, the static suite typically picks it
    up without new test code.
-5. **Integration validation.** For a new chart pin, run `make qualify`
+6. **Integration validation.** For a new chart pin, run `make qualify`
    and let the e2e pipeline render the bundle. KWOK simulated
    clusters (`make kwok-e2e RECIPE=<name>`) catch most resolution
    regressions without GPU hardware.
