@@ -60,19 +60,6 @@ const strictEnvVar = "AICR_VALIDATION_FLOOR_STRICT"
 // time-bounded escape hatch only when a follow-up issue exists to drain
 // them; the stale-entry guard at the end of TestOverlayValidationPhaseFloor
 // catches drift.
-//
-// Pending data gap (intentionally not listed here): #1052 retired the
-// `gb200-any-training.yaml` criteria-wildcard in favor of per-leaf NCCL
-// thresholds. The EKS GB200 training leaves carry their own perf blocks;
-// the OKE chain (`gb200-oke-training`, `gb200-oke-ubuntu-training`,
-// `gb200-oke-ubuntu-training-kubeflow`) currently ships without one and
-// is reported as a default-mode WARN ("WARN recommended performance ..."),
-// not a hard failure. A knownGaps entry would be stale-flagged because
-// performance is warn-only in non-strict mode. When the OCI GB200 testbed
-// lands (#1007) `gb200-oke-training` will ship its own
-// `nccl-all-reduce-bw` constraint and the WARN drains. If a future change
-// toggles AICR_VALIDATION_FLOOR_STRICT=1 in CI before that, add three
-// performance entries here referencing #1007.
 var knownGaps = map[string]map[string]bool{}
 
 // classification captures the inputs that drive the per-intent floor.

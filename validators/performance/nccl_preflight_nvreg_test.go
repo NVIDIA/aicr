@@ -93,6 +93,10 @@ func TestGB200NetPreflightApplies(t *testing.T) {
 			"NET + GB200 + GKE → not required (no EFA on GKE)",
 			variantNET, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceGKE, false,
 		},
+		{
+			"NET + GB200 + OKE → not required (no EFA on OKE)",
+			variantNET, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE, false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

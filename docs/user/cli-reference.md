@@ -1050,6 +1050,7 @@ that validators use by default:
 |----------|-----------------------------|----------|
 | GKE | `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb` | Non-standard GPU node pool labels |
 | EKS | `node.kubernetes.io/instance-type: <discovered>` | Custom node pool labels |
+| OKE | `nvidia.com/gpu.product: <discovered>` (when GFD labels are present) | Pin NCCL workers to the accelerator cohort sized for the test; non-GFD clusters get no default selector |
 
 When `--toleration` is provided, it replaces the default tolerate-all policy
 (`operator: Exists`) on workloads that need to land on tainted GPU nodes.

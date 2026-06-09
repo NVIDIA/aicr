@@ -47,14 +47,18 @@ ones) that match the target fabric:
 
 | Check | Transport | When it's selected |
 |---|---|---|
-| `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | Default for H100 on EKS/GKE, and for GB200/B200 on non-EKS services. Preserves the pre-variant behavior. |
+| `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | Default for H100 on EKS/GKE, and for GB200/B200 on non-EKS services without a named-variant pairing (e.g. B200, or GB200 outside EKS/OKE). Preserves the pre-variant behavior. |
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
 
 GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 `-nvls` together rather than the auto-detect variant, because those nodes
 expose two inter-node fabrics simultaneously and a single auto-detect test
 would only exercise one of them.
+
+GB200/OKE recipes enable `-nvls` only: OKE NET/RDMA stays out of the support
+matrix until the OCI testbed proves a non-Socket NCCL transport end to end, so
+OKE validates the NVL72 IMEX fabric without an EFA/NET counterpart.
 
 ```bash
 # Capture snapshot, generate training recipe, validate the performance phase.
