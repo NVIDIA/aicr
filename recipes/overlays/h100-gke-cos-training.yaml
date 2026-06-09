@@ -87,6 +87,13 @@ spec:
     performance:
       checks:
         - nccl-all-reduce-bw
+      # NOTE: this NCCL bus-bandwidth floor is a fixed absolute value calibrated
+      # on a full 8-GPU H100 NVLink/SXM node with multi-NIC transport. busbw is
+      # fabric-class dependent (not GPU-count scaled), so a smaller or
+      # different-fabric H100 SKU — e.g. a single-GPU-per-node shape, whose
+      # all-reduce is pure inter-node NIC with no intra-node NVLink — can
+      # false-fail. Making the gate fabric/transport-class aware is tracked in
+      # https://github.com/NVIDIA/aicr/issues/1256.
       constraints:
         - name: nccl-all-reduce-bw
           value: ">= 250"

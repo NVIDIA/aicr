@@ -70,6 +70,11 @@ spec:
       # applies 10% tolerance). A larger model would exercise the per-GPU
       # compute advantage and warrant a tighter gate. Model + concurrency are
       # pinned so the gate stays valid independent of the compiled defaults.
+      #
+      # NOTE: this throughput floor is a fixed absolute full-node value (here a
+      # 4-GPU GB200 node) and is not normalized for GPU count, so a smaller SKU
+      # of this accelerator can false-fail a healthy run. A normalized per-GPU
+      # floor is tracked in https://github.com/NVIDIA/aicr/issues/1254.
       constraints:
         - name: inference-model
           value: Qwen/Qwen3-8B

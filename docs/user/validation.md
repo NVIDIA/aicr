@@ -76,6 +76,13 @@ The generated recipe lists the selected variant(s) under
 (example: `>= 300 GB/s` for H100 + EFA; `>= 40 GB/s` NET and `>= 500 GB/s`
 NVLS for GB200 + EFA, each sized for a 2-node pair).
 
+**Node-shape assumption.** These bus-bandwidth floors are fixed absolute
+values calibrated on full, high-bandwidth nodes (8-GPU H100 NVLink/SXM with
+multi-NIC transport). They are *not* normalized for node fabric or GPU count,
+so a smaller or different-fabric H100 SKU (e.g. a single-GPU-per-node shape)
+can false-fail a healthy run. Making the NCCL gate fabric/transport-class
+aware is tracked in [#1256](https://github.com/NVIDIA/aicr/issues/1256).
+
 Expected flow (~5–10 min per variant): readiness pre-flight → deploy
 `TrainingRuntime` + `TrainJob` in `aicr-validation` → worker pods reach
 `Running` → run `all_reduce_perf` → parse peak bus bandwidth → verify the
@@ -163,6 +170,16 @@ validation:
       - name: inference-concurrency-per-gpu  # positive integer; default 256
         value: "256"
 ```
+
+**Node-shape assumption.** The `inference-throughput` floor is a fixed
+absolute full-node value calibrated on a full node (the shared `>= 50000`
+gate was measured on 8-GPU H100; GB200 on a 4-GPU node). It is *not*
+normalized for GPU count, and the evaluator only scales it down for partial
+occupancy — not across node sizes — so a smaller H100 SKU (e.g. 1-/2-GPU
+shapes such as `p5.4xlarge`, AKS `NC80adis`) can false-fail a healthy run.
+`inference-ttft-p99` is a per-request latency at fixed concurrency-per-GPU
+and does not need GPU-count normalization. A normalized per-GPU throughput
+floor is tracked in [#1254](https://github.com/NVIDIA/aicr/issues/1254).
 
 `inference-model` and `inference-concurrency-per-gpu` are optional: omit them to
 use the compiled defaults (Qwen3-8B at 256 concurrent requests per GPU), set them
