@@ -107,6 +107,24 @@ else
   echo "No recipe.yaml or bundle directory found; skipping runtime bundle archive"
 fi
 
+# Containerd config dump — runs unconditionally (cheap; 2 small files
+# per node) so the toml that nvidia-ctk emits is captured even when
+# COLLECT_NODE_RUNTIME_ARTIFACTS=false. Targets the nvidia-container-
+# toolkit 1.19.1 vs kind worker containerd schema-drift hypothesis in
+# issue #1237.
+docker_timeout 30s ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
+  --format '{{.Names}}' | sort | while read -r node_container; do
+    [[ -z "${node_container}" ]] && continue
+    node_file="${node_container//[^A-Za-z0-9_.-]/_}"
+    {
+      echo "=== ${node_container}: /etc/containerd/config.toml ==="
+      docker_timeout 15s exec "${node_container}" cat /etc/containerd/config.toml 2>&1 || true
+      echo
+      echo "=== ${node_container}: /etc/containerd/conf.d/99-nvidia.toml ==="
+      docker_timeout 15s exec "${node_container}" cat /etc/containerd/conf.d/99-nvidia.toml 2>&1 || true
+    } > "/tmp/debug-artifacts/${node_file}-containerd-config.txt" 2>&1 || true
+  done || true
+
 case "${COLLECT_NODE_RUNTIME_ARTIFACTS}" in
   true)
     artifact_loop_start="$(date +%s)"
