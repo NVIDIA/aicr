@@ -41,7 +41,7 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.113.0'
+  grype: 'v0.114.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.0.6'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
