@@ -58,12 +58,31 @@ func (f *fakeFetcher) Fetch(_ context.Context, apiVersion, kind, namespace, name
 	return nil, errors.New(errors.ErrCodeNotFound, "fake: not found: "+key)
 }
 
-func (f *fakeFetcher) List(_ context.Context, apiVersion, kind, namespace string, _ map[string]string) ([]map[string]interface{}, error) {
+func (f *fakeFetcher) List(_ context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]interface{}, error) {
 	key := apiVersion + "/" + kind + "/" + namespace
-	if items, ok := f.lists[key]; ok {
+	items, ok := f.lists[key]
+	if !ok {
+		return nil, nil
+	}
+	if len(labels) == 0 {
 		return items, nil
 	}
-	return nil, nil
+	var filtered []map[string]interface{}
+	for _, it := range items {
+		md, _ := it["metadata"].(map[string]any)
+		objLabels, _ := md["labels"].(map[string]any)
+		match := true
+		for k, v := range labels {
+			if got, _ := objLabels[k].(string); got != v {
+				match = false
+				break
+			}
+		}
+		if match {
+			filtered = append(filtered, it)
+		}
+	}
+	return filtered, nil
 }
 
 // readinessYAML is a minimal Chainsaw Test with one assert step and one
@@ -100,71 +119,123 @@ spec:
                 phase: Pending
 `
 
-// TestRunChainsawTestInProcess_Happy verifies a healthy fixture: the
-// Deployment exists with availableReplicas > 0, no pods are pending.
-func TestRunChainsawTestInProcess_Happy(t *testing.T) {
-	t.Parallel()
-	f := newFakeFetcher()
-	f.addGet("apps/v1", "Deployment", "ns", "foo", map[string]any{
+// healthyDeployment returns a Deployment fixture with availableReplicas=2.
+func healthyDeployment() map[string]any {
+	return map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
 		"metadata":   map[string]any{"name": "foo", "namespace": "ns"},
 		"status":     map[string]any{"availableReplicas": float64(2)},
-	})
-	f.addList("v1", "Pod", "ns", []map[string]any{
-		{
-			"apiVersion": "v1",
-			"kind":       "Pod",
-			"metadata":   map[string]any{"name": "p1", "namespace": "ns"},
-			"status":     map[string]any{"phase": "Running"},
-		},
-	})
-
-	r := runChainsawTestInProcess(context.Background(), "comp", readinessYAML, time.Second, f)
-	if !r.Passed {
-		t.Errorf("expected Passed=true, got Error=%v Output=%s", r.Error, r.Output)
 	}
 }
 
-// TestRunChainsawTestInProcess_AssertFails verifies the assert path:
-// Deployment missing → assert fails → Result.Passed=false, Error set.
-func TestRunChainsawTestInProcess_AssertFails(t *testing.T) {
+func pod(name, phase string, labels map[string]any) map[string]any {
+	md := map[string]any{"name": name, "namespace": "ns"}
+	if labels != nil {
+		md["labels"] = labels
+	}
+	return map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   md,
+		"status":     map[string]any{"phase": phase},
+	}
+}
+
+// TestRunChainsawTestInProcess covers the three load-bearing paths of the
+// in-process executor: a healthy fixture passes both steps; a missing
+// resource fails the assert; a forbidden shape (a Pending pod) fires the
+// error block. Label-selector filtering is exercised by a fourth case so
+// the fakeFetcher.List label-matching code path is covered.
+func TestRunChainsawTestInProcess(t *testing.T) {
 	t.Parallel()
-	f := newFakeFetcher() // no resources at all
-	r := runChainsawTestInProcess(context.Background(), "comp", readinessYAML, time.Second, f)
-	if r.Passed {
-		t.Fatalf("expected Passed=false")
+	tests := []struct {
+		name       string
+		yaml       string
+		setup      func(*fakeFetcher)
+		wantPassed bool
+		wantErr    bool
+	}{
+		{
+			name: "happy path: deployment ready and no pending pods",
+			yaml: readinessYAML,
+			setup: func(f *fakeFetcher) {
+				f.addGet("apps/v1", "Deployment", "ns", "foo", healthyDeployment())
+				f.addList("v1", "Pod", "ns", []map[string]any{pod("p1", "Running", nil)})
+			},
+			wantPassed: true,
+		},
+		{
+			name:       "assert fails: deployment missing",
+			yaml:       readinessYAML,
+			setup:      func(*fakeFetcher) {}, // empty fetcher
+			wantPassed: false,
+			wantErr:    true,
+		},
+		{
+			name: "error fires: pending pod present",
+			yaml: readinessYAML,
+			setup: func(f *fakeFetcher) {
+				f.addGet("apps/v1", "Deployment", "ns", "foo", healthyDeployment())
+				f.addList("v1", "Pod", "ns", []map[string]any{pod("p1", "Pending", nil)})
+			},
+			wantPassed: false,
+			wantErr:    true,
+		},
+		{
+			name: "label selector filters out non-matching pods",
+			yaml: labelSelectorYAML,
+			setup: func(f *fakeFetcher) {
+				// Pending pod exists but does NOT carry app=foo,
+				// so the selector-filtered list is empty and the
+				// error block must NOT fire.
+				f.addList("v1", "Pod", "ns", []map[string]any{
+					pod("p1", "Pending", map[string]any{"app": "bar"}),
+				})
+			},
+			wantPassed: true,
+		},
 	}
-	if r.Error == nil {
-		t.Fatalf("expected Error to be set")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFakeFetcher()
+			tt.setup(f)
+			r := runChainsawTestInProcess(context.Background(), "comp", tt.yaml, time.Second, f)
+			if r.Passed != tt.wantPassed {
+				t.Errorf("Passed = %v, want %v (Error=%v Output=%s)", r.Passed, tt.wantPassed, r.Error, r.Output)
+			}
+			if (r.Error != nil) != tt.wantErr {
+				t.Errorf("Error set = %v, want %v (err=%v)", r.Error != nil, tt.wantErr, r.Error)
+			}
+		})
 	}
 }
 
-// TestRunChainsawTestInProcess_ErrorFires verifies the error path:
-// Deployment is healthy but a pod IS Pending → error block fires →
-// Result.Passed=false.
-func TestRunChainsawTestInProcess_ErrorFires(t *testing.T) {
-	t.Parallel()
-	f := newFakeFetcher()
-	f.addGet("apps/v1", "Deployment", "ns", "foo", map[string]any{
-		"apiVersion": "apps/v1",
-		"kind":       "Deployment",
-		"metadata":   map[string]any{"name": "foo", "namespace": "ns"},
-		"status":     map[string]any{"availableReplicas": float64(2)},
-	})
-	f.addList("v1", "Pod", "ns", []map[string]any{
-		{
-			"apiVersion": "v1",
-			"kind":       "Pod",
-			"metadata":   map[string]any{"name": "p1", "namespace": "ns"},
-			"status":     map[string]any{"phase": "Pending"},
-		},
-	})
-	r := runChainsawTestInProcess(context.Background(), "comp", readinessYAML, time.Second, f)
-	if r.Passed {
-		t.Fatalf("expected Passed=false (pending pod should fire the error)")
-	}
-}
+// labelSelectorYAML uses metadata.labels to narrow the error block's List
+// so the fakeFetcher.List label-filter code path is exercised.
+const labelSelectorYAML = `
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: t
+spec:
+  timeouts:
+    assert: 100ms
+  steps:
+    - name: no-pending-foo-pods
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: ns
+                labels:
+                  app: foo
+              status:
+                phase: Pending
+`
 
 // TestRunChainsawTestInProcess_RegistryCorpusParses ensures every in-tree
 // recipes/checks/*/health-check.yaml is parseable by the in-process
@@ -210,7 +281,11 @@ func TestRunChainsawTestInProcess_RegistryCorpusParses(t *testing.T) {
 		// expected assertion-against-empty-fetcher failure.
 		if r.Error != nil {
 			var se *errors.StructuredError
-			if stderrors.As(r.Error, &se) && se.Code == errors.ErrCodeInvalidRequest {
+			if !stderrors.As(r.Error, &se) {
+				t.Errorf("%s: unexpected non-structured error: %T %v", e.Name(), r.Error, r.Error)
+				continue
+			}
+			if se.Code == errors.ErrCodeInvalidRequest {
 				t.Errorf("%s: parse/schema rejection: %v", e.Name(), r.Error)
 			}
 		}

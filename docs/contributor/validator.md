@@ -10,7 +10,7 @@ contributor view for all four.
 | [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
-| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces: `make check-health` post-deploy locally, AND `aicr validate --phase deployment` in-cluster | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format executed in-process by the deployment validator via `validators/chainsaw/inprocess.go`; raw K8s YAML via the chainsaw Go library) |
+| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces with distinct runtimes: `make check-health` post-deploy locally (shells out to the `chainsaw` CLI installed on the developer's machine), AND `aicr validate --phase deployment` in-cluster (executes the Test format in-process via `validators/chainsaw/inprocess.go` — no external binary in the deployment validator image) | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format on both surfaces; raw K8s YAML asserts use the chainsaw Go library inside `assertRawResources`) |
 
 Rule of thumb: declarative constraint against a snapshot value → surface 1.
 Active probe of a live cluster → surface 2 or 4. Pre-deployment sanity

@@ -84,6 +84,10 @@ func runChainsawTestInProcess(ctx context.Context, component, yamlContent string
 		"effectiveTimeout", effectiveTimeout)
 
 	for stepIdx, step := range test.Spec.Steps {
+		if err := ctx.Err(); err != nil {
+			result.Error = errors.Wrap(errors.ErrCodeInternal, "context canceled between steps", err)
+			return result
+		}
 		stepLabel := step.Name
 		if stepLabel == "" {
 			stepLabel = fmt.Sprintf("step[%d]", stepIdx)
@@ -108,14 +112,20 @@ func runChainsawTestInProcess(ctx context.Context, component, yamlContent string
 func executeStepInProcess(ctx context.Context, try []v1alpha1.Operation, fetcher ResourceFetcher, stepTimeout time.Duration) error {
 	deadline := time.Now().Add(stepTimeout)
 	for opIdx, op := range try {
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("try[%d]: context canceled", opIdx), err)
+		}
 		switch {
 		case op.Assert != nil:
 			if err := runAssertWithRetry(ctx, op.Assert, fetcher, deadline); err != nil {
-				return fmt.Errorf("try[%d] assert: %w", opIdx, err)
+				return errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("try[%d] assert", opIdx), err)
 			}
 		case op.Error != nil:
 			if err := runErrorWithRetry(ctx, op.Error, fetcher, deadline); err != nil {
-				return fmt.Errorf("try[%d] error: %w", opIdx, err)
+				return errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("try[%d] error", opIdx), err)
 			}
 		default:
 			// Defense-in-depth: ValidateTestReadOnly rejects every
@@ -203,14 +213,17 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 		// exist or doesn't match the shape.
 		actual, err := fetcher.Fetch(ctx, apiVersion, kind, namespace, name)
 		if err != nil {
-			return fmt.Errorf("%s %s/%s not found: %w", kind, namespace, name, err)
+			return errors.Wrap(errors.ErrCodeNotFound,
+				fmt.Sprintf("%s %s/%s not found", kind, namespace, name), err)
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return fmt.Errorf("%s %s/%s: assertion engine error: %w", kind, namespace, name, checkErr)
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("%s %s/%s: assertion engine error", kind, namespace, name), checkErr)
 		}
 		if len(errs) > 0 {
-			return fmt.Errorf("%s %s/%s: %s", kind, namespace, name, formatFieldErrors(errs))
+			return errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("%s %s/%s: %s", kind, namespace, name, formatFieldErrors(errs)))
 		}
 		return nil
 	}
@@ -218,22 +231,30 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 	// List-and-match: assert passes if at least one item matches.
 	items, err := fetcher.List(ctx, apiVersion, kind, namespace, labels)
 	if err != nil {
-		return fmt.Errorf("list %s in %q: %w", kind, namespace, err)
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("list %s in %q", kind, namespace), err)
 	}
 	if len(items) == 0 {
-		return fmt.Errorf("%s in %q: no resources found (labels=%v)", kind, namespace, labels)
+		return errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("%s in %q: no resources found (labels=%v)", kind, namespace, labels))
 	}
 	var lastMatchErr error
 	for _, actual := range items {
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("list-match canceled for %s in %q", kind, namespace), err)
+		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return fmt.Errorf("%s in %q: assertion engine error: %w", kind, namespace, checkErr)
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("%s in %q: assertion engine error", kind, namespace), checkErr)
 		}
 		if len(errs) == 0 {
 			return nil // at least one item matches
 		}
-		lastMatchErr = fmt.Errorf("no %s in %q matched (last reason: %s)",
-			kind, namespace, formatFieldErrors(errs))
+		lastMatchErr = errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("no %s in %q matched (last reason: %s)",
+				kind, namespace, formatFieldErrors(errs)))
 	}
 	return lastMatchErr
 }
@@ -265,11 +286,13 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return fmt.Errorf("%s %s/%s: assertion engine error: %w", kind, namespace, name, checkErr)
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("%s %s/%s: assertion engine error", kind, namespace, name), checkErr)
 		}
 		if len(errs) == 0 {
 			// Resource matches the forbidden shape → error fires.
-			return fmt.Errorf("%s %s/%s: forbidden shape matched", kind, namespace, name)
+			return errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("%s %s/%s: forbidden shape matched", kind, namespace, name))
 		}
 		return nil
 	}
@@ -278,12 +301,18 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 	// shape. Empty list is the happy path.
 	items, err := fetcher.List(ctx, apiVersion, kind, namespace, labels)
 	if err != nil {
-		return fmt.Errorf("list %s in %q: %w", kind, namespace, err)
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("list %s in %q", kind, namespace), err)
 	}
 	for _, actual := range items {
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("list-match canceled for %s in %q", kind, namespace), err)
+		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return fmt.Errorf("%s in %q: assertion engine error: %w", kind, namespace, checkErr)
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("%s in %q: assertion engine error", kind, namespace), checkErr)
 		}
 		if len(errs) == 0 {
 			// Forbidden shape matched at least one resource.
@@ -293,7 +322,8 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 					itemName = n
 				}
 			}
-			return fmt.Errorf("%s %s/%s matches forbidden shape", kind, namespace, itemName)
+			return errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("%s %s/%s matches forbidden shape", kind, namespace, itemName))
 		}
 	}
 	return nil
