@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -293,5 +294,94 @@ func TestRunChainsawTestInProcess_RegistryCorpusParses(t *testing.T) {
 	}
 	if parsed == 0 {
 		t.Fatal("no Test-format checks were exercised — registry walker is broken")
+	}
+}
+
+// TestRunChainsawTestInProcess_TerminalEvalErrorFailsFast is a regression
+// guard for #1252: a permanent JMESPath evaluation error must fail fast, not
+// be retried for the entire assert window. `length(@)` on a nil field throws
+// "invalid type for: <nil>" — the exact error class that, before the fix,
+// runAssertWithRetry retried every AssertRetryInterval until the deadline.
+// With a 30s step budget, a correct terminal-error short-circuit returns in
+// well under a second; a regression would block for >= one retry interval.
+func TestRunChainsawTestInProcess_TerminalEvalErrorFailsFast(t *testing.T) {
+	t.Parallel()
+	// `length(@)` on the absent `missingField` throws "invalid type for:
+	// <nil>" — the exact terminal eval error. Exercised across the full
+	// matrix that shares the isTerminalAssertErr guard: both ops (assert →
+	// runAssertWithRetry, error → runErrorWithRetry) AND both fetch paths
+	// (named single-Get vs. List-and-match). The bug that prompted the fix
+	// was on List-based Pod checks, so the List path must be pinned too.
+	const throwExpr = "(missingField[?x == 'y'] | length(@) > `0`): true"
+	// named=true → single-Get branch (metadata.name set);
+	// named=false → List-and-match branch (selector, no name).
+	makeYAML := func(op string, named bool) string {
+		meta := "namespace: perfns"
+		if named {
+			meta = "name: foo\n                namespace: perfns"
+		}
+		return `
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: terminal-eval-error
+spec:
+  steps:
+    - name: nil-throw
+      try:
+        - ` + op + `:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                ` + meta + `
+              status:
+                ` + throwExpr + `
+`
+	}
+	cases := []struct {
+		op    string
+		named bool
+	}{
+		{"assert", true}, {"error", true},
+		{"assert", false}, {"error", false},
+	}
+	for _, tc := range cases {
+		mode := "list"
+		if tc.named {
+			mode = "named"
+		}
+		t.Run(tc.op+"/"+mode, func(t *testing.T) {
+			t.Parallel()
+			f := newFakeFetcher()
+			// Seed a Deployment (without `missingField`) so the path reaches
+			// the assertion engine and throws, rather than short-circuiting on
+			// NotFound / empty-list. The List branch is what the original
+			// (init)containerStatuses bug rode in on, so both are pinned.
+			d := healthyDeployment()
+			if tc.named {
+				f.addGet("apps/v1", "Deployment", "perfns", "foo", d)
+			} else {
+				f.addList("apps/v1", "Deployment", "perfns", []map[string]any{d})
+			}
+
+			// Generous step budget: a correct terminal-error short-circuit
+			// returns in well under a second; a regression (retrying the
+			// permanent error) blocks for >= one AssertRetryInterval.
+			start := time.Now()
+			r := runChainsawTestInProcess(context.Background(), "comp", makeYAML(tc.op, tc.named), 30*time.Second, f)
+			elapsed := time.Since(start)
+
+			if r.Error == nil {
+				t.Fatalf("expected terminal eval error, got nil (Passed=%v Output=%s)", r.Passed, r.Output)
+			}
+			if !stderrors.Is(r.Error, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("expected ErrCodeInvalidRequest (terminal), got %v", r.Error)
+			}
+			if elapsed >= defaults.AssertRetryInterval {
+				t.Fatalf("terminal eval error was retried (took %s >= AssertRetryInterval %s) — #1252 regression",
+					elapsed, defaults.AssertRetryInterval)
+			}
+		})
 	}
 }
