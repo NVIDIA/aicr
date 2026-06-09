@@ -136,6 +136,6 @@ driver:
 - [GPU Operator on AKS](https://learn.microsoft.com/en-us/azure/aks/nvidia-gpu-operator)
 - [AKS GPU Node Pools](https://learn.microsoft.com/en-us/azure/aks/gpu-cluster)
 - [Kubernetes DRA Documentation](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-- [NVIDIA DRA Driver](https://github.com/NVIDIA/k8s-dra-driver-gpu)
+- [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu)
 - [AKS Supported Kubernetes Versions](https://learn.microsoft.com/en-us/azure/aks/supported-kubernetes-versions)
 - [Kubernetes 1.34 DRA Updates (blog)](https://kubernetes.io/blog/2025/09/01/kubernetes-v1-34-dra-updates/)

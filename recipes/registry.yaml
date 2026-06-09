@@ -284,9 +284,9 @@ components:
     healthCheck:
       assertFile: checks/nvidia-dra-driver-gpu/health-check.yaml
     helm:
-      defaultRepository: https://helm.ngc.nvidia.com/nvidia
-      defaultChart: nvidia/nvidia-dra-driver-gpu
-      defaultVersion: "25.12.0"
+      defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
+      defaultChart: dra-driver-nvidia-gpu
+      defaultVersion: "0.4.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
