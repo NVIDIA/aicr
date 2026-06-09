@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -58,7 +59,18 @@ func (f *clusterFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace,
 
 	obj, err := resource.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("%s %s/%s not found", kind, namespace, name), err)
+		// Preserve the distinction between a true 404 and any other
+		// API failure. Negative health checks (chainsaw `error:`
+		// blocks) treat NotFound as the happy path and must fail
+		// closed on transient errors (timeouts, 5xx, forbidden) —
+		// otherwise a flaky apiserver silently passes a check that
+		// should have caught the forbidden shape.
+		if apierrors.IsNotFound(err) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound,
+				fmt.Sprintf("%s %s/%s not found", kind, namespace, name), err)
+		}
+		return nil, errors.Wrap(errors.ErrCodeUnavailable,
+			fmt.Sprintf("failed to get %s %s/%s", kind, namespace, name), err)
 	}
 
 	return obj.UnstructuredContent(), nil

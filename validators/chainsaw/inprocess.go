@@ -16,6 +16,7 @@ package chainsaw
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -78,6 +79,14 @@ func runChainsawTestInProcess(ctx context.Context, component, yamlContent string
 		effectiveTimeout = test.Spec.Timeouts.Assert.Duration
 	}
 
+	// Cap the whole Test under one budget — the old runChainsawBinary
+	// path wrapped the exec in context.WithTimeout(ctx, ChainsawAssertTimeout),
+	// so without an outer cap an N-step Test could run N × effectiveTimeout
+	// in the unhealthy / retrying case. Use effectiveTimeout as the
+	// shared budget across all steps.
+	ctx, cancel := context.WithTimeout(ctx, effectiveTimeout)
+	defer cancel()
+
 	slog.Debug("running chainsaw Test in-process",
 		"component", component,
 		"steps", len(test.Spec.Steps),
@@ -93,9 +102,13 @@ func runChainsawTestInProcess(ctx context.Context, component, yamlContent string
 			stepLabel = fmt.Sprintf("step[%d]", stepIdx)
 		}
 		if err := executeStepInProcess(ctx, step.Try, fetcher, effectiveTimeout); err != nil {
+			// Propagate the structured error from the inner evaluator
+			// as-is so codes (ErrCodeNotFound, ErrCodeUnavailable,
+			// ErrCodeInvalidRequest) survive — wrapping here would
+			// clobber them with ErrCodeInternal. Step / component
+			// context is captured in the slog line below.
 			result.Output = err.Error()
-			result.Error = errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("component %q step %q failed", component, stepLabel), err)
+			result.Error = err
 			slog.Warn("health check failed", "component", component, "step", stepLabel, "error", err)
 			return result
 		}
@@ -106,9 +119,14 @@ func runChainsawTestInProcess(ctx context.Context, component, yamlContent string
 	return result
 }
 
-// executeStepInProcess walks a step's Try operations sequentially.
-// Each operation has its own retry-until-deadline loop (matching the
-// chainsaw binary's per-operation semantics).
+// executeStepInProcess walks a step's Try operations sequentially. All
+// operations in a step share one deadline (set at step entry from the
+// Test's spec.timeouts.assert, or the caller's fallback). This differs
+// from the chainsaw binary, which gives each operation its own clock —
+// benign for the current corpus because error ops pass instantly when
+// healthy and a failing op short-circuits the step. Note also that
+// only timeouts.assert is read; timeouts.error is ignored, though no
+// in-tree check sets it today.
 func executeStepInProcess(ctx context.Context, try []v1alpha1.Operation, fetcher ResourceFetcher, stepTimeout time.Duration) error {
 	deadline := time.Now().Add(stepTimeout)
 	for opIdx, op := range try {
@@ -118,14 +136,15 @@ func executeStepInProcess(ctx context.Context, try []v1alpha1.Operation, fetcher
 		}
 		switch {
 		case op.Assert != nil:
+			// Propagate inner code (don't re-wrap with
+			// ErrCodeInternal); per-operation context is in the
+			// step's slog line.
 			if err := runAssertWithRetry(ctx, op.Assert, fetcher, deadline); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal,
-					fmt.Sprintf("try[%d] assert", opIdx), err)
+				return err
 			}
 		case op.Error != nil:
 			if err := runErrorWithRetry(ctx, op.Error, fetcher, deadline); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal,
-					fmt.Sprintf("try[%d] error", opIdx), err)
+				return err
 			}
 		default:
 			// Defense-in-depth: ValidateTestReadOnly rejects every
@@ -213,8 +232,10 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 		// exist or doesn't match the shape.
 		actual, err := fetcher.Fetch(ctx, apiVersion, kind, namespace, name)
 		if err != nil {
-			return errors.Wrap(errors.ErrCodeNotFound,
-				fmt.Sprintf("%s %s/%s not found", kind, namespace, name), err)
+			// Fetch already returns a structured error with the
+			// correct code (ErrCodeNotFound vs ErrCodeUnavailable);
+			// propagate as-is rather than double-wrapping.
+			return err
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
@@ -229,10 +250,10 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 	}
 
 	// List-and-match: assert passes if at least one item matches.
+	// List already returns structured errors; propagate as-is.
 	items, err := fetcher.List(ctx, apiVersion, kind, namespace, labels)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("list %s in %q", kind, namespace), err)
+		return err
 	}
 	if len(items) == 0 {
 		return errors.New(errors.ErrCodeNotFound,
@@ -278,11 +299,18 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 	check := v1alpha1.NewCheck(resourceSpec)
 	if name != "" {
 		// Single-resource: error passes if the resource doesn't exist
-		// OR if it doesn't match the shape.
+		// OR if it doesn't match the shape. Distinguish a true 404
+		// (happy path) from any transient API failure (timeout, 5xx,
+		// forbidden) — the binary chainsaw runner failed closed on
+		// non-NotFound errors, and treating them as "resource absent"
+		// would silently pass a negative health check that should have
+		// caught the forbidden shape.
 		actual, err := fetcher.Fetch(ctx, apiVersion, kind, namespace, name)
 		if err != nil {
-			// NotFound is the happy path for error blocks.
-			return nil
+			if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+				return nil
+			}
+			return err
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
@@ -298,11 +326,11 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 	}
 
 	// List-and-match: error fires if ANY item matches the forbidden
-	// shape. Empty list is the happy path.
+	// shape. Empty list is the happy path. List already returns
+	// structured errors; propagate as-is.
 	items, err := fetcher.List(ctx, apiVersion, kind, namespace, labels)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("list %s in %q", kind, namespace), err)
+		return err
 	}
 	for _, actual := range items {
 		if err := ctx.Err(); err != nil {
