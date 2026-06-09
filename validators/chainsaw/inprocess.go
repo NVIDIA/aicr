@@ -167,6 +167,9 @@ func runAssertWithRetry(ctx context.Context, a *v1alpha1.Assert, fetcher Resourc
 		if lastErr == nil {
 			return nil
 		}
+		if isTerminalAssertErr(lastErr) {
+			return lastErr
+		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return lastErr
@@ -194,6 +197,9 @@ func runErrorWithRetry(ctx context.Context, e *v1alpha1.Error, fetcher ResourceF
 		if lastErr == nil {
 			return nil
 		}
+		if isTerminalAssertErr(lastErr) {
+			return lastErr
+		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return lastErr
@@ -208,6 +214,17 @@ func runErrorWithRetry(ctx context.Context, e *v1alpha1.Error, fetcher ResourceF
 		case <-time.After(wait):
 		}
 	}
+}
+
+// isTerminalAssertErr reports whether err is a non-retryable failure: a
+// malformed or non-evaluable assert/error expression (ErrCodeInvalidRequest,
+// e.g. a JMESPath operation that throws "invalid type for: <nil>"). Such an
+// error will never become valid by retrying, so the retry loops fail fast
+// instead of burning the full assert deadline. Transient failures — a resource
+// not yet in the desired state (assertion mismatch) or not-found — carry other
+// codes and continue to retry until the deadline.
+func isTerminalAssertErr(err error) bool {
+	return stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, ""))
 }
 
 // evaluateAssert runs a single positive assertion against the cluster.
@@ -239,7 +256,7 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("%s %s/%s: assertion engine error", kind, namespace, name), checkErr)
 		}
 		if len(errs) > 0 {
@@ -267,7 +284,7 @@ func evaluateAssert(ctx context.Context, a *v1alpha1.Assert, fetcher ResourceFet
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("%s in %q: assertion engine error", kind, namespace), checkErr)
 		}
 		if len(errs) == 0 {
@@ -314,7 +331,7 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("%s %s/%s: assertion engine error", kind, namespace, name), checkErr)
 		}
 		if len(errs) == 0 {
@@ -339,7 +356,7 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("%s in %q: assertion engine error", kind, namespace), checkErr)
 		}
 		if len(errs) == 0 {

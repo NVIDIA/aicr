@@ -42,13 +42,20 @@ spec:
                   - status: "True"
     - name: validate-deployment-exists
       try:
+        # Match by label, not name: the Helm chart prefixes the Deployment
+        # with the release name (e.g. dynamo-platform-dynamo-operator-
+        # controller-manager), so a hardcoded name: dynamo-operator never
+        # matches and the assert retries to the deadline. The chart sets a
+        # stable app.kubernetes.io/name=dynamo-operator label on the manager
+        # Deployment regardless of release name; List-and-match on it.
         - assert:
             resource:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: dynamo-operator
                 namespace: dynamo-system
+                labels:
+                  app.kubernetes.io/name: dynamo-operator
               status:
                 (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
@@ -92,7 +99,7 @@ spec:
               metadata:
                 namespace: dynamo-system
               status:
-                (containerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
         - error:
             resource:
               apiVersion: v1
@@ -100,4 +107,4 @@ spec:
               metadata:
                 namespace: dynamo-system
               status:
-                (initContainerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
