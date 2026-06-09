@@ -14,11 +14,21 @@
 
 # NVIDIA DRA Driver GPU Health Check
 #
-# Validates that the NVIDIA DRA (Dynamic Resource Allocation) GPU driver is
-# running and healthy in the nvidia-dra-driver namespace. Checks that the
-# nvidia-dra-driver-gpu-kubelet-plugin DaemonSet has at least one ready pod
-# and that no pods in the namespace are stuck in Pending, Failed, or Unknown
-# phases.
+# Validates that the NVIDIA DRA (Dynamic Resource Allocation) GPU driver
+# is running and healthy in the nvidia-dra-driver namespace. The
+# kubelet-plugin DaemonSet must roll out fully — numberReady ==
+# desiredNumberScheduled (with desiredNumberScheduled > 0 as a guard).
+# Previous check gated only on numberReady > 0, passing on partial
+# failures; see #1222 and recipes/checks/nfd/health-check.yaml for
+# the same rationale.
+#
+# Resource names: the DaemonSet name is release-derived
+# (<release>-kubelet-plugin). AICR's release name is
+# `nvidia-dra-driver-gpu` (matches ComponentRef Name in registry.yaml).
+# If a deployer renames the release, this assert needs updating in
+# lockstep — see verifyDRAKubeletPluginReady commentary in
+# validators/deployment/expected_resources.go for why a chart-shape
+# label would be a more robust selector.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -27,11 +37,8 @@ spec:
   timeouts:
     assert: 5m
   steps:
-    - name: validate-deployment-exists
+    - name: validate-kubelet-plugin-daemonset-fully-rolled-out
       try:
-        # Guard against vacuous pass on empty namespace: verify the
-        # nvidia-dra-driver-gpu-kubelet-plugin DaemonSet exists and has
-        # at least one ready pod.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -40,12 +47,10 @@ spec:
                 name: nvidia-dra-driver-gpu-kubelet-plugin
                 namespace: nvidia-dra-driver
               status:
-                (numberReady > `0`): true
+                (desiredNumberScheduled > `0`): true
+                (numberReady == desiredNumberScheduled): true
     - name: validate-all-pods-healthy
       try:
-        # Assert no pods are in unhealthy phases.
-        # Pods must be Running (long-lived) or Succeeded (completed jobs).
-        # This catches Pending (init containers, scheduling), Failed, and Unknown.
         - error:
             resource:
               apiVersion: v1
@@ -70,3 +75,27 @@ spec:
                 namespace: nvidia-dra-driver
               status:
                 phase: Unknown
+        # JMESPath projection (not single-element match): kyverno-json's
+        # sliceNode.Assert gates on exact slice length before per-element
+        # comparison, so a `containerStatuses: - state: ...` shape only
+        # matches single-container pods and silently passes sidecars. Use
+        # `containerStatuses[?...] | length(@) > 0` to fire on any
+        # container at any index. Parallel initContainerStatuses block
+        # below catches init-container failures (invisible to
+        # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: nvidia-dra-driver
+              status:
+                (containerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: nvidia-dra-driver
+              status:
+                (initContainerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

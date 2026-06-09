@@ -115,7 +115,10 @@ spec:
                 (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
       try:
-        # Catch Pending / Failed / Unknown phases. Chainsaw `error` passes
+        # Catch Pending / Failed / Unknown phases AND pods stuck in
+        # Running with a known-bad container-waiting reason
+        # (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+        # CreateContainerConfigError). Chainsaw `error` passes
         # vacuously when no resource matches, so the preceding workload-
         # readiness asserts (StatefulSet / Deployments / NodeSet) are
         # load-bearing: they guarantee the pods exist before this step runs.
@@ -143,3 +146,27 @@ spec:
                 namespace: slurm
               status:
                 phase: Unknown
+        # JMESPath projection (not single-element match): kyverno-json's
+        # sliceNode.Assert gates on exact slice length before per-element
+        # comparison, so a `containerStatuses: - state: ...` shape only
+        # matches single-container pods and silently passes sidecars. Use
+        # `containerStatuses[?...] | length(@) > 0` to fire on any
+        # container at any index. Parallel initContainerStatuses block
+        # below catches init-container failures (invisible to
+        # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: slurm
+              status:
+                (containerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: slurm
+              status:
+                (initContainerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

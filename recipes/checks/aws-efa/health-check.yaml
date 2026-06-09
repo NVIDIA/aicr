@@ -14,11 +14,15 @@
 
 # AWS EFA Health Check
 #
-# Validates that the AWS EFA K8s device plugin is running and healthy in the
-# kube-system namespace. Checks that the aws-efa-k8s-device-plugin DaemonSet
-# has at least one ready pod and that no EFA plugin pods (selected by label)
-# are stuck in Pending, Failed, or Unknown phases. Label selectors are used
-# because kube-system is a shared namespace.
+# Validates that the AWS EFA K8s device plugin is running and healthy
+# in the kube-system namespace. The DaemonSet must roll out fully —
+# numberReady == desiredNumberScheduled (with desiredNumberScheduled > 0
+# as a guard against vacuous pass on a 0-node selector). The previous
+# check gated only on numberReady > 0, which passed on partial
+# failures; see #1222 / recipes/checks/nfd/health-check.yaml for the
+# same rationale. Container-state errors (CrashLoopBackOff,
+# ImagePullBackOff, ErrImagePull, CreateContainerConfigError) are
+# label-scoped because kube-system is a shared namespace.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -27,10 +31,8 @@ spec:
   timeouts:
     assert: 5m
   steps:
-    - name: validate-deployment-exists
+    - name: validate-daemonset-fully-rolled-out
       try:
-        # Guard against vacuous pass: verify the aws-efa-k8s-device-plugin
-        # DaemonSet exists and has at least one ready pod.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -39,11 +41,10 @@ spec:
                 name: aws-efa-k8s-device-plugin
                 namespace: kube-system
               status:
-                (numberReady > `0`): true
+                (desiredNumberScheduled > `0`): true
+                (numberReady == desiredNumberScheduled): true
     - name: validate-all-pods-healthy
       try:
-        # Assert no EFA plugin pods are in unhealthy phases.
-        # Uses label selector because kube-system is a shared namespace.
         - error:
             resource:
               apiVersion: v1
@@ -74,3 +75,31 @@ spec:
                   app.kubernetes.io/name: aws-efa-k8s-device-plugin
               status:
                 phase: Unknown
+        # JMESPath projection (not single-element match): kyverno-json's
+        # sliceNode.Assert gates on exact slice length before per-element
+        # comparison, so a `containerStatuses: - state: ...` shape only
+        # matches single-container pods and silently passes sidecars. Use
+        # `containerStatuses[?...] | length(@) > 0` to fire on any
+        # container at any index. Parallel initContainerStatuses block
+        # below catches init-container failures (invisible to
+        # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  app.kubernetes.io/name: aws-efa-k8s-device-plugin
+              status:
+                (containerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  app.kubernetes.io/name: aws-efa-k8s-device-plugin
+              status:
+                (initContainerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

@@ -15,9 +15,16 @@
 # Cert Manager Health Check
 #
 # Validates that cert-manager is running and healthy in the cert-manager
-# namespace. Checks that the cert-manager deployment has at least one
-# available replica and that no pods in the namespace are stuck in Pending,
-# Failed, or Unknown phases.
+# namespace. The chart deploys three Deployments — the controller
+# (cert-manager), the CA injector (cert-manager-cainjector), and the
+# webhook (cert-manager-webhook) — all of which must be available for
+# the operator to issue / inject / validate certificates. The previous
+# check only asserted the controller; this check covers all three to
+# avoid silently passing while the webhook is down (which would block
+# every Certificate/Issuer CR admission).
+#
+# Also asserts the three core CRDs are Established=True so the
+# apiserver will accept CRs of those kinds (per #1222 / #660).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -26,10 +33,37 @@ spec:
   timeouts:
     assert: 5m
   steps:
-    - name: validate-deployment-exists
+    - name: validate-crds-established
       try:
-        # Guard against vacuous pass on empty namespace: verify the
-        # cert-manager deployment exists and has at least one ready replica.
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: certificates.cert-manager.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: issuers.cert-manager.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusterissuers.cert-manager.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+    - name: validate-controller-deployment
+      try:
         - assert:
             resource:
               apiVersion: apps/v1
@@ -39,11 +73,34 @@ spec:
                 namespace: cert-manager
               status:
                 (availableReplicas > `0`): true
+    - name: validate-cainjector-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cert-manager-cainjector
+                namespace: cert-manager
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-webhook-deployment
+      try:
+        # The webhook must be ready before any Certificate / Issuer CR
+        # can be admitted. Without this assert, a healthy controller
+        # with a dead webhook would still pass the check while the
+        # cluster silently rejects every cert-manager CR.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cert-manager-webhook
+                namespace: cert-manager
+              status:
+                (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
       try:
-        # Assert no pods are in unhealthy phases.
-        # Pods must be Running (long-lived) or Succeeded (completed jobs).
-        # This catches Pending (init containers, scheduling), Failed, and Unknown.
         - error:
             resource:
               apiVersion: v1
@@ -68,3 +125,27 @@ spec:
                 namespace: cert-manager
               status:
                 phase: Unknown
+        # JMESPath projection (not single-element match): kyverno-json's
+        # sliceNode.Assert gates on exact slice length before per-element
+        # comparison, so a `containerStatuses: - state: ...` shape only
+        # matches single-container pods and silently passes sidecars. Use
+        # `containerStatuses[?...] | length(@) > 0` to fire on any
+        # container at any index. Parallel initContainerStatuses block
+        # below catches init-container failures (invisible to
+        # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: cert-manager
+              status:
+                (containerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: cert-manager
+              status:
+                (initContainerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
