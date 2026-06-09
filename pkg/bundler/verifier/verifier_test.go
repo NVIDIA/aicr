@@ -26,7 +26,9 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
 // createTestBundle creates a minimal bundle directory with checksums generated
@@ -123,24 +125,29 @@ func TestVerify_NonexistentDir(t *testing.T) {
 }
 
 func TestVerifyBundle_RejectsEmptyDigest(t *testing.T) {
-	// verifyBundle must reject empty artifact digests — this prevents
-	// accidental fallback to WithoutArtifactUnsafe().
-	identity, err := verify.NewShortCertificateIdentity("", ".+", "", ".+")
+	// The empty-digest guard now lives in attestation.VerifyStatementWith
+	// (the composed core both keyless verifier paths flow through). It must
+	// reject empty artifact digests — this prevents accidental fallback to
+	// WithoutArtifactUnsafe(). The guard runs before bundle parsing, so the
+	// bundle bytes need not be valid here.
+	certID, err := verify.NewShortCertificateIdentity("", ".+", "", ".+")
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := attestation.NewKeylessVerificationIdentity(certID)
+	tlog := attestation.NewRequireTLogPolicy()
 
-	_, err = verifyBundle(nil, nil, identity, nil)
+	_, err = attestation.VerifyStatementWith(context.Background(), []byte("{}"), id, tlog, nil)
 	if err == nil {
-		t.Fatal("verifyBundle() with nil digest should return error")
+		t.Fatal("VerifyStatementWith() with nil digest should return error")
 	}
 	if !strings.Contains(err.Error(), "artifact digest is required") {
 		t.Errorf("error = %v, want message about artifact digest requirement", err)
 	}
 
-	_, err = verifyBundle(nil, nil, identity, []byte{})
+	_, err = attestation.VerifyStatementWith(context.Background(), []byte("{}"), id, tlog, []byte{})
 	if err == nil {
-		t.Fatal("verifyBundle() with empty digest should return error")
+		t.Fatal("VerifyStatementWith() with empty digest should return error")
 	}
 }
 
@@ -161,31 +168,6 @@ func TestVerify_NilOptions(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Verify() returned nil result")
-	}
-}
-
-func TestContainsCertChainError(t *testing.T) {
-	tests := []struct {
-		name   string
-		errMsg string
-		want   bool
-	}{
-		{"unknown authority", "certificate signed by unknown authority", true},
-		{"cert chain", "failed to verify certificate chain", true},
-		{"x509 error", "x509: certificate has expired", true},
-		{"unable to verify", "unable to verify certificate", true},
-		{"root cert", "root certificate not found", true},
-		{"case insensitive", "Certificate Signed By Unknown Authority", true},
-		{"unrelated error", "connection refused", false},
-		{"empty string", "", false},
-		{"sigstore error", "sigstore verification failed", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := containsCertChainError(tt.errMsg); got != tt.want {
-				t.Errorf("containsCertChainError(%q) = %v, want %v", tt.errMsg, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -369,25 +351,14 @@ func TestParseDSSEPayload(t *testing.T) {
 	})
 }
 
-func TestLoadSigstoreBundle_MissingFile(t *testing.T) {
-	_, err := loadSigstoreBundle("/nonexistent/path")
+func TestReadBoundedFile_MissingFile(t *testing.T) {
+	_, err := readBoundedFile("/nonexistent/path", defaults.MaxSigstoreBundleSize)
 	if err == nil {
-		t.Error("loadSigstoreBundle() with missing file should return error")
+		t.Error("readBoundedFile() with missing file should return error")
 	}
 }
 
-func TestLoadSigstoreBundle_InvalidJSON(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bad.json")
-	if err := os.WriteFile(path, []byte("not json"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := loadSigstoreBundle(path)
-	if err == nil {
-		t.Error("loadSigstoreBundle() with invalid JSON should return error")
-	}
-}
-
-func TestLoadSigstoreBundle_OversizedFile(t *testing.T) {
+func TestReadBoundedFile_OversizedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "huge.json")
 	// Create a file just over the limit
 	f, err := os.Create(path)
@@ -403,9 +374,9 @@ func TestLoadSigstoreBundle_OversizedFile(t *testing.T) {
 	}
 	f.Close()
 
-	_, err = loadSigstoreBundle(path)
+	_, err = readBoundedFile(path, defaults.MaxSigstoreBundleSize)
 	if err == nil {
-		t.Error("loadSigstoreBundle() with oversized file should return error")
+		t.Error("readBoundedFile() with oversized file should return error")
 	}
 	if !strings.Contains(err.Error(), "exceeds maximum size") {
 		t.Errorf("error = %v, want message about maximum size", err)
@@ -490,22 +461,6 @@ func TestVerify_ContextCancelled(t *testing.T) {
 	}
 }
 
-func TestLoadSigstoreBundle_IncompleteBundle(t *testing.T) {
-	// Valid JSON/protobuf but incomplete sigstore bundle (missing content)
-	bundleJSON := `{"mediaType":"application/vnd.dev.sigstore.bundle+json;version=0.3"}`
-	path := filepath.Join(t.TempDir(), "incomplete.sigstore.json")
-	if err := os.WriteFile(path, []byte(bundleJSON), 0600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := loadSigstoreBundle(path)
-	if err == nil {
-		t.Error("loadSigstoreBundle() with incomplete bundle should return error")
-	}
-	if !strings.Contains(err.Error(), "invalid sigstore bundle") {
-		t.Errorf("error = %v, want message about invalid bundle", err)
-	}
-}
-
 func TestVerify_WithDataDir(t *testing.T) {
 	// Bundle with checksums + data dir → trust level capped at attested (but
 	// without real attestation, we test the checksum + no-attestation path)
@@ -566,6 +521,64 @@ func TestVerify_ChecksumsWithFakeAttestation(t *testing.T) {
 	}
 	if len(result.Errors) == 0 {
 		t.Error("expected errors for invalid attestation")
+	}
+}
+
+// writeFakeBundleAttestation creates the standard bundle attestation file path
+// under dir with the given JSON content, mirroring TestVerify_ContextCancelled.
+func writeFakeBundleAttestation(t *testing.T, dir, content string) {
+	t.Helper()
+	attestDir := filepath.Join(dir, "attestation")
+	if err := os.MkdirAll(attestDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	attestPath := filepath.Join(attestDir, "bundle-attestation.sigstore.json")
+	if err := os.WriteFile(attestPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerify_KeyOption_UnknownScheme(t *testing.T) {
+	// "bogus://x" is not a recognized KMS scheme, so NewKeyVerificationIdentity
+	// treats it as a PEM path, fails to open the file, and returns
+	// ErrCodeInvalidRequest. Verify() records this on result.Errors and sets
+	// TrustUnknown without hard-failing (returns nil error) — same contract as
+	// a keyless verifySigstoreBundle failure.
+	dir := createTestBundle(t)
+	writeFakeBundleAttestation(t, dir, `{"not":"a-valid-sigstore-bundle"}`)
+
+	result, err := Verify(context.Background(), dir, &VerifyOptions{Key: "bogus://x"})
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+	if result.TrustLevel != TrustUnknown {
+		t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+	if len(result.Errors) == 0 {
+		t.Error("expected errors for key-resolution failure")
+	}
+	if result.BundleAttested {
+		t.Error("BundleAttested = true, want false on key-resolution failure")
+	}
+}
+
+func TestVerify_KeyOption_MissingPEMFile(t *testing.T) {
+	// A --key pointing at a nonexistent local PEM file is a user error
+	// (ErrCodeInvalidRequest from loadPEMPublicKey). Verify() surfaces it on
+	// result.Errors and sets TrustUnknown, returning nil error.
+	dir := createTestBundle(t)
+	writeFakeBundleAttestation(t, dir, `{"not":"a-valid-sigstore-bundle"}`)
+
+	keyPath := filepath.Join(t.TempDir(), "nonexistent-key.pem")
+	result, err := Verify(context.Background(), dir, &VerifyOptions{Key: keyPath})
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+	if result.TrustLevel != TrustUnknown {
+		t.Errorf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+	if len(result.Errors) == 0 {
+		t.Error("expected errors for missing PEM key file")
 	}
 }
 

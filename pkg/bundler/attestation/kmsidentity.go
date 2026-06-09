@@ -18,12 +18,11 @@ import (
 	"bytes"
 	"context"
 	"crypto"
-	stderrors "errors"
 	"io"
+	"strings"
 
 	"github.com/sigstore/sigstore-go/pkg/sign"
 	"github.com/sigstore/sigstore/pkg/signature"
-	"github.com/sigstore/sigstore/pkg/signature/kms"
 	"github.com/sigstore/sigstore/pkg/signature/options"
 
 	// Blank-import the cosign-style KMS providers so their schemes
@@ -36,13 +35,40 @@ import (
 	_ "github.com/sigstore/sigstore/pkg/signature/kms/azure"
 	_ "github.com/sigstore/sigstore/pkg/signature/kms/gcp"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // ctxKeySigningKey is the structured-error context key carrying the KMS key
 // URI on KMS resolution failures.
 const ctxKeySigningKey = "signingKey"
+
+// kmsURISchemes are the cosign-style KMS key-URI scheme prefixes this project
+// supports. It is the single source of truth shared by the signing side
+// (NewKMSIdentity / resolveKMSPublicKey) and the verifying side
+// (NewKeyVerificationIdentity), so the two cannot drift on what counts as a
+// "KMS URI". The set mirrors the blank-imported provider packages above;
+// HashiCorp Vault (hashivault://) is intentionally omitted (MPL-2.0 license,
+// see issue #407).
+var kmsURISchemes = []string{"awskms://", "gcpkms://", "azurekms://"}
+
+// isKMSURI reports whether ref names a supported cosign-style KMS key
+// (awskms:// | gcpkms:// | azurekms://) rather than a local PEM path. It is the
+// input-form discriminator both signing and verifying use; resolveKMSPublicKey
+// still classifies the precise kms.Get failure (unknown scheme vs provider
+// init) once a candidate is handed to the provider registry.
+//
+// Scheme matching is case-insensitive (RFC 3986 schemes are case-insensitive),
+// so a variant like GCPKMS:// is routed to the KMS path rather than mistaken
+// for a local file; resolveKMSPublicKey lowercases the scheme before kms.Get.
+func isKMSURI(ref string) bool {
+	lower := strings.ToLower(ref)
+	for _, scheme := range kmsURISchemes {
+		if strings.HasPrefix(lower, scheme) {
+			return true
+		}
+	}
+	return false
+}
 
 // kmsIdentity signs with a KMS-held key. It carries no Fulcio certificate, so
 // SignStatementWith records public-key verification material and uses the key
@@ -60,41 +86,16 @@ func NewKMSIdentity(keyURI string) SigningIdentity { return &kmsIdentity{keyURI:
 // the bundle digest algorithm (the cloud KMS defaults — ECDSA P-256 / RSA-2048
 // — all sign over a SHA-256 digest).
 func (k *kmsIdentity) Keypair(ctx context.Context) (sign.Keypair, error) {
-	// Bound the provider lookup + PublicKey RPC so a caller that passes an
-	// unbounded context cannot hang here. When invoked from SignStatementWith
-	// the parent context is already bounded by SigstoreSignTimeout, so this
-	// nests harmlessly (the tighter deadline wins).
-	ctx, cancel := context.WithTimeout(ctx, defaults.SigstoreSignTimeout)
-	defer cancel()
-
-	sv, err := kms.Get(ctx, k.keyURI, crypto.SHA256)
+	// resolveKMSPublicKey (kmspublickey.go) bounds the provider lookup +
+	// PublicKey RPC, classifies kms.Get failures (unrecognized scheme →
+	// ErrCodeInvalidRequest, provider init failure → ErrCodeUnavailable), and
+	// reads the public key eagerly under ctx. Signing additionally needs the
+	// live SignerVerifier seam for SignDigest, so both halves are reused here
+	// without a second kms.Get RPC. Verification (#1152) reuses the same
+	// resolver but consumes only the public key.
+	sv, pub, err := resolveKMSPublicKey(ctx, k.keyURI)
 	if err != nil {
-		// kms.Get fails for two distinct reasons that must not be conflated at
-		// the HTTP boundary (the server path, #1150). An unrecognized scheme
-		// (or a missing out-of-process plugin) surfaces as ProviderNotFoundError
-		// and is a client error — the request named a key we cannot handle. A
-		// matched provider that then fails to initialize (credential resolution,
-		// network, IMDS) is an upstream-availability failure, not a bad request.
-		var notFound *kms.ProviderNotFoundError
-		if stderrors.As(err, &notFound) {
-			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-				"unsupported or unrecognized KMS signing-key scheme", err,
-				map[string]interface{}{ctxKeySigningKey: k.keyURI})
-		}
-		return nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
-			"failed to initialize KMS provider for signing key", err,
-			map[string]interface{}{ctxKeySigningKey: k.keyURI})
-	}
-
-	// Read the public key eagerly here, where ctx is in scope: the kmsSigner
-	// seam's Public() takes no context, and the KMS PublicKey call is a remote
-	// RPC. Resolving it now lets the RPC honor the caller's deadline instead of
-	// falling back to a background context inside the adapter.
-	pub, err := sv.PublicKey(options.WithContext(ctx))
-	if err != nil {
-		return nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
-			"failed to read KMS public key", err,
-			map[string]interface{}{ctxKeySigningKey: k.keyURI})
+		return nil, err
 	}
 
 	return newKMSKeypairFromSigner(&kmsSignerVerifier{sv: sv, pub: pub})

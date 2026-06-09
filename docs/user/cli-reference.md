@@ -2183,12 +2183,11 @@ The resulting bundle uses the same Sigstore bundle format as keyless signing,
 but its verification material is the signing key's public key rather than a
 Fulcio certificate.
 
-> **Verification:** a KMS-signed bundle is verified with cosign's public-key
-> path, e.g. `cosign verify-blob-attestation --key <same-kms-uri> ...`, supplying
-> the same KMS URI used to sign. Native `aicr verify --key` support is **not**
-> part of this change and does not exist yet; it is tracked under
-> [#1152](https://github.com/NVIDIA/aicr/issues/1152). Use cosign to verify
-> KMS-signed bundles in the meantime.
+> **Verification:** verify a KMS-signed bundle with `aicr verify --key <uri>`,
+> supplying the same KMS URI used to sign (or a local PEM public-key file). See
+> the [`aicr verify`](#aicr-verify) flags below. cosign's public-key path
+> (`cosign verify-blob-attestation --key <same-kms-uri> ...`) also works, since
+> the bundle uses the standard Sigstore bundle format.
 
 HashiCorp Vault (`hashivault://`) is not supported: its client libraries are MPL-2.0 licensed, which is incompatible with this project's license policy. This is a deliberate, ongoing exclusion rather than a not-yet-implemented feature at this time.
 
@@ -2448,7 +2447,7 @@ aicr mirror list --recipe recipe.yaml --set gpuoperator:driver.enabled=false
 
 ### aicr verify
 
-Verify the integrity and attestation chain of a bundle. Verification is fully offline — no network calls are made.
+Verify the integrity and attestation chain of a bundle. By default verification is offline and makes no network calls. The one exception is `--key` with a KMS URI, which reaches the KMS provider to fetch the public key (see the `--key` network behavior note below).
 
 **Synopsis:**
 ```shell
@@ -2462,6 +2461,7 @@ aicr verify <bundle-dir> [flags]
 | `--require-creator` | string | | Require a specific creator identity, matched against the bundle attestation signing certificate. |
 | `--cli-version-constraint` | string | | Version constraint for the aicr CLI version in the attestation predicate. Supports `>=`, `>`, `<=`, `<`, `==`, `!=`. A bare version (e.g. `"0.8.0"`) defaults to `>=`. |
 | `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
+| `--key` | string | | Verify a key-signed bundle attestation against a KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://`) or a local PEM public-key file. This is the counterpart to `bundle --signing-key`. It coexists with `--certificate-identity-regexp`, which pins the binary attestation; the two verify different attestations. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
 
 #### Trust Levels
@@ -2495,8 +2495,19 @@ aicr verify ./my-bundle --cli-version-constraint ">= 0.8.0"
 
 # JSON output for CI pipelines
 aicr verify ./my-bundle --format json
+
+# Sign a bundle with a KMS key, then verify it with the same key
+aicr bundle -r recipe.yaml --attest --signing-key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k -o ./bundles
+aicr verify ./bundles/<bundle-dir> --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
+
+# Or verify against an exported PEM public key (no KMS access needed)
+aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
 ```
 
+> **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
+>
+> Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache when present and otherwise fetched over the network, so run `aicr trust update` once to pre-populate it. A local PEM key therefore makes verification fully offline only when the trusted-root cache is already warm. Verification that drops the transparency-log requirement entirely, for true air-gapped use, is tracked in [#1154](https://github.com/NVIDIA/aicr/issues/1154).
+>
 > **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
 
 ---

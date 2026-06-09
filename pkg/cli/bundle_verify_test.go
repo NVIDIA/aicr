@@ -16,10 +16,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	"github.com/urfave/cli/v3"
 )
 
 func TestBundleVerifyCmd_HasExpectedFlags(t *testing.T) {
@@ -29,7 +35,7 @@ func TestBundleVerifyCmd_HasExpectedFlags(t *testing.T) {
 		t.Errorf("Name = %q, want %q", cmd.Name, "verify")
 	}
 
-	expectedFlags := []string{"min-trust-level", "require-creator", "cli-version-constraint", "certificate-identity-regexp", "format"}
+	expectedFlags := []string{"min-trust-level", "require-creator", "cli-version-constraint", "certificate-identity-regexp", "key", "format"}
 	for _, name := range expectedFlags {
 		found := false
 		for _, f := range cmd.Flags {
@@ -62,6 +68,105 @@ func TestBundleVerifyCmd_MinTrustLevelDefault(t *testing.T) {
 		}
 	}
 	t.Error("min-trust-level flag not found")
+}
+
+// writeVerifiableKeyFixture builds a bundle directory that passes the checksum
+// step and carries a bundle-attestation file, so verification reaches the
+// bundle-attestation step (where --key takes effect) instead of stopping at
+// missing checksums. The attestation bytes only need to exist: with --key, key
+// resolution runs before they are parsed.
+func writeVerifiableKeyFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	valuesPath := filepath.Join(dir, "values.yaml")
+	if err := os.WriteFile(valuesPath, []byte("replicas: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// GenerateChecksums takes absolute file paths and records them relative to dir.
+	if err := checksum.GenerateChecksums(context.Background(), dir, []string{valuesPath}); err != nil {
+		t.Fatalf("GenerateChecksums: %v", err)
+	}
+	attestPath := filepath.Join(dir, attestation.BundleAttestationFile)
+	if err := os.MkdirAll(filepath.Dir(attestPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attestPath, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestBundleVerifyCmd_KeyFlagPlumbing runs the real verify command with --key
+// against a fixture that passes checksums and has a bundle attestation, so
+// verification reaches the bundle-attestation step where --key takes effect. A
+// nonexistent PEM path drives the key-verification branch to a public-key
+// resolution error, which the keyless path would not produce (it would report a
+// sigstore-bundle parse error). Asserting that error proves verifyOpts.Key is
+// plumbed and routed to the key branch, and that --key coexists with
+// --certificate-identity-regexp (no mutual exclusivity).
+func TestBundleVerifyCmd_KeyFlagPlumbing(t *testing.T) {
+	tests := []struct {
+		name string
+		args func(dir string) []string
+	}{
+		{
+			name: "key alone reaches key verification",
+			args: func(dir string) []string { return []string{"verify", dir, "--key", "/nonexistent/key.pem"} },
+		},
+		{
+			name: "key coexists with certificate-identity-regexp",
+			args: func(dir string) []string {
+				return []string{"verify", dir, "--key", "/nonexistent/key.pem", "--certificate-identity-regexp", "https://github.com/NVIDIA/aicr/.+"}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeVerifiableKeyFixture(t)
+			cmd := bundleVerifyCmd()
+			var buf bytes.Buffer
+			cmd.Writer = &buf
+
+			err := cmd.Run(context.Background(), tt.args(dir))
+
+			// Must not be a flag-parse/usage error: the flags were accepted and
+			// the action ran (proves --key coexists with the identity regexp).
+			if err != nil {
+				for _, bad := range []string{"flag provided but not defined", "no such flag", "flag needs an argument"} {
+					if strings.Contains(err.Error(), bad) {
+						t.Fatalf("got flag-level error %q for args %v", err.Error(), tt.args(dir))
+					}
+				}
+			}
+
+			// Prove the key-verification branch ran: the public-key resolution
+			// error surfaces in the output. The keyless path would instead
+			// report a sigstore-bundle parse failure.
+			combined := buf.String()
+			if err != nil {
+				combined += " " + err.Error()
+			}
+			if !strings.Contains(combined, "public key") {
+				t.Errorf("output does not show the key-verification path was taken; got:\n%s", combined)
+			}
+		})
+	}
+}
+
+func TestBundleVerifyCmd_KeyFlagDefinition(t *testing.T) {
+	cmd := bundleVerifyCmd()
+	for _, f := range cmd.Flags {
+		if f.Names()[0] != "key" {
+			continue
+		}
+		// --key is a plain StringFlag (not completion-wrapped): there is no
+		// natural completion source for a KMS URI or PEM path.
+		if _, ok := f.(*cli.StringFlag); !ok {
+			t.Fatalf("--key should be a plain *cli.StringFlag, got %T", f)
+		}
+		return
+	}
+	t.Fatal("--key flag not found")
 }
 
 func TestOutputText_Verdict(t *testing.T) {
