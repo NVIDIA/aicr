@@ -1,0 +1,109 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# prometheus-operator-crds Health Check
+#
+# CRD-only component. Validates that every CRD this chart installs has
+# reached the `Established=True` condition (CRD storage is up and the
+# apiserver will accept CRs of those kinds).
+#
+# CRDs come from the upstream prometheus-community/prometheus-operator-crds
+# chart pinned to 28.0.1 in recipes/registry.yaml. The 8 kinds under
+# monitoring.coreos.com/v1 are enumerated in
+# recipes/components/prometheus-operator-crds/values.yaml header:
+# Alertmanager, AlertmanagerConfig, PodMonitor, Probe, Prometheus,
+# PrometheusRule, ServiceMonitor, ThanosRuler. Plural names match the
+# long-standing upstream prometheus-operator chart shape.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: prometheus-operator-crds-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-prometheus-operator-crds-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: alertmanagers.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: alertmanagerconfigs.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podmonitors.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: probes.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: prometheuses.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: prometheusrules.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: servicemonitors.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: thanosrulers.monitoring.coreos.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"

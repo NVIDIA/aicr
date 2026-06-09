@@ -1,0 +1,65 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GKE NCCL-TCPXO Health Check
+#
+# Validates the manifest-only gke-nccl-tcpxo component. The component
+# ships two DaemonSets that AICR applies directly (no Helm release),
+# from recipes/components/gke-nccl-tcpxo/manifests/:
+#
+#   1. nccl-tcpxo-installer (kube-system) — installs NCCL TCPXO plugin
+#      binaries on each GPU node's host filesystem so workloads can
+#      LD_LOAD them.
+#   2. device-injector (kube-system) — NRI device-injection DaemonSet
+#      that exposes the host's TCPXO ENV / devices to containers.
+#
+# Both DaemonSets must roll out fully. The asserts gate on
+# `numberReady == desiredNumberScheduled` (with `desiredNumberScheduled
+# > 0` as a guard against vacuous pass on a 0-node selector). We assert
+# on `numberReady` rather than `numberUnavailable == 0` because
+# `numberUnavailable` is `omitempty` and disappears from the status
+# when zero — making the equality compare null on a healthy DaemonSet
+# (see recipes/checks/nfd/health-check.yaml for the same rationale).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gke-nccl-tcpxo-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-nccl-tcpxo-installer-daemonset
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nccl-tcpxo-installer
+                namespace: kube-system
+              status:
+                (desiredNumberScheduled > `0`): true
+                (numberReady == desiredNumberScheduled): true
+    - name: validate-device-injector-daemonset
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: device-injector
+                namespace: kube-system
+              status:
+                (desiredNumberScheduled > `0`): true
+                (numberReady == desiredNumberScheduled): true

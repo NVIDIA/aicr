@@ -1,0 +1,93 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# slinky-slurm-operator-crds Health Check
+#
+# CRD-only component. Validates that every CRD this chart installs has
+# reached the `Established=True` condition (CRD storage is up and the
+# apiserver will accept CRs of those kinds).
+#
+# CRDs come from the upstream SchedMD Slinky slurm-operator-crds chart
+# pinned to 1.1.0 (oci://ghcr.io/slinkyproject/charts) in
+# recipes/registry.yaml. The 6 kinds under slinky.slurm.net are
+# enumerated in recipes/components/slinky-slurm-operator-crds/values.yaml
+# header: Accounting, Controller, LoginSet, NodeSet, RestApi, Token.
+# Plural metadata.name values follow the controller-gen default
+# (lowercase + standard pluralization). Live-cluster verification is
+# the load-bearing step — if a plural disagrees with the chart-shipped
+# manifest, update here in lockstep. See #1221.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: slinky-slurm-operator-crds-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-slinky-slurm-operator-crds-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: accountings.slinky.slurm.net
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: controllers.slinky.slurm.net
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: loginsets.slinky.slurm.net
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: nodesets.slinky.slurm.net
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: restapis.slinky.slurm.net
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: tokens.slinky.slurm.net
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
