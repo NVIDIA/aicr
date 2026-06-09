@@ -20,7 +20,8 @@
 # Compute domains are enabled for multi-node training coordination.
 # Reference: https://github.com/oracle-quickstart/oci-hpc-oke/blob/grace-blackwell/manifests/dra/values.yaml
 
-# Override release name prefix to avoid aicr-stack- prefix in resource names
+# See values.yaml for why both nameOverride and fullnameOverride are pinned.
+nameOverride: nvidia-dra-driver-gpu
 fullnameOverride: nvidia-dra-driver-gpu
 
 # Host-installed driver (OKE pre-installs NVIDIA drivers)

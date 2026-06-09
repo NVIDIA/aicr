@@ -40,7 +40,15 @@
 #   The DRA driver remains installed for non-GPU DRA resources (compute-domain, etc.)
 #   but will not advertise GPU ResourceSlices.
 
-# Override release name prefix to avoid aicr-stack- prefix in resource names
+# Override release name prefix to avoid aicr-stack- prefix in resource names.
+# nameOverride is required because v0.4.0 of the chart (registry.k8s.io)
+# uses {{ include "dra-driver-nvidia-gpu.name" }}-controller /
+# -kubelet-plugin for the workload names — that helper resolves to the
+# chart name (`dra-driver-nvidia-gpu`) unless nameOverride is set, even
+# when fullnameOverride is present. AICR's health checks, conformance
+# validator, and chainsaw assertions all expect `nvidia-dra-driver-gpu-*`
+# rendered names, so the name has to be pinned here.
+nameOverride: nvidia-dra-driver-gpu
 fullnameOverride: nvidia-dra-driver-gpu
 
 # Specify the driver root on the host.
