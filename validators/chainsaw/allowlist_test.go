@@ -341,8 +341,22 @@ func TestDisallowedOperation_AllowlistFailsClosed(t *testing.T) {
 // enforces that every component HAS an assertFile, this gives the full
 // PR-time contract: every registry entry has a readable, allowlist-
 // compliant chainsaw check.
+//
+// CROSS-TEST DEPENDENCY: empty-assertFile and unreadable-path failure
+// modes are deliberately skipped here and owned by
+// TestComponentRegistry_RequiresHealthCheck in pkg/recipe — that test
+// fails first with a clearer message, so we avoid double-reporting on
+// the same root cause. If that test is ever removed or weakened,
+// strengthen this one to fail on empty/unreadable entries rather than
+// silently skipping them; otherwise a broken registry could green-
+// light here as long as ≥1 valid entry keeps `checked > 0`. Post-merge
+// review on PR #1244.
 func TestValidateTestReadOnly_RegistryContent(t *testing.T) {
-	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	// Empty prefix matches the canonical defaultEmbeddedProvider used at
+	// runtime (pkg/recipe/components.go); "." also works because
+	// filepath.Join cleans it, but matches the runtime path exactly
+	// without the head-scratch.
+	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		t.Fatalf("failed to load component registry: %v", err)

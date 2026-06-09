@@ -14,13 +14,21 @@
 
 # GPU Operator Health Check
 #
-# Validates the GPU operator stack by checking pod phases in the gpu-operator
-# namespace. The nvidia-operator-validator DaemonSet runs 4 sequential init
-# containers (driver, toolkit, cuda, plugin) before reaching Running state.
-# If it's Running, all validations passed. The nvidia-cuda-validator is a
-# one-shot Pod created by the operator-validator; Succeeded means CUDA
-# compute is functional. No log checks needed — pod phase is the definitive
-# signal.
+# Validates the GPU operator stack:
+# 1. The gpu-operator Deployment has at least one available replica.
+# 2. The clusterpolicies.nvidia.com CRD is Established (apiserver will
+#    accept the singleton ClusterPolicy CR).
+# 3. The ClusterPolicy singleton named "cluster-policy" has reconciled
+#    to status.state == "ready" — this is the deepest signal that the
+#    full GPU stack (driver, toolkit, cuda, plugin DaemonSets, validators)
+#    is healthy. Migrates the verifyClusterPolicyReady Go check that
+#    PR #1235 task 7 deferred for assertion-equivalence proof.
+# 4. No pods in unhealthy phases or stuck container-waiting states.
+#
+# The nvidia-operator-validator DaemonSet runs 4 sequential init
+# containers (driver, toolkit, cuda, plugin) before reaching Running;
+# the ClusterPolicy state assertion is the canonical post-reconcile
+# signal that all four passed.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -29,6 +37,17 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-cluster-policy-crd-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusterpolicies.nvidia.com
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
     - name: validate-deployment-exists
       try:
         # Guard against vacuous pass on empty namespace: verify the
@@ -42,11 +61,22 @@ spec:
                 namespace: gpu-operator
               status:
                 (availableReplicas > `0`): true
+    - name: validate-cluster-policy-ready
+      try:
+        # Deepest GPU readiness signal: ClusterPolicy singleton has
+        # reconciled to state=ready. Replaces the deferred
+        # verifyClusterPolicyReady Go check from PR #1235 task 7.
+        - assert:
+            resource:
+              apiVersion: nvidia.com/v1
+              kind: ClusterPolicy
+              metadata:
+                name: cluster-policy
+              status:
+                state: ready
     - name: validate-all-pods-healthy
       try:
-        # Assert no pods are in unhealthy phases.
-        # Pods must be Running (long-lived) or Succeeded (completed jobs).
-        # This catches Pending (init containers, scheduling), Failed, and Unknown.
+        # Phase-based errors: Pending/Failed/Unknown.
         - error:
             resource:
               apiVersion: v1
@@ -71,3 +101,31 @@ spec:
                 namespace: gpu-operator
               status:
                 phase: Unknown
+        # Container-state errors: pods stuck in Running phase with a
+        # container in a known-bad waiting reason. Phase filtering alone
+        # misses CrashLoopBackOff/ImagePullBackOff because those pods
+        # typically remain in Running phase with unhealthy containers.
+        # JMESPath projection (not single-element match): kyverno-json's
+        # sliceNode.Assert gates on exact slice length before per-element
+        # comparison, so a `containerStatuses: - state: ...` shape only
+        # matches single-container pods and silently passes sidecars. Use
+        # `containerStatuses[?...] | length(@) > 0` to fire on any
+        # container at any index. Parallel initContainerStatuses block
+        # below catches init-container failures (invisible to
+        # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: gpu-operator
+              status:
+                (containerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: gpu-operator
+              status:
+                (initContainerStatuses[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
