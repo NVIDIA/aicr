@@ -291,9 +291,15 @@ const (
 
 // Chainsaw assertion configuration for component health checks.
 const (
-	// ChainsawAssertTimeout is the outer timeout for the chainsaw binary process.
-	// Must be greater than the chainsaw-internal assert timeout (spec.timeouts.assert
-	// in health check YAML files, currently 5m) to avoid killing the process early.
+	// ChainsawAssertTimeout is the fallback per-Test budget for the
+	// in-process chainsaw runner when a health check YAML omits
+	// spec.timeouts.assert. The runner caps each Test under a single
+	// context.WithTimeout(ctx, effectiveTimeout) where effectiveTimeout
+	// is the YAML's spec.timeouts.assert if set, otherwise this value.
+	// Every in-tree check currently sets timeouts.assert (5m), so this
+	// 6m default only kicks in for Tests that don't declare one.
+	// Replaced the prior "outer timeout for the chainsaw binary
+	// process" role; #1236 removed the binary entirely.
 	ChainsawAssertTimeout = 6 * time.Minute
 
 	// ChainsawMaxParallel is the maximum number of concurrent assertion
