@@ -15,15 +15,15 @@
 package chainsaw
 
 import (
+	"context"
 	stderrors "errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kyverno/chainsaw/pkg/apis/v1alpha1"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 func TestValidateTestReadOnly(t *testing.T) {
@@ -327,46 +327,51 @@ func TestDisallowedOperation_AllowlistFailsClosed(t *testing.T) {
 	}
 }
 
-// TestValidateTestReadOnly_RegistryContent walks every in-tree
-// healthCheck.assertFile under recipes/checks/*/health-check.yaml and
-// verifies it passes the allowlist. If this regresses, a registry-declared
-// check has crept in that violates the read-only contract — block at PR
-// time (PR #1223 will add the same check at lint time, with structured
-// reporting that names every offender, not just the first).
+// TestValidateTestReadOnly_RegistryContent walks every registry-declared
+// healthCheck.assertFile (via the embedded recipe data provider) and
+// verifies it passes the read-only allowlist. PR #1223 changed this from
+// a filesystem walk to a registry walk so a registry entry pointing at a
+// non-conventional path (anything other than
+// recipes/checks/<name>/health-check.yaml) is still validated — the
+// runtime hydration path resolves through the same registry +
+// DataProvider, so any path the runtime would honor must also be
+// allowlist-compliant.
+//
+// Paired with pkg/recipe.TestComponentRegistry_RequiresHealthCheck which
+// enforces that every component HAS an assertFile, this gives the full
+// PR-time contract: every registry entry has a readable, allowlist-
+// compliant chainsaw check.
 func TestValidateTestReadOnly_RegistryContent(t *testing.T) {
-	// Walk repo-relative recipes/checks. The test runs from the package
-	// directory (validators/chainsaw), so walk up two levels to the repo
-	// root. If the path changes, the t.Fatalf below makes the cause
-	// obvious instead of letting the test silently pass.
-	root := filepath.Join("..", "..", "recipes", "checks")
-	if _, err := os.Stat(root); err != nil {
-		t.Fatalf("recipes/checks not found at %s: %v", root, err)
-	}
-	entries, err := os.ReadDir(root)
+	provider := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
-		t.Fatalf("read recipes/checks: %v", err)
+		t.Fatalf("failed to load component registry: %v", err)
 	}
 	checked := 0
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, comp := range registry.Components {
+		assertFile := comp.HealthCheck.AssertFile
+		if assertFile == "" {
+			// Lint guard in pkg/recipe (TestComponentRegistry_RequiresHealthCheck)
+			// fails first with a clearer message; skip here so this test
+			// doesn't double-report on the same root cause.
 			continue
 		}
-		path := filepath.Join(root, e.Name(), "health-check.yaml")
-		data, err := os.ReadFile(path)
+		data, err := provider.ReadFile(context.Background(), assertFile)
 		if err != nil {
-			// Component dir without a health-check.yaml is allowed (e.g.,
-			// the 3 backfill components #1221 will add).
-			if os.IsNotExist(err) {
-				continue
-			}
-			t.Fatalf("read %s: %v", path, err)
+			// Path-readability is also covered by
+			// TestComponentRegistry_RequiresHealthCheck. Skip here for the
+			// same reason — single source of truth on that failure mode.
+			continue
 		}
 		if !IsChainsawTest(string(data)) {
-			// The allowlist only applies to Chainsaw Test format.
+			// The allowlist only applies to Chainsaw Test format. Raw K8s
+			// YAML asserts are evaluated by the chainsaw Go library and
+			// have no operations to gate.
 			continue
 		}
-		if err := ValidateTestReadOnly(e.Name(), string(data)); err != nil {
-			t.Errorf("%s violates read-only allowlist: %v", path, err)
+		if err := ValidateTestReadOnly(comp.Name, string(data)); err != nil {
+			t.Errorf("component %q assertFile %q violates read-only allowlist: %v",
+				comp.Name, assertFile, err)
 		}
 		checked++
 	}
