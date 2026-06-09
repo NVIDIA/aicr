@@ -237,10 +237,10 @@ The trade-off is intentional. Pinning an image gives reproducibility; deferring 
 
 AICR pulls from a deliberately diverse set of registries:
 
-- **`nvcr.io`** — NVIDIA's primary container registry; GPU Operator, Network Operator, DRA driver, NIM Operator, Dynamo Platform.
+- **`nvcr.io`** — NVIDIA's primary container registry; GPU Operator, Network Operator, NIM Operator, Dynamo Platform.
 - **`ghcr.io`** — GitHub Container Registry; nvsentinel, nodewright, kai-scheduler, grove, kubeflow-trainer, k8s-ephemeral-storage-metrics.
 - **`quay.io`** — cert-manager and Prometheus components.
-- **`registry.k8s.io`** — Kubernetes SIG components (NFD, prometheus-adapter, kueue, csi-sidecars).
+- **`registry.k8s.io`** — Kubernetes SIG components (DRA driver, NFD, prometheus-adapter, kueue, csi-sidecars).
 - **`public.ecr.aws`** — AWS public artifacts (aws-ebs-csi-driver).
 - **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry below shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
 - **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).

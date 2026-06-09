@@ -127,10 +127,10 @@ componentRefs:
 
   - name: nvidia-dra-driver-gpu
     namespace: nvidia-system
-    chart: nvidia-dra-driver-gpu
+    chart: dra-driver-nvidia-gpu
     type: Helm
-    source: https://helm.ngc.nvidia.com/nvidia
-    version: 25.12.0
+    source: oci://registry.k8s.io/dra-driver-nvidia/charts
+    version: 0.4.0
     valuesFile: components/nvidia-dra-driver-gpu/values.yaml
     dependencyRefs:
       - gpu-operator
