@@ -37,13 +37,30 @@ builds:
       post:
         ## cosign v1 attestation with slsa provenance v1.
         ## NOTE: below aicrd currently attests via github attestation
+        ##
+        ## Wrap cosign in a 3-attempt bash retry loop with 5s/10s backoffs
+        ## (no sleep after the final failed attempt — that would just
+        ## delay the exit) to absorb transient Sigstore Rekor flakes.
+        ## cosign attest-blob has no native --retry flag (Rekor retry
+        ## behavior is internal to the rekor-go client and not exposed
+        ## via the cosign CLI). The AICR-side `aicr recipe sign-catalog`
+        ## post-hook uses pkg/bundler/attestation/signWithRetry which
+        ## has equivalent retry semantics at the Go level; this loop is
+        ## the equivalent mitigation for the binary-attestation step.
+        ## See issue #1249.
         - cmd: >-
             bash -c '[ -z "${SLSA_PREDICATE:-}" ] && exit 0;
+            for n in 1 2 3; do
             cosign attest-blob
             --predicate "${SLSA_PREDICATE}"
             --type https://slsa.dev/provenance/v1
             --bundle "$(dirname "{{ .Path }}")/aicr-attestation.sigstore.json"
-            --yes "{{ .Path }}"'
+            --yes "{{ .Path }}" && exit 0;
+            echo "cosign attest-blob attempt $n failed; retrying" >&2;
+            if [ "$n" -lt 3 ]; then sleep $((n * 5)); fi;
+            done;
+            echo "cosign attest-blob failed after 3 attempts" >&2;
+            exit 1'
           output: true
         ## Sign the embedded recipe catalog (registry.yaml + validators/catalog.yaml).
         ##

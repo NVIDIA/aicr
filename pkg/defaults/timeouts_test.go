@@ -102,6 +102,45 @@ func TestJobEnvelopeMarginInvariant(t *testing.T) {
 	}
 }
 
+// TestSigstoreRetryBudgetInvariant guards the contract that the retry
+// budget fits inside the outer SigstoreSignTimeout ceiling: worst-case
+// wall-clock is SigstoreRetryBudget * SigstoreAttemptTimeout plus the
+// sum of backoffs between attempts, and that total must not exceed
+// SigstoreSignTimeout — otherwise the inner retry loop would race the
+// outer deadline. See issue #1249.
+func TestSigstoreRetryBudgetInvariant(t *testing.T) {
+	if SigstoreRetryBudget <= 0 {
+		t.Fatalf("SigstoreRetryBudget must be > 0; got %d", SigstoreRetryBudget)
+	}
+	if SigstoreAttemptTimeout <= 0 {
+		t.Fatalf("SigstoreAttemptTimeout must be > 0; got %v", SigstoreAttemptTimeout)
+	}
+	if SigstoreRetryInitialBackoff <= 0 {
+		t.Fatalf("SigstoreRetryInitialBackoff must be > 0; got %v", SigstoreRetryInitialBackoff)
+	}
+	if SigstoreRetryBackoffFactor < 1 {
+		t.Fatalf("SigstoreRetryBackoffFactor must be >= 1; got %d", SigstoreRetryBackoffFactor)
+	}
+
+	// Compute worst-case: every attempt hits the per-attempt timeout,
+	// every backoff between attempts is taken in full.
+	totalAttempts := SigstoreRetryBudget * SigstoreAttemptTimeout
+	var totalBackoffs time.Duration
+	backoff := SigstoreRetryInitialBackoff
+	for range SigstoreRetryBudget - 1 {
+		totalBackoffs += backoff
+		backoff *= time.Duration(SigstoreRetryBackoffFactor)
+	}
+	worstCase := totalAttempts + totalBackoffs
+	if worstCase > SigstoreSignTimeout {
+		t.Errorf("worst-case retry budget %v exceeds SigstoreSignTimeout %v "+
+			"(attempts: %d × %v = %v, backoffs: %v) — raise SigstoreSignTimeout "+
+			"or tighten the per-attempt / backoff knobs in lockstep",
+			worstCase, SigstoreSignTimeout, SigstoreRetryBudget,
+			SigstoreAttemptTimeout, totalAttempts, totalBackoffs)
+	}
+}
+
 func TestRecipeBuildTimeoutLessThanHandler(t *testing.T) {
 	// Recipe build timeout should be less than handler timeout
 	// to allow for error handling before the request times out
