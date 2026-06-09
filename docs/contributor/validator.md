@@ -10,7 +10,7 @@ contributor view for all four.
 | [**Constraint**](#constraints-declarative) (declarative) | `aicr validate` against a snapshot | Recipe overlay `validation:` block | `pkg/constraints` evaluator (in-process) |
 | [**Container-per-validator check**](#container-per-validator-checks) | `aicr validate` against a live cluster | `validators/<phase>/` + `recipes/validators/catalog.yaml` | One K8s Job per check |
 | [**Component validation**](#component-validations-bundle-time) (bundle-time) | `aicr bundle` | `pkg/bundler/validations/checks.go` + `registry.yaml` `validations:` | In-process Go `ValidationFunc` |
-| [**Chainsaw health check**](#chainsaw-health-checks) | `make check-health` post-deploy | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML assertions |
+| [**Chainsaw health check**](#chainsaw-health-checks) | Two surfaces: `make check-health` post-deploy locally, AND `aicr validate --phase deployment` in-cluster | `recipes/checks/<name>/health-check.yaml` | Chainsaw YAML (Test format runs via the pinned chainsaw binary shipped in the deployment validator image; raw K8s YAML via the chainsaw Go library) |
 
 Rule of thumb: declarative constraint against a snapshot value → surface 1.
 Active probe of a live cluster → surface 2 or 4. Pre-deployment sanity
@@ -650,11 +650,21 @@ A **chainsaw health check** is a YAML test in
 `recipes/checks/<component>/health-check.yaml` that asserts a
 deployed component's state. Runs against a real cluster (typically a
 Kind cluster after `aicr bundle` + `helm install`) via the
-[Chainsaw](https://kyverno.github.io/chainsaw/) test runner. The
-separation from container-per-validator checks: chainsaw is
-**post-deploy** Helm-chart-author sanity, declarative YAML, no Go
-code. Container checks are **part of `aicr validate`** and run as
-part of the AICR validation contract.
+[Chainsaw](https://kyverno.github.io/chainsaw/) test runner.
+
+The same assertion file now powers TWO surfaces:
+
+1. **`make check-health` / `make check-health-all`** — local Kind-cluster
+   sanity invoked manually by chart authors.
+2. **`aicr validate --phase deployment`** — registry-declared content is
+   loaded into `ComponentRef.HealthCheckAsserts` during recipe
+   resolution (PR #1219) and executed by the deployment validator's
+   chainsaw runner (PR #1220). The deployment validator image
+   ships the pinned chainsaw binary at `/usr/local/bin/chainsaw`; the
+   version + sha256 come from `.settings.yaml` and are wired into the
+   image via Makefile build args. CLI output is source-tagged
+   `[chainsaw]` vs `[expectedResources]` so operators can disambiguate
+   when both paths report on the same component.
 
 **Registration.** A component opts in by declaring
 `healthCheck.assertFile` in `recipes/registry.yaml`:
@@ -691,12 +701,22 @@ spec:
               status: { (availableReplicas > `0`): true }
 ```
 
-Use Chainsaw's `assert` (expected match), `error` (unexpected match
-must not exist), and `script` (shell). Always include an existence
-guard before phase assertions so an empty namespace can't yield a
-vacuous pass. See the
+Use Chainsaw's `assert` (expected match) and `error` (unexpected match
+must not exist). Always include an existence guard before phase
+assertions so an empty namespace can't yield a vacuous pass. See the
 [Chainsaw assert reference](https://kyverno.github.io/chainsaw/latest/operations/check/assert/)
 for the full operator list.
+
+**Read-only allowlist.** Registry-declared assert files MUST use only
+`assert` and `error` operations. The deployment validator Job runs
+under a ServiceAccount bound to cluster-admin, so registry content is
+restricted at runtime to read-only Chainsaw operations
+(`validators/chainsaw/allowlist.go`). Any other operation (`script`,
+`apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
+`sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
+`ErrCodeInvalidRequest`. PR #1223 will add the same enforcement at
+lint time so violations are caught before they ever reach the
+validator.
 
 **Running:**
 

@@ -17,8 +17,17 @@
 # Validates the standalone NFD deployment by checking:
 # 1. NFD Master Deployment has at least one ready replica
 # 2. NFD Worker DaemonSet has fully rolled out (desiredNumberScheduled > 0
-#    and numberUnavailable == 0, so partial failures don't pass)
+#    and numberReady == desiredNumberScheduled, so partial failures don't pass)
 # 3. NFD GC Deployment has at least one ready replica (gc.enable: true)
+#
+# Resource names: AICR deploys the kubernetes-sigs/node-feature-discovery
+# chart under release name "nfd" (matching the ComponentRef Name in
+# recipes/registry.yaml). The chart's fullname template prefixes the
+# release name to the chart name when they don't overlap, yielding
+# "nfd-node-feature-discovery-*" for the master Deployment, worker
+# DaemonSet, and gc Deployment. If a deployer ever switches the release
+# name to "node-feature-discovery", these asserts need updating in
+# lockstep.
 # 4. No pods in unhealthy phases (Pending, Failed, Unknown) or stuck in
 #    Running with a known-unhealthy container waiting reason
 #    (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
@@ -38,7 +47,7 @@ spec:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: node-feature-discovery-master
+                name: nfd-node-feature-discovery-master
                 namespace: node-feature-discovery
               status:
                 (availableReplicas > `0`): true
@@ -49,17 +58,19 @@ spec:
               apiVersion: apps/v1
               kind: DaemonSet
               metadata:
-                name: node-feature-discovery-worker
+                name: nfd-node-feature-discovery-worker
                 namespace: node-feature-discovery
               status:
                 # Guard against vacuous pass when 0 nodes match the
                 # DaemonSet: require at least one scheduled pod.
                 (desiredNumberScheduled > `0`): true
-                # Full rollout: 0 unavailable pods. Combined with the
-                # guard above, this is equivalent to "all scheduled pods
-                # are ready". Replaces the earlier `numberReady > 0`
-                # which passed on partial failures.
-                (numberUnavailable == `0`): true
+                # Full rollout: every scheduled pod is ready. Combined with
+                # the guard above, this rejects partial failures. We assert on
+                # numberReady (always present in DaemonSetStatus) rather than
+                # numberUnavailable, which is `omitempty` and disappears from
+                # the status when zero — making `numberUnavailable == 0`
+                # evaluate `null == 0` (false) on a fully-healthy DaemonSet.
+                (numberReady == desiredNumberScheduled): true
     - name: validate-gc-deployment
       try:
         - assert:
@@ -67,7 +78,7 @@ spec:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: node-feature-discovery-gc
+                name: nfd-node-feature-discovery-gc
                 namespace: node-feature-discovery
               status:
                 (availableReplicas > `0`): true

@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strings"
@@ -51,6 +52,57 @@ func TestComponentRegistry_Validate(t *testing.T) {
 		for _, e := range errs {
 			t.Errorf("validation error: %v", e)
 		}
+	}
+}
+
+// TestComponentRegistry_RequiresHealthCheck enforces issue #1223's contract:
+// every component in recipes/registry.yaml MUST declare
+// healthCheck.assertFile, and that path MUST resolve through the data
+// provider to a readable file. Together with
+// TestValidateTestReadOnly_RegistryContent in validators/chainsaw —
+// which separately validates that every file the registry points at
+// passes the read-only allowlist — this closes the registry-side half
+// of the contract that #1220 introduced at runtime: deployment-phase
+// chainsaw assertions are only ever driven by registry-declared,
+// allowlist-compliant content.
+//
+// Surface is lint-time (this Go test under `make qualify`) rather than
+// load-time (rejecting at `aicr recipe`). Two reasons: (1) catches the
+// violation at PR review, before any operator runs `aicr`; (2) external
+// `--data` overlays may add components that an in-process registry
+// merge sees but aren't subject to this contract — only the in-tree
+// `recipes/registry.yaml` is. The embedded registry is the source of
+// truth for this assertion.
+func TestComponentRegistry_RequiresHealthCheck(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+	provider := defaultEmbeddedProvider
+
+	for _, comp := range registry.Components {
+		t.Run(comp.Name, func(t *testing.T) {
+			if comp.HealthCheck.AssertFile == "" {
+				t.Errorf("component %q must declare healthCheck.assertFile in recipes/registry.yaml "+
+					"and ship the corresponding recipes/checks/%s/health-check.yaml — see #1223 "+
+					"and validators/chainsaw/allowlist.go for the read-only allowlist contract",
+					comp.Name, comp.Name)
+				return
+			}
+			// Verify the path resolves through the same data provider that
+			// hydration uses at recipe-resolution time (pkg/recipe/
+			// metadata_store.go:hydrateHealthCheckAsserts). An embedded
+			// read is in-memory and instantaneous; no timeout needed.
+			data, err := provider.ReadFile(context.Background(), comp.HealthCheck.AssertFile)
+			if err != nil {
+				t.Errorf("component %q assertFile %q is unreadable through the embedded data provider: %v",
+					comp.Name, comp.HealthCheck.AssertFile, err)
+				return
+			}
+			if len(data) == 0 {
+				t.Errorf("component %q assertFile %q is empty", comp.Name, comp.HealthCheck.AssertFile)
+			}
+		})
 	}
 }
 

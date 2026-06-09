@@ -49,6 +49,38 @@ func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 	}
 }
 
+// TestExpectedResourcesCatalogEnvelope asserts the expected-resources
+// validator's catalog timeout (which becomes the Job's
+// activeDeadlineSeconds) exceeds the inner chainsaw assert timeout by
+// enough headroom for graceful chainsaw termination. Without this,
+// chainsaw is SIGKILLed mid-cleanup and operators see truncated output.
+// See issue #1220.
+func TestExpectedResourcesCatalogEnvelope(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	var found bool
+	required := defaults.ChainsawAssertTimeout + defaults.JobEnvelopeMargin
+	for _, v := range catalog.Validators {
+		if v.Name != "expected-resources" {
+			continue
+		}
+		found = true
+		// Strict-greater: pre-chainsaw work (helper.VerifyResource
+		// iteration) executes serially before chainsaw starts, so an
+		// exact-equal value would let cluster-scale grow eat into
+		// chainsaw's budget. Per PR #1235 review.
+		if v.Timeout <= required {
+			t.Errorf("expected-resources timeout %v must be > ChainsawAssertTimeout (%v) + JobEnvelopeMargin (%v) = %v",
+				v.Timeout, defaults.ChainsawAssertTimeout, defaults.JobEnvelopeMargin, required)
+		}
+	}
+	if !found {
+		t.Fatal("expected-resources validator missing from catalog — invariant cannot be verified")
+	}
+}
+
 func TestLoadEmbeddedCatalog(t *testing.T) {
 	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
