@@ -52,6 +52,30 @@
 // The SLSA predicate records build metadata including the tool version, recipe,
 // components, and resolvedDependencies (binary provenance + external data files).
 //
+// # Retry Contract
+//
+// SignStatementWith wraps the underlying sign.Bundle call with bounded
+// exponential-backoff retry to absorb transient Fulcio/Rekor failures
+// (e.g., Sigstore Rekor public-good infrastructure slowness — see #1249
+// for the failure pattern observed in #1244 and #1245). Each attempt is
+// bounded by defaults.SigstoreAttemptTimeout; the outer signing flow is
+// bounded by defaults.SigstoreSignTimeout (an upper-bound ceiling that
+// covers up to defaults.SigstoreRetryBudget attempts plus
+// SigstoreRetryInitialBackoff × SigstoreRetryBackoffFactor^(N-1)
+// backoffs between them). Retry semantics:
+//
+//   - Outer ctx DeadlineExceeded   → ErrCodeTimeout, no further retries
+//     (the whole signing budget is gone).
+//   - Outer ctx Canceled           → ErrCodeUnavailable, no retries
+//     (caller signaled don't-wait).
+//   - Per-attempt failure with outer ctx alive → retry on the same
+//     content / identity / policy until budget is exhausted, then
+//     ErrCodeUnavailable wrapping the last attempt's error.
+//
+// pkg/defaults.TestSigstoreRetryBudgetInvariant guards the math so a
+// future tuning that overflows the SigstoreSignTimeout ceiling fails
+// loudly at unit-test time.
+//
 // # OIDC Token Acquisition
 //
 // Three flows are exposed for obtaining a Sigstore OIDC identity token; the
