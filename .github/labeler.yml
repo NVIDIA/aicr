@@ -18,7 +18,9 @@ area/ci:
 
 area/recipes:
   - changed-files:
-      - any-glob-to-any-file: 'recipes/**'
+      - any-glob-to-any-file:
+          - 'recipes/**'
+          - 'pkg/health/**'
 
 area/bundler:
   - changed-files:
