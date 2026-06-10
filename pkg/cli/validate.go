@@ -579,6 +579,7 @@ func validateCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 			Category: catEvidence,
 		},
+		assumeYesFlag(catEvidence),
 		configFlag(),
 		dataFlag(),
 		outputFlag(),
