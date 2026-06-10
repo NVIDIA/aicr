@@ -22,6 +22,8 @@
 nfd:
   # AICR delivers a targeted NFD NodeFeatureRule via manifest instead of the
   # chart's built-in rule. The chart's rule targets generic Ethernet NICs
-  # (class 0200/0207); the manifest targets ConnectX-7 specifically (device
-  # IDs 101c/101e). Disable the chart's rule to avoid the broader match.
+  # (class 0200/0207); the manifest targets the InfiniBand virtual functions
+  # specifically (device IDs 101c = ConnectX-6 VF, 101e = generic mlx5Gen VF,
+  # as exposed by Azure ND-series via SR-IOV). Disable the chart's rule to
+  # avoid the broader match.
   deployNodeFeatureRules: false
