@@ -90,11 +90,18 @@ jobs:
         run: .github/scripts/recipe-evidence-check.sh
 
       - name: Upload evidence report
-        # Always upload so even a partial report (build failed mid-loop,
-        # discovery errored) reaches the comment workflow.
-        if: ${{ always() && hashFiles(format('{0}/report.md', runner.temp)) != '' }}
+        # Always attempt upload so even a partial report (build failed
+        # mid-loop, discovery errored) reaches the comment workflow.
+        # `if-no-files-found: ignore` makes a genuinely-absent report a
+        # no-op instead of a failure. We can NOT guard this with
+        # hashFiles(): that expression only matches paths inside
+        # GITHUB_WORKSPACE, and the report lives under runner.temp — so
+        # the guard always evaluated empty and the upload was always
+        # skipped. upload-artifact itself reads the absolute path fine.
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: recipe-evidence-report
           path: ${{ runner.temp }}/report.md
+          if-no-files-found: ignore
           retention-days: 7
