@@ -19,6 +19,7 @@ import (
 	"context"
 	stderrors "errors"
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -109,9 +110,110 @@ func TestRollup(t *testing.T) {
 	}
 }
 
+func TestClassifyChartPinned(t *testing.T) {
+	helm := func(name, version string) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: name, Type: recipe.ComponentTypeHelm, Version: version}
+	}
+	disabledHelm := func(name, version string) recipe.ComponentRef {
+		return recipe.ComponentRef{
+			Name: name, Type: recipe.ComponentTypeHelm, Version: version,
+			Overrides: map[string]any{"enabled": false},
+		}
+	}
+	kustomize := func(name string) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: name, Type: recipe.ComponentTypeKustomize}
+	}
+	result := func(refs ...recipe.ComponentRef) *recipe.RecipeResult {
+		return &recipe.RecipeResult{ComponentRefs: refs}
+	}
+
+	tests := []struct {
+		name        string
+		result      *recipe.RecipeResult
+		wantState   string
+		detailMatch string // substring that must appear in detail ("" = detail must be empty)
+	}{
+		{"nil result passes", nil, StatusPass, ""},
+		{"all helm pinned passes", result(helm("a", "1.0.0"), helm("b", "2.1.0")), StatusPass, ""},
+		{"unpinned helm fails", result(helm("a", "1.0.0"), helm("b", "")), StatusFail, "b"},
+		{
+			"multiple unpinned listed sorted",
+			result(helm("zebra", ""), helm("alpha", ""), helm("ok", "1.0.0")),
+			StatusFail, "alpha, zebra",
+		},
+		{"pure kustomize is vacuous pass", result(kustomize("k1"), kustomize("k2")), StatusPass, "not applicable"},
+		{"no components is vacuous pass", result(), StatusPass, "not applicable"},
+		{"mixed pinned helm and kustomize passes", result(helm("a", "1.0.0"), kustomize("k")), StatusPass, ""},
+		{
+			"disabled unpinned helm is skipped",
+			result(helm("a", "1.0.0"), disabledHelm("off", "")),
+			StatusPass, "",
+		},
+		{
+			"only disabled unpinned helm is vacuous pass",
+			result(disabledHelm("off", "")),
+			StatusPass, "not applicable",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state, detail := classifyChartPinned(tt.result)
+			if state != tt.wantState {
+				t.Errorf("state = %q, want %q", state, tt.wantState)
+			}
+			if tt.detailMatch == "" {
+				if detail != "" {
+					t.Errorf("detail = %q, want empty", detail)
+				}
+			} else if !strings.Contains(detail, tt.detailMatch) {
+				t.Errorf("detail = %q, want substring %q", detail, tt.detailMatch)
+			}
+		})
+	}
+}
+
+func TestComputeCoverage(t *testing.T) {
+	t.Run("nil result yields zero coverage", func(t *testing.T) {
+		if got := computeCoverage(nil); !reflect.DeepEqual(got, DeclaredCoverage{}) {
+			t.Errorf("got %+v, want zero value", got)
+		}
+	})
+	t.Run("nil validation yields zero coverage", func(t *testing.T) {
+		if got := computeCoverage(&recipe.RecipeResult{}); !reflect.DeepEqual(got, DeclaredCoverage{}) {
+			t.Errorf("got %+v, want zero value", got)
+		}
+	})
+	t.Run("populated phases recorded with sorted checks", func(t *testing.T) {
+		res := &recipe.RecipeResult{Validation: &recipe.ValidationConfig{
+			Deployment: &recipe.ValidationPhase{
+				Checks:      []string{"gpu-operator-version", "check-nvidia-smi", "operator-health"},
+				Constraints: []recipe.Constraint{{Name: "c1"}, {Name: "c2"}},
+			},
+			// Readiness/Performance/Conformance intentionally nil (minimal recipe).
+		}}
+		cov := computeCoverage(res)
+
+		if !cov.Deployment.Declared {
+			t.Error("Deployment.Declared = false, want true")
+		}
+		wantChecks := []string{"check-nvidia-smi", "gpu-operator-version", "operator-health"}
+		if !reflect.DeepEqual(cov.Deployment.Checks, wantChecks) {
+			t.Errorf("Deployment.Checks = %v, want sorted %v", cov.Deployment.Checks, wantChecks)
+		}
+		if cov.Deployment.Constraints != 2 {
+			t.Errorf("Deployment.Constraints = %d, want 2", cov.Deployment.Constraints)
+		}
+		// A dropped phase must not be penalized — it is simply not declared.
+		if cov.Readiness.Declared || cov.Performance.Declared || cov.Conformance.Declared {
+			t.Errorf("undeclared phases marked declared: %+v", cov)
+		}
+	})
+}
+
 // TestComputeEmbeddedCatalog resolves the real embedded catalog: every leaf
 // must carry a resolves dimension and a status consistent with the rollup of
-// its dimensions, and at least one leaf must resolve cleanly.
+// its dimensions, and at least one leaf must resolve cleanly. Cleanly-resolved
+// leaves also carry the chart_pinned dimension (a pure read of the result).
 func TestComputeEmbeddedCatalog(t *testing.T) {
 	report, err := Compute(context.Background(), Options{})
 	if err != nil {
@@ -141,6 +243,11 @@ func TestComputeEmbeddedCatalog(t *testing.T) {
 		}
 		if state == StatusPass {
 			sawPass = true
+			// A cleanly-resolved leaf is a pure-readable result, so chart_pinned
+			// must have been scored.
+			if _, ok := combo.Structure.Dimensions[DimChartPinned]; !ok {
+				t.Errorf("combo %q resolved but missing chart_pinned dimension", combo.LeafOverlay)
+			}
 		}
 	}
 	if !sawPass {
@@ -252,6 +359,78 @@ components:
 	}
 	if d := broken.Structure.Detail[DimResolves]; !strings.Contains(d, "assertFile") {
 		t.Errorf("detail = %q, want it to surface the assertFile read failure", d)
+	}
+	// No RecipeResult to read, so the descriptor must be omitted (nil), not an
+	// all-zero block a consumer could misread as "declares no checks".
+	if broken.Structure.Coverage != nil {
+		t.Errorf("Coverage = %+v, want nil on a failed resolve", *broken.Structure.Coverage)
+	}
+}
+
+// TestComputeChartPinnedFailThroughBuilder drives a chart_pinned fail through
+// the real builder: a leaf with a Helm component whose registry entry declares
+// no default chart version, so the resolved ComponentRef carries an empty
+// Version. The recipe resolves cleanly (resolves=pass) but chart_pinned must
+// fail, dragging the rolled-up status to fail.
+func TestComputeChartPinnedFailThroughBuilder(t *testing.T) {
+	provider := newInMemoryProvider(map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/unpinned-leaf.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: unpinned-leaf
+spec:
+  criteria:
+    service: eks
+  componentRefs:
+    - name: unpinned-helm
+`),
+		"registry.yaml": []byte(`apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: unpinned-helm
+    displayName: Unpinned Helm Component
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/unpinned-helm
+`),
+	})
+
+	report, err := Compute(context.Background(), Options{Provider: provider})
+	if err != nil {
+		t.Fatalf("Compute() error = %v", err)
+	}
+
+	var combo *ComboHealth
+	for i := range report.Combos {
+		if report.Combos[i].LeafOverlay == "unpinned-leaf" {
+			combo = &report.Combos[i]
+		}
+	}
+	if combo == nil {
+		t.Fatalf("unpinned-leaf was not enumerated; combos = %+v", report.Combos)
+	}
+	if got := combo.Structure.Dimensions[DimResolves]; got != StatusPass {
+		t.Errorf("resolves = %q, want %q (recipe should resolve cleanly)", got, StatusPass)
+	}
+	if got := combo.Structure.Dimensions[DimChartPinned]; got != StatusFail {
+		t.Errorf("chart_pinned = %q, want %q (unpinned Helm chart)", got, StatusFail)
+	}
+	if combo.Structure.Status != StatusFail {
+		t.Errorf("status = %q, want %q", combo.Structure.Status, StatusFail)
+	}
+	if d := combo.Structure.Detail[DimChartPinned]; !strings.Contains(d, "unpinned-helm") {
+		t.Errorf("detail = %q, want it to name the unpinned component", d)
+	}
+	// The recipe resolved, so the descriptor must be populated (non-nil).
+	if combo.Structure.Coverage == nil {
+		t.Error("Coverage = nil, want non-nil on a resolved recipe")
 	}
 }
 

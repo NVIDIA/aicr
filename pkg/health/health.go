@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"sort"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -48,12 +49,16 @@ const (
 	StatusUnknown = "unknown"
 )
 
-// Graded dimension keys. Later work adds more keys (chart_pinned,
-// declared_coverage, constraints_wellformed) without changing the rollup.
+// Graded dimension keys. Later work adds more keys (constraints_wellformed)
+// without changing the rollup.
 const (
 	// DimResolves is the graded dimension scoring whether the recipe builder
 	// resolves the criteria into a RecipeResult without error.
 	DimResolves = "resolves"
+
+	// DimChartPinned is the graded dimension scoring whether every resolved
+	// Helm component references an explicit chart version (ADR-006 layer 1).
+	DimChartPinned = "chart_pinned"
 )
 
 // Options configures a Compute run.
@@ -74,8 +79,7 @@ type Options struct {
 
 // PhaseCoverage records which named checks and how many phase-level
 // constraints a single validation phase declares. It is a descriptor, never
-// graded. Populated by the declared_coverage signal (added in later work);
-// the resolves-only core leaves it at its zero value.
+// graded.
 type PhaseCoverage struct {
 	// Declared is true when the phase block is present after overlay merge.
 	Declared bool `json:"declared" yaml:"declared"`
@@ -108,12 +112,15 @@ type StructureHealth struct {
 	Dimensions map[string]string `json:"dimensions" yaml:"dimensions"`
 
 	// Detail maps a graded dimension key to a human-readable note (e.g., the
-	// resolver error for a fail or held-unknown). Absent for clean dimensions.
+	// resolver error for a fail/held-unknown, or the not-applicable note on a
+	// vacuous chart_pinned pass). A genuinely clean dimension has no entry.
 	Detail map[string]string `json:"detail,omitempty" yaml:"detail,omitempty"`
 
 	// Coverage is a descriptor recording which validations the recipe defines.
-	// It is never graded. Populated by later work; zero-valued here.
-	Coverage DeclaredCoverage `json:"coverage" yaml:"coverage"`
+	// It is never graded. Non-nil only when the recipe resolves; nil otherwise
+	// (no RecipeResult to read), so the field is omitted rather than emitting a
+	// misleading all-zero block for a combo whose coverage is simply unknown.
+	Coverage *DeclaredCoverage `json:"coverage,omitempty" yaml:"coverage,omitempty"`
 }
 
 // ComboHealth is the health of a single leaf recipe / criteria combination.
@@ -199,11 +206,24 @@ func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.Cat
 		Detail:     make(map[string]string),
 	}
 
-	_, err := builder.BuildFromCriteria(ctx, entry.Criteria)
+	result, err := builder.BuildFromCriteria(ctx, entry.Criteria)
 	state, detail := classifyResolve(err)
 	structure.Dimensions[DimResolves] = state
 	if detail != "" {
 		structure.Detail[DimResolves] = detail
+	}
+
+	// The remaining structural signals are pure reads of the resolved
+	// RecipeResult, so they only apply when resolution succeeded — a failed or
+	// held combo has no result to inspect.
+	if err == nil {
+		pinnedState, pinnedDetail := classifyChartPinned(result)
+		structure.Dimensions[DimChartPinned] = pinnedState
+		if pinnedDetail != "" {
+			structure.Detail[DimChartPinned] = pinnedDetail
+		}
+		cov := computeCoverage(result)
+		structure.Coverage = &cov
 	}
 
 	structure.Status = rollup(structure.Dimensions)
@@ -213,6 +233,88 @@ func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.Cat
 		LeafOverlay: entry.Name,
 		Structure:   structure,
 	}
+}
+
+// classifyChartPinned grades the chart_pinned dimension: every enabled Helm
+// component must reference an explicit chart version (ADR-006 layer 1 — the
+// chart-version pin, not image digests). An unpinned Helm component is a fail.
+//
+// This is a pure in-repo field check — no Helm render. It is a presence check
+// (non-empty Version), not range/exact-pin validation: a floating version
+// would score pass, but the registry pins exact versions, so layer 1 is
+// satisfied by presence. Disabled components (overrides.enabled: false) are
+// skipped — they are never bundled or deployed, so an unpinned disabled
+// component must not flip the recipe to fail; this matches every other
+// consumer of ComponentRefs (bundler, deployers, mirror, BOM).
+//
+// A recipe with no enabled Helm components (e.g. pure-Kustomize) scores a
+// vacuous pass with an explanatory detail, since Kustomize defaultTag pinning
+// is out of scope and the column must not be misread as "supply-chain pinned".
+//
+// The dimension therefore has three distinguishable states for a downstream
+// renderer: pass with a detail (vacuous — no Helm to pin), pass with no detail
+// (genuinely pinned), and absent from Dimensions entirely (resolve failed/held,
+// so it was never scored).
+func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
+	if result == nil {
+		return StatusPass, ""
+	}
+
+	helmCount := 0
+	var unpinned []string
+	for _, ref := range result.ComponentRefs {
+		if ref.Type != recipe.ComponentTypeHelm || !ref.IsEnabled() {
+			continue
+		}
+		helmCount++
+		if ref.Version == "" {
+			unpinned = append(unpinned, ref.Name)
+		}
+	}
+
+	if len(unpinned) > 0 {
+		sort.Strings(unpinned)
+		return StatusFail, "unpinned Helm chart version for: " + strings.Join(unpinned, ", ")
+	}
+	if helmCount == 0 {
+		return StatusPass, "no enabled Helm components; chart-version pinning not applicable (Kustomize tag pinning is out of scope)"
+	}
+	return StatusPass, ""
+}
+
+// computeCoverage builds the declared_coverage descriptor from the resolved
+// recipe's validation config. A nil config (or nil phase) yields a zero-value
+// PhaseCoverage (Declared=false) — a minimal recipe that drops phases is not
+// penalized, since coverage is descriptive and never graded.
+func computeCoverage(result *recipe.RecipeResult) DeclaredCoverage {
+	if result == nil || result.Validation == nil {
+		return DeclaredCoverage{}
+	}
+	v := result.Validation
+	return DeclaredCoverage{
+		Readiness:   phaseCoverage(v.Readiness),
+		Deployment:  phaseCoverage(v.Deployment),
+		Performance: phaseCoverage(v.Performance),
+		Conformance: phaseCoverage(v.Conformance),
+	}
+}
+
+// phaseCoverage describes one validation phase: whether it is declared, the
+// sorted names of its checks, and its phase-level constraint count.
+func phaseCoverage(p *recipe.ValidationPhase) PhaseCoverage {
+	if p == nil {
+		return PhaseCoverage{}
+	}
+	pc := PhaseCoverage{
+		Declared:    true,
+		Constraints: len(p.Constraints),
+	}
+	if len(p.Checks) > 0 {
+		pc.Checks = make([]string, len(p.Checks))
+		copy(pc.Checks, p.Checks)
+		sort.Strings(pc.Checks)
+	}
+	return pc
 }
 
 // classifyResolve grades the resolves dimension from a build error.

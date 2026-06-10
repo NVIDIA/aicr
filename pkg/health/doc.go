@@ -34,11 +34,17 @@
 // # Signals and rollup
 //
 // Each leaf is scored on graded dimensions whose per-dimension state is one
-// of pass, warn, fail, or unknown. The resolves dimension (this package) is
-// graded from whether the recipe builder resolves the criteria without
-// error. Additional dimensions (chart_pinned, declared_coverage,
-// constraints_wellformed) are layered on by later work and feed the same
-// generic rollup without changing rollup logic.
+// of pass, warn, fail, or unknown. Two graded dimensions ship today: resolves
+// (whether the recipe builder resolves the criteria without error) and
+// chart_pinned (whether every resolved Helm component references an explicit
+// chart version — ADR-006 layer 1, a pure field read with no Helm render).
+// One more graded dimension, constraints_wellformed, is layered on by later
+// work and feeds the same generic rollup without changing rollup logic.
+//
+// declared_coverage is a separate descriptor, not a graded dimension: it
+// records, per validation phase, whether the phase is declared, its named
+// checks, and its constraint count. It is surfaced but never moves the status,
+// so a deliberately minimal recipe is not penalized for declaring fewer checks.
 //
 // The rolled-up per-recipe status is fail if any graded dimension fails,
 // else warn if any warns, else unknown if any is held (transient resolver
