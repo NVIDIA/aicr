@@ -27,6 +27,12 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
+// gkeAcceleratorLabel is set by GKE node-pool spec on every accelerator node
+// (e.g. "nvidia-h100-mega-80gb" for a3-megagpu-8g, "nvidia-h100-80gb" for
+// a3-highgpu-1g). Read off the target node to pin NCCL workers to the SKU
+// the test was sized against, without hardcoding any single shape.
+const gkeAcceleratorLabel = "cloud.google.com/gke-accelerator"
+
 // discoverGKEGPUNICNetworks lists networks.networking.gke.io and returns
 // GPU NIC network names (those containing "gpu-nic"), sorted alphabetically.
 // GKE clusters provision these with cluster-specific prefixes (e.g.,

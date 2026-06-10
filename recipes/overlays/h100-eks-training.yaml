@@ -87,6 +87,15 @@ spec:
       # false-fail. Making the gate fabric/transport-class aware is tracked in
       # https://github.com/NVIDIA/aicr/issues/1256.
       constraints:
+        # Fixed absolute floor calibrated on p5.48xlarge (8x H100 SXM,
+        # 32x EFA, NVLink/NVSwitch). This recipe is SKU-agnostic — it
+        # matches all EKS/H100 instance types, including small shapes
+        # (e.g. p5.4xlarge: 1 GPU, 1 EFA) whose pure inter-node NIC path
+        # measures tens of GB/s and cannot clear this floor. See #1256.
+        # The proper fix is either a weakest-in-scope liveness floor
+        # (option a) or a per-fabric criteria dimension (option b);
+        # both need measured numbers from the small SKUs that we don't
+        # have yet. Keeping the calibrated value here until then.
         - name: nccl-all-reduce-bw
           value: ">= 300"
     conformance:

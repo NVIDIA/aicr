@@ -396,7 +396,10 @@ func TestAcceleratorProductMatchers(t *testing.T) {
 
 func TestPlatformWorkerScheduling(t *testing.T) {
 	t.Run("EKS returns instance-type selector", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge", nil)
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge", nil)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
 		if ns["node.kubernetes.io/instance-type"] != "p5.48xlarge" {
 			t.Errorf("EKS nodeSelector = %v, want instance-type=p5.48xlarge", ns)
 		}
@@ -404,13 +407,59 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("EKS tolerations = %v, want tolerate-all", tols)
 		}
 	})
-	t.Run("GKE returns gke-accelerator selector", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceGKE, "", nil)
-		if ns["cloud.google.com/gke-accelerator"] != "nvidia-h100-mega-80gb" {
+	t.Run("GKE uses discovered gke-accelerator label (a3-megagpu-8g)", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-mega-80gb"}}},
+		}
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceGKE, "", nodes)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
+		if ns[gkeAcceleratorLabel] != "nvidia-h100-mega-80gb" {
 			t.Errorf("GKE nodeSelector = %v, want gke-accelerator=nvidia-h100-mega-80gb", ns)
 		}
 		if len(tols) != 2 {
 			t.Errorf("GKE tolerations count = %d, want 2", len(tols))
+		}
+	})
+	t.Run("GKE uses discovered gke-accelerator label (a3-highgpu-1g)", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-80gb"}}},
+		}
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceGKE, "", nodes)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
+		if ns[gkeAcceleratorLabel] != "nvidia-h100-80gb" {
+			t.Errorf("GKE nodeSelector = %v, want gke-accelerator=nvidia-h100-80gb", ns)
+		}
+		if len(tols) != 2 {
+			t.Errorf("GKE tolerations count = %d, want 2", len(tols))
+		}
+	})
+	t.Run("GKE on cluster with missing label returns error", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}},
+		}
+		_, _, err := platformWorkerScheduling(recipe.CriteriaServiceGKE, "", nodes)
+		if err == nil {
+			t.Errorf("GKE with missing labels should return error, got nil")
+		}
+		if !strings.Contains(err.Error(), gkeAcceleratorLabel) {
+			t.Errorf("Error should mention %s, got: %v", gkeAcceleratorLabel, err)
+		}
+	})
+	t.Run("GKE on mixed-SKU pool returns error to prevent WorkerCount divergence", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-mega-80gb"}}},
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-80gb"}}},
+		}
+		_, _, err := platformWorkerScheduling(recipe.CriteriaServiceGKE, "", nodes)
+		if err == nil {
+			t.Errorf("GKE with mixed labels should return error, got nil")
+		}
+		if !strings.Contains(err.Error(), gkeAcceleratorLabel) {
+			t.Errorf("Error should mention %s, got: %v", gkeAcceleratorLabel, err)
 		}
 	})
 	t.Run("OKE pins to shared gpu.product and tolerates taints", func(t *testing.T) {
@@ -418,7 +467,10 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
 			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-GB200"}}},
 		}
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceOKE, "", nodes)
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceOKE, "", nodes)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
 		if ns[gpuProductLabel] != "NVIDIA-GB200" {
 			t.Errorf("OKE nodeSelector = %v, want %s=NVIDIA-GB200", ns, gpuProductLabel)
 		}
@@ -430,7 +482,10 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 		nodes := []corev1.Node{
 			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}},
 		}
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceOKE, "", nodes)
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceOKE, "", nodes)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
 		if ns != nil {
 			t.Errorf("OKE non-GFD nodeSelector = %v, want nil", ns)
 		}
@@ -439,13 +494,19 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 		}
 	})
 	t.Run("unknown service returns nil", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling("unknown", "", nil)
+		ns, tols, err := platformWorkerScheduling("unknown", "", nil)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
 		if ns != nil || tols != nil {
 			t.Errorf("unknown service should return nil, got ns=%v tols=%v", ns, tols)
 		}
 	})
 	t.Run("any service returns nil", func(t *testing.T) {
-		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceAny, "", nil)
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceAny, "", nil)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
 		if ns != nil || tols != nil {
 			t.Errorf("any service should return nil, got ns=%v tols=%v", ns, tols)
 		}
@@ -488,6 +549,46 @@ func TestCommonGPUProduct(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := commonGPUProduct(tt.nodes); got != tt.want {
 				t.Errorf("commonGPUProduct() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommonGKEAccelerator(t *testing.T) {
+	tests := []struct {
+		name  string
+		nodes []corev1.Node
+		want  string
+	}{
+		{
+			"all share accelerator label",
+			[]corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-mega-80gb"}}},
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-mega-80gb"}}},
+			},
+			"nvidia-h100-mega-80gb",
+		},
+		{
+			"mixed accelerators",
+			[]corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-mega-80gb"}}},
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-80gb"}}},
+			},
+			"",
+		},
+		{
+			"one node missing label",
+			[]corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gkeAcceleratorLabel: "nvidia-h100-mega-80gb"}}},
+				{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}},
+			},
+			"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := commonGKEAccelerator(tt.nodes); got != tt.want {
+				t.Errorf("commonGKEAccelerator() = %q, want %q", got, tt.want)
 			}
 		})
 	}

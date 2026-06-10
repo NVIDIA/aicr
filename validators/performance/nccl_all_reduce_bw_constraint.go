@@ -599,7 +599,10 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	}
 
 	// Build effective worker scheduling: user override takes precedence over platform default.
-	defaultNodeSelector, defaultTolerations := platformWorkerScheduling(service, instanceType, config.Nodes)
+	defaultNodeSelector, defaultTolerations, err := platformWorkerScheduling(service, instanceType, config.Nodes)
+	if err != nil {
+		return err
+	}
 	effectiveNodeSelector := defaultNodeSelector
 	// Gate on len() rather than != nil so an explicit but empty selector does
 	// not silently clear the platform default for scheduling while
@@ -834,21 +837,32 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 // platformWorkerScheduling returns the default nodeSelector and tolerations
 // for NCCL worker pods on the given service. instanceType is only used for EKS;
 // nodes (the accelerator-narrowed target set from resolveTargetGPUNodes) is
-// only used for OKE, where the selector is derived from the shared
-// nvidia.com/gpu.product label.
-func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration) {
+// used for GKE (the gke-accelerator label) and OKE (the shared
+// nvidia.com/gpu.product label).
+func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration, error) {
 	switch service {
 	case recipe.CriteriaServiceEKS:
 		return map[string]string{
 			"node.kubernetes.io/instance-type": instanceType,
-		}, []v1.Toleration{{Operator: v1.TolerationOpExists}}
+		}, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
 	case recipe.CriteriaServiceGKE:
-		return map[string]string{
-				"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
-			}, []v1.Toleration{
-				{Operator: v1.TolerationOpExists},
-				{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
-			}
+		// GKE accelerator node pools carry cloud.google.com/gke-accelerator
+		// (set by the node pool spec). Pin workers to the SKU shared by every
+		// target node so the selector matches the cohort WorkerCount was sized
+		// against — narrowByAccelerator only filters by the H100 product
+		// prefix, so a mixed pool (e.g. a3-megagpu-8g + a3-highgpu-1g) can
+		// reach this branch. Fail if accelerator labels are missing or mixed
+		// to prevent WorkerCount divergence (sizing for N nodes but scheduling
+		// to a subset).
+		acc := commonGKEAccelerator(nodes)
+		if acc == "" {
+			return nil, nil, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("GKE nodes have missing or mixed %s labels — cannot derive a nodeSelector that matches the full WorkerCount cohort", gkeAcceleratorLabel))
+		}
+		return map[string]string{gkeAcceleratorLabel: acc}, []v1.Toleration{
+			{Operator: v1.TolerationOpExists},
+			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
+		}, nil
 	case recipe.CriteriaServiceOKE:
 		// OKE bare-metal GB200 pools are commonly tainted and may coexist
 		// with other GPU shapes under one control plane. Tolerate the pool
@@ -862,11 +876,11 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 		if product := commonGPUProduct(nodes); product != "" {
 			nodeSelector = map[string]string{gpuProductLabel: product}
 		}
-		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}
+		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
 	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM:
-		return nil, nil
+		return nil, nil, nil
 	default:
-		return nil, nil
+		return nil, nil, nil
 	}
 }
 
@@ -891,6 +905,27 @@ func commonGPUProduct(nodes []v1.Node) string {
 		}
 	}
 	return product
+}
+
+// commonGKEAccelerator returns the cloud.google.com/gke-accelerator label
+// shared by every node, or "" when the nodes disagree or any node lacks the
+// label. Mirrors commonGPUProduct, applied to the GKE-specific label NCCL
+// workers must pin to so the nodeSelector matches the same cohort
+// WorkerCount was sized against.
+func commonGKEAccelerator(nodes []v1.Node) string {
+	accelerator := ""
+	for _, n := range nodes {
+		a := n.Labels[gkeAcceleratorLabel]
+		if a == "" {
+			return ""
+		}
+		if accelerator == "" {
+			accelerator = a
+		} else if a != accelerator {
+			return ""
+		}
+	}
+	return accelerator
 }
 
 // applyNCCLWorkerScheduling sets the nodeSelector and tolerations on the "node"
