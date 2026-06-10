@@ -72,18 +72,32 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Ask GitHub which open PR(s) contain this head SHA. This is
-          # the trusted source — never trust an artifact-supplied number.
-          pulls=$(gh api "repos/${BASE_REPO}/commits/${HEAD_SHA}/pulls" \
-            --jq '[.[] | select(.state == "open")]')
-
-          # Cross-check the PR's head-repo owner against the workflow_run's
-          # head_repository owner so two PRs sharing a head SHA across
-          # forks don't get confused. Require exactly one match — if a
-          # single fork-owner has somehow opened multiple open PRs from
-          # the same head SHA, refuse to guess.
-          matches=$(echo "$pulls" | jq -r --arg owner "$HEAD_OWNER" \
-            '[.[] | select(.head.repo.owner.login == $owner) | .number]')
+          # Resolve the PR from the trusted workflow_run.head_sha by
+          # listing open PRs and matching on head SHA + head-repo owner.
+          #
+          # We deliberately do NOT use `commits/${HEAD_SHA}/pulls`: that
+          # endpoint does not reliably return fork-originated PRs (the head
+          # commit lives in the contributor's fork, not the base repo), so
+          # every external-contributor PR resolved to zero matches and the
+          # comment was silently skipped. Listing open PRs and comparing
+          # `.head.sha` works uniformly for same-repo and fork PRs.
+          #
+          # This is still the trusted source — both the SHA and the owner
+          # come from the workflow_run event, never an artifact. Matching
+          # the head-repo owner keeps two PRs that share a head SHA across
+          # forks from being confused. Require exactly one match — refuse
+          # to guess if a single owner has multiple open PRs at this SHA.
+          #
+          # --paginate streams matching PR numbers across all pages
+          # (gh applies --jq per page); `jq -s` then slurps that stream
+          # into a JSON array. HEAD_SHA/HEAD_OWNER are read via jq's
+          # `env.` rather than interpolated into the filter, so a hostile
+          # value can't break out of the jq expression. (gh's --jq does
+          # not accept jq's --arg, hence env.)
+          matches=$(gh api --paginate \
+            "repos/${BASE_REPO}/pulls?state=open&per_page=100" \
+            --jq '.[] | select(.head.sha == env.HEAD_SHA and .head.repo.owner.login == env.HEAD_OWNER) | .number' \
+            | jq -s '.')
           match_count=$(echo "$matches" | jq 'length')
 
           if [[ "$match_count" -ne 1 ]]; then
