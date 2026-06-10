@@ -21,6 +21,9 @@
 # Data
 recipes/** @nvidia/aicr-maintainer
 
+# Recipe health (ADR-009): the area/recipes owners triage the weekly refresh
+pkg/health/** @nvidia/aicr-maintainer
+
 # CI/CD and automation
 /Makefile @nvidia/aicr-maintainer
 /.goreleaser.yaml @nvidia/aicr-maintainer
