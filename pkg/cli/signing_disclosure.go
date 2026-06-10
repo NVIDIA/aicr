@@ -45,31 +45,22 @@ func assumeYesFlag(category string) cli.Flag {
 	}
 }
 
-// keylessOIDCPathIsInteractive reports whether the OIDC source precedence
-// encoded in opts would fall through to an interactive login (browser
-// callback or device-code) that mints a Fulcio certificate from the
-// signer's personal identity.
+// keylessOIDCPathIsInteractive reports whether signing with opts would fall
+// through to an interactive login (browser callback or device-code) that
+// mints a Fulcio certificate from the signer's personal identity.
 //
-// It mirrors the precedence in bundleattest.ResolveOIDCToken: a pre-fetched
-// identity token, GitHub Actions ambient OIDC, or a KMS signing key all
-// short-circuit before any browser/device-code prompt, so none of those is
-// interactive. Everything else (explicit --oidc-device-flow, or the default
-// browser flow) is interactive and surprises the user with a login that
-// publishes their identity. Kept in lock-step with the resolver so the gate
-// fires exactly when — and only when — a browser/device-code flow would open.
+// The OIDC source-precedence decision is delegated to
+// bundleattest.SelectOIDCSource — the same classifier ResolveOIDCToken
+// switches on — so the gate cannot drift from the resolver: a new
+// non-interactive source added there is reflected here automatically. The
+// only thing the gate adds is the KMS short-circuit: a SigningKey selects
+// key-based signing in ResolveAttester before any OIDC source applies, and
+// embeds no OIDC identity in the artifact.
 func keylessOIDCPathIsInteractive(opts bundleattest.ResolveOptions) bool {
-	switch {
-	case opts.SigningKey != "":
-		// KMS key-based signing embeds no OIDC identity in the artifact.
+	if opts.SigningKey != "" {
 		return false
-	case opts.IdentityToken != "":
-		return false
-	case opts.AmbientURL != "" && opts.AmbientToken != "":
-		return false
-	default:
-		// --oidc-device-flow or the default browser callback.
-		return true
 	}
+	return bundleattest.SelectOIDCSource(opts).Interactive()
 }
 
 // buildKeylessSigningBanner renders the privacy disclosure shown before an

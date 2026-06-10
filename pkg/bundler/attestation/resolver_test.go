@@ -23,6 +23,61 @@ import (
 	"testing"
 )
 
+// TestSelectOIDCSource pins the source-precedence classifier that both
+// ResolveOIDCToken and the CLI disclosure gate consume, so the two cannot
+// drift: identity-token > ambient (both values) > device-flow > browser.
+func TestSelectOIDCSource(t *testing.T) {
+	tests := []struct {
+		name            string
+		opts            ResolveOptions
+		want            OIDCSourceKind
+		wantInteractive bool
+	}{
+		{
+			name:            "identity token wins over everything",
+			opts:            ResolveOptions{IdentityToken: "tok", AmbientURL: "u", AmbientToken: "t", DeviceFlow: true},
+			want:            OIDCSourceIdentityToken,
+			wantInteractive: false,
+		},
+		{
+			name:            "ambient requires both url and token",
+			opts:            ResolveOptions{AmbientURL: "u", AmbientToken: "t", DeviceFlow: true},
+			want:            OIDCSourceAmbient,
+			wantInteractive: false,
+		},
+		{
+			name:            "ambient url alone falls through to device-flow",
+			opts:            ResolveOptions{AmbientURL: "u", DeviceFlow: true},
+			want:            OIDCSourceDeviceFlow,
+			wantInteractive: true,
+		},
+		{
+			name:            "device-flow when no non-interactive source",
+			opts:            ResolveOptions{DeviceFlow: true},
+			want:            OIDCSourceDeviceFlow,
+			wantInteractive: true,
+		},
+		{
+			name:            "empty options default to browser",
+			opts:            ResolveOptions{},
+			want:            OIDCSourceBrowser,
+			wantInteractive: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SelectOIDCSource(tt.opts)
+			if got != tt.want {
+				t.Errorf("SelectOIDCSource() = %v, want %v", got, tt.want)
+			}
+			if got.Interactive() != tt.wantInteractive {
+				t.Errorf("%v.Interactive() = %v, want %v", got, got.Interactive(), tt.wantInteractive)
+			}
+		})
+	}
+}
+
 // TestResolveAttester exercises the four-tier OIDC source precedence
 // (identity-token > ambient > device-flow > interactive browser) plus the
 // disabled short-circuit. The ambient case uses an httptest server so the
