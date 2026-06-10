@@ -102,6 +102,18 @@ const (
 	ValidationOperationTimeout = 75 * time.Minute
 )
 
+// Health computation timeouts.
+const (
+	// HealthComputeTimeout is the upper bound for a single health.Compute
+	// run across the whole recipe catalog when the caller's context has no
+	// deadline. Health resolution is hermetic and in-memory (no network, no
+	// cluster), but each of the ~50 leaf combos resolves through the recipe
+	// builder, so the ceiling is sized well above the expected sub-second
+	// run to absorb a cold metadata-store load. Each per-combo build is
+	// independently bounded by RecipeBuildTimeout.
+	HealthComputeTimeout = 5 * time.Minute
+)
+
 // Server timeouts for HTTP server configuration.
 const (
 	// ServerReadTimeout is the maximum duration for reading request headers.
