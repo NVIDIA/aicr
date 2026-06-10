@@ -15,12 +15,15 @@
 # NFD NodeFeatureRule for Mellanox InfiniBand NICs
 #
 # Labels nodes with feature.node.kubernetes.io/pci-15b3.present=true when a
-# Mellanox ConnectX-7 NIC is present (PCI device IDs 101c or 101e). This label
-# is used by the NicClusterPolicy nodeAffinity and the ib-node-config DaemonSet
-# to target only IB-capable nodes.
+# Mellanox InfiniBand virtual function is present (PCI device IDs 101c or 101e).
+# 101c is the ConnectX-6 Virtual Function (MT28908) and 101e is the generic
+# mlx5Gen Virtual Function — Azure ND-series VMs surface the IB NIC to the guest
+# via SR-IOV as one of these VFs (e.g. ND A100 v4 exposes the ConnectX-6 VF
+# 101c, ND H100 v5 the mlx5Gen VF). This label is used by the NicClusterPolicy
+# nodeAffinity and the ib-node-config DaemonSet to target only IB-capable nodes.
 #
 # The network-operator chart's built-in deployNodeFeatureRules targets generic
-# Ethernet NICs (class 0200/0207). This rule targets ConnectX-7 specifically,
+# Ethernet NICs (class 0200/0207). This rule targets the IB VFs specifically,
 # which is why values-aks.yaml sets nfd.deployNodeFeatureRules=false.
 #
 # Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/tests/setup-infra/network-operator-nfd.yaml
