@@ -1,0 +1,103 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: a100-eks-training
+
+spec:
+  # Inherits from eks-training recipe (EKS + training settings)
+  base: eks-training
+
+  criteria:
+    service: eks
+    accelerator: a100
+    intent: training
+
+  # Specific constraints for A100 on EKS training workloads.
+  # A100 has no IMEX/NVLink ComputeDomain requirement, so the recipe keeps
+  # the EKS training baseline rather than the H100/H200 1.32.4 floor.
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.30"
+
+  componentRefs:
+    # A100-specific GPU Operator overrides (inherits valuesFile from eks-training).
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        cdi:
+          enabled: true
+        gdrcopy:
+          enabled: true
+
+    # A100 reuses the h100 nodewright tuning profile (tuning.yaml). nvidia-setup
+    # ships baked-in (service, accelerator) configs only for eks-h100 /
+    # eks-gb200, with no separate A100 target — but per the nodewright
+    # maintainer the h100 tuning is the correct profile for A100 on EKS/GKE:
+    # the A100-vs-H100 deltas in the DGX Base OS tunings pertain only to
+    # baremetal and do not apply in EKS/GKE, so h100 is effectively the A100
+    # tuning here. This mirrors h200-eks-training, which reuses the h100 profile
+    # the same way. The recipe criteria above stays a100; only this tuning
+    # profile selector is h100.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning.yaml
+      overrides:
+        service: eks
+        accelerator: h100
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  # Validation checks for A100 on EKS training workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  #
+  # The deployment-phase floor (4 standard checks + gpu-operator version pin)
+  # is contributed by the a100-any cross-cutting overlay and is not duplicated
+  # here.
+  #
+  # Performance gating is intentionally omitted until an empirical A100-on-EKS
+  # NCCL baseline is established. The H100/H200 EKS training overlays pin an
+  # absolute nccl-all-reduce-bw floor (>= 300) calibrated on 8-GPU Hopper
+  # NVLink nodes with EFA; that value is neither fabric-class aware
+  # (https://github.com/NVIDIA/aicr/issues/1256) nor valid for A100, so
+  # carrying it would only false-fail healthy runs.
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access
