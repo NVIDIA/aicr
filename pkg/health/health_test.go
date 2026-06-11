@@ -123,6 +123,15 @@ func TestClassifyChartPinned(t *testing.T) {
 	kustomize := func(name string) recipe.ComponentRef {
 		return recipe.ComponentRef{Name: name, Type: recipe.ComponentTypeKustomize}
 	}
+	// manifestOnly models a manifest-only "Helm" component (e.g.
+	// nodewright-customizations): type Helm, ships local manifestFiles, and has
+	// no external chart/source/version to pin.
+	manifestOnly := func(name string) recipe.ComponentRef {
+		return recipe.ComponentRef{
+			Name: name, Type: recipe.ComponentTypeHelm,
+			ManifestFiles: []string{"components/" + name + "/manifests/tuning.yaml"},
+		}
+	}
 	result := func(refs ...recipe.ComponentRef) *recipe.RecipeResult {
 		return &recipe.RecipeResult{ComponentRefs: refs}
 	}
@@ -152,6 +161,21 @@ func TestClassifyChartPinned(t *testing.T) {
 		{
 			"only disabled unpinned helm is vacuous pass",
 			result(disabledHelm("off", "")),
+			StatusPass, "not applicable",
+		},
+		{
+			"manifest-only helm alongside pinned chart passes",
+			result(helm("a", "1.0.0"), manifestOnly("nodewright-customizations")),
+			StatusPass, "",
+		},
+		{
+			"manifest-only helm not flagged as unpinned",
+			result(helm("b", ""), manifestOnly("nodewright-customizations")),
+			StatusFail, "b",
+		},
+		{
+			"only manifest-only helm is vacuous pass",
+			result(manifestOnly("nodewright-customizations")),
 			StatusPass, "not applicable",
 		},
 	}
@@ -311,6 +335,48 @@ func TestComputeCoverage(t *testing.T) {
 			t.Errorf("undeclared phases marked declared: %+v", cov)
 		}
 	})
+}
+
+// TestDeclaredCoverageCompact pins the byte-exact R/D/P/C format shared by the
+// recipe-health matrix (tools/health) and the `aicr recipe list` table
+// (pkg/cli). The format must not drift: the committed matrix and the
+// determinism/golden tests depend on it.
+func TestDeclaredCoverageCompact(t *testing.T) {
+	tests := []struct {
+		name     string
+		cov      DeclaredCoverage
+		expected string
+	}{
+		{
+			name:     "zero value",
+			cov:      DeclaredCoverage{},
+			expected: "R:0 D:0 P:0 C:0",
+		},
+		{
+			name: "all phases populated",
+			cov: DeclaredCoverage{
+				Readiness:   PhaseCoverage{Checks: []string{"a", "b"}},
+				Deployment:  PhaseCoverage{Checks: []string{"a", "b", "c", "d"}},
+				Performance: PhaseCoverage{Checks: []string{"a"}},
+				Conformance: PhaseCoverage{Checks: make([]string, 10)},
+			},
+			expected: "R:2 D:4 P:1 C:10",
+		},
+		{
+			name: "counts only Checks, not Declared or Constraints",
+			cov: DeclaredCoverage{
+				Deployment: PhaseCoverage{Declared: true, Constraints: 5},
+			},
+			expected: "R:0 D:0 P:0 C:0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cov.Compact(); got != tt.expected {
+				t.Errorf("Compact() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
 }
 
 // TestComputeEmbeddedCatalog resolves the real embedded catalog: every leaf

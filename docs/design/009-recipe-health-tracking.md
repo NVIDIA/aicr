@@ -392,11 +392,15 @@ introduce simply does not arise.
 
 Mirror the BOM precedent precisely:
 
-- `make health-docs` runs `go run ./tools/health -deterministic -no-title`
-  and splices the matrix into `docs/user/recipe-health.md` between
+- `make recipe-health-docs` runs `go run ./tools/health -deterministic
+  -no-title` and splices the matrix into `docs/user/recipe-health.md` between
   `<!-- BEGIN AICR-HEALTH -->` / `<!-- END AICR-HEALTH -->`. `make
-  health-check` is the advisory staleness check (paralleling `bom-check`),
-  **not** wired into `make qualify`.
+  recipe-health-check` is the advisory staleness check (paralleling
+  `bom-check`), **not** wired into `make qualify`. (The targets are named
+  `recipe-health-*`, not the shorter `health-*` this ADR originally proposed,
+  to avoid colliding with the existing `check-health` / `check-health-all` /
+  `component-health` cluster-chainsaw target family — the `health-check` vs
+  `check-health` homophone is a footgun.)
 - `.github/workflows/health-refresh.yaml` structurally clones
   `bom-refresh.yaml`: **weekly** cron, fixed `chore/health-refresh` branch,
   `delete-branch: true`, `peter-evans/create-pull-request` on drift, built-in
