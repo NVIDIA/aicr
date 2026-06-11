@@ -99,11 +99,28 @@ func checkTimeoutFromEnv() time.Duration {
 func LoadContext() (*Context, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), checkTimeoutFromEnv())
 
-	// Build K8s client
-	clientset, config, err := k8sclient.BuildKubeClient("")
+	// Build the REST config (the typed client it also returns is rebuilt below
+	// after raising the rate limits, so it is intentionally discarded here).
+	_, config, err := k8sclient.BuildKubeClient("")
 	if err != nil {
 		cancel()
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+
+	// Raise the client-side rate limits above client-go's defaults (QPS 5,
+	// Burst 10). Enumeration-heavy checks like expected-resources issue many
+	// GETs across every recipe component within a single per-check deadline;
+	// the default limiter queues the tail until the deadline elapses, surfacing
+	// as "client rate limiter Wait ... context deadline exceeded". The typed
+	// client returned above already captured the pre-override config, so rebuild
+	// it after raising the limits; the dynamic client below picks them up
+	// directly. apiserver APF still protects the server.
+	config.QPS = defaults.ValidatorClientQPS
+	config.Burst = defaults.ValidatorClientBurst
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		cancel()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to rebuild kubernetes client with raised rate limits", err)
 	}
 
 	// Build dynamic client

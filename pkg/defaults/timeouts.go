@@ -323,6 +323,24 @@ const (
 	// they pass or the ChainsawAssertTimeout expires.
 	AssertRetryInterval = 5 * time.Second
 
+	// AbsentResourceGracePeriod bounds how long a health-check assertion
+	// retries a resource that does not exist at all (the fetch returns
+	// ErrCodeNotFound). A resource that is missing entirely — wrong
+	// namespace, never installed — will not appear by waiting out the full
+	// ChainsawAssertTimeout, and retrying it for minutes holds one of the
+	// ChainsawMaxParallel worker slots and starves healthy components behind
+	// it (and can push the check past the Job's activeDeadlineSeconds, which
+	// surfaces as an opaque "other" status instead of a clean failure).
+	//
+	// This grace bounds ONLY the entirely-absent (NotFound) case. A resource
+	// that EXISTS but is not yet ready returns a shape-mismatch error
+	// (ErrCodeInternal), and a transient API failure returns
+	// ErrCodeUnavailable — both keep the full ChainsawAssertTimeout so slow
+	// but healthy rollouts are not failed prematurely. The grace allows brief
+	// creation lag (a resource that appears within the window switches to the
+	// full readiness budget) while failing permanently-absent resources fast.
+	AbsentResourceGracePeriod = 30 * time.Second
+
 	// JobEnvelopeMargin is the headroom added on top of ChainsawAssertTimeout
 	// when computing the validator Job's outer activeDeadlineSeconds and the
 	// expected-resources catalog timeout. Chainsaw needs time after the inner
