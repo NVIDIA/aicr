@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/urfave/cli/v3"
+	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/health"
 )
@@ -220,6 +221,134 @@ func TestRecipeList_EmptyResult(t *testing.T) {
 	out := runRecipeList(t, "--service", "eks", "--accelerator", "gb200", "--os", "cos")
 	if !strings.Contains(out, "(no matching overlays)") {
 		t.Errorf("expected empty-result message, got:\n%s", out)
+	}
+}
+
+// TestRecipeList_EmptyResultNoHealth exercises the empty + --no-health
+// intersection: the nil healthByName map must not panic when there are zero
+// rows, and the empty-overlays message still renders.
+func TestRecipeList_EmptyResultNoHealth(t *testing.T) {
+	out := runRecipeList(t, "--no-health", "--service", "eks", "--accelerator", "gb200", "--os", "cos")
+	if !strings.Contains(out, "(no matching overlays)") {
+		t.Errorf("expected empty-result message, got:\n%s", out)
+	}
+	if strings.Contains(firstLine(out), "STATUS") {
+		t.Errorf("--no-health empty result should omit the STATUS column; got header: %s", firstLine(out))
+	}
+}
+
+// TestRecipeList_NoHealthTable asserts --no-health renders the pre-#1228 table
+// shape: the STATUS/COVERAGE columns are gone and every row carries exactly the
+// eight #1208 columns, with no coverage/status tokens leaking in.
+func TestRecipeList_NoHealthTable(t *testing.T) {
+	out := runRecipeList(t, "--no-health")
+
+	header := firstLine(out)
+	for _, col := range []string{"NAME", "IS_LEAF", "SOURCE"} {
+		if !strings.Contains(header, col) {
+			t.Errorf("table header missing %q column; got: %s", col, header)
+		}
+	}
+	for _, col := range []string{"STATUS", "COVERAGE"} {
+		if strings.Contains(header, col) {
+			t.Errorf("--no-health header should omit %q column; got: %s", col, header)
+		}
+	}
+	// No compact coverage cell should appear anywhere in the body.
+	if strings.Contains(out, "R:") || strings.Contains(out, "C:") {
+		t.Errorf("--no-health output leaked a coverage cell:\n%s", out)
+	}
+	// A stable leaf row ("gb200-any") must collapse to exactly 8 fields.
+	row := lineContaining(out, "gb200-any ")
+	if row == "" {
+		t.Fatalf("expected a gb200-any row in --no-health output:\n%s", out)
+	}
+	if got := len(strings.Fields(row)); got != 8 {
+		t.Fatalf("expected 8 columns in --no-health row, got %d: %q", got, row)
+	}
+}
+
+// TestRecipeList_NoHealthSkipFlagAlias confirms the --skip-health alias is wired
+// to the same flag as --no-health and produces byte-identical output.
+func TestRecipeList_NoHealthSkipFlagAlias(t *testing.T) {
+	alias := runRecipeList(t, "--skip-health")
+	primary := runRecipeList(t, "--no-health")
+	if alias != primary {
+		t.Errorf("--skip-health output should equal --no-health output\nalias:\n%s\nprimary:\n%s", alias, primary)
+	}
+	if strings.Contains(firstLine(alias), "STATUS") {
+		t.Errorf("--skip-health should omit the STATUS column; got header: %s", firstLine(alias))
+	}
+}
+
+// TestRecipeList_NoHealthJSON asserts --no-health drops the health block from
+// every json entry — including leaves that would otherwise carry one — yielding
+// the pre-#1228 shape (#1208 fields only).
+func TestRecipeList_NoHealthJSON(t *testing.T) {
+	out := runRecipeList(t, "--no-health", "--format", "json")
+
+	if strings.Contains(out, "\"health\"") {
+		t.Errorf("--no-health json must not contain a health block:\n%s", out)
+	}
+
+	var entries []struct {
+		Name   string                  `json:"name"`
+		IsLeaf bool                    `json:"is_leaf"`
+		Source string                  `json:"source"`
+		Health *health.StructureHealth `json:"health"`
+	}
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		t.Fatalf("unmarshal json output: %v\n%s", err, out)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one catalog entry")
+	}
+	var sawLeaf bool
+	for _, e := range entries {
+		if e.Name == "" || e.Source == "" {
+			t.Errorf("entry missing #1208 name/source field: %+v", e)
+		}
+		if e.IsLeaf {
+			sawLeaf = true
+		}
+		if e.Health != nil {
+			t.Errorf("--no-health entry %q should carry no health block", e.Name)
+		}
+	}
+	if !sawLeaf {
+		t.Fatal("expected at least one leaf entry to confirm health is suppressed even for leaves")
+	}
+}
+
+// TestRecipeList_NoHealthYAML asserts --no-health drops the health block from
+// the yaml output while keeping the #1208 fields at the top level. It decodes
+// the YAML and asserts no entry carries a "health" key (rather than a fragile
+// substring scan), and that at least one leaf entry is present — so the test
+// fails loudly if the catalog ever renders empty.
+func TestRecipeList_NoHealthYAML(t *testing.T) {
+	out := runRecipeList(t, "--no-health", "--format", "yaml")
+
+	var entries []map[string]any
+	if err := yaml.Unmarshal([]byte(out), &entries); err != nil {
+		t.Fatalf("unmarshal yaml output: %v\n%s", err, out)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one catalog entry in yaml output")
+	}
+	var sawLeaf bool
+	for _, e := range entries {
+		if _, ok := e["health"]; ok {
+			t.Errorf("--no-health yaml entry %v must not carry a health key", e["name"])
+		}
+		if e["name"] == nil || e["source"] == nil {
+			t.Errorf("yaml entry missing #1208 name/source field: %v", e)
+		}
+		if leaf, _ := e["is_leaf"].(bool); leaf {
+			sawLeaf = true
+		}
+	}
+	if !sawLeaf {
+		t.Fatal("expected at least one leaf entry to confirm health is suppressed even for leaves")
 	}
 }
 
