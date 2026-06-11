@@ -1,0 +1,82 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: a100-aks-training
+
+spec:
+  # Inherits from aks-training recipe (AKS + training settings)
+  base: aks-training
+
+  criteria:
+    service: aks
+    accelerator: a100
+    intent: training
+
+  # Specific constraints for A100 on AKS training workloads.
+  # A100 has no IMEX/NVLink ComputeDomain requirement, so the recipe keeps
+  # the AKS training baseline rather than the H100 1.32.4 floor.
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.30"
+
+  # Nodewright customizations omitted — Nodewright packages do not support
+  # service: aks. The nodewright-operator itself is inherited from base
+  # and still deploys. This follows the H100 AKS training pattern.
+  componentRefs:
+    # A100-specific GPU Operator overrides (inherits valuesFile from aks-training)
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+      overrides:
+        gdrcopy:
+          enabled: true
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  # Validation checks for A100 on AKS training workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  #
+  # The deployment-phase floor (4 standard checks + gpu-operator version pin)
+  # is contributed by the a100-any cross-cutting overlay and is not duplicated
+  # here.
+  #
+  # Performance gating is intentionally omitted until an empirical A100-on-Azure
+  # NCCL baseline is established. The H100 AKS training overlay pins an absolute
+  # nccl-all-reduce-bw floor (>= 100); that value is calibrated for H100 ND-series
+  # nodes and is neither fabric-class aware (https://github.com/NVIDIA/aicr/issues/1256)
+  # nor valid for A100, so carrying it would only false-fail healthy runs.
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

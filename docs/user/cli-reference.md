@@ -2,6 +2,8 @@
 
 Complete reference for the `aicr` command-line interface.
 
+For details on which CLI verbs and critical user journeys are exercised by tests, on what hardware, and at what cadence, see the [Coverage Matrix](./coverage-matrix.md).
+
 ## Overview
 
 AICR provides a four-step workflow for optimizing GPU infrastructure:
