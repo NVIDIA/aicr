@@ -121,6 +121,21 @@ outputs:
   snapshot_agent_cuda_image:
     description: 'CUDA base image for the snapshot agent image'
     value: ${{ steps.versions.outputs.snapshot_agent_cuda_image }}
+  awscli:
+    description: 'AWS CLI version (pip package, used by the KMS MiniStack e2e)'
+    value: ${{ steps.versions.outputs.awscli }}
+  ministack_image:
+    description: 'MiniStack image (token-free AWS emulator for the KMS e2e)'
+    value: ${{ steps.versions.outputs.ministack_image }}
+  mkcert:
+    description: 'mkcert version (trusted localhost TLS cert for the KMS e2e)'
+    value: ${{ steps.versions.outputs.mkcert }}
+  mkcert_sha256_linux_amd64:
+    description: 'mkcert SHA256 for linux/amd64'
+    value: ${{ steps.versions.outputs.mkcert_sha256_linux_amd64 }}
+  mkcert_sha256_linux_arm64:
+    description: 'mkcert SHA256 for linux/arm64'
+    value: ${{ steps.versions.outputs.mkcert_sha256_linux_arm64 }}
 
 runs:
   using: 'composite'
@@ -168,6 +183,11 @@ runs:
         echo "flux=$(yq eval '.testing_tools.flux_version' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "hauler=$(yq eval '.testing_tools.hauler' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "zarf=$(yq eval '.testing_tools.zarf' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "awscli=$(yq eval '.testing_tools.awscli' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "ministack_image=$(yq eval '.testing_tools.ministack_image' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "mkcert=$(yq eval '.testing_tools.mkcert' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "mkcert_sha256_linux_amd64=$(yq eval '.testing_tools.mkcert_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "mkcert_sha256_linux_arm64=$(yq eval '.testing_tools.mkcert_checksums.linux_arm64' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Quality thresholds
         echo "coverage_threshold=$(yq eval '.quality.coverage_threshold' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -219,4 +239,7 @@ runs:
         echo "  kind_node_image: ${{ steps.versions.outputs.kind_node_image }}"
         echo "  h100_kind_node_image: ${{ steps.versions.outputs.h100_kind_node_image }}"
         echo "  gpu_operator_chart_version: ${{ steps.versions.outputs.gpu_operator_chart_version }}"
+        echo "  awscli: ${{ steps.versions.outputs.awscli }}"
+        echo "  ministack_image: ${{ steps.versions.outputs.ministack_image }}"
+        echo "  mkcert: ${{ steps.versions.outputs.mkcert }}"
         echo "  snapshot_agent_cuda_image: ${{ steps.versions.outputs.snapshot_agent_cuda_image }}"

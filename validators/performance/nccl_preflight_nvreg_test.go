@@ -78,6 +78,10 @@ func TestGB200NetPreflightApplies(t *testing.T) {
 			variantNET, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS, true,
 		},
 		{
+			"NET + GB300 + EKS → check required (shares GB200 Grace PCI topology + EFA)",
+			variantNET, recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS, true,
+		},
+		{
 			"NVLS + GB200 + EKS → not required (NVLink-C2C, no PCIe dma-buf)",
 			variantNVLS, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS, false,
 		},

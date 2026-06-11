@@ -1,0 +1,291 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# KMS-backed bundle signing and verification e2e tests against MiniStack
+# (https://ministack.org), a token-free AWS emulator. Provisions an ephemeral
+# ECDSA P-256 asymmetric KMS key, builds the aicr binary, then runs the chainsaw
+# suite gated by --selector 'requires=ministack'. No real AWS credentials are
+# needed: MiniStack accepts any values for AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+#
+# MiniStack replaces LocalStack here because LocalStack's latest/stable images
+# now refuse to boot without a paid license token (exit code 55), which would
+# turn any image bump into a CI outage. The MiniStack image is pinned in
+# .settings.yaml (testing_tools.ministack_image) and resolved via load-versions,
+# so it is never floated to :latest. The emulator runs as a plain `docker run`
+# step (not a services: container) because a service container starts before any
+# step and therefore cannot reference the load-versions step output.
+
+name: KMS MiniStack E2E
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  # Validate on PRs that touch the test, its workflow/tooling, or the signing
+  # code under test. Gated to same-repo in the job `if` below: fork PRs lack the
+  # OIDC token needed to attest the binary, so they skip rather than fail.
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tests/chainsaw/signing/bundle-attestation-kms-ministack/**'
+      - '.github/workflows/kms-ministack-e2e.yaml'
+      - '.github/actions/load-versions/**'
+      - '.github/actions/generate-slsa-predicate/**'
+      - '.github/actions/setup-build-tools/**'
+      - '.settings.yaml'
+      - '.goreleaser.yaml'
+      - 'pkg/bundler/**'
+      # The `bundle --signing-key`, `verify --key`, and identity-regexp plumbing
+      # under test lives in pkg/cli; cmd/aicr is the thin entrypoint. go.mod/sum
+      # cover dependency bumps (e.g. sigstore) that change the signing path.
+      - 'pkg/cli/**'
+      - 'cmd/aicr/**'
+      - 'go.mod'
+      - 'go.sum'
+
+# Least privilege at the workflow level; id-token is granted only to the job
+# that needs it (below).
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_DEFAULT_REGION: us-east-1
+  # HTTPS: sigstore's awskms client hardcodes https://, so MiniStack runs with
+  # USE_SSL=1 and a mkcert cert the Go AWS SDK trusts (AWS_CA_BUNDLE for the CLI).
+  MINISTACK_ENDPOINT: https://localhost:4566
+  MINISTACK_CERT_DIR: /tmp/ministack-tls
+
+jobs:
+  kms-ministack-e2e:
+    name: KMS MiniStack E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # id-token: write mints the GitHub OIDC token for Sigstore keyless signing.
+    # The "Build aicr binary" step runs goreleaser, whose cosign attest-blob hook
+    # uses that identity to produce the binary's SLSA provenance (fed by
+    # "Generate SLSA predicate" and checked by --min-trust-level verified).
+    permissions:
+      contents: read
+      id-token: write
+    # Skip on fork PRs: they get a read-only token, so `cosign attest-blob`
+    # (binary attestation) cannot run. push/workflow_dispatch always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29  # v7.0.0
+        with:
+          version: ${{ steps.versions.outputs.goreleaser }}
+          install-only: true
+
+      - name: Install Chainsaw
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_chainsaw: 'true'
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
+
+      - name: Generate SLSA predicate
+        uses: ./.github/actions/generate-slsa-predicate
+        with:
+          workflow_file: kms-ministack-e2e.yaml
+
+      - name: Install AWS CLI
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet "awscli==${{ steps.versions.outputs.awscli }}"
+
+      - name: Install mkcert and provision TLS cert
+        env:
+          MKCERT_VERSION: ${{ steps.versions.outputs.mkcert }}
+          MKCERT_SHA256: ${{ steps.versions.outputs.mkcert_sha256_linux_amd64 }}
+        run: |
+          set -euo pipefail
+          # Pinned mkcert binary (GitHub release), checksum-verified before install.
+          tmp="$(mktemp)"
+          curl -fsSL -o "$tmp" \
+            "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64"
+          echo "${MKCERT_SHA256}  ${tmp}" | sha256sum -c -
+          sudo install -m 0755 "$tmp" /usr/local/bin/mkcert
+          rm -f "$tmp"
+
+          # Install the mkcert CA into the runner trust store so the Go AWS SDK
+          # trusts MiniStack's TLS. Ephemeral runner, so this is safe.
+          mkcert -install
+
+          mkdir -p "${MINISTACK_CERT_DIR}"
+          mkcert -cert-file "${MINISTACK_CERT_DIR}/cert.pem" \
+            -key-file "${MINISTACK_CERT_DIR}/key.pem" \
+            localhost 127.0.0.1 ::1
+          chmod 644 "${MINISTACK_CERT_DIR}"/*.pem
+
+          # The Python aws CLI uses its own bundle; point it at the mkcert root CA.
+          echo "AWS_CA_BUNDLE=$(mkcert -CAROOT)/rootCA.pem" >> "$GITHUB_ENV"
+
+      - name: Start MiniStack
+        env:
+          MINISTACK_IMAGE: ${{ steps.versions.outputs.ministack_image }}
+        run: |
+          set -euo pipefail
+
+          # Token-free AWS emulator; image is pinned in .settings.yaml. USE_SSL=1
+          # serves TLS with the mounted mkcert cert (sigstore awskms needs https).
+          docker run -d --name ministack -p 4566:4566 \
+            -e USE_SSL=1 \
+            -e MINISTACK_SSL_CERT=/certs/cert.pem \
+            -e MINISTACK_SSL_KEY=/certs/key.pem \
+            -v "${MINISTACK_CERT_DIR}:/certs:ro" \
+            "${MINISTACK_IMAGE}" >/dev/null
+
+          # Wait for KMS to serve. AWS_MAX_ATTEMPTS=1 + short CLI timeouts keep each
+          # probe fast while the endpoint is still coming up.
+          for _ in $(seq 1 45); do
+            if [ "$(docker inspect -f '{{.State.Running}}' ministack 2>/dev/null)" != "true" ]; then
+              docker logs ministack 2>&1 | tail -20
+              echo "::error::MiniStack container exited unexpectedly"
+              exit 1
+            fi
+            if AWS_MAX_ATTEMPTS=1 aws kms list-keys \
+                --endpoint-url "${MINISTACK_ENDPOINT}" \
+                --cli-connect-timeout 3 --cli-read-timeout 5 \
+                --output text >/dev/null 2>&1; then
+              echo "MiniStack KMS is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ministack 2>&1 | tail -20
+          echo "::error::MiniStack did not become ready in time"
+          exit 1
+
+      - name: Build aicr binary
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          set -euo pipefail
+          goreleaser build --clean --single-target --snapshot --timeout 10m
+
+      - name: Locate binary and detect attestation
+        run: |
+          set -euo pipefail
+          AICR_BIN=""
+          for pattern in dist/aicr_linux_amd64_v1/aicr dist/aicr_linux_amd64/aicr; do
+            if [ -x "$pattern" ]; then
+              AICR_BIN="$(pwd)/$pattern"
+              break
+            fi
+          done
+          if [ -z "$AICR_BIN" ]; then
+            echo "::error::Built binary not found in dist/"
+            exit 1
+          fi
+          echo "AICR_BIN=${AICR_BIN}" >> "$GITHUB_ENV"
+          echo "Binary: ${AICR_BIN}"
+
+          ATTEST_FILE="$(dirname "$AICR_BIN")/aicr-attestation.sigstore.json"
+          if [ -f "$ATTEST_FILE" ]; then
+            echo "AICR_ATTESTED=true" >> "$GITHUB_ENV"
+            echo "AICR_IDENTITY_REGEXP=https://github.com/${{ github.repository }}/.github/workflows/kms-ministack-e2e\\.yaml@.*" >> "$GITHUB_ENV"
+            echo "Binary attestation found: $ATTEST_FILE"
+          else
+            echo "AICR_ATTESTED=false" >> "$GITHUB_ENV"
+            echo "::warning::No binary attestation found; verify-min-trust-verified step will be skipped"
+          fi
+
+      - name: Provision KMS key in MiniStack
+        run: |
+          set -euo pipefail
+
+          # Create an ECDSA P-256 asymmetric signing key
+          KMS_KEY_ARN=$(aws kms create-key \
+            --endpoint-url "${MINISTACK_ENDPOINT}" \
+            --key-spec ECC_NIST_P256 \
+            --key-usage SIGN_VERIFY \
+            --description "aicr-e2e-signing-key" \
+            --query 'KeyMetadata.Arn' \
+            --output text)
+
+          echo "Provisioned KMS key ARN: ${KMS_KEY_ARN}"
+          echo "KMS_KEY_ARN=${KMS_KEY_ARN}" >> "$GITHUB_ENV"
+
+          # Derive the URI with the MiniStack endpoint embedded in the host portion.
+          # Format: awskms://<host:port>/<arn>
+          HOST="${MINISTACK_ENDPOINT#http://}"
+          HOST="${HOST#https://}"
+          HOST="${HOST%/}"
+          KMS_URI="awskms://${HOST}/${KMS_KEY_ARN}"
+          echo "KMS_URI=${KMS_URI}" >> "$GITHUB_ENV"
+          echo "KMS URI: ${KMS_URI}"
+
+      - name: Export public key to PEM
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kms-e2e
+          aws kms get-public-key \
+            --endpoint-url "${MINISTACK_ENDPOINT}" \
+            --key-id "${KMS_KEY_ARN}" \
+            --query 'PublicKey' \
+            --output text | base64 -d | \
+            openssl pkey -pubin -inform DER -outform PEM \
+            -out /tmp/kms-e2e/signing-key.pem
+          echo "KMS_PEM_FILE=/tmp/kms-e2e/signing-key.pem" >> "$GITHUB_ENV"
+          echo "Public key exported to /tmp/kms-e2e/signing-key.pem"
+
+      - name: Run KMS MiniStack chainsaw tests
+        env:
+          AICR_ATTESTED: ${{ env.AICR_ATTESTED }}
+          AICR_IDENTITY_REGEXP: ${{ env.AICR_IDENTITY_REGEXP }}
+        run: |
+          set -euo pipefail
+          chainsaw test \
+            --no-cluster \
+            --config tests/chainsaw/chainsaw-config.yaml \
+            --test-dir tests/chainsaw/signing/bundle-attestation-kms-ministack/ \
+            --selector 'requires=ministack'
+
+      - name: Stop MiniStack
+        if: always()
+        run: docker rm -f ministack >/dev/null 2>&1 || true

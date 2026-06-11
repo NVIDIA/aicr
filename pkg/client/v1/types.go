@@ -122,7 +122,7 @@ type AgentConfig struct {
 //
 // Field meanings match the pkg/recipe.Criteria documentation:
 //   - Service: Kubernetes service flavor (eks/gke/aks/oke/kind/lke/bcm).
-//   - Accelerator: GPU model identifier (h100/h200/b200/gb200/a100/l40/rtx-pro-6000).
+//   - Accelerator: GPU model identifier (h100/h200/b200/gb200/gb300/a100/l40/rtx-pro-6000).
 //   - Intent: workload intent (training/inference).
 //   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos).
 //   - Platform: framework overlay (dynamo/kubeflow/nim/runai/slurm).

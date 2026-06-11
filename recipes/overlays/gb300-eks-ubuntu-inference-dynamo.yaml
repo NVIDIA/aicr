@@ -1,0 +1,93 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: gb300-eks-ubuntu-inference-dynamo
+
+spec:
+  # Inherits from gb300-eks-ubuntu-inference (GB300 + Ubuntu inference settings)
+  # Adds Dynamo inference platform components.
+  base: gb300-eks-ubuntu-inference
+
+  criteria:
+    service: eks
+    accelerator: gb300
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+
+  # DRA requires Kubernetes 1.34+ (GA)
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        gpuResourcesEnabledOverride: true
+
+    - name: grove
+      type: Helm
+      source: oci://ghcr.io/ai-dynamo/grove
+      version: "v0.1.0-alpha.6"
+      valuesFile: components/grove/values.yaml
+
+    - name: dynamo-platform
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      version: "1.0.2"
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - grove
+        - cert-manager
+        - kube-prometheus-stack
+        - gpu-operator
+        - kai-scheduler
+
+  validation:
+    performance:
+      checks:
+        - inference-perf
+      # Starting gate inherited from gb200-eks-ubuntu-inference-dynamo (Qwen3-8B
+      # at concurrency=256/GPU, throughput >= 50000, TTFT p99 <= 2000). GB300
+      # (Blackwell Ultra) has more HBM3e and higher FP4/attention throughput, so
+      # these GB200-derived values are a loose, safe floor — they will not
+      # false-fail GB300 and can be tightened once GB300-on-EKS baselines exist.
+      # Model + concurrency are pinned so the gate stays valid independent of
+      # the compiled defaults. Per-GPU normalization tracked in
+      # https://github.com/NVIDIA/aicr/issues/1254.
+      constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "256"
+        - name: inference-throughput
+          value: ">= 50000"
+        - name: inference-ttft-p99
+          value: "<= 2000"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - inference-gateway
+        - robust-controller
+        - secure-accelerator-access
+        - pod-autoscaling
+        - cluster-autoscaling

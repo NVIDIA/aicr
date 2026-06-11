@@ -26,6 +26,10 @@ var gpuSKURegistry = []struct {
 	sku     string
 }{
 	{"GB200", "gb200"},
+	// "GB300" before any future "B300" rule, same first-match-wins reason as
+	// "GB200" before "B200" — a Grace-Blackwell-Ultra node must not be labeled
+	// as a discrete B300.
+	{"GB300", "gb300"},
 	{"B200", "b200"},
 	{"H100", "h100"},
 	// GH200 (Grace Hopper Superchip) contains the substring "H200" but is a

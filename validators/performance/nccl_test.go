@@ -363,6 +363,8 @@ func TestAcceleratorProductMatchers(t *testing.T) {
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200", true},
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200-96GB", false}, // exact-match guard
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-H100-80GB-HBM3", false},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB300", true},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB200", false}, // GB300 must not match GB200
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-B200", true},
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-GB200", false},
 		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-80GB-HBM3", true},
@@ -844,13 +846,13 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			name:    "NET EKS GB200",
 			variant: variantNET,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS EKS GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS OKE GB200",
