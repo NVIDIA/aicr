@@ -17,6 +17,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -118,25 +119,16 @@ func TestRenderMDXSafe(t *testing.T) {
 // containsOutsideCode is a coarse check: our generator emits no fenced code
 // blocks, so any occurrence is "outside code" for gate purposes.
 func containsOutsideCode(s, sub string) bool {
-	return len(sub) > 0 && contains(s, sub)
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
+	return len(sub) > 0 && strings.Contains(s, sub)
 }
 
 func TestNoTitleOmitsH1(t *testing.T) {
 	with := Render(BuildMatrix(t.TempDir()), true, false)
 	without := Render(BuildMatrix(t.TempDir()), true, true)
-	if !contains(with, "# Recipe & CLI Coverage Matrix") {
+	if !strings.Contains(with, "# Recipe & CLI Coverage Matrix") {
 		t.Error("expected H1 when noTitle=false")
 	}
-	if contains(without, "# Recipe & CLI Coverage Matrix") {
+	if strings.Contains(without, "# Recipe & CLI Coverage Matrix") {
 		t.Error("H1 must be omitted when noTitle=true")
 	}
 }

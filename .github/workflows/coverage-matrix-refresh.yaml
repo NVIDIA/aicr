@@ -32,6 +32,13 @@ on:
     - cron: "30 6 * * 1"
   workflow_dispatch: {}
 
+# Only one refresh run at a time: the scheduled and manual triggers both target
+# the fixed chore/coverage-refresh branch, so overlapping runs would contend for
+# the same branch and churn the PR.
+concurrency:
+  group: coverage-matrix-refresh
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -59,6 +66,9 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
 
+      # Single-use, secret-free invocation of an existing Make target — kept
+      # inline rather than wrapped in a Layer-2 composite action (matches the
+      # sibling bom-refresh workflow's `run: make bom-docs`).
       - name: Regenerate coverage matrix doc
         run: make coverage-docs
 
