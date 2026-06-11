@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -22,108 +23,145 @@ import (
 	"strings"
 )
 
-// signalRoot is one in-repo tree the scanner walks, tagged with the harness it
-// represents and whether that harness is currently inert (stubbed).
-type signalRoot struct {
-	rel     string // path relative to repo root
+// maxScanFileBytes bounds how much of a signal file we read; runner scripts and
+// test manifests are small, so anything larger is almost certainly not a hand
+// authored invocation we care about.
+const maxScanFileBytes = 1 << 20 // 1 MiB
+
+// scanTarget is one path the scanner walks, tagged with the harness it
+// represents. A target may be a directory (walked recursively) or a single file
+// (e.g. an extensionless UAT runner script).
+type scanTarget struct {
+	path    string
 	harness Harness
-	stubbed bool // assets present but no workflow runs them (Azure UAT)
 }
 
-// defaultSignalRoots is the canonical, ordered set of trees RQ3 sources from.
-// Azure UAT is marked stubbed: the trees exist but no workflow references them
-// (revive-or-retire owned by DC6, #1280).
-func defaultSignalRoots() []signalRoot {
-	return []signalRoot{
-		{rel: "tests/chainsaw", harness: HarnessChainsaw},
-		{rel: "tests/uat/aws", harness: HarnessUAT},
-		{rel: "tests/uat/gcp", harness: HarnessUAT},
-		{rel: "tests/uat/azure", harness: HarnessUAT, stubbed: true},
-		{rel: "demos", harness: HarnessDemo},
+// scanTargets is the execution surface the matrix sources from:
+//   - tests/chainsaw (whole tree)        — per-PR CI
+//   - the scheduled UAT runner scripts   — real nightly H100 (wired only)
+//   - demos (whole tree)                 — documented, not executed
+//
+// Critically, the UAT targets are the *wired runner scripts* — not the whole
+// tests/uat tree — so present-but-unwired assets (Azure stubs, cuj2-inference
+// dirs no scheduled run invokes) are not mistaken for executed coverage.
+func scanTargets(repoRoot string) []scanTarget {
+	runners := scanWiredUAT(repoRoot).runners
+	targets := make([]scanTarget, 0, len(runners)+2)
+	targets = append(targets, scanTarget{path: filepath.Join(repoRoot, "tests", "chainsaw"), harness: HarnessChainsaw})
+	for _, runner := range runners {
+		targets = append(targets, scanTarget{path: filepath.Join(repoRoot, runner), harness: HarnessUAT})
 	}
+	targets = append(targets, scanTarget{path: filepath.Join(repoRoot, "demos"), harness: HarnessDemo})
+	return targets
 }
 
-// binInvocation matches the start of an `aicr` invocation in any of the forms
-// the test/demo trees use: bare `aicr`, `./aicr`, or a `${AICR_BIN}` / `$AICR`
-// shell variable. The trailing space is required so the verb word follows.
-const binInvocation = `(?:\$\{?AICR[A-Z_]*\}?|\./aicr|\baicr)[ \t]+`
+// binInvocation matches the start of an `aicr` invocation in the forms the test,
+// runner, and demo trees use: bare `aicr`, `./aicr`, or a `${AICR_BIN}`/`$AICR`
+// shell variable (with or without surrounding quotes).
+const binInvocation = `(?:\$\{?AICR[A-Z_]*\}?|\./aicr|\baicr)["']?[ \t]+`
 
-// scanText is the subset of file extensions worth scanning for invocations.
-var scanText = map[string]bool{
+// arrayInvocation matches the shell argv-array form the UAT runner uses, e.g.
+// `args=(evidence verify ./evidence/pointer.yaml)` — the binary is applied
+// separately via "${args[@]}", so the verb words follow the array opener.
+const arrayInvocation = `=\([ \t]*`
+
+// scanTextExt is the set of explicitly-recognized text extensions. Extensionless
+// files (e.g. the UAT `run` scripts) are also scanned when they look like text.
+var scanTextExt = map[string]bool{
 	".yaml": true, ".yml": true, ".md": true, ".sh": true, ".txt": true,
 }
 
-// verbRegex builds a matcher for a (possibly multi-word) verb path invoked
-// after the binary, e.g. "evidence verify" -> <bin> evidence verify.
+// verbRegex builds a matcher for a (possibly multi-word) verb path invoked after
+// the binary or as a shell argv array, e.g. "evidence verify" matches both
+// `${AICR_BIN} evidence verify` and `args=(evidence verify ...)`.
 func verbRegex(verbPath string) *regexp.Regexp {
 	words := strings.Fields(verbPath)
 	for i, w := range words {
 		words[i] = regexp.QuoteMeta(w)
 	}
-	// \b after the last word so "verify" does not match "verifyx"; intervening
-	// whitespace between words is flexible.
-	return regexp.MustCompile(binInvocation + strings.Join(words, `[ \t]+`) + `\b`)
+	joined := strings.Join(words, `[ \t]+`)
+	return regexp.MustCompile(`(?:` + binInvocation + `|` + arrayInvocation + `)` + joined + `\b`)
 }
 
-// verbSignals records, per verb path, the harnesses that exercise it and whether
-// it was seen only in a stubbed tree.
-type verbSignals struct {
-	harnesses   map[Harness]bool
-	stubbedOnly bool // matched only under a stubbed root (e.g. Azure UAT)
-}
-
-// scanVerbs walks every signal root and reports which harnesses invoke each
-// verb. A verb seen only under stubbed roots is flagged stubbedOnly so the
-// caller can render it as stubbed rather than covered.
-func scanVerbs(repoRoot string, verbs []string) map[string]*verbSignals {
-	res := make(map[string]*verbSignals, len(verbs))
+// scanVerbs walks every scan target and reports which harnesses invoke each
+// verb path.
+func scanVerbs(repoRoot string, verbs []string) map[string]map[Harness]bool {
+	res := make(map[string]map[Harness]bool, len(verbs))
 	matchers := make(map[string]*regexp.Regexp, len(verbs))
 	for _, v := range verbs {
-		res[v] = &verbSignals{harnesses: map[Harness]bool{}, stubbedOnly: true}
+		res[v] = map[Harness]bool{}
 		matchers[v] = verbRegex(v)
 	}
 
-	for _, root := range defaultSignalRoots() {
-		walkSignalFiles(filepath.Join(repoRoot, root.rel), func(content string) {
+	for _, t := range scanTargets(repoRoot) {
+		walkSignalFiles(t.path, func(content string) {
 			for _, v := range verbs {
 				if matchers[v].MatchString(content) {
-					res[v].harnesses[root.harness] = true
-					if !root.stubbed {
-						res[v].stubbedOnly = false
-					}
+					res[v][t.harness] = true
 				}
 			}
 		})
 	}
-
-	// A verb with no matches at all is not stubbed-only; it is simply uncovered.
-	for _, sig := range res {
-		if len(sig.harnesses) == 0 {
-			sig.stubbedOnly = false
-		}
-	}
 	return res
 }
 
-// walkSignalFiles invokes fn with the text content of each scannable file under
-// dir. Missing dirs are skipped silently (a tree may not exist in a fixture).
-func walkSignalFiles(dir string, fn func(content string)) {
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
+// walkSignalFiles invokes fn with the text content of path (a single file) or of
+// each scannable file under path (a directory). Missing paths are skipped.
+func walkSignalFiles(path string, fn func(content string)) {
+	info, err := os.Stat(path)
+	if err != nil {
 		return
 	}
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, werr error) error {
-		if werr != nil {
+	if !info.IsDir() {
+		readScannable(path, fn)
+		return
+	}
+	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() {
 			return nil //nolint:nilerr // best-effort scan; an unreadable entry is not fatal
 		}
-		if d.IsDir() || !scanText[filepath.Ext(path)] {
-			return nil
+		if scannableExt(p) {
+			readScannable(p, fn)
 		}
-		data, rerr := os.ReadFile(path) //nolint:gosec // path bounded by dir under repo root
-		if rerr != nil {
-			return nil //nolint:nilerr // skip unreadable file
-		}
-		fn(string(data))
 		return nil
 	})
+}
+
+// scannableExt reports whether p should be scanned: a known text extension, or
+// an extensionless file (the UAT runner scripts) that sniffs as text.
+func scannableExt(p string) bool {
+	ext := filepath.Ext(p)
+	if scanTextExt[ext] {
+		return true
+	}
+	if ext == "" {
+		return looksLikeText(p)
+	}
+	return false
+}
+
+// looksLikeText sniffs the first bytes of p for NUL, the cheap binary tell, so
+// extensionless executables that are real scripts are scanned and stray binaries
+// are skipped.
+func looksLikeText(p string) bool {
+	f, err := os.Open(p) //nolint:gosec // path bounded by a signal-root dir under repo root
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	return !bytes.Contains(buf[:n], []byte{0})
+}
+
+// readScannable reads up to maxScanFileBytes of p and hands the content to fn.
+func readScannable(p string, fn func(content string)) {
+	f, err := os.Open(p) //nolint:gosec // path bounded by a signal-root dir under repo root
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	data := make([]byte, maxScanFileBytes)
+	n, _ := f.Read(data)
+	fn(string(data[:n]))
 }

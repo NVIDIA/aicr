@@ -44,19 +44,34 @@ func rowByItem(m Matrix, item string) (Row, bool) {
 	return Row{}, false
 }
 
-func TestBuildMatrixStatusFromSignals(t *testing.T) {
-	root := t.TempDir()
+// wiredTrainingFixture sets up a repo where the scheduled AWS UAT workflow runs
+// the training config via the runner script, the runner invokes a few verbs
+// (incl. the argv-array `evidence verify`), chainsaw exercises recipe/validate,
+// inference UAT assets exist but are unwired, and demos document `query`.
+func wiredTrainingFixture(t *testing.T, root string) {
 	writeFixture(t, root, map[string]string{
-		// chainsaw exercises recipe + validate (executable, per-PR)
+		// Scheduled UAT workflow: wires the runner + a *training* config only.
+		".github/workflows/uat-aws.yaml": "" +
+			"env:\n  TEST_CONFIG: tests/uat/aws/tests/h100-training-config.yaml\n" +
+			"jobs:\n  uat:\n    steps:\n      - run: ./tests/uat/aws/run prep \"${TEST_CONFIG}\"\n",
+		// Extensionless runner: the real nightly invocations, incl. the argv array.
+		"tests/uat/aws/run": "#!/usr/bin/env bash\n" +
+			"\"${AICR_BIN}\" snapshot --config \"${1}\"\n" +
+			"\"${AICR_BIN}\" bundle -r recipe.yaml\n" +
+			"args=(evidence verify ./evidence/pointer.yaml)\n" +
+			"\"${AICR_BIN}\" \"${args[@]}\"\n",
+		// chainsaw exercises recipe + validate (per-PR).
 		"tests/chainsaw/cli/recipe-gen/chainsaw-test.yaml": "run: aicr recipe --service eks\nrun: ${AICR_BIN} validate -r r.yaml\n",
-		// aws UAT exercises bundle + the inference CUJ (executable, nightly)
-		"tests/uat/aws/tests/cuj2-inference/test.yaml": "script: ${AICR_BIN} bundle -r r.yaml\n",
-		"tests/uat/aws/tests/cuj1-training/test.yaml":  "script: aicr validate\n",
-		// azure trees exist but are stubbed: trust update appears only here
-		"tests/uat/azure/tests/cuj1-training/t.yaml": "run: aicr trust update\n",
-		// demos document query only (not executable)
+		// Inference UAT assets exist but no scheduled workflow wires an inference config.
+		"tests/uat/aws/tests/cuj2-inference/test.yaml": "script: ${AICR_BIN} bundle\n",
+		// demos document query only (not executable).
 		"demos/cuj1-eks.md": "Run `aicr query --selector x` to inspect.\n",
 	})
+}
+
+func TestBuildMatrixStatusFromSignals(t *testing.T) {
+	root := t.TempDir()
+	wiredTrainingFixture(t, root)
 
 	m := BuildMatrix(root)
 
@@ -65,14 +80,14 @@ func TestBuildMatrixStatusFromSignals(t *testing.T) {
 		wantStatus Status
 		wantNote   bool
 	}{
-		{"recipe", StatusCovered, false},
-		{"validate", StatusCovered, false},
-		{"bundle", StatusCovered, false},
-		{"trust update", StatusStubbed, true}, // azure-only → stubbed
-		{"query", StatusNotYetCovered, true},  // demo-only → not-yet w/ note
-		{"diff", StatusNotYetCovered, false},  // no signal anywhere
-		{"cuj1-training-kubeflow", StatusCovered, false},
-		{"cuj2-inference-dynamo", StatusCovered, false},
+		{"recipe", StatusCovered, false},                 // chainsaw
+		{"validate", StatusCovered, false},               // chainsaw
+		{"bundle", StatusCovered, false},                 // wired UAT runner
+		{"evidence verify", StatusCovered, false},        // argv-array in the runner script
+		{"query", StatusNotYetCovered, true},             // demo-only → note
+		{"diff", StatusNotYetCovered, false},             // no signal anywhere
+		{"cuj1-training-kubeflow", StatusCovered, false}, // wired training intent + demo
+		{"cuj2-inference-dynamo", StatusStubbed, true},   // assets present but unwired
 	}
 	for _, tt := range tests {
 		t.Run(tt.item, func(t *testing.T) {
@@ -90,12 +105,28 @@ func TestBuildMatrixStatusFromSignals(t *testing.T) {
 	}
 }
 
+// TestUnwiredUATNotLive guards the P0 fix: cuj2-inference must not be reported as
+// live nightly H100 coverage when no scheduled workflow wires an inference config.
+func TestUnwiredUATNotLive(t *testing.T) {
+	root := t.TempDir()
+	wiredTrainingFixture(t, root)
+	m := BuildMatrix(root)
+
+	r, ok := rowByItem(m, "cuj2-inference-dynamo")
+	if !ok {
+		t.Fatal("cuj2-inference-dynamo row missing")
+	}
+	if r.Harnesses[HarnessUAT] {
+		t.Error("cuj2-inference must not be marked UAT-covered (no wired inference config)")
+	}
+	if r.Cadence == "nightly" || r.Hardware == "GPU (H100, real)" {
+		t.Errorf("unwired CUJ must not claim nightly H100 coverage; got hardware=%q cadence=%q", r.Hardware, r.Cadence)
+	}
+}
+
 func TestRenderDeterministic(t *testing.T) {
 	root := t.TempDir()
-	writeFixture(t, root, map[string]string{
-		"tests/chainsaw/cli/recipe-gen/t.yaml": "run: aicr recipe\n",
-		"demos/cuj2.md":                        "aicr bundle\n",
-	})
+	wiredTrainingFixture(t, root)
 	// Two independent builds must render byte-identical output despite the
 	// map-backed harness sets and verb scan.
 	a := Render(BuildMatrix(root), true, false)
@@ -110,16 +141,10 @@ func TestRenderMDXSafe(t *testing.T) {
 	// bare braces, no autolinks in the generated body.
 	out := Render(BuildMatrix(t.TempDir()), true, false)
 	for _, bad := range []string{"<!--", "{", "<http://", "<https://"} {
-		if containsOutsideCode(out, bad) {
+		if strings.Contains(out, bad) {
 			t.Errorf("generated body contains MDX-unsafe token %q", bad)
 		}
 	}
-}
-
-// containsOutsideCode is a coarse check: our generator emits no fenced code
-// blocks, so any occurrence is "outside code" for gate purposes.
-func containsOutsideCode(s, sub string) bool {
-	return len(sub) > 0 && strings.Contains(s, sub)
 }
 
 func TestNoTitleOmitsH1(t *testing.T) {

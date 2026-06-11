@@ -6,16 +6,16 @@ It is a **structural** matrix: it reports *which* CUJs and CLI verbs are exercis
 
 This is a **different axis** from the per-recipe **Coverage** column in the recipe-health matrix (ADR-009 `declared_coverage`): that column counts declared named checks per validation phase for a single recipe, whereas this matrix answers "which journeys and CLI verbs are exercised, where, and how often." The reverse cross-link from the recipe-health page is added by RQ1 (#1283) once that page ships. See also the [CLI reference](./cli-reference.md).
 
-**AICR-version axis.** The live UAT matrix exercises main + previous N stable releases per recipe; the per-version posture is a TestGrid link, not a cell here.
+**AICR-version axis.** Scheduled UAT builds only the current checkout, so the live axis today is `main`. The multi-version matrix (main + the previous N stable releases) is owned by the dynamic-clusters epic (DC5); per-version posture will be a TestGrid link, not a cell here.
 
-**Legend.** `covered` = an executable in-repo test exercises it; `not-yet-covered` = a shipping capability no executable test touches yet; `stubbed` = test assets exist but no workflow runs them.
+**Legend.** `covered` = exercised by an executable *journey* signal — a chainsaw/KWOK test or a wired nightly UAT runner; `not-yet-covered` = a shipping capability no such journey touches yet; `stubbed` = UAT assets exist but no scheduled workflow runs them. This tracks CUJ/CLI journey coverage — per-package Go unit-test coverage is a separate gate (`make test-coverage`), not reflected here.
 
 ## Critical user journeys (CUJs)
 
 | Item | Exercised by | Hardware | Cadence | Status | Notes |
 |------|--------------|----------|---------|--------|-------|
 | `cuj1-training-kubeflow` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `cuj2-inference-dynamo` | uat, demo | GPU (H100, real) | nightly | covered | — |
+| `cuj2-inference-dynamo` | demo | GPU (unwired) | — | stubbed | UAT assets present but no scheduled workflow runs them — inference UAT tracked by DC3 (#1276), Azure by DC6 (#1280) |
 
 ## CLI verbs
 
@@ -25,12 +25,15 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | `diff` | — | — | — | not-yet-covered | — |
 | `evidence digest` | — | — | — | not-yet-covered | — |
 | `evidence publish` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
-| `evidence verify` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
+| `evidence verify` | uat, demo | GPU (H100, real) | nightly | covered | — |
 | `mirror list` | — | — | — | not-yet-covered | — |
 | `query` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
 | `recipe` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
+| `recipe list` | — | — | — | not-yet-covered | — |
+| `recipe sign-catalog` | — | — | — | not-yet-covered | — |
+| `recipe verify-catalog` | — | — | — | not-yet-covered | — |
 | `skill` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
 | `snapshot` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `trust update` | chainsaw, demo | simulated / none | per-PR | covered | — |
+| `trust update` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `validate` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `verify` | chainsaw, demo | simulated / none | per-PR | covered | — |

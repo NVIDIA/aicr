@@ -48,6 +48,13 @@ func cliVerbs() []string {
 }
 
 // expandVerb returns the verb path(s) contributed by cmd under the given prefix.
+//
+// A command contributes itself when it is independently runnable — a leaf, or a
+// parent that carries its own Action (e.g. `recipe`, which also nests
+// `recipe list` / `recipe verify-catalog`). Either way its visible subcommands
+// are always included, so an executable parent does not hide shipping verbs. A
+// pure group (subcommands, no own Action, e.g. `evidence`) contributes only its
+// children.
 func expandVerb(prefix string, cmd *v3.Command) []string {
 	if builtinVerbs[cmd.Name] {
 		return nil
@@ -57,13 +64,12 @@ func expandVerb(prefix string, cmd *v3.Command) []string {
 		path = prefix + " " + cmd.Name
 	}
 
-	// A pure group (subcommands, no own Action) contributes only its children.
-	if len(cmd.Commands) > 0 && cmd.Action == nil {
-		var out []string
-		for _, sub := range cmd.Commands {
-			out = append(out, expandVerb(path, sub)...)
-		}
-		return out
+	var out []string
+	if len(cmd.Commands) == 0 || cmd.Action != nil {
+		out = append(out, path)
 	}
-	return []string{path}
+	for _, sub := range cmd.Commands {
+		out = append(out, expandVerb(path, sub)...)
+	}
+	return out
 }

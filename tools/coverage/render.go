@@ -65,13 +65,19 @@ func preamble(m Matrix) string {
 	b.WriteString("often.\" The reverse cross-link from the recipe-health page is added by RQ1 ")
 	b.WriteString("(#1283) once that page ships. See also the [CLI reference](./cli-reference.md).\n\n")
 
-	b.WriteString("**AICR-version axis.** The live UAT matrix exercises ")
-	b.WriteString(strings.Join(m.VersionAxis, " + "))
-	b.WriteString(" per recipe; the per-version posture is a TestGrid link, not a cell here.\n\n")
+	b.WriteString("**AICR-version axis.** Scheduled UAT builds only the current checkout, so ")
+	b.WriteString("the live axis today is `")
+	b.WriteString(strings.Join(m.VersionAxis, "`, `"))
+	b.WriteString("`. The multi-version matrix (main + the previous N stable releases) is ")
+	b.WriteString("owned by the dynamic-clusters epic (DC5); per-version posture will be a ")
+	b.WriteString("TestGrid link, not a cell here.\n\n")
 
-	b.WriteString("**Legend.** `covered` = an executable in-repo test exercises it; ")
-	b.WriteString("`not-yet-covered` = a shipping capability no executable test touches yet; ")
-	b.WriteString("`stubbed` = test assets exist but no workflow runs them.\n")
+	b.WriteString("**Legend.** `covered` = exercised by an executable *journey* signal — a ")
+	b.WriteString("chainsaw/KWOK test or a wired nightly UAT runner; `not-yet-covered` = a ")
+	b.WriteString("shipping capability no such journey touches yet; `stubbed` = UAT assets exist ")
+	b.WriteString("but no scheduled workflow runs them. This tracks CUJ/CLI journey coverage — ")
+	b.WriteString("per-package Go unit-test coverage is a separate gate (`make test-coverage`), ")
+	b.WriteString("not reflected here.\n")
 	return b.String()
 }
 

@@ -16,6 +16,7 @@ package main
 
 import (
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -59,11 +60,29 @@ func TestCLIVerbsDerivedFromRegistry(t *testing.T) {
 		}
 	})
 
-	t.Run("action commands stay single", func(t *testing.T) {
+	t.Run("action commands present", func(t *testing.T) {
 		for _, want := range []string{"recipe", "bundle", "validate", "snapshot", "query"} {
 			if !set[want] {
 				t.Errorf("expected verb %q in %v", want, verbs)
 			}
+		}
+	})
+
+	t.Run("action parent does not hide its subcommands", func(t *testing.T) {
+		// `recipe` has its own Action AND nests subcommands; both the parent and
+		// the visible subcommands must appear (e.g. `recipe verify-catalog`).
+		if !set["recipe"] {
+			t.Error("expected executable parent verb \"recipe\"")
+		}
+		hasRecipeSub := false
+		for _, v := range verbs {
+			if strings.HasPrefix(v, "recipe ") {
+				hasRecipeSub = true
+				break
+			}
+		}
+		if !hasRecipeSub {
+			t.Errorf("expected at least one `recipe <sub>` verb in %v", verbs)
 		}
 	})
 }
