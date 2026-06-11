@@ -542,6 +542,11 @@ constraints:
 Enumerate overlay recipes in the catalog. Useful for discovering which criteria
 combinations have a dedicated leaf overlay versus an intermediate shared recipe.
 
+Each leaf overlay also carries a structural-health verdict (ADR-009 §4): a
+rolled-up status and a per-phase declared-coverage summary, computed by
+resolving the recipe and inspecting the result. Intermediate (non-leaf)
+overlays are not scored — only leaf overlays resolve to a concrete combination.
+
 **Synopsis:**
 
 ```shell
@@ -572,6 +577,16 @@ with AND.
 | `criteria` | The full criteria dimensions the overlay targets |
 | `is_leaf` | `true` when the overlay is a leaf — no other overlay inherits from it |
 | `source` | Data provenance: `embedded` (built-in) or `external` (from `--data`) |
+| `health.status` | Rolled-up structural verdict for the leaf overlay: `pass`, `warn`, `fail`, or `unknown` (omitted for non-leaf overlays) |
+| `health.dimensions` | Per-dimension status map (e.g. `resolves`, `chart_pinned`) feeding the rollup |
+| `health.coverage` | Declared validation coverage per phase (`readiness`, `deployment`, `performance`, `conformance`): the named checks and phase-level constraint count each declares |
+
+In `table` format the health axis is rendered as two extra columns: `STATUS`
+(the rolled-up verdict) and `COVERAGE`, a compact per-phase named-check summary
+of the form `R:2 D:4 P:1 C:10` (Readiness / Deployment / Performance /
+Conformance). Non-leaf overlays render `-` in both columns. A dimension whose
+grader cannot reach a confident verdict surfaces as `unknown`, and the status
+column still renders.
 
 **Examples:**
 
@@ -592,21 +607,44 @@ aicr recipe list --accelerator h100 --format json
 aicr recipe list --data /etc/aicr/custom-recipes --format yaml
 ```
 
+**Example table output:**
+
+Intermediate (non-leaf) overlays render `-` in the `STATUS`/`COVERAGE`
+columns; only leaf overlays are scored.
+
+```text
+NAME                SERVICE  ACCELERATOR  INTENT    OS   PLATFORM  IS_LEAF  STATUS  COVERAGE         SOURCE
+gb200-eks-training  eks      gb200        training  any  any       false    -       -                embedded
+gb200-any           any      gb200        any       any  any       true     pass    R:0 D:4 P:0 C:0  embedded
+```
+
 **Example JSON output:**
+
+The `criteria` keys are capitalized because the criteria struct carries no
+field tags; the structured output mirrors the Go field names. The `health`
+block is present only for leaf overlays — non-leaf overlays omit it.
 
 ```json
 [
   {
-    "name": "gb200-eks-ubuntu-training",
-    "criteria": {"service": "eks", "accelerator": "gb200", "os": "ubuntu", "intent": "training"},
+    "name": "gb200-any",
+    "criteria": {"Service": "any", "Accelerator": "gb200", "Intent": "", "OS": "", "Platform": "", "Nodes": 0},
     "is_leaf": true,
-    "source": "embedded"
-  },
-  {
-    "name": "h100-eks-ubuntu-training",
-    "criteria": {"service": "eks", "accelerator": "h100", "os": "ubuntu", "intent": "training"},
-    "is_leaf": true,
-    "source": "embedded"
+    "source": "embedded",
+    "health": {
+      "status": "pass",
+      "dimensions": {"resolves": "pass", "chart_pinned": "pass"},
+      "coverage": {
+        "readiness": {"declared": false, "constraints": 0},
+        "deployment": {
+          "declared": true,
+          "checks": ["check-nvidia-smi", "expected-resources", "gpu-operator-version", "operator-health"],
+          "constraints": 1
+        },
+        "performance": {"declared": false, "constraints": 0},
+        "conformance": {"declared": false, "constraints": 0}
+      }
+    }
   }
 ]
 ```
