@@ -44,6 +44,10 @@ func TestParseGPUSKU(t *testing.T) {
 		{"GB200 bare", "NVIDIA GB200", "gb200"},
 		{"GB200 NVL72", "NVIDIA GB200 NVL72", "gb200"},
 		{"GB200 Grace Blackwell", "NVIDIA GB200 Grace Blackwell Superchip", "gb200"},
+		// GB300 variants (Grace Blackwell Ultra; distinct token, no ordering dependency).
+		{"GB300 bare", "NVIDIA GB300", "gb300"},
+		{"GB300 NVL72", "NVIDIA GB300 NVL72", "gb300"},
+		{"GB300 wins over B200 substring", "NVIDIA GB300 B200 NVL72", "gb300"},
 		// L40.
 		{"L40 bare", "NVIDIA L40", "l40"},
 		// RTX PRO 6000 (multi-token; editions append trailing words).

@@ -36,6 +36,10 @@ var gpuSKURegistry = []struct {
 	sku    string
 }{
 	{[]string{"GB200"}, "gb200"},
+	// "GB300" before any future "B300" rule — a Grace-Blackwell-Ultra node
+	// must not be labeled as a discrete B300. (Token-sequence matching makes
+	// order non-significant here, but keep GB* ahead of B* for clarity.)
+	{[]string{"GB300"}, "gb300"},
 	{[]string{"B200"}, "b200"},
 	{[]string{"H100"}, "h100"},
 	{[]string{"H200"}, "h200"},
