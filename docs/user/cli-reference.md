@@ -2,6 +2,8 @@
 
 Complete reference for the `aicr` command-line interface.
 
+For details on which CLI verbs and critical user journeys are exercised by tests, on what hardware, and at what cadence, see the [Coverage Matrix](./coverage-matrix.md).
+
 ## Overview
 
 AICR provides a four-step workflow for optimizing GPU infrastructure:
@@ -426,7 +428,7 @@ Generate recipes using direct system parameters:
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke, bcm |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, b200, a100, l40, rtx-pro-6000 |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
