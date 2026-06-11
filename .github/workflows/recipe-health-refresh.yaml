@@ -108,7 +108,9 @@ jobs:
             Review the diff to confirm the change is expected.
           branch: chore/health-refresh
           delete-branch: true
+          # Only real repo labels: documentation/enhancement/bug are org-level
+          # issue *types*, not PR labels (#1315). The path labeler also adds
+          # area/* on the bot PR, but listing them keeps intent explicit.
           labels: |
-            documentation
             area/docs
             area/recipes
