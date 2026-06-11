@@ -86,7 +86,9 @@ func run(ctx context.Context, outDir, aicrVersion string, deterministic, noTitle
 	})
 	closeErr := mf.Close()
 	if mdErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "render markdown", mdErr)
+		// renderMatrix already returns a structured ErrCodeInternal error;
+		// return it as-is rather than double-wrapping with the same code.
+		return mdErr
 	}
 	if closeErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "close "+mdPath, closeErr)

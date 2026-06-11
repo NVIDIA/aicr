@@ -167,16 +167,24 @@ func TestDimCell(t *testing.T) {
 }
 
 func TestCoverageCell(t *testing.T) {
-	if got := coverageCell(nil); got != "—" {
-		t.Errorf("coverageCell(nil) = %q, want em dash", got)
+	tests := []struct {
+		name string
+		in   *health.DeclaredCoverage
+		want string
+	}{
+		{"nil coverage is em dash", nil, "—"},
+		{"non-nil formats per-phase check counts", &health.DeclaredCoverage{
+			Readiness:   health.PhaseCoverage{Checks: []string{"r1", "r2"}},
+			Deployment:  health.PhaseCoverage{Checks: []string{"d1"}},
+			Conformance: health.PhaseCoverage{Checks: []string{"c1", "c2", "c3"}},
+		}, "R:2 D:1 P:0 C:3"},
 	}
-	cov := &health.DeclaredCoverage{
-		Readiness:   health.PhaseCoverage{Checks: []string{"r1", "r2"}},
-		Deployment:  health.PhaseCoverage{Checks: []string{"d1"}},
-		Conformance: health.PhaseCoverage{Checks: []string{"c1", "c2", "c3"}},
-	}
-	if got := coverageCell(cov); got != "R:2 D:1 P:0 C:3" {
-		t.Errorf("coverageCell() = %q, want %q", got, "R:2 D:1 P:0 C:3")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := coverageCell(tt.in); got != tt.want {
+				t.Errorf("coverageCell() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
