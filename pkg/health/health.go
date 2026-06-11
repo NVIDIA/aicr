@@ -112,6 +112,24 @@ type DeclaredCoverage struct {
 	Conformance PhaseCoverage `json:"conformance" yaml:"conformance"`
 }
 
+// Compact renders the per-phase declared-check counts as a single line in
+// phase order — readiness, deployment, performance, conformance — e.g.
+// "R:2 D:4 P:1 C:10". It is the single source of truth for this format,
+// shared by the recipe-health matrix (tools/health) and the `aicr recipe
+// list` table (pkg/cli) so the two cannot drift. The caller owns the nil
+// case: a nil *DeclaredCoverage means coverage is unknown (the recipe did
+// not resolve), which each surface renders with its own placeholder rather
+// than a misleading all-zero block, so this method is only valid on a
+// non-nil receiver.
+func (c *DeclaredCoverage) Compact() string {
+	return fmt.Sprintf("R:%d D:%d P:%d C:%d",
+		len(c.Readiness.Checks),
+		len(c.Deployment.Checks),
+		len(c.Performance.Checks),
+		len(c.Conformance.Checks),
+	)
+}
+
 // StructureHealth is the structural-soundness axis for one recipe.
 type StructureHealth struct {
 	// Status is the rolled-up verdict: pass | warn | fail | unknown (held).

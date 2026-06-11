@@ -330,12 +330,7 @@ func compactCoverage(c *health.DeclaredCoverage) string {
 	if c == nil {
 		return healthNotApplicable
 	}
-	return fmt.Sprintf("R:%d D:%d P:%d C:%d",
-		len(c.Readiness.Checks),
-		len(c.Deployment.Checks),
-		len(c.Performance.Checks),
-		len(c.Conformance.Checks),
-	)
+	return c.Compact()
 }
 
 // orAny returns s if non-empty, otherwise the wildcard placeholder.

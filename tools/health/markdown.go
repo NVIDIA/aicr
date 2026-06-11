@@ -156,10 +156,5 @@ func coverageCell(cov *health.DeclaredCoverage) string {
 	if cov == nil {
 		return "—"
 	}
-	return fmt.Sprintf("R:%d D:%d P:%d C:%d",
-		len(cov.Readiness.Checks),
-		len(cov.Deployment.Checks),
-		len(cov.Performance.Checks),
-		len(cov.Conformance.Checks),
-	)
+	return cov.Compact()
 }
