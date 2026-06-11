@@ -1,0 +1,344 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-attestation-kms-ministack
+  labels:
+    requires: ministack
+    ci: "true" # needs a CI-attested binary; excluded from fork e2e (no OIDC)
+    external-service: "true" # needs a live MiniStack; excluded from the generic sweep, run only by kms-ministack-e2e.yaml
+spec:
+  description: |
+    KMS-backed bundle signing and verification round-trip against MiniStack
+    (https://ministack.org), a token-free AWS emulator used in place of LocalStack.
+    Requires MiniStack running at MINISTACK_ENDPOINT (default: https://localhost:4566)
+    with KMS_KEY_ARN set to a pre-provisioned ECDSA P-256 asymmetric signing key.
+    The KMS URI format used is: awskms://<host:port>/<arn>
+    Skipped in normal --no-cluster runs; activated with --selector 'requires=ministack'.
+  timeouts:
+    exec: 120s
+  steps:
+    - name: setup
+      description: Generate recipe for KMS attestation tests.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              "${AICR_BIN}" recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: resolve-kms-uri
+      description: Build the KMS URI embedding the MiniStack endpoint.
+      try:
+        - script:
+            content: |
+              # Derive the awskms:// URI with the MiniStack endpoint embedded.
+              # Format: awskms://<host:port>/<arn>
+              # e.g.  awskms://localhost:4566/arn:aws:kms:us-east-1:000000000000:key/...
+              ENDPOINT="${MINISTACK_ENDPOINT:-https://localhost:4566}"
+              KMS_KEY_ARN="${KMS_KEY_ARN:?Set KMS_KEY_ARN to the MiniStack key ARN}"
+              # Strip the scheme so we get host:port only
+              HOST="${ENDPOINT#http://}"
+              HOST="${HOST#https://}"
+              HOST="${HOST%/}"
+              KMS_URI="awskms://${HOST}/${KMS_KEY_ARN}"
+              echo "KMS_URI=${KMS_URI}" > /tmp/chainsaw-bundle-attestation-kms/kms-env
+              echo "Resolved KMS URI: ${KMS_URI}"
+            check:
+              ($error == null): true
+
+    - name: bundle-with-kms-signing
+      description: |
+        Create a bundle attested with the MiniStack KMS key. Public-key signing:
+        no Fulcio certificate (not keyless), but the attestation is still logged
+        to the public Sigstore Rekor transparency log by default.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              . "${WORK}/kms-env"
+
+              # --certificate-identity-regexp pins the *binary* attestation identity.
+              # The CI binary is attested by this e2e workflow, not the on-tag release
+              # workflow that the default trust pattern accepts, so the bundler must be
+              # told the expected identity or it rejects the binary. Empty locally
+              # (where --attest cannot run anyway without a CI-attested binary).
+              "${AICR_BIN}" bundle -r "${WORK}/recipe.yaml" \
+                -o "${WORK}/bundle" \
+                --attest \
+                --signing-key "${KMS_URI}" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP:-}"
+            check:
+              ($error == null): true
+
+    - name: bundle-has-attestation-file
+      description: KMS-signed bundle contains bundle-attestation.sigstore.json with no Fulcio cert.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              ATTEST="${WORK}/bundle/attestation/bundle-attestation.sigstore.json"
+
+              # Attestation file must exist
+              test -f "${ATTEST}"
+
+              # Standard bundle files must also be present
+              test -f "${WORK}/bundle/checksums.txt"
+              test -f "${WORK}/bundle/recipe.yaml"
+
+              # KMS path: no Fulcio certificate embedded in the bundle.
+              # The verificationMaterial block will have a x509CertificateChain or
+              # publicKey, not a fulcioCert. Use negative grep to assert absence.
+              if python3 -c "
+              import json, sys
+              with open('${ATTEST}') as f:
+                  d = json.load(f)
+              vm = d.get('verificationMaterial', {})
+              has_fulcio = 'x509CertificateChain' in vm and bool(vm['x509CertificateChain'].get('certificates'))
+              print('has_fulcio_cert:', has_fulcio)
+              sys.exit(0 if not has_fulcio else 1)
+              "; then
+                echo "PASS: no Fulcio certificate in KMS-signed attestation (public-key path)"
+              else
+                echo "FAIL: Fulcio certificate unexpectedly present in KMS-signed attestation"
+                exit 1
+              fi
+            check:
+              ($error == null): true
+
+    - name: verify-with-kms-key
+      description: Verify KMS-signed bundle using --key with the KMS URI.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              . "${WORK}/kms-env"
+
+              # Identity regexp pins the binary attestation identity (empty falls
+              # back to the production on-tag default; the test binary is attested
+              # by build-attested.yaml, so AICR_IDENTITY_REGEXP overrides it).
+              OUTPUT=$("${AICR_BIN}" verify "${WORK}/bundle" \
+                --key "${KMS_URI}" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP:-}" \
+                --format json)
+              echo "${OUTPUT}"
+              # Assert the actual values are true, not just that the fields exist.
+              # Grep in-script (not a chainsaw key) because a ': ' inside a
+              # (contains(...)) assertion literal breaks chainsaw YAML parsing.
+              echo "${OUTPUT}" | grep -q '"checksumsPassed": true'
+              echo "${OUTPUT}" | grep -q '"bundleAttested": true'
+            check:
+              ($error == null): true
+
+    - name: verify-with-pem-public-key
+      description: Export public key from MiniStack and verify bundle with the PEM file.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              KMS_KEY_ARN="${KMS_KEY_ARN:?Set KMS_KEY_ARN to the MiniStack key ARN}"
+              ENDPOINT="${MINISTACK_ENDPOINT:-https://localhost:4566}"
+              PEM_FILE="${WORK}/signing-key.pem"
+
+              # Export public key from MiniStack KMS
+              aws kms get-public-key \
+                --endpoint-url "${ENDPOINT}" \
+                --key-id "${KMS_KEY_ARN}" \
+                --region us-east-1 \
+                --query 'PublicKey' \
+                --output text | base64 -d | \
+                openssl pkey -pubin -inform DER -outform PEM -out "${PEM_FILE}" \
+                2>/dev/null || \
+              aws kms get-public-key \
+                --endpoint-url "${ENDPOINT}" \
+                --key-id "${KMS_KEY_ARN}" \
+                --region us-east-1 \
+                --output json | \
+                python3 -c "
+              import json, base64, sys
+              d = json.load(sys.stdin)
+              data = base64.b64decode(d['PublicKey'])
+              sys.stdout.buffer.write(data)
+              " | openssl pkey -pubin -inform DER -outform PEM -out "${PEM_FILE}"
+
+              test -s "${PEM_FILE}"
+              echo "Public key exported to ${PEM_FILE}"
+
+              # Verify using the PEM file path instead of KMS URI
+              OUTPUT=$("${AICR_BIN}" verify "${WORK}/bundle" \
+                --key "${PEM_FILE}" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP:-}" \
+                --format json)
+              echo "${OUTPUT}"
+              # Assert the actual values, not just field presence. Grep in-script
+              # (not a chainsaw key): a ': ' inside a (contains(...)) literal breaks
+              # chainsaw YAML parsing.
+              echo "${OUTPUT}" | grep -q '"checksumsPassed": true'
+              echo "${OUTPUT}" | grep -q '"bundleAttested": true'
+            check:
+              ($error == null): true
+
+    - name: verify-min-trust-attested
+      description: KMS-signed bundle meets --min-trust-level attested.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              . "${WORK}/kms-env"
+
+              "${AICR_BIN}" verify "${WORK}/bundle" \
+                --key "${KMS_URI}" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP:-}" \
+                --min-trust-level attested
+            check:
+              ($error == null): true
+
+    - name: verify-min-trust-verified
+      description: |
+        KMS-signed bundle + attested binary meets --min-trust-level verified.
+        Skipped when AICR_ATTESTED is not "true" (no binary attestation available).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              . "${WORK}/kms-env"
+
+              if [ "${AICR_ATTESTED:-false}" != "true" ]; then
+                echo "SKIP: binary not attested (AICR_ATTESTED=${AICR_ATTESTED:-false}); skipping verified-level check"
+                exit 0
+              fi
+
+              IDENTITY_REGEXP="${AICR_IDENTITY_REGEXP:?Set AICR_IDENTITY_REGEXP to the workflow identity regexp}"
+
+              "${AICR_BIN}" verify "${WORK}/bundle" \
+                --key "${KMS_URI}" \
+                --certificate-identity-regexp "${IDENTITY_REGEXP}" \
+                --min-trust-level verified \
+                --format json
+            check:
+              ($error == null): true
+
+    - name: verify-tamper-detection
+      description: Tampering with a KMS-signed bundle is detected.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              . "${WORK}/kms-env"
+
+              # Tamper with a file
+              echo "tampered" >> "${WORK}/bundle/deploy.sh"
+              OUTPUT=$("${AICR_BIN}" verify "${WORK}/bundle" \
+                --key "${KMS_URI}" \
+                --format json --min-trust-level unknown 2>&1)
+              echo "$OUTPUT"
+              echo "$OUTPUT" | grep -q '"checksumsPassed": false'
+            check:
+              ($error == null): true
+
+    - name: rebuild-bundle
+      description: Rebuild clean bundle for remaining tests.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+              . "${WORK}/kms-env"
+
+              rm -rf "${WORK}/bundle"
+              # --certificate-identity-regexp pins the *binary* attestation identity.
+              # The CI binary is attested by this e2e workflow, not the on-tag release
+              # workflow that the default trust pattern accepts, so the bundler must be
+              # told the expected identity or it rejects the binary. Empty locally
+              # (where --attest cannot run anyway without a CI-attested binary).
+              "${AICR_BIN}" bundle -r "${WORK}/recipe.yaml" \
+                -o "${WORK}/bundle" \
+                --attest \
+                --signing-key "${KMS_URI}" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP:-}"
+            check:
+              ($error == null): true
+
+    - name: verify-wrong-key-rejected
+      description: Verifying with a different KMS key URI is rejected (signature mismatch).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-kms"
+
+              # Provision a second key to use as a wrong-key probe
+              ENDPOINT="${MINISTACK_ENDPOINT:-https://localhost:4566}"
+              WRONG_KEY_ARN=$(aws kms create-key \
+                --endpoint-url "${ENDPOINT}" \
+                --region us-east-1 \
+                --key-spec ECC_NIST_P256 \
+                --key-usage SIGN_VERIFY \
+                --description "aicr-test-wrong-key" \
+                --query 'KeyMetadata.Arn' \
+                --output text)
+
+              HOST="${ENDPOINT#http://}"
+              HOST="${HOST#https://}"
+              HOST="${HOST%/}"
+              WRONG_URI="awskms://${HOST}/${WRONG_KEY_ARN}"
+
+              # Verification MUST fail. The bundle was signed with the original
+              # key, so the wrong key cannot validate its attestation signature.
+              # That mismatch is recorded in the verifier's errors, which makes
+              # `aicr verify` exit non-zero. Capture the exit code explicitly (do
+              # NOT swallow it with `|| true`, which would mask a false pass) and
+              # require a non-zero status. JSON output so the secondary guard can
+              # assert the field too.
+              rc=0
+              OUTPUT=$("${AICR_BIN}" verify "${WORK}/bundle" \
+                --key "${WRONG_URI}" \
+                --format json \
+                --min-trust-level unknown 2>&1) || rc=$?
+              echo "$OUTPUT"
+
+              if [ "${rc}" -eq 0 ]; then
+                echo "FAIL: wrong key was accepted (verify exited 0)"
+                exit 1
+              fi
+              # Defense in depth: a rejection must never coincide with a verified
+              # signature. (rc is already non-zero here, so this only guards
+              # against a future regression that decouples the two.)
+              if echo "$OUTPUT" | grep -q '"bundleAttested": true'; then
+                echo "FAIL: wrong key reported bundleAttested:true"
+                exit 1
+              fi
+              echo "PASS: wrong key correctly rejected (verify exited ${rc})"
+            check:
+              ($error == null): true
+
+    - name: cleanup
+      description: Remove temporary files.
+      try:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-attestation-kms

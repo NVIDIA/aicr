@@ -110,8 +110,8 @@ runs:
           echo "::warning::No binary attestation found (attestation tests will skip)"
         fi
 
-    ## skipping attestation tests for forked repository because
-    ## OIDC authentication is not available in forked repositories
+    ## Forked repos: skip CI-gated tests (no OIDC for attestation). ci!=true
+    ## drops every ci="true" test across both dirs.
     - name: Run CLI chainsaw tests (forked repository)
       if: github.event.pull_request.head.repo.fork == true
       shell: bash
@@ -121,8 +121,14 @@ runs:
           --no-cluster \
           --config tests/chainsaw/chainsaw-config.yaml \
           --test-dir tests/chainsaw/cli/ \
+          --test-dir tests/chainsaw/signing/ \
           --selector 'ci!=true'
 
+    ## Same-repo: run the generic CLI tests plus the signing/attestation tests
+    ## that only need the CI-built attested binary. external-service!=true drops
+    ## tests that require a live external stack (MiniStack KMS, Sigstore
+    ## scaffolding); those run only in their dedicated workflows. The selector is
+    ## a no-op for tests/chainsaw/cli (none carry the label).
     - name: Run CLI chainsaw tests
       if: github.event.pull_request.head.repo.fork == false
       shell: bash
@@ -131,7 +137,9 @@ runs:
         chainsaw test \
           --no-cluster \
           --config tests/chainsaw/chainsaw-config.yaml \
-          --test-dir tests/chainsaw/cli/
+          --test-dir tests/chainsaw/cli/ \
+          --test-dir tests/chainsaw/signing/ \
+          --selector 'external-service!=true'
 
     - name: Run AI-conformance offline tests
       shell: bash

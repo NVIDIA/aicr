@@ -620,7 +620,7 @@ net. When renaming or removing a heading:
 - Internal package or architecture → `docs/contributor/<area>.md`
 - **Enum/constant value added** (e.g., new accelerator, service, OS, intent, platform, error code) → the value is usually enumerated in *many* files, not one, and grepping for the *new* value returns nothing. Start from the authoritative Go type (e.g., `pkg/recipe/criteria.go` for `CriteriaAccelerator*`), list every current value, and verify each appears wherever the enum is documented. Audit targets typically include: the OpenAPI contract at `api/aicr/v1/server.yaml` (every `enum:` block); doc pages `docs/README.md` (glossary), `docs/user/cli-reference.md`, `docs/user/api-reference.md`, `docs/contributor/api-server.md`, `docs/contributor/cli.md`, `docs/contributor/recipe.md`, `docs/contributor/validator.md`; Go-visible surfaces in the package that defines the type (package godoc in `pkg/<area>/doc.go`, field/type comments on the Go struct, and any urfave/cli `Description`/`Usage` strings that enumerate values, e.g., `pkg/cli/recipe.go`); and issue templates that surface the enum in dropdowns (`.github/ISSUE_TEMPLATE/*.yml`). Grepping `docs/` for an already-documented sibling value (e.g., `gb200`) catches forward additions but misses pre-existing drift — check against the Go type, not a known-good sibling.
 
-Follow the heading conventions in the `## Documentation Style` section above. Doc-only PRs (label `documentation`) are still subject to the full `make qualify` gate.
+Follow the heading conventions in the `## Documentation Style` section above. Doc-only PRs (typically labeled `area/docs`) are still subject to the full `make qualify` gate.
 
 **PR description:** Use the template from `.github/PULL_REQUEST_TEMPLATE.md` exactly as defined there. Do not inline a modified copy — read and fill in the canonical template. The template covers: Summary, Motivation/Context (with Fixes/Related), Type of Change, Components Affected, Implementation Notes, Testing, Risk Assessment, and Checklist.
 
@@ -637,11 +637,18 @@ This rule does not apply to non-Go changes (YAML, docs, CI workflows). Note: CI 
 **PR policy:**
 - Do NOT add `Co-Authored-By` lines (organization policy)
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
-- Add appropriate type labels: `enhancement`, `bug`, `documentation`
+- Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`. Use `dependencies` for dependency bumps. (There are no `enhancement`/`bug`/`documentation` repo labels — those names are org-level *issue types*, which apply to issues, not PRs.)
 - Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
 - Do NOT add issue priority labels `P0`, `P1`, or `P2` to PRs; they are reserved for issues and automation removes them from pull requests
 - Do NOT add `size/*` labels (auto-assigned by bot)
 - Keep the PR title under 70 characters; use the description for details
+
+**Issue policy:**
+- Set an **org issue type** on new issues. This is a GitHub-native field (shown in the standard issue view, distinct from repo `area/*`/`theme/*` labels) that categorizes the issue. Valid types: `Task`, `Bug`, `Enhancement`, `Epic`, `Initiative`, `Documentation`.
+  - Prefer `gh issue create --type Bug ...` (requires `gh` v2.94.0+); use `gh issue edit <n> --type Bug` for existing issues.
+  - With older `gh` versions, use the web UI or automation with the needed permissions. Current REST Issues create/edit endpoints also accept `type` for users with push access, but avoid stale ad hoc `gh api` examples because older clients or API versions may reject or silently drop the field.
+- Match the type to intent (a feature request → `Enhancement`, a docs gap → `Documentation`); the issue templates pre-fill a sensible default, so only override when the template's choice is wrong.
+- The AICR Project board also has its own `Type` and `Priority` (P0–P2) fields — those are set on the *project board*, not the issue, and need a `project`-scoped token. Leave them to maintainers/automation unless explicitly asked.
 
 ## Key Files
 

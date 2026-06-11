@@ -32,6 +32,46 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 **Evidence** is a literal `pending` for every recipe today. No conformance attestations exist yet, so the column is honestly uniform: it reports the absence of evidence rather than overstating what is known. A differentiated, evidence-derived column lands once the first signed attestation does.
 
 <!-- BEGIN AICR-HEALTH -->
-<!-- AICR-HEALTH-DEFERRED: matrix publication intentionally withheld; see the note below. Remove this sentinel by running `make recipe-health-docs`, which overwrites this whole region with the generated matrix. -->
-_Matrix publication is intentionally deferred. The generator (`tools/health`) and the `make recipe-health-docs` / `make recipe-health-check` targets are in place and fully functional today — what is withheld is the **committed matrix body**, not the tooling. One structural signal (`chart_pinned`) currently over-reports `fail` for manifest-only components (declared `type: Helm` but shipping local manifests with no external chart to pin), which would render a misleading matrix. The matrix will be populated by `make recipe-health-docs` once that signal is corrected. See [ADR-009](../design/009-recipe-health-tracking.md)._
+## Summary
+
+- Recipes: **32**
+- Pass: **32** · Warn: **0** · Fail: **0** · Unknown: **0**
+
+## Recipes
+
+| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence |
+|--------|---------|-------------|----|--------|----------|--------|----------|----------|
+| b200-any | — | b200 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
+| gb200-any | — | gb200 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
+| h100-any | — | h100 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
+| h200-any | — | h200 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
+| rtx-pro-6000-any | — | rtx-pro-6000 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
+| monitoring-hpa | — | — | — | — | — | pass | R:0 D:0 P:0 C:0 | pending |
+| h100-aks-ubuntu-inference-dynamo | aks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
+| h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
+| h100-bcm-ubuntu-training | bcm | h100 | ubuntu | training | — | pass | R:0 D:4 P:0 C:5 | pending |
+| gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:10 | pending |
+| gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:8 | pending |
+| h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
+| h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
+| h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| h100-eks-ubuntu-training-slurm | eks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
+| h200-eks-inference | eks | h200 | — | inference | — | pass | R:0 D:4 P:0 C:5 | pending |
+| h200-eks-training | eks | h200 | — | training | — | pass | R:0 D:4 P:1 C:10 | pending |
+| rtx-pro-6000-eks-ubuntu-inference-dynamo | eks | rtx-pro-6000 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
+| rtx-pro-6000-eks-ubuntu-inference-nim | eks | rtx-pro-6000 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
+| b200-gke-cos-inference-dynamo | gke | b200 | cos | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
+| b200-gke-cos-training-kubeflow | gke | b200 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
+| h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
+| h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
+| h100-kind-inference-dynamo | kind | h100 | — | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
+| h100-kind-training-kubeflow | kind | h100 | — | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
+| h100-kind-training-slurm | kind | h100 | — | training | slurm | pass | R:0 D:4 P:0 C:9 | pending |
+| rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:8 | pending |
+| rtx-pro-6000-lke-ubuntu-training | lke | rtx-pro-6000 | ubuntu | training | — | pass | R:0 D:4 P:0 C:8 | pending |
+| gb200-oke-ubuntu-inference-dynamo | oke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:10 | pending |
+| gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:8 | pending |
+
 <!-- END AICR-HEALTH -->

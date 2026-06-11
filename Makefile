@@ -392,11 +392,6 @@ recipe-health-summary: ## Renders the per-dimension structural detail to $(SUMMA
 .PHONY: recipe-health-check
 recipe-health-check: ## Verifies $(HEALTH_DOC_PATH) is up to date with the recipe catalog (advisory; not wired into qualify/lint/merge gate)
 	@set -e; \
-	if grep -q '<!-- AICR-HEALTH-DEFERRED' $(HEALTH_DOC_PATH); then \
-	   echo "$(HEALTH_DOC_PATH): matrix publication is deferred (placeholder present); skipping staleness check."; \
-	   echo "Remove the AICR-HEALTH-DEFERRED sentinel by publishing the matrix once chart_pinned no longer over-reports failures."; \
-	   exit 0; \
-	fi; \
 	$(MAKE) recipe-health-docs; \
 	if ! git diff --quiet -- $(HEALTH_DOC_PATH); then \
 	   echo "ERROR: $(HEALTH_DOC_PATH) is stale. Run 'make recipe-health-docs' and commit the change." >&2; \
