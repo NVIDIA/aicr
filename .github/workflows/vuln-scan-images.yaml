@@ -17,7 +17,12 @@ name: Daily Image Vulnerability Scan
 on:
   schedule:
     - cron: '0 6 * * *'  # Daily at 6:00 AM UTC
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      notify_slack:
+        description: 'Post results to Slack (scheduled runs always post; manual runs skip by default)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -317,6 +322,10 @@ jobs:
       - name: Post to Slack
         env:
           SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          # Scheduled runs always post; manual runs post only when the
+          # notify_slack input is set. The message is echoed to the logs
+          # either way, so manual runs can validate findings without Slack.
+          POST_SLACK: ${{ github.event_name == 'schedule' || inputs.notify_slack }}
           SHA: ${{ github.sha }}
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
@@ -355,14 +364,19 @@ jobs:
 
           MESSAGE="Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}\\n<${RUN_URL}|View run>"
 
-          if [[ -n "${SLACK_SERVICE}" ]]; then
+          # Always echo the message so the run logs carry the findings,
+          # then post to Slack only when enabled for this trigger.
+          echo -e "${MESSAGE}"
+
+          if [[ "${POST_SLACK}" != "true" ]]; then
+            echo "Slack notification disabled for this run (POST_SLACK=${POST_SLACK}); skipping post"
+          elif [[ -n "${SLACK_SERVICE}" ]]; then
             curl -sSf -X POST \
               -H 'Content-type: application/json' \
               --data "{\"text\":\"${MESSAGE}\"}" \
               "https://hooks.slack.com/services/${SLACK_SERVICE}"
           else
             echo "SLACK_SERVICE not set, skipping notification"
-            echo -e "${MESSAGE}"
           fi
 
   # =============================================================================

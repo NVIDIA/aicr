@@ -17,9 +17,11 @@ package health
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -59,6 +61,15 @@ const (
 	// DimChartPinned is the graded dimension scoring whether every resolved
 	// Helm component references an explicit chart version (ADR-006 layer 1).
 	DimChartPinned = "chart_pinned"
+
+	// DimConstraintsWellformed is the graded dimension scoring whether every
+	// merged constraint parses with the snapshot-free constraint parsers
+	// (fail), and whether the constraint-aware resolution surfaced any
+	// composition warnings (warn). It is parse-only well-formedness — V1 is
+	// hermetic and never replays a constraint against cluster/snapshot state.
+	// See classifyConstraintsWellformed for why the warn branch is inert under
+	// the current satisfied-stub resolution.
+	DimConstraintsWellformed = "constraints_wellformed"
 )
 
 // Options configures a Compute run.
@@ -206,7 +217,14 @@ func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.Cat
 		Detail:     make(map[string]string),
 	}
 
-	result, err := builder.BuildFromCriteria(ctx, entry.Criteria)
+	// Resolve through the constraint-aware path with a hermetic satisfied stub.
+	// With every constraint reported satisfied this merges exactly the overlays
+	// BuildFromCriteria would (no cluster-dependent exclusions), so the resolves
+	// grade is unchanged — but the result additionally carries the merged
+	// Constraints and any ConstraintWarnings/ExcludedOverlays the constraint-aware
+	// path surfaces, which the constraints_wellformed signal reads. One build,
+	// no snapshot, no cluster.
+	result, err := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, satisfiedEvaluator)
 	state, detail := classifyResolve(err)
 	structure.Dimensions[DimResolves] = state
 	if detail != "" {
@@ -222,6 +240,13 @@ func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.Cat
 		if pinnedDetail != "" {
 			structure.Detail[DimChartPinned] = pinnedDetail
 		}
+
+		cwState, cwDetail := classifyConstraintsWellformed(result)
+		structure.Dimensions[DimConstraintsWellformed] = cwState
+		if cwDetail != "" {
+			structure.Detail[DimConstraintsWellformed] = cwDetail
+		}
+
 		cov := computeCoverage(result)
 		structure.Coverage = &cov
 	}
@@ -279,6 +304,75 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 	if helmCount == 0 {
 		return StatusPass, "no enabled Helm components; chart-version pinning not applicable (Kustomize tag pinning is out of scope)"
 	}
+	return StatusPass, ""
+}
+
+// satisfiedEvaluator is the hermetic stub fed to BuildFromCriteriaWithEvaluator
+// so the constraint-aware resolution path executes offline. It reports every
+// constraint satisfied, so no overlay is excluded and no ConstraintWarning is
+// emitted — the resolution exercises the merge/compose machinery without any
+// snapshot measurement, which is all the parse-only signal needs.
+func satisfiedEvaluator(recipe.Constraint) recipe.ConstraintEvalResult {
+	return recipe.ConstraintEvalResult{Passed: true}
+}
+
+// classifyConstraintsWellformed grades the constraints_wellformed dimension
+// hermetically — no snapshot, no cluster.
+//
+// Primary (fail): every merged constraint must parse. Both the path
+// (ParseConstraintPath over Name) and the value expression
+// (ParseConstraintExpression over Value) are checked with the exported,
+// snapshot-free parsers. The first malformed constraint fails the dimension,
+// naming the offending constraint and the parser error in the detail — a
+// malformed constraint is never a silent pass. The merged constraint order is
+// deterministic for a given leaf (sorted by name once any overlay/mixin merges,
+// base-file order otherwise), so the reported failure is stable across runs.
+//
+// This is structural parse well-formedness only: it does not validate value
+// semantics. A version-comparison value that parses but is not a usable version
+// (e.g. ">= not-a-version") scores pass here — semantic/range checking and any
+// snapshot-dependent constraint replay are deferred to the evidence-driven
+// validation axis (ADR-009 coverage_declared_vs_run).
+//
+// Secondary (warn): if every constraint parses but the resolution surfaced
+// ConstraintWarnings or ExcludedOverlays, the dimension warns. NOTE: these
+// fields are populated only when the injected evaluator reports a constraint
+// failed or errored (see metadata_store.evaluateOverlayConstraints /
+// evaluateMixinConstraints). satisfiedEvaluator never does, so under the
+// current hermetic resolution the warn branch does not fire — composition
+// problems surface instead as resolve errors. The branch is retained because it
+// is the correct reading of a resolved result and is forward-compatible with a
+// future evaluator wired into this path; it is exercised by unit tests via
+// direct field injection.
+//
+// A nil result (resolve failed or held) is never scored by the caller; pass is
+// returned defensively.
+func classifyConstraintsWellformed(result *recipe.RecipeResult) (state, detail string) {
+	if result == nil {
+		return StatusPass, ""
+	}
+
+	for _, c := range result.Constraints {
+		if _, err := constraints.ParseConstraintPath(c.Name); err != nil {
+			return StatusFail, fmt.Sprintf("constraint %q: malformed path: %v", c.Name, err)
+		}
+		if _, err := constraints.ParseConstraintExpression(c.Value); err != nil {
+			return StatusFail, fmt.Sprintf("constraint %q: malformed value %q: %v", c.Name, c.Value, err)
+		}
+	}
+
+	if warnings := result.Metadata.ConstraintWarnings; len(warnings) > 0 {
+		w := warnings[0]
+		return StatusWarn, fmt.Sprintf(
+			"%d constraint warning(s) during resolution; first: overlay %q constraint %q: %s",
+			len(warnings), w.Overlay, w.Constraint, w.Reason)
+	}
+	if excluded := result.Metadata.ExcludedOverlays; len(excluded) > 0 {
+		return StatusWarn, fmt.Sprintf(
+			"%d overlay(s) excluded during constraint-aware resolution; first: %q (%s)",
+			len(excluded), excluded[0].Name, excluded[0].Reason)
+	}
+
 	return StatusPass, ""
 }
 

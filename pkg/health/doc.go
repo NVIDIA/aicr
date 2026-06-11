@@ -34,12 +34,25 @@
 // # Signals and rollup
 //
 // Each leaf is scored on graded dimensions whose per-dimension state is one
-// of pass, warn, fail, or unknown. Two graded dimensions ship today: resolves
-// (whether the recipe builder resolves the criteria without error) and
+// of pass, warn, fail, or unknown. Three graded dimensions ship today:
+// resolves (whether the recipe builder resolves the criteria without error),
 // chart_pinned (whether every resolved Helm component references an explicit
-// chart version — ADR-006 layer 1, a pure field read with no Helm render).
-// One more graded dimension, constraints_wellformed, is layered on by later
-// work and feeds the same generic rollup without changing rollup logic.
+// chart version — ADR-006 layer 1, a pure field read with no Helm render), and
+// constraints_wellformed (whether every merged constraint parses with the
+// snapshot-free constraint parsers — fail — and whether the constraint-aware
+// resolution surfaced composition warnings — warn). Each feeds the same
+// generic rollup without changing rollup logic.
+//
+// constraints_wellformed is parse-only well-formedness and hermetic: the leaf
+// is resolved through the constraint-aware path with a satisfied stub
+// evaluator, so the signal never replays a constraint against cluster or
+// snapshot state. Its fail grade (a constraint that does not parse) is the
+// load-bearing signal; the warn grade reads ConstraintWarnings/ExcludedOverlays
+// but, because the stub fails no constraint, does not fire under the current
+// hermetic resolution (it is retained for forward-compatibility — see
+// classifyConstraintsWellformed). Value semantics and snapshot-dependent
+// constraint replay are deferred to the evidence-driven validation axis
+// (ADR-009 coverage_declared_vs_run).
 //
 // declared_coverage is a separate descriptor, not a graded dimension: it
 // records, per validation phase, whether the phase is declared, its named

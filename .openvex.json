@@ -3,9 +3,9 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-06-06T00:00:00Z",
-  "version": 2,
-  "tooling": "manual; reachability verified against aiperf v0.7.0 source",
+  "timestamp": "2026-06-11T00:00:00Z",
+  "version": 3,
+  "tooling": "manual; aiperf-bench statements verified against aiperf v0.7.0 source; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage)",
   "statements": [
     {
       "vulnerability": {
@@ -305,6 +305,23 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The attack requires parsing a crafted (attacker-controlled) XML document through xml.parsers.expat or xml.etree.ElementTree to trigger hash flooding. AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go). That subcommand communicates with the inference endpoint via JSON over HTTP only; all data transport uses aiohttp + orjson/msgspec. aiperf v0.7.0's declared dependencies contain no XML parsing libraries — the runtime stack (aiohttp, msgspec, orjson, numpy, transformers, uvicorn, fastapi) is entirely JSON/binary-based. While xml.parsers.expat is present in the Python 3.13 stdlib image, no attacker-controlled XML document can enter the aiperf profile execution path, making the hash-flooding trigger unreachable."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45447",
+        "description": "OpenSSL heap use-after-free in PKCS7_verify() (CWE-416, High). Fixed for Ubuntu 24.04 (noble) in openssl 3.0.13-0ubuntu3.11; the aicr image inherits the unpatched package transitively from the nvcr.io/nvidia/cuda CUDA base until that base rebuilds."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr",
+          "identifiers": {
+            "purl": "pkg:oci/aicr"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The aicr image is a statically-linked Go binary built by ko (`ko build ./cmd/aicr --bare`, base from .ko.yaml: nvcr.io/nvidia/cuda:13.2.1-runtime-ubuntu24.04). The build is CGO-free (ko default CGO_ENABLED=0; no `import \"C\"` anywhere in cmd/ or pkg/), so the binary uses Go's native crypto/tls and crypto/x509 and does not dynamically link, dlopen, or otherwise call into libssl3t64/libcrypto. The vulnerable symbol PKCS7_verify is reachable only through the OpenSSL C API, which no process in the container invokes: the openssl and libssl3t64 packages are inert Ubuntu base-image artifacts inherited from the CUDA image, and the container's sole entrypoint is the aicr binary. CVE-2026-45447 requires calling PKCS7_verify on attacker-influenced PKCS#7 input, and that code path does not exist in the running workload. The sibling aicrd image is unaffected by this CVE because it builds on gcr.io/distroless/static:nonroot, which carries no openssl package. Verified with grype v0.110.0 (the scan-action pin) `--vex .openvex.json` against the published ghcr.io/nvidia/aicr scan image: CVE-2026-45447 moves to ignoredMatches for both openssl and libssl3t64 under the vex namespace, leaving zero surviving HIGH findings."
     }
   ]
 }
