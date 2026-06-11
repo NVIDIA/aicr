@@ -116,6 +116,12 @@ Include overlays from an external data directory:
 				Usage:    "Output format (json, yaml, table)",
 				Category: catOutput,
 			}, func() []string { return []string{"json", "yaml", "table"} }),
+			&cli.BoolFlag{
+				Name:     flagNoHealth,
+				Aliases:  []string{"skip-health"},
+				Usage:    "Skip per-leaf structural-health computation. Omits the STATUS/COVERAGE table columns and the health block in json/yaml output.",
+				Category: catOutput,
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, flagFormat); err != nil {
@@ -151,20 +157,30 @@ Include overlays from an external data directory:
 					fmt.Sprintf("unknown output format %q, valid formats are: json, yaml, table", cmd.String(flagFormat)))
 			}
 
-			// Delegate the structural-health computation to pkg/health (via the
-			// facade, which binds this Client's own provider so --data overlays
-			// are scored). Health is keyed by leaf overlay name so each catalog
-			// entry can be paired with its verdict during rendering.
-			report, err := client.ComputeHealth(ctx, filter)
-			if err != nil {
-				return err
-			}
-			healthByName := make(map[string]*health.StructureHealth, len(report.Combos))
-			for i := range report.Combos {
-				healthByName[report.Combos[i].LeafOverlay] = &report.Combos[i].Structure
+			// The --no-health opt-out skips the per-leaf structural-health
+			// computation entirely and renders the pre-#1228 catalog shape (no
+			// STATUS/COVERAGE columns, no health block). A nil healthByName map
+			// signals writeCatalogEntries to drop the health axis.
+			showHealth := !cmd.Bool(flagNoHealth)
+
+			var healthByName map[string]*health.StructureHealth
+			if showHealth {
+				// Delegate the structural-health computation to pkg/health (via
+				// the facade, which binds this Client's own provider so --data
+				// overlays are scored). Health is keyed by leaf overlay name so
+				// each catalog entry can be paired with its verdict during
+				// rendering.
+				report, err := client.ComputeHealth(ctx, filter)
+				if err != nil {
+					return err
+				}
+				healthByName = make(map[string]*health.StructureHealth, len(report.Combos))
+				for i := range report.Combos {
+					healthByName[report.Combos[i].LeafOverlay] = &report.Combos[i].Structure
+				}
 			}
 
-			return writeCatalogEntries(ctx, cmd, entries, healthByName, format)
+			return writeCatalogEntries(ctx, cmd, entries, healthByName, showHealth, format)
 		},
 	}
 }
@@ -232,7 +248,12 @@ func buildCatalogFilter(cmd *cli.Command, client *aicr.Client) (*aicr.Criteria, 
 // json/yaml emit the full per-dimension status map and declared_coverage under
 // a health object; table renders a compact structural status column and an
 // R/D/P/C coverage summary.
-func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.CatalogEntry, healthByName map[string]*health.StructureHealth, format serializer.Format) error {
+//
+// When showHealth is false (the --no-health opt-out), the health axis is
+// dropped entirely: the table omits the STATUS/COVERAGE columns and json/yaml
+// omit the health block, reproducing the pre-#1228 catalog shape. healthByName
+// is nil in that case.
+func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.CatalogEntry, healthByName map[string]*health.StructureHealth, showHealth bool, format serializer.Format) error {
 	w := cmd.Root().Writer
 
 	switch format {
@@ -256,12 +277,31 @@ func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.C
 
 	case serializer.FormatTable:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		if _, err := fmt.Fprintln(tw, "NAME\tSERVICE\tACCELERATOR\tINTENT\tOS\tPLATFORM\tIS_LEAF\tSTATUS\tCOVERAGE\tSOURCE"); err != nil {
+		header := "NAME\tSERVICE\tACCELERATOR\tINTENT\tOS\tPLATFORM\tIS_LEAF\tSTATUS\tCOVERAGE\tSOURCE"
+		if !showHealth {
+			header = "NAME\tSERVICE\tACCELERATOR\tINTENT\tOS\tPLATFORM\tIS_LEAF\tSOURCE"
+		}
+		if _, err := fmt.Fprintln(tw, header); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to write table header", err)
 		}
 		for _, e := range entries {
 			if err := ctx.Err(); err != nil {
 				return errors.Wrap(errors.ErrCodeTimeout, "write canceled", err)
+			}
+			if !showHealth {
+				if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%v\t%s\n",
+					e.Name,
+					orAny(e.Criteria.Service),
+					orAny(e.Criteria.Accelerator),
+					orAny(e.Criteria.Intent),
+					orAny(e.Criteria.OS),
+					orAny(e.Criteria.Platform),
+					e.IsLeaf,
+					e.Source,
+				); err != nil {
+					return errors.Wrap(errors.ErrCodeInternal, "failed to write table row", err)
+				}
+				continue
 			}
 			h := healthByName[e.Name]
 			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%v\t%s\t%s\t%s\n",

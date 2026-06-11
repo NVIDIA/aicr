@@ -564,6 +564,7 @@ aicr recipe list [flags]
 | `--platform` | | string | | Filter by platform/framework type (e.g. dynamo, kubeflow, nim) |
 | `--format` | `-t` | string | table | Output format: json, yaml, table |
 | `--data` | | string | | External data directory to include alongside embedded overlays |
+| `--no-health` | `--skip-health` | bool | false | Skip per-leaf structural-health computation; render only the enumeration columns/fields |
 
 Filter flags narrow the output to overlays whose criteria carry that exact value.
 Unspecified flags match all overlays for that dimension. Multiple filters are combined
@@ -588,6 +589,14 @@ Conformance). Non-leaf overlays render `-` in both columns. A dimension whose
 grader cannot reach a confident verdict surfaces as `unknown`, and the status
 column still renders.
 
+Resolving every leaf overlay to compute its health verdict adds latency on each
+invocation. For purely interactive "what overlays exist?" lookups — or scripted
+callers that only consume `name`/`criteria`/`is_leaf`/`source` — pass
+`--no-health` (alias `--skip-health`) to skip the health computation entirely.
+With the flag set the `table` format omits the `STATUS`/`COVERAGE` columns and
+the `json`/`yaml` formats omit the `health` block, leaving only the enumeration
+columns/fields.
+
 **Examples:**
 
 ```shell
@@ -605,6 +614,9 @@ aicr recipe list --accelerator h100 --format json
 
 # Include external overlays from a custom data directory
 aicr recipe list --data /etc/aicr/custom-recipes --format yaml
+
+# Skip the structural-health computation for a faster enumeration-only listing
+aicr recipe list --no-health
 ```
 
 **Example table output:**
