@@ -823,6 +823,7 @@ aicr validate [flags]
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
 | `--oidc-device-flow` | | bool | false | Use the OAuth 2.0 device authorization grant for `--push` OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. |
+| `--yes` | `--assume-yes` | bool | false | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 | `--data` | | string | | External data directory to overlay on embedded data |
 
 **Input Sources:**
@@ -954,6 +955,8 @@ aicr validate \
   --emit-attestation ./out \
   --push ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
 # After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
+# NOTE: keyless --push signing publishes the signer's identity (email + issuer)
+# to the public Rekor log. On a TTY, aicr pauses for confirmation first (--yes skips it).
 
 # Validate on a cluster with custom GPU node labels (non-standard labels that AICR doesn't
 # recognize by default, e.g., using a custom node pool label instead of cloud-provider defaults)
@@ -1264,6 +1267,7 @@ aicr bundle [flags]
 | `--fulcio-url` | | string | Override the Fulcio CA URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Fulcio when omitted. Also reads `AICR_FULCIO_URL`. |
 | `--rekor-url` | | string | Override the Rekor transparency-log URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Rekor when omitted. Also reads `AICR_REKOR_URL`. The two URLs are independent — a private Fulcio can pair with the public Rekor or vice versa. |
 | `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a cloud KMS URI; supported schemes are `awskms://`, `gcpkms://`, and `azurekms://`. Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. `--rekor-url` may still be combined to log to a private Rekor. See [KMS-Backed Signing](#kms-backed-signing). |
+| `--yes` | `--assume-yes` | bool | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 
 #### Bundle Config File Mode
 
@@ -2153,6 +2157,56 @@ Both interactive flows time out after 5 minutes.
 
 Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`, `flux`). External `--data` files are included in `checksums.txt` and listed as resolved dependencies in the attestation.
 
+##### Privacy: identity in keyless signatures
+
+Keyless signing trades a long-lived key for a short-lived Fulcio certificate
+minted from **your identity** — and that identity becomes part of the public
+record. Before any of the interactive sources above (device-code or browser)
+opens a login, understand what is published:
+
+- The Fulcio certificate embeds the **authenticated OIDC identity** — typically
+  your **email address** plus the OIDC **issuer** — in the certificate's subject
+  alternative name.
+- With the **public-good** Sigstore defaults (`fulcio.sigstore.dev` /
+  `rekor.sigstore.dev`), the signature and certificate are recorded in the
+  **Rekor transparency log**, which is **public, append-only, and permanent** —
+  entries cannot be deleted, so the identity is **globally searchable forever**.
+- The same identity-bearing Sigstore bundle is **attached to the pushed OCI
+  artifact** as a referrer, visible to anyone who can pull it.
+
+This applies equally to `aicr bundle --attest`, `aicr validate --emit-attestation --push`,
+and `aicr evidence publish --push`.
+
+**Controlling exposure.** To avoid publishing a personal identity:
+
+- Sign from a **service / CI ambient identity** (e.g. GitHub Actions OIDC)
+  rather than a personal browser login.
+- Supply a **pre-fetched `--identity-token`** minted from a non-personal
+  identity (a workload-identity exchange, a CI bot account).
+- Point `--fulcio-url` / `--rekor-url` at **private Sigstore infrastructure** so
+  the identity stays inside your organization rather than the public commons.
+  (Note: the `validate --emit-attestation` / `evidence publish` paths always use
+  the public-good endpoints today; only `bundle --attest` exposes these flags.)
+- Use `--signing-key` (KMS-backed signing) instead of keyless — no OIDC identity
+  is embedded. See [KMS-Backed Signing](#kms-backed-signing).
+
+**Interactive confirmation gate.** Because the consequence is irreversible on
+public Sigstore, the CLI gates the interactive login behind an explicit
+confirmation. When `aicr` is about to open a **browser or device-code** flow it
+prints a disclosure banner naming the Fulcio/Rekor endpoints in effect and what
+will be published, then:
+
+- **On a TTY**, it pauses for a `y/N` confirmation (default **no**) and aborts
+  cleanly — no browser opens — if you decline.
+- **On non-interactive stdin** (CI, pipes), it prints the banner and proceeds
+  without blocking, so scripted/CI signing is never wedged.
+- Pre-fetched `--identity-token`, ambient GitHub Actions OIDC, and `--signing-key`
+  paths are **not** gated — they neither open a browser nor publish a surprise
+  identity.
+
+Pass `--yes` (alias `--assume-yes`, env `AICR_ASSUME_YES`) to skip the prompt for
+trusted interactive automation; the banner is still printed.
+
 ##### KMS-Backed Signing
 
 Keyless signing depends on an OIDC identity provider. Some CI/CD environments
@@ -2578,15 +2632,22 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omit the tag and aicr derives a unique per-recipe one (`<recipe-slug>-<short-fingerprint>`); pass an explicit tag to override. See [`aicr validate --push`](#aicr-validate). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
 | `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
+| `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 | `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS when pushing the OCI artifact (local-registry tests). |
 | `--insecure-tls` | | bool | `false` | Skip TLS verification when pushing the OCI artifact (self-signed registries). |
+
+> **Identity disclosure:** `evidence publish` always signs. On the interactive
+> (browser / device-code) keyless paths it publishes the signer's identity
+> (email + issuer) to the public Rekor log, so on a TTY it pauses for
+> confirmation first (`--yes` skips it). See
+> [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures).
 
 **Exit codes:**
 
 | Code | Meaning |
 |------|---------|
 | 0 | Bundle signed, pushed, and `pointer.yaml` written. |
-| non-zero | Bundle could not be loaded, signed, or pushed. |
+| non-zero | Identity-disclosure prompt declined, or bundle could not be loaded, signed, or pushed. |
 
 **Examples:**
 
