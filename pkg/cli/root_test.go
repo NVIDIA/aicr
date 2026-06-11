@@ -16,6 +16,20 @@ package cli
 
 import "testing"
 
+func TestRootCommand(t *testing.T) {
+	cmd := RootCommand()
+	if cmd == nil {
+		t.Fatal("RootCommand() returned nil")
+	}
+	if len(cmd.Commands) == 0 {
+		t.Fatal("RootCommand() has no subcommands")
+	}
+	// It must return the same assembled tree as the internal builder.
+	if got, want := len(cmd.Commands), len(newRootCmd().Commands); got != want {
+		t.Errorf("RootCommand() subcommand count = %d, want %d", got, want)
+	}
+}
+
 func TestDefaultAgentImage(t *testing.T) {
 	tests := []struct {
 		name     string

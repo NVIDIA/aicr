@@ -26,6 +26,9 @@ pkg/health/** @nvidia/aicr-maintainer
 tools/health/** @nvidia/aicr-maintainer
 docs/user/recipe-health.md @nvidia/aicr-maintainer
 
+# Recipe-quality surfaces (RQ): the CUJ/CLI coverage matrix generator
+tools/coverage/** @nvidia/aicr-maintainer
+
 # CI/CD and automation
 /Makefile @nvidia/aicr-maintainer
 /.goreleaser.yaml @nvidia/aicr-maintainer
