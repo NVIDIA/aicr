@@ -43,6 +43,10 @@ type recipeEvidenceConfig struct {
 	// issue, and a multi-minute validation run between resolve and sign
 	// invalidates it.
 	OIDCResolve bundleattest.ResolveOptions
+
+	// AssumeYes bypasses the interactive keyless-signing identity-disclosure
+	// prompt (--yes / AICR_ASSUME_YES). The banner is still emitted.
+	AssumeYes bool
 }
 
 // buildRecipeEvidenceConfig parses the --emit-attestation flag family with
@@ -65,6 +69,7 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 		PlainHTTP:   boolFlagOrConfig(cmd, flagPlainHTTP, att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),
 		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
+		AssumeYes:   cmd.Bool(flagAssumeYes),
 	}
 }
 
@@ -103,6 +108,16 @@ func emitRecipeEvidence(
 	results []*validator.PhaseResult,
 	cfg *recipeEvidenceConfig,
 ) error {
+
+	// Signing happens only when --push is set (see attestation.Emit). Gate the
+	// interactive keyless login behind the identity-disclosure prompt before
+	// the long validation-and-push run can open a browser/device-code flow.
+	// Non-interactive token sources and non-TTY runs pass through inside the gate.
+	if cfg.Push != "" {
+		if err := confirmKeylessSigningDisclosure(cfg.OIDCResolve, cfg.AssumeYes, os.Stdin, os.Stderr); err != nil {
+			return err
+		}
+	}
 
 	cat, err := catalog.LoadWithDataProvider(ctx, dp, version, commit)
 	if err != nil {
