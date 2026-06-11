@@ -75,6 +75,8 @@ func TestParseCriteriaAcceleratorType(t *testing.T) {
 		{"h200", "h200", CriteriaAcceleratorH200, false},
 		{"H200 uppercase", "H200", CriteriaAcceleratorH200, false},
 		{"gb200", "gb200", CriteriaAcceleratorGB200, false},
+		{"gb300", "gb300", CriteriaAcceleratorGB300, false},
+		{"GB300 uppercase", "GB300", CriteriaAcceleratorGB300, false},
 		{"b200", "b200", CriteriaAcceleratorB200, false},
 		{"a100", "a100", CriteriaAcceleratorA100, false},
 		{"l40", "l40", CriteriaAcceleratorL40, false},
@@ -635,7 +637,7 @@ func TestGetCriteriaAcceleratorTypes(t *testing.T) {
 	types := GetCriteriaAcceleratorTypes()
 
 	// Should return sorted list
-	expected := []string{"a100", "b200", "gb200", "h100", "h200", "l40", "rtx-pro-6000"}
+	expected := []string{"a100", "b200", "gb200", "gb300", "h100", "h200", "l40", "rtx-pro-6000"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaAcceleratorTypes() returned %d types, want %d", len(types), len(expected))
 	}

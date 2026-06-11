@@ -135,6 +135,12 @@ var (
 //	variantDefault → testdata/{accelerator}/{service}/{filename}
 //	other variants → testdata/{accelerator}/{service}/{stem}-{variant}{ext}
 func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, filename string) string {
+	// GB300 (Blackwell Ultra) reuses the GB200 NCCL testdata templates — same
+	// NVL72 platform, Grace ARM64 host, and EFA/MNNVL transport. The recipe
+	// criteria stays gb300; only the template directory aliases to gb200.
+	if accelerator == recipe.CriteriaAcceleratorGB300 {
+		accelerator = recipe.CriteriaAcceleratorGB200
+	}
 	if variant != variantDefault {
 		ext := filepath.Ext(filename)
 		stem := strings.TrimSuffix(filename, ext)
@@ -155,10 +161,12 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
 	variantNET: {
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
+		// GB300 reuses the GB200 EKS templates (same NVL72 platform) via the
+		// alias in templatePath.
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 	},
 	variantNVLS: {
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
 	},
 }
@@ -363,6 +371,7 @@ const (
 // No entry for CriteriaAcceleratorAny — "any" deliberately skips the filter.
 var acceleratorProductMatchers = map[recipe.CriteriaAcceleratorType]func(string) bool{
 	recipe.CriteriaAcceleratorGB200:      func(s string) bool { return s == "NVIDIA-GB200" },
+	recipe.CriteriaAcceleratorGB300:      func(s string) bool { return s == "NVIDIA-GB300" },
 	recipe.CriteriaAcceleratorB200:       func(s string) bool { return s == "NVIDIA-B200" },
 	recipe.CriteriaAcceleratorH100:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H100-") },
 	recipe.CriteriaAcceleratorA100:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-A100-") },
