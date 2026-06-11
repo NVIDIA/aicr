@@ -36,6 +36,13 @@ on:
     - cron: "30 6 * * 1"
   workflow_dispatch: {}
 
+# Serialize runs of this workflow so a manual workflow_dispatch cannot race a
+# scheduled run — both push the same fixed `chore/health-refresh` branch.
+# cancel-in-progress is intentionally omitted: a new run waits rather than
+# interrupting an in-flight branch push / PR update mid-write, then reconciles.
+concurrency:
+  group: ${{ github.workflow }}
+
 permissions:
   contents: read
 
@@ -44,6 +51,9 @@ jobs:
     name: Regenerate recipe-health matrix and open PR on drift
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Elevated above the workflow-global `contents: read`: this job needs
+    # `contents: write` to push the refresh branch and `pull-requests: write`
+    # so peter-evans/create-pull-request can open or update the drift-only PR.
     permissions:
       contents: write
       pull-requests: write
