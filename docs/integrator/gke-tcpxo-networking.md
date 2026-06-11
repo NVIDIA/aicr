@@ -1,6 +1,8 @@
 # GKE TCPXO Networking Prerequisites
 
-For `*-gke-cos-training*` recipes, GPUDirect TCPXO enables high-speed inter-node GPU communication on GKE. Without it, NCCL falls back to TCP (~4 GB/s vs ~340 GB/s with TCPXO).
+For the **H100 GKE COS training** recipes (`h100-gke-cos-training*`, on `a3-megagpu-8g` nodes), GPUDirect TCPXO enables high-speed inter-node GPU communication on GKE. Without it, the NVIDIA Collective Communications Library (NCCL) falls back to TCP (~4 GB/s vs ~340 GB/s with TCPXO).
+
+> **A100 (a2) exception:** the `a100-gke-cos-training*` recipes intentionally omit the `gke-nccl-tcpxo` component — GPUDirect TCPXO targets H100 `a3-megagpu-8g` nodes, not the A100 `a2-highgpu`/`a2-ultragpu` machine family. The prerequisites below do **not** apply to A100 GKE recipes, and the generated A100 bundle does not install the TCPXO DaemonSets.
 
 ## Infrastructure Prerequisites
 
