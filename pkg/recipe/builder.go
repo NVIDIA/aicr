@@ -121,8 +121,8 @@ func (b *Builder) BuildFromCriteria(ctx context.Context, c *Criteria) (*RecipeRe
 //   - Constraint warnings are included in the result metadata for visibility
 //   - Only overlays whose constraints pass (or have no constraints) are merged
 //
-// The evaluator function is typically created by wrapping validator.EvaluateConstraint
-// with the snapshot data.
+// The evaluator function is typically created by wrapping
+// constraints.Evaluate, binding it to the snapshot data (see pkg/client/v1).
 func (b *Builder) BuildFromCriteriaWithEvaluator(ctx context.Context, c *Criteria, evaluator ConstraintEvaluatorFunc) (*RecipeResult, error) {
 	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
 		return store.BuildRecipeResultWithEvaluator(buildCtx, c, evaluator)
