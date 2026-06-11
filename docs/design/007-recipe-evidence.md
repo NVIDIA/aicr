@@ -822,6 +822,24 @@ see `## Future direction`.
   per recipe lives in the pointer at a time. A second contributor's
   attestation overwrites the first; multi-cluster diversity isn't
   captured.
+- **Keyless signing publishes the signer's identity (PII) to a public,
+  immutable log.** The Fulcio certificate embeds the authenticated OIDC
+  identity — typically the signer's **email address** plus the issuer —
+  and with the public-good defaults (`fulcio.sigstore.dev` /
+  `rekor.sigstore.dev`) that identity is written to the **public,
+  append-only Rekor transparency log**, where it is permanent and
+  globally searchable, and is also attached to the pushed OCI artifact.
+  The consequence is irreversible, so consent must be explicit rather
+  than implicit: the CLI emits an endpoint-aware disclosure banner and,
+  on a TTY, pauses for confirmation before any interactive
+  (browser/device-code) login opens (`--yes` / `AICR_ASSUME_YES` skips
+  the prompt; non-interactive stdin proceeds without blocking so CI is
+  not wedged). Pre-fetched `--identity-token`, ambient CI OIDC, and
+  `--signing-key` paths are unaffected. Exposure is controlled by signing
+  from a non-personal CI/service identity, supplying a pre-fetched token,
+  or pointing `--fulcio-url`/`--rekor-url` at private Sigstore
+  infrastructure. See the
+  [CLI reference](../user/cli-reference.md#privacy-identity-in-keyless-signatures).
 
 ## Alternatives Considered
 

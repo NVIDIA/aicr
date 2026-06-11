@@ -172,6 +172,109 @@ func TestClassifyChartPinned(t *testing.T) {
 	}
 }
 
+func TestClassifyConstraintsWellformed(t *testing.T) {
+	constraint := func(name, value string) recipe.Constraint {
+		return recipe.Constraint{Name: name, Value: value}
+	}
+	result := func(constraints ...recipe.Constraint) *recipe.RecipeResult {
+		return &recipe.RecipeResult{Constraints: constraints}
+	}
+	withWarnings := func(r *recipe.RecipeResult, warnings ...recipe.ConstraintWarning) *recipe.RecipeResult {
+		r.Metadata.ConstraintWarnings = warnings
+		return r
+	}
+	withExcluded := func(r *recipe.RecipeResult, excluded ...recipe.ExcludedOverlay) *recipe.RecipeResult {
+		r.Metadata.ExcludedOverlays = excluded
+		return r
+	}
+
+	tests := []struct {
+		name        string
+		result      *recipe.RecipeResult
+		wantState   string
+		detailMatch string // substring that must appear in detail ("" = detail must be empty)
+	}{
+		{"nil result passes", nil, StatusPass, ""},
+		{"no constraints passes", result(), StatusPass, ""},
+		{
+			"all well-formed constraints pass",
+			result(constraint("K8s.server.version", ">= 1.32.4"), constraint("OS.release.name", "ubuntu")),
+			StatusPass, "",
+		},
+		{
+			"malformed path (too few segments) fails",
+			result(constraint("bogus", "1.0")),
+			StatusFail, "bogus",
+		},
+		{
+			"malformed path (invalid measurement type) fails",
+			result(constraint("NotAType.sub.key", "1.0")),
+			StatusFail, "malformed path",
+		},
+		{
+			"malformed value (empty after operator) fails",
+			result(constraint("K8s.server.version", ">=")),
+			StatusFail, "malformed value",
+		},
+		{
+			"empty value fails",
+			result(constraint("K8s.server.version", "")),
+			StatusFail, "malformed value",
+		},
+		{
+			// Whitespace-only values are trimmed to empty by the parser, so they
+			// take the same fail path as an empty value.
+			"whitespace-only value fails",
+			result(constraint("K8s.server.version", "   ")),
+			StatusFail, "malformed value",
+		},
+		{
+			"parse failure beats resolution warning",
+			withWarnings(
+				result(constraint("bogus", "1.0")),
+				recipe.ConstraintWarning{Overlay: "o", Constraint: "c", Reason: "r"},
+			),
+			StatusFail, "bogus",
+		},
+		// The two warn cases below inject Metadata.ConstraintWarnings /
+		// ExcludedOverlays directly: with the production satisfiedEvaluator no
+		// constraint fails, so these fields are never populated through Compute
+		// (see classifyConstraintsWellformed). Direct injection is the only way
+		// to exercise the warn branch, by design.
+		{
+			"well-formed with constraint warning warns",
+			withWarnings(
+				result(constraint("K8s.server.version", ">= 1.32.4")),
+				recipe.ConstraintWarning{Overlay: "gke-overlay", Constraint: "K8s.server.version", Reason: "version too low"},
+			),
+			StatusWarn, "gke-overlay",
+		},
+		{
+			"well-formed with excluded overlay warns",
+			withExcluded(
+				result(constraint("K8s.server.version", ">= 1.32.4")),
+				recipe.ExcludedOverlay{Name: "dropped-overlay", Reason: recipe.ExcludedOverlayReasonConstraintFailed},
+			),
+			StatusWarn, "dropped-overlay",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state, detail := classifyConstraintsWellformed(tt.result)
+			if state != tt.wantState {
+				t.Errorf("state = %q, want %q", state, tt.wantState)
+			}
+			if tt.detailMatch == "" {
+				if detail != "" {
+					t.Errorf("detail = %q, want empty", detail)
+				}
+			} else if !strings.Contains(detail, tt.detailMatch) {
+				t.Errorf("detail = %q, want substring %q", detail, tt.detailMatch)
+			}
+		})
+	}
+}
+
 func TestComputeCoverage(t *testing.T) {
 	t.Run("nil result yields zero coverage", func(t *testing.T) {
 		if got := computeCoverage(nil); !reflect.DeepEqual(got, DeclaredCoverage{}) {
@@ -244,9 +347,12 @@ func TestComputeEmbeddedCatalog(t *testing.T) {
 		if state == StatusPass {
 			sawPass = true
 			// A cleanly-resolved leaf is a pure-readable result, so chart_pinned
-			// must have been scored.
+			// and constraints_wellformed must both have been scored.
 			if _, ok := combo.Structure.Dimensions[DimChartPinned]; !ok {
 				t.Errorf("combo %q resolved but missing chart_pinned dimension", combo.LeafOverlay)
+			}
+			if _, ok := combo.Structure.Dimensions[DimConstraintsWellformed]; !ok {
+				t.Errorf("combo %q resolved but missing constraints_wellformed dimension", combo.LeafOverlay)
 			}
 		}
 	}
@@ -431,6 +537,147 @@ components:
 	// The recipe resolved, so the descriptor must be populated (non-nil).
 	if combo.Structure.Coverage == nil {
 		t.Error("Coverage = nil, want non-nil on a resolved recipe")
+	}
+}
+
+// TestComputeConstraintsWellformedFailThroughBuilder drives a
+// constraints_wellformed fail through the real builder: a leaf carrying a
+// malformed constraint (a path with too few segments). The recipe resolves
+// cleanly (resolves=pass) but the snapshot-free parser rejects the constraint,
+// so constraints_wellformed must fail and drag the rolled-up status to fail —
+// a malformed constraint is never a silent pass. Hermetic: no snapshot.
+func TestComputeConstraintsWellformedFailThroughBuilder(t *testing.T) {
+	provider := newInMemoryProvider(map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/malformed-constraint-leaf.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: malformed-constraint-leaf
+spec:
+  criteria:
+    service: eks
+  componentRefs: []
+  constraints:
+    - name: not-a-valid-path
+      value: ">= 1.0"
+`),
+		"registry.yaml": []byte(`apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components: []
+`),
+	})
+
+	report, err := Compute(context.Background(), Options{Provider: provider})
+	if err != nil {
+		t.Fatalf("Compute() error = %v", err)
+	}
+
+	var combo *ComboHealth
+	for i := range report.Combos {
+		if report.Combos[i].LeafOverlay == "malformed-constraint-leaf" {
+			combo = &report.Combos[i]
+		}
+	}
+	if combo == nil {
+		t.Fatalf("malformed-constraint-leaf was not enumerated; combos = %+v", report.Combos)
+	}
+	if got := combo.Structure.Dimensions[DimResolves]; got != StatusPass {
+		t.Errorf("resolves = %q, want %q (recipe should resolve cleanly)", got, StatusPass)
+	}
+	if got := combo.Structure.Dimensions[DimConstraintsWellformed]; got != StatusFail {
+		t.Errorf("constraints_wellformed = %q, want %q (malformed constraint path)", got, StatusFail)
+	}
+	if combo.Structure.Status != StatusFail {
+		t.Errorf("status = %q, want %q", combo.Structure.Status, StatusFail)
+	}
+	if d := combo.Structure.Detail[DimConstraintsWellformed]; !strings.Contains(d, "not-a-valid-path") {
+		t.Errorf("detail = %q, want it to name the malformed constraint", d)
+	}
+}
+
+// TestComputeAllDimensionsCoexistAndRollUpClean proves the end-to-end
+// four-signal contract on one resolved leaf: the three graded dimensions
+// (resolves, chart_pinned, constraints_wellformed) all pass, the
+// declared_coverage descriptor is populated (not graded), and the rollup is
+// pass. A pinned Helm component, a well-formed constraint, and a declared
+// deployment phase are all present.
+func TestComputeAllDimensionsCoexistAndRollUpClean(t *testing.T) {
+	provider := newInMemoryProvider(map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/clean-leaf.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: clean-leaf
+spec:
+  criteria:
+    service: eks
+  componentRefs:
+    - name: pinned-helm
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+  validation:
+    deployment:
+      checks:
+        - operator-health
+`),
+		"registry.yaml": []byte(`apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: pinned-helm
+    displayName: Pinned Helm Component
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/pinned-helm
+      defaultVersion: 1.2.3
+`),
+	})
+
+	report, err := Compute(context.Background(), Options{Provider: provider})
+	if err != nil {
+		t.Fatalf("Compute() error = %v", err)
+	}
+
+	var combo *ComboHealth
+	for i := range report.Combos {
+		if report.Combos[i].LeafOverlay == "clean-leaf" {
+			combo = &report.Combos[i]
+		}
+	}
+	if combo == nil {
+		t.Fatalf("clean-leaf was not enumerated; combos = %+v", report.Combos)
+	}
+
+	for _, dim := range []string{DimResolves, DimChartPinned, DimConstraintsWellformed} {
+		if got := combo.Structure.Dimensions[dim]; got != StatusPass {
+			t.Errorf("dimension %q = %q, want %q", dim, got, StatusPass)
+		}
+	}
+	if combo.Structure.Status != StatusPass {
+		t.Errorf("status = %q, want %q (all graded dimensions pass)", combo.Structure.Status, StatusPass)
+	}
+	// declared_coverage is a descriptor, not graded: it must be populated but
+	// must not move the rolled-up status.
+	if combo.Structure.Coverage == nil {
+		t.Fatal("Coverage = nil, want populated descriptor on a resolved leaf")
+	}
+	if !combo.Structure.Coverage.Deployment.Declared {
+		t.Error("Coverage.Deployment.Declared = false, want true (deployment phase declared)")
+	}
+	if want := []string{"operator-health"}; !reflect.DeepEqual(combo.Structure.Coverage.Deployment.Checks, want) {
+		t.Errorf("Coverage.Deployment.Checks = %v, want %v", combo.Structure.Coverage.Deployment.Checks, want)
 	}
 }
 

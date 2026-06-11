@@ -173,7 +173,7 @@ Each combination is scored from signals that are **all hermetic and offline**
 | Dimension | Role | Signal | Source |
 |---|---|---|---|
 | `resolves` | graded | `BuildFromCriteria` returns a `RecipeResult` without error | `pkg/recipe/builder.go` |
-| `constraints_wellformed` | graded | Every `Constraint.Value` parses; inline replay under `--no-cluster` is clean; no `ConstraintWarning`s | `pkg/recipe/metadata.go`, `pkg/validator` (no-cluster mode) |
+| `constraints_wellformed` | graded | Every merged constraint's `Name` (path) and `Value` (expression) parse with the snapshot-free parsers (`fail` on any parse error); resolution surfacing a `ConstraintWarning`/`ExcludedOverlay` is `warn` | `pkg/constraints` (parsers), `pkg/health` (classifier) |
 | `chart_pinned` | graded | Every resolved component references an explicit pinned chart version/digest per [ADR-006](006-image-pinning-policy.md) — a pure in-repo check on the resolved recipe, **no Helm render** | resolved `RecipeResult` components; ADR-006 policy |
 | `declared_coverage` | descriptor | For each of readiness/deployment/performance/conformance: present-or-not, the **named checks** declared, and the phase-level constraint count | `pkg/recipe/validation.go` (`ValidationPhase.Checks`, `.Constraints`) |
 
@@ -205,13 +205,19 @@ to the Supported/Preview/Experimental vocabulary, applied to the grade:
 letter grades are deferred until the validation axis can fuse into them
 (deferred table).
 
-**Compute budget.** The dominant cost is the `--no-cluster` constraint replay
-across the ~50 leaf combos. The target is a sub-minute generator run, well
-inside the weekly cadence's tolerance. If it grows past a few minutes, the
-redesign levers — in order — are: cache per-combo results keyed by the
-resolved-recipe digest; parallelize the replay; or drop inline replay from
-the scheduled job and gate it to PRs touching `recipes/**`. None are needed
-at v1 scale.
+**Compute budget.** `constraints_wellformed` is specified as parse-only rather
+than a `--no-cluster` constraint replay: each leaf is resolved through the
+constraint-aware path with a satisfied-stub evaluator (no snapshot) and the
+snapshot-free parsers run over the merged constraints (the original
+`--no-cluster` replay phrasing is unachievable offline, since the evaluator
+extracts a snapshot value before parsing). The dominant cost is therefore the
+per-combo resolve across the ~50 leaf combos, not constraint evaluation. The
+target is a sub-minute generator run, well inside the weekly cadence's
+tolerance. If it grows past a few minutes, the redesign levers — in order —
+are: cache per-combo results keyed by the resolved-recipe digest; parallelize
+resolution; or gate the scheduled job to PRs touching `recipes/**`. None are
+needed at v1 scale. (Actual snapshot-dependent replay is deferred to the
+validation axis's `coverage_declared_vs_run`.)
 
 **Two originally proposed structural signals are deferred, not dropped:**
 - `chart_drift` (upstream image drift on a pinned chart) requires a live

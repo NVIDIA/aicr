@@ -69,41 +69,81 @@ type ResolveOptions struct {
 	PromptWriter io.Writer
 }
 
-// ResolveOIDCToken walks the OIDC source precedence chain and returns the
-// resulting identity token string. Suitable for callers that build their
-// own signer around a raw token and do not want the bundler's Attester
-// abstraction.
+// OIDCSourceKind identifies which keyless OIDC token source ResolveOIDCToken
+// will consult for a given ResolveOptions. It is the single source of truth
+// for the source-precedence decision, shared by ResolveOIDCToken and by
+// callers (e.g. the CLI identity-disclosure gate) that must reason about
+// whether an interactive login is about to open without driving the login
+// themselves.
+type OIDCSourceKind int
+
+const (
+	// OIDCSourceIdentityToken — a pre-fetched token (no login, no prompt).
+	OIDCSourceIdentityToken OIDCSourceKind = iota
+	// OIDCSourceAmbient — GitHub Actions ambient OIDC (no login, no prompt).
+	OIDCSourceAmbient
+	// OIDCSourceDeviceFlow — RFC 8628 device-code login (interactive).
+	OIDCSourceDeviceFlow
+	// OIDCSourceBrowser — interactive browser callback login (interactive).
+	OIDCSourceBrowser
+)
+
+// Interactive reports whether the source opens a user-facing login (browser
+// callback or device-code) that mints a Fulcio certificate from the signer's
+// identity. The pre-fetched-token and ambient sources are non-interactive.
+func (k OIDCSourceKind) Interactive() bool {
+	return k == OIDCSourceDeviceFlow || k == OIDCSourceBrowser
+}
+
+// SelectOIDCSource reports which token source ResolveOIDCToken will use for
+// opts, following the precedence below. It does not read the environment or
+// perform any network/login work — it is a pure classification of opts.
 //
 // Precedence (highest first):
 //  1. IdentityToken — explicit pre-fetched token.
-//  2. AmbientURL+AmbientToken — GitHub Actions ambient OIDC.
+//  2. AmbientURL+AmbientToken — GitHub Actions ambient OIDC (both required).
 //  3. DeviceFlow — RFC 8628 device-code flow.
 //  4. Interactive browser flow (default).
+//
+// KMS (SigningKey) signing is not an OIDC source: it is selected earlier, in
+// ResolveAttester / ResolveAttesterLazy, before ResolveOIDCToken is reached,
+// so it is intentionally outside this classifier.
+func SelectOIDCSource(opts ResolveOptions) OIDCSourceKind {
+	switch {
+	case opts.IdentityToken != "":
+		return OIDCSourceIdentityToken
+	case opts.AmbientURL != "" && opts.AmbientToken != "":
+		return OIDCSourceAmbient
+	case opts.DeviceFlow:
+		return OIDCSourceDeviceFlow
+	default:
+		return OIDCSourceBrowser
+	}
+}
+
+// ResolveOIDCToken walks the OIDC source precedence chain and returns the
+// resulting identity token string. Suitable for callers that build their
+// own signer around a raw token and do not want the bundler's Attester
+// abstraction. The branch taken is decided by SelectOIDCSource, so callers
+// can predict it without driving a login.
 //
 // Errors from the OIDC helpers are returned as-is to preserve their
 // pkg/errors classification (timeout / unavailable / internal). The
 // function does not read the runtime environment itself — callers
 // populate ResolveOptions from their own surface (flags, env vars).
 func ResolveOIDCToken(ctx context.Context, opts ResolveOptions) (string, error) {
-	// 1. Pre-fetched identity token.
-	if opts.IdentityToken != "" {
+	switch SelectOIDCSource(opts) { //nolint:exhaustive // OIDCSourceBrowser is the default branch (the lowest-precedence fallback)
+	case OIDCSourceIdentityToken:
 		slog.Info("using pre-fetched OIDC identity token")
 		return opts.IdentityToken, nil
-	}
-
-	// 2. Ambient OIDC (GitHub Actions).
-	if opts.AmbientURL != "" && opts.AmbientToken != "" {
+	case OIDCSourceAmbient:
 		return FetchAmbientOIDCToken(ctx, opts.AmbientURL, opts.AmbientToken)
-	}
-
-	// 3. Device-code flow — works on headless hosts.
-	if opts.DeviceFlow {
+	case OIDCSourceDeviceFlow:
 		return FetchDeviceCodeOIDCToken(ctx, opts.PromptWriter)
+	default: // OIDCSourceBrowser
+		slog.Info("no ambient OIDC token, attempting interactive authentication")
+		return FetchInteractiveOIDCToken(ctx, opts.PromptWriter)
 	}
-
-	// 4. Interactive browser flow (default).
-	slog.Info("no ambient OIDC token, attempting interactive authentication")
-	return FetchInteractiveOIDCToken(ctx, opts.PromptWriter)
 }
 
 // ResolveAttester returns the Attester implementation selected by opts.

@@ -53,6 +53,10 @@ const (
 	flagInsecureTLS    = "insecure-tls"
 	flagPlainHTTP      = "plain-http"
 	flagPush           = "push"
+	// flagAssumeYes bypasses the interactive keyless-signing identity
+	// disclosure prompt (see confirmKeylessSigningDisclosure). The banner is
+	// still emitted; only the y/N pause is skipped.
+	flagAssumeYes = "yes"
 )
 
 // Category labels (urfave/cli flag.Category values, grouping flags in help output).

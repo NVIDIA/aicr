@@ -96,6 +96,10 @@ type bundleCmdOptions struct {
 	// (RFC 8628) for headless hosts where a browser callback is unavailable.
 	oidcDeviceFlow bool
 
+	// assumeYes bypasses the interactive keyless-signing identity-disclosure
+	// prompt (--yes / AICR_ASSUME_YES). The banner is still emitted.
+	assumeYes bool
+
 	// fulcioURL and rekorURL override the public-good Sigstore endpoints so
 	// keyless signing targets a private Fulcio CA and/or Rekor transparency
 	// log. Empty leaves the public defaults in place. See #408.
@@ -144,6 +148,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		identityToken:             cmd.String(flagIdentityToken),
 		signingKey:                cmd.String(flagSigningKey),
 		oidcDeviceFlow:            boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
+		assumeYes:                 cmd.Bool(flagAssumeYes),
 		fulcioURL:                 stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
 		rekorURL:                  stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
 		insecureTLS:               boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
@@ -720,6 +725,7 @@ Package with explicit tag (overrides CLI version):
 				Sources:  cli.EnvVars("AICR_REKOR_URL"),
 				Category: catDeployment,
 			},
+			assumeYesFlag(catDeployment),
 			kubeconfigFlag(),
 			dataFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
@@ -834,6 +840,16 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithAppName(opts.appName),
 	)
 
+	// Gate the interactive keyless-signing login behind an identity-disclosure
+	// prompt before any browser/device-code flow opens. Only fires when
+	// --attest is set and the resolved OIDC path is interactive; pre-fetched
+	// token / ambient / KMS-key paths and non-TTY runs pass through.
+	if opts.attest {
+		if discErr := confirmKeylessSigningDisclosure(bundleOIDCResolveOptions(opts), opts.assumeYes, os.Stdin, os.Stderr); discErr != nil {
+			return discErr
+		}
+	}
+
 	// Note: binary attestation pre-flight check is handled inside
 	// MakeBundle via bundler.New().
 	attester, err := selectAttester(ctx, opts)
@@ -904,7 +920,19 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 // escape hatch — the underlying error is propagated unchanged so its
 // pkg/errors classification (and the resulting CLI exit code) is preserved.
 func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.Attester, error) {
-	att, err := attestation.ResolveAttesterLazy(ctx, attestation.ResolveOptions{
+	att, err := attestation.ResolveAttesterLazy(ctx, bundleOIDCResolveOptions(opts))
+	if err != nil && opts.attest {
+		slog.Error("bundle attestation requires authentication; remove --attest to bundle without signing", "error", err)
+	}
+	return att, err
+}
+
+// bundleOIDCResolveOptions translates the bundle command's signing flags and
+// runtime environment into the attestation package's ResolveOptions. Shared
+// by selectAttester (which builds the lazy attester) and the keyless-signing
+// disclosure gate so both reason about the identical token-source precedence.
+func bundleOIDCResolveOptions(opts *bundleCmdOptions) attestation.ResolveOptions {
+	return attestation.ResolveOptions{
 		Attest:        opts.attest,
 		IdentityToken: opts.identityToken,
 		SigningKey:    opts.signingKey,
@@ -916,11 +944,7 @@ func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.At
 		// Prompts (verification URL + user code) go to stderr so they don't
 		// pollute stdout when callers redirect bundle output.
 		PromptWriter: os.Stderr,
-	})
-	if err != nil && opts.attest {
-		slog.Error("bundle attestation requires authentication; remove --attest to bundle without signing", "error", err)
 	}
-	return att, err
 }
 
 // pushOCIBundle packages and pushes the bundle to an OCI registry.

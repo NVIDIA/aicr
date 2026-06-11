@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	"os"
 
 	"github.com/urfave/cli/v3"
 
@@ -90,6 +91,7 @@ Example:
 				Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 				Category: catEvidence,
 			},
+			assumeYesFlag(catEvidence),
 		},
 		Action: runEvidencePublishCmd,
 	}
@@ -110,13 +112,22 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "--push <oci-ref> is required")
 	}
 
+	// `evidence publish` always signs (push is required), so gate the
+	// interactive keyless login behind the identity-disclosure prompt before
+	// it can open a browser/device-code flow. Non-interactive token sources
+	// and non-TTY runs pass through inside the gate.
+	oidcResolve := oidcResolveOptionsFromFlags(cmd)
+	if err := confirmKeylessSigningDisclosure(oidcResolve, cmd.Bool(flagAssumeYes), os.Stdin, os.Stderr); err != nil {
+		return err
+	}
+
 	err := attestation.Publish(ctx, attestation.PublishOptions{
 		BundleDir:   dir,
 		Push:        push,
 		PlainHTTP:   cmd.Bool(flagPlainHTTP),
 		InsecureTLS: cmd.Bool(flagInsecureTLS),
 		AICRVersion: version,
-		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
+		OIDCResolve: oidcResolve,
 	})
 	// Publish already returns coded pkg/errors; PropagateOrWrap preserves
 	// those and only classifies any uncoded error that slips through.
