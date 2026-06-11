@@ -70,7 +70,7 @@ type Fingerprint struct {
 	// k8s.node.provider (parsed from spec.providerID).
 	Service Dimension `json:"service" yaml:"service"`
 
-	// Accelerator is the GPU SKU (h100, h200, gb200, b200, a100, l40,
+	// Accelerator is the GPU SKU (h100, h200, gb200, gb300, b200, a100, l40,
 	// rtx-pro-6000). Parsed from gpu.smi.gpu.model.
 	Accelerator Dimension `json:"accelerator" yaml:"accelerator"`
 

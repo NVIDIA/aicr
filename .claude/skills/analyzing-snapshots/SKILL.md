@@ -93,7 +93,7 @@ Key fields from `GPU.smi`:
 | gpu.model contains | Accelerator |
 |--------------------|-------------|
 | `gb200` | gb200 (check before b200) |
-| `gb300` | gb200 class (Blackwell NVL family) |
+| `gb300` | gb300 (check before b200; Blackwell Ultra NVL family) |
 | `b200` | b200 |
 | `h100` | h100 |
 | `gh200` | unresolved — Grace Hopper Superchip, not the discrete H200 GPU (check before h200) |
@@ -274,7 +274,7 @@ aicr recipe \
 | Criteria | Extracted From | Valid Values |
 |----------|---------------|--------------|
 | service | K8s.node.provider / K8s.server.version | eks, gke, aks, oke, kind, lke |
-| accelerator | GPU.smi.gpu.model | h100, h200, gb200, b200, a100, l40, rtx-pro-6000 |
+| accelerator | GPU.smi.gpu.model | h100, h200, gb200, gb300, b200, a100, l40, rtx-pro-6000 |
 | os | OS.release.ID | ubuntu, rhel, cos, amazonlinux |
 | intent | User-specified | training, inference |
 | platform | User-specified | dynamo, kubeflow, nim, runai, slurm |

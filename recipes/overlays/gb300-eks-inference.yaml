@@ -1,0 +1,96 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: gb300-eks-inference
+
+spec:
+  # Inherits from eks-inference recipe (EKS + inference settings)
+  base: eks-inference
+
+  criteria:
+    service: eks
+    accelerator: gb300
+    intent: inference
+
+  # Specific constraints for GB300 on EKS inference workloads
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  componentRefs:
+    # GB300+EKS GPU Operator prerequisites. Keep in sync with the same block
+    # in gb300-eks-training.yaml. The NVreg flag and cdi+gdrcopy are needed
+    # for multi-node inference that crosses EFA — tensor-parallel serving
+    # over the network has the same dma-buf attach requirement as training
+    # all-reduce. The mixin system can't extend componentRefs already
+    # declared in the inheritance chain, so this lives per-leaf for now.
+    - name: gpu-operator
+      type: Helm
+      preManifestFiles:
+        # Pre-install: ClusterPolicy reconcile reads this ConfigMap during
+        # `helm install --wait`. See gb300-eks-training.yaml for full context (#859).
+        - components/gpu-operator/manifests/kernel-module-params.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        cdi:
+          enabled: true
+        gdrcopy:
+          enabled: true
+        driver:
+          kernelModuleConfig:
+            name: nvidia-kernel-module-params
+
+    # GB300 reuses the gb200 nodewright tuning profile (shared ARM64 Grace
+    # host and Blackwell NVL72 platform; no gb300-specific package yet). Per
+    # the nodewright maintainer this reuse is expected to work, with one caveat:
+    # GB300 may hit the DOCA issue the AWS GPU AMI already works around —
+    # revisit if EFA/RDMA bring-up regresses on GB300. See gb300-eks-training.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning.yaml
+      overrides:
+        service: eks
+        accelerator: gb200
+        intent: inference
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  # Validation checks for GB300 on EKS inference workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # GB300 support shipped in gpu-operator v25.10 (same release as GB200).
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
