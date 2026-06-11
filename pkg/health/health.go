@@ -272,6 +272,11 @@ func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.Cat
 // component must not flip the recipe to fail; this matches every other
 // consumer of ComponentRefs (bundler, deployers, mirror, BOM).
 //
+// Manifest-only "Helm" components (typed Helm but carrying local manifestFiles
+// with no external chart/source — e.g. nodewright-customizations) are also
+// skipped: there is no external chart version to pin, so grading them against
+// the pin requirement is a false positive. See isManifestOnlyHelm.
+//
 // A recipe with no enabled Helm components (e.g. pure-Kustomize) scores a
 // vacuous pass with an explanatory detail, since Kustomize defaultTag pinning
 // is out of scope and the column must not be misread as "supply-chain pinned".
@@ -289,6 +294,13 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 	var unpinned []string
 	for _, ref := range result.ComponentRefs {
 		if ref.Type != recipe.ComponentTypeHelm || !ref.IsEnabled() {
+			continue
+		}
+		// Manifest-only "Helm" components (e.g. nodewright-customizations) are
+		// typed Helm but ship local manifestFiles with no external chart, so
+		// they have no chart version to pin. Skip them — exactly like disabled
+		// components — rather than flag a non-existent pin as unpinned.
+		if isManifestOnlyHelm(ref) {
 			continue
 		}
 		helmCount++
@@ -374,6 +386,18 @@ func classifyConstraintsWellformed(result *recipe.RecipeResult) (state, detail s
 	}
 
 	return StatusPass, ""
+}
+
+// isManifestOnlyHelm reports whether a Helm-typed ComponentRef is a
+// manifest-only component: it references no external chart (empty Chart and
+// Source) but ships local manifest files. Such a component has no chart
+// version to pin, so chart_pinned must not grade it. This mirrors the
+// manifest-only detection in the bundler's deployers (ref.Chart == "" &&
+// ref.Source == "" with manifests present), keeping the health signal aligned
+// with what is actually bundled and deployed.
+func isManifestOnlyHelm(ref recipe.ComponentRef) bool {
+	return ref.Chart == "" && ref.Source == "" &&
+		(len(ref.ManifestFiles) > 0 || len(ref.PreManifestFiles) > 0)
 }
 
 // computeCoverage builds the declared_coverage descriptor from the resolved

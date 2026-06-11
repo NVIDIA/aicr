@@ -123,6 +123,15 @@ func TestClassifyChartPinned(t *testing.T) {
 	kustomize := func(name string) recipe.ComponentRef {
 		return recipe.ComponentRef{Name: name, Type: recipe.ComponentTypeKustomize}
 	}
+	// manifestOnly models a manifest-only "Helm" component (e.g.
+	// nodewright-customizations): type Helm, ships local manifestFiles, and has
+	// no external chart/source/version to pin.
+	manifestOnly := func(name string) recipe.ComponentRef {
+		return recipe.ComponentRef{
+			Name: name, Type: recipe.ComponentTypeHelm,
+			ManifestFiles: []string{"components/" + name + "/manifests/tuning.yaml"},
+		}
+	}
 	result := func(refs ...recipe.ComponentRef) *recipe.RecipeResult {
 		return &recipe.RecipeResult{ComponentRefs: refs}
 	}
@@ -152,6 +161,21 @@ func TestClassifyChartPinned(t *testing.T) {
 		{
 			"only disabled unpinned helm is vacuous pass",
 			result(disabledHelm("off", "")),
+			StatusPass, "not applicable",
+		},
+		{
+			"manifest-only helm alongside pinned chart passes",
+			result(helm("a", "1.0.0"), manifestOnly("nodewright-customizations")),
+			StatusPass, "",
+		},
+		{
+			"manifest-only helm not flagged as unpinned",
+			result(helm("b", ""), manifestOnly("nodewright-customizations")),
+			StatusFail, "b",
+		},
+		{
+			"only manifest-only helm is vacuous pass",
+			result(manifestOnly("nodewright-customizations")),
 			StatusPass, "not applicable",
 		},
 	}
