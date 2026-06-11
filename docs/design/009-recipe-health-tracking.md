@@ -205,17 +205,19 @@ to the Supported/Preview/Experimental vocabulary, applied to the grade:
 letter grades are deferred until the validation axis can fuse into them
 (deferred table).
 
-**Compute budget.** As shipped, V1's `constraints_wellformed` is parse-only,
-not a `--no-cluster` constraint replay: it resolves each leaf through the
-constraint-aware path with a satisfied-stub evaluator (no snapshot) and runs
-the snapshot-free parsers over the merged constraints. The dominant cost is
-therefore the per-combo resolve across the ~50 leaf combos, not constraint
-evaluation. The target is a sub-minute generator run, well inside the weekly
-cadence's tolerance. If it grows past a few minutes, the redesign levers — in
-order — are: cache per-combo results keyed by the resolved-recipe digest;
-parallelize resolution; or gate the scheduled job to PRs touching `recipes/**`.
-None are needed at v1 scale. (Actual snapshot-dependent replay is deferred to
-the validation axis's `coverage_declared_vs_run`.)
+**Compute budget.** `constraints_wellformed` is specified as parse-only rather
+than a `--no-cluster` constraint replay: each leaf is resolved through the
+constraint-aware path with a satisfied-stub evaluator (no snapshot) and the
+snapshot-free parsers run over the merged constraints (the original
+`--no-cluster` replay phrasing is unachievable offline, since the evaluator
+extracts a snapshot value before parsing). The dominant cost is therefore the
+per-combo resolve across the ~50 leaf combos, not constraint evaluation. The
+target is a sub-minute generator run, well inside the weekly cadence's
+tolerance. If it grows past a few minutes, the redesign levers — in order —
+are: cache per-combo results keyed by the resolved-recipe digest; parallelize
+resolution; or gate the scheduled job to PRs touching `recipes/**`. None are
+needed at v1 scale. (Actual snapshot-dependent replay is deferred to the
+validation axis's `coverage_declared_vs_run`.)
 
 **Two originally proposed structural signals are deferred, not dropped:**
 - `chart_drift` (upstream image drift on a pinned chart) requires a live
