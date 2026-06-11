@@ -27,6 +27,10 @@ coverage.txt
 bin/
 /aicr
 /aicrd
+# Stray binaries from `go build ./tools/<name>` at the repo root (the Makefile
+# uses `go run`, so these are only ever accidental).
+/bom
+/health
 
 # =============================================================================
 # Build & Release

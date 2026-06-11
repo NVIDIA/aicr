@@ -23,6 +23,8 @@ recipes/** @nvidia/aicr-maintainer
 
 # Recipe health (ADR-009): the area/recipes owners triage the weekly refresh
 pkg/health/** @nvidia/aicr-maintainer
+tools/health/** @nvidia/aicr-maintainer
+docs/user/recipe-health.md @nvidia/aicr-maintainer
 
 # CI/CD and automation
 /Makefile @nvidia/aicr-maintainer
