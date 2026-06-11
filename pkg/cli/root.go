@@ -322,6 +322,13 @@ func flagUsage(f cli.Flag) string {
 	return ""
 }
 
+// RootCommand returns the fully-assembled root command tree, including every
+// registered subcommand. It exists so out-of-tree tooling (e.g. tools/coverage)
+// can enumerate the live CLI verb registry instead of duplicating the list.
+func RootCommand() *cli.Command {
+	return newRootCmd()
+}
+
 // Execute starts the CLI application.
 // This is called by main.main().
 func Execute() {
