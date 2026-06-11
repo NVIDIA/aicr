@@ -645,8 +645,8 @@ This rule does not apply to non-Go changes (YAML, docs, CI workflows). Note: CI 
 
 **Issue policy:**
 - Set an **org issue type** on new issues. This is a GitHub-native field (shown in the standard issue view, distinct from repo `area/*`/`theme/*` labels) that categorizes the issue. Valid types: `Task`, `Bug`, `Enhancement`, `Epic`, `Initiative`, `Documentation`.
-  - Prefer `gh issue create --type Bug ...` (requires `gh` ≥ 2.63).
-  - If your `gh` predates 2.63 (no `--type` flag), set it via the REST API: `gh api repos/NVIDIA/aicr/issues -f title='…' -f body='…' -f type='Bug'`, or on an existing issue `gh api --method PATCH repos/NVIDIA/aicr/issues/<n> -f type='Bug'`.
+  - Prefer `gh issue create --type Bug ...` (requires `gh` v2.94.0+); use `gh issue edit <n> --type Bug` for existing issues.
+  - With older `gh` versions, use the web UI or automation with the needed permissions. Current REST Issues create/edit endpoints also accept `type` for users with push access, but avoid stale ad hoc `gh api` examples because older clients or API versions may reject or silently drop the field.
 - Match the type to intent (a feature request → `Enhancement`, a docs gap → `Documentation`); the issue templates pre-fill a sensible default, so only override when the template's choice is wrong.
 - The AICR Project board also has its own `Type` and `Priority` (P0–P2) fields — those are set on the *project board*, not the issue, and need a `project`-scoped token. Leave them to maintainers/automation unless explicitly asked.
 
