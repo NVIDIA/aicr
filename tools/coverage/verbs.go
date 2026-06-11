@@ -56,7 +56,7 @@ func cliVerbs() []string {
 // pure group (subcommands, no own Action, e.g. `evidence`) contributes only its
 // children.
 func expandVerb(prefix string, cmd *v3.Command) []string {
-	if builtinVerbs[cmd.Name] {
+	if builtinVerbs[cmd.Name] || cmd.Hidden {
 		return nil
 	}
 	path := cmd.Name
