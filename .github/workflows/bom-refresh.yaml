@@ -87,6 +87,5 @@ jobs:
           branch: chore/bom-refresh
           delete-branch: true
           labels: |
-            documentation
             area/docs
             area/recipes
