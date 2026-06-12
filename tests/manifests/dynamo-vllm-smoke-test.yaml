@@ -17,8 +17,11 @@
 # serving Qwen/Qwen3-0.6B (public, ungated, ~1.2GB).
 # No HuggingFace token required.
 #
-# Requires DYN_STORE_KV=mem and DYN_EVENT_PLANE=zmq because etcd/nats
-# are disabled in the dynamo-platform v1.0.2 deployment.
+# Uses the Dynamo 1.2 Kubernetes path: Kubernetes-native discovery plus the
+# NATS-backed event plane from the dynamo-platform chart. Request/response
+# traffic uses Dynamo's request plane default (TCP). The frontend runs
+# KV-cache-aware routing; the local vLLM engine publishes KV events through
+# ZMQ and the Dynamo worker runtime relays them onto the NATS event plane.
 #
 # Usage:
 #   kubectl apply -f tests/manifests/dynamo-vllm-smoke-test.yaml -n dynamo-system
@@ -28,44 +31,64 @@
 #     -H "Content-Type: application/json" \
 #     -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello!"}],"max_tokens":30,"stream":false}'
 
-apiVersion: nvidia.com/v1alpha1
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: vllm-smoke-gpu-claim
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+
+---
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
 metadata:
   name: vllm-smoke-test
 spec:
-  services:
-    Frontend:
-      componentType: frontend
+  backendFramework: vllm
+  components:
+    - name: Frontend
+      type: frontend
       replicas: 1
-      envs:
-        - name: DYN_STORE_KV
-          value: mem
-        - name: DYN_EVENT_PLANE
-          value: zmq
-      extraPodSpec:
-        mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.2
-    VllmDecodeWorker:
-      componentType: worker
+      podTemplate:
+        spec:
+          containers:
+            - name: main
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              env:
+                - name: SERVED_MODEL_NAME
+                  value: Qwen/Qwen3-0.6B
+                - name: DYN_ROUTER_MODE
+                  value: kv
+    - name: VllmDecodeWorker
+      type: worker
       replicas: 1
-      envs:
-        - name: DYN_STORE_KV
-          value: mem
-        - name: DYN_EVENT_PLANE
-          value: zmq
-      resources:
-        claims:
-          - name: gpu
-      extraPodSpec:
-        tolerations:
-          - key: nvidia.com/gpu
-            operator: Exists
-            effect: NoSchedule
-        resourceClaims:
-          - name: gpu
-            resourceClaimName: vllm-smoke-gpu-claim
-        mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.2
-          workingDir: /workspace/examples/backends/vllm
-          command: ["python3", "-m", "dynamo.vllm"]
-          args: ["--model", "Qwen/Qwen3-0.6B"]
+      sharedMemorySize: 2Gi
+      podTemplate:
+        spec:
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          resourceClaims:
+            - name: gpu
+              resourceClaimName: vllm-smoke-gpu-claim
+          containers:
+            - name: main
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              workingDir: /workspace/examples/backends/vllm
+              command: ["python3", "-m", "dynamo.vllm"]
+              args:
+                - --model
+                - Qwen/Qwen3-0.6B
+                - --kv-events-config
+                - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
+              resources:
+                claims:
+                  - name: gpu

@@ -1,11 +1,16 @@
 # EKS Dynamo Networking Prerequisites
 
-For `*-eks-ubuntu-inference-dynamo` recipes, `dynamo-platform` commonly runs:
-- `etcd` on TCP `2379`
-- `nats` (JetStream) on TCP `4222`
+For `*-eks-ubuntu-inference-dynamo` recipes, AICR configures
+`dynamo-platform` with Kubernetes-native discovery and the standard NATS
+event plane for KV-cache and runtime events:
+- `nats` on TCP `4222`
+
+Frontend-to-worker inference request/response traffic is separate: Dynamo 1.2
+defaults `DYN_REQUEST_PLANE` to TCP, and AICR does not override it to NATS. The
+worker runtime relays local vLLM ZMQ KV-cache events onto the NATS-backed event
+plane so the KV router or EPP can consume live cache state.
 
 If system components and GPU workloads are on different node groups/security groups, these ports may be blocked from GPU nodes to system nodes. Typical symptoms:
-- `Unable to create lease` (etcd unreachable)
 - `JetStream not available` (NATS unreachable)
 
 The conformance validator's `ai-service-metrics` check adds a third requirement:
@@ -34,9 +39,8 @@ this page documents the cluster-side prerequisite until the validator gains
 ## Required Security Group Rules
 
 Allow ingress from the GPU node security group to the system node security group on:
-- TCP `2379` — etcd (dynamo-platform)
-- TCP `4222` — NATS / JetStream (dynamo-platform)
-- TCP `9090` — Prometheus (required for the `ai-service-metrics` conformance check)
+- TCP `4222` - NATS event plane (dynamo-platform)
+- TCP `9090` - Prometheus (required for the `ai-service-metrics` conformance check)
 
 The `9090` rule is symmetrically required: the validator orchestrator pod may
 land on **any** worker node, so every node group whose pods can host the
@@ -64,10 +68,7 @@ aws ec2 describe-instances \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
 
-# 2) Allow etcd + NATS + Prometheus from GPU SG -> system SG
-aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
-  --protocol tcp --port 2379 --source-group <gpu-sg-id>
-
+# 2) Allow NATS + Prometheus from GPU SG -> system SG
 aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
   --protocol tcp --port 4222 --source-group <gpu-sg-id>
 

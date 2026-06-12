@@ -40,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestHasDynamoPlatform(t *testing.T) {
@@ -327,24 +328,24 @@ func TestParseAIPerfOutput(t *testing.T) {
 
 func TestIsDynamoDeploymentReady(t *testing.T) {
 	// dgd builds a DynamoGraphDeployment with the given spec replica counts and
-	// status.services entries (each entry is a field->count map, e.g.
+	// status.components entries (each entry is a field->count map, e.g.
 	// {"replicas": 8, "readyReplicas": 8}).
 	dgd := func(state string, spec map[string]int64, status map[string]map[string]int64) *unstructured.Unstructured {
-		specSvc := map[string]interface{}{}
+		specComponents := make([]interface{}, 0, len(spec))
 		for name, r := range spec {
-			specSvc[name] = map[string]interface{}{"replicas": r}
+			specComponents = append(specComponents, map[string]interface{}{keyName: name, "replicas": r})
 		}
-		statSvc := map[string]interface{}{}
+		statusComponents := map[string]interface{}{}
 		for name, fields := range status {
 			m := map[string]interface{}{}
 			for k, v := range fields {
 				m[k] = v
 			}
-			statSvc[name] = m
+			statusComponents[name] = m
 		}
 		return &unstructured.Unstructured{Object: map[string]interface{}{
-			"spec":   map[string]interface{}{"services": specSvc},
-			"status": map[string]interface{}{"state": state, "services": statSvc},
+			"spec":   map[string]interface{}{"components": specComponents},
+			"status": map[string]interface{}{"state": state, "components": statusComponents},
 		}}
 	}
 	tests := []struct {
@@ -364,13 +365,13 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 			want:  false,
 		},
 		{
-			name:  "successful but status.services empty",
+			name:  "successful but status.components empty",
 			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{}),
 			want:  false,
 		},
 		{
-			// Codex review gap: operator populates status.services
-			// incrementally; the worker service is not represented yet.
+			// Codex review gap: operator populates status.components
+			// incrementally; the worker component is not represented yet.
 			name:  "successful but worker absent from status",
 			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{"Frontend": {"replicas": 1, "readyReplicas": 1}}),
 			want:  false,
@@ -388,7 +389,7 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 			want:  false,
 		},
 		{
-			name:  "successful and all desired services ready (readyReplicas)",
+			name:  "successful and all desired components ready (readyReplicas)",
 			input: dgd("successful", map[string]int64{"Frontend": 1, "VllmDecodeWorker": 8}, map[string]map[string]int64{"Frontend": {"replicas": 1, "readyReplicas": 1}, "VllmDecodeWorker": {"replicas": 8, "readyReplicas": 8}}),
 			want:  true,
 		},
@@ -401,12 +402,12 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 			// spec replicas omitted → defaults to 1; one ready replica satisfies it.
 			name: "spec replicas omitted defaults to 1",
 			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"spec": map[string]interface{}{"services": map[string]interface{}{
-					"VllmDecodeWorker": map[string]interface{}{}, // no replicas field
+				"spec": map[string]interface{}{"components": []interface{}{
+					map[string]interface{}{keyName: "VllmDecodeWorker"}, // no replicas field
 				}},
 				"status": map[string]interface{}{
 					"state": "successful",
-					"services": map[string]interface{}{
+					"components": map[string]interface{}{
 						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
 					},
 				},
@@ -417,12 +418,12 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 			// Present-but-wrong-typed spec replicas must fail closed, not default to 1.
 			name: "spec replicas wrong type fails closed",
 			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"spec": map[string]interface{}{"services": map[string]interface{}{
-					"VllmDecodeWorker": map[string]interface{}{"replicas": "eight"},
+				"spec": map[string]interface{}{"components": []interface{}{
+					map[string]interface{}{keyName: "VllmDecodeWorker", "replicas": "eight"},
 				}},
 				"status": map[string]interface{}{
 					"state": "successful",
-					"services": map[string]interface{}{
+					"components": map[string]interface{}{
 						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "readyReplicas": int64(8)},
 					},
 				},
@@ -443,17 +444,29 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 	// Minimal DynamoGraphDeployment skeleton matching testdata/inference/dynamo-deployment.yaml structure.
 	newObj := func() *unstructured.Unstructured {
 		return &unstructured.Unstructured{Object: map[string]interface{}{
-			"apiVersion": "nvidia.com/v1alpha1",
+			"apiVersion": "nvidia.com/v1beta1",
 			"kind":       "DynamoGraphDeployment",
 			"spec": map[string]interface{}{
-				"services": map[string]interface{}{
-					"Frontend": map[string]interface{}{
-						"componentType": "frontend",
-						"replicas":      int64(1),
+				"components": []interface{}{
+					map[string]interface{}{
+						keyName:    "Frontend",
+						"type":     "frontend",
+						"replicas": int64(1),
+						"podTemplate": map[string]interface{}{
+							"spec": map[string]interface{}{
+								"containers": []interface{}{map[string]interface{}{keyName: mainContainerName}},
+							},
+						},
 					},
-					"VllmDecodeWorker": map[string]interface{}{
-						"componentType": "worker",
-						"replicas":      int64(4),
+					map[string]interface{}{
+						keyName:    "VllmDecodeWorker",
+						"type":     "worker",
+						"replicas": int64(4),
+						"podTemplate": map[string]interface{}{
+							"spec": map[string]interface{}{
+								"containers": []interface{}{map[string]interface{}{keyName: mainContainerName}},
+							},
+						},
 					},
 				},
 			},
@@ -474,9 +487,9 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 	}
 
 	// Worker must have nodeSelector, tolerations, and resourceClaims.
-	worker, _, _ := unstructured.NestedMap(obj.Object, "spec", "services", "VllmDecodeWorker", "extraPodSpec")
+	worker := componentPodSpec(t, obj, "VllmDecodeWorker")
 	if worker == nil {
-		t.Fatal("VllmDecodeWorker extraPodSpec not set")
+		t.Fatal("VllmDecodeWorker podTemplate.spec not set")
 	}
 	ns, _, _ := unstructured.NestedMap(worker, "nodeSelector")
 	if ns["nodeGroup"] != "gpu-worker" {
@@ -498,14 +511,22 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 	if claim["name"] != "gpu" || claim["resourceClaimTemplateName"] != inferenceClaimTemplateName {
 		t.Errorf("worker resourceClaim = %v, want name=gpu + template=%s", claim, inferenceClaimTemplateName)
 	}
+	containerClaims := mainContainerResourceClaims(t, worker)
+	if len(containerClaims) != 1 {
+		t.Fatalf("worker main container resource claims count = %d, want 1", len(containerClaims))
+	}
+	containerClaim := containerClaims[0].(map[string]interface{})
+	if containerClaim["name"] != "gpu" {
+		t.Errorf("worker main container resource claim = %v, want name=gpu", containerClaim)
+	}
 
 	// Frontend must have tolerations AND the same nodeSelector as worker —
 	// they co-locate on the GPU node cohort so cross-namespace traffic stays
 	// inside a single node-group Security Group on EKS. Frontend does NOT get
 	// a ResourceClaim (it's CPU-only).
-	frontend, _, _ := unstructured.NestedMap(obj.Object, "spec", "services", "Frontend", "extraPodSpec")
+	frontend := componentPodSpec(t, obj, "Frontend")
 	if frontend == nil {
-		t.Fatal("Frontend extraPodSpec not set")
+		t.Fatal("Frontend podTemplate.spec not set")
 	}
 	frontTols, _, _ := unstructured.NestedSlice(frontend, "tolerations")
 	if len(frontTols) != 1 {
@@ -526,12 +547,89 @@ func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
 	}}
 	err := applyInferenceWorkerScheduling(obj, &inferenceWorkloadConfig{})
 	if err == nil {
-		t.Fatal("applyInferenceWorkerScheduling() expected error for missing spec.services, got nil")
+		t.Fatal("applyInferenceWorkerScheduling() expected error for missing spec.components, got nil")
 	}
 }
 
+func TestEnsureMainContainerResourceClaims_AppendsMainWhenMissing(t *testing.T) {
+	podSpec := map[string]interface{}{
+		"containers": []interface{}{
+			map[string]interface{}{keyName: "sidecar-frontend"},
+		},
+	}
+	ensureMainContainerResourceClaims(podSpec, []interface{}{map[string]interface{}{keyName: "gpu"}})
+
+	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
+	if err != nil {
+		t.Fatalf("read containers: %v", err)
+	}
+	if len(containers) != 2 {
+		t.Fatalf("containers count = %d, want 2: %v", len(containers), containers)
+	}
+	sidecar := containers[0].(map[string]interface{})
+	if sidecar[keyName] != "sidecar-frontend" {
+		t.Fatalf("first container = %v, want original sidecar preserved", sidecar)
+	}
+	if _, found, _ := unstructured.NestedSlice(sidecar, "resources", "claims"); found {
+		t.Fatal("sidecar unexpectedly received GPU resource claims")
+	}
+	main := containers[1].(map[string]interface{})
+	if main[keyName] != mainContainerName {
+		t.Fatalf("appended container name = %v, want %s", main[keyName], mainContainerName)
+	}
+	claims, _, err := unstructured.NestedSlice(main, "resources", "claims")
+	if err != nil {
+		t.Fatalf("read appended main resources.claims: %v", err)
+	}
+	if len(claims) != 1 {
+		t.Fatalf("appended main resource claims count = %d, want 1", len(claims))
+	}
+}
+
+func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string) map[string]interface{} {
+	t.Helper()
+	components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
+	if err != nil {
+		t.Fatalf("read spec.components: %v", err)
+	}
+	for _, raw := range components {
+		component, ok := raw.(map[string]interface{})
+		if !ok || component[keyName] != name {
+			continue
+		}
+		podSpec, _, err := unstructured.NestedMap(component, "podTemplate", "spec")
+		if err != nil {
+			t.Fatalf("read %s podTemplate.spec: %v", name, err)
+		}
+		return podSpec
+	}
+	t.Fatalf("component %q not found", name)
+	return nil
+}
+
+func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) []interface{} {
+	t.Helper()
+	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
+	if err != nil {
+		t.Fatalf("read containers: %v", err)
+	}
+	for _, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		if !ok || container[keyName] != mainContainerName {
+			continue
+		}
+		claims, _, err := unstructured.NestedSlice(container, "resources", "claims")
+		if err != nil {
+			t.Fatalf("read main container resources.claims: %v", err)
+		}
+		return claims
+	}
+	t.Fatal("main container not found")
+	return nil
+}
+
 // TestParseDynamoTemplate_ScalarModelStaysString guards the quoting of
-// value: "${MODEL}" at testdata/inference/dynamo-deployment.yaml:43. A
+// value: "${MODEL}" in testdata/inference/dynamo-deployment.yaml. A
 // scalar-looking model ID (pure-numeric / boolean-like / null-like) that
 // passes validateModelID must round-trip through ${MODEL} substitution and
 // YAML unmarshal as a *string*, not a YAML int/bool/null — otherwise the
@@ -555,10 +653,7 @@ func TestParseDynamoTemplate_ScalarModelStaysString(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseYAMLTemplate() error: %v", err)
 			}
-			envs, _, err := unstructured.NestedSlice(obj.Object, "spec", "services", "Frontend", "envs")
-			if err != nil {
-				t.Fatalf("read Frontend envs: %v", err)
-			}
+			envs := componentContainerEnv(t, obj, "Frontend", mainContainerName)
 			var got interface{}
 			var found bool
 			for _, e := range envs {
@@ -580,6 +675,28 @@ func TestParseDynamoTemplate_ScalarModelStaysString(t *testing.T) {
 			}
 		})
 	}
+}
+
+func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, componentName, containerName string) []interface{} {
+	t.Helper()
+	podSpec := componentPodSpec(t, obj, componentName)
+	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
+	if err != nil {
+		t.Fatalf("read %s containers: %v", componentName, err)
+	}
+	for _, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		if !ok || container[keyName] != containerName {
+			continue
+		}
+		env, _, err := unstructured.NestedSlice(container, "env")
+		if err != nil {
+			t.Fatalf("read %s/%s env: %v", componentName, containerName, err)
+		}
+		return env
+	}
+	t.Fatalf("container %s/%s not found", componentName, containerName)
+	return nil
 }
 
 func TestBuildAIPerfJob_PrebuiltImageAndSentinel(t *testing.T) {
@@ -1060,6 +1177,125 @@ func TestResolveConcurrencyPerGPU(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveRoutingMode(t *testing.T) {
+	routingC := func(v string) recipe.Constraint {
+		return recipe.Constraint{Name: perfConstraintRoutingMode, Value: v}
+	}
+	tests := []struct {
+		name    string
+		ctx     *validators.Context
+		want    inferenceRoutingMode
+		wantErr bool
+	}{
+		{"no recipe defaults to dynamo-router", ctxWithPerfConstraints(), inferenceRoutingModeDynamoRouter, false},
+		{"blank recipe defaults to dynamo-router", ctxWithPerfConstraints(routingC("   ")), inferenceRoutingModeDynamoRouter, false},
+		{"explicit dynamo-router", ctxWithPerfConstraints(routingC("dynamo-router")), inferenceRoutingModeDynamoRouter, false},
+		{"explicit gateway-epp", ctxWithPerfConstraints(routingC("gateway-epp")), inferenceRoutingModeGatewayEPP, false},
+		{"invalid mode fails closed", ctxWithPerfConstraints(routingC("load-only")), "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveRoutingMode(tt.ctx)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveRoutingMode() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("resolveRoutingMode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDynamoDeploymentTemplate(t *testing.T) {
+	tests := []struct {
+		name string
+		mode inferenceRoutingMode
+		want string
+	}{
+		{"default router template", inferenceRoutingModeDynamoRouter, "dynamo-deployment.yaml"},
+		{"gateway epp template", inferenceRoutingModeGatewayEPP, "dynamo-deployment-gateway-epp.yaml"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dynamoDeploymentTemplate(tt.mode); got != tt.want {
+				t.Errorf("dynamoDeploymentTemplate(%q) = %q, want %q", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveInferenceEndpoint(t *testing.T) {
+	const ns = "aicr-inference-perf-test"
+	frontendSvc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: inferenceDeploymentName + "-frontend", Namespace: ns},
+		Spec:       v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 9000}}},
+	}
+	gatewaySvc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: inferenceGatewayName, Namespace: inferenceGatewayNamespace},
+		Spec:       v1.ServiceSpec{Ports: []v1.ServicePort{{Port: 8080}}},
+	}
+
+	t.Run("dynamo-router uses frontend service", func(t *testing.T) {
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset(frontendSvc, gatewaySvc)}
+		config := &inferenceWorkloadConfig{namespace: ns, routingMode: inferenceRoutingModeDynamoRouter}
+		want := "http://aicr-inference-perf-frontend.aicr-inference-perf-test.svc:9000"
+		got, err := resolveInferenceEndpoint(ctx, config)
+		if err != nil {
+			t.Fatalf("resolveInferenceEndpoint() error: %v", err)
+		}
+		if got != want {
+			t.Errorf("resolveInferenceEndpoint() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("gateway-epp uses inference gateway service", func(t *testing.T) {
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset(frontendSvc, gatewaySvc)}
+		config := &inferenceWorkloadConfig{namespace: ns, routingMode: inferenceRoutingModeGatewayEPP}
+		want := "http://inference-gateway.agentgateway-system.svc:8080"
+		got, err := resolveInferenceEndpoint(ctx, config)
+		if err != nil {
+			t.Fatalf("resolveInferenceEndpoint() error: %v", err)
+		}
+		if got != want {
+			t.Errorf("resolveInferenceEndpoint() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("gateway-epp falls back to conventional endpoint", func(t *testing.T) {
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset()}
+		config := &inferenceWorkloadConfig{namespace: ns, routingMode: inferenceRoutingModeGatewayEPP}
+		got, err := resolveInferenceEndpoint(ctx, config)
+		if err != nil {
+			t.Fatalf("resolveInferenceEndpoint() error: %v", err)
+		}
+		if got != defaultGatewayEndpoint() {
+			t.Errorf("resolveInferenceEndpoint() = %q, want %q", got, defaultGatewayEndpoint())
+		}
+	})
+
+	t.Run("gateway-epp surfaces service list errors", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("list", "services", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, stderrors.New("service list denied")
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		config := &inferenceWorkloadConfig{namespace: ns, routingMode: inferenceRoutingModeGatewayEPP}
+		got, err := resolveInferenceEndpoint(ctx, config)
+		if err == nil {
+			t.Fatalf("resolveInferenceEndpoint() = %q, want error", got)
+		}
+		if !strings.Contains(err.Error(), "failed to list inference gateway services") {
+			t.Fatalf("resolveInferenceEndpoint() error = %v, want gateway list context", err)
+		}
+	})
 }
 
 // TestDurationFromEnv verifies the duration knob reader: unset → default, a

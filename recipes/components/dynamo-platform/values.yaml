@@ -12,18 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values (v1.0.2)
+# Dynamo Platform Helm values (v1.2.0)
 # NVIDIA Dynamo inference serving platform operator.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
 # Grove is installed as a separate AICR component (see recipes/components/grove/).
 
-# --- Global subchart controls (new in 1.0) ---
-# Disable etcd — Kubernetes-native discovery replaces it for the operator.
-# Runtime pods bypass etcd via DYN_STORE_KV=mem on workloads.
+# --- Global subchart controls ---
 global:
+  # Kubernetes-native discovery replaces etcd for AICR Dynamo workloads.
   etcd:
     install: false
+  # Dynamo 1.2 defaults the runtime event plane to NATS for distributed
+  # Kubernetes backends. Install the bundled NATS chart so workloads can use
+  # the runtime default instead of per-workload DYN_EVENT_PLANE overrides.
+  # Request/response traffic stays on Dynamo's request plane default (TCP)
+  # unless a workload explicitly sets DYN_REQUEST_PLANE.
+  nats:
+    install: true
   # Disable kai-scheduler sub-chart install — managed as a separate AICR component.
   # Keep enabled: true so the Dynamo operator detects and uses the external scheduler.
   kai-scheduler:
@@ -39,30 +45,11 @@ dynamo-operator:
   # Upgrade CRDs via the platform chart (no separate dynamo-crds 1.0 chart)
   upgradeCRD: true
 
-  # Use Kubernetes-native service discovery (operator-level only;
-  # runtime pods still require DYN_STORE_KV=mem to skip etcd leases)
+  # Use Kubernetes-native service discovery.
   discoveryBackend: "kubernetes"
-
-  # Disable NATS at the operator level to prevent --natsAddr injection
-  nats:
-    enabled: false
 
   # Point Dynamo to the existing kube-prometheus-stack for metrics collection.
   # PodMonitor CRs are auto-created by the operator for metric discovery.
   dynamo:
     metrics:
       prometheusEndpoint: "http://kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
-
-# Disable kai-scheduler sub-chart — managed as a separate aicr component
-kai-scheduler:
-  enabled: false
-
-# Disable NATS sub-chart — ZMQ event plane replaces it.
-# Runtime pods bypass NATS via DYN_EVENT_PLANE=zmq on workloads.
-nats:
-  enabled: false
-
-# Disable etcd sub-chart — Kubernetes-native discovery replaces it for the operator.
-# Runtime pods bypass etcd via DYN_STORE_KV=mem on workloads.
-etcd:
-  enabled: false

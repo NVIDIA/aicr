@@ -33,7 +33,7 @@ import (
 const robustTestPrefix = "robust-test-"
 
 var dgdGVR = schema.GroupVersionResource{
-	Group: apiGroupNVIDIA, Version: versionV1alpha1, Resource: "dynamographdeployments",
+	Group: apiGroupNVIDIA, Version: versionV1beta1, Resource: "dynamographdeployments",
 }
 
 var dcdGVR = schema.GroupVersionResource{
@@ -450,14 +450,14 @@ func validateDynamoWebhookRejects(ctx *validators.Context) (*webhookRejectionRep
 
 	dgd := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			keyAPIVersion: "nvidia.com/v1alpha1",
+			keyAPIVersion: "nvidia.com/v1beta1",
 			keyKind:       "DynamoGraphDeployment",
 			keyMetadata: map[string]interface{}{
 				keyName:      name,
 				keyNamespace: namespaceDynamoSystem,
 			},
 			keySpec: map[string]interface{}{
-				"services": map[string]interface{}{},
+				"components": []interface{}{},
 			},
 		},
 	}

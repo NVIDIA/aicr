@@ -1671,7 +1671,7 @@ webhooks operational, and custom resources reconciled.
 2. **Custom Resource Definitions** — 6 Dynamo CRDs registered (DynamoGraphDeployment, DynamoComponentDeployment, etc.)
 3. **Webhooks Operational** — Validating webhook configured and active
 4. **Custom Resource Reconciled** — `DynamoGraphDeployment/vllm-agg` reconciled into running workload pods via PodCliques
-5. **Supporting Services** — etcd and NATS running for Dynamo platform state management
+5. **Supporting Services** — NATS running for Dynamo's Kubernetes event plane
 6. **Result: PASS**
 
 ---
@@ -1738,7 +1738,7 @@ EOF
     # Submit an invalid DynamoGraphDeployment (empty spec) — webhook should reject it
     local webhook_result
     webhook_result=$(kubectl apply -f - 2>&1 <<INVALID_CR || true
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
 metadata:
   name: webhook-test-invalid

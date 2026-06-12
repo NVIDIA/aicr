@@ -190,7 +190,7 @@ func TestCoverageCell(t *testing.T) {
 
 func TestRunEndToEnd(t *testing.T) {
 	outDir := t.TempDir()
-	if err := run(context.Background(), outDir, "test-v1", true, true); err != nil {
+	if err := run(context.Background(), outDir, "", "test-v1", true, true); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(outDir, matrixFile))
@@ -216,8 +216,176 @@ func TestRunMkdirError(t *testing.T) {
 	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	if err := run(context.Background(), filepath.Join(f, "sub"), "test-v1", true, true); err == nil {
+	if err := run(context.Background(), filepath.Join(f, "sub"), "", "test-v1", true, true); err == nil {
 		t.Fatal("expected error when out-dir parent is a file, got nil")
+	}
+}
+
+// detailSampleReport exercises every renderDetail branch: a recipe that passes
+// all graded dimensions, and one whose resolve failed (so chart_pinned and
+// constraints_wellformed are absent from the map — never scored) and which
+// carries a human-readable resolver note.
+func detailSampleReport() *health.Report {
+	return &health.Report{
+		SchemaVersion: health.SchemaVersion,
+		Combos: []health.ComboHealth{
+			{
+				LeafOverlay: "all-pass",
+				Structure: health.StructureHealth{
+					Status: health.StatusPass,
+					Dimensions: map[string]string{
+						health.DimResolves:              health.StatusPass,
+						health.DimChartPinned:           health.StatusPass,
+						health.DimConstraintsWellformed: health.StatusPass,
+					},
+				},
+			},
+			{
+				LeafOverlay: "resolve-fail",
+				Structure: health.StructureHealth{
+					Status: health.StatusFail,
+					Dimensions: map[string]string{
+						health.DimResolves: health.StatusFail,
+						// chart_pinned & constraints_wellformed absent — never scored.
+					},
+					Detail: map[string]string{
+						health.DimResolves: "overlay merge failed:\r\nmissing base | overlay",
+					},
+				},
+			},
+			{
+				LeafOverlay: "mixed-states",
+				Structure: health.StructureHealth{
+					Status: health.StatusWarn,
+					Dimensions: map[string]string{
+						// Exercises the warn and unknown tally arms.
+						health.DimResolves:              health.StatusUnknown,
+						health.DimChartPinned:           health.StatusWarn,
+						health.DimConstraintsWellformed: health.StatusPass,
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestRenderDetailContent(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderDetail(&buf, detailSampleReport()); err != nil {
+		t.Fatalf("renderDetail() error = %v", err)
+	}
+	out := buf.String()
+
+	wantSubstrings := []string{
+		"## Structural detail",
+		"### Per-dimension tally",
+		"| Dimension | Pass | Warn | Fail | Unknown | Not scored |",
+		// resolves: pass (all-pass), fail (resolve-fail), unknown (mixed-states).
+		"| resolves | 1 | 0 | 1 | 1 | 0 |",
+		// chart_pinned: pass (all-pass), warn (mixed-states); resolve-fail unscored.
+		"| chart_pinned | 1 | 1 | 0 | 0 | 1 |",
+		// constraints_wellformed: pass (all-pass, mixed-states); resolve-fail unscored.
+		"| constraints_wellformed | 2 | 0 | 0 | 0 | 1 |",
+		"### Per-recipe",
+		"| Recipe | resolves | chart_pinned | constraints_wellformed | Status | Notes |",
+		"| all-pass | pass | pass | pass | pass |  |",
+		// Absent dimensions render as the not-scored em dash; the note has its
+		// CRLF flattened and pipe escaped so the table stays intact.
+		"| resolve-fail | fail | — | — | fail | resolves: overlay merge failed: missing base \\| overlay |",
+		// Warn/unknown dimension states surface verbatim in the per-recipe row.
+		"| mixed-states | unknown | warn | pass | warn |  |",
+	}
+	for _, s := range wantSubstrings {
+		if !strings.Contains(out, s) {
+			t.Errorf("rendered detail missing %q\n--- full output ---\n%s", s, out)
+		}
+	}
+}
+
+func TestRenderDetailByteStable(t *testing.T) {
+	var a, b bytes.Buffer
+	if err := renderDetail(&a, detailSampleReport()); err != nil {
+		t.Fatalf("renderDetail() first run error = %v", err)
+	}
+	if err := renderDetail(&b, detailSampleReport()); err != nil {
+		t.Fatalf("renderDetail() second run error = %v", err)
+	}
+	if !bytes.Equal(a.Bytes(), b.Bytes()) {
+		t.Errorf("deterministic detail differs across runs:\n--- run 1 ---\n%s\n--- run 2 ---\n%s", a.String(), b.String())
+	}
+}
+
+func TestDimStateCell(t *testing.T) {
+	dims := map[string]string{health.DimResolves: health.StatusPass}
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{"present state", health.DimResolves, "pass"},
+		{"absent dimension is not-scored em dash", health.DimChartPinned, "—"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dimStateCell(dims, tt.key); got != tt.want {
+				t.Errorf("dimStateCell(%q) = %q, want %q", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetailNotes(t *testing.T) {
+	tests := []struct {
+		name string
+		in   map[string]string
+		want string
+	}{
+		{"empty map is blank", nil, ""},
+		{"single note", map[string]string{health.DimResolves: "boom"}, "resolves: boom"},
+		{
+			"ordered by detailDimensions, pipe escaped, newline flattened",
+			map[string]string{
+				health.DimChartPinned: "no helm | to pin",
+				health.DimResolves:    "line one\nline two",
+			},
+			"resolves: line one line two; chart_pinned: no helm \\| to pin",
+		},
+		{
+			"CRLF and lone CR flattened",
+			map[string]string{health.DimResolves: "a\r\nb\rc"},
+			"resolves: a b c",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detailNotes(tt.in); got != tt.want {
+				t.Errorf("detailNotes() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunWritesSummaryDetail(t *testing.T) {
+	outDir := t.TempDir()
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
+	// Seed prior content to prove the detail is appended, not truncated — the
+	// $GITHUB_STEP_SUMMARY append contract.
+	if err := os.WriteFile(summaryPath, []byte("PRIOR\n"), 0o644); err != nil {
+		t.Fatalf("seed summary: %v", err)
+	}
+	if err := run(context.Background(), outDir, summaryPath, "test-v1", true, true); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	data, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("read summary: %v", err)
+	}
+	got := string(data)
+	if !strings.HasPrefix(got, "PRIOR\n") {
+		t.Errorf("detail overwrote prior summary content instead of appending:\n%s", got)
+	}
+	if !strings.Contains(got, "## Structural detail") || !strings.Contains(got, "### Per-dimension tally") {
+		t.Errorf("summary file missing per-dimension detail:\n%s", got)
 	}
 }
 

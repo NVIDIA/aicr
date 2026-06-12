@@ -289,11 +289,9 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 
 // gb200NetPreflightApplies reports whether the preflight check should run for
 // the given (variant, accelerator, service) tuple. Keeps the call site at the
-// top of validateNcclAllReduceBw uncluttered. GB300 shares GB200's Grace PCI
-// topology and EFA path on EKS, so the NVreg_GrdmaPciTopoCheckOverride flag is
-// required for its NET variant too.
+// top of validateNcclAllReduceBw uncluttered.
 func gb200NetPreflightApplies(variant ncclVariant, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) bool {
 	return variant == variantNET &&
-		(accelerator == recipe.CriteriaAcceleratorGB200 || accelerator == recipe.CriteriaAcceleratorGB300) &&
+		accelerator == recipe.CriteriaAcceleratorGB200 &&
 		service == recipe.CriteriaServiceEKS
 }
