@@ -310,6 +310,7 @@ By contributor task:
 - **Adding a bundle-time component validation** → [validator.md](validator.md#component-validations-bundle-time)
 - **Maintaining recipes and cutting releases** → [maintaining.md](maintaining.md)
 - **Writing or running tests (unit, chainsaw, KWOK, e2e)** → [tests.md](tests.md)
+- **Using the project's Claude skills (snapshot analysis, docs audit, demos, decks, OpenVEX, release notes)** → [skills.md](skills.md)
 
 By reference:
 
