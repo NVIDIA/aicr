@@ -48,7 +48,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
 | nfd | helm | node-feature-discovery | 0.18.3 | 1 |
 | nodewright-customizations | manifest | — | — | 5 |
-| nodewright-operator | helm | skyhook-operator | v0.15.1 | 3 |
+| nodewright-operator | helm | nodewright | v0.17.0 | 3 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1-rc.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
@@ -184,7 +184,7 @@ _No images extracted._
 ### nodewright-operator
 
 - `bitnami/kubectl:latest@sha256:1bc359beb3ae3982591349df11db50b0917b0596e8bed8ab9cf0c8a84a3502d1`
-- `nvcr.io/nvidia/skyhook/operator:v0.15.0@sha256:09e4f71cca8757818515f9e7dd4b8f47d30c642dc3a7efe1329d5c19efea76b9`
+- `ghcr.io/nvidia/nodewright/operator:v0.17.0@sha256:1511449bf51f2844b6bb3a03bde3d5590caf2ca283e3e39c0745a8016af2132f`
 - `quay.io/brancz/kube-rbac-proxy:v0.15.0@sha256:2c7b120590cbe9f634f5099f2cbb91d0b668569023a81505ca124a5c437e7663`
 
 ### nvidia-dra-driver-gpu
