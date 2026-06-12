@@ -193,3 +193,7 @@ nfd:
 # it off until AICR has explicit CC-capable hardware support.
 ccManager:
   enabled: false
+
+# Chart default (enabled) renders an undeclared CRD field.
+kataSandboxDevicePlugin:
+  enabled: false
