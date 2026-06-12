@@ -50,7 +50,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | nodewright-customizations | manifest | — | — | 5 |
 | nodewright-operator | helm | skyhook-operator | v0.15.1 | 3 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.0 | 1 |
-| nvsentinel | helm | nvsentinel | v1.3.0 | 6 |
+| nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | slinky-slurm | helm | slurm | 1.1.0 | 5 |
@@ -191,12 +191,12 @@ _No images extracted._
 
 ### nvsentinel
 
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.3.0-dcgm-3.x`
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.3.0-dcgm-4.x`
-- `ghcr.io/nvidia/nvsentinel/labeler:v1.3.0`
-- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.3.0`
-- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.3.0`
-- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.3.0`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.9.0-dcgm-3.x`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.9.0-dcgm-4.x`
+- `ghcr.io/nvidia/nvsentinel/labeler:v1.9.0`
+- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.9.0`
+- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.9.0`
+- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.9.0`
 
 ### prometheus-adapter
 
