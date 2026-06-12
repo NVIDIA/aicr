@@ -2,16 +2,6 @@
 
 We welcome contributions from developers of all backgrounds and experience levels.
 
-## Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [How to Contribute](#how-to-contribute)
-- [Design Principles](#design-principles)
-- [Pull Request Process](#pull-request-process)
-- [Developer Certificate of Origin](#developer-certificate-of-origin)
-- [Tips for Contributors](#tips-for-contributors)
-
 ## Code of Conduct
 
 This project follows NVIDIA's commitment to fostering an open and welcoming environment. Please be respectful and professional in all interactions. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details.
@@ -166,22 +156,7 @@ Trust is established through evidence, not assertions. Every released artifact c
    - DEVELOPMENT.md for developer workflow changes
    - Code comments and godoc for API changes
 
-3. **Commit with required provenance:**
-   ```bash
-   # External contributors (DCO sign-off required)
-   git commit -s -m "feat: add network collector
-
-   - Implement NetworkCollector interface
-   - Add unit tests with 80% coverage
-   - Update factory registration
-
-   Fixes #123"
-
-   # NVIDIA org members / automation (DCO sign-off exempt)
-   git commit -S -m "feat: add network collector"
-   ```
-
-   External contributors must use `-s`. NVIDIA organization members are exempt from DCO bot sign-off checks and should use cryptographic signing (`-S`).
+3. **Commit with required provenance:** External contributors sign off with `-s`; NVIDIA organization members use cryptographic signing (`-S`). See [Developer Certificate of Origin](#developer-certificate-of-origin) for details.
 
 ### Creating the Pull Request
 
@@ -195,13 +170,7 @@ Trust is established through evidence, not assertions. Every released artifact c
 
 ### Review Process
 
-1. **Automated Checks** run via GitHub Actions:
-   - Go tests with race detector
-   - golangci-lint
-   - YAML linting
-   - Security scans (Anchore in CI, Grype in `make scan`)
-   - Coverage tracking
-   - E2E tests
+1. **Automated Checks** run via GitHub Actions — the same gate `make qualify` runs locally (tests with race detector, golangci-lint, YAML linting, security scan, coverage, E2E). See [Full Qualification](DEVELOPMENT.md#7-full-qualification) in the development guide.
 
 2. **Maintainer Review** covers:
    - Correctness and functionality
@@ -209,11 +178,9 @@ Trust is established through evidence, not assertions. Every released artifact c
    - Test coverage and quality
    - Documentation completeness
 
-3. **Address Feedback** by pushing new commits:
+3. **Address Feedback** by pushing new commits (signed per [Developer Certificate of Origin](#developer-certificate-of-origin)):
    ```bash
-   git commit -s -m "address review: improve error handling"   # external contributors
-   # or
-   git commit -S -m "address review: improve error handling"   # NVIDIA org members / automation
+   git commit -m "address review: improve error handling"
    git push origin your-branch
    ```
 

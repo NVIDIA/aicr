@@ -15,12 +15,16 @@ This section is for users who:
 | Document | Description |
 |----------|-------------|
 | [Installation](installation.md) | Install the `aicr` CLI (automated script, manual, or build from source) |
+| [End-to-End Tutorial](tutorial.md) | Learning path: install → recipe → bundle → deploy → validate, start to finish |
 | [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
+| [Generating Bundles](bundling.md) | Task-oriented how-to: deployers, value overrides, node scheduling, offline/vendored charts, readiness gates |
 | [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
 | [Validation](validation.md) | Task-oriented walkthrough: validate a cluster against a recipe, both training and inference performance phases |
 | [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
 | [Container Images](container-images.md) | Container image inventory across all components (BOM) |
+| [Recipe Health](recipe-health.md) | Per-recipe health and validation status tracking |
+| [Air-Gap Mirror](air-gap-mirror.md) | Mirror images and charts for air-gapped deployment |
 
 ## Quick Start
 

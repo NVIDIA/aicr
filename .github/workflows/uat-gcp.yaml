@@ -170,7 +170,7 @@ jobs:
           kubectl get nodes
 
       # UAT phases — each step invokes tests/uat/gcp/run so the demo
-      # (demos/cuj1-gke-config.md) and CI stay in lockstep, and per-phase
+      # (demos/cuj1-training.md) and CI stay in lockstep, and per-phase
       # failures surface as discrete steps in the GitHub Actions UI. Phases
       # chain on success: prep → install → conformance → train → verify.
       # The signed evidence bundle is produced by the conformance step; the

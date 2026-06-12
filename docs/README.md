@@ -25,7 +25,9 @@ For operators running `aicr` against real clusters.
 | Topic | Doc |
 |-------|-----|
 | Install the CLI | [Installation](user/installation.md) |
+| Full workflow, start to finish | [End-to-End Tutorial](user/tutorial.md) |
 | Every command and flag | [CLI Reference](user/cli-reference.md) |
+| Render a recipe into deployment artifacts | [Generating Bundles](user/bundling.md) |
 | REST API for `aicrd` | [API Reference](user/api-reference.md) |
 | Run the snapshot agent in-cluster | [Agent Deployment](user/agent-deployment.md) |
 | Validate a recipe against a live cluster | [Validation](user/validation.md) |
@@ -42,6 +44,7 @@ For pipelines and platforms that call AICR programmatically or host
 | CI/CD integration patterns | [Automation](integrator/automation.md) |
 | Self-host `aicrd` on Kubernetes | [Kubernetes Deployment](integrator/kubernetes-deployment.md) |
 | Add or modify recipe metadata | [Recipe Development](integrator/recipe-development.md) |
+| Verify artifacts (SLSA, SBOM, attestations) | [Supply Chain Verification](integrator/supply-chain-verification.md) |
 | Ship custom validators via `--data` | [Validator Extension](integrator/validator-extension.md) |
 | Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE networking](integrator/gke-tcpxo-networking.md), [Talos](integrator/talos-integration.md) |
 

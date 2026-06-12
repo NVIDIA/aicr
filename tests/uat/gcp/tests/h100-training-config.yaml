@@ -15,7 +15,7 @@
 # AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
 #
 # Drives the GKE H100 training UAT — codifies the workflow demonstrated in
-# `demos/cuj1-gke-config.md` against the cluster provisioned by
+# `demos/cuj1-training.md` (GKE config-driven section) against the cluster provisioned by
 # `../cluster-config.yaml`. Scheduling fields match that cluster's node
 # labels/taints.
 #

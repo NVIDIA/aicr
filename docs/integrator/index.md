@@ -26,6 +26,7 @@ This section is for integrators who:
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
 | [Data Extension](data-extension.md) | Extending the embedded catalog via `--data` — overlays, components, and runtime criteria values without a rebuild |
 | [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
+| [Supply Chain Verification](supply-chain-verification.md) | Verifying SLSA provenance, SBOMs, and attestations; admission policies; offline verification |
 | [NodeWright Component](components/nodewright.md) | NodeWright component reference and configuration |
 
 ## Quick Start

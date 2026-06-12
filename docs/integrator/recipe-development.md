@@ -664,27 +664,16 @@ cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
 git add recipes/evidence/<recipe-name>.yaml
 ```
 
-The `--push` example omits the tag, so aicr derives a unique per-recipe one,
-`<recipe-slug>-<short-fingerprint>` (e.g.
-`gb200-eks-ubuntu-training-3f9a1c2b4d5e`). The bundle is always pinned by its
-`sha256:` digest (what `evidence verify` and the pointer use, pulling by
-digest), so the tag is only a human-readable label and tag choice never
-affects verification. The derived tag keeps distinct attestations on
-distinct refs; pass an explicit tag to override.
+`--push` signs the bundle (cosign keyless via Sigstore) and attaches it to the
+OCI artifact as a Sigstore Bundle referrer. The tag is just a label — the
+bundle is pinned by its `sha256:` digest — so omitting it lets aicr derive a
+unique per-recipe tag (`<recipe-slug>-<short-fingerprint>`, e.g.
+`gb200-eks-ubuntu-training-3f9a1c2b4d5e`).
 
-`--push` triggers cosign keyless signing through Sigstore's
-public-good infrastructure. The CLI resolves an OIDC token through
-the precedence chain documented under
-[`--identity-token`](../user/cli-reference.md#aicr-validate); if no
-pre-fetched token, ambient GitHub Actions OIDC, or
-`--oidc-device-flow` is available, it opens a browser. The signed
-`attestation.intoto.jsonl` is attached to the OCI artifact as a
-Sigstore Bundle referrer.
-
-For the full bundle layout, flag reference, and registry
-compatibility notes, see
-[Emitting recipe evidence for a PR](../user/validation.md#emitting-recipe-evidence-for-a-pr).
-For the producer-and-consumer walkthrough end-to-end, see
+For the full bundle layout, flag reference, tag derivation, OIDC token
+precedence, and registry compatibility notes, see
+[Emitting recipe evidence](../user/validation.md#emitting-recipe-evidence).
+For the end-to-end producer-and-consumer walkthrough, see the
 [Recipe Evidence Demo](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md).
 
 ### Self-Verifying Before You Open the PR
@@ -758,7 +747,7 @@ valid exempt path — see the bypass policy's "Inappropriate uses."
 
 ### Reference
 
-- [Emitting recipe evidence for a PR](../user/validation.md#emitting-recipe-evidence-for-a-pr) — user-facing flag reference and bundle layout
+- [Emitting recipe evidence](../user/validation.md#emitting-recipe-evidence) — user-facing flag reference and bundle layout
 - [Recipe Evidence Demo](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md) — full producer-and-consumer walkthrough
 - [Maintaining Recipe Contributions](../contributor/maintaining.md) — maintainer-side review checklist
 - [ADR-007](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) — bundle format and verifier semantics

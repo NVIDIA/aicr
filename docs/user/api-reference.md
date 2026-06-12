@@ -6,6 +6,8 @@ Complete reference for using the AICR API Server.
 
 The AICR API Server provides HTTP REST access to recipe generation and bundle creation for GPU-accelerated infrastructure. Use the API for programmatic access to configuration recommendations and deployment artifacts.
 
+> Version numbers in the sample requests and responses below (server version, chart versions, driver versions) are illustrative. The authoritative, current versions are in the [Component Catalog](component-catalog.md) and the [Container Images BOM](container-images.md).
+
 ```
 ┌──────────────┐      ┌──────────────┐
 │ GET /recipe  │─────▶│   Recipe     │
@@ -101,7 +103,7 @@ curl "http://localhost:8080/"
 ```json
 {
   "service": "aicrd",
-  "version": "v0.7.6",
+  "version": "v0.14.0",
   "routes": ["/v1/recipe", "/v1/query", "/v1/bundle"]
 }
 ```
@@ -403,8 +405,8 @@ curl -X POST "http://localhost:8080/v1/bundle" \
     "apiVersion": "aicr.nvidia.com/v1alpha1",
     "kind": "Recipe",
     "componentRefs": [
-      {"name": "gpu-operator", "version": "v25.3.3", "type": "helm"},
-      {"name": "network-operator", "version": "v25.4.0", "type": "helm"}
+      {"name": "gpu-operator", "version": "v26.3.2", "type": "helm"},
+      {"name": "network-operator", "version": "v26.1.1", "type": "helm"}
     ]
   }' \
   -o bundles.zip
@@ -416,8 +418,8 @@ curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-oper
     "apiVersion": "aicr.nvidia.com/v1alpha1",
     "kind": "Recipe",
     "componentRefs": [
-      {"name": "gpu-operator", "version": "v25.3.3", "type": "helm"},
-      {"name": "network-operator", "version": "v25.4.0", "type": "helm"}
+      {"name": "gpu-operator", "version": "v26.3.2", "type": "helm"},
+      {"name": "network-operator", "version": "v26.1.1", "type": "helm"}
     ]
   }' \
   -o bundles.zip

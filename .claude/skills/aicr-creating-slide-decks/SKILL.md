@@ -1,5 +1,5 @@
 ---
-name: creating-slide-decks
+name: aicr-creating-slide-decks
 description: Use when building a self-contained HTML slide deck or visual talking-point for a technical concept or workflow (e.g. a demos/*.html) — shown full-screen or projected and narrated, opening in any browser with no build step or dependencies.
 ---
 
@@ -7,7 +7,7 @@ description: Use when building a self-contained HTML slide deck or visual talkin
 
 ## Overview
 
-A deck here is **one self-contained HTML file** — inline CSS and inline SVG, no build, no dependencies, no network — that opens in any browser and projects cleanly. One idea per slide; hand-drawn SVG diagrams carry the weight. It's the *talk-to-it* companion to a runnable demo script (see the `creating-guided-demos` skill).
+A deck here is **one self-contained HTML file** — inline CSS and inline SVG, no build, no dependencies, no network — that opens in any browser and projects cleanly. One idea per slide; hand-drawn SVG diagrams carry the weight. It's the *talk-to-it* companion to a runnable demo script (see the `aicr-creating-guided-demos` skill).
 
 Copy [`skeleton.html`](skeleton.html): it's already a working deck (palette + chrome + keyboard nav + a title slide + a content slide + an SVG diagram stub). Add one `<section class="slide">` per idea; the script auto-counts and navigates.
 

@@ -683,7 +683,7 @@ aicr bundle -r recipe.yaml \
 
 ## Full Reference
 
-See `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASING.md`, and `.github/copilot-instructions.md` for extended documentation including:
+See `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASING.md`, and the `docs/` tree (`docs/contributor/` for architecture) for extended documentation including:
 - Detailed code examples for collectors, bundlers, API endpoints
 - GitHub Actions architecture (three-layer composite actions)
 - CI/CD workflows, supply chain security (SLSA, SBOM, Cosign)

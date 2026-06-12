@@ -2,20 +2,6 @@
 
 Project setup, architecture, development workflows, and tooling for AI Cluster Runtime (AICR) contributors.
 
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Prerequisites](#prerequisites)
-- [Development Setup](#development-setup)
-- [Project Architecture](#project-architecture)
-- [Development Workflow](#development-workflow)
-- [Local Kubernetes Development](#local-kubernetes-development)
-- [KWOK Simulated Cluster Testing](#kwok-simulated-cluster-testing)
-- [Local Health Check Validation](#local-health-check-validation)
-- [Make Targets Reference](#make-targets-reference)
-- [Debugging](#debugging)
-- [Validator Development](#validator-development)
-
 ## Quick Start
 
 Set environment variable `AUTO_MODE=true` to avoid having to approve each tool install.
@@ -183,89 +169,11 @@ aicr/
 └── tilt/               # Local dev environment
 ```
 
-### Key Components
-
-#### CLI (`aicr`)
-- **Location**: `cmd/aicr/main.go` → `pkg/cli/`
-- **Framework**: [urfave/cli v3](https://github.com/urfave/cli)
-- **Commands**: `snapshot`, `recipe`, `query`, `bundle`, `verify`, `validate`, `evidence`, `diff`, `mirror`, `trust`, `skill`
-- **Purpose**: User-facing tool for system snapshots and recipe generation (supports both query and snapshot modes)
-- **Output**: Supports JSON, YAML, and table formats
-
-#### API Server
-
-- **Location**: `cmd/aicrd/main.go` → `pkg/server/`
-- **Endpoints**:
-  - `GET /v1/recipe` - Generate configuration recipes
-  - `GET /v1/query` - Query a hydrated value from a recipe
-  - `POST /v1/bundle` - Render a recipe into deployment artifacts
-  - `GET /health` - Liveness probe
-  - `GET /ready` - Readiness probe
-  - `GET /metrics` - Prometheus metrics
-- **Purpose**: HTTP service for recipe generation with rate limiting and observability
-- **Deployment**: http://localhost:8080
-
-#### Collectors
-- **Location**: `pkg/collector/`
-- **Pattern**: Factory-based with dependency injection
-- **Types**:
-  - **SystemD**: Service states (containerd, docker, kubelet)
-  - **OS**: 4 subtypes - grub, sysctl, kmod, release
-  - **Kubernetes**: Node info, server version, images, ClusterPolicy
-  - **GPU**: Hardware info, driver version, MIG settings
-- **Purpose**: Parallel collection of system configuration data
-- **Context Support**: All collectors respect context cancellation
-
-#### Recipe Engine
-- **Location**: `pkg/recipe/`
-- **Purpose**: Generate optimized configurations using base-plus-overlay model
-- **Modes**:
-  - **Query Mode**: Direct recipe generation from system parameters
-  - **Snapshot Mode**: Extract query from snapshot → Build recipe → Return recommendations
-- **Input**: OS, OS version, kernel, K8s service/version, GPU type, workload intent
-- **Output**: Recipe with matched rules and configuration measurements
-- **Data Source**: Embedded YAML configuration (`recipes/overlays/*.yaml` including `base.yaml`, `recipes/mixins/*.yaml`)
-- **Query Extraction**: Parses K8s, OS, GPU measurements from snapshots to construct recipe queries
-
-#### Snapshotter
-- **Location**: `pkg/snapshotter/`
-- **Purpose**: Orchestrate parallel collection of system measurements
-- **Output**: Complete snapshot with metadata and all collector measurements
-- **Usage**: CLI command, Kubernetes Job agent
-- **Format**: Structured snapshot (aicr.nvidia.com/v1alpha1)
-
-#### Bundler Framework
-- **Location**: `pkg/bundler/`
-- **Pattern**: Registry-based with pluggable bundler implementations
-- **API**: Object-oriented with functional options (DefaultBundler.New())
-- **Purpose**: Generate deployment bundles from recipes (Helm values, K8s manifests, scripts)
-- **Features**:
-  - Template-based generation with go:embed
-  - Functional options pattern for configuration (WithBundlerTypes, WithFailFast, WithConfig, WithRegistry)
-  - **Parallel execution** (all bundlers run concurrently)
-  - Empty bundlerTypes = all registered bundlers (dynamic discovery)
-  - Fail-fast or error collection modes
-  - Prometheus metrics for observability
-  - Context-aware execution with cancellation support
-  - **Value overrides**: CLI `--set bundler:path.to.field=value` allows runtime customization
-  - **Node scheduling**: `--system-node-selector`, `--accelerated-node-selector`, and toleration flags for workload placement
-- **Extensibility**: Implement `Bundler` interface and self-register in init() to add new bundle types
-
-#### Validator
-- **Location**: `pkg/validator/`
-- **Purpose**: Multi-phase validation of cluster configuration against recipe requirements
-- **Phases**:
-  - **Readiness**: Evaluates constraints inline against snapshot (K8s version, OS, kernel) — no checks or Jobs
-  - **Deployment**: Validates component deployment health and expected resources
-  - **Performance**: Validates system performance and network fabric health (e.g. NCCL all-reduce bus bandwidth via Kubeflow Trainer)
-  - **Conformance**: Validates workload-specific requirements and conformance
-- **Features**:
-  - Phase-based validation with dependency logic (fail → skip subsequent)
-  - Constraint evaluation against snapshots using version comparison operators
-  - Check execution framework with in-cluster Job dispatch and result collection
-  - Structured validation results with per-phase status
-- **CLI**: `aicr validate --phase <phase>` (default: readiness)
-- **Implementation**: `pkg/validator/phases.go` contains phase validation logic
+Binaries live in `cmd/` (`aicr` CLI, `aicrd` API server); business logic and the
+collectors, recipe engine, snapshotter, bundler framework, and validator live in
+the `pkg/` subdirectories shown above. For per-package responsibilities, the data
+flow between them, and component-level design, see the architecture documentation
+linked below rather than restating it here.
 
 ### Architecture Principle
 

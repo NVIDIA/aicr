@@ -127,7 +127,7 @@ so vLLM's one-time CUDA-graph / JIT compilation (tens of seconds on a cold
 worker) is excluded from the reported throughput and p99 TTFT — the numbers
 reflect steady state, not cold start. Warm-up scales with concurrency and is
 tunable via `AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY` (see the
-[validator reference](../contributor/validator.md#inference-perf-benchmark-tuning)).
+[validator reference](../contributor/validator.md#performance-benchmark-tuning)).
 
 **Determinism:** the benchmark is driven reproducibly so the verdict reflects the
 deployment, not run-to-run RNG — a fixed random seed, fixed input/output token
@@ -341,7 +341,7 @@ Valid feature names (from `pkg/evidence/cncf/collector.go`):
 | `pod-autoscaling` | HPA / custom-metrics-driven pod autoscaling |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
-## Emitting recipe evidence for a PR
+## Emitting recipe evidence
 
 When a recipe PR targets hardware AICR maintainers cannot independently
 re-run, the contributor needs to attach a signed **evidence bundle** so a

@@ -6,16 +6,12 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 
 | Demo | Description |
 |------|-------------|
-| [cuj1-eks.md](cuj1-eks.md) | CUJ1 - EKS cluster setup |
-| [cuj1-gke.md](cuj1-gke.md) | CUJ1 - GKE cluster setup |
-| [cuj2.md](cuj2.md) | CUJ2 - EKS inference with Dynamo |
-| [cuj2-demo.md](cuj2-demo.md) | CUJ2 - Annotated demo walkthrough (training vs inference) |
-| [cuj2-eks.md](cuj2-eks.md) | CUJ2 - EKS variant |
-| [cuj2-gke.md](cuj2-gke.md) | CUJ2 - GKE variant |
-| [e2e.md](e2e.md) | End-to-end CLI demo |
-| [valid.md](valid.md) | Validation demo |
-| [data.md](data.md) | External data directory demo |
-| [ext.md](ext.md) | Extension demo |
+| [cuj1-training.md](cuj1-training.md) | CUJ1 (training) - EKS + GKE end-to-end, plus a config-driven GKE + signed-evidence variant |
+| [cuj2-inference.md](cuj2-inference.md) | CUJ2 (inference) - EKS + GKE end-to-end with the Dynamo platform |
+| [cuj2-demo.md](cuj2-demo.md) | CUJ2 (inference) - Annotated slide-style demo walkthrough (training vs inference) |
+| [recipe-data-architecture.md](recipe-data-architecture.md) | Recipe metadata system: inheritance, criteria matching, deployment order, runtime external data |
+| [validation-acceptance.md](validation-acceptance.md) | Validation acceptance runbook (snapshot/recipe/bundle/validate across all phases) |
+| [end-to-end-cli.md](end-to-end-cli.md) | End-to-end CLI demo (includes the runtime external-data `--data` flow) |
 | [query.md](query.md) | Querying hydrated recipes with dot-path selectors |
 | [evidence.md](evidence.md) | Recipe evidence demo (validate emit + verify) |
 | [evidence-demo-slides.html](evidence-demo-slides.html) | Recipe evidence demo — slide deck |
@@ -26,6 +22,7 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [bundle-attestation.md](bundle-attestation.md) | Bundle attestation demo (`aicr bundle --attest` + `aicr verify` trust levels) |
 | [bundle-attestation-demo-slides.html](bundle-attestation-demo-slides.html) | Bundle attestation — slide deck |
 | [bundle-attestation-demo.sh](bundle-attestation-demo.sh) | Interactive bundle sign + verify + tamper walkthrough |
+| [examples/CUJ2-Test-Report.md](examples/CUJ2-Test-Report.md) | Dated historical capture (2026-03-13) of a CUJ2 inference run — example test report, not a runbook |
 
 ## Recording Test Runs
 
