@@ -1,5 +1,5 @@
 ---
-name: creating-guided-demos
+name: aicr-creating-guided-demos
 description: Scaffolds an interactive guided demo script (demos/*.sh), live or self-paced, with the Frame → Tell → Show → Close pattern. Triggers on "demo script", "guided walkthrough", "demos/*.sh", "live demo".
 ---
 

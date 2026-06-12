@@ -1,5 +1,5 @@
 ---
-name: managing-openvex
+name: aicr-managing-openvex
 description: |
   Use when adding, updating, or removing CVE/GHSA suppressions in
   `.openvex.json` — the OpenVEX document consumed by the daily image

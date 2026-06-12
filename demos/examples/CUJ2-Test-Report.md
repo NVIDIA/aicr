@@ -224,17 +224,8 @@ All CUJ2 success criteria met:
 
 ## How This Report Was Generated
 
-Terminal session recorded with `script cuj2-session2.log`. Key events extracted with:
-
-```shell
-cat cuj2-session2.log \
-  | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
-  | sed 's/\x1b\][^\x07\x1b]*[\x07]//g' \
-  | sed 's/\x1b\][^\x1b]*\x1b\\//g' \
-  | sed 's/\x1b[()][A-Z0-9]//g' \
-  | sed 's/\x1b\[[?][0-9;]*[a-zA-Z]//g' \
-  | sed 's/\x0d//g; s/\x07//g; s/\x08//g; s/\x0f//g' \
-  | grep -E '^\[cli\]|^Installing |^Deploying |^Deployment |^Error|^Script '
-```
+Terminal session recorded with `script cuj2-session2.log`, then cleaned with the
+ANSI-stripping recipe in [../README.md](../README.md#recording-test-runs) (run
+against `cuj2-session2.log`).
 
 Final markdown assembled by Claude Code (claude-opus-4-6) from the cleaned log output and session context.

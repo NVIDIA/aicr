@@ -210,173 +210,15 @@ spec:
 kubectl apply -f ingress.yaml
 ```
 
-## Agent Deployment
+## Capturing Snapshots (Agent)
 
-Deploy the AICR Agent as a Kubernetes Job to automatically capture cluster configuration.
-
-### 1. Create RBAC Resources
-
-```yaml
-# agent-rbac.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: aicr
-  namespace: gpu-operator
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: aicr
-  namespace: gpu-operator
-rules:
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "create", "update", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: aicr
-  namespace: gpu-operator
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: aicr
-subjects:
-- kind: ServiceAccount
-  name: aicr
-  namespace: gpu-operator  # Must match ServiceAccount namespace
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: aicr
-rules:
-- apiGroups: [""]
-  resources: ["nodes", "pods"]
-  verbs: ["get", "list"]
-- apiGroups: ["nvidia.com"]
-  resources: ["clusterpolicies"]
-  verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: aicr
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: aicr
-subjects:
-- kind: ServiceAccount
-  name: aicr
-  namespace: gpu-operator
-```
-
-```shell
-kubectl apply -f agent-rbac.yaml
-```
-
-### 2. Create Agent Job
-
-```yaml
-# agent-job.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: aicr
-  namespace: gpu-operator
-  labels:
-    app: aicr-agent
-spec:
-  template:
-    metadata:
-      labels:
-        app: aicr-agent
-    spec:
-      serviceAccountName: aicr
-      restartPolicy: Never
-      
-      containers:
-      - name: aicr
-        image: ghcr.io/nvidia/aicr:latest
-        imagePullPolicy: IfNotPresent
-        
-        command:
-        - aicr
-        - snapshot
-        - --output
-        - cm://gpu-operator/aicr-snapshot
-        
-        securityContext:
-          privileged: true
-          runAsUser: 0
-          runAsGroup: 0
-      hostPID: true
-      hostNetwork: true
-      hostIPC: true
-      volumes:
-      - name: systemd
-        hostPath:
-          path: /run/systemd
-          type: Directory
-```
-
-> **Note:** The agent defaults to privileged mode, which is required for GPU, SystemD, and OS collectors. For PSS-restricted namespaces where only the Kubernetes collector is needed, use `--privileged=false` when deploying via the CLI. See [Agent Deployment](../user/agent-deployment.md) for details.
-
-```shell
-kubectl apply -f agent-job.yaml
-
-# Wait for completion
-kubectl wait --for=condition=complete job/aicr -n gpu-operator --timeout=5m
-
-# Verify ConfigMap was created
-kubectl get configmap aicr-snapshot -n gpu-operator
-
-# View snapshot data
-kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}'
-```
-
-### 3. Generate Recipe from ConfigMap
-
-```bash
-# Using CLI (local or in another Job)
-aicr recipe --snapshot cm://gpu-operator/aicr-snapshot \
-             --intent training \
-             --platform kubeflow \
-             --output recipe.yaml
-
-# Or write recipe back to ConfigMap
-aicr recipe --snapshot cm://gpu-operator/aicr-snapshot \
-             --intent training \
-             --platform kubeflow \
-             --output cm://gpu-operator/aicr-recipe
-```
-
-### 4. Generate Bundle
-
-```bash
-# From file
-aicr bundle --recipe recipe.yaml --output ./bundles
-
-# From ConfigMap
-aicr bundle --recipe cm://gpu-operator/aicr-recipe --output ./bundles
-```
-
-### E2E Testing
-
-Validate the complete workflow:
-
-```bash
-# Run all CLI integration tests (no cluster needed)
-make e2e
-
-# Run cluster-based E2E tests (requires Kind cluster)
-make e2e-tilt
-```
-
-CLI tests use [Kyverno Chainsaw](https://github.com/kyverno/chainsaw) for declarative YAML assertions. See `tests/chainsaw/README.md` for details.
+The API server only generates recipes and bundles — it does not capture
+cluster state. Snapshot capture is a separate concern handled by the AICR
+agent Job, including its RBAC (ServiceAccount, Role, ClusterRole), the
+privileged-mode requirement, ConfigMap storage (`cm://<ns>/<name>`), and the
+full snapshot → recipe → bundle CLI flow. That material is documented
+canonically in [Agent Deployment](../user/agent-deployment.md) and is not
+duplicated here.
 
 ## Configuration Options
 
@@ -728,73 +570,15 @@ kubectl rollout status deployment/aicrd -n aicr
 kubectl rollout undo deployment/aicrd -n aicr
 ```
 
-### Blue-Green Deployment
-
-```shell
-# Deploy new version
-kubectl apply -f deployment-v2.yaml
-
-# Switch service
-kubectl patch service aicrd -n aicr \
-  -p '{"spec":{"selector":{"version":"v2"}}}'
-
-# Delete old deployment
-kubectl delete deployment aicrd-v1 -n aicr
-```
-
-## Backup and Disaster Recovery
-
-### Export Configuration
-
-```shell
-# Export all resources
-kubectl get all -n aicr -o yaml > aicr-backup.yaml
-
-# Export specific resources
-kubectl get deployment,service,ingress -n aicr -o yaml > aicr-config.yaml
-```
-
-### Restore from Backup
-
-```shell
-# Restore namespace and resources
-kubectl apply -f aicr-backup.yaml
-```
-
-## Cost Optimization
-
-### Resource Limits
-
-Start with minimal resources:
-```yaml
-resources:
-  requests:
-    cpu: 50m
-    memory: 64Mi
-  limits:
-    cpu: 200m
-    memory: 256Mi
-```
-
-Monitor and adjust based on usage.
-
-### Vertical Pod Autoscaler (Optional)
-
-```yaml
-# vpa.yaml
-apiVersion: autoscaling.k8s.io/v1
-kind: VerticalPodAutoscaler
-metadata:
-  name: aicrd
-  namespace: aicr
-spec:
-  targetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: aicrd
-  updatePolicy:
-    updateMode: "Auto"
-```
+The aicrd server is stateless — it holds no persistent data, so there is
+nothing to back up beyond the manifests in this guide (keep them in version
+control). Standard Kubernetes patterns apply unchanged for blue-green/canary
+rollouts, backup/restore of resource definitions, and right-sizing requests
+and limits (start small — see the requests/limits in the
+[Deployment](#2-create-deployment) above — and adjust from `kubectl top`
+output or a Vertical Pod Autoscaler). Refer to the upstream
+[Kubernetes documentation](https://kubernetes.io/docs/concepts/workloads/)
+for these; none require AICR-specific handling.
 
 ## See Also
 

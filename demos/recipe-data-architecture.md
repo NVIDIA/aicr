@@ -228,7 +228,7 @@ Integrity of the metadata is paramount!
 
 ### Demo
 
-- [This Demo](https://github.com/NVIDIA/aicr/blob/main/demos/data.md) - Full architecture documentation
+- [This Demo](https://github.com/NVIDIA/aicr/blob/main/demos/recipe-data-architecture.md) - Full architecture documentation
 
 ### Documentation
 - [Data Architecture](https://github.com/NVIDIA/aicr/blob/main/docs/contributor/recipe.md) - Full architecture documentation

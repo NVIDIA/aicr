@@ -15,7 +15,7 @@
 # AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
 #
 # Drives the EKS H100 training UAT — codifies the workflow demonstrated in
-# `demos/cuj1-eks.md` against the cluster provisioned by
+# `demos/cuj1-training.md` (EKS section) against the cluster provisioned by
 # `../cluster-config.yaml`.
 #
 # Scheduling note: the EKS actuator auto-applies `dedicated=worker-workload`

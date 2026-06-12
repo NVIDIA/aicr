@@ -166,7 +166,9 @@ func assertRawResources(ctx context.Context, ca ComponentAssert, timeout time.Du
 	}
 
 	deadline := time.Now().Add(timeout)
-	var lastErr error
+	absentDeadline := time.Now().Add(defaults.AbsentResourceGracePeriod)
+	var lastErr, lastSubstantiveErr error
+	sawResource := false
 
 	for {
 		lastErr = assertAllDocuments(ctx, docs, fetcher)
@@ -176,7 +178,38 @@ func assertRawResources(ctx context.Context, ca ComponentAssert, timeout time.Du
 			return result
 		}
 
-		remaining := time.Until(deadline)
+		// A terminal error (malformed/non-evaluable assert, ErrCodeInvalidRequest)
+		// never becomes valid by retrying — fail fast instead of burning the full
+		// timeout and a worker slot. Mirrors runAssertWithRetry (inprocess.go).
+		if isTerminalAssertErr(lastErr) {
+			result.Output = lastErr.Error()
+			result.Error = lastErr
+			slog.Warn("health check failed", "component", ca.Name, "error", lastErr)
+			return result
+		}
+
+		// Record the failure seen while the context is still live; after
+		// cancellation assertAllDocuments returns a context / rate-limiter
+		// error that masks the real reason (e.g. "resource not found"). On
+		// deadline we surface the substantive reason so the verdict is a
+		// clean failure instead of an opaque context-cancellation error.
+		if ctx.Err() == nil {
+			lastSubstantiveErr = lastErr
+		}
+
+		// Only a shape-mismatch (ErrCodeInternal — resource fetched but does not
+		// match) proves the resource exists and disables the absent-grace. A
+		// transient ErrCodeUnavailable (API blip) must NOT latch, or an early
+		// blip on an absent resource would defeat the fast-fail grace.
+		if resourceObservedErr(lastErr) {
+			sawResource = true
+		}
+
+		// An entirely-absent resource (NotFound, never observed) is bounded to
+		// the short AbsentResourceGracePeriod; a not-ready resource — or one
+		// that has already appeared — keeps the full deadline so slow-but-healthy
+		// rollouts are not failed prematurely.
+		remaining := time.Until(notFoundGraceDeadline(lastErr, sawResource, absentDeadline, deadline))
 		if remaining <= 0 {
 			break
 		}
@@ -189,16 +222,29 @@ func assertRawResources(ctx context.Context, ca ComponentAssert, timeout time.Du
 
 		select {
 		case <-ctx.Done():
-			result.Error = errors.Wrap(errors.ErrCodeInternal, "context canceled during assertion", ctx.Err())
+			reason := lastSubstantiveErr
+			if reason == nil {
+				reason = errors.Wrap(errors.ErrCodeInternal, "context canceled during assertion", ctx.Err())
+			}
+			result.Output = reason.Error()
+			result.Error = reason
+			slog.Warn("health check failed", "component", ca.Name, "error", reason)
 			return result
 		case <-time.After(wait):
 			// retry
 		}
 	}
 
-	result.Output = lastErr.Error()
-	result.Error = errors.Wrap(errors.ErrCodeInternal, "health check failed after timeout", lastErr)
-	slog.Warn("health check failed", "component", ca.Name, "error", lastErr)
+	// Surface the substantive failure seen while the context was live
+	// (preserving its structured code, e.g. ErrCodeNotFound) rather than the
+	// possibly context-tainted lastErr, so the verdict is a clean failure.
+	reason := lastSubstantiveErr
+	if reason == nil {
+		reason = lastErr
+	}
+	result.Output = reason.Error()
+	result.Error = reason
+	slog.Warn("health check failed", "component", ca.Name, "error", reason)
 	return result
 }
 
@@ -228,16 +274,24 @@ func assertSingleDocument(ctx context.Context, expected map[string]interface{}, 
 
 	actual, err := fetcher.Fetch(ctx, apiVersion, kind, namespace, name)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to fetch %s %s/%s", kind, namespace, name), err)
+		// Propagate the fetcher's structured code (ErrCodeNotFound vs
+		// ErrCodeUnavailable) as-is — do NOT blanket-wrap as ErrCodeInternal.
+		// ErrCodeInternal is reserved for an actual shape mismatch (the
+		// checks.Check error list below). This keeps the raw path aligned with
+		// evaluateAssert so the absent-resource grace latch (resourceObservedErr,
+		// which keys on ErrCodeInternal) can distinguish "resource exists but
+		// not ready" from "absent / transient API error".
+		return err
 	}
 
 	// Use chainsaw's assertion engine for subset matching with JMESPath support.
 	check := v1alpha1.NewCheck(expected)
 	errs, err := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("assertion error for %s %s/%s", kind, namespace, name), err)
+		// A malformed/non-evaluable assertion is terminal (ErrCodeInvalidRequest),
+		// matching evaluateAssert — it will never become valid by retrying.
+		return errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("assertion engine error for %s %s/%s", kind, namespace, name), err)
 	}
 	if len(errs) > 0 {
 		return errors.New(errors.ErrCodeInternal,

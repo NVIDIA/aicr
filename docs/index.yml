@@ -84,5 +84,7 @@ navigation:
         path: contributor/api-server.md
       - page: Testing
         path: contributor/tests.md
+      - page: Claude Skills
+        path: contributor/skills.md
       - page: Maintaining AICR
         path: contributor/maintaining.md

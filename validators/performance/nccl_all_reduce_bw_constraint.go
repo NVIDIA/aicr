@@ -150,7 +150,10 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 // targeted transport-class coverage.
 var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	variantDefault: {
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100},
+		// H200 is Hopper on EFA, electrically identical to H100 for NCCL
+		// (NVLink4 intra-node, EFA inter-node), so it reuses the EKS H100
+		// runtime template and the same calibrated >= 300 GB/s floor.
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100, recipe.CriteriaAcceleratorH200},
 		recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
@@ -359,12 +362,13 @@ const (
 // that reports whether a given nvidia.com/gpu.product label value belongs to
 // that accelerator family. Exact matches are used where GFD emits a single
 // product string (GB200, B200, L40 family, RTX Pro 6000); prefix matches cover
-// accelerators with multiple concrete SKUs (H100 SXM/PCIe/NVL, A100 SXM/PCIe).
+// accelerators with multiple concrete SKUs (H100 SXM/PCIe/NVL, H200, A100 SXM/PCIe).
 // No entry for CriteriaAcceleratorAny — "any" deliberately skips the filter.
 var acceleratorProductMatchers = map[recipe.CriteriaAcceleratorType]func(string) bool{
 	recipe.CriteriaAcceleratorGB200:      func(s string) bool { return s == "NVIDIA-GB200" },
 	recipe.CriteriaAcceleratorB200:       func(s string) bool { return s == "NVIDIA-B200" },
 	recipe.CriteriaAcceleratorH100:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H100-") },
+	recipe.CriteriaAcceleratorH200:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H200-") },
 	recipe.CriteriaAcceleratorA100:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-A100-") },
 	recipe.CriteriaAcceleratorL40:        func(s string) bool { return s == "NVIDIA-L40" || s == "NVIDIA-L40S" },
 	recipe.CriteriaAcceleratorRTXPro6000: func(s string) bool { return s == "NVIDIA-RTX-PRO-6000" },

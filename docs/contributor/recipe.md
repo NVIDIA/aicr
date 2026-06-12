@@ -181,6 +181,17 @@ merge by name (later wins on same name; new appended); componentRefs
 merge by name field-by-field; criteria are *not* inherited (each
 recipe declares its own).
 
+**Leaf.** A leaf is the most specific overlay in a chain — the
+terminal node carrying fully-qualified `criteria` (every relevant
+dimension set, e.g. `service` + `accelerator` + `os` + `intent` +
+`platform`) that an end-user query actually resolves to. A leaf
+usually adds little of its own (often `componentRefs: []`); its job is
+to bind one inheritance chain plus its `mixins` under a single
+criteria fingerprint. "Base → ... → leaf" throughout this page refers
+to walking from the root spec down to this node. Leaf is a role, not a
+distinct `kind` — every overlay is a `RecipeMetadata`; "leaf" just
+names the ones at the end of a chain.
+
 ## Mixin Composition
 
 Inheritance is single-parent, which means cross-cutting concerns (OS

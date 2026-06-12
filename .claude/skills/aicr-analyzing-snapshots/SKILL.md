@@ -1,5 +1,5 @@
 ---
-name: analyzing-snapshots
+name: aicr-analyzing-snapshots
 description: |
   Use when analyzing an AICR snapshot YAML file, reviewing cluster state,
   comparing provider characteristics, extracting GPU/network topology insights,

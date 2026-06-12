@@ -45,7 +45,7 @@
 # - fullnameOverride strips the aicr-stack- release prefix from the
 #   resources that use the chart's fullname helper (ServiceAccounts,
 #   RoleBindings).
-# - nameOverride is needed because v0.4.0 of the chart uses the
+# - nameOverride is needed because the chart uses the
 #   `dra-driver-nvidia-gpu.name` helper for the controller Deployment
 #   and the kubelet-plugin DaemonSet. That helper resolves to
 #   `nameOverride || .Chart.Name`, so without it the rendered names

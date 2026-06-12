@@ -193,100 +193,24 @@ GPU/smi/model               → accelerator (type)
 
 ### Recipe Generation
 
-#### Inheritance Chain Resolution
+#### Inheritance and Overlay Merging
 
-When a query matches a leaf recipe that has a `spec.base` reference, the system resolves the full inheritance chain before merging:
+When a query matches a leaf recipe with a `spec.base` reference, the builder:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Inheritance Resolution                                      │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  Query: {service: eks, accelerator: gb200, os: ubuntu,      │
-│          intent: training}                                  │
-│                                                             │
-│  1. Find matching recipes (by specificity):                 │
-│     - eks (specificity: 1)                                  │
-│     - eks-training (specificity: 2)                         │
-│     - gb200-eks-training (specificity: 3)                   │
-│     - gb200-eks-ubuntu-training (specificity: 4)            │
-│                                                             │
-│  2. Resolve inheritance chain for each:                     │
-│     gb200-eks-ubuntu-training.spec.base = "gb200-eks-training"
-│     gb200-eks-training.spec.base = "eks-training"           │
-│     eks-training.spec.base = "eks"                          │
-│     eks.spec.base = "" (implicit base)                      │
-│                                                             │
-│  3. Build chain (root to leaf):                             │
-│     [base] → [eks] → [eks-training] → [gb200-eks-training]  │
-│           → [gb200-eks-ubuntu-training]                     │
-│                                                             │
-│  4. Merge in order (later overrides earlier):               │
-│     result = base                                           │
-│     result = merge(result, eks)                             │
-│     result = merge(result, eks-training)                    │
-│     result = merge(result, gb200-eks-training)              │
-│     result = merge(result, gb200-eks-ubuntu-training)       │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
+1. **Matches overlays by criteria.** An overlay matches when every field it
+   specifies equals the query; omitted fields act as wildcards (e.g. an overlay
+   that omits `os` matches any OS). The `any` sentinel is its own value — a
+   query `any` only matches a recipe `any`.
+2. **Resolves the inheritance chain** for each match by following `spec.base`
+   to the implicit `base`, producing a root-to-leaf ordering such as
+   `base → eks → eks-training → gb200-eks-training → gb200-eks-ubuntu-training`.
+3. **Merges in order**, later overlays overriding earlier ones.
+4. **Applies mixins** (`spec.mixins`): appends their constraints and
+   `componentRefs`, evaluating mixin constraints when a snapshot is provided.
+5. **Strips context** maps from subtypes unless context output is requested.
 
-#### Base and Overlay Merging
-
-```
-┌────────────────────────────────────────────────────────┐
-│ Recipe Builder                                         │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│  1. Load base measurements (universal config)          │
-│     └─ From embedded overlays/base.yaml                │
-│                                                        │
-│  2. Match query to overlays (by criteria)              │
-│     ├─ Query matches recipes where:                    │
-│     │   - Recipe "any" field = wildcard (matches any)  │
-│     │   - Query "any" field = only matches recipe "any"│
-│     └─ Resolve inheritance chain for each match        │
-│                                                        │
-│  3. Merge inheritance chain in order                   │
-│     ├─ Base values (from overlays/base.yaml)           │
-│     ├─ + eks (EKS-specific settings)                   │
-│     ├─ + eks-training (training optimizations)         │
-│     ├─ + gb200-eks-training (GB200 overrides)          │
-│     └─ + gb200-eks-ubuntu-training (Ubuntu specifics)  │
-│                                                        │
-│  4. Apply mixins (if spec.mixins declared)             │
-│     ├─ Load mixin files from recipes/mixins/           │
-│     ├─ Append mixin constraints and componentRefs      │
-│     └─ If snapshot provided, evaluate mixin constraints│
-│                                                        │
-│  5. Strip context (if !context)                        │
-│     └─ Remove context maps from all subtypes           │
-│                                                        │
-│  6. Return recipe                                      │
-│                                                        │
-└────────────────────────────────────────────────────────┘
-```
-
-#### Overlay Matching Algorithm
-
-```go
-// Overlay matches if all specified fields match query
-// Omitted fields act as wildcards
-
-overlay.key {
-    service: "eks"        // Must match
-    accelerator: "gb200"  // Must match
-    os: <omitted>         // Wildcard (any OS)
-}
-
-query {
-    service: "eks"
-    accelerator: "gb200"
-    os: "ubuntu"
-}
-
-Result: MATCH (os wildcarded)
-```
+For the resolver internals (specificity scoring, deep-merge semantics) see
+[Recipe architecture](../contributor/recipe.md).
 
 ### Recipe Data Structure
 
@@ -365,48 +289,11 @@ The validate stage compares recipe constraints against actual measurements from 
 
 ### Constraint Path Format
 
-Constraints use fully qualified paths: `{Type}.{Subtype}.{Key}`
-
-| Path | Description |
-|------|-------------|
-| `K8s.server.version` | Kubernetes server version |
-| `OS.release.ID` | Operating system family (ubuntu, rhel, cos, amazonlinux, talos) |
-| `OS.release.VERSION_ID` | OS version (22.04, 24.04) |
-| `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
-| `GPU.driver.version` | NVIDIA driver version |
-
-### Supported Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `>=` | Greater than or equal | `K8s.server.version>=1.28` |
-| `<=` | Less than or equal | `K8s.server.version<=1.30` |
-| `>` | Greater than | `OS.release.VERSION_ID>22.04` |
-| `<` | Less than | `OS.release.VERSION_ID<25.00` |
-| `==` | Exactly equal | `OS.release.ID==ubuntu` |
-| `!=` | Not equal | `OS.release.ID!=rhel` |
-| (none) | Exact match | `GPU.driver.version` |
-
-**Narrower subsets per validator.** A small number of validators accept
-only a subset of these operators when that's the only form the evaluator
-actually honors — using a broader operator would be silently reinterpreted
-as the honored form, so the validator rejects it with
-`ErrCodeInvalidRequest` at parse time instead. Current narrowings:
-
-| Validator / metric | Accepted operator | Rationale |
-|--------------------|-------------------|-----------|
-| `inference-throughput` | `>=` only | Evaluator enforces `throughput >= threshold * 0.9` (10% tolerance); strict `>`, `==`, `!=`, bare, and inverted forms are all coerced to the same check and would mislead recipe authors. |
-| `inference-ttft-p99` | `<=` only | Evaluator enforces `ttftP99 <= threshold * 1.1`; same rationale as throughput, opposite direction. |
-
-The `inference-perf` check also reads **input** entries from the same
-`performance.constraints` block — `inference-model` (HF model ID),
-`inference-concurrency-per-gpu` (positive integer), and
-`inference-routing-mode` (`dynamo-router` or `gateway-epp`). These carry a bare
-value, not a comparator: they configure the benchmark per accelerator rather
-than asserting a pass/fail bound. Model and concurrency precedence is recipe >
-catalog env (`AICR_INFERENCE_PERF_MODEL` /
-`AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU`) > compiled default (Qwen3-8B,
-256/GPU). Routing mode is recipe-only and defaults to `dynamo-router`.
+Constraints use fully qualified paths (`{Type}.{Subtype}.{Key}`) and a set of
+comparison operators. The full path and operator reference — including the
+per-validator operator narrowings and the `inference-perf` input entries
+(model, concurrency, routing mode) — lives in the CLI reference; see
+[Constraint paths and operators](../user/cli-reference.md#constraint-paths-and-operators).
 
 ### Input Sources
 
@@ -431,52 +318,14 @@ aicr validate \
 
 ### Validation Output
 
-Results are output in [CTRF](https://ctrf.io/) (Common Test Report Format) JSON:
-
-```json
-{
-  "reportFormat": "CTRF",
-  "specVersion": "0.0.1",
-  "timestamp": "2026-03-10T20:10:44Z",
-  "generatedBy": "aicr",
-  "results": {
-    "tool": { "name": "aicr", "version": "v0.10.3-next" },
-    "summary": {
-      "tests": 16, "passed": 13, "failed": 0, "skipped": 3,
-      "pending": 0, "other": 0,
-      "start": 1773173400872, "stop": 1773173799002
-    },
-    "tests": [
-      {
-        "name": "operator-health",
-        "status": "passed",
-        "duration": 0,
-        "suite": ["deployment"],
-        "stdout": ["Found 1 gpu-operator pod(s)", "Running: 1/1"]
-      },
-      {
-        "name": "nccl-all-reduce-bw",
-        "status": "passed",
-        "duration": 234000,
-        "suite": ["performance"],
-        "stdout": ["NCCL All Reduce bandwidth: 488.37 GB/s", "Constraint: >= 100 → true"]
-      },
-      {
-        "name": "inference-perf",
-        "status": "passed",
-        "duration": 612000,
-        "suite": ["performance"],
-        "stdout": [
-          "RESULT: Inference throughput: 108789.87 tokens/sec",
-          "RESULT: Inference TTFT p99: 687.50 ms",
-          "Throughput constraint: >= 50000 → PASS",
-          "TTFT p99 constraint: <= 2000 → PASS"
-        ]
-      }
-    ]
-  }
-}
-```
+Results are emitted in [CTRF](https://ctrf.io/) (Common Test Report Format)
+JSON: a top-level `summary` (test counts and start/stop timestamps) plus a
+`tests` array where each entry carries a `name`, `status`
+(passed/failed/skipped), `suite` (the phase — readiness, deployment,
+performance, conformance), and `stdout` lines with the per-check evidence. For
+a worked example of the full report and how performance checks such as
+`inference-perf` surface their measured values, see
+[Emitting recipe evidence for a PR](../user/validation.md#emitting-recipe-evidence).
 
 ### CI/CD Integration
 
@@ -871,66 +720,6 @@ X-RateLimit-Reset: 1735650000
 - No configuration files
 - No network calls (except Kubernetes API for snapshots)
 - Fully self-contained binaries
-
-## Performance Characteristics
-
-### Snapshot Collection
-
-- **Parallel**: All collectors run concurrently
-- **Timeout**: 30 seconds per collector
-- **Memory**: ~10-50MB depending on cluster size
-- **Duration**: 1-5 seconds typical
-
-### Recipe Generation
-
-- **Cached**: Recipe data cached in memory (5min TTL)
-- **Overlay Matching**: O(n) where n = number of overlays
-- **Memory**: &lt;1MB per request
-- **Duration**: &lt;100ms typical (in-memory only)
-
-### Bundle Generation
-
-- **Parallel**: All bundlers run concurrently
-- **Template Rendering**: Minimal overhead (&lt;10ms per template)
-- **File I/O**: ~10-20 files per bundler
-- **Duration**: &lt;1 second typical
-
-### API Server
-
-- **Concurrency**: 100 req/s sustained, 200 burst
-- **Latency**: p50: 50ms, p95: 150ms, p99: 300ms
-- **Memory**: ~100MB baseline + 1MB per concurrent request
-- **CPU**: Minimal (&lt;5% single core at 100 req/s)
-
-## Data Validation
-
-### Input Validation
-
-**Query Parameters:**
-- Type checking (string, int, bool)
-- Enum validation (eks, gke, aks, etc.)
-- Version format validation (regex)
-- Range validation (if applicable)
-
-**Snapshot Files:**
-- YAML/JSON schema validation
-- Required fields presence
-- Type consistency
-- Measurement structure validation
-
-### Output Validation
-
-**Recipes:**
-- Valid apiVersion and kind
-- Metadata with version and timestamp
-- Criteria properly populated
-- ComponentRefs have required fields (name, version)
-
-**Bundles:**
-- All required files generated
-- Templates rendered successfully
-- Checksums computed
-- File permissions correct (scripts executable)
 
 ## See Also
 

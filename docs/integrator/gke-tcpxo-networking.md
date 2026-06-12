@@ -115,6 +115,71 @@ kubectl get ds nccl-tcpxo-installer -n kube-system \
 
 Update the `nccl-plugin-gpudirecttcpx-dev` image tag in your workload to match.
 
+## Running the NCCL Benchmark
+
+`aicr validate --phase performance` is not yet automated for GKE — the test uses
+raw Pods with a TCPXO daemon sidecar, which differs from the EKS TrainJob-based
+approach. Run it manually with either of the two profiles below. Each pod runs a
+`tcpxo-daemon` sidecar (manages the GPUDirect TCPX data path) plus the
+`nccl-test` container.
+
+### Option 1: testdata manifests (matches validator framework)
+
+```shell
+export NAMESPACE=nccl-perf
+export GPU_COUNT_PER_NODE=8
+export GPU_COUNT=16
+export WORKER_COUNT=2
+export TEST_TYPE=all_reduce_perf
+export MIN_MESSAGE_SIZE=1M
+export MAX_MESSAGE_SIZE=8G
+
+kubectl create ns $NAMESPACE
+envsubst < validators/performance/testdata/h100/gke/runtime.yaml | kubectl apply -f -
+
+# Wait for pods to be 2/2 Running
+kubectl get pods -n $NAMESPACE -o wide -w
+
+# Trigger the AllReduce benchmark from host-1
+kubectl exec nccl-test-host-1 -n $NAMESPACE -c nccl-test -- \
+  /scripts/allreduce.sh nccl-host-1 nccl-host-2
+
+# Expected: ~340 GB/s busBW at 16 GB (AllReduce), ~100 GB/s avg
+# Clean up
+kubectl delete ns $NAMESPACE
+```
+
+### Option 2: standalone demo manifests
+
+NRI profile (recommended, no `hostNetwork`):
+
+```shell
+kubectl create ns nccl-test
+kubectl apply -f demos/workloads/training/gke-nccl-test-tcpxo.yaml -n nccl-test
+
+# Wait for pods to be 2/2 Running
+kubectl get pods -n nccl-test -o wide -w
+
+# Trigger the AllReduce benchmark from host-1
+kubectl exec nccl-test-host-1 -n nccl-test -c nccl-test -- bash -c '
+  /scripts/init_ssh.sh nccl-host-1 nccl-host-2 &&
+  pushd /scripts && /scripts/gen_hostfiles.sh nccl-host-1 nccl-host-2 && popd &&
+  DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_reduce_perf NHOSTS=2 \
+    NCCL_LIB_DIR="/usr/local/nvidia/lib64" LD_LIBRARY_PATH="/usr/local/nvidia/lib64" \
+    /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
+
+# Expected: ~340 GB/s busBW at 16 GB (AllReduce), ~100 GB/s avg
+# Clean up
+kubectl delete ns nccl-test
+```
+
+### Interpreting results
+
+| Metric | Without TCPXO | With TCPXO |
+|--------|--------------|------------|
+| AllReduce busBW (16 GB) | ~4 GB/s | ~340 GB/s |
+| AllReduce avg busBW | ~4 GB/s | ~100 GB/s |
+
 ## Troubleshooting
 
 ### RxDM detects 7/8 GPUs

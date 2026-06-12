@@ -47,7 +47,7 @@ ones) that match the target fabric:
 
 | Check | Transport | When it's selected |
 |---|---|---|
-| `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | Default for H100 on EKS/GKE, and for GB200/B200 on non-EKS services without a named-variant pairing (e.g. B200, or GB200 outside EKS/OKE). Preserves the pre-variant behavior. |
+| `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
 
@@ -127,7 +127,7 @@ so vLLM's one-time CUDA-graph / JIT compilation (tens of seconds on a cold
 worker) is excluded from the reported throughput and p99 TTFT — the numbers
 reflect steady state, not cold start. Warm-up scales with concurrency and is
 tunable via `AICR_INFERENCE_PERF_WARMUP_PER_CONCURRENCY` (see the
-[validator reference](../contributor/validator.md#inference-perf-benchmark-tuning)).
+[validator reference](../contributor/validator.md#performance-benchmark-tuning)).
 
 **Determinism:** the benchmark is driven reproducibly so the verdict reflects the
 deployment, not run-to-run RNG — a fixed random seed, fixed input/output token
@@ -341,7 +341,7 @@ Valid feature names (from `pkg/evidence/cncf/collector.go`):
 | `pod-autoscaling` | HPA / custom-metrics-driven pod autoscaling |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
-## Emitting recipe evidence for a PR
+## Emitting recipe evidence
 
 When a recipe PR targets hardware AICR maintainers cannot independently
 re-run, the contributor needs to attach a signed **evidence bundle** so a

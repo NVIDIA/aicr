@@ -346,6 +346,11 @@ bom-pinning-check: ## Verifies every Helm component in the registry has a pinned
 # check-health-all / component-health cluster-chainsaw family.
 HEALTH_DOC_PATH := docs/user/recipe-health.md
 
+# Destination for the per-dimension structural detail emitted by
+# `make recipe-health-summary`. Defaults to stdout for local inspection; the
+# weekly health-refresh workflow overrides it to $GITHUB_STEP_SUMMARY.
+SUMMARY_OUT ?= /dev/stdout
+
 .PHONY: recipe-health-docs
 recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PATH) from the recipe catalog (hermetic, no network)
 	@set -e; \
@@ -371,6 +376,18 @@ recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PA
 	' $(HEALTH_DOC_PATH) > "$$TMP/merged.md"; \
 	mv "$$TMP/merged.md" $(HEALTH_DOC_PATH); \
 	echo "Updated $(HEALTH_DOC_PATH) (prose preserved, auto-generated section refreshed)"
+
+.PHONY: recipe-health-summary
+recipe-health-summary: ## Renders the per-dimension structural detail to $(SUMMARY_OUT) (default stdout); the weekly health-refresh workflow points it at $$GITHUB_STEP_SUMMARY
+	@set -e; \
+	TMP="$$(mktemp -d)"; \
+	trap 'rm -rf "$$TMP"' EXIT; \
+	GOFLAGS="-mod=vendor" go run ./tools/health \
+	  -out-dir "$$TMP" \
+	  -summary-out "$(SUMMARY_OUT)" \
+	  -aicr-version "main" \
+	  -deterministic \
+	  -no-title
 
 .PHONY: recipe-health-check
 recipe-health-check: ## Verifies $(HEALTH_DOC_PATH) is up to date with the recipe catalog (advisory; not wired into qualify/lint/merge gate)

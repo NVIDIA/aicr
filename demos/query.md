@@ -227,5 +227,4 @@ template.
 
 * [CLI Reference: aicr query](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#aicr-query)
 * [Recipe Development Guide](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/recipe-development.md)
-* [End-to-End Demo](e2e.md)
-* [External Data Demo](ext.md)
+* [End-to-End Demo](end-to-end-cli.md) — includes the runtime external-data (`--data`) flow

@@ -369,6 +369,8 @@ func TestAcceleratorProductMatchers(t *testing.T) {
 		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-PCIe", true},
 		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-NVL", true},
 		{recipe.CriteriaAcceleratorH100, "NVIDIA-H200-141GB-HBM3e", false},
+		{recipe.CriteriaAcceleratorH200, "NVIDIA-H200-141GB-HBM3e", true},
+		{recipe.CriteriaAcceleratorH200, "NVIDIA-H100-80GB-HBM3", false},
 		{recipe.CriteriaAcceleratorA100, "NVIDIA-A100-SXM4-80GB", true},
 		{recipe.CriteriaAcceleratorA100, "NVIDIA-A100-PCIe", true},
 		{recipe.CriteriaAcceleratorA100, "NVIDIA-A10G", false},
@@ -610,6 +612,14 @@ func TestTemplatePath(t *testing.T) {
 			variant:     variantDefault,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "h100", "eks", "runtime.yaml"),
+		},
+		{
+			name:        "eks h200 runtime default",
+			accelerator: recipe.CriteriaAcceleratorH200,
+			service:     recipe.CriteriaServiceEKS,
+			variant:     variantDefault,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "h200", "eks", "runtime.yaml"),
 		},
 		{
 			name:        "eks h100 trainjob default",
@@ -873,8 +883,10 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 
 	// Legacy default variant must still list the original combinations
 	// so existing recipes that reference "nccl-all-reduce-bw" keep working.
-	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceEKS]; len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorH100 {
-		t.Errorf("variantDefault EKS = %v, want [H100]", accels)
+	// EKS default carries H100 and H200 (Hopper on EFA, shared template).
+	wantEKS := []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100, recipe.CriteriaAcceleratorH200}
+	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceEKS]; !reflect.DeepEqual(accels, wantEKS) {
+		t.Errorf("variantDefault EKS = %v, want %v", accels, wantEKS)
 	}
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAny]; len(accels) != 2 {
 		t.Errorf("variantDefault Any count = %d, want 2 (B200, GB200)", len(accels))
@@ -923,6 +935,46 @@ func TestSupportedNCCLCombinationsHaveRuntimeTemplates(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestH200EKSRuntimeMatchesH100 enforces the "keep in sync with H100" contract
+// declared in the header of testdata/h200/eks/runtime.yaml. H200 is Hopper on
+// EFA — electrically identical to H100 for NCCL — so the two EKS runtime
+// templates must stay byte-identical apart from their leading comment/license
+// headers. This converts the comment-only guarantee into an enforced one: an
+// EFA-related edit to one template that is not mirrored in the other fails here
+// instead of silently diverging. If the transport setup ever legitimately
+// diverges by SKU, fork the templates and delete this test.
+func TestH200EKSRuntimeMatchesH100(t *testing.T) {
+	h100 := readTemplateBody(t, filepath.Join("testdata", "h100", "eks", "runtime.yaml"))
+	h200 := readTemplateBody(t, filepath.Join("testdata", "h200", "eks", "runtime.yaml"))
+	if h100 != h200 {
+		t.Errorf("testdata/h200/eks/runtime.yaml diverged from the H100 EKS template "+
+			"(comparing bodies after stripping leading comment headers).\nH100:\n%s\nH200:\n%s", h100, h200)
+	}
+}
+
+// readTemplateBody returns the file contents with the leading run of blank and
+// comment (#-prefixed) lines removed, i.e. everything from the first YAML line
+// onward. Lets header comments (license, per-file notes) differ while the
+// template body is compared exactly.
+func readTemplateBody(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	lines := strings.Split(string(content), "\n")
+	start := 0
+	for start < len(lines) {
+		trimmed := strings.TrimSpace(lines[start])
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			start++
+			continue
+		}
+		break
+	}
+	return strings.Join(lines[start:], "\n")
 }
 
 func TestParseThreshold(t *testing.T) {

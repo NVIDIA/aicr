@@ -4,6 +4,8 @@ Complete reference for the `aicr` command-line interface.
 
 For details on which CLI verbs and critical user journeys are exercised by tests, on what hardware, and at what cadence, see the [Coverage Matrix](./coverage-matrix.md).
 
+> Version numbers in examples (component, chart, and driver versions) are illustrative and may not match any released recipe. The authoritative, current versions live in the [Component Catalog](component-catalog.md) and the [Container Images BOM](container-images.md).
+
 ## Overview
 
 AICR provides a four-step workflow for optimizing GPU infrastructure:
@@ -84,7 +86,7 @@ aicr snapshot [flags]
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
-| `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [GPU Node Auto-Targeting](#gpu-node-auto-targeting). Pass an explicit selector to override. |
+| `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [Agent Deployment](agent-deployment.md). Pass an explicit selector to override. |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
@@ -253,69 +255,9 @@ cluster:
 
 See `examples/templates/snapshot-template.md.tmpl` for a complete example template that generates a concise cluster report.
 
-#### Agent Deployment Mode
+#### Agent Deployment
 
-When running against a cluster, AICR deploys a Kubernetes Job to capture the snapshot:
-
-1. **Deploys RBAC**: ServiceAccount, Role, RoleBinding, ClusterRole, ClusterRoleBinding
-2. **Creates Job**: Runs `aicr snapshot` as a container on the target node
-3. **Waits for completion**: Monitors Job status with configurable timeout
-4. **Retrieves snapshot**: Reads snapshot from ConfigMap after Job completes
-5. **Writes output**: Saves snapshot to specified output destination
-6. **Cleanup**: Deletes Job and RBAC resources (use `--no-cleanup` to keep for debugging)
-
-**Benefits of agent deployment:**
-- Capture configuration from actual cluster nodes (not local machine)
-- No need to run kubectl manually
-- Programmatic deployment for automation/CI/CD
-- Reusable RBAC resources across multiple runs
-
-**Agent deployment requirements:**
-- Kubernetes cluster access (via kubeconfig)
-- Cluster admin permissions (for RBAC creation)
-- GPU nodes with nvidia-smi (for GPU metrics)
-
-#### GPU Node Auto-Targeting
-
-The agent Job defaults to an empty node selector that tolerates all taints, so on a
-mixed CPU+GPU cluster the scheduler can place it on a non-GPU node where `nvidia-smi`
-is absent — the snapshot then completes successfully but contains no GPU data. To close
-that silent failure mode, `aicr snapshot` applies two safeguards:
-
-**Proactive auto-targeting.** Before deploying the Job, if no placement constraint is
-set (`--node-selector`, `--require-gpu`, and `--runtime-class` are all unset) and the
-cluster has nodes labeled `nvidia.com/gpu.present=true`, the agent auto-injects that
-selector so the Job lands on a GPU node:
-
-```
-auto-targeting GPU nodes: selector=nvidia.com/gpu.present=true (pass --node-selector to override)
-```
-
-- Passing any of `--node-selector`, `--require-gpu`, or `--runtime-class` disables
-  auto-targeting — your explicit intent is always preserved.
-- Detection relies on Node Feature Discovery / GPU Feature Discovery (NFD/GFD) labels.
-  Clusters without those labels (e.g., before the GPU Operator is installed) are not
-  auto-detected; target nodes explicitly with `--node-selector kubernetes.io/hostname=<gpu-node>`.
-- The pre-flight node check is presence-only (`limit=1`), bounded by a 5s timeout, and
-  **fails open**: an API error logs a warning and the snapshot proceeds without
-  injection rather than blocking.
-- A GPU node can be cordoned between detection and pod scheduling. When that happens the
-  Job pends until `--timeout`; the timeout error names the auto-injected selector so the
-  cause is clear.
-
-**Reactive placement-mismatch warning.** After collection, if the snapshot has no GPU
-data but the cluster topology shows GPU-capable nodes (via NFD labels), the agent emits
-a loud warning so the result is not silently trusted:
-
-```
-snapshot has no GPU data but cluster topology shows GPU-capable nodes — agent likely ran on a non-GPU node
-```
-
-The warning lists remediation options:
-- `--node-selector nvidia.com/gpu.present=true` (after GPU Operator/NFD)
-- `--node-selector kubernetes.io/hostname=<gpu-node>` (before GPU Operator)
-- `--require-gpu` (requests the `nvidia.com/gpu` resource; needs the Device Plugin)
-- `--runtime-class nvidia` (nvidia-smi access without consuming a GPU slot)
+When running against a cluster, AICR deploys a Kubernetes Job to capture the snapshot. For the RBAC the agent creates, the in-cluster Job lifecycle, ConfigMap storage, and GPU-node auto-targeting (proactive selector injection plus the reactive placement-mismatch warning), see [Agent Deployment](agent-deployment.md).
 
 #### ConfigMap Output
 
@@ -528,13 +470,13 @@ criteria:
   os: any
 componentRefs:
   - name: gpu-operator
-    version: v25.3.3
+    version: vXX.Y.Z          # illustrative; see Component Catalog for current pins
     order: 1
     repository: https://helm.ngc.nvidia.com/nvidia
 constraints:
   driver:
-    version: "580.82.07"
-    cudaVersion: "13.1"
+    version: "<driver-version>"   # illustrative
+    cudaVersion: "<cuda-version>"
 ```
 
 ---
@@ -757,13 +699,13 @@ Leading dots are optional (yq-style): `.components.gpu-operator.chart` and
 # Get a specific Helm value
 aicr query --service eks --accelerator h100 --intent training \
   --selector components.gpu-operator.values.driver.version
-# stdout: 570.86.16
+# stdout: <driver-version>   # illustrative; actual value comes from the resolved recipe
 
 # Get a value subtree
 aicr query --service eks --accelerator h100 --intent training \
   --selector components.gpu-operator.values.driver
 # stdout:
-#   version: "570.86.16"
+#   version: "<driver-version>"
 #   repository: nvcr.io/nvidia
 
 # Get the full hydrated component
@@ -896,26 +838,9 @@ Validation can be run in different phases to validate different aspects of the d
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
 
-**Deployment phase checks:**
+Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 
-The `deployment` phase verifies that the cluster is actually ready for GPU workloads — not just that install commands returned successfully. It covers:
-
-- Enabled component namespaces are `Active`.
-- Declared `expectedResources` (Deployments, DaemonSets, etc.) exist and are healthy.
-- When `nodewright-customizations` is enabled: every Skyhook CR the recipe declares reports `status.status == complete`. The set of expected CR names is extracted from the recipe's own `ComponentRef.ManifestFiles` for this component, so unrelated Skyhook CRs on the cluster (stale from prior deploys, or owned by another tenant) are ignored. If no Skyhook names can be extracted from those `ManifestFiles`, deployment validation fails closed as a recipe/configuration error instead of skipping.
-- When `gpu-operator` is enabled: `ClusterPolicy` reports `status.state == ready`.
-- When `nvidia-dra-driver-gpu` is enabled: the kubelet-plugin DaemonSet is ready. Discovery is by the upstream chart's role-suffix convention — the validator finds the single DaemonSet in the component namespace whose name ends in `-kubelet-plugin`, so custom `fullnameOverride` values are handled automatically.
-
-**Graceful skip:** If a component is declared in the recipe but its CRD is not yet registered on the cluster (e.g., fresh cluster, operator chart not installed), the corresponding readiness check is skipped rather than failing. Once the CRD is present, the check runs and a missing CR is treated as a real failure — for example, if the `gpu-operator` CRD is registered but no `ClusterPolicy` CR exists, deployment validation fails with a "CR missing" diagnostic rather than silently passing. Other errors still fail closed: an RBAC denial on `skyhooks.skyhook.nvidia.com` returns HTTP 403 (not a `NoMatch`), so the validator surfaces it as a failure instead of silently skipping the Skyhook check.
-
-**Day-N re-verification:** Because this is a read-only check against live cluster state, re-running `aicr validate --phase deployment` after scale-up, upgrade, or other runtime changes is safe and answers the same "is this cluster ready for GPU workloads now?" question.
-
-**Phase Dependencies:**
-- Phases run sequentially when using `--phase all`
-- All phases run by default and produce results regardless of earlier failures. Use `--fail-fast` to stop after the first phase that fails (e.g., to skip a 65-minute inference-perf run when deployment already failed).
-- Use individual phases for targeted validation during specific deployment stages
-
-#### Constraint Format
+#### Constraint paths and operators
 
 Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 
@@ -927,7 +852,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 | `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
 | `GPU.info.type` | GPU hardware type |
 
-#### Supported Operators
+Supported operators:
 
 | Operator | Example | Description |
 |----------|---------|-------------|
@@ -1090,28 +1015,7 @@ aicr validate --config validate-cluster-a.yaml
 aicr validate --config validate-cluster-b.yaml
 ```
 
-#### Workload Scheduling
-
-The `--node-selector` and `--toleration` flags control scheduling for **validation
-workloads** — the inner pods that validators create to test cluster functionality
-(e.g., NCCL benchmark workers, conformance test pods). They do **not** affect the
-validator orchestrator Job, which runs lightweight check logic and is placed on
-CPU-preferred nodes automatically.
-
-When `--node-selector` is provided, it replaces the platform-specific selectors
-that validators use by default:
-
-| Platform | Default Selector (replaced) | Use Case |
-|----------|-----------------------------|----------|
-| GKE | `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb` | Non-standard GPU node pool labels |
-| EKS | `node.kubernetes.io/instance-type: <discovered>` | Custom node pool labels |
-| OKE | `nvidia.com/gpu.product: <discovered>` (when GFD labels are present) | Pin NCCL workers to the accelerator cohort sized for the test; non-GFD clusters get no default selector |
-
-When `--toleration` is provided, it replaces the default tolerate-all policy
-(`operator: Exists`) on workloads that need to land on tainted GPU nodes.
-
-Validators that use `nodeName` pinning (nvidia-smi, DRA isolation test) or
-DRA ResourceClaims for placement (gang scheduling) are not affected by these flags.
+The `--node-selector` and `--toleration` flags control scheduling for the inner validation workloads (NCCL benchmark workers, conformance test pods), not the validator orchestrator Job. For when to use them with non-standard GPU labels or taints, see [Validation](validation.md#non-standard-gpu-labels-or-taints).
 
 **Output Structure ([CTRF](https://ctrf.io/) JSON):**
 
