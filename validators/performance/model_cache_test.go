@@ -69,20 +69,27 @@ func TestModelCacheEnabled(t *testing.T) {
 }
 
 // TestInjectModelCacheMounts verifies the cache PVC volume, read-only mount, and
-// HF_HOME/HF_HUB_OFFLINE env are added to a service's extraPodSpec while
-// preserving env the template already declares (e.g. HF_TOKEN).
+// HF_HOME/HF_HUB_OFFLINE env are added to a component pod spec while preserving
+// env the template already declares (e.g. HF_TOKEN).
 func TestInjectModelCacheMounts(t *testing.T) {
-	extra := map[string]interface{}{
-		"mainContainer": map[string]interface{}{
-			"image": "img",
-			"env": []interface{}{
-				map[string]interface{}{"name": "HF_TOKEN", "value": "x"},
+	podSpec := map[string]interface{}{
+		"containers": []interface{}{
+			map[string]interface{}{
+				"name":  mainContainerName,
+				"image": "img",
+				"env": []interface{}{
+					map[string]interface{}{"name": "HF_TOKEN", "value": "x"},
+				},
+			},
+			map[string]interface{}{
+				"name":  "sidecar-frontend",
+				"image": "img",
 			},
 		},
 	}
-	injectModelCacheMounts(extra)
+	injectModelCacheMounts(podSpec)
 
-	vols, _ := extra["volumes"].([]interface{})
+	vols, _ := podSpec["volumes"].([]interface{})
 	if len(vols) != 1 {
 		t.Fatalf("want 1 volume, got %d", len(vols))
 	}
@@ -91,18 +98,22 @@ func TestInjectModelCacheMounts(t *testing.T) {
 		t.Errorf("pvc volume = %v", pvc)
 	}
 
-	mc := extra["mainContainer"].(map[string]interface{})
-	mounts, _ := mc["volumeMounts"].([]interface{})
-	if len(mounts) != 1 {
-		t.Fatalf("want 1 volumeMount, got %d", len(mounts))
-	}
-	m := mounts[0].(map[string]interface{})
-	if m["mountPath"] != modelCacheMountPath || m["readOnly"] != true {
-		t.Errorf("volumeMount = %v", m)
+	containers := podSpec["containers"].([]interface{})
+	for _, raw := range containers {
+		container := raw.(map[string]interface{})
+		mounts, _ := container["volumeMounts"].([]interface{})
+		if len(mounts) != 1 {
+			t.Fatalf("%s: want 1 volumeMount, got %d", container["name"], len(mounts))
+		}
+		m := mounts[0].(map[string]interface{})
+		if m["mountPath"] != modelCacheMountPath || m["readOnly"] != true {
+			t.Errorf("%s volumeMount = %v", container["name"], m)
+		}
 	}
 
 	got := map[string]string{}
-	for _, e := range mc["env"].([]interface{}) {
+	mainContainer := containers[0].(map[string]interface{})
+	for _, e := range mainContainer["env"].([]interface{}) {
 		em := e.(map[string]interface{})
 		if v, ok := em["value"].(string); ok {
 			got[em["name"].(string)] = v
@@ -311,12 +322,19 @@ func TestEnsureModelCache_NoDefaultStorageClassFailsFast(t *testing.T) {
 // mismatch fails closed. The constant is kept in sync by comment only, so this
 // test fails loudly if a template bump isn't mirrored on the constant.
 func TestCacheWorkerImageMatchesTemplate(t *testing.T) {
-	data, err := os.ReadFile("testdata/inference/dynamo-deployment.yaml")
-	if err != nil {
-		t.Fatalf("read deploy template: %v", err)
-	}
-	if !strings.Contains(string(data), cacheWorkerImage) {
-		t.Errorf("cacheWorkerImage %q not found in testdata/inference/dynamo-deployment.yaml; "+
-			"the populate-Job image has drifted from the worker image — update cacheWorkerImage to match", cacheWorkerImage)
+	for _, path := range []string{
+		"testdata/inference/dynamo-deployment.yaml",
+		"testdata/inference/dynamo-deployment-gateway-epp.yaml",
+	} {
+		t.Run(path, func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read deploy template: %v", err)
+			}
+			if !strings.Contains(string(data), cacheWorkerImage) {
+				t.Errorf("cacheWorkerImage %q not found in %s; "+
+					"the populate-Job image has drifted from the worker image — update cacheWorkerImage to match", cacheWorkerImage, path)
+			}
+		})
 	}
 }

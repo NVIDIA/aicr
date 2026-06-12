@@ -169,16 +169,16 @@ const (
 	// the catalog entry's `timeout`), which must be raised in tandem.
 	envHealthTimeout = "AICR_INFERENCE_PERF_HEALTH_TIMEOUT"
 
-	// perfConstraintModel / perfConstraintConcurrency name the recipe
-	// performance.constraints entries that let an overlay set the benchmark
-	// model and per-GPU concurrency per accelerator — symmetric with how the
-	// inference-throughput / inference-ttft-p99 thresholds already live in the
-	// recipe. Resolution precedence is recipe > catalog env > compiled default
-	// (see resolveModel / resolveConcurrencyPerGPU). Unlike the throughput/TTFT
-	// entries these carry a bare value (an HF model ID, a positive integer), not
-	// a comparator expression.
+	// perfConstraintModel / perfConstraintConcurrency / perfConstraintRoutingMode
+	// name recipe performance.constraints entries that configure the benchmark
+	// per accelerator — symmetric with how inference-throughput / inference-ttft-p99
+	// thresholds already live in the recipe. Resolution precedence is recipe >
+	// catalog env > compiled default for model/concurrency, and recipe > compiled
+	// default for routing mode. Unlike the throughput/TTFT entries these carry
+	// bare values, not comparator expressions.
 	perfConstraintModel       = "inference-model"
 	perfConstraintConcurrency = "inference-concurrency-per-gpu"
+	perfConstraintRoutingMode = "inference-routing-mode"
 
 	// inferenceDeploymentName is the DynamoGraphDeployment name for the benchmark
 	// workload. Passed to the template via ${DEPLOYMENT_NAME}.
@@ -206,10 +206,16 @@ const (
 	// catalog). When set, deployInferenceWorkload provisions hfTokenSecretName.
 	envHFToken = "HF_TOKEN" //nolint:gosec // G101: env var name, not a hardcoded credential
 
-	// inferenceFrontendPort is the port exposed by the Dynamo frontend service
-	// (contract from the dynamo-frontend chart). Used in the deploy path to
-	// construct the benchmark endpoint before the Service object exists.
+	// inferenceFrontendPort is the port exposed by the Dynamo frontend service.
+	// Used in the deploy path to construct the benchmark endpoint before the
+	// Service object exists.
 	inferenceFrontendPort int32 = 8000
+
+	// inferenceGatewayNamespace / inferenceGatewayName identify the AICR-managed
+	// agentgateway Gateway used by the gateway-epp routing mode.
+	inferenceGatewayNamespace = "agentgateway-system"
+	inferenceGatewayName      = "inference-gateway"
+	inferenceGatewayPort      = int32(80)
 
 	// inferenceWorkloadNamespacePrefix is the base for the per-run benchmark
 	// namespace. Each run suffixes this with its unique run ID (from the
@@ -223,13 +229,24 @@ const (
 	// node. Matches the `driver` field the NVIDIA DRA driver stamps on every
 	// DeviceRequestAllocationResult it produces.
 	gpuDRADriverName = "gpu.nvidia.com"
+
+	// mainContainerName is the v1beta1 Dynamo container name that receives
+	// operator defaults and GPU DRA resource claims.
+	mainContainerName = "main"
 )
 
-// GVRs for Dynamo and KAI Scheduler CRDs.
+type inferenceRoutingMode string
+
+const (
+	inferenceRoutingModeDynamoRouter inferenceRoutingMode = "dynamo-router"
+	inferenceRoutingModeGatewayEPP   inferenceRoutingMode = "gateway-epp"
+)
+
+// GVRs for Dynamo, KAI Scheduler, and Gateway API resources.
 var (
 	dynamoDeploymentGVR = schema.GroupVersionResource{
 		Group:    "nvidia.com",
-		Version:  versionV1alpha1,
+		Version:  versionV1beta1,
 		Resource: "dynamographdeployments",
 	}
 
@@ -237,6 +254,12 @@ var (
 		Group:    "scheduling.run.ai",
 		Version:  "v2",
 		Resource: "queues",
+	}
+
+	httpRouteGVR = schema.GroupVersionResource{
+		Group:    "gateway.networking.k8s.io",
+		Version:  "v1",
+		Resource: "httproutes",
 	}
 )
 
@@ -291,6 +314,7 @@ type inferenceWorkloadConfig struct {
 	deployedByUs           bool   // true if we (or a prior run we own) created the workload
 	modelCacheSize         string // PVC size (e.g. "100Gi") enabling the model-weights cache; empty = disabled
 	modelCacheStorageClass string // StorageClass for the cache PVC; empty = cluster default
+	routingMode            inferenceRoutingMode
 }
 
 // validateInferencePerf orchestrates the full inference performance pipeline:
@@ -350,10 +374,13 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 		return nil, deployErr
 	}
 
-	// Look up the frontend service to get the actual port rather than
-	// assuming 8000. The Service exists once waitForDynamoDeploymentReady
-	// returns, so this is safe here.
-	endpoint := resolveFrontendEndpoint(ctx, config.namespace)
+	// Look up the serving endpoint after the workload is ready. In Dynamo
+	// router mode this is the frontend Service; in gateway-epp mode it is the
+	// AICR-managed inference gateway that routes to the generated InferencePool.
+	endpoint, err := resolveInferenceEndpoint(ctx, config)
+	if err != nil {
+		return nil, err
+	}
 
 	slog.Info("Using inference endpoint", "endpoint", endpoint, "concurrency", config.concurrency)
 
@@ -518,7 +545,12 @@ func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, er
 	// with an opaque error or be unsafe; fail closed with a clear message
 	// instead. Symmetric with the AIPerf path, which passes the model via env.
 	model := resolveModel(ctx)
-	if err := validateModelID(model); err != nil {
+	if modelErr := validateModelID(model); modelErr != nil {
+		return nil, modelErr
+	}
+
+	routingMode, err := resolveRoutingMode(ctx)
+	if err != nil {
 		return nil, err
 	}
 
@@ -533,6 +565,7 @@ func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, er
 		model:                  model,
 		modelCacheSize:         cacheSize,
 		modelCacheStorageClass: strings.TrimSpace(os.Getenv(envModelCacheStorageClass)),
+		routingMode:            routingMode,
 	}
 
 	// Pin every worker to the specific chosen node via kubernetes.io/hostname
@@ -727,10 +760,10 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 	return tolerations
 }
 
-// deployInferenceWorkload deploys the ResourceClaimTemplate, KAI Queue, and
-// DynamoGraphDeployment. Sets config.deployedByUs = true as soon as any
-// resource is created, so the deferred cleanup in the caller always runs —
-// even if later steps (e.g., readiness wait) fail.
+// deployInferenceWorkload deploys the ResourceClaimTemplate, KAI Queue,
+// DynamoGraphDeployment, and any routing-mode-specific Gateway API resources.
+// Sets config.deployedByUs = true as soon as any resource is created, so the
+// deferred cleanup in the caller always runs — even if later steps fail.
 func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	// Create namespace (idempotent).
 	if err := ensureNamespace(ctx, config.namespace); err != nil {
@@ -784,9 +817,9 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 	}
 
 	// Apply DynamoGraphDeployment with programmatic pod-scheduling injection.
-	// The YAML template has no ${GPU_*} placeholders; scheduling is applied
-	// to the worker extraPodSpec via applyInferenceWorkerScheduling below.
-	deployPath := filepath.Join("testdata", "inference", "dynamo-deployment.yaml")
+	// The YAML templates have no ${GPU_*} placeholders; scheduling is applied
+	// to v1beta1 component podTemplate specs via applyInferenceWorkerScheduling below.
+	deployPath := filepath.Join("testdata", "inference", dynamoDeploymentTemplate(config.routingMode))
 	mutator := func(obj *unstructured.Unstructured) error {
 		return applyInferenceWorkerScheduling(obj, config)
 	}
@@ -802,90 +835,166 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		return errors.Wrap(errors.ErrCodeInternal, "DynamoGraphDeployment not ready", err)
 	}
 
+	if config.routingMode == inferenceRoutingModeGatewayEPP {
+		routePath := filepath.Join("testdata", "inference", "http-route-gateway-epp.yaml")
+		if err := createOrUpdateFromTemplate(ctx, httpRouteGVR,
+			config.namespace, routePath, templateData, nil); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to apply HTTPRoute for gateway-epp routing", err)
+		}
+		slog.Info("Applied HTTPRoute for gateway-epp routing",
+			"name", inferenceHTTPRouteName(), "gateway", inferenceGatewayName)
+	}
+
 	return nil
 }
 
-// applyInferenceWorkerScheduling injects nodeSelector, tolerations, and
-// resourceClaims into the VllmDecodeWorker service's extraPodSpec. Operating
-// on the unstructured object (rather than text-substituting into the YAML
-// template) keeps taint values safe from YAML special characters.
+func dynamoDeploymentTemplate(mode inferenceRoutingMode) string {
+	if mode == inferenceRoutingModeGatewayEPP {
+		return "dynamo-deployment-gateway-epp.yaml"
+	}
+	return "dynamo-deployment.yaml"
+}
+
+func inferenceHTTPRouteName() string {
+	return inferenceDeploymentName + "-route"
+}
+
+// applyInferenceWorkerScheduling injects nodeSelector, tolerations, and DRA
+// resourceClaims into each v1beta1 component's podTemplate. Operating on the
+// unstructured object (rather than text-substituting into the YAML template)
+// keeps taint values safe from YAML special characters.
 func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 	config *inferenceWorkloadConfig) error {
 
-	services, found, err := unstructured.NestedMap(obj.Object, "spec", "services")
+	components, found, err := unstructured.NestedSlice(obj.Object, "spec", "components")
 	if err != nil || !found {
-		return errors.New(errors.ErrCodeInternal, "spec.services not found in DynamoGraphDeployment")
+		return errors.New(errors.ErrCodeInternal, "spec.components not found in DynamoGraphDeployment")
 	}
 
 	// Bind the worker pod to the DRA ResourceClaimTemplate.
-	claimBindings := []interface{}{
-		map[string]interface{}{
-			keyName:                     "gpu",
-			"resourceClaimTemplateName": inferenceClaimTemplateName,
-		},
-	}
+	claimBindings := []interface{}{map[string]interface{}{
+		keyName:                     "gpu",
+		"resourceClaimTemplateName": inferenceClaimTemplateName,
+	}}
+	containerClaimRefs := []interface{}{map[string]interface{}{
+		keyName: "gpu",
+	}}
 
-	for svcName, svcRaw := range services {
-		svc, ok := svcRaw.(map[string]interface{})
+	for i, compRaw := range components {
+		component, ok := compRaw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		extraPodSpec, _, _ := unstructured.NestedMap(svc, "extraPodSpec")
-		if extraPodSpec == nil {
-			extraPodSpec = map[string]interface{}{}
+		componentName, _, _ := unstructured.NestedString(component, "name")
+		componentType, _, _ := unstructured.NestedString(component, "type")
+
+		podTemplate, _, _ := unstructured.NestedMap(component, "podTemplate")
+		if podTemplate == nil {
+			podTemplate = map[string]interface{}{}
+		}
+		podSpec, _, _ := unstructured.NestedMap(podTemplate, "spec")
+		if podSpec == nil {
+			podSpec = map[string]interface{}{}
 		}
 
-		// Tolerations AND nodeSelector apply to every service so all components
+		// Tolerations AND nodeSelector apply to every component so all pods
 		// co-locate on the GPU node cohort. Co-location matters on clusters
 		// whose GPU/system/CPU node groups live in separate network security
-		// groups (e.g., EKS with per-nodegroup SGs) — splitting Frontend onto a
-		// system node silently breaks the validator→Frontend health-check path
-		// via cross-SG firewall drops even though every pod reports Ready.
+		// groups (e.g., EKS with per-nodegroup SGs) — splitting Frontend/EPP
+		// onto a system node can silently break the validator→serving path via
+		// cross-SG firewall drops even though every pod reports Ready.
 		if len(config.gpuTolerations) > 0 {
-			tolList := make([]interface{}, 0, len(config.gpuTolerations))
-			for _, t := range config.gpuTolerations {
-				tolMap := map[string]interface{}{
-					"operator": string(t.Operator),
-				}
-				if t.Key != "" {
-					tolMap["key"] = t.Key
-				}
-				if t.Value != "" {
-					tolMap["value"] = t.Value
-				}
-				if t.Effect != "" {
-					tolMap["effect"] = string(t.Effect)
-				}
-				tolList = append(tolList, tolMap)
-			}
-			extraPodSpec["tolerations"] = tolList
+			podSpec["tolerations"] = tolerationsToUnstructured(config.gpuTolerations)
 		}
 		if len(config.gpuNodeSelector) > 0 {
 			ns := make(map[string]interface{}, len(config.gpuNodeSelector))
 			for k, v := range config.gpuNodeSelector {
 				ns[k] = v
 			}
-			extraPodSpec["nodeSelector"] = ns
+			podSpec["nodeSelector"] = ns
 		}
 
-		// Only the worker needs a GPU via DRA; frontend is CPU-only and runs
-		// on the same node group purely for network reachability.
-		if svcName == "VllmDecodeWorker" {
-			extraPodSpec["resourceClaims"] = claimBindings
+		if isInferenceGPUComponent(componentName, componentType) {
+			podSpec["resourceClaims"] = claimBindings
+			ensureMainContainerResourceClaims(podSpec, containerClaimRefs)
 		}
 
 		// When the model-weights cache is enabled, mount the pre-populated PVC
-		// read-only and point HF_HOME at it (offline) so the worker/frontend
-		// load weights locally instead of re-downloading from Hugging Face.
+		// read-only and point HF_HOME at it (offline) so the worker/frontend/EPP
+		// load model metadata locally instead of re-downloading from Hugging Face.
 		if modelCacheEnabled(config) {
-			injectModelCacheMounts(extraPodSpec)
+			injectModelCacheMounts(podSpec)
 		}
 
-		svc["extraPodSpec"] = extraPodSpec
-		services[svcName] = svc
+		if err := unstructured.SetNestedMap(podTemplate, podSpec, "spec"); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to set component podTemplate spec", err)
+		}
+		component["podTemplate"] = podTemplate
+		components[i] = component
 	}
 
-	return unstructured.SetNestedMap(obj.Object, services, "spec", "services")
+	return unstructured.SetNestedSlice(obj.Object, components, "spec", "components")
+}
+
+func tolerationsToUnstructured(tolerations []v1.Toleration) []interface{} {
+	tolList := make([]interface{}, 0, len(tolerations))
+	for _, t := range tolerations {
+		tolMap := map[string]interface{}{
+			"operator": string(t.Operator),
+		}
+		if t.Key != "" {
+			tolMap["key"] = t.Key
+		}
+		if t.Value != "" {
+			tolMap["value"] = t.Value
+		}
+		if t.Effect != "" {
+			tolMap["effect"] = string(t.Effect)
+		}
+		tolList = append(tolList, tolMap)
+	}
+	return tolList
+}
+
+func isInferenceGPUComponent(componentName, componentType string) bool {
+	switch componentType {
+	case "worker", "decode", "prefill":
+		return true
+	default:
+		return componentName == "VllmDecodeWorker"
+	}
+}
+
+func ensureMainContainerResourceClaims(podSpec map[string]interface{}, claims []interface{}) {
+	containers, _ := podSpec["containers"].([]interface{})
+	if len(containers) == 0 {
+		containers = []interface{}{map[string]interface{}{keyName: mainContainerName}}
+	}
+	mainIdx := -1
+	for i, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		if ok && container[keyName] == mainContainerName {
+			mainIdx = i
+			break
+		}
+	}
+	if mainIdx == -1 {
+		mainIdx = len(containers)
+		containers = append(containers, map[string]interface{}{keyName: mainContainerName})
+	}
+
+	container, ok := containers[mainIdx].(map[string]interface{})
+	if !ok {
+		container = map[string]interface{}{keyName: mainContainerName}
+	}
+	resources, _ := container["resources"].(map[string]interface{})
+	if resources == nil {
+		resources = map[string]interface{}{}
+	}
+	resources["claims"] = claims
+	container["resources"] = resources
+	containers[mainIdx] = container
+	podSpec["containers"] = containers
 }
 
 // ensureHFTokenSecret provisions the optional Hugging Face token Secret in the
@@ -1131,7 +1240,7 @@ func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWork
 	}
 }
 
-// isDynamoDeploymentReady reports whether *every desired* service in the
+// isDynamoDeploymentReady reports whether *every desired* component in the
 // DynamoGraphDeployment has all of its replicas Ready — not just that the
 // operator reported a top-level state of "successful". The benchmark pins one
 // data-parallel worker per GPU; if it starts while some workers are still
@@ -1139,10 +1248,10 @@ func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWork
 // model concurrently from one RWO EBS cache), it measures an under-provisioned
 // deployment and reports falsely low throughput / high TTFT. See #1181.
 //
-// Readiness is keyed off spec.services (the desired set), and each service's
+// Readiness is keyed off spec.components (the desired set), and each component's
 // status.readyReplicas is compared against its spec replica count. This guards
-// two failure modes that checking status.services alone misses: (1) the
-// operator may populate status.services incrementally, so a desired service
+// two failure modes that checking status.components alone misses: (1) the
+// operator may populate status.components incrementally, so a desired component
 // (e.g. the worker) can be entirely absent while the frontend already reports
 // ready; (2) during scale-up status.replicas lags the spec count, so comparing
 // ready against status.replicas can pass at, say, 6/8.
@@ -1155,22 +1264,22 @@ func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 		return false
 	}
 
-	desired, found, err := unstructured.NestedMap(obj.Object, "spec", "services")
-	if err != nil || !found || len(desired) == 0 {
+	desired, found := desiredDynamoComponents(obj)
+	if !found || len(desired) == 0 {
 		return false
 	}
-	statusServices, found, err := unstructured.NestedMap(obj.Object, "status", "services")
+
+	statusComponents, found, err := unstructured.NestedMap(obj.Object, "status", "components")
+	if err != nil || !found {
+		statusComponents, found, err = unstructured.NestedMap(obj.Object, "status", "services")
+	}
 	if err != nil || !found {
 		return false
 	}
 
-	for name, draw := range desired {
-		dsvc, ok := draw.(map[string]interface{})
-		if !ok {
-			return false
-		}
-		// Desired replica count from the spec. DGD services default to 1
-		// replica when unset; a 0-replica service has nothing to await.
+	for name, dsvc := range desired {
+		// Desired replica count from the spec. DGD components default to 1
+		// replica when unset; a 0-replica component has nothing to await.
 		want, wfound, werr := unstructured.NestedInt64(dsvc, "replicas")
 		if werr != nil {
 			// Present but wrong-typed replicas: fail closed rather than
@@ -1185,9 +1294,9 @@ func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 			continue
 		}
 
-		// The desired service must be represented in status — not just the
+		// The desired component must be represented in status — not just the
 		// subset the operator has populated so far.
-		sraw, ok := statusServices[name]
+		sraw, ok := statusComponents[name]
 		if !ok {
 			return false
 		}
@@ -1210,6 +1319,39 @@ func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 	return true
 }
 
+func desiredDynamoComponents(obj *unstructured.Unstructured) (map[string]map[string]interface{}, bool) {
+	components, found, err := unstructured.NestedSlice(obj.Object, "spec", "components")
+	if err == nil && found {
+		out := make(map[string]map[string]interface{}, len(components))
+		for _, raw := range components {
+			component, ok := raw.(map[string]interface{})
+			if !ok {
+				return nil, false
+			}
+			name, _, _ := unstructured.NestedString(component, "name")
+			if name == "" {
+				return nil, false
+			}
+			out[name] = component
+		}
+		return out, true
+	}
+
+	services, found, err := unstructured.NestedMap(obj.Object, "spec", "services")
+	if err != nil || !found {
+		return nil, false
+	}
+	out := make(map[string]map[string]interface{}, len(services))
+	for name, raw := range services {
+		service, ok := raw.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		out[name] = service
+	}
+	return out, true
+}
+
 // existingResourceVersion returns the ResourceVersion from an Unstructured
 // object, or the empty string if the object is nil. Used to avoid re-delivery
 // of events already consumed by the pre-watch Get.
@@ -1222,8 +1364,7 @@ func existingResourceVersion(obj *unstructured.Unstructured) string {
 
 // resolveFrontendEndpoint looks up the Dynamo frontend Service in the given
 // namespace and returns its cluster-internal URL. Falls back to the default
-// port if the Service cannot be inspected, which still works when the
-// dynamo-frontend chart uses its contract port (8000).
+// port if the Service cannot be inspected.
 func resolveFrontendEndpoint(ctx *validators.Context, namespace string) string {
 	lookupCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -1237,6 +1378,66 @@ func resolveFrontendEndpoint(ctx *validators.Context, namespace string) string {
 	}
 	port := inferServicePort(*svc)
 	return fmt.Sprintf("http://%s.%s.svc:%d", svc.Name, svc.Namespace, port)
+}
+
+func resolveInferenceEndpoint(ctx *validators.Context, config *inferenceWorkloadConfig) (string, error) {
+	if config.routingMode == inferenceRoutingModeGatewayEPP {
+		return resolveGatewayEndpoint(ctx)
+	}
+	return resolveFrontendEndpoint(ctx, config.namespace), nil
+}
+
+// resolveGatewayEndpoint returns the in-cluster URL for the AICR-managed
+// inference gateway. The Service is created by the agentgateway controller from
+// the Gateway resource, so fall back to the conventional name and port when it
+// is not yet inspectable; waitForEndpointReady will surface a real timeout if
+// the gateway never serves the route.
+func resolveGatewayEndpoint(ctx *validators.Context) (string, error) {
+	lookupCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	svcs, err := ctx.Clientset.CoreV1().Services(inferenceGatewayNamespace).List(lookupCtx, metav1.ListOptions{})
+	if err != nil {
+		slog.Debug("Inference gateway service lookup failed",
+			"namespace", inferenceGatewayNamespace, "service", inferenceGatewayName, "port", inferenceGatewayPort, "error", err)
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list inference gateway services", err)
+	}
+
+	var selected *v1.Service
+	for i := range svcs.Items {
+		svc := &svcs.Items[i]
+		if svc.Name == inferenceGatewayName {
+			selected = svc
+			break
+		}
+		if selected == nil && isInferenceGatewayProxyServiceName(svc.Name) {
+			selected = svc
+		}
+	}
+	if selected == nil {
+		slog.Debug("Inference gateway service not found, using default gateway endpoint",
+			"namespace", inferenceGatewayNamespace, "service", inferenceGatewayName, "port", inferenceGatewayPort)
+		return defaultGatewayEndpoint(), nil
+	}
+
+	port := inferServicePort(*selected)
+	return fmt.Sprintf("http://%s.%s.svc:%d", selected.Name, selected.Namespace, port), nil
+}
+
+func defaultGatewayEndpoint() string {
+	return fmt.Sprintf("http://%s.%s.svc:%d", inferenceGatewayName, inferenceGatewayNamespace, inferenceGatewayPort)
+}
+
+func isInferenceGatewayProxyServiceName(name string) bool {
+	if !strings.Contains(name, inferenceGatewayName) {
+		return false
+	}
+	for _, marker := range []string{"controller-manager", "webhook", "metrics"} {
+		if strings.Contains(name, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 // inferencePerfNoCleanup reports whether AICR_INFERENCE_PERF_NO_CLEANUP is set
@@ -1555,6 +1756,33 @@ func resolveModel(ctx *validators.Context) string {
 		}
 	}
 	return resolveInferenceModel()
+}
+
+// resolveRoutingMode returns where KV-aware routing decisions are made for the
+// benchmark workload. The default `dynamo-router` mode keeps routing in the
+// Dynamo frontend. `gateway-epp` switches to Gateway API Inference Extension:
+// EPP performs KV-aware endpoint selection and worker frontend sidecars run in
+// direct mode so they honor EPP's routing headers. The sidecars do not relay
+// local vLLM ZMQ KV events onto NATS; that relay is handled by the worker
+// runtime.
+func resolveRoutingMode(ctx *validators.Context) (inferenceRoutingMode, error) {
+	if c, ok := findPerformanceConstraint(ctx, perfConstraintRoutingMode); ok {
+		raw := strings.TrimSpace(c.Value)
+		if raw == "" {
+			return inferenceRoutingModeDynamoRouter, nil
+		}
+		switch inferenceRoutingMode(raw) {
+		case inferenceRoutingModeDynamoRouter:
+			return inferenceRoutingModeDynamoRouter, nil
+		case inferenceRoutingModeGatewayEPP:
+			return inferenceRoutingModeGatewayEPP, nil
+		default:
+			return "", errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid %s=%q: must be %q or %q",
+					perfConstraintRoutingMode, raw, inferenceRoutingModeDynamoRouter, inferenceRoutingModeGatewayEPP))
+		}
+	}
+	return inferenceRoutingModeDynamoRouter, nil
 }
 
 // resolveConcurrencyPerGPU returns the per-GPU concurrency with precedence

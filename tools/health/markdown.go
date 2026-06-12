@@ -17,12 +17,31 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// detailDimensions is the fixed render order for the per-dimension structural
+// detail (renderDetail). pkg/health stores a recipe's dimension states in a
+// map, which has no stable iteration order; pinning the order here keeps the
+// step-summary output byte-stable. A new graded dimension added to pkg/health
+// must be appended here to surface in the detail.
+var detailDimensions = []string{
+	health.DimResolves,
+	health.DimChartPinned,
+	health.DimConstraintsWellformed,
+}
+
+// dimNotScored is the cell rendered when a recipe was never scored on a
+// dimension — the dimension is absent from its Dimensions map because the
+// recipe did not resolve, so the render-free reads (chart_pinned,
+// constraints_wellformed) had no resolved recipe to inspect. It is distinct
+// from a graded pass/warn/fail/unknown.
+const dimNotScored = "—"
 
 // evidencePending is the literal value rendered in the Evidence column for
 // every recipe in V1. No attestations exist yet (recipes/evidence/ is empty),
@@ -157,4 +176,111 @@ func coverageCell(cov *health.DeclaredCoverage) string {
 		return "—"
 	}
 	return cov.Compact()
+}
+
+// renderDetail writes the per-dimension structural detail as Markdown. Per
+// ADR-009 §5, this is the content the weekly health-refresh workflow appends
+// to $GITHUB_STEP_SUMMARY: the committed matrix (renderMatrix) shows only each
+// recipe's rolled-up Status, while this breakdown shows the state of every
+// graded dimension behind that rollup, so a maintainer triaging the weekly bot
+// PR can see which signal drove a fail/warn without re-running the generator.
+// There is deliberately no committed detail doc — the step summary is its only
+// home. The output carries no timestamp, so it is inherently deterministic.
+func renderDetail(w io.Writer, report *health.Report) error {
+	sw := &stickyWriter{w: w}
+
+	fmt.Fprintf(sw, "## Structural detail\n\n")
+	fmt.Fprintf(sw, "Per-graded-dimension state behind each recipe's rolled-up Status. "+
+		"`%s` means the dimension was not scored — the recipe did not resolve, so the "+
+		"render-free reads behind `chart_pinned` and `constraints_wellformed` had no "+
+		"resolved recipe to inspect.\n\n", dimNotScored)
+
+	writeDimensionTally(sw, report)
+	writeDimensionMatrix(sw, report)
+
+	if sw.err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write recipe-health detail markdown", sw.err)
+	}
+	return nil
+}
+
+// writeDimensionTally emits a per-dimension rollup of how many recipes landed
+// in each state — the at-a-glance triage view, so a maintainer sees "chart_pinned
+// failed on N recipes" before scanning the per-recipe table.
+func writeDimensionTally(sw *stickyWriter, report *health.Report) {
+	fmt.Fprintf(sw, "### Per-dimension tally\n\n")
+	fmt.Fprintln(sw, "| Dimension | Pass | Warn | Fail | Unknown | Not scored |")
+	fmt.Fprintln(sw, "|-----------|------|------|------|---------|------------|")
+	for _, dim := range detailDimensions {
+		var pass, warn, fail, unknown, notScored int
+		for _, c := range report.Combos {
+			state, ok := c.Structure.Dimensions[dim]
+			if !ok {
+				notScored++
+				continue
+			}
+			switch state {
+			case health.StatusPass:
+				pass++
+			case health.StatusWarn:
+				warn++
+			case health.StatusFail:
+				fail++
+			case health.StatusUnknown:
+				unknown++
+			}
+		}
+		fmt.Fprintf(sw, "| %s | %d | %d | %d | %d | %d |\n", dim, pass, warn, fail, unknown, notScored)
+	}
+	fmt.Fprintln(sw)
+}
+
+// writeDimensionMatrix emits one row per recipe with the state of each graded
+// dimension, the rolled-up Status, and any human-readable notes (resolver
+// errors, vacuous-pass explanations) the scorer attached.
+func writeDimensionMatrix(sw *stickyWriter, report *health.Report) {
+	fmt.Fprintf(sw, "### Per-recipe\n\n")
+	fmt.Fprintln(sw, "| Recipe | resolves | chart_pinned | constraints_wellformed | Status | Notes |")
+	fmt.Fprintln(sw, "|--------|----------|--------------|------------------------|--------|-------|")
+	for _, c := range report.Combos {
+		fmt.Fprintf(sw, "| %s | %s | %s | %s | %s | %s |\n",
+			c.LeafOverlay,
+			dimStateCell(c.Structure.Dimensions, health.DimResolves),
+			dimStateCell(c.Structure.Dimensions, health.DimChartPinned),
+			dimStateCell(c.Structure.Dimensions, health.DimConstraintsWellformed),
+			c.Structure.Status,
+			detailNotes(c.Structure.Detail),
+		)
+	}
+	fmt.Fprintln(sw)
+}
+
+// dimStateCell renders a dimension's state, or dimNotScored when the dimension
+// is absent from the map (the recipe did not resolve, so it was never scored).
+func dimStateCell(dims map[string]string, key string) string {
+	if state, ok := dims[key]; ok {
+		return state
+	}
+	return dimNotScored
+}
+
+// detailNotes joins the per-dimension human-readable notes into one cell, in
+// detailDimensions order. Pipes and line breaks are neutralized so a note
+// (e.g. a multi-line resolver error, possibly with CRLF) can never break the
+// Markdown table layout.
+func detailNotes(detail map[string]string) string {
+	if len(detail) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, dim := range detailDimensions {
+		if note, ok := detail[dim]; ok && note != "" {
+			parts = append(parts, fmt.Sprintf("%s: %s", dim, note))
+		}
+	}
+	joined := strings.Join(parts, "; ")
+	joined = strings.ReplaceAll(joined, "\r\n", " ")
+	joined = strings.ReplaceAll(joined, "\n", " ")
+	joined = strings.ReplaceAll(joined, "\r", " ")
+	return strings.ReplaceAll(joined, "|", "\\|")
 }
