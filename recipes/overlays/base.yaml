@@ -96,7 +96,10 @@ spec:
     - name: nvidia-dra-driver-gpu
       type: Helm
       source: oci://registry.k8s.io/dra-driver-nvidia/charts
-      version: "0.4.0"
+      # TEMPORARY: pinned to 0.4.1-rc.1 to fix the duplicate pod-template label
+      # key 0.4.0 emits (invalid YAML breaking Argo CD/Flux/strict consumers).
+      # Bump to 0.4.1 GA once released (week of 2026-06-29). See registry.yaml.
+      version: "0.4.1-rc.1"
       valuesFile: components/nvidia-dra-driver-gpu/values.yaml
       dependencyRefs:
         - gpu-operator
