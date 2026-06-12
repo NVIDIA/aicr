@@ -13,6 +13,8 @@
 # limitations under the License.
 
 # Assert Dynamo platform components are healthy on the kind inference stack.
+# AICR uses Kubernetes-native discovery plus NATS for Dynamo's Kubernetes
+# event plane and worker KV-cache events.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,6 +23,14 @@ metadata:
 status:
   (conditions[?type == 'Available']):
     - status: "True"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dynamo-platform-nats
+  namespace: dynamo-system
+status:
+  (readyReplicas > `0`): true
 ---
 apiVersion: apps/v1
 kind: Deployment

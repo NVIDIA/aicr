@@ -191,8 +191,8 @@
 │  └──────────────────────┘       └──────────────────────┘        │
 │                                                                 │
 │  Discovery: Kubernetes-native (no etcd)                         │
-│  KV Store:  In-memory (DYN_STORE_KV=mem)                        │
-│  Events:    ZeroMQ (DYN_EVENT_PLANE=zmq, no NATS)               │
+│  Requests:  Dynamo request plane (default TCP)                  │
+│  Events:    NATS event plane for worker KV-cache events         │
 │                                                                 │
 │  CRDs (6):                                                      │
 │  ├── DynamoGraphDeployment         (inference serving graph)    │
@@ -213,7 +213,7 @@
 │  DynamoGraphDeployment: vllm-agg                                │
 │  Status: successful — All resources are ready                   │
 │                                                                 │
-│  ┌─────────┐  HTTP  ┌───────────────┐  ZMQ   ┌──────────────┐   │
+│  ┌─────────┐  HTTP  ┌───────────────┐  TCP   ┌──────────────┐   │
 │  │  Client │───────▶│   Frontend    │───────▶│ VllmDecode   │   │
 │  │ (OpenAI │ :8000  │               │        │   Worker     │   │
 │  │  API)   │◀───────│ vllm-runtime  │◀───────│              │   │
@@ -224,14 +224,15 @@
 │                       svc: :8000               svc: :9090       │
 │                                                                 │
 │  Services:                                                      │
-│    Frontend          1/1 Ready   componentType: frontend        │
-│    VllmDecodeWorker  1/1 Ready   componentType: worker  gpu: 1  │
+│    Frontend          1/1 Ready   type: frontend                 │
+│    VllmDecodeWorker  1/1 Ready   type: worker  gpu: 1           │
 │                                                                 │
 │  Flow:                                                          │
 │    1. Client → /v1/chat/completions → Frontend :8000            │
-│    2. Frontend → ZMQ → VllmDecodeWorker                         │
+│    2. Frontend → Dynamo request plane (TCP) → VllmDecodeWorker  │
 │    3. VllmDecodeWorker runs Qwen3-0.6B on H100                  │
-│    4. Response: Worker → ZMQ → Frontend → Client                │
+│    4. Worker relays local vLLM ZMQ KV events to NATS            │
+│    5. KV router consumes NATS events; response returns over TCP │
 └─────────────────────────────────────────────────────────────────┘
 ```
 ### ChatBot

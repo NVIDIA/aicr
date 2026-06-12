@@ -92,7 +92,7 @@ const (
 	// ResolveImage for registry-override parity is tracked in #1159. Note that
 	// registry parity alone is not air-gap support: the populate Job's
 	// snapshot_download still reaches huggingface.co for the weights.
-	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.0.2"
+	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0"
 
 	// Resource requests for the populate container. snapshot_download is
 	// network/IO-bound, not compute-bound, so requests stay small; they exist so
@@ -330,19 +330,21 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pu
 }
 
 // injectModelCacheMounts adds the read-only cache PVC volume, its mount, and the
-// HF_HOME / HF_HUB_OFFLINE env to a service's extraPodSpec so the worker loads
-// weights from the pre-populated PVC and never reaches out to Hugging Face.
-// Offline mode fails closed if the cache is incomplete rather than silently
-// falling back to a (rate-limited) download. Operates on the unstructured map
-// in place, merging with any env the template already declares.
+// HF_HOME / HF_HUB_OFFLINE env to a component's podTemplate.spec so the worker
+// loads weights from the pre-populated PVC and never reaches out to Hugging
+// Face. Offline mode fails closed if the cache is incomplete rather than
+// silently falling back to a (rate-limited) download. Operates on the
+// unstructured pod spec in place, merging with any env the template already
+// declares.
 //
-// Applied per-service by applyInferenceWorkerScheduling, so the Frontend pod
-// also receives the RO mount even though it does not need weights. This is
+// Applied per-component by applyInferenceWorkerScheduling, so Frontend/EPP pods
+// also receive the RO mount even though only the worker needs weights. This is
 // intentional and harmless: the RWO PVC is co-located on one node (which the
 // validator already enforces) and snapshot_download fetches the full repo
-// (tokenizer included), so an offline frontend still resolves.
-func injectModelCacheMounts(extraPodSpec map[string]interface{}) {
-	vols, _ := extraPodSpec["volumes"].([]interface{})
+// (tokenizer included), so offline frontend/EPP components still resolve model
+// metadata.
+func injectModelCacheMounts(podSpec map[string]interface{}) {
+	vols, _ := podSpec["volumes"].([]interface{})
 	vols = append(vols, map[string]interface{}{
 		keyName: modelCacheVolumeName,
 		"persistentVolumeClaim": map[string]interface{}{
@@ -350,25 +352,32 @@ func injectModelCacheMounts(extraPodSpec map[string]interface{}) {
 			"readOnly":  true,
 		},
 	})
-	extraPodSpec["volumes"] = vols
+	podSpec["volumes"] = vols
 
-	mc, _ := extraPodSpec["mainContainer"].(map[string]interface{})
-	if mc == nil {
-		mc = map[string]interface{}{}
+	containers, _ := podSpec["containers"].([]interface{})
+	if len(containers) == 0 {
+		containers = []interface{}{map[string]interface{}{keyName: mainContainerName}}
 	}
-	mounts, _ := mc["volumeMounts"].([]interface{})
-	mounts = append(mounts, map[string]interface{}{
-		keyName:     modelCacheVolumeName,
-		"mountPath": modelCacheMountPath,
-		"readOnly":  true,
-	})
-	mc["volumeMounts"] = mounts
+	for i, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		mounts, _ := container["volumeMounts"].([]interface{})
+		mounts = append(mounts, map[string]interface{}{
+			keyName:     modelCacheVolumeName,
+			"mountPath": modelCacheMountPath,
+			"readOnly":  true,
+		})
+		container["volumeMounts"] = mounts
 
-	env, _ := mc["env"].([]interface{})
-	env = append(env,
-		map[string]interface{}{keyName: "HF_HOME", "value": modelCacheMountPath},
-		map[string]interface{}{keyName: "HF_HUB_OFFLINE", "value": "1"},
-	)
-	mc["env"] = env
-	extraPodSpec["mainContainer"] = mc
+		env, _ := container["env"].([]interface{})
+		env = append(env,
+			map[string]interface{}{keyName: "HF_HOME", "value": modelCacheMountPath},
+			map[string]interface{}{keyName: "HF_HUB_OFFLINE", "value": "1"},
+		)
+		container["env"] = env
+		containers[i] = container
+	}
+	podSpec["containers"] = containers
 }
