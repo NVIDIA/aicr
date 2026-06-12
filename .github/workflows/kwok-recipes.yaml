@@ -228,7 +228,7 @@ jobs:
           # shard's matrix under the limit. Keep this deployer list in sync
           # with the test-tier1 matrix above and the input doc in
           # .github/actions/kwok-test/action.yml.
-          deployers='["helm","argocd-oci","argocd-helm-oci","flux-oci"]'
+          deployers='["helm","argocd-oci","argocd-helm-oci","flux-oci","flux-git"]'
           readonly TIER3_BATCH_SIZE=200  # headroom under GitHub's 256 cap
 
           # Fail closed if the batch size is ever raised past the hard limit —
@@ -275,7 +275,7 @@ jobs:
       fail-fast: false
       matrix:
         recipe: ${{ fromJSON(needs.discover.outputs.tier1) }}
-        deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci]
+        deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci, flux-git]
     steps:
       - name: Checkout Code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
