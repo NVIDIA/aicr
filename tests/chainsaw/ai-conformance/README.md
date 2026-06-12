@@ -162,7 +162,7 @@ chainsaw test \
 | Namespaces, CRDs | 2m | Should exist immediately after deployment |
 | cert-manager, agentgateway, skyhook, monitoring, kai-scheduler | 5m | Standard Deployment rollout |
 | gpu-operator, nvidia-dra-driver-gpu | 10m | GPU driver compilation on nodes is slow |
-| dynamo-platform | 5m | Operator + etcd + NATS startup |
+| dynamo-platform | 5m | Operator + Grove + NATS event-plane startup |
 
 ## Assertion Patterns
 

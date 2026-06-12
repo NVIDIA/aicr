@@ -1,0 +1,36 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Allow anonymous access to the cluster's OIDC discovery endpoints
+# (/.well-known/openid-configuration and /openid/v1/jwks). Fulcio fetches these
+# unauthenticated when it builds the verifier for the in-cluster Kubernetes
+# ServiceAccount issuer; kind denies anonymous access by default, which Fulcio
+# surfaces as "unsupported issuer". Binding the built-in
+# system:service-account-issuer-discovery ClusterRole to the anonymous user
+# grants exactly that read access and nothing more. Scoped to this e2e cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aicr-e2e-oidc-discovery-anonymous
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:service-account-issuer-discovery
+subjects:
+  - kind: User
+    name: system:anonymous
+    apiGroup: rbac.authorization.k8s.io
+  - kind: Group
+    name: system:unauthenticated
+    apiGroup: rbac.authorization.k8s.io

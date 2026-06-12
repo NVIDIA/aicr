@@ -1,0 +1,193 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-attestation-private-sigstore
+  labels:
+    requires: private-sigstore
+    ci: "true" # needs a CI-attested binary; excluded from fork e2e (no OIDC)
+    external-service: "true" # needs a live local Sigstore stack; excluded from the generic sweep, run only by sigstore-scaffolding-e2e.yaml
+spec:
+  description: |
+    Keyless sign -> log -> verify round-trip against a private Sigstore stack
+    deployed from the sigstore `scaffold` Helm chart (Fulcio + Rekor + CTLog +
+    Trillian). Exercises --fulcio-url / --rekor-url on aicr bundle --attest and
+    confirms the resulting .sigstore.json contains a Fulcio certificate
+    (verificationMaterial.certificate) and a Rekor entry (tlogEntries).
+
+    Endpoint- and identity-agnostic: the harness (run.sh / the CI workflow)
+    injects these environment variables. See that harness for how the stack is
+    deployed and reached (helm install + kubectl port-forward + a localhost TLS
+    proxy, since aicr requires https:// endpoints).
+      FULCIO_URL           - https URL of the local Fulcio CA
+      REKOR_URL            - https URL of the local Rekor log
+      OIDC_TOKEN           - identity token minted for the in-cluster Kubernetes
+                             ServiceAccount issuer that Fulcio trusts
+      AICR_IDENTITY_REGEXP - --certificate-identity-regexp pinning the *binary*
+                             attestation identity (verified against public Sigstore)
+
+    Deferred (Phase 2):
+    - aicr verify does not yet accept --rekor-url / --fulcio-url, so the
+      verify step checks only bundle checksums (its sigstore attestation check
+      runs against the public trust root and cannot validate the private Rekor
+      entry). See the verify-bundle-checksums step.
+    - aicr verify --certificate-identity-regexp requires the pattern to contain
+      "://github.com/NVIDIA/aicr/", so it cannot pin the in-cluster SA identity.
+      Attestation-level verification against the private CA is therefore not
+      exercised by aicr verify in this phase.
+    See issue #1215 for Phase 2 scope.
+
+    Skip in normal runs with: --selector 'requires!=private-sigstore'
+  timeouts:
+    exec: 120s
+  steps:
+    - name: setup
+      description: Generate recipe for private-sigstore attestation tests.
+      try:
+        - script:
+            content: |
+              # chainsaw does not fail-fast: a script's result is its LAST
+              # command's exit code, so set -e is required for every line to gate.
+              set -e
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: create-attested-bundle-private-sigstore
+      description: |
+        Create bundle using the private Fulcio CA and Rekor log. OIDC_TOKEN is a
+        short-lived token minted (by the harness, via `kubectl create token`) for
+        the in-cluster Kubernetes ServiceAccount issuer that Fulcio is configured
+        to trust; it is passed in via the environment.
+      try:
+        - script:
+            content: |
+              set -e
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              FULCIO_URL="${FULCIO_URL:?Set FULCIO_URL to the local Fulcio endpoint (https://)}"
+              REKOR_URL="${REKOR_URL:?Set REKOR_URL to the local Rekor endpoint (https://)}"
+              OIDC_TOKEN="${OIDC_TOKEN:?Set OIDC_TOKEN to a valid OIDC token for the local issuer}"
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              # --certificate-identity-regexp pins the *binary* attestation identity
+              # (verified against public Sigstore). The CI binary is attested by this
+              # e2e/build-attested workflow, not on-tag, so the bundler must be told
+              # the expected identity. The keyless *bundle* attestation is signed
+              # against the local stack via --fulcio-url/--rekor-url/--identity-token.
+              "${AICR_BIN}" bundle -r "${WORK}/recipe.yaml" -o "${WORK}/bundle" \
+                --attest \
+                --fulcio-url "${FULCIO_URL}" \
+                --rekor-url "${REKOR_URL}" \
+                --identity-token "${OIDC_TOKEN}" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP:-}"
+            check:
+              ($error == null): true
+
+    - name: attested-bundle-has-files
+      description: Bundle contains expected attestation and standard artifacts.
+      try:
+        - script:
+            content: |
+              set -e
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              test -f "${WORK}/bundle/attestation/bundle-attestation.sigstore.json"
+              test -f "${WORK}/bundle/checksums.txt"
+              test -f "${WORK}/bundle/recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: attestation-bundle-has-fulcio-certificate
+      description: |
+        The sigstore bundle JSON must contain a Fulcio certificate under
+        verificationMaterial.certificate. This is the primary signal that the
+        private Fulcio endpoint was reached and the keyless signing flow
+        completed successfully against the local CA.
+      try:
+        - script:
+            content: |
+              set -e
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              BUNDLE="${WORK}/bundle/attestation/bundle-attestation.sigstore.json"
+              # Assert the keyless path semantically (yq parses the JSON bundle):
+              # a non-empty verificationMaterial.certificate.rawBytes AND no
+              # verificationMaterial.publicKey (which a KMS / public-key bundle
+              # would carry instead). Proves a real Fulcio cert was embedded.
+              yq -p json -e '.verificationMaterial.certificate.rawBytes | length > 0' "${BUNDLE}" >/dev/null
+              yq -p json -e '.verificationMaterial.publicKey == null' "${BUNDLE}" >/dev/null
+            check:
+              ($error == null): true
+
+    - name: attestation-bundle-has-tlog-entry
+      description: |
+        The sigstore bundle JSON must contain tlogEntries confirming the bundle
+        was appended to the local Rekor transparency log.
+      try:
+        - script:
+            content: |
+              set -e
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              BUNDLE="${WORK}/bundle/attestation/bundle-attestation.sigstore.json"
+              # Assert a real Rekor entry (yq parses the JSON bundle): a non-empty
+              # tlogEntries array whose first entry carries an inclusionProof,
+              # which Rekor populates only when the entry was actually appended.
+              yq -p json -e '.verificationMaterial.tlogEntries | length > 0' "${BUNDLE}" >/dev/null
+              yq -p json -e '.verificationMaterial.tlogEntries[0].inclusionProof != null' "${BUNDLE}" >/dev/null
+            check:
+              ($error == null): true
+
+    - name: verify-bundle-checksums
+      description: |
+        Confirm aicr verify reports checksumsPassed for the bundle. aicr verify
+        does not yet accept --rekor-url / a custom trust root (deferred to
+        Phase 2, issue #1215), so its sigstore attestation check runs against
+        the PUBLIC trust root and necessarily fails log-inclusion for a bundle
+        recorded in the PRIVATE Rekor — verify therefore exits non-zero. That
+        attestation failure is expected here; this step asserts only the
+        checksum result, which is independent of attestation trust. The JSON
+        report is written to stdout even on non-zero exit, so we capture it,
+        tolerate the exit code, and assert the checksum field with yq.
+      try:
+        - script:
+            content: |
+              set -e
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              # Phase 2 (#1215): once verify accepts --rekor-url/--fulcio-url,
+              # assert --min-trust-level verified against the local stack here.
+              # verify exits non-zero (expected: it cannot validate the private
+              # Rekor against the public trust root) but still writes the JSON
+              # report to stdout, so capture it, tolerate the exit, and assert the
+              # boolean checksum result with yq (type-aware, not a brittle
+              # whitespace-sensitive string match).
+              OUT="$(${AICR_BIN} verify "${WORK}/bundle" --min-trust-level unknown --format json 2>/dev/null || true)"
+              echo "${OUT}"
+              echo "${OUT}" | yq -p json -e '.checksumsPassed == true' >/dev/null
+            check:
+              # The yq assertion above fails (non-zero) on a checksum mismatch, so this
+              # confirms checksums passed without coupling to verify's exit code
+              # (which reflects the expected private-Rekor attestation failure).
+              ($error == null): true
+
+    - name: cleanup
+      description: Remove temporary files.
+      try:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-attestation-private-sigstore

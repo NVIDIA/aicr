@@ -12,16 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo inference workload for performance benchmarking.
-# Deploys a vLLM aggregated backend with a small model for smoke testing.
-# Worker replicas scale to match available GPUs (1 GPU per replica via DRA).
-# Frontend-to-worker traffic uses Dynamo's request plane default (TCP). The
-# local vLLM ZMQ KV-event publisher feeds the worker runtime, which relays
-# KV-cache events onto the NATS-backed Dynamo event plane.
-#
-# Target overlays require K8s 1.34+ with nvidia-dra-driver-gpu, so worker
-# GPUs are requested through a DRA ResourceClaimTemplate rather than raw
-# nvidia.com/gpu resources.
+# Dynamo inference workload for performance benchmarking through GAIE/EPP.
+# EPP performs KV-cache-aware endpoint selection and worker frontend sidecars
+# run in direct mode so they honor EPP's routing headers. Direct mode is not
+# the local ZMQ-to-NATS relay; the Dynamo worker runtime relays vLLM KV-cache
+# events from the local ZMQ publisher onto the NATS-backed event plane.
 #
 # Pod scheduling (nodeSelector / tolerations / resourceClaims bindings) is
 # injected programmatically from Go (see applyInferenceWorkerScheduling in
@@ -36,22 +31,23 @@ metadata:
 spec:
   backendFramework: vllm
   components:
-    - name: Frontend
-      type: frontend
+    - name: Epp
+      type: epp
       replicas: 1
       podTemplate:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/epp-image:1.2.0
               env:
-                - name: SERVED_MODEL_NAME
-                  # Quoted so a scalar-looking model ID (e.g. a pure-numeric or
-                  # boolean-like name that passes validateModelID) parses as a
-                  # string, not int/bool/null, after ${MODEL} substitution.
+                - name: DYN_KV_CACHE_BLOCK_SIZE
+                  value: "128"
+                - name: DYN_MODEL_NAME
+                  # Quoted so a scalar-looking model ID parses as a string
+                  # after ${MODEL} substitution.
                   value: "${MODEL}"
-                - name: DYN_ROUTER_MODE
-                  value: kv
+                - name: DYN_ENFORCE_DISAGG
+                  value: "false"
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:
@@ -64,10 +60,35 @@ spec:
                       name: aicr-hf-token
                       key: token
                       optional: true
+      eppConfig:
+        config:
+          plugins:
+            - type: disagg-profile-handler
+            - name: decode-filter
+              type: label-filter
+              parameters:
+                label: nvidia.com/dynamo-component-type
+                validValues:
+                  - decode
+                allowsNoLabel: true
+            - name: picker
+              type: max-score-picker
+            - name: dyn-decode
+              type: dyn-decode-scorer
+          schedulingProfiles:
+            - name: decode
+              plugins:
+                - pluginRef: decode-filter
+                  weight: 1
+                - pluginRef: dyn-decode
+                  weight: 1
+                - pluginRef: picker
+                  weight: 1
     - name: VllmDecodeWorker
-      type: worker
+      type: decode
       replicas: ${GPU_COUNT}
       sharedMemorySize: 2Gi
+      frontendSidecar: sidecar-frontend
       podTemplate:
         spec:
           containers:
@@ -78,8 +99,33 @@ spec:
               args:
                 - --model
                 - "${MODEL}"
+                - --served-model-name
+                - "${MODEL}"
+                - --enable-prefix-caching
+                - --block-size
+                - "128"
                 - --kv-events-config
-                - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
+                - '{"enable_kv_cache_events":true}'
+              env:
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: aicr-hf-token
+                      key: token
+                      optional: true
+                - name: HUGGING_FACE_HUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: aicr-hf-token
+                      key: token
+                      optional: true
+            - name: sidecar-frontend
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              args:
+                - -m
+                - dynamo.frontend
+                - --router-mode
+                - direct
               env:
                 - name: HF_TOKEN
                   valueFrom:
