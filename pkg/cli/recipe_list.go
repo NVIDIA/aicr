@@ -25,9 +25,32 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
+
+// healthNotApplicable is the placeholder rendered in the status/coverage table
+// cells for non-leaf overlays, which pkg/health does not score (only leaf
+// recipes resolve to a concrete combination).
+const healthNotApplicable = "-"
+
+// catalogListEntry augments a #1208 CatalogEntry with the ADR-009 §4
+// structural-health axis for the leaf overlay backing it. Health is non-nil
+// only for leaf overlays; the embedded CatalogEntry fields (name, criteria,
+// is_leaf, source) marshal exactly as #1208 emitted them, so the health block
+// is purely additive.
+type catalogListEntry struct {
+	// The yaml:",inline" tag is load-bearing: gopkg.in/yaml.v3 (used by
+	// serializer.MarshalYAMLDeterministic) does NOT auto-inline an anonymous
+	// struct field the way encoding/json does — without it the #1208 fields
+	// nest under a "catalogentry:" key, breaking every existing YAML consumer.
+	// The json:",inline" is a self-documenting no-op (encoding/json already
+	// promotes anonymous fields).
+	aicr.CatalogEntry `json:",inline" yaml:",inline"`
+
+	Health *health.StructureHealth `json:"health,omitempty" yaml:"health,omitempty"`
+}
 
 func recipeListCmd() *cli.Command {
 	return &cli.Command{
@@ -93,6 +116,12 @@ Include overlays from an external data directory:
 				Usage:    "Output format (json, yaml, table)",
 				Category: catOutput,
 			}, func() []string { return []string{"json", "yaml", "table"} }),
+			&cli.BoolFlag{
+				Name:     flagNoHealth,
+				Aliases:  []string{"skip-health"},
+				Usage:    "Skip per-leaf structural-health computation. Omits the STATUS/COVERAGE table columns and the health block in json/yaml output.",
+				Category: catOutput,
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS, flagPlatform, flagFormat); err != nil {
@@ -128,7 +157,30 @@ Include overlays from an external data directory:
 					fmt.Sprintf("unknown output format %q, valid formats are: json, yaml, table", cmd.String(flagFormat)))
 			}
 
-			return writeCatalogEntries(ctx, cmd, entries, format)
+			// The --no-health opt-out skips the per-leaf structural-health
+			// computation entirely and renders the pre-#1228 catalog shape (no
+			// STATUS/COVERAGE columns, no health block). A nil healthByName map
+			// signals writeCatalogEntries to drop the health axis.
+			showHealth := !cmd.Bool(flagNoHealth)
+
+			var healthByName map[string]*health.StructureHealth
+			if showHealth {
+				// Delegate the structural-health computation to pkg/health (via
+				// the facade, which binds this Client's own provider so --data
+				// overlays are scored). Health is keyed by leaf overlay name so
+				// each catalog entry can be paired with its verdict during
+				// rendering.
+				report, err := client.ComputeHealth(ctx, filter)
+				if err != nil {
+					return err
+				}
+				healthByName = make(map[string]*health.StructureHealth, len(report.Combos))
+				for i := range report.Combos {
+					healthByName[report.Combos[i].LeafOverlay] = &report.Combos[i].Structure
+				}
+			}
+
+			return writeCatalogEntries(ctx, cmd, entries, healthByName, showHealth, format)
 		},
 	}
 }
@@ -189,13 +241,24 @@ func buildCatalogFilter(cmd *cli.Command, client *aicr.Client) (*aicr.Criteria, 
 }
 
 // writeCatalogEntries writes catalog entries to the command's writer in the
-// requested format.
-func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.CatalogEntry, format serializer.Format) error {
+// requested format, pairing each entry with the structural-health verdict for
+// its leaf overlay (healthByName, keyed by overlay name; nil for non-leaf
+// overlays, which pkg/health does not score).
+//
+// json/yaml emit the full per-dimension status map and declared_coverage under
+// a health object; table renders a compact structural status column and an
+// R/D/P/C coverage summary.
+//
+// When showHealth is false (the --no-health opt-out), the health axis is
+// dropped entirely: the table omits the STATUS/COVERAGE columns and json/yaml
+// omit the health block, reproducing the pre-#1228 catalog shape. healthByName
+// is nil in that case.
+func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.CatalogEntry, healthByName map[string]*health.StructureHealth, showHealth bool, format serializer.Format) error {
 	w := cmd.Root().Writer
 
 	switch format {
 	case serializer.FormatJSON:
-		data, err := json.MarshalIndent(entries, "", "  ")
+		data, err := json.MarshalIndent(withHealth(entries, healthByName), "", "  ")
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to marshal catalog entries as JSON", err)
 		}
@@ -204,7 +267,7 @@ func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.C
 		}
 
 	case serializer.FormatYAML:
-		data, err := serializer.MarshalYAMLDeterministic(entries)
+		data, err := serializer.MarshalYAMLDeterministic(withHealth(entries, healthByName))
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to marshal catalog entries as YAML", err)
 		}
@@ -214,14 +277,34 @@ func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.C
 
 	case serializer.FormatTable:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		if _, err := fmt.Fprintln(tw, "NAME\tSERVICE\tACCELERATOR\tINTENT\tOS\tPLATFORM\tIS_LEAF\tSOURCE"); err != nil {
+		header := "NAME\tSERVICE\tACCELERATOR\tINTENT\tOS\tPLATFORM\tIS_LEAF\tSTATUS\tCOVERAGE\tSOURCE"
+		if !showHealth {
+			header = "NAME\tSERVICE\tACCELERATOR\tINTENT\tOS\tPLATFORM\tIS_LEAF\tSOURCE"
+		}
+		if _, err := fmt.Fprintln(tw, header); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to write table header", err)
 		}
 		for _, e := range entries {
 			if err := ctx.Err(); err != nil {
 				return errors.Wrap(errors.ErrCodeTimeout, "write canceled", err)
 			}
-			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%v\t%s\n",
+			if !showHealth {
+				if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%v\t%s\n",
+					e.Name,
+					orAny(e.Criteria.Service),
+					orAny(e.Criteria.Accelerator),
+					orAny(e.Criteria.Intent),
+					orAny(e.Criteria.OS),
+					orAny(e.Criteria.Platform),
+					e.IsLeaf,
+					e.Source,
+				); err != nil {
+					return errors.Wrap(errors.ErrCodeInternal, "failed to write table row", err)
+				}
+				continue
+			}
+			h := healthByName[e.Name]
+			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%v\t%s\t%s\t%s\n",
 				e.Name,
 				orAny(e.Criteria.Service),
 				orAny(e.Criteria.Accelerator),
@@ -229,6 +312,8 @@ func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.C
 				orAny(e.Criteria.OS),
 				orAny(e.Criteria.Platform),
 				e.IsLeaf,
+				healthStatus(h),
+				healthCoverage(h),
 				e.Source,
 			); err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to write table row", err)
@@ -245,6 +330,47 @@ func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.C
 	}
 
 	return nil
+}
+
+// withHealth pairs each catalog entry with the structural-health verdict for
+// its leaf overlay, returning the augmented slice the structured formats
+// marshal. Non-leaf overlays carry no health (nil), so the health block is
+// omitted for them rather than emitting a misleading empty object.
+func withHealth(entries []aicr.CatalogEntry, healthByName map[string]*health.StructureHealth) []catalogListEntry {
+	out := make([]catalogListEntry, len(entries))
+	for i, e := range entries {
+		out[i] = catalogListEntry{CatalogEntry: e, Health: healthByName[e.Name]}
+	}
+	return out
+}
+
+// healthStatus renders the rolled-up structural status for a table cell, or the
+// not-applicable placeholder when the overlay was not scored (non-leaf).
+func healthStatus(h *health.StructureHealth) string {
+	if h == nil {
+		return healthNotApplicable
+	}
+	return h.Status
+}
+
+// healthCoverage renders the compact declared-coverage summary for a table
+// cell, or the not-applicable placeholder when the overlay was not scored.
+func healthCoverage(h *health.StructureHealth) string {
+	if h == nil {
+		return healthNotApplicable
+	}
+	return compactCoverage(h.Coverage)
+}
+
+// compactCoverage renders the declared-coverage descriptor as a one-line
+// R/D/P/C summary of the named-check count each validation phase declares,
+// e.g. "R:2 D:4 P:1 C:10". A nil descriptor (recipe did not resolve, so
+// coverage is unknown) renders the not-applicable placeholder.
+func compactCoverage(c *health.DeclaredCoverage) string {
+	if c == nil {
+		return healthNotApplicable
+	}
+	return c.Compact()
 }
 
 // orAny returns s if non-empty, otherwise the wildcard placeholder.

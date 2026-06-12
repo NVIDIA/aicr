@@ -32,8 +32,12 @@ navigation:
         path: user/air-gap-mirror.md
       - page: Component Catalog
         path: user/component-catalog.md
+      - page: Recipe Health
+        path: user/recipe-health.md
       - page: Validation
         path: user/validation.md
+      - page: Coverage Matrix
+        path: user/coverage-matrix.md
 
   - section: Integrator Guide
     contents:

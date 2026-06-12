@@ -9,8 +9,9 @@
 # common violations before they reach CI or break versioned doc snapshots.
 #
 # Scope: docs/user/, docs/integrator/, and docs/contributor/ (all published
-# to Fern). container-images.md is auto-generated with HTML comment markers
-# that VitePress still needs; excluded until VitePress is removed.
+# to Fern). container-images.md and recipe-health.md carry auto-generated
+# HTML comment splice markers that VitePress still needs; both are excluded
+# until VitePress is removed (see EXCLUDE_NAMES below).
 # Override with positional args for frozen version content.
 #
 # Checks:
@@ -27,7 +28,14 @@ set -euo pipefail
 
 ERRORS=0
 SEARCH_DIRS=("docs/user/" "docs/integrator/" "docs/contributor/")
-EXCLUDE="container-images.md"
+# Docs with auto-generated HTML-comment splice markers that VitePress still
+# needs (excluded until VitePress is removed): the BOM inventory and the
+# recipe-health matrix, both spliced by `make *-docs` between marker comments.
+EXCLUDE_NAMES=("container-images.md" "recipe-health.md")
+EXCLUDE_ARGS=()
+for name in "${EXCLUDE_NAMES[@]}"; do
+  EXCLUDE_ARGS+=(! -name "${name}")
+done
 
 # Allow overriding the search path (e.g., for frozen version content)
 if [[ $# -gt 0 ]]; then
@@ -49,7 +57,7 @@ for dir in "${SEARCH_DIRS[@]}"; do
       in_fence { next }
       { print NR": "$0 }
     ' "$file" | grep -E "<(${VOID_ELEMENTS})([[:space:]][^>]*)?" | grep -Ev "<(${VOID_ELEMENTS})([[:space:]][^>]*)?[[:space:]]*/>" || true)
-  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) ! -name "${EXCLUDE}" 2>/dev/null)
+  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)
 done
 
 # --- Checks 2, 3, 4, 5: bare braces, HTML comments, autolinks, bare tags ---
@@ -97,7 +105,7 @@ for dir in "${SEARCH_DIRS[@]}"; do
     if [[ $? -ne 0 ]]; then
       ERRORS=$((ERRORS + 1))
     fi
-  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) ! -name "${EXCLUDE}" 2>/dev/null)
+  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)
 done
 
 if [[ ${ERRORS} -gt 0 ]]; then

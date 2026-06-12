@@ -35,6 +35,7 @@ const (
 	flagIntent      = "intent"
 	flagOS          = "os"
 	flagPlatform    = "platform"
+	flagNoHealth    = "no-health"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.

@@ -83,6 +83,25 @@ testing_tools:
     darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
   yq: 'v4.53.2'
+  # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
+  # renovate: datasource=pypi depName=awscli depType=testing_tools
+  awscli: '1.45.26'
+  # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
+  # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
+  # to boot without a paid license token. Pinned (never :latest) for reproducibility.
+  # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
+  # serves TLS with a mkcert cert (see mkcert below).
+  # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
+  ministack_image: 'ministackorg/ministack:1.3.61'
+  # mkcert issues a trusted localhost cert for MiniStack's TLS and installs its CA
+  # into the system trust store, so the Go AWS SDK accepts the awskms:// endpoint.
+  # renovate: datasource=github-releases depName=FiloSottile/mkcert depType=testing_tools
+  mkcert: 'v1.4.4'
+  # SHA256 of the mkcert release binaries (Linux only; macOS installs via brew).
+  # Update alongside the mkcert version above.
+  mkcert_checksums:
+    linux_amd64: '6d31c65b03972c6dc4a14ab429f2928300518b26503f58723e532d1b0a3bbb52'
+    linux_arm64: 'b98f2cc69fd9147fe4d405d859c57504571adec0d3611c3eefd04107c7ac00d0'
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
   karpenter: 'v1.12.1'
   # In-cluster OCI registry for KWOK deployer-matrix CI (issue #843).

@@ -512,82 +512,36 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 
 ## Documentation Style
 
-**Auto-anchors, no TOCs.** Both GitHub and the Fern-rendered docs site
-auto-generate anchor IDs from heading text (lowercase, spaces → hyphens).
-Do not add `## Table of Contents` blocks or explicit `<a name="...">` /
-`{#slug}` markup — they drift out of sync and duplicate what the platforms
-already provide on hover.
+**Auto-anchors, no TOCs.** GitHub and the Fern docs site auto-generate anchor IDs from heading text (lowercase, spaces → hyphens). Do not add `## Table of Contents` blocks or explicit `<a name>` / `{#slug}` markup — they drift and duplicate what the platforms provide.
 
-**Promote `**Bold Label:**` paragraphs to real headings sparingly.** A bold
-label becomes a heading only when it names a topic (feature, subsystem,
-algorithm, pattern, named behavior) with substantial content beneath it
-(≥ ~8 content lines is a useful rule of thumb). Leave as bold paragraphs:
-- **Scaffolding** that recurs per section: `Synopsis`, `Flags`, `Examples`,
-  `Example`, `Behavior`, `Usage`, `Parameters`, `Returns`.
-- **Generic structural labels** that just describe what's in the next
-  block: `Output`, `Input Sources`, `Benefits`, `Responsibilities`,
-  `Key Features`, `Key Points`, `Installation`.
-- **Thin sections (< 8 lines)** even if the label is a named topic — a
-  2-sentence intro that mostly delegates to children isn't itself a topic.
-- **FAQ-style entries** under a collection heading (e.g. `### Common Issues`
-  with entries like `**"Connection refused" error:**` + 2-line fix) —
-  promoting each fragments navigation without adding substance.
-- **Paired short subsections** — if two thin labels are conceptual siblings
-  (e.g. `**Updating versions:**` + `**Adding components:**`), promote
-  both or neither.
+**Promote `**Bold Label:**` to a heading sparingly** — only when it names a topic (feature, subsystem, pattern, named behavior) with ≥ ~8 content lines beneath it. Leave as bold paragraphs: recurring scaffolding (`Synopsis`, `Flags`, `Examples`, `Usage`, `Parameters`, `Returns`), generic structural labels (`Output`, `Benefits`, `Key Points`, `Installation`), thin sections (< 8 lines), FAQ-style entries under a collection heading, and paired short siblings (promote both or neither).
 
-**Slug gotchas when promoting.** GitHub preserves hyphens literally but
-strips most other punctuation:
-- Trailing `` (`--flag`) `` → triple-hyphen slug (`…values---dynamic`).
-  Drop the parenthetical if the flag name is already in the first paragraph.
-- `+`, `&`, `/` between words → double-hyphen slugs (`Base + Overlay
-  Merging` → `base--overlay-merging`). Rewrite with `and` / `or`.
+**Slug gotchas when promoting** (GitHub keeps hyphens, strips other punctuation): trailing `(--flag)` → triple-hyphen slug (drop the parenthetical if the flag is already in the first paragraph); `+`, `&`, `/` between words → double-hyphen slugs (rewrite with `and`/`or`).
 
-**Anchor link hygiene.** Broken anchor links are caught in CI by
-[lychee](https://github.com/lycheeverse/lychee) on any PR that touches
-`docs/**` (see `.github/workflows/fern-docs-ci.yaml`, config in
-`.lychee.toml`) — `make qualify` does NOT run it, so CI is the safety
-net. When renaming or removing a heading:
-- Grep for `<filename>.md#<old-slug>` across the repo first — other docs,
-  Helm templates, and `SECURITY.md` link into user-facing anchors, and
-  those inbound links won't be in the same file you're editing.
-- If intentionally removing a heading an external doc linked to, update
-  the inbound link in the same PR.
+**Anchor link hygiene.** Broken anchors are caught in CI by lychee on any PR touching `docs/**` (`.github/workflows/fern-docs-ci.yaml`, config `.lychee.toml`) — `make qualify` does NOT run it. When renaming/removing a heading, grep for `<filename>.md#<old-slug>` across the repo first (other docs, Helm templates, and `SECURITY.md` link into user-facing anchors), and update any inbound link in the same PR.
 
 ## Anti-Patterns (Do Not Do)
+
+Process and unique findings below; the rule sections above (Error Wrapping, Context Propagation, HTTP Client/Server, Logging, Constants, Kubernetes Patterns, Test Isolation) are authoritative for everything they cover and are not repeated here.
 
 | Anti-Pattern | Correct Approach |
 |--------------|------------------|
 | Modify code without reading it first | Always `Read` files before `Edit` |
 | Skip or disable tests to make CI pass | Fix the actual issue |
 | Invent new patterns | Study existing code in same package first |
-| Use `fmt.Errorf` for errors | Use `pkg/errors` with error codes |
-| Return bare `err` without wrapping | Always `errors.Wrap()` with context message |
-| Use `context.Background()` in I/O methods | Use `context.WithTimeout()` with bounded deadline |
-| Use `fmt.Println` for logging | Use `slog.Info/Debug/Warn/Error` |
-| Hardcode timeout/limit values | Define in `pkg/defaults` and reference by name |
-| Re-wrap errors that already have correct codes | Return as-is to preserve error code |
 | Ignore context cancellation | Always check `ctx.Done()` in loops/operations |
 | Add features not requested | Implement exactly what was asked |
 | Create new files when editing suffices | Prefer `Edit` over `Write` |
 | Guess at missing parameters | Ask for clarification |
 | Continue after 3 failed fix attempts | Stop, reassess approach, explain blockers |
-| Use polling loops for K8s operations | Use watch API for efficiency |
-| Compare errors with `==` (e.g., `err == io.EOF`) | Use `errors.Is(err, io.EOF)` (`stderrors.Is` in files that alias stdlib errors) — `errorlint` enforced by CI |
-| Duplicate K8s utilities across packages | Use shared utilities from `pkg/k8s/pod` |
-| Run tests that connect to live clusters | Always use `--no-cluster` flag in tests |
 | Use boolean flags to track options | Use pointer pattern (nil = not set, &value = set) |
-| Use `http.DefaultClient` | Use custom `&http.Client{Timeout: defaults.HTTPClientTimeout}` |
-| Use `IgnoreAlreadyExists` for mutable K8s resources | Use create-or-update semantics (Create, then Update if exists) |
-| Ignore `Close()` error on writable file handles | Capture and check `closeErr := f.Close()` |
 | Hardcode resource names from templates | Extract to named constants to keep code and templates in sync |
-| Unbounded `io.ReadAll(resp.Body)` on outbound HTTP | Wrap with `io.LimitReader` against `defaults.HTTPResponseBodyLimit` |
 | Unbounded `io.ReadAll` on request bodies in HTTP handlers / public parsers | Wrap with `io.LimitReader` against `defaults.MaxRecipePOSTBytes` (or matching cap). Production callers use `http.MaxBytesReader`, but public APIs are reachable from CLI/library callers — bound defense-in-depth |
 | Unbounded `os.ReadFile(path)` before a size check | `os.Open` + `io.LimitReader(f, maxSize+1)` — `os.ReadFile` allocates the full file first, so attacker-influenced paths (`/proc` symlinks, network mounts) can OOM the process |
-| Embed `Cause.Error()` in 5xx response details | Use `server.WriteErrorFromErr` (4xx-only cause leak) |
-| Use unprefixed `LOG_LEVEL` | Use `AICR_LOG_LEVEL` (only the prefixed name is read) |
-| `fmt.Println`/`fmt.Printf` to stdout in CLI commands | Write to `cmd.Root().Writer` (or `io.Writer` parameter) |
 | `yaml.Marshal` on `map[string]any` for output that feeds a digest/signature/OCI manifest/fingerprint | Use `serializer.MarshalYAMLDeterministic` — `yaml.v3` walks randomized Go map order, so two runs produce different bytes |
+| Negative test / presence check that passes on an ambiguous condition (`Get` error flattened to `NotFound`, `\|\| true` swallowing exit status, missing label → empty selector) | Fail closed — preserve `apierrors.IsNotFound` vs transient errors, capture `rc` and fail when `rc==0`, treat mixed/missing labels as an error. A spuriously-*passing* negative check is the dangerous direction (distinct from the validator-gate rule above) |
+| Chainsaw/kyverno-json assert with a literal one-element slice, or comparing an `omitempty` status field to `0` | Slice literals match exact length only — use a JMESPath projection (`x[?cond]`); `omitempty` fields (`NumberUnavailable`) are absent when healthy so `null==0` fails — assert non-omitempty fields (`numberReady == desiredNumberScheduled && desiredNumberScheduled > 0`) |
+| Security/read-only gate shaped as a denylist (enumerate the bad ops) | Invert to an allowlist — unknown or future-added ops must fail closed by default, not slip through (e.g. chainsaw's side-effecting `proxy` op under a cluster-admin SA) |
 | Deep-copy helper that recurses into maps but copies `[]any` by reference | Recurse into both `map[string]any` and `[]any`; scalars fall through the default branch by value. Slice aliasing leaks mutations across overlay merges |
 | Substring scan for `..` to defend against path traversal | Use `filepath.IsLocal(relPath)` — the substring check has false positives (`foo..bak`) and false negatives (after `filepath.Rel` cleans `..` segments) |
 | `sync.Once` caching state that depends on a settable global (e.g., a registry tied to a DataProvider) | Key the cache by a generation counter the setter increments; recompute on miss so late-bound configuration takes effect |
@@ -620,28 +574,35 @@ net. When renaming or removing a heading:
 - Internal package or architecture → `docs/contributor/<area>.md`
 - **Enum/constant value added** (e.g., new accelerator, service, OS, intent, platform, error code) → the value is usually enumerated in *many* files, not one, and grepping for the *new* value returns nothing. Start from the authoritative Go type (e.g., `pkg/recipe/criteria.go` for `CriteriaAccelerator*`), list every current value, and verify each appears wherever the enum is documented. Audit targets typically include: the OpenAPI contract at `api/aicr/v1/server.yaml` (every `enum:` block); doc pages `docs/README.md` (glossary), `docs/user/cli-reference.md`, `docs/user/api-reference.md`, `docs/contributor/api-server.md`, `docs/contributor/cli.md`, `docs/contributor/recipe.md`, `docs/contributor/validator.md`; Go-visible surfaces in the package that defines the type (package godoc in `pkg/<area>/doc.go`, field/type comments on the Go struct, and any urfave/cli `Description`/`Usage` strings that enumerate values, e.g., `pkg/cli/recipe.go`); and issue templates that surface the enum in dropdowns (`.github/ISSUE_TEMPLATE/*.yml`). Grepping `docs/` for an already-documented sibling value (e.g., `gb200`) catches forward additions but misses pre-existing drift — check against the Go type, not a known-good sibling.
 
-Follow the heading conventions in the `## Documentation Style` section above. Doc-only PRs (label `documentation`) are still subject to the full `make qualify` gate.
+Follow the heading conventions in the `## Documentation Style` section above. Doc-only PRs (typically labeled `area/docs`) are still subject to the full `make qualify` gate.
 
 **PR description:** Use the template from `.github/PULL_REQUEST_TEMPLATE.md` exactly as defined there. Do not inline a modified copy — read and fill in the canonical template. The template covers: Summary, Motivation/Context (with Fixes/Related), Type of Change, Components Affected, Implementation Notes, Testing, Risk Assessment, and Checklist.
 
-**Test coverage gate (Go packages only):**
-Before pushing a PR that changes Go source files, check test coverage on affected packages. Set `pkg` to the narrowest directory root you want to measure — `$pkg/...` intentionally includes descendant packages. Prefer the narrowest changed root (e.g., if only `pkg/collector/topology` changed, use `pkg=pkg/collector/topology`, not `pkg=pkg/collector`). Use a broader root only when you intentionally want one combined delta across related subpackages.
-1. Run `GOFLAGS="-mod=vendor" go test -coverprofile=cover.out ./$pkg/...` on each changed package
-2. Get the baseline using a clean worktree (changes must be committed first): `(git worktree add $TMPDIR/baseline origin/main && (cd $TMPDIR/baseline && GOFLAGS="-mod=vendor" go test -coverprofile=$TMPDIR/base.out ./$pkg/...); rc=$?; git worktree remove --force $TMPDIR/baseline; return $rc 2>/dev/null || (exit $rc))`. This preserves the test exit status through cleanup. Write the profile to `$TMPDIR/base.out` (outside the worktree) so it survives cleanup. Compare with `go tool cover -func` on both profiles. Skip this step for entirely new packages.
-3. **Block** if `make test-coverage` fails — this enforces the project-wide 70% floor (from `.settings.yaml`). Do not use per-package profiles for this check.
-4. **Flag** any package with per-package coverage decrease > 0.5% (comparing step 1 vs step 2)
-5. **Block** if any new exported function or method (identified via `git diff origin/main -- $pkg/` — look for added `func` lines with uppercase names) has 0% coverage — add tests before pushing
-6. Report the delta in the PR description's Testing section (e.g., `pkg/recipe: 90.4% → 90.3% (-0.1%)`)
-This rule does not apply to non-Go changes (YAML, docs, CI workflows). Note: CI also posts per-package coverage deltas post-push via `go-coverage-report` in `on-push-comment.yaml`; this gate catches regressions before push.
+**Test coverage gate (Go packages only; not YAML/docs/CI):**
+Before pushing a PR that changes Go source, check coverage on affected packages. Set `pkg` to the narrowest changed root — `$pkg/...` includes descendants (e.g. use `pkg=pkg/collector/topology`, not `pkg=pkg/collector`, unless you want a combined delta).
+1. Current: `GOFLAGS="-mod=vendor" go test -coverprofile=cover.out ./$pkg/...` on each changed package.
+2. Baseline (skip for new packages; commit changes first): `(git worktree add $TMPDIR/baseline origin/main && (cd $TMPDIR/baseline && GOFLAGS="-mod=vendor" go test -coverprofile=$TMPDIR/base.out ./$pkg/...); rc=$?; git worktree remove --force $TMPDIR/baseline; return $rc 2>/dev/null || (exit $rc))` — `$TMPDIR/base.out` survives cleanup and `rc` preserves test status. Compare with `go tool cover -func`.
+3. **Block** if `make test-coverage` fails (enforces the project-wide 70% floor from `.settings.yaml`; do not use per-package profiles for this check).
+4. **Flag** any package with per-package decrease > 0.5% (step 1 vs 2).
+5. **Block** if any new exported func/method (`git diff origin/main -- $pkg/`, added uppercase `func` lines) has 0% coverage — add tests first.
+6. Report the delta in the PR's Testing section (e.g. `pkg/recipe: 90.4% → 90.3% (-0.1%)`).
+CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-comment.yaml`); this gate catches regressions before push.
 
 **PR policy:**
 - Do NOT add `Co-Authored-By` lines (organization policy)
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
-- Add appropriate type labels: `enhancement`, `bug`, `documentation`
+- Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`. Use `dependencies` for dependency bumps. (There are no `enhancement`/`bug`/`documentation` repo labels — those names are org-level *issue types*, which apply to issues, not PRs.)
 - Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
 - Do NOT add issue priority labels `P0`, `P1`, or `P2` to PRs; they are reserved for issues and automation removes them from pull requests
 - Do NOT add `size/*` labels (auto-assigned by bot)
 - Keep the PR title under 70 characters; use the description for details
+
+**Issue policy:**
+- Set an **org issue type** on new issues. This is a GitHub-native field (shown in the standard issue view, distinct from repo `area/*`/`theme/*` labels) that categorizes the issue. Valid types: `Task`, `Bug`, `Enhancement`, `Epic`, `Initiative`, `Documentation`.
+  - Prefer `gh issue create --type Bug ...` (requires `gh` v2.94.0+); use `gh issue edit <n> --type Bug` for existing issues.
+  - With older `gh` versions, use the web UI or automation with the needed permissions. Current REST Issues create/edit endpoints also accept `type` for users with push access, but avoid stale ad hoc `gh api` examples because older clients or API versions may reject or silently drop the field.
+- Match the type to intent (a feature request → `Enhancement`, a docs gap → `Documentation`); the issue templates pre-fill a sensible default, so only override when the template's choice is wrong.
+- The AICR Project board also has its own `Type` and `Priority` (P0–P2) fields — those are set on the *project board*, not the issue, and need a `project`-scoped token. Leave them to maintainers/automation unless explicitly asked.
 
 ## Key Files
 

@@ -122,6 +122,12 @@ get_tool_metadata() {
         chainsaw)
             echo "chainsaw:::chainsaw version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
             ;;
+        mkcert)
+            echo "mkcert:::mkcert -version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+            ;;
+        awscli)
+            echo "aws:::aws --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1:::major_minor"
+            ;;
         hauler)
             echo "hauler:::hauler version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
             ;;
