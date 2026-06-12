@@ -25,8 +25,10 @@ const (
 	resourceNVIDIAGPU = "nvidia.com/gpu"
 	// resourceCRDs is the Kubernetes API resource name for CustomResourceDefinitions.
 	resourceCRDs = "customresourcedefinitions"
-	// versionV1alpha1 is the API version used by NVIDIA dynamo CRDs and trainjob CRDs.
+	// versionV1alpha1 is the API version used by legacy NVIDIA and TrainJob CRDs.
 	versionV1alpha1 = "v1alpha1"
+	// versionV1beta1 is the API version used by DynamoGraphDeployment in Dynamo 1.2.
+	versionV1beta1 = "v1beta1"
 	// labelNVIDIAGPUPresent is the "key=value" selector for GPU-bearing nodes
 	// when scaled-up via the cluster autoscaler.
 	labelNVIDIAGPUPresent = "nvidia.com/gpu.present=true"

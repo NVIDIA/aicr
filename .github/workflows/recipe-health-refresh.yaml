@@ -1,0 +1,116 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Weekly refresh of docs/user/recipe-health.md (ADR-009 §5).
+#
+# Runs `make recipe-health-docs` against the recipe catalog and opens (or
+# updates) a PR if the regenerated matrix differs from the committed copy.
+# Structurally mirrors bom-refresh.yaml, with one deliberate divergence: the
+# health generator is hermetic and render-free (a pure read of the resolved
+# recipe — no Helm, no GPU, no cluster, no network), so this workflow has no
+# Helm setup step. Health changes only when code, the registry, or chart pins
+# change on merge, so this runs weekly rather than daily, and is offset from
+# bom-refresh's Monday slot so two bot PRs don't contend for /ok re-fire and
+# runner capacity at the same minute.
+#
+# Health is advisory: this is a drift-only refresh, not a blocking gate. A
+# PR-time sticky-comment apparatus is a deferred follow-up.
+
+name: Recipe Health Refresh
+
+on:
+  schedule:
+    # Mondays 06:30 UTC, offset from bom-refresh (06:00) so the two weekly
+    # bot PRs don't land in the same minute and contend for runners / /ok.
+    - cron: "30 6 * * 1"
+  workflow_dispatch: {}
+
+# Serialize runs of this workflow so a manual workflow_dispatch cannot race a
+# scheduled run — both push the same fixed `chore/health-refresh` branch.
+# cancel-in-progress is intentionally omitted: a new run waits rather than
+# interrupting an in-flight branch push / PR update mid-write, then reconciles.
+concurrency:
+  group: ${{ github.workflow }}
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Regenerate recipe-health matrix and open PR on drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Elevated above the workflow-global `contents: read`: this job needs
+    # `contents: write` to push the refresh branch and `pull-requests: write`
+    # so peter-evans/create-pull-request can open or update the drift-only PR.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # No Helm setup: the recipe-health generator is render-free (it never
+      # templates a chart), the one deliberate divergence from bom-refresh.
+
+      - name: Regenerate recipe-health matrix
+        run: make recipe-health-docs
+
+      - name: Write per-dimension detail to step summary
+        # Surface the structural per-dimension states (resolves / chart_pinned /
+        # constraints_wellformed) behind each recipe's rolled-up Status, for
+        # at-a-glance maintainer triage, whether or not the matrix drifted. This
+        # detail is deliberately absent from the committed matrix (ADR-009 §5):
+        # the step summary is its only home.
+        run: make recipe-health-summary SUMMARY_OUT="$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update refresh PR if matrix drifted
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
+        with:
+          # The bot reuses GITHUB_TOKEN; the repo's /ok reviewer-comment
+          # policy re-fires CI on bot PRs (matches the renovate.yaml setup).
+          commit-message: "chore(health): refresh recipe health matrix"
+          title: "chore(health): refresh recipe health matrix"
+          body: |
+            Automated weekly refresh of `docs/user/recipe-health.md`.
+
+            The recipe-health matrix is regenerated hermetically by
+            `make recipe-health-docs` (a render-free read of the resolved
+            recipe catalog — no Helm, GPU, cluster, or network). Drift here
+            reflects a structural change to the catalog: a recipe that
+            started or stopped resolving, a chart pin added or removed, or a
+            constraint that changed well-formedness.
+
+            The per-dimension matrix detail is in this run's step summary.
+            Review the diff to confirm the change is expected.
+          branch: chore/health-refresh
+          delete-branch: true
+          # Only real repo labels: documentation/enhancement/bug are org-level
+          # issue *types*, not PR labels (#1315). The path labeler also adds
+          # area/* on the bot PR, but listing them keeps intent explicit.
+          labels: |
+            area/docs
+            area/recipes

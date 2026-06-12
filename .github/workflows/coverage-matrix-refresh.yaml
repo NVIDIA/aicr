@@ -90,6 +90,5 @@ jobs:
           branch: chore/coverage-refresh
           delete-branch: true
           labels: |
-            documentation
             area/docs
             area/ci

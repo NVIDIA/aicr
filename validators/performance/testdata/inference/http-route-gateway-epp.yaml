@@ -12,29 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
-  name: gb300-eks-ubuntu-inference
-
+  name: ${DEPLOYMENT_NAME}-route
+  namespace: ${NAMESPACE}
 spec:
-  # Inherits from gb300-eks-inference recipe (GB300 + EKS + inference settings)
-  # This overlay adds Ubuntu-specific configurations
-  base: gb300-eks-inference
-
-  criteria:
-    service: eks
-    accelerator: gb300
-    os: ubuntu
-    intent: inference
-
-  # Ubuntu OS constraints via mixin (defined once in recipes/mixins/os-ubuntu.yaml)
-  mixins:
-    - os-ubuntu
-
-  # GB300 + EKS specific constraints (not covered by mixin)
-  constraints:
-    - name: K8s.server.version
-      value: ">= 1.32.4"
-
-  componentRefs: []
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: inference-gateway
+      namespace: agentgateway-system
+  rules:
+    - backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: ${DEPLOYMENT_NAME}-pool
+          namespace: ${NAMESPACE}
+          port: 8000
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+      timeouts:
+        request: 300s

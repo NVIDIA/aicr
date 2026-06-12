@@ -52,6 +52,7 @@ func TestAKSDynamoInferencePerformanceGoalsFollowPattern(t *testing.T) {
 	wantConstraints := map[string]string{
 		"inference-model":               "Qwen/Qwen3-8B",
 		"inference-concurrency-per-gpu": "256",
+		"inference-routing-mode":        "dynamo-router",
 		"inference-throughput":          ">= 50000",
 		"inference-ttft-p99":            "<= 2000",
 	}

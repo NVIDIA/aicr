@@ -14,7 +14,7 @@
 
 # DRA ResourceClaimTemplate for the inference benchmark workload.
 # One instance is allocated per worker pod (1 GPU each) by the Dynamo operator
-# when a pod references the claim via extraPodSpec.resourceClaims.
+# when a pod references the claim via podTemplate.spec.resourceClaims.
 # Must stay in sync with inferenceClaimTemplateName in inference_perf_constraint.go.
 
 apiVersion: resource.k8s.io/v1

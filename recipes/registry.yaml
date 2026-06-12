@@ -458,7 +458,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts
-      defaultVersion: "v0.1.0-alpha.6"
+      defaultVersion: "v0.1.0-alpha.8"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
@@ -477,14 +477,16 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "1.0.2"
+      defaultVersion: "1.2.0"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - dynamo-operator.controllerManager.nodeSelector
+          - nats.podTemplate.merge.spec.nodeSelector
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
+          - nats.podTemplate.merge.spec.tolerations
 
   - name: agentgateway-crds
     displayName: agentgateway-crds
