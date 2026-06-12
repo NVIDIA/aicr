@@ -401,10 +401,11 @@ Mirror the BOM precedent precisely:
   to avoid colliding with the existing `check-health` / `check-health-all` /
   `component-health` cluster-chainsaw target family — the `health-check` vs
   `check-health` homophone is a footgun.)
-- `.github/workflows/health-refresh.yaml` structurally clones
-  `bom-refresh.yaml`: **weekly** cron, fixed `chore/health-refresh` branch,
+- `.github/workflows/recipe-health-refresh.yaml` structurally clones
+  `bom-refresh.yaml` (named `recipe-health-*` for the same homophone reason as
+  the make targets above): **weekly** cron, fixed `chore/health-refresh` branch,
   `delete-branch: true`, `peter-evans/create-pull-request` on drift, built-in
-  `GITHUB_TOKEN`, labels `documentation` / `area/docs` / `area/recipes`.
+  `GITHUB_TOKEN`, labels `area/docs` / `area/recipes`.
   Weekly (not daily) is correct: V1 health changes only on code / registry /
   chart changes — all merge events — not on the calendar, so there is no
   daily signal to catch. The workflow inherits the repo's `/ok`

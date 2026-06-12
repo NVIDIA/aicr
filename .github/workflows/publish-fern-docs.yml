@@ -261,5 +261,4 @@ jobs:
             fern/versions/v*.yml
             fern/docs.yml
           labels: |
-            documentation
             area/ci

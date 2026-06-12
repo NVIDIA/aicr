@@ -118,7 +118,7 @@ spec:
 
     # ── Dynamo Platform ────────────────────────────────────────────────
     - name: assert-dynamo
-      description: Verify Dynamo operator, etcd, and NATS are healthy.
+      description: Verify Dynamo operator, Grove, and NATS event plane are healthy.
       try:
         - assert:
             file: assert-dynamo.yaml

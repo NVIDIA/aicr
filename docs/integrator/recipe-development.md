@@ -161,11 +161,11 @@ Only use this pattern when the content is truly uniform across the wildcard dime
 
 ### Inference performance constraints
 
-The `inference-perf` performance check reads up to four entries from
-`validation.performance.constraints`, all keyed by name. Two are pass/fail
-**thresholds** (comparator values, 10% tolerance applied by the evaluator) and
-two are optional **inputs** that tune the benchmark per accelerator (bare
-values, no comparator):
+The `inference-perf` performance check reads named entries from
+`validation.performance.constraints`. Two are pass/fail **thresholds**
+(comparator values, 10% tolerance applied by the evaluator) and the rest are
+optional **inputs** that tune the benchmark per accelerator (bare values, no
+comparator):
 
 ```yaml
 validation:
@@ -180,6 +180,8 @@ validation:
         value: Qwen/Qwen3-8B
       - name: inference-concurrency-per-gpu # optional; positive integer
         value: "256"
+      - name: inference-routing-mode        # optional; dynamo-router or gateway-epp
+        value: dynamo-router
 ```
 
 `inference-model` and `inference-concurrency-per-gpu` resolve with precedence
@@ -189,6 +191,9 @@ each accelerator — exactly as the throughput/TTFT thresholds already vary per
 overlay — while the compiled defaults cover overlays that omit them. Because the
 thresholds are only meaningful at a specific model + concurrency, pin all four
 together in an overlay rather than relying on the global defaults for the inputs.
+`inference-routing-mode` resolves from the recipe only, defaulting to
+`dynamo-router`; set `gateway-epp` to validate the GAIE/EPP path through the
+AICR-managed inference gateway.
 
 ### Component Types
 

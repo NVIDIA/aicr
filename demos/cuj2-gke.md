@@ -85,9 +85,8 @@ kubectl apply -f demos/workloads/inference/vllm-agg.yaml
 kubectl get dynamographdeployments -n dynamo-workload
 kubectl get pods -n dynamo-workload -o wide -w
 
-# Verify the inference gateway routes to the workload
-kubectl get gateway inference-gateway -n agentgateway-system
-kubectl get inferencepool -n dynamo-workload
+# Verify the Dynamo frontend service is available
+kubectl get svc vllm-agg-frontend -n dynamo-workload
 ```
 
 ## Chat with the Model

@@ -25,8 +25,8 @@ H100/RTX clusters showed:
 **Mitigations shipped/in-PR:** dynamo runtime image bump 0.9.0→1.0.2 (#1193, the
 panic fix); reproducible gate — TTFT `<= 2000` ms + pinned AIPerf inputs (#1196);
 centralized dynamo image reference + drift guard (#1194).
-**Long-term:** load-aware routing (`least-loaded`, dynamo 1.2.x) + a sub-knee,
-throughput-primary gate.
+**Long-term:** Dynamo 1.2 KV-cache-aware routing with live worker KV events,
+plus a sub-knee, throughput-primary gate.
 
 ---
 
@@ -363,11 +363,10 @@ workers / frontend / AIPerf Job in place for exactly this kind of post-mortem.
    condition at a **sub-knee operating point** (e.g. 1024) with a **generous TTFT
    ceiling** (≥2000 ms) as a guardrail; deterministic AIPerf inputs. The verdict
    then reflects deployment health, not RNG or knee jitter.
-2. **Load-aware routing (`least-loaded`)** — the proper fix for a transiently-slow
-   worker (routes around it instead of force-feeding). Requires a **dynamo 1.2.x**
-   runtime + operator bump (least-loaded is a 1.2.x feature; 1.0.2 has only
-   round-robin / random / kv). Bump operator chart **and** runtime images together
-   to avoid re-introducing version skew, then switch `DYN_ROUTER_MODE=least-loaded`.
+2. **KV-cache-aware routing on Dynamo 1.2** — route with live worker KV-cache
+   events instead of 1.0.2-era static assumptions. Bump operator chart **and**
+   runtime images together to avoid re-introducing version skew, keep
+   `DYN_ROUTER_MODE=kv`, and ensure workers publish KV events for the router.
 3. **Version-drift guard (#1194):** single source of truth for the dynamo runtime
    image (repo+tag) + a `make` check tying the tag to the operator chart version,
    so the 0.9.0/1.0.2 skew can't recur.

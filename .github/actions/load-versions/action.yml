@@ -91,6 +91,9 @@ outputs:
   argocd_chart:
     description: 'Argo CD Helm chart version (for KWOK deployer-matrix CI)'
     value: ${{ steps.versions.outputs.argocd_chart }}
+  scaffold_chart:
+    description: 'sigstore scaffold Helm chart version (for the private-Sigstore signing e2e)'
+    value: ${{ steps.versions.outputs.scaffold_chart }}
   flux:
     description: 'Flux CLI version'
     value: ${{ steps.versions.outputs.flux }}
@@ -180,6 +183,7 @@ runs:
         echo "yq=$(yq eval '.testing_tools.yq' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "registry_image=$(yq eval '.testing_tools.registry_image' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "argocd_chart=$(yq eval '.testing_tools.argocd_chart' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "scaffold_chart=$(yq eval '.testing_tools.scaffold_chart' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "flux=$(yq eval '.testing_tools.flux_version' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "hauler=$(yq eval '.testing_tools.hauler' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "zarf=$(yq eval '.testing_tools.zarf' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -230,6 +234,7 @@ runs:
         echo "  yq: ${{ steps.versions.outputs.yq }}"
         echo "  registry_image: ${{ steps.versions.outputs.registry_image }}"
         echo "  argocd_chart: ${{ steps.versions.outputs.argocd_chart }}"
+        echo "  scaffold_chart: ${{ steps.versions.outputs.scaffold_chart }}"
         echo "  flux: ${{ steps.versions.outputs.flux }}"
         echo "  hauler: ${{ steps.versions.outputs.hauler }}"
         echo "  zarf: ${{ steps.versions.outputs.zarf }}"
