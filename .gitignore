@@ -156,3 +156,8 @@ aicr-e2e.xml
 # Demos
 *.mp4
 *.mov
+
+# Stray binary from a manual `go build ./tests/.../tlsproxy/` (without -o) run at
+# the repo root. The private-Sigstore e2e's run.sh builds the proxy to $TMPDIR,
+# so this only guards an accidental local build; the source stays tracked.
+/tlsproxy

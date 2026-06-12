@@ -111,6 +111,11 @@ testing_tools:
   # the first stable line with native OCI artifact source (issue #843).
   # renovate: datasource=helm depName=argo-cd registryUrl=https://argoproj.github.io/argo-helm depType=testing_tools
   argocd_chart: '9.5.14'
+  # sigstore scaffold umbrella chart for the private-Sigstore signing e2e
+  # (Fulcio + Rekor + CTLog + Trillian). Deploys plain Deployment + ClusterIP
+  # Services reachable via port-forward on macOS and Linux (issue #1215).
+  # renovate: datasource=helm depName=scaffold registryUrl=https://sigstore.github.io/helm-charts depType=testing_tools
+  scaffold_chart: '0.6.109'
   # Flux 2 release for KWOK deployer-matrix CI flux-oci lane (issue #843).
   # install.yaml is downloaded from the GitHub release; source-controller,
   # kustomize-controller and helm-controller are the only controllers the

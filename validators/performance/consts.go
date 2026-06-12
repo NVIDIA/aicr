@@ -19,6 +19,7 @@ const (
 	apiGroupAPIExtensions    = "apiextensions.k8s.io"
 	resourceCRDs             = "customresourcedefinitions"
 	versionV1alpha1          = "v1alpha1"
+	versionV1beta1           = "v1beta1"
 	keyName                  = "name"
 	checkNameNCCLAllReduceBW = "nccl-all-reduce-bw"
 )

@@ -102,7 +102,10 @@ validators:
     #       value: Qwen/Qwen3-8B
     #     - name: inference-concurrency-per-gpu
     #       value: "256"
+    #     - name: inference-routing-mode
+    #       value: dynamo-router
     # Resolution precedence is recipe > catalog env (below) > compiled default.
+    # inference-routing-mode is recipe-only and accepts dynamo-router or gateway-epp.
     # The per-accelerator pass/fail thresholds live in the recipe overlays only.
     #   AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU      (default 256 — empirical throughput
     #     sweet spot on 8B across RTX PRO 6000 / GB200 / H100; below the over-saturation knee)

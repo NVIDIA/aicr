@@ -149,8 +149,8 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase performance
 ```
 
 The generated recipe includes `dynamo-platform` in `componentRefs` and lists
-`inference-perf` under `validation.performance.checks` with two constraints
-— one per metric the check produces:
+`inference-perf` under `validation.performance.checks` with pass/fail
+constraints plus benchmark inputs:
 
 ```yaml
 validation:
@@ -169,6 +169,8 @@ validation:
         value: Qwen/Qwen3-8B
       - name: inference-concurrency-per-gpu  # positive integer; default 256
         value: "256"
+      - name: inference-routing-mode         # dynamo-router or gateway-epp
+        value: dynamo-router
 ```
 
 **Node-shape assumption.** The `inference-throughput` floor is a fixed
@@ -186,6 +188,18 @@ use the compiled defaults (Qwen3-8B at 256 concurrent requests per GPU), set the
 per overlay to tune model and load for each accelerator, or override globally
 with the `AICR_INFERENCE_PERF_MODEL` / `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU`
 catalog knobs (recipe wins over catalog env wins over default).
+
+`inference-routing-mode` selects the Dynamo 1.2 Kubernetes routing path. The
+default `dynamo-router` mode deploys a Dynamo frontend with KV-cache-aware
+routing (`DYN_ROUTER_MODE=kv`). Normal frontend-to-worker request/response
+traffic uses Dynamo's request plane (Dynamo 1.2 defaults to TCP); AICR does not
+set `DYN_REQUEST_PLANE=nats`. Workers publish local vLLM KV-cache events with
+the vLLM ZMQ publisher and the Dynamo worker runtime relays those events onto
+the NATS-backed event plane for the router to consume. Set it to `gateway-epp`
+to exercise GAIE/EPP: the validator deploys an EPP component, worker frontend
+sidecars in direct mode, and an HTTPRoute through the AICR-managed inference
+gateway. The direct-mode sidecars honor EPP routing headers; they are not the
+ZMQ-to-NATS relay.
 
 **Model-weights cache and `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`.** The benchmark downloads
 the model **once** into a PVC and serves all workers from it (on by default;
