@@ -43,3 +43,11 @@ platformConnector:
 
   updateStrategy: RollingUpdate
   maxUnavailable: 1
+
+# Use the generic (privileged-Job) reboot provider so users don't need
+# cloud IAM permissions. When faultRemediation/janitor are enabled, the
+# janitor-provider spawns a privileged Job that runs chroot /host /sbin/reboot
+# on the target node (ADR-028: generic bare-metal reboot provider).
+janitor-provider:
+  csp:
+    provider: generic

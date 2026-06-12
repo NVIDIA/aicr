@@ -268,7 +268,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: nvsentinel
-      defaultVersion: v1.3.0
+      defaultVersion: v1.9.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
