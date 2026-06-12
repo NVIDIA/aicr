@@ -66,12 +66,13 @@ spec:
       constraints:
         - name: Deployment.gpu-operator.version
           value: ">= v24.6.0"
-    performance:
-      checks:
-        - nccl-all-reduce-bw
-      constraints:
-        - name: nccl-all-reduce-bw
-          value: ">= 100"
+    # No performance phase: the nccl-all-reduce-bw check is intentionally not
+    # declared here. The validator has no AKS NCCL runtime template or
+    # scheduling path (AKS is not in the support table), so a declared check
+    # would silently skip and report the phase as passed without measuring
+    # anything — false assurance. Wire it (testbed-validated AKS runtime
+    # template + scheduling path + support-table entry + real threshold) once
+    # an H100 AKS testbed is characterized. See issue #1337.
     conformance:
       checks:
         - platform-health

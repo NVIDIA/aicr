@@ -87,20 +87,14 @@ spec:
         # accelerator-wide floor in b200-any.yaml.
         - name: Deployment.gpu-operator.version
           value: ">= v25.10.0"
-    performance:
-      # Single-fabric NCCL on GKE A4 — no MNNVL / NVL72 IMEX domain on B200
-      # (that is a GB200 feature), so a single all-reduce constraint is
-      # sufficient. The floor is a conservative placeholder; A4 reaches
-      # high-bandwidth NCCL via GPU Operator's gdrcopy + GKE's native
-      # multi-NIC fabric rather than via a TCPX/RDMA installer DaemonSet,
-      # so the H100 GKE TCPXO baseline (>= 250 GB/s) is not the right
-      # anchor. Tighten once empirical numbers from the B200 GKE testbed
-      # (nvcf-dgxc-k8s-gcp-azne1-prd7) are captured.
-      checks:
-        - nccl-all-reduce-bw
-      constraints:
-        - name: nccl-all-reduce-bw
-          value: ">= 100"
+    # No performance phase: the nccl-all-reduce-bw check is intentionally not
+    # declared here. The validator does not yet support gke+b200 (its only GKE
+    # NCCL template is TCPXO/FastRak-specific to a3-megagpu H100, while A4 uses
+    # GPUDirect RDMA over RoCE/CX-7), so a declared check would silently skip
+    # and report the phase as passed without measuring anything — false
+    # assurance. Wire it (testbed-validated testdata/b200/gke/runtime.yaml +
+    # support-table entry + real threshold) once the B200 GKE testbed
+    # (nvcf-dgxc-k8s-gcp-azne1-prd7) is characterized. See issue #1337.
     conformance:
       checks:
         - platform-health

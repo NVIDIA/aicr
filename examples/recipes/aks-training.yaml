@@ -168,12 +168,6 @@ validation:
       - expected-resources
       - gpu-operator-version
       - check-nvidia-smi
-  performance:
-    constraints:
-      - name: nccl-all-reduce-bw
-        value: '>= 100'
-    checks:
-      - nccl-all-reduce-bw
   conformance:
     checks:
       - platform-health
