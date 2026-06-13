@@ -44,6 +44,7 @@ const (
 	skuL4         = "l4"
 	skuL20        = "l20"
 	skuL40        = "l40"
+	skuL40G       = "l40g"
 	skuL40S       = "l40s"
 	skuP4         = "p4"
 	skuP6         = "p6"
@@ -135,6 +136,7 @@ var gpuDeviceIDToSKU = map[string]string{
 
 	// Ada (datacenter).
 	"26b5": skuL40,  // L40
+	"26b8": skuL40G, // L40G (China L40 variant)
 	"26b9": skuL40S, // L40S
 	"26b7": skuL20,  // L20
 	"26ba": skuL20,  // L20
