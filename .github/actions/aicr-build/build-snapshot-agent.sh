@@ -25,6 +25,11 @@ if [[ ! -f dist/aicr ]]; then
   exit 1
 fi
 
+if [[ -z "${KIND_CLUSTER_NAME:-}" || "${KIND_CLUSTER_NAME}" == "null" ]]; then
+  echo "::error::KIND_CLUSTER_NAME must be provided by the aicr-build action"
+  exit 1
+fi
+
 # Build the snapshot agent image on a static, distroless base. The agent binary
 # is static Go and detects GPUs driver-free via NFD/PCI (sysfs), so it needs
 # neither the NVIDIA driver nor nvidia-smi — and no CUDA base image.

@@ -235,7 +235,7 @@ The `--template` flag enables custom output formatting using Go templates with [
 .Measurements   # Array of Measurement objects
   .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology)
   .Subtypes     # Array of Subtype objects
-    .Name       # Subtype name (e.g., "server", "smi", "grub")
+    .Name       # Subtype name (e.g., "server", "hardware", "grub")
     .Data       # Map of readings (key -> Reading with .String method)
 
 # NodeTopology measurement type has subtypes: summary, taint, label

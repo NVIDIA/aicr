@@ -179,11 +179,11 @@ sudo chmod +x /usr/local/bin/aicr
 
 Snapshot GPU detection is driver-free: it enumerates PCI devices via sysfs
 (NFD) and resolves the accelerator SKU from the device ID — no `nvidia-smi` or
-NVIDIA driver required. When run in-cluster, the agent also reads the GPU
-Operator's `nvidia.com/gpu.product` node label. If a snapshot reports no GPU on
-a node you expect to have one, confirm the agent landed on the GPU node (it
-needs host `/sys` access) and, for the most accurate SKU, that the GPU Operator
-has labeled the node.
+NVIDIA driver required. The GPU Operator's `nvidia.com/gpu.product` node label
+is **not** required to collect GPU data; when present (read in-cluster via the
+node topology), it improves SKU accuracy and powers the "GPU placement
+mismatch" warning. If a snapshot reports no GPU on a node you expect to have
+one, confirm the agent landed on the GPU node (it needs host `/sys` access).
 
 ## Uninstall
 
