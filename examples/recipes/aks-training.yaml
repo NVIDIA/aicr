@@ -142,10 +142,10 @@ componentRefs:
       - kube-prometheus-stack
   - name: nodewright-operator
     namespace: skyhook
-    chart: skyhook-operator
+    chart: nodewright
     type: Helm
-    source: https://helm.ngc.nvidia.com/nvidia/skyhook
-    version: v0.15.1
+    source: oci://ghcr.io/nvidia/nodewright/charts
+    version: v0.17.0
     valuesFile: components/nodewright-operator/values.yaml
 deploymentOrder:
   - cert-manager

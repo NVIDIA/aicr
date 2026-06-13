@@ -201,9 +201,9 @@ components:
     healthCheck:
       assertFile: checks/nodewright-operator/health-check.yaml
     helm:
-      defaultRepository: https://helm.ngc.nvidia.com/nvidia/skyhook
-      defaultChart: skyhook-operator
-      defaultVersion: v0.15.1
+      defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
+      defaultChart: nodewright
+      defaultVersion: v0.17.0
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:
