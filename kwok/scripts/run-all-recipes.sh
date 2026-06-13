@@ -30,13 +30,18 @@
 #                         flux-oci         (in-cluster registry + Flux 2
 #                                           OCIRepository → Kustomization →
 #                                           HelmRelease)
+#                         flux-git         (in-cluster registry + Flux 2 +
+#                                           Gitea; filesystem bundle pushed
+#                                           to Git, GitRepository →
+#                                           Kustomization → HelmRelease;
+#                                           issue #963)
 #                       When != helm, install-infra.sh is run ONCE before the
 #                       recipe loop with DEPLOYER exported so it installs the
 #                       shared in-cluster OCI registry plus the GitOps
 #                       controllers the selected deployer needs (Argo CD or
-#                       Flux). Their owning namespaces (`aicr-registry`,
-#                       `argocd`, `flux-system`) survive across recipe
-#                       iterations.
+#                       Flux, plus Gitea for flux-git). Their owning
+#                       namespaces (`aicr-registry`, `argocd`, `flux-system`)
+#                       survive across recipe iterations.
 #
 # Exit codes:
 #    0  all recipes passed
@@ -253,7 +258,8 @@ Usage: run-all-recipes.sh [--deployer <name>] [recipe1 recipe2 ...]
 
 Flags:
   --deployer <name>   Deployer to exercise for every recipe. One of:
-                        helm (default), argocd-oci, argocd-helm-oci, flux-oci
+                        helm (default), argocd-oci, argocd-helm-oci, flux-oci,
+                        flux-git
 
 Examples:
   run-all-recipes.sh
@@ -261,6 +267,7 @@ Examples:
   run-all-recipes.sh --deployer argocd-oci eks-training
   run-all-recipes.sh --deployer=argocd-helm-oci
   run-all-recipes.sh --deployer flux-oci eks-training
+  run-all-recipes.sh --deployer flux-git eks-training
 EOF
 }
 
@@ -308,11 +315,11 @@ main() {
     done
 
     case "$DEPLOYER" in
-        helm|argocd-oci|argocd-helm-oci|flux-oci)
+        helm|argocd-oci|argocd-helm-oci|flux-oci|flux-git)
             ;;
         *)
             log_error "Invalid --deployer value: '${DEPLOYER}'"
-            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, flux-oci"
+            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, flux-oci, flux-git"
             usage
             return 1
             ;;
@@ -341,16 +348,18 @@ main() {
     cleanup_between_tests
 
     # Install shared in-cluster registry + the controller(s) the selected
-    # deployer needs (Argo CD for argocd-*, Flux for flux-oci). install-
-    # infra.sh is idempotent but unnecessary work per recipe; a failure
-    # here is fatal — the lane cannot run without it. DEPLOYER is exported
-    # so install-infra.sh can branch on it. Its exit code map: 10=yq/
-    # settings, 20=registry Deployment not Ready, 21=registry not reachable
-    # on host port, 30=Argo CD Helm install failed, 31=Application CRD not
-    # Established, 40=Repository secret apply failed, 60=Flux install
-    # manifest apply failed, 61=Flux controller not Ready, 62=Flux CRDs not
-    # Established. Surface the raw rc in the log line so an operator can
-    # map it.
+    # deployer needs (Argo CD for argocd-*, Flux for flux-*, plus Gitea for
+    # flux-git). install-infra.sh is idempotent but unnecessary work per
+    # recipe; a failure here is fatal — the lane cannot run without it.
+    # DEPLOYER is exported so install-infra.sh can branch on it. Its exit
+    # code map: 10=yq/settings, 20=registry Deployment not Ready,
+    # 21=registry not reachable on host port, 30=Argo CD Helm install
+    # failed, 31=Application CRD not Established, 40=Repository secret
+    # apply failed, 60=Flux install manifest apply failed, 61=Flux
+    # controller not Ready, 62=Flux CRDs not Established, 70=Gitea
+    # Deployment not Ready, 71=Gitea not reachable on host port, 72=Gitea
+    # admin user bootstrap failed. Surface the raw rc in the log line so
+    # an operator can map it.
     if [[ "${DEPLOYER}" != "helm" ]]; then
         log_info "Installing shared infra (in-cluster registry + controllers for ${DEPLOYER})..."
         local infra_rc=0
@@ -385,7 +394,7 @@ main() {
             # alone instead of a chain of "but only X can produce 50"
             # comments scattered across files.
             if (( rc == EXIT_ARGOCD_SYNC_TIMEOUT )) \
-                    && [[ "$DEPLOYER" == argocd-* || "$DEPLOYER" == flux-oci ]]; then
+                    && [[ "$DEPLOYER" == argocd-* || "$DEPLOYER" == flux-* ]]; then
                 consecutive_sync_timeouts=$(( consecutive_sync_timeouts + 1 ))
                 log_warn "GitOps sync timeout strike ${consecutive_sync_timeouts}/${ARGOCD_SYNC_STRIKE_LIMIT} on recipe ${recipe}"
                 if (( consecutive_sync_timeouts >= ARGOCD_SYNC_STRIKE_LIMIT )); then

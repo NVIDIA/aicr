@@ -48,6 +48,16 @@ nodes:
       - containerPort: 30500
         hostPort: 5500
         protocol: TCP
+      # Host port 3300 → NodePort 30300 exposes the in-cluster Gitea
+      # (gitea.aicr-registry.svc) to the runner so the flux-git lane can
+      # `git push` the filesystem bundle. Host 3300 (not Gitea's default
+      # 3000) for the same collision-avoidance reason as 5500 above —
+      # port 3000 is commonly held by Grafana / local dev servers.
+      # In-cluster consumers (Flux source-controller) use Service DNS on
+      # port 3000 regardless of the host-side mapping. Issue #963.
+      - containerPort: 30300
+        hostPort: 3300
+        protocol: TCP
     kubeadmConfigPatches:
       - |
         kind: InitConfiguration

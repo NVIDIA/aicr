@@ -35,11 +35,18 @@
 #                                           OCI push -> apply OCIRepository +
 #                                           Kustomization wrappers and let
 #                                           Flux reconcile)
+#                         flux-git         (aicr bundle --deployer flux ->
+#                                           filesystem output -> git push to
+#                                           in-cluster Gitea -> apply
+#                                           GitRepository + Kustomization
+#                                           wrappers and let Flux reconcile;
+#                                           issue #963)
 #                       For argocd-* values the in-cluster registry + Argo CD
 #                       must already be installed; for flux-oci the registry
-#                       + Flux 2 controllers must be installed. Both are
-#                       managed by `kwok/scripts/install-infra.sh` keyed on
-#                       the DEPLOYER env var.
+#                       + Flux 2 controllers must be installed; for flux-git
+#                       additionally Gitea. All are managed by
+#                       `kwok/scripts/install-infra.sh` keyed on the DEPLOYER
+#                       env var.
 #
 # Environment variables (GitOps deployers only):
 #   KWOK_REGISTRY_HOST_PORT  Host port the in-cluster registry is reachable on
@@ -66,6 +73,16 @@
 #                            Kustomization after the grace window indicates
 #                            kubectl apply silently produced no resource
 #                            (RBAC denial, CRD missing). Default: 30.
+#   KWOK_GITEA_HOST_PORT     (flux-git only) Host port the in-cluster Gitea
+#                            is reachable on from the runner for `git push`.
+#                            MUST match install-infra.sh / kind-config.yaml.
+#                            Default: 3300.
+#   KWOK_GITEA_USER          (flux-git only) Gitea user to push as. Must
+#                            match the admin user bootstrapped by
+#                            install-infra.sh. Default: aicr.
+#   KWOK_GITEA_PASSWORD      (flux-git only) Password for KWOK_GITEA_USER.
+#                            CI-only credential for the ephemeral in-cluster
+#                            Gitea — not a secret. Default: aicr-kwok-ci.
 #
 # This script:
 # 1. Generates a recipe from the cluster config
@@ -79,7 +96,7 @@
 #    1  generic failure (bundle gen, deploy, pod scheduling, RBAC, CRD missing,
 #       apiserver unreachable, etc.)
 #   50  GitOps sync deadline hit (KWOK_ARGOCD_SYNC_TIMEOUT for argocd-*,
-#       KWOK_FLUX_SYNC_TIMEOUT for flux-oci). Distinct so run-all-recipes.sh
+#       KWOK_FLUX_SYNC_TIMEOUT for flux-*). Distinct so run-all-recipes.sh
 #       can apply the 3-strike rule (ADR-008 §"Error Handling and Failure
 #       Modes") without grepping stderr. Only emitted for GitOps deployers;
 #       the helm path never returns 50.
@@ -158,8 +175,8 @@ resolve_argocd_root_app() {
     esac
 }
 
-# Flux-specific globals (set in generate_bundle / deploy_bundle for flux-oci).
-# Both live in the flux-system namespace (Flux's default control plane).
+# Flux-specific globals (set in generate_bundle / deploy_bundle for flux-*).
+# All live in the flux-system namespace (Flux's default control plane).
 #
 # FLUX_OCIREPOSITORY_NAME is fixed to "aicr-bundle" — the value the bundler
 # embeds into local-chart HelmRelease sourceRefs when --deployer flux is
@@ -167,27 +184,54 @@ resolve_argocd_root_app() {
 # and pkg/cli/bundle.go). Changing the name in one place WITHOUT the other
 # breaks chart resolution at reconcile time, so the constant is the contract.
 #
+# FLUX_GITREPOSITORY_NAME (flux-git) names the OUTER GitRepository this
+# script applies at deploy time — the source the wrapper Kustomization
+# pulls the bundle tree from. Named "aicr-bundle" for symmetry with the
+# OCI lane. Unlike the OCI name there is NO bundler contract on it: with a
+# filesystem --output the bundler bakes its OWN GitRepository source CR
+# into the bundle (sources/gitrepo-<sanitized-url>.yaml, derived from
+# --repo) and local-chart HelmReleases reference THAT object, not this
+# one. Two GitRepository objects pointing at the same repo is accepted
+# duplication — reproducing the Go sanitizeSourceName() truncation logic
+# in bash to merge them would be fragile.
+#
 # FLUX_KUSTOMIZATION_NAME varies by recipe so back-to-back recipes on the
 # same cluster don't collide (one Kustomization per recipe pointing at
-# the same shared OCIRepository over time).
+# the same shared source over time).
 #
-# Default empty when DEPLOYER != flux-oci; cleanup guards against empty.
+# Default empty when DEPLOYER != flux-*; cleanup guards against empty.
 FLUX_KUSTOMIZATION_NAME=""
 FLUX_OCIREPOSITORY_NAME=""
+FLUX_GITREPOSITORY_NAME=""
+
+# Git URLs for the flux-git lane (issue #963). Same dual-view pattern as
+# OCI_REF / OCI_IN_CLUSTER_REF: the runner pushes via the Kind host-port
+# mapping (localhost:3300), while Flux's source-controller clones via
+# Service DNS from inside the cluster. Populated in generate_bundle;
+# consumed by deploy_bundle. Script-globals so the runner→service-DNS
+# rewrite rule lives in exactly one place.
+GIT_PUSH_URL=""
+GIT_IN_CLUSTER_URL=""
 
 # Resolve FLUX_* names from the recipe. Must be called before any code path
 # that consults them (cleanup, deploy_bundle, wait_for_flux_sync).
 resolve_flux_root_names() {
     local recipe="$1"
-    if [[ "$DEPLOYER" == "flux-oci" ]]; then
-        # Fixed name — see comment above. Must match what
-        # pkg/cli/bundle.go sets as BundleOCISourceName.
-        FLUX_OCIREPOSITORY_NAME="aicr-bundle"
-        FLUX_KUSTOMIZATION_NAME="aicr-${recipe}"
-    else
-        FLUX_OCIREPOSITORY_NAME=""
-        FLUX_KUSTOMIZATION_NAME=""
-    fi
+    FLUX_OCIREPOSITORY_NAME=""
+    FLUX_GITREPOSITORY_NAME=""
+    FLUX_KUSTOMIZATION_NAME=""
+    case "$DEPLOYER" in
+        flux-oci)
+            # Fixed name — see comment above. Must match what
+            # pkg/cli/bundle.go sets as BundleOCISourceName.
+            FLUX_OCIREPOSITORY_NAME="aicr-bundle"
+            FLUX_KUSTOMIZATION_NAME="aicr-${recipe}"
+            ;;
+        flux-git)
+            FLUX_GITREPOSITORY_NAME="aicr-bundle"
+            FLUX_KUSTOMIZATION_NAME="aicr-${recipe}"
+            ;;
+    esac
 }
 
 # Cleanup function
@@ -232,11 +276,11 @@ cleanup() {
             fi
         fi
 
-        # Flux deployer: delete the Kustomization FIRST so its prune
+        # Flux deployers: delete the Kustomization FIRST so its prune
         # GC removes the per-component HelmReleases before namespace
-        # cleanup races them. The OCIRepository then has nothing to feed
-        # and can be removed safely.
-        if [[ "$DEPLOYER" == "flux-oci" ]]; then
+        # cleanup races them. The source (OCIRepository / GitRepository)
+        # then has nothing to feed and can be removed safely.
+        if [[ "$DEPLOYER" == flux-* ]]; then
             if [[ -n "$FLUX_KUSTOMIZATION_NAME" ]]; then
                 log_info "Deleting Flux Kustomization ${FLUX_KUSTOMIZATION_NAME} (prune cascade)..."
                 timeout 120s kubectl delete kustomization "$FLUX_KUSTOMIZATION_NAME" \
@@ -245,6 +289,19 @@ cleanup() {
             if [[ -n "$FLUX_OCIREPOSITORY_NAME" ]]; then
                 log_info "Deleting Flux OCIRepository ${FLUX_OCIREPOSITORY_NAME}..."
                 timeout 30s kubectl delete ocirepository "$FLUX_OCIREPOSITORY_NAME" \
+                    -n flux-system --ignore-not-found --wait=true 2>/dev/null || true
+            fi
+            if [[ -n "$FLUX_GITREPOSITORY_NAME" ]]; then
+                log_info "Deleting Flux GitRepository ${FLUX_GITREPOSITORY_NAME}..."
+                timeout 30s kubectl delete gitrepository "$FLUX_GITREPOSITORY_NAME" \
+                    -n flux-system --ignore-not-found --wait=true 2>/dev/null || true
+                # The bundle also carried an INNER GitRepository source CR
+                # (sources/gitrepo-<sanitized-url>.yaml). The Kustomization
+                # prune above normally GCs it, but if prune raced the delete
+                # it lingers and keeps polling Gitea. Best-effort sweep of
+                # any leftovers in flux-system — safe because the flux-git
+                # lane owns every GitRepository in that namespace.
+                timeout 30s kubectl delete gitrepository --all \
                     -n flux-system --ignore-not-found --wait=true 2>/dev/null || true
             fi
             # Best-effort: clear any HelmReleases the bundle declared in
@@ -376,7 +433,10 @@ find_aicr_binary() {
 # Check dependencies
 check_deps() {
     local missing=()
-    for cmd in kubectl helm yq jq; do
+    local required=(kubectl helm yq jq)
+    # flux-git pushes the filesystem bundle to the in-cluster Gitea.
+    [[ "$DEPLOYER" == "flux-git" ]] && required+=(git)
+    for cmd in "${required[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
@@ -897,6 +957,99 @@ generate_bundle() {
                 return 1
             fi
             ;;
+        flux-git)
+            # Filesystem-bundle round-trip (issue #963): bundle to a local
+            # directory, push the tree to the in-cluster Gitea, and let
+            # Flux's source-controller clone it back. This exercises the
+            # flux deployer's GIT shape — GitRepository source CRs in
+            # sources/gitrepo-*.yaml — which the OCI lane never renders.
+            local short_sha
+            short_sha=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "local")
+            local gitea_host_port="${KWOK_GITEA_HOST_PORT:-3300}"
+            local gitea_user="${KWOK_GITEA_USER:-aicr}"
+            local gitea_password="${KWOK_GITEA_PASSWORD:-aicr-kwok-ci}"
+            # Dual-view URLs (same pattern as OCI_REF / OCI_IN_CLUSTER_REF):
+            # the runner pushes via the Kind host-port mapping; Flux's
+            # source-controller clones via Service DNS. --repo gets the
+            # IN-CLUSTER URL because it is baked into the bundle's own
+            # GitRepository source CR, which source-controller resolves
+            # from inside the cluster. The repo must be anonymously
+            # readable: the bundler's gitrepo template has no secretRef
+            # (install-infra.sh configures Gitea so pushed repos are
+            # public via DEFAULT_PUSH_CREATE_PRIVATE=false).
+            GIT_IN_CLUSTER_URL="http://gitea.aicr-registry.svc.cluster.local:3000/${gitea_user}/${recipe}.git"
+            GIT_PUSH_URL="http://${gitea_user}:${gitea_password}@localhost:${gitea_host_port}/${gitea_user}/${recipe}.git"
+
+            log_info "Bundling for flux (filesystem), repo URL ${GIT_IN_CLUSTER_URL}"
+            # No --plain-http: that flag is OCI-only. No tag handling: the
+            # bundler's GitRepository refs default to branch `main`, so the
+            # push below MUST target main.
+            if ! bundle_output=$("$AICR_BIN" bundle \
+                --recipe "${WORK_DIR}/recipe.yaml" \
+                --deployer flux \
+                --output "${WORK_DIR}/bundle" \
+                --repo "$GIT_IN_CLUSTER_URL" \
+                --system-node-selector "aicr.nvidia.com/node-type=system" \
+                --accelerated-node-selector "aicr.nvidia.com/node-type=accelerated" \
+                --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
+                --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
+                --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
+                --set "certmanager:startupapicheck.enabled=false" \
+                --set "slinkyslurmoperator:webhook.enabled=false" \
+                --set "slinkyslurmoperator:certManager.enabled=false" \
+                --set "slurmcluster:controller.persistence.enabled=false" \
+                --set "kubeprometheusstack:defaultRules.create=false" \
+                --set "kubeprometheusstack:alertmanager.enabled=false" \
+                --set "nodewright-customizations:enabled=false" \
+                --set "dynamoplatform:etcd.persistence.enabled=false" \
+                --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false" 2>&1); then
+                log_error "Bundle generation failed"
+                log_error "Bundle command output:"
+                echo "$bundle_output"
+                return 1
+            fi
+
+            # Same fail-fast as flux-oci: the wrapper Kustomization points
+            # `path: ./` at the bundle root.
+            if [[ ! -f "${WORK_DIR}/bundle/kustomization.yaml" ]]; then
+                log_error "Expected kustomization.yaml not found in bundle: ${WORK_DIR}/bundle"
+                log_error "Bundle contents:"
+                list_bundle_entries "${WORK_DIR}/bundle"
+                return 1
+            fi
+            # Git-mode proof: a filesystem --output must render at least one
+            # GitRepository source CR. Its absence means the bundler silently
+            # took the OCI path and the lane is no longer testing the Git
+            # shape it exists for.
+            if ! compgen -G "${WORK_DIR}/bundle/sources/gitrepo-*.yaml" >/dev/null; then
+                log_error "No sources/gitrepo-*.yaml in bundle — flux git mode did not engage"
+                log_error "Bundle contents:"
+                list_bundle_entries "${WORK_DIR}/bundle"
+                return 1
+            fi
+
+            # Push the bundle tree to Gitea. push-to-create makes the repo
+            # on first push; --force resets state on re-runs so the lane is
+            # idempotent (Gitea state is emptyDir-ephemeral anyway). Branch
+            # main is a hard requirement — see the bundler note above.
+            log_info "Pushing bundle to Gitea (localhost:${gitea_host_port}, repo ${gitea_user}/${recipe})..."
+            local git_output
+            if ! git_output=$(
+                {
+                    cd "${WORK_DIR}/bundle" &&
+                    git init -q -b main &&
+                    git add -A &&
+                    git -c user.name=aicr-kwok -c user.email=aicr@example.invalid \
+                        commit -q -m "bundle ${recipe} ${short_sha}-${DEPLOYER}" &&
+                    git push -q --force "$GIT_PUSH_URL" main
+                } 2>&1
+            ); then
+                log_error "git push to Gitea failed"
+                log_error "$git_output"
+                return 1
+            fi
+            log_info "Bundle pushed; Flux will clone from ${GIT_IN_CLUSTER_URL} (branch main)"
+            ;;
         *)
             log_error "Unknown deployer: ${DEPLOYER}"
             return 1
@@ -1135,6 +1288,73 @@ EOF
                 return "$sync_rc"
             fi
             ;;
+        flux-git)
+            if [[ -z "$GIT_IN_CLUSTER_URL" ]]; then
+                log_error "GIT_IN_CLUSTER_URL unset for flux-git path (bundle step skipped?)"
+                return 1
+            fi
+
+            # Mirror of the flux-oci branch with a GitRepository source
+            # instead of OCIRepository. The outer GitRepository here is the
+            # wrapper source the Kustomization pulls the bundle tree from;
+            # the bundle ALSO carries its own inner GitRepository CR
+            # (sources/gitrepo-*.yaml) that local-chart HelmReleases
+            # reference — both point at the same public Gitea repo.
+            #
+            # No spec.secretRef: the repo is public (anonymous clone), and
+            # plain HTTP needs no insecure toggle for git sources (unlike
+            # OCIRepository.spec.insecure).
+            log_info "Applying Flux GitRepository ${FLUX_GITREPOSITORY_NAME} (url=${GIT_IN_CLUSTER_URL})..."
+            if ! kubectl apply -f - <<EOF
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: ${FLUX_GITREPOSITORY_NAME}
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: ${GIT_IN_CLUSTER_URL}
+  ref:
+    branch: main
+EOF
+            then
+                log_error "kubectl apply GitRepository failed"
+                return 1
+            fi
+
+            # Kustomization identical to the flux-oci wrapper except for
+            # sourceRef.kind — see that branch for the wait/prune/timeout
+            # rationale.
+            log_info "Applying Flux Kustomization ${FLUX_KUSTOMIZATION_NAME}..."
+            if ! kubectl apply -f - <<EOF
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ${FLUX_KUSTOMIZATION_NAME}
+  namespace: flux-system
+spec:
+  interval: 1m
+  prune: true
+  wait: false
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: ${FLUX_GITREPOSITORY_NAME}
+  path: ./
+EOF
+            then
+                log_error "kubectl apply Kustomization failed"
+                return 1
+            fi
+
+            # Preserve wait_for_flux_sync's exit code (50 == sync timeout)
+            # so run-all-recipes.sh can apply the 3-strike rule.
+            local sync_rc=0
+            wait_for_flux_sync || sync_rc=$?
+            if (( sync_rc != 0 )); then
+                return "$sync_rc"
+            fi
+            ;;
         *)
             log_error "Unknown deployer: ${DEPLOYER}"
             return 1
@@ -1236,8 +1456,8 @@ wait_for_argocd_sync() {
 }
 
 wait_for_flux_sync() {
-    if [[ -z "$FLUX_KUSTOMIZATION_NAME" ]] || [[ -z "$FLUX_OCIREPOSITORY_NAME" ]]; then
-        log_error "FLUX_KUSTOMIZATION_NAME or FLUX_OCIREPOSITORY_NAME is empty (DEPLOYER=${DEPLOYER})"
+    if [[ -z "$FLUX_KUSTOMIZATION_NAME" ]]; then
+        log_error "FLUX_KUSTOMIZATION_NAME is empty (DEPLOYER=${DEPLOYER})"
         return 1
     fi
 
@@ -1248,17 +1468,54 @@ wait_for_flux_sync() {
         return 1
     fi
 
-    local test_dir="${REPO_ROOT}/tests/chainsaw/kwok/flux-sync"
-    local sync_timeout="${KWOK_FLUX_SYNC_TIMEOUT:-500}s"
+    # Per-deployer gate: the two tests differ ONLY in the source-Ready
+    # step (OCIRepository vs GitRepository); steps 2-4 (Kustomization,
+    # HelmRelease terminal-pass predicate, ArtifactGenerator) are kept
+    # byte-identical between them — see the sync-note header comments in
+    # both chainsaw-test.yaml files and ADR-009.
+    local test_dir source_args
+    case "$DEPLOYER" in
+        flux-oci)
+            if [[ -z "$FLUX_OCIREPOSITORY_NAME" ]]; then
+                log_error "FLUX_OCIREPOSITORY_NAME is empty (DEPLOYER=${DEPLOYER})"
+                return 1
+            fi
+            test_dir="${REPO_ROOT}/tests/chainsaw/kwok/flux-sync"
+            source_args=(--set "ociRepositoryName=${FLUX_OCIREPOSITORY_NAME}")
+            log_info "Flux sync gate (chainsaw): ociRepository=${FLUX_OCIREPOSITORY_NAME} kustomization=${FLUX_KUSTOMIZATION_NAME}"
+            ;;
+        flux-git)
+            if [[ -z "$FLUX_GITREPOSITORY_NAME" ]]; then
+                log_error "FLUX_GITREPOSITORY_NAME is empty (DEPLOYER=${DEPLOYER})"
+                return 1
+            fi
+            test_dir="${REPO_ROOT}/tests/chainsaw/kwok/flux-git-sync"
+            source_args=(--set "gitRepositoryName=${FLUX_GITREPOSITORY_NAME}")
+            log_info "Flux sync gate (chainsaw): gitRepository=${FLUX_GITREPOSITORY_NAME} kustomization=${FLUX_KUSTOMIZATION_NAME}"
+            ;;
+        *)
+            log_error "wait_for_flux_sync called with non-flux DEPLOYER=${DEPLOYER}"
+            return 1
+            ;;
+    esac
 
-    log_info "Flux sync gate (chainsaw): ociRepository=${FLUX_OCIREPOSITORY_NAME} kustomization=${FLUX_KUSTOMIZATION_NAME} timeout=${sync_timeout}"
+    local sync_timeout="${KWOK_FLUX_SYNC_TIMEOUT:-500}s"
+    log_info "Flux sync timeout: ${sync_timeout}"
 
     # See the argocd shim's comment for the --set vs --values choice;
     # --values requires YAML, --set takes inline key=value pairs.
+    #
+    # --error-timeout matters as much as --assert-timeout here: the
+    # all-HelmReleases and ArtifactGenerator gates are error-polarity
+    # ops (poll until NO resource matches the bad-state predicate),
+    # and chainsaw's default error timeout is 30s — far below what a
+    # dependsOn chain needs to converge. Without the override the gate
+    # would flake on every multi-component recipe.
     if "$chainsaw_bin" test "$test_dir" \
-            --set "ociRepositoryName=${FLUX_OCIREPOSITORY_NAME}" \
+            "${source_args[@]}" \
             --set "kustomizationName=${FLUX_KUSTOMIZATION_NAME}" \
             --assert-timeout "$sync_timeout" \
+            --error-timeout "$sync_timeout" \
             --no-color; then
         log_info "Flux sync PASS (chainsaw)"
         return 0
@@ -1499,13 +1756,16 @@ Usage: validate-scheduling.sh [--keep-namespace] [--deployer <name>] <recipe-nam
 
 Flags:
   --keep-namespace        Preserve releases/namespaces after the run.
-  --deployer <name>       One of: helm (default), argocd-oci, argocd-helm-oci.
+  --deployer <name>       One of: helm (default), argocd-oci, argocd-helm-oci,
+                          flux-oci, flux-git.
 
 Examples:
   validate-scheduling.sh h100-eks-ubuntu-training-kubeflow
   validate-scheduling.sh --keep-namespace eks-training
   validate-scheduling.sh --deployer argocd-oci eks-training
   validate-scheduling.sh --deployer argocd-helm-oci eks-training
+  validate-scheduling.sh --deployer flux-oci eks-training
+  validate-scheduling.sh --deployer flux-git eks-training
 EOF
     exit 1
 }
@@ -1549,11 +1809,11 @@ main() {
     fi
 
     case "$DEPLOYER" in
-        helm|argocd-oci|argocd-helm-oci|flux-oci)
+        helm|argocd-oci|argocd-helm-oci|flux-oci|flux-git)
             ;;
         *)
             log_error "Invalid --deployer value: '${DEPLOYER}'"
-            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, flux-oci"
+            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, flux-oci, flux-git"
             exit 1
             ;;
     esac

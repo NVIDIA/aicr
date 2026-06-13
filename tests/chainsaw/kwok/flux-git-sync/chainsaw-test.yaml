@@ -14,58 +14,60 @@
 
 # yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
 #
-# KWOK flux-oci sync gate. Replaces the bash `wait_for_flux_sync` +
-# `wait_for_flux_root_app` + `dump_flux_failures` functions previously in
-# kwok/scripts/validate-scheduling.sh. Driven by the validate-scheduling.sh
-# flux-oci deployer branch; see issue #962 for the migration rationale.
+# KWOK flux-git sync gate (issue #963). Sibling of ../flux-sync/ — the
+# ONLY intended divergence is step 1, which asserts the GitRepository
+# source instead of the OCIRepository (chainsaw cannot template the
+# resource `kind:` of an assert, so a parameterized single test is not
+# an option). Steps 2-4 (Kustomization, the HelmRelease terminal-pass
+# predicate, ArtifactGenerator) MUST stay byte-identical with
+# flux-sync/chainsaw-test.yaml; when changing one, change both. See
+# ADR-009 (docs/design/009-kwok-git-source-lanes.md).
 #
-# SYNC NOTE (issue #963): ../flux-git-sync/chainsaw-test.yaml is a sibling
-# of this test whose only intended divergence is the source-Ready step
-# (GitRepository instead of OCIRepository). The Kustomization, HelmRelease
-# terminal-pass predicate, and ArtifactGenerator steps MUST stay
-# byte-identical between the two files — when changing one, change both.
-#
-# Bindings passed via `chainsaw test --values <key>=<value>`:
-#   - ociRepositoryName: name of the outer OCIRepository CR (default
-#     "aicr-bundle", set by the bundler at push time).
-#   - kustomizationName: name of the root Kustomization the bundle applies
-#     (`aicr-<recipe>`, set by the validate-scheduling.sh driver).
+# Bindings passed via `chainsaw test --set <key>=<value>`:
+#   - gitRepositoryName: name of the outer GitRepository CR applied by
+#     validate-scheduling.sh's flux-git branch (default "aicr-bundle").
+#     Note: the bundle ALSO carries an inner GitRepository source CR with
+#     a sanitized-URL name; it is not asserted by name here — the
+#     error-polarity sub-step below covers it generically.
+#   - kustomizationName: name of the root Kustomization wrapping the
+#     bundle (`aicr-<recipe>`, set by the validate-scheduling.sh driver).
 #
 # Flux reconciliation is a 4-stage pipeline; each stage is its own step
 # so failure diagnostics name the stage that broke:
 #
-#   1. OCIRepository Ready  — source-controller pulled the artifact.
+#   1. GitRepository Ready  — source-controller cloned the Gitea repo.
 #   2. Kustomization Ready  — kustomize-controller parsed and applied the bundle's manifests.
 #   3. HelmRelease Ready    — helm-controller reconciled each release.
 #   4. ArtifactGenerator    — source-watcher extracted local-chart subdirectories
-#      (only when present; OCIRepository-only bundles skip this stage).
+#      (only when present; bundles without local charts skip this stage).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: kwok-flux-sync
+  name: kwok-flux-git-sync
 spec:
   description: |
-    Wait for Flux reconciliation to converge on the KWOK deployer matrix.
-    Asserts each stage of the pipeline reaches Ready=True in sequence.
+    Wait for Flux reconciliation of a Git-sourced (Gitea) bundle to
+    converge on the KWOK deployer matrix. Asserts each stage of the
+    pipeline reaches Ready=True in sequence.
   bindings:
     # See the argocd-sync test for the $values vs bindings pattern.
     # CLI `--set <key>=<value>` populates `$values.<key>`; the bindings
     # below pull that through with a default fallback for ad-hoc runs.
-    - name: ociRepositoryName
-      value: ($values.ociRepositoryName || 'aicr-bundle')
+    - name: gitRepositoryName
+      value: ($values.gitRepositoryName || 'aicr-bundle')
     - name: kustomizationName
       value: ($values.kustomizationName || 'aicr-bundle')
   timeouts:
     # KWOK_FLUX_SYNC_TIMEOUT default (500s in the bash gate). Flux's
     # reconcile loop has longer default intervals than Argo CD's
     # controller; 8 minutes accommodates the additional latency.
-    # `error` needs the same budget as `assert`: the all-HelmReleases
-    # and ArtifactGenerator steps use error-polarity (poll until NO
-    # resource matches the bad-state predicate), and chainsaw's default
-    # error timeout is only 30s — far less than a dependsOn chain needs
-    # to converge. Both are overridden per-run by the driver
-    # (validate-scheduling.sh passes --assert-timeout AND
-    # --error-timeout from KWOK_FLUX_SYNC_TIMEOUT).
+    # `error` needs the same budget as `assert`: the no-failed-
+    # GitRepository, all-HelmReleases, and ArtifactGenerator steps use
+    # error-polarity (poll until NO resource matches the bad-state
+    # predicate), and chainsaw's default error timeout is only 30s —
+    # far less than a dependsOn chain needs to converge. Both are
+    # overridden per-run by the driver (validate-scheduling.sh passes
+    # --assert-timeout AND --error-timeout from KWOK_FLUX_SYNC_TIMEOUT).
     assert: 8m
     error: 8m
   # See the comment on the argocd-sync test: chainsaw's default cleanup
@@ -75,32 +77,67 @@ spec:
   # skipDelete is safe.
   skipDelete: true
   steps:
-    - name: assert-ocirepository-ready
+    - name: assert-gitrepository-ready
       description: |
-        OCIRepository must reach Ready=True. Proves source-controller
-        could PULL the bundle artifact (mediaType, insecure-HTTP wiring,
-        layer selector all correct). This is the artifact-shape regression
-        surface — argocd-* catches the same class of bug via repo-server.
+        The outer GitRepository must reach Ready=True. Proves
+        source-controller could CLONE the bundle repo from the in-cluster
+        Gitea (anonymous HTTP read of a public push-to-create repo, branch
+        main). This is the Git-source regression surface — flux-oci covers
+        the same class of bug for the OCI artifact path. A second
+        error-polarity assertion then requires that NO GitRepository in
+        flux-system is non-Ready, which covers the bundle's INNER
+        sanitized-name source CR (rendered into sources/gitrepo-*.yaml by
+        the bundler from --repo) without having to reproduce the Go
+        sanitizeSourceName() naming in the test driver. The inner source
+        exists by the time this matters: it only affects HelmRelease
+        chart resolution, which step 3 gates on anyway.
       try:
         - assert:
-            # Flux v2.x stabilized OCIRepository under v1 (the bundler
-            # templates at pkg/bundler/deployer/flux/templates/ emit
-            # this version). v1beta2 is the older API and may not be
-            # served by the cluster's source-controller.
+            # Flux v2.x serves GitRepository under source.toolkit.fluxcd.io/v1
+            # (same group/version the bundler templates emit at
+            # pkg/bundler/deployer/flux/templates/gitrepo-source.yaml.tmpl).
             resource:
               apiVersion: source.toolkit.fluxcd.io/v1
-              kind: OCIRepository
+              kind: GitRepository
               metadata:
-                name: ($ociRepositoryName)
+                name: ($gitRepositoryName)
                 namespace: flux-system
               status:
                 (conditions[?type=='Ready']|[0].status == 'True'): true
       catch:
         - script:
             content: |
-              echo "--- OCIRepositories ---"
-              kubectl get ocirepository -A 2>&1 || true
-              kubectl get ocirepository -n flux-system -o yaml 2>&1 || true
+              echo "--- GitRepositories ---"
+              kubectl get gitrepository -A 2>&1 || true
+              kubectl get gitrepository -n flux-system -o yaml 2>&1 || true
+              echo "--- source-controller (tail=200) ---"
+              kubectl logs -n flux-system deploy/source-controller --tail=200 2>&1 || true
+              echo "--- gitea (tail=100) ---"
+              kubectl logs -n aicr-registry deploy/gitea --tail=100 2>&1 || true
+
+    - name: assert-no-gitrepository-failed
+      description: |
+        No GitRepository in flux-system may sit in a non-Ready state once
+        the outer source is Ready. Catches the bundle's inner
+        sanitized-name GitRepository source (URL typo, branch mismatch,
+        private-repo regression) without naming it. Error polarity:
+        passes on zero matches, fails when any GitRepository is
+        not Ready=True.
+      try:
+        - error:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                namespace: flux-system
+              status:
+                (conditions[?type=='Ready']|[0].status != 'True'): true
+      catch:
+        - script:
+            content: |
+              echo "--- GitRepositories ---"
+              kubectl get gitrepository -A 2>&1 || true
+              kubectl get gitrepository -n flux-system -o yaml 2>&1 || true
               echo "--- source-controller (tail=200) ---"
               kubectl logs -n flux-system deploy/source-controller --tail=200 2>&1 || true
 
@@ -194,10 +231,14 @@ spec:
       description: |
         When ArtifactGenerator CRs exist (local-chart bundles), they must
         reach Ready=True. Proves source-watcher extracted local-chart
-        sub-directories from the OCI bundle into ExternalArtifacts that
+        sub-directories from the bundle into ExternalArtifacts that
         helm-controller can consume. Regression surface for issue #964.
-        Step is a no-op when zero ArtifactGenerators exist (Chainsaw's
-        resource matcher with no items returns success).
+        Step is a no-op when zero ArtifactGenerators exist — and on the
+        flux-git lane that is the EXPECTED steady state: with a
+        filesystem --output the bundler references local charts through
+        the GitRepository source directly (chart: ./<dir>) and emits no
+        ArtifactGenerators. Kept identical to flux-sync anyway so the
+        two gates cannot drift.
       try:
         # Inverted polarity vs assert: error matches if ANY resource
         # satisfies the predicate. We want "no ArtifactGenerator in a

@@ -19,7 +19,8 @@
 #
 # Idempotent: re-running is a no-op when state already matches. All versions
 # are sourced from .settings.yaml (`testing_tools.registry_image`,
-# `testing_tools.argocd_chart`, `testing_tools.flux_version`) — never hardcoded.
+# `testing_tools.argocd_chart`, `testing_tools.flux_version`,
+# `testing_tools.gitea_image`) — never hardcoded.
 #
 # Components installed (controller installs branch on $DEPLOYER):
 #   1. ALWAYS: `registry:2` Deployment + NodePort Service in the
@@ -37,17 +38,24 @@
 #      HTTP. Phase 0 spike confirmed `repo-creds` shape does NOT propagate
 #      this field for OCI repos — see docs/plans/2026-05-18-kwok-deployer-
 #      matrix.md (F4).
-#   3. DEPLOYER=flux-oci: Flux 2 install manifest applied from the pinned
-#      GitHub release; we only need source-controller (OCIRepository),
-#      kustomize-controller (Kustomization wrapper) and helm-controller
-#      (HelmRelease per AICR component). notification-controller and
-#      image-reflector-controller are tolerated but unused. Flux does NOT
-#      require a separate repo-creds-style secret for the in-cluster
-#      registry: per-OCIRepository `spec.insecure: true` toggles plain-HTTP
-#      at the source level.
+#   3. DEPLOYER=flux-oci|flux-git: Flux 2 install manifest applied from the
+#      pinned GitHub release; we only need source-controller
+#      (OCIRepository/GitRepository), kustomize-controller (Kustomization
+#      wrapper) and helm-controller (HelmRelease per AICR component).
+#      notification-controller and image-reflector-controller are tolerated
+#      but unused. Flux does NOT require a separate repo-creds-style secret
+#      for the in-cluster registry: per-OCIRepository `spec.insecure: true`
+#      toggles plain-HTTP at the source level.
+#   4. DEPLOYER=flux-git: Gitea Deployment + NodePort Service in the
+#      `aicr-registry` namespace (issue #963), mirroring the registry
+#      pattern. Service is exposed on nodePort 30300; kwok/kind-config.yaml
+#      maps host port 3300 -> nodePort 30300 so the runner can `git push`
+#      the filesystem bundle. Push-to-create is enabled and created repos
+#      are PUBLIC so Flux's source-controller clones anonymously — the
+#      bundler's GitRepository template has no secretRef.
 #
 # Usage:
-#   DEPLOYER=helm|argocd-oci|argocd-helm-oci|flux-oci ./install-infra.sh
+#   DEPLOYER=helm|argocd-oci|argocd-helm-oci|flux-oci|flux-git ./install-infra.sh
 #   (DEPLOYER defaults to "helm"; under helm only the registry is installed,
 #    which is harmless if unused.)
 #
@@ -79,9 +87,21 @@
 #                                           argocd-oci       - registry + Argo CD
 #                                           argocd-helm-oci  - registry + Argo CD
 #                                           flux-oci         - registry + Flux 2
+#                                           flux-git         - registry + Flux 2 + Gitea
 #                                         Unknown values fall back to the
 #                                         registry-only path; the caller is
 #                                         expected to validate first.
+#   KWOK_GITEA_HOST_PORT     (optional, default 3300) - Host port the script
+#                                         probes when verifying Gitea is
+#                                         reachable. Same caveat as
+#                                         KWOK_REGISTRY_HOST_PORT: must match
+#                                         the Kind extraPortMappings hostPort.
+#   KWOK_GITEA_USER          (optional, default "aicr") - Gitea admin user the
+#                                         flux-git lane pushes as.
+#   KWOK_GITEA_PASSWORD      (optional, default "aicr-kwok-ci") - Password for
+#                                         KWOK_GITEA_USER. CI-only credential
+#                                         for the ephemeral in-cluster Gitea —
+#                                         not a secret.
 #
 # Exit codes (distinct so callers can branch on failure mode):
 #    0  success
@@ -94,6 +114,9 @@
 #   60  Flux install manifest apply failed
 #   61  Flux controller (source/kustomize/helm) not Ready in 180s
 #   62  Flux CRDs (OCIRepository/Kustomization/HelmRelease) not Established in 60s
+#   70  Gitea Deployment not Ready in 120s
+#   71  Gitea not reachable on host port within 60s
+#   72  Gitea admin user bootstrap failed
 
 set -euo pipefail
 
@@ -126,6 +149,15 @@ ARGOCD_RELEASE="argocd"
 ARGOCD_REPO_NAME="argo"
 ARGOCD_REPO_URL="https://argoproj.github.io/argo-helm"
 ARGOCD_HELM_TIMEOUT="5m"
+
+# Gitea configuration (flux-git lane, issue #963). Lives in the registry
+# namespace so the existing system-namespace cleanup allowlist covers it.
+GITEA_NAME="gitea"
+GITEA_PORT=3000
+GITEA_NODEPORT=30300
+GITEA_HOST_PORT="${KWOK_GITEA_HOST_PORT:-3300}"
+GITEA_USER="${KWOK_GITEA_USER:-aicr}"
+GITEA_PASSWORD="${KWOK_GITEA_PASSWORD:-aicr-kwok-ci}"
 
 # Flux 2 configuration. install.yaml is fetched from the pinned GitHub
 # release; only source/kustomize/helm controllers are required by the
@@ -185,6 +217,14 @@ dump_registry_diagnostics() {
     kc describe deployment -n "${REGISTRY_NAMESPACE}" "${REGISTRY_NAME}" 2>&1 || true
     log_error "--- registry pod logs (tail=200) ---"
     kc logs -n "${REGISTRY_NAMESPACE}" "deploy/${REGISTRY_NAME}" --tail=200 2>&1 || true
+}
+
+# Diagnostic dump for Gitea failures.
+dump_gitea_diagnostics() {
+    log_error "--- gitea diagnostics ---"
+    kc describe deployment -n "${REGISTRY_NAMESPACE}" "${GITEA_NAME}" 2>&1 || true
+    log_error "--- gitea pod logs (tail=200) ---"
+    kc logs -n "${REGISTRY_NAMESPACE}" "deploy/${GITEA_NAME}" --tail=200 2>&1 || true
 }
 
 # Diagnostic dump for Argo CD failures.
@@ -514,6 +554,184 @@ install_flux() {
 }
 
 # -------------------------------------------------------------------
+# Step 5 (flux-git only): Install Gitea as the in-cluster Git server.
+#
+# Mirrors install_registry(): plain Deployment + NodePort Service in the
+# registry namespace, image pinned via .settings.yaml. Configuration is
+# entirely env-driven (GITEA__section__KEY), no app.ini templating:
+#   - INSTALL_LOCK=true skips the interactive setup wizard.
+#   - sqlite3 on an emptyDir — Gitea state is intentionally ephemeral;
+#     validate-scheduling.sh force-pushes each bundle, so nothing needs
+#     to survive a cluster rebuild.
+#   - ENABLE_PUSH_CREATE_USER=true means the first `git push` creates the
+#     repo — no per-recipe repo-creation API calls.
+#   - DEFAULT_PUSH_CREATE_PRIVATE=false makes pushed repos PUBLIC so Flux
+#     source-controller clones anonymously. The flux deployer's
+#     GitRepository template has no secretRef, so anonymous read access
+#     is a hard requirement of the lane, not a convenience.
+# -------------------------------------------------------------------
+install_gitea() {
+    local image="$1"
+
+    log_info "Installing in-cluster Gitea (${image}) in namespace ${REGISTRY_NAMESPACE}..."
+
+    # Namespace may not exist yet if install order ever changes; apply is
+    # idempotent either way.
+    kc apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${REGISTRY_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: aicr-registry
+    app.kubernetes.io/managed-by: install-infra.sh
+EOF
+
+    kc apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${GITEA_NAME}
+  namespace: ${REGISTRY_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: ${GITEA_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ${GITEA_NAME}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ${GITEA_NAME}
+    spec:
+      containers:
+        - name: ${GITEA_NAME}
+          image: ${image}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: ${GITEA_PORT}
+              protocol: TCP
+          env:
+            - name: GITEA__security__INSTALL_LOCK
+              value: "true"
+            - name: GITEA__database__DB_TYPE
+              value: "sqlite3"
+            - name: GITEA__server__HTTP_PORT
+              value: "${GITEA_PORT}"
+            - name: GITEA__server__ROOT_URL
+              value: "http://${GITEA_NAME}.${REGISTRY_NAMESPACE}.svc.cluster.local:${GITEA_PORT}/"
+            - name: GITEA__repository__ENABLE_PUSH_CREATE_USER
+              value: "true"
+            - name: GITEA__repository__DEFAULT_PUSH_CREATE_PRIVATE
+              value: "false"
+            - name: GITEA__service__DISABLE_REGISTRATION
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/gitea
+            - name: config
+              mountPath: /etc/gitea
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: config
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${GITEA_NAME}
+  namespace: ${REGISTRY_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: ${GITEA_NAME}
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: ${GITEA_NAME}
+  ports:
+    - name: http
+      port: ${GITEA_PORT}
+      targetPort: ${GITEA_PORT}
+      nodePort: ${GITEA_NODEPORT}
+      protocol: TCP
+EOF
+
+    log_info "Waiting for Gitea Deployment to become Ready (timeout 120s)..."
+    if ! kc rollout status deployment/"${GITEA_NAME}" \
+            -n "${REGISTRY_NAMESPACE}" --timeout=120s; then
+        log_error "Gitea Deployment did not become Ready within 120s"
+        dump_gitea_diagnostics
+        exit 70
+    fi
+
+    # Probe the host port that Kind maps to NodePort 30300. Same caveat as
+    # the registry probe: KWOK_GITEA_HOST_PORT only changes what this probe
+    # waits on, not Kind's actual port mapping (kwok/kind-config.yaml). A
+    # 60s hang here usually means the cluster predates the 3300 mapping and
+    # must be recreated.
+    log_info "Waiting for http://localhost:${GITEA_HOST_PORT}/api/healthz to respond (timeout 60s)..."
+    local waited=0
+    local interval=2
+    local reachable=0
+    while (( waited < 60 )); do
+        if curl -sf -o /dev/null --max-time 3 \
+                "http://localhost:${GITEA_HOST_PORT}/api/healthz"; then
+            log_info "Gitea reachable at http://localhost:${GITEA_HOST_PORT}/"
+            reachable=1
+            break
+        fi
+        sleep "${interval}"
+        waited=$(( waited + interval ))
+    done
+    if (( ! reachable )); then
+        log_error "Gitea not reachable on host port ${GITEA_HOST_PORT} within 60s"
+        log_error "If this cluster predates the 3300 port mapping, recreate it:"
+        log_error "  kind delete cluster --name <kwok-cluster-name>"
+        dump_gitea_diagnostics
+        log_error "--- node port-mapping sanity ---"
+        kc get nodes -o wide 2>&1 || true
+        exit 71
+    fi
+
+    # Bootstrap the admin user the lane pushes as. `gitea admin user create`
+    # is not idempotent, so treat "already exists" as success for re-runs.
+    log_info "Ensuring Gitea admin user '${GITEA_USER}' exists..."
+    local create_out
+    if create_out=$(kc exec -n "${REGISTRY_NAMESPACE}" "deploy/${GITEA_NAME}" -- \
+            gitea admin user create \
+                --admin \
+                --username "${GITEA_USER}" \
+                --password "${GITEA_PASSWORD}" \
+                --email "aicr@example.invalid" \
+                --must-change-password=false 2>&1); then
+        log_info "Gitea admin user '${GITEA_USER}' created"
+    elif grep -qi "already exists" <<<"${create_out}"; then
+        log_info "Gitea admin user '${GITEA_USER}' already exists — skipping"
+    else
+        log_error "Gitea admin user bootstrap failed:"
+        log_error "${create_out}"
+        dump_gitea_diagnostics
+        exit 72
+    fi
+
+    log_info "Gitea ready (push-to-create enabled, pushed repos are public)"
+}
+
+# -------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------
 main() {
@@ -563,6 +781,18 @@ main() {
             log_info "flux_version:          ${flux_version}"
             log_debug "Step 2 (flux): install Flux 2"
             install_flux "${flux_version}"
+            ;;
+        flux-git)
+            local flux_version gitea_image
+            flux_version=$(read_setting '.testing_tools.flux_version')
+            gitea_image=$(read_setting '.testing_tools.gitea_image')
+            log_info "flux_version:          ${flux_version}"
+            log_info "gitea_image:           ${gitea_image}"
+            log_info "gitea host port:       ${GITEA_HOST_PORT}"
+            log_debug "Step 2 (flux): install Flux 2"
+            install_flux "${flux_version}"
+            log_debug "Step 3 (flux-git): install Gitea"
+            install_gitea "${gitea_image}"
             ;;
         helm|"")
             log_info "DEPLOYER=${DEPLOYER:-helm}: skipping GitOps controller install"
