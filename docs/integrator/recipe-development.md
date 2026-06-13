@@ -310,7 +310,7 @@ constraints:
 | `K8s.server.version` | `1.32.4` |
 | `OS.release.ID` | `ubuntu`, `rhel` |
 | `OS.release.VERSION_ID` | `24.04` |
-| `GPU.smi.driver-version` | `580.82.07` |
+| `GPU.hardware.model` | `h100`, `l40s` |
 
 **Operators:** `>=`, `<=`, `>`, `<`, `==`, `!=`, or exact match (no operator)
 

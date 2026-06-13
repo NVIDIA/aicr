@@ -151,8 +151,10 @@ testing:
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
   gpu_operator_chart_version: 'v25.10.1'
-  # renovate: datasource=docker depName=nvcr.io/nvidia/cuda depType=testing
-  snapshot_agent_cuda_image: 'nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04'
+  # Base image for the CI smoke-test snapshot-agent image. The agent binary is
+  # static Go and detects GPUs driver-free via NFD/PCI, so it no longer needs a
+  # CUDA base / nvidia-smi. Matches ko's default static base for the aicr image.
+  snapshot_agent_base_image: 'cgr.dev/chainguard/static:latest'
 
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components

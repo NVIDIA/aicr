@@ -182,26 +182,28 @@ if [[ ! -f "$SNAPSHOT" ]]; then
   exit 1
 fi
 
-# Check: verify GPU driver version from snapshot
-DRIVER_VERSION=$(yq '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.name == "smi") | .data.driver_version' "$SNAPSHOT")
+# Check: verify the detected GPU SKU from the snapshot. GPU detection is
+# driver-free — the accelerator SKU is resolved from the PCI device ID and
+# recorded in the "hardware" subtype's "model" key.
+GPU_MODEL=$(yq '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.name == "hardware") | .data.model' "$SNAPSHOT")
 
-if [[ -z "$DRIVER_VERSION" ]]; then
-  echo "GPU driver version not found in snapshot" > /dev/termination-log
+if [[ -z "$GPU_MODEL" || "$GPU_MODEL" == "null" ]]; then
+  echo "GPU SKU not found in snapshot" > /dev/termination-log
   exit 1
 fi
 
-REQUIRED="550.90"
+# Allowed accelerators for this workload.
+ALLOWED="h100 h200 b200"
 
 # Evidence to stdout
-echo "GPU driver version: $DRIVER_VERSION"
-echo "Required minimum:   $REQUIRED"
+echo "Detected GPU SKU: $GPU_MODEL"
+echo "Allowed:          $ALLOWED"
 
-# Compare versions
-if printf '%s\n%s' "$REQUIRED" "$DRIVER_VERSION" | sort -V | head -1 | grep -qx "$REQUIRED"; then
-  echo "PASS: driver version meets requirement"
+if grep -qw "$GPU_MODEL" <<<"$ALLOWED"; then
+  echo "PASS: $GPU_MODEL is an allowed accelerator"
   exit 0
 else
-  MSG="FAIL: driver $DRIVER_VERSION < required $REQUIRED"
+  MSG="FAIL: $GPU_MODEL is not in allowed set ($ALLOWED)"
   echo "$MSG"
   echo "$MSG" > /dev/termination-log
   exit 1
