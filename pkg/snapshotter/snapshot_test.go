@@ -136,8 +136,11 @@ func TestNodeSnapshotter_PopulatesFingerprint(t *testing.T) {
 				Set("provider", measurement.Str("eks"))).
 			Build(),
 		gpuMeasurement: measurement.NewMeasurement(measurement.TypeGPU).
-			WithSubtypeBuilder(measurement.NewSubtypeBuilder("smi").
-				Set("gpu.model", measurement.Str("NVIDIA H100 80GB HBM3"))).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("hardware").
+				Set("gpu-present", measurement.Bool(true)).
+				Set("gpu-count", measurement.Int(8)).
+				Set("detection-source", measurement.Str("nfd")).
+				Set("model", measurement.Str("h100"))).
 			Build(),
 		osMeasurement: measurement.NewMeasurement(measurement.TypeOS).
 			WithSubtypeBuilder(measurement.NewSubtypeBuilder("release").

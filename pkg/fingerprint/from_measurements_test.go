@@ -39,20 +39,9 @@ func k8sMeasurement(version, provider string) *measurement.Measurement {
 	return b.Build()
 }
 
-// gpuMeasurement builds a TypeGPU measurement with the given smi
-// gpu.model value.
-func gpuMeasurement(model string) *measurement.Measurement {
-	return measurement.NewMeasurement(measurement.TypeGPU).
-		WithSubtypeBuilder(
-			measurement.NewSubtypeBuilder("smi").
-				Set("gpu.model", measurement.Str(model)),
-		).
-		Build()
-}
-
 // gpuHardwareMeasurement builds a TypeGPU measurement with a "hardware"
-// subtype carrying a PCI-derived SKU and a zero-GPU "smi" subtype (mirrors a
-// node where nvidia-smi is absent but NFD/PCI enumeration succeeded).
+// subtype carrying a PCI-derived SKU (the only GPU subtype after the SMI
+// collector was removed).
 func gpuHardwareMeasurement(sku string) *measurement.Measurement {
 	hw := measurement.NewSubtypeBuilder("hardware").
 		Set("gpu-present", measurement.Bool(true)).
@@ -63,7 +52,6 @@ func gpuHardwareMeasurement(sku string) *measurement.Measurement {
 	}
 	return measurement.NewMeasurement(measurement.TypeGPU).
 		WithSubtypeBuilder(hw).
-		WithSubtypeBuilder(measurement.NewSubtypeBuilder("smi").Set("gpu-count", measurement.Int(0))).
 		Build()
 }
 
@@ -105,21 +93,6 @@ func TestFromMeasurements_PCIBackfill(t *testing.T) {
 		}
 		if got.GPUModel.Value != "h100" {
 			t.Errorf("GPUModel.Value = %q, want %q (PCI discovery independent of label)", got.GPUModel.Value, "h100")
-		}
-	})
-
-	t.Run("nvidia-smi takes precedence over PCI for Accelerator", func(t *testing.T) {
-		m := measurement.NewMeasurement(measurement.TypeGPU).
-			WithSubtypeBuilder(measurement.NewSubtypeBuilder("hardware").
-				Set("gpu-present", measurement.Bool(true)).
-				Set("gpu-count", measurement.Int(1)).
-				Set("model", measurement.Str("h100"))).
-			WithSubtypeBuilder(measurement.NewSubtypeBuilder("smi").
-				Set("gpu.model", measurement.Str("NVIDIA L40"))).
-			Build()
-		got := FromMeasurements([]*measurement.Measurement{m})
-		if got.Accelerator.Value != "l40" || got.Accelerator.Source != sourceAcceleratorSMI {
-			t.Errorf("Accelerator = %+v, want value l40 from smi source", got.Accelerator)
 		}
 	})
 }
@@ -171,7 +144,7 @@ func TestFromMeasurements_Empty(t *testing.T) {
 func TestFromMeasurements_FullSnapshot(t *testing.T) {
 	got := FromMeasurements([]*measurement.Measurement{
 		k8sMeasurement("v1.33.4", "eks"),
-		gpuMeasurement("NVIDIA H100 80GB HBM3"),
+		gpuHardwareMeasurement("h100"),
 		osMeasurement("ubuntu", "22.04"),
 		topologyMeasurement(12, map[string]string{
 			"topology.kubernetes.io/region": "us-west-2|node1,node2",
@@ -264,22 +237,19 @@ func TestFromMeasurements_GPUNodeCount(t *testing.T) {
 func TestFromMeasurements_AcceleratorReconciliation(t *testing.T) {
 	tests := []struct {
 		name      string
-		smiModel  string
 		labels    map[string]string
 		wantValue string
 		wantNote  string
 	}{
 		{
-			name:     "homogeneous: smi + matching single topology label",
-			smiModel: "NVIDIA H100 80GB HBM3",
+			name: "homogeneous: single topology label resolves SKU",
 			labels: map[string]string{
 				"nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3|node1,node2",
 			},
 			wantValue: "h100",
 		},
 		{
-			name:     "heterogeneous: topology disambiguated keys override smi",
-			smiModel: "NVIDIA H100 80GB HBM3",
+			name: "heterogeneous: disambiguated keys record multi-gpu",
 			labels: map[string]string{
 				"nvidia.com/gpu.product.NVIDIA-H100-80GB-HBM3": "NVIDIA-H100-80GB-HBM3|node1",
 				"nvidia.com/gpu.product.NVIDIA-L40":            "NVIDIA-L40|node2",
@@ -288,33 +258,21 @@ func TestFromMeasurements_AcceleratorReconciliation(t *testing.T) {
 			wantNote:  "multi-gpu",
 		},
 		{
-			name:     "smi empty, single topology label backfills accelerator",
-			smiModel: "",
+			name: "single topology label backfills accelerator",
 			labels: map[string]string{
 				"nvidia.com/gpu.product": "NVIDIA-GB200|node1,node2",
 			},
 			wantValue: "gb200",
 		},
 		{
-			name:      "no topology labels: smi result preserved",
-			smiModel:  "NVIDIA H100 80GB HBM3",
-			labels:    nil,
-			wantValue: "h100",
-		},
-		{
-			name:      "no GPU anywhere: empty accelerator",
-			smiModel:  "",
+			name:      "no GPU label: empty accelerator",
 			labels:    map[string]string{"kubernetes.io/arch": "amd64|node1"},
 			wantValue: "",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ms := []*measurement.Measurement{topologyMeasurement(2, tt.labels)}
-			if tt.smiModel != "" {
-				ms = append(ms, gpuMeasurement(tt.smiModel))
-			}
-			got := FromMeasurements(ms)
+			got := FromMeasurements([]*measurement.Measurement{topologyMeasurement(2, tt.labels)})
 			if got.Accelerator.Value != tt.wantValue {
 				t.Errorf("Accelerator.Value = %q, want %q", got.Accelerator.Value, tt.wantValue)
 			}
@@ -447,27 +405,17 @@ func TestFromMeasurements_NilMeasurement(t *testing.T) {
 	}
 }
 
-func TestFromMeasurements_GPUUnknownModel(t *testing.T) {
-	got := FromMeasurements([]*measurement.Measurement{gpuMeasurement("NVIDIA T4")})
-	if got.Accelerator.Value != "" {
-		t.Errorf("expected empty Accelerator for unrecognized model, got %q", got.Accelerator.Value)
-	}
-	if got.Accelerator.Note != "unknown-sku" {
-		t.Errorf("expected Accelerator.Note=unknown-sku for unrecognized model, got %q", got.Accelerator.Note)
-	}
-	if got.Accelerator.Source != "gpu.smi.gpu.model" {
-		t.Errorf("expected smi source, got %q", got.Accelerator.Source)
-	}
-}
-
 func TestFromMeasurements_GPUMissingSubtype(t *testing.T) {
 	gpu := measurement.NewMeasurement(measurement.TypeGPU).Build()
 	got := FromMeasurements([]*measurement.Measurement{gpu})
 	if got.Accelerator.Value != "" {
-		t.Errorf("expected empty Accelerator when smi subtype missing, got %q", got.Accelerator.Value)
+		t.Errorf("expected empty Accelerator when hardware subtype missing, got %q", got.Accelerator.Value)
 	}
 	if got.Accelerator.Note != "" {
 		t.Errorf("expected empty Accelerator.Note when no GPU signal exists, got %q", got.Accelerator.Note)
+	}
+	if got.GPUModel.Value != "" {
+		t.Errorf("expected empty GPUModel when hardware subtype missing, got %q", got.GPUModel.Value)
 	}
 }
 
@@ -493,23 +441,22 @@ func TestFromMeasurements_GPUUnknownModelFromTopology(t *testing.T) {
 	}
 }
 
-// TestFromMeasurements_SMIUnknownPlusTopologyRecognized covers the
-// reconcile path where smi reported an unrecognized product (note:
-// unknown-sku, value empty) but the topology label resolves to a
-// known SKU. Topology is the more authoritative cluster-wide signal
-// and must win — Value gets backfilled and the unknown-sku note is
-// cleared so reviewers see the resolved SKU, not the stale signal.
-func TestFromMeasurements_SMIUnknownPlusTopologyRecognized(t *testing.T) {
+// TestFromMeasurements_LabelRecognizedWithUnknownPCI covers a node whose GPU
+// "hardware" subtype reports a SKU outside the recipe enum (so it cannot
+// backfill the matching dimension) while the GPU-operator label resolves to a
+// supported SKU. The label is primary and must win for Accelerator; the PCI
+// SKU still surfaces descriptively via GPUModel.
+func TestFromMeasurements_LabelRecognizedWithUnknownPCI(t *testing.T) {
 	got := FromMeasurements([]*measurement.Measurement{
-		gpuMeasurement("NVIDIA T4"), // smi: unrecognized
+		gpuHardwareMeasurement("l40s"), // PCI: unsupported-for-matching SKU
 		topologyMeasurement(1, map[string]string{
 			"nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3|node1",
 		}),
 	})
-	if got.Accelerator.Value != "h100" {
-		t.Errorf("expected topology to backfill h100, got %q", got.Accelerator.Value)
+	if got.Accelerator.Value != "h100" || got.Accelerator.Source != "nodeTopology.label.nvidia.com/gpu.product" {
+		t.Errorf("Accelerator = %+v, want h100 from label (primary)", got.Accelerator)
 	}
-	if got.Accelerator.Note != "" {
-		t.Errorf("expected unknown-sku note cleared after topology recognized SKU, got %q", got.Accelerator.Note)
+	if got.GPUModel.Value != "l40s" {
+		t.Errorf("GPUModel.Value = %q, want l40s (PCI discovery)", got.GPUModel.Value)
 	}
 }
