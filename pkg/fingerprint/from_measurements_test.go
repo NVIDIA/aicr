@@ -50,6 +50,80 @@ func gpuMeasurement(model string) *measurement.Measurement {
 		Build()
 }
 
+// gpuHardwareMeasurement builds a TypeGPU measurement with a "hardware"
+// subtype carrying a PCI-derived SKU and a zero-GPU "smi" subtype (mirrors a
+// node where nvidia-smi is absent but NFD/PCI enumeration succeeded).
+func gpuHardwareMeasurement(sku string) *measurement.Measurement {
+	hw := measurement.NewSubtypeBuilder("hardware").
+		Set("gpu-present", measurement.Bool(true)).
+		Set("gpu-count", measurement.Int(1)).
+		Set("detection-source", measurement.Str("nfd"))
+	if sku != "" {
+		hw = hw.Set("model", measurement.Str(sku))
+	}
+	return measurement.NewMeasurement(measurement.TypeGPU).
+		WithSubtypeBuilder(hw).
+		WithSubtypeBuilder(measurement.NewSubtypeBuilder("smi").Set("gpu-count", measurement.Int(0))).
+		Build()
+}
+
+func TestFromMeasurements_PCIBackfill(t *testing.T) {
+	t.Run("supported SKU backfills Accelerator and GPUModel when nvidia-smi absent and no label", func(t *testing.T) {
+		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("h100")})
+		if got.Accelerator.Value != "h100" || got.Accelerator.Source != sourceAcceleratorPCI {
+			t.Errorf("Accelerator = %+v, want value h100 from PCI", got.Accelerator)
+		}
+		if got.GPUModel.Value != "h100" {
+			t.Errorf("GPUModel.Value = %q, want %q", got.GPUModel.Value, "h100")
+		}
+	})
+
+	t.Run("unsupported SKU populates GPUModel only, never the matching Accelerator", func(t *testing.T) {
+		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("l40s")})
+		if got.Accelerator.Value != "" {
+			t.Errorf("Accelerator.Value = %q, want empty (l40s is not a recipe-supported enum)", got.Accelerator.Value)
+		}
+		if got.GPUModel.Value != "l40s" || got.GPUModel.Source != sourceAcceleratorPCI {
+			t.Errorf("GPUModel = %+v, want value l40s from PCI", got.GPUModel)
+		}
+	})
+
+	t.Run("no PCI SKU leaves both empty", func(t *testing.T) {
+		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("")})
+		if got.Accelerator.Value != "" || got.GPUModel.Value != "" {
+			t.Errorf("Accelerator=%+v GPUModel=%+v, want both empty", got.Accelerator, got.GPUModel)
+		}
+	})
+
+	t.Run("GFD label takes precedence over PCI for Accelerator; GPUModel still from PCI", func(t *testing.T) {
+		got := FromMeasurements([]*measurement.Measurement{
+			gpuHardwareMeasurement("h100"),
+			topologyMeasurement(1, map[string]string{"nvidia.com/gpu.product": "NVIDIA L40"}),
+		})
+		if got.Accelerator.Value != "l40" || got.Accelerator.Source != sourceTopologyGPU {
+			t.Errorf("Accelerator = %+v, want l40 from label (primary)", got.Accelerator)
+		}
+		if got.GPUModel.Value != "h100" {
+			t.Errorf("GPUModel.Value = %q, want %q (PCI discovery independent of label)", got.GPUModel.Value, "h100")
+		}
+	})
+
+	t.Run("nvidia-smi takes precedence over PCI for Accelerator", func(t *testing.T) {
+		m := measurement.NewMeasurement(measurement.TypeGPU).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("hardware").
+				Set("gpu-present", measurement.Bool(true)).
+				Set("gpu-count", measurement.Int(1)).
+				Set("model", measurement.Str("h100"))).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("smi").
+				Set("gpu.model", measurement.Str("NVIDIA L40"))).
+			Build()
+		got := FromMeasurements([]*measurement.Measurement{m})
+		if got.Accelerator.Value != "l40" || got.Accelerator.Source != sourceAcceleratorSMI {
+			t.Errorf("Accelerator = %+v, want value l40 from smi source", got.Accelerator)
+		}
+	})
+}
+
 // osMeasurement builds a TypeOS measurement with the given /etc/os-release
 // ID and VERSION_ID values.
 func osMeasurement(id, versionID string) *measurement.Measurement {

@@ -133,14 +133,20 @@ func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 
 // hardwareSubtype converts HardwareInfo into a measurement subtype.
 func hardwareSubtype(info *HardwareInfo) measurement.Subtype {
+	data := map[string]measurement.Reading{
+		measurement.KeyGPUPresent:         measurement.Bool(info.GPUPresent),
+		measurement.KeyGPUCount:           measurement.Int(info.GPUCount),
+		measurement.KeyGPUDriverLoaded:    measurement.Bool(info.DriverLoaded),
+		measurement.KeyGPUDetectionSource: measurement.Str(info.DetectionSource),
+	}
+	// Only emit the model when the device ID resolved to a known SKU; an
+	// empty value would otherwise read as "detected but blank."
+	if info.SKU != "" {
+		data[measurement.KeyGPUModel] = measurement.Str(info.SKU)
+	}
 	return measurement.Subtype{
 		Name: subtypeHardware,
-		Data: map[string]measurement.Reading{
-			measurement.KeyGPUPresent:         measurement.Bool(info.GPUPresent),
-			measurement.KeyGPUCount:           measurement.Int(info.GPUCount),
-			measurement.KeyGPUDriverLoaded:    measurement.Bool(info.DriverLoaded),
-			measurement.KeyGPUDetectionSource: measurement.Str(info.DetectionSource),
-		},
+		Data: data,
 	}
 }
 

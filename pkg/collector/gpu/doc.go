@@ -21,8 +21,9 @@
 // separate measurement subtype:
 //
 //	Phase 1 ("hardware"): NFD-based PCI enumeration — detects NVIDIA GPUs
-//	    via sysfs PCI device scan and checks nvidia kernel module state.
-//	    No GPU drivers required. Requires Linux with sysfs mounted.
+//	    via sysfs PCI device scan, resolves the accelerator SKU from the PCI
+//	    device ID, and checks nvidia kernel module state. No GPU drivers
+//	    required. Requires Linux with sysfs mounted.
 //
 //	Phase 2 ("smi"): nvidia-smi XML query — collects driver version, CUDA
 //	    version, per-GPU hardware specs, and runtime settings. Requires
@@ -51,7 +52,7 @@
 //	Measurement{
 //	    Type: "GPU",
 //	    Subtypes: [
-//	        {Name: "hardware", Data: {gpu-present, gpu-count, driver-loaded, detection-source}},
+//	        {Name: "hardware", Data: {gpu-present, gpu-count, driver-loaded, detection-source, model}},
 //	        {Name: "smi",      Data: {gpu-count, driver, cuda-version, gpu.model, ...}},
 //	    ],
 //	}

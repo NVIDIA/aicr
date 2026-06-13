@@ -15,9 +15,11 @@
 package fingerprint
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 )
 
@@ -28,17 +30,20 @@ const (
 	subtypeK8sServer        = "server"
 	subtypeK8sNode          = "node"
 	subtypeGPUSMI           = "smi"
+	subtypeGPUHardware      = "hardware"
 	subtypeOSRelease        = "release"
 	subtypeTopologySummary  = "summary"
 	subtypeTopologyLabel    = "label"
 	keyK8sNodeProvider      = "provider"
 	keyGPUSMIModel          = "gpu.model"
+	keyGPUHardwareSKU       = "model"
 	keyOSReleaseID          = "ID"
 	keyOSReleaseVersionID   = "VERSION_ID"
 	keyTopologyNodeCount    = "node-count"
 	labelKeyRegion          = "topology.kubernetes.io/region"
 	sourceServiceProvider   = "k8s.node.provider"
 	sourceAcceleratorSMI    = "gpu.smi.gpu.model"
+	sourceAcceleratorPCI    = "gpu.hardware.model"
 	sourceOSRelease         = "os.release"
 	sourceK8sServerVersion  = "k8s.server.version"
 	sourceTopologyNodeCount = "nodeTopology.summary.node-count"
@@ -57,7 +62,7 @@ const (
 // missing fingerprint values as "unknown" rather than "mismatched."
 func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 	fp := &Fingerprint{}
-	var topo *measurement.Measurement
+	var topo, gpu *measurement.Measurement
 	for _, m := range measurements {
 		if m == nil {
 			continue
@@ -67,6 +72,7 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 			populateFromK8s(fp, m)
 		case measurement.TypeGPU:
 			populateFromGPU(fp, m)
+			gpu = m
 		case measurement.TypeOS:
 			populateFromOS(fp, m)
 		case measurement.TypeNodeTopology:
@@ -80,7 +86,42 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 	if topo != nil {
 		reconcileAccelerator(fp, topo)
 	}
+	if gpu != nil {
+		populatePCIDiscovery(fp, gpu)
+	}
 	return fp
+}
+
+// populatePCIDiscovery records the PCI device-ID–derived SKU from the GPU
+// "hardware" subtype. The descriptive SKU always populates GPUModel (the
+// real hardware, supported or not). The matching Accelerator dimension is
+// only backfilled when (a) no higher-priority source already resolved it,
+// (b) the node is not heterogeneous, and (c) the SKU is a recipe-supported
+// accelerator — so a driver-less, unlabeled node still matches recipes for
+// supported GPUs without ever placing an unsupported SKU in the matching
+// dimension (which would skew Fingerprint.Match / ToCriteria).
+func populatePCIDiscovery(fp *Fingerprint, gpu *measurement.Measurement) {
+	st := gpu.GetSubtype(subtypeGPUHardware)
+	if st == nil {
+		return
+	}
+	sku, err := st.GetString(keyGPUHardwareSKU)
+	if err != nil || sku == "" {
+		return
+	}
+	fp.GPUModel = Dimension{Value: sku, Source: sourceAcceleratorPCI}
+
+	if fp.Accelerator.Value == "" && fp.Accelerator.Note != noteMultiGPU && isSupportedAccelerator(sku) {
+		fp.Accelerator = Dimension{Value: sku, Source: sourceAcceleratorPCI}
+	}
+}
+
+// isSupportedAccelerator reports whether sku is in the static OSS
+// recipe-accelerator enum. Used to gate the PCI backfill of the matching
+// Accelerator dimension; descriptive SKUs outside the enum still surface via
+// GPUModel.
+func isSupportedAccelerator(sku string) bool {
+	return slices.Contains(recipe.GetCriteriaAcceleratorTypes(), sku)
 }
 
 // reconcileAccelerator cross-references the per-node smi reading with
