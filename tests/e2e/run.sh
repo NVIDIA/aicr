@@ -449,10 +449,12 @@ test_snapshot() {
 
   # Extract and display GPU info from the driver-free "hardware" subtype
   # (the SMI subtype was removed; model is the PCI-derived accelerator SKU).
+  # Scope extraction to the GPU "hardware" subtype so a "model" key elsewhere in
+  # the snapshot can't be misread as the GPU SKU.
   local gpu_name gpu_count driver_loaded
-  gpu_name=$(echo "$snapshot_data" | grep -E "^\s*model:" | head -1 | sed 's/.*model: //' || echo "unknown")
-  gpu_count=$(echo "$snapshot_data" | grep "gpu-count:" | head -1 | sed 's/.*gpu-count: //' || echo "0")
-  driver_loaded=$(echo "$snapshot_data" | grep "driver-loaded:" | head -1 | sed 's/.*driver-loaded: //' || echo "unknown")
+  gpu_name=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data.model // "unknown"' - | head -1)
+  gpu_count=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["gpu-count"] // 0' - | head -1)
+  driver_loaded=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["driver-loaded"] // "unknown"' - | head -1)
 
   if [ -n "$gpu_name" ] && [ "$gpu_name" != "unknown" ]; then
     detail "GPU SKU: ${gpu_name}"

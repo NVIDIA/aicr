@@ -27,7 +27,7 @@ if ! [[ "${GPU_COUNT}" =~ ^[0-9]+$ ]]; then
   echo "::error::Expected numeric gpu-count in snapshot, got: ${GPU_COUNT}"
   exit 1
 fi
-if [[ "${GPU_MODEL,,}" != *"${EXPECTED_GPU_MODEL,,}"* ]]; then
+if [[ "${GPU_MODEL,,}" != "${EXPECTED_GPU_MODEL,,}" ]]; then
   echo "::error::Expected ${EXPECTED_GPU_MODEL} GPU in snapshot, got: ${GPU_MODEL}"
   exit 1
 fi
