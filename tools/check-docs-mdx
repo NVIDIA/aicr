@@ -9,9 +9,10 @@
 # common violations before they reach CI or break versioned doc snapshots.
 #
 # Scope: docs/user/, docs/integrator/, and docs/contributor/ (all published
-# to Fern). container-images.md and recipe-health.md carry auto-generated
-# HTML comment splice markers that VitePress still needs; both are excluded
-# until VitePress is removed (see EXCLUDE_NAMES below).
+# to Fern). container-images.md carries auto-generated HTML comment splice
+# markers that VitePress still needs and is not published to Fern, so it is
+# excluded (see EXCLUDE_NAMES below). recipe-health.md IS published to Fern
+# and uses MDX-safe {/* ... */} comment markers, so it is checked.
 # Override with positional args for frozen version content.
 #
 # Checks:
@@ -28,10 +29,11 @@ set -euo pipefail
 
 ERRORS=0
 SEARCH_DIRS=("docs/user/" "docs/integrator/" "docs/contributor/")
-# Docs with auto-generated HTML-comment splice markers that VitePress still
-# needs (excluded until VitePress is removed): the BOM inventory and the
-# recipe-health matrix, both spliced by `make *-docs` between marker comments.
-EXCLUDE_NAMES=("container-images.md" "recipe-health.md")
+# Docs excluded from the MDX scan: container-images.md carries auto-generated
+# HTML-comment splice markers that VitePress still needs and is not published
+# to Fern. (recipe-health.md is intentionally NOT excluded — it is Fern-
+# published and uses MDX-safe {/* ... */} markers.)
+EXCLUDE_NAMES=("container-images.md")
 EXCLUDE_ARGS=()
 for name in "${EXCLUDE_NAMES[@]}"; do
   EXCLUDE_ARGS+=(! -name "${name}")
@@ -66,16 +68,45 @@ done
 for dir in "${SEARCH_DIRS[@]}"; do
   while IFS= read -r file; do
     [[ -z "${file}" ]] && continue
-    awk '
+    # awk exits 1 when it finds a hazard; keep it inside the `if` condition so
+    # `set -e` does not abort the whole scan at the first offending file
+    # (otherwise violations in later files are silently skipped).
+    if ! awk '
       /^```/ { in_fence = !in_fence; next }
       in_fence { next }
       {
-        # Strip inline code spans so backticked tokens don'\''t trigger.
         line = $0
+        # Strip inline code spans FIRST so backticked tokens — including a
+        # backticked `{/*` or `*/}` — never trip the MDX-comment detection
+        # below (or any later check). Doing this before the comment scan
+        # prevents a backticked, unterminated `{/*` from opening a bogus
+        # multi-line region that swallows real hazards on following lines.
         gsub(/`[^`]*`/, "", line)
-        # Strip backslash-escaped angle brackets (\<word\>) — these are
-        # valid markdown escapes and MDX-safe.
-        gsub(/\\<[^>]*\\>/, "", line)
+        # MDX comments {/* ... */} are valid (and used for license headers
+        # and the auto-generated splice markers in recipe-health.md). Treat
+        # them like code: continue an open multi-line comment, strip
+        # single-line ones, and open a region for an unterminated {/*.
+        if (in_mdx_comment) {
+          ci = index(line, "*/}")
+          if (ci > 0) { line = substr(line, ci + 3); in_mdx_comment = 0 }
+          else { next }
+        }
+        # Strip MDX comments one {/* ... */} segment at a time. A greedy
+        # match would span from the first {/* to the last */} and delete a
+        # real hazard sitting between two separate comments on one line
+        # (e.g. `{/* a */} <30 s {/* b */}`), letting it evade the checks
+        # below. An unterminated {/* opens a multi-line region.
+        while (match(line, /\{\/\*/)) {
+          cstart = RSTART
+          rest = substr(line, cstart)
+          ci = index(rest, "*/}")
+          if (ci > 0) { line = substr(line, 1, cstart - 1) substr(rest, ci + 3) }
+          else { line = substr(line, 1, cstart - 1); in_mdx_comment = 1; break }
+        }
+        # Strip backslash-escaped angle brackets (\<word\>, or a lone \<) —
+        # these are valid markdown escapes and MDX-safe.
+        gsub(/\\</, "", line)
+        gsub(/\\>/, "", line)
       }
       # Bare { not preceded by backslash escape. The leading
       # (^|[^\\]) form catches { in column 1 as well.
@@ -93,16 +124,16 @@ for dir in "${SEARCH_DIRS[@]}"; do
         printf "MDX: autolink outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
-      # Bare angle-bracket placeholders: <word> that are not void HTML
-      # elements (check 1) or autolinks (check 4). MDX interprets these
-      # as JSX component tags.
-      line ~ /<[a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
+      # Bare angle-bracket placeholders: <word> or <digit> (e.g. <30 s,
+      # <13%) that are not void HTML elements (check 1) or autolinks
+      # (check 4). MDX interprets a `<` followed by a name-start character
+      # as a JSX tag and chokes on what follows.
+      line ~ /<[0-9a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
         printf "MDX: bare <word> tag outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
       END { exit (errors > 0) ? 1 : 0 }
-    ' "$file" 2>/dev/null
-    if [[ $? -ne 0 ]]; then
+    ' "$file" 2>/dev/null; then
       ERRORS=$((ERRORS + 1))
     fi
   done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)

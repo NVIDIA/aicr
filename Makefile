@@ -137,7 +137,7 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
 .PHONY: check-docs-mdx
-check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments)
+check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
 
 .PHONY: lint-go
