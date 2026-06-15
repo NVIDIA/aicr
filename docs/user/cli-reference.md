@@ -235,7 +235,7 @@ The `--template` flag enables custom output formatting using Go templates with [
 .Measurements   # Array of Measurement objects
   .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology)
   .Subtypes     # Array of Subtype objects
-    .Name       # Subtype name (e.g., "server", "smi", "grub")
+    .Name       # Subtype name (e.g., "server", "hardware", "grub")
     .Data       # Map of readings (key -> Reading with .String method)
 
 # NodeTopology measurement type has subtypes: summary, taint, label
@@ -248,8 +248,8 @@ Example template extracting key cluster info:
 cluster:
   kubernetes: {{ with index .Measurements 0 }}{{ range .Subtypes }}{{ if eq .Name "server" }}
     version: {{ (index .Data "version").String }}{{ end }}{{ end }}{{ end }}
-  gpu: {{ range .Measurements }}{{ if eq .Type.String "GPU" }}{{ range .Subtypes }}{{ if eq .Name "smi" }}
-    model: {{ (index .Data "gpu.model").String }}
+  gpu: {{ range .Measurements }}{{ if eq .Type.String "GPU" }}{{ range .Subtypes }}{{ if eq .Name "hardware" }}
+    model: {{ (index .Data "model").String }}
     count: {{ (index .Data "gpu-count").String }}{{ end }}{{ end }}{{ end }}{{ end }}
 ```
 

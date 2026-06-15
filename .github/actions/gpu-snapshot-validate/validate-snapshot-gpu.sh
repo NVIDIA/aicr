@@ -15,16 +15,19 @@
 
 set -euo pipefail
 
-# Query by subtype field (not index) — #502 added a "hardware" subtype before "smi".
-GPU_MODEL=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "smi") | .data["gpu.model"]' snapshot.yaml)
-GPU_COUNT=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "smi") | .data["gpu-count"]' snapshot.yaml)
+# GPU detection is driver-free: presence/count and the accelerator SKU come
+# from the NFD/PCI "hardware" subtype (the "smi" subtype was removed). The
+# model is a normalized lowercase SKU token (e.g. "h100", "l40g"), so the
+# model comparison is case-insensitive against the expected value.
+GPU_MODEL=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data.model' snapshot.yaml)
+GPU_COUNT=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["gpu-count"]' snapshot.yaml)
 echo "GPU model: ${GPU_MODEL}"
 echo "GPU count: ${GPU_COUNT}"
 if ! [[ "${GPU_COUNT}" =~ ^[0-9]+$ ]]; then
   echo "::error::Expected numeric gpu-count in snapshot, got: ${GPU_COUNT}"
   exit 1
 fi
-if [[ "${GPU_MODEL}" != *"${EXPECTED_GPU_MODEL}"* ]]; then
+if [[ "${GPU_MODEL,,}" != "${EXPECTED_GPU_MODEL,,}" ]]; then
   echo "::error::Expected ${EXPECTED_GPU_MODEL} GPU in snapshot, got: ${GPU_MODEL}"
   exit 1
 fi

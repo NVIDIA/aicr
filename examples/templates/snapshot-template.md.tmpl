@@ -3,7 +3,7 @@
 {{- /* Extract data from measurements */ -}}
 {{- $k8sServer := dict }}
 {{- $k8sNode := dict }}
-{{- $gpuSmi := dict }}
+{{- $gpuHardware := dict }}
 {{- $osGrub := dict }}
 {{- $k8sImages := dict }}
 {{- $k8sPolicy := dict }}
@@ -18,7 +18,7 @@
   {{- end }}
   {{- if eq .Type.String "GPU" }}
     {{- range .Subtypes }}
-      {{- if eq .Name "smi" }}{{ $gpuSmi = .Data }}{{ end }}
+      {{- if eq .Name "hardware" }}{{ $gpuHardware = .Data }}{{ end }}
     {{- end }}
   {{- end }}
   {{- if eq .Type.String "OS" }}
@@ -46,13 +46,11 @@
 
 | Property | Value |
 |----------|-------|
-| **Model** | {{ if index $gpuSmi "gpu.model" }}{{ (index $gpuSmi "gpu.model").String }}{{ else }}_unknown_{{ end }} |
-| **Architecture** | {{ if index $gpuSmi "gpu.product-architecture" }}{{ (index $gpuSmi "gpu.product-architecture").String }}{{ else }}_unknown_{{ end }} |
-| **GPU Count** | {{ if index $gpuSmi "gpu-count" }}{{ (index $gpuSmi "gpu-count").String }}{{ else }}0{{ end }} |
-| **Driver Version** | {{ if index $gpuSmi "driver" }}{{ (index $gpuSmi "driver").String }}{{ else }}_unknown_{{ end }} |
-| **CUDA Version** | {{ if index $gpuSmi "cuda-version" }}{{ (index $gpuSmi "cuda-version").String }}{{ else }}_unknown_{{ end }} |
-| **Persistence Mode** | {{ if index $gpuSmi "gpu.persistence-mode" }}{{ (index $gpuSmi "gpu.persistence-mode").String }}{{ else }}_unknown_{{ end }} |
-| **Addressing Mode** | {{ if index $gpuSmi "gpu.addressing-mode" }}{{ (index $gpuSmi "gpu.addressing-mode").String }}{{ else }}_unknown_{{ end }} |
+| **Model (SKU)** | {{ if index $gpuHardware "model" }}{{ (index $gpuHardware "model").String }}{{ else }}_unknown_{{ end }} |
+| **GPU Present** | {{ if index $gpuHardware "gpu-present" }}{{ (index $gpuHardware "gpu-present").String }}{{ else }}_unknown_{{ end }} |
+| **GPU Count** | {{ if index $gpuHardware "gpu-count" }}{{ (index $gpuHardware "gpu-count").String }}{{ else }}0{{ end }} |
+| **Driver Loaded** | {{ if index $gpuHardware "driver-loaded" }}{{ (index $gpuHardware "driver-loaded").String }}{{ else }}_unknown_{{ end }} |
+| **Detection Source** | {{ if index $gpuHardware "detection-source" }}{{ (index $gpuHardware "detection-source").String }}{{ else }}_unknown_{{ end }} |
 
 ## Boot Configuration
 

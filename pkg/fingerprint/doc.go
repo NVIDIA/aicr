@@ -23,7 +23,7 @@
 // server version, region, total node count, and GPU node count. Each
 // dimension records the resolved value plus an optional source string
 // identifying which collector signal produced it (e.g.,
-// "k8s.node.provider", "gpu.smi.gpu.model").
+// "k8s.node.provider", "gpu.hardware.model").
 //
 // FromMeasurements builds a Fingerprint from a snapshot's measurement
 // slice without taking a dependency on pkg/snapshotter, so the
