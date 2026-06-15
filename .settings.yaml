@@ -122,6 +122,11 @@ testing_tools:
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
   flux_version: 'v2.8.8'
+  # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
+  # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
+  # admin user create` directly without su gymnastics.
+  # renovate: datasource=docker depName=gitea/gitea depType=testing_tools
+  gitea_image: 'gitea/gitea:1.26.2-rootless'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v1.4.3'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools

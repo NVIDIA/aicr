@@ -20,7 +20,7 @@ inputs:
     description: 'Recipe name to test'
     required: true
   deployer:
-    description: 'Deployer to exercise: helm | argocd-oci | argocd-helm-oci | flux-oci'
+    description: 'Deployer to exercise: helm | argocd-oci | argocd-helm-oci | flux-oci | flux-git'
     required: false
     default: 'helm'
   go_version:
@@ -50,7 +50,7 @@ inputs:
     required: false
     default: 'v4.52.4'
   flux_version:
-    description: 'Flux CLI version to install (required for flux-oci deployer)'
+    description: 'Flux CLI version to install (required for the flux-oci and flux-git deployers)'
     required: false
     default: ''
   chainsaw_version:
@@ -111,7 +111,7 @@ runs:
         flux_version: '${{ inputs.flux_version }}'
         install_goreleaser: 'true'
         goreleaser_version: '${{ inputs.goreleaser_version }}'
-        # chainsaw drives the argocd-* / flux-oci sync gates from
+        # chainsaw drives the argocd-* / flux-* sync gates from
         # kwok/scripts/validate-scheduling.sh (issue #962 migration).
         install_chainsaw: 'true'
         chainsaw_version: '${{ inputs.chainsaw_version }}'
@@ -150,11 +150,12 @@ runs:
           kubectl get applications -n argocd -o yaml > "/tmp/kwok-debug-artifacts/${cluster}-argo-apps.yaml" 2>/dev/null || true
           kubectl logs -n argocd deploy/argocd-repo-server --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-argo-reposerver.log" 2>/dev/null || true
           kubectl logs -n argocd statefulset/argocd-application-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-argo-appcontroller.log" 2>/dev/null || true
-          kubectl get ocirepositories,kustomizations,helmreleases -A -o yaml > "/tmp/kwok-debug-artifacts/${cluster}-flux-resources.yaml" 2>/dev/null || true
+          kubectl get ocirepositories,gitrepositories,kustomizations,helmreleases -A -o yaml > "/tmp/kwok-debug-artifacts/${cluster}-flux-resources.yaml" 2>/dev/null || true
           kubectl logs -n flux-system deploy/source-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-flux-source-controller.log" 2>/dev/null || true
           kubectl logs -n flux-system deploy/kustomize-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-flux-kustomize-controller.log" 2>/dev/null || true
           kubectl logs -n flux-system deploy/helm-controller --tail=500 > "/tmp/kwok-debug-artifacts/${cluster}-flux-helm-controller.log" 2>/dev/null || true
           kubectl logs -n aicr-registry deploy/registry --tail=200 > "/tmp/kwok-debug-artifacts/${cluster}-registry.log" 2>/dev/null || true
+          kubectl logs -n aicr-registry deploy/gitea --tail=200 > "/tmp/kwok-debug-artifacts/${cluster}-gitea.log" 2>/dev/null || true
         done
 
     - name: Export Kind logs
