@@ -417,7 +417,7 @@ func TestDocMarkersPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", docPath, err)
 	}
-	for _, marker := range []string{"<!-- BEGIN AICR-HEALTH -->", "<!-- END AICR-HEALTH -->"} {
+	for _, marker := range []string{"{/* BEGIN AICR-HEALTH */}", "{/* END AICR-HEALTH */}"} {
 		if !strings.Contains(string(data), marker) {
 			t.Errorf("%s is missing splice marker %q", docPath, marker)
 		}

@@ -1,4 +1,4 @@
-<!--
+{/*
 Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -6,7 +6,7 @@ you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
--->
+*/}
 
 # Recipe Health
 
@@ -31,7 +31,7 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 
 **Evidence** is a literal `pending` for every recipe today. No conformance attestations exist yet, so the column is honestly uniform: it reports the absence of evidence rather than overstating what is known. A differentiated, evidence-derived column lands once the first signed attestation does.
 
-<!-- BEGIN AICR-HEALTH -->
+{/* BEGIN AICR-HEALTH */}
 ## Summary
 
 - Recipes: **37**
@@ -79,4 +79,4 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 | gb200-oke-ubuntu-inference-dynamo | oke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:10 | pending |
 | gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:8 | pending |
 
-<!-- END AICR-HEALTH -->
+{/* END AICR-HEALTH */}

@@ -357,8 +357,8 @@ recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PA
 	if [ ! -f $(HEALTH_DOC_PATH) ]; then \
 	   echo "ERROR: $(HEALTH_DOC_PATH) does not exist; cannot splice." >&2; exit 1; \
 	fi; \
-	if ! grep -q '<!-- BEGIN AICR-HEALTH -->' $(HEALTH_DOC_PATH) || \
-	   ! grep -q '<!-- END AICR-HEALTH -->' $(HEALTH_DOC_PATH); then \
+	if ! grep -qF '{/* BEGIN AICR-HEALTH */}' $(HEALTH_DOC_PATH) || \
+	   ! grep -qF '{/* END AICR-HEALTH */}' $(HEALTH_DOC_PATH); then \
 	   echo "ERROR: $(HEALTH_DOC_PATH) is missing AICR-HEALTH markers." >&2; exit 1; \
 	fi; \
 	TMP="$$(mktemp -d)"; \
@@ -370,9 +370,9 @@ recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PA
 	  -deterministic \
 	  -no-title; \
 	awk -v body="$$TMP/recipe-health.md" ' \
-	  /<!-- BEGIN AICR-HEALTH -->/ { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
-	  /<!-- END AICR-HEALTH -->/   { skip = 0 } \
-	  !skip                        { print } \
+	  index($$0, "{/* BEGIN AICR-HEALTH */}") { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
+	  index($$0, "{/* END AICR-HEALTH */}")   { skip = 0 } \
+	  !skip                                    { print } \
 	' $(HEALTH_DOC_PATH) > "$$TMP/merged.md"; \
 	mv "$$TMP/merged.md" $(HEALTH_DOC_PATH); \
 	echo "Updated $(HEALTH_DOC_PATH) (prose preserved, auto-generated section refreshed)"
