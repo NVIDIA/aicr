@@ -32,10 +32,6 @@ toolkit:
   enabled: true
   installDir: /home/kubernetes/bin/nvidia
   env:
-    - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
-      value: "false"
-    - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS
-      value: "true"
     - name: RUNTIME_CONFIG_SOURCE
       value: "file"
 
