@@ -73,9 +73,10 @@ for dir in "${SEARCH_DIRS[@]}"; do
         # Strip inline code spans so backticked tokens don'\''t trigger.
         line = $0
         gsub(/`[^`]*`/, "", line)
-        # Strip backslash-escaped angle brackets (\<word\>) — these are
-        # valid markdown escapes and MDX-safe.
-        gsub(/\\<[^>]*\\>/, "", line)
+        # Strip backslash-escaped angle brackets (\<word\>, or a lone \<) —
+        # these are valid markdown escapes and MDX-safe.
+        gsub(/\\</, "", line)
+        gsub(/\\>/, "", line)
       }
       # Bare { not preceded by backslash escape. The leading
       # (^|[^\\]) form catches { in column 1 as well.
@@ -93,10 +94,11 @@ for dir in "${SEARCH_DIRS[@]}"; do
         printf "MDX: autolink outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
-      # Bare angle-bracket placeholders: <word> that are not void HTML
-      # elements (check 1) or autolinks (check 4). MDX interprets these
-      # as JSX component tags.
-      line ~ /<[a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
+      # Bare angle-bracket placeholders: <word> or <digit> (e.g. <30 s,
+      # <13%) that are not void HTML elements (check 1) or autolinks
+      # (check 4). MDX interprets a `<` followed by a name-start character
+      # as a JSX tag and chokes on what follows.
+      line ~ /<[0-9a-zA-Z]/ && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
         printf "MDX: bare <word> tag outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
       }
