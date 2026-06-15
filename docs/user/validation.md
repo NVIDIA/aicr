@@ -567,18 +567,22 @@ conformance check `ai-service-metrics` can fail non-deterministically with:
 [SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
 ```
 
-The validator orchestrator Job tolerates every taint and has no node-affinity
-toward Prometheus, so the kube-scheduler may place it on any worker node —
-including one whose ENI is in a security group whose ingress to the
-Prometheus-hosting SG is missing or asymmetric. The outcome is **not stable
-across re-runs**: image-locality scoring tends to keep the pod on whatever
-node won the first scheduling decision, so a passing run on a fresh cluster
-does not prove the SG topology is correct.
+The validator orchestrator Job tolerates every taint and sets a *preferred*
+`dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
+Prometheus pod when possible. The preference is best-effort, so on fallback it
+can still land on any worker node — including one whose ENI is in a security
+group whose ingress to the Prometheus-hosting SG is missing or asymmetric. On
+such a fallback the outcome is **not stable across re-runs**: image-locality
+scoring tends to keep the pod on whatever node won the first scheduling
+decision, so a passing run on a fresh cluster does not prove the SG topology is
+correct.
 
 This is a cluster-side prerequisite, not an AICR bug per se — see
 [EKS Dynamo Networking Prerequisites](../integrator/eks-dynamo-networking.md#required-security-group-rules)
-for the SG ingress rules required for Prometheus (`tcp/9090`). The underlying
-issue is tracked at [#933](https://github.com/NVIDIA/aicr/issues/933).
+for the SG ingress rules required for Prometheus (`tcp/9090`). The preferred
+`dependencyAffinity` ([#933](https://github.com/NVIDIA/aicr/issues/933),
+resolved) makes a bad placement far less likely, but the `9090` SG rule remains
+the reliable guarantee since the affinity is best-effort.
 
 Workaround when SG changes are not available: re-run the check until the
 orchestrator lands on a node whose SG can reach Prometheus, then leave the
