@@ -65,6 +65,7 @@ func TestSKUForDeviceID(t *testing.T) {
 		// Case-insensitive + 0x prefix + whitespace tolerance.
 		{"uppercase", "26B9", "l40s"},
 		{"0x prefix", "0x2330", "h100"},
+		{"0X uppercase prefix", "0X2330", "h100"},
 		{"whitespace", "  2330  ", "h100"},
 
 		// Excluded by scope/curation — must resolve to "" (unknown):

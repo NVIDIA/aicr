@@ -91,11 +91,15 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 // populatePCIDiscovery records the PCI device-ID–derived SKU from the GPU
 // "hardware" subtype. The descriptive SKU always populates GPUModel (the
 // real hardware, supported or not). The matching Accelerator dimension is
-// only backfilled when (a) no higher-priority source already resolved it,
-// (b) the node is not heterogeneous, and (c) the SKU is a recipe-supported
-// accelerator — so a driver-less, unlabeled node still matches recipes for
-// supported GPUs without ever placing an unsupported SKU in the matching
-// dimension (which would skew Fingerprint.Match / ToCriteria).
+// only backfilled when (a) no higher-priority source already resolved it
+// and (b) the node is not heterogeneous:
+//   - a recipe-supported SKU sets the matching Accelerator value, so a
+//     driver-less, unlabeled node still matches recipes for supported GPUs;
+//   - an unsupported SKU never enters the matching dimension (which would
+//     skew Fingerprint.Match / ToCriteria) but records the unknown-sku note
+//     so "GPU present but unsupported" stays visible — mirroring the
+//     topology path in reconcileAccelerator. The descriptive SKU is in
+//     GPUModel either way.
 func populatePCIDiscovery(fp *Fingerprint, gpu *measurement.Measurement) {
 	st := gpu.GetSubtype(subtypeGPUHardware)
 	if st == nil {
@@ -107,8 +111,19 @@ func populatePCIDiscovery(fp *Fingerprint, gpu *measurement.Measurement) {
 	}
 	fp.GPUModel = Dimension{Value: sku, Source: sourceAcceleratorPCI}
 
-	if fp.Accelerator.Value == "" && fp.Accelerator.Note != noteMultiGPU && isSupportedAccelerator(sku) {
+	// Don't disturb a higher-priority resolution (label-resolved value or
+	// the multi-gpu note from a heterogeneous topology).
+	if fp.Accelerator.Value != "" || fp.Accelerator.Note == noteMultiGPU {
+		return
+	}
+	if isSupportedAccelerator(sku) {
 		fp.Accelerator = Dimension{Value: sku, Source: sourceAcceleratorPCI}
+		return
+	}
+	// GPU present but its SKU is outside the recipe-supported enum. Preserve
+	// the unknown-sku signal unless the topology source already set one.
+	if fp.Accelerator.Note == "" {
+		fp.Accelerator = Dimension{Source: sourceAcceleratorPCI, Note: noteUnknownSKU}
 	}
 }
 

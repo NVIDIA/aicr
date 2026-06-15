@@ -166,6 +166,10 @@ kos:
     build: aicrd
     repositories:
       - ghcr.io/nvidia/aicrd
+    # No base_image: aicrd intentionally uses ko's default static, distroless
+    # base (cgr.dev/chainguard/static), same as aicr above. It runs as the
+    # nonroot user 65532 by default, preserving the security posture of the
+    # previous gcr.io/distroless/static:nonroot base (also UID 65532).
     platforms:
       - linux/amd64
       - linux/arm64

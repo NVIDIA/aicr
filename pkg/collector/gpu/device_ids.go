@@ -164,6 +164,6 @@ var gpuDeviceIDToSKU = map[string]string{
 // device ID, or "" when the ID is not a recognized datacenter GPU. The lookup
 // is case-insensitive and tolerates an optional "0x" prefix.
 func skuForDeviceID(deviceID string) string {
-	id := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(deviceID), "0x"))
+	id := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(deviceID)), "0x")
 	return gpuDeviceIDToSKU[id]
 }
