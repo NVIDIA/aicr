@@ -284,7 +284,7 @@ which **cancelled that legitimate first request mid-warmup**; each retry
 restarts it, so no poll ever succeeded and the 5-minute window expired —
 **before AIPerf (which has its own warmup phase) ever started**. It is
 intermittent because RTX's cold first-token straddles the 30 s line (morning
-runs landed <30 s and passed; afternoon landed ~42 s and failed); H100/GB200
+runs landed \<30 s and passed; afternoon landed ~42 s and failed); H100/GB200
 cold-start stays under 30 s, so they never tripped it. Independent of the AIPerf
 determinism flags (the same tweaked image both passed and failed across runs)
 and of concurrency.
