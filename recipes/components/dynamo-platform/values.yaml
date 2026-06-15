@@ -41,6 +41,17 @@ global:
     install: false
     enabled: true
 
+nats:
+  config:
+    jetstream:
+      fileStore:
+        pvc:
+          # Mirror the chart default so AICR can warn when no StorageClass is
+          # selected and inject --storage-class into the bundled NATS PVC.
+          enabled: true
+          size: 10Gi
+          storageClassName: ""
+
 dynamo-operator:
   # Upgrade CRDs via the platform chart (no separate dynamo-crds 1.0 chart)
   upgradeCRD: true
