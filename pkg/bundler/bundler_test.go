@@ -1319,6 +1319,74 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 	}
 }
 
+func TestApplyNodeSchedulingOverrides_DynamoPlatformStorageClass(t *testing.T) {
+	const scPath = "nats.config.jetstream.fileStore.pvc.storageClassName"
+
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	comp := registry.Get("dynamo-platform")
+	if comp == nil {
+		t.Fatal("registry missing dynamo-platform")
+	}
+	if !slices.Contains(comp.GetStorageClassPaths(), scPath) {
+		t.Fatalf("registry storageClassPaths for dynamo-platform = %v, want %q",
+			comp.GetStorageClassPaths(), scPath)
+	}
+
+	tests := []struct {
+		name          string
+		cfgOpts       []config.Option
+		initialValues map[string]string
+		wantValue     string
+	}{
+		{
+			name:      "global storageClass injected into bundled NATS PVC",
+			cfgOpts:   []config.Option{config.WithStorageClass("my-storage-class")},
+			wantValue: "my-storage-class",
+		},
+		{
+			name: "explicit dynamo --set wins over global --storage-class",
+			cfgOpts: []config.Option{
+				config.WithStorageClass("my-storage-class"),
+				config.WithValueOverrides(map[string]map[string]string{
+					"dynamo": {scPath: "explicit-gp2"},
+				}),
+			},
+			initialValues: map[string]string{scPath: "explicit-gp2"},
+			wantValue:     "explicit-gp2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(tt.cfgOpts...)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			values := map[string]any{}
+			if len(tt.initialValues) > 0 {
+				if applyErr := component.ApplyMapOverrides(values, tt.initialValues); applyErr != nil {
+					t.Fatalf("ApplyMapOverrides() setup error = %v", applyErr)
+				}
+			}
+
+			b.applyNodeSchedulingOverrides("dynamo-platform", values, nil, schedulingPathPolicy{})
+
+			got, ok := component.GetValueByPath(values, scPath)
+			if !ok {
+				t.Fatal("storageClassName not injected")
+			}
+			if got != tt.wantValue {
+				t.Errorf("storageClassName = %v, want %q", got, tt.wantValue)
+			}
+		})
+	}
+}
+
 // TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths verifies the
 // precedence rule that paths the user explicitly populated via the recipe
 // overlay's inline overrides or CLI --set are NOT overwritten by CLI/config
@@ -1905,6 +1973,76 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 					scPath,
 					"--storage-class <name>",
 					"--set kube-prometheus-stack:" + scPath + "=<name>",
+				} {
+					if !strings.Contains(warning, want) {
+						t.Errorf("warning = %q, want substring %q", warning, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestWarnMissingStorageClassForPVCs_DynamoPlatformNATS(t *testing.T) {
+	const scPath = "nats.config.jetstream.fileStore.pvc.storageClassName"
+
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:       "dynamo-platform",
+			ValuesFile: "components/dynamo-platform/values.yaml",
+		}},
+	}
+
+	tests := []struct {
+		name        string
+		setupValues func(map[string]any)
+		wantWarning bool
+	}{
+		{
+			name:        "warns when bundled NATS PVC omits storageClassName",
+			wantWarning: true,
+		},
+		{
+			name: "does not warn when bundled NATS PVC has storageClassName",
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, scPath, "gp3")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values, err := recipeResult.GetValuesForComponent("dynamo-platform")
+			if err != nil {
+				t.Fatalf("GetValuesForComponent(dynamo-platform): %v", err)
+			}
+			if tt.setupValues != nil {
+				tt.setupValues(values)
+			}
+
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			err = b.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
+				"dynamo-platform": values,
+			})
+			if err != nil {
+				t.Fatalf("warnMissingStorageClassForPVCs() error = %v", err)
+			}
+
+			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			}
+
+			if tt.wantWarning {
+				warning := b.warnings[0]
+				for _, want := range []string{
+					"Warning: dynamo-platform renders a PVC without storageClassName",
+					scPath,
+					"--storage-class <name>",
+					"--set dynamo-platform:" + scPath + "=<name>",
 				} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
