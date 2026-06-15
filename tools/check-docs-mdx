@@ -68,11 +68,20 @@ done
 for dir in "${SEARCH_DIRS[@]}"; do
   while IFS= read -r file; do
     [[ -z "${file}" ]] && continue
-    awk '
+    # awk exits 1 when it finds a hazard; keep it inside the `if` condition so
+    # `set -e` does not abort the whole scan at the first offending file
+    # (otherwise violations in later files are silently skipped).
+    if ! awk '
       /^```/ { in_fence = !in_fence; next }
       in_fence { next }
       {
         line = $0
+        # Strip inline code spans FIRST so backticked tokens — including a
+        # backticked `{/*` or `*/}` — never trip the MDX-comment detection
+        # below (or any later check). Doing this before the comment scan
+        # prevents a backticked, unterminated `{/*` from opening a bogus
+        # multi-line region that swallows real hazards on following lines.
+        gsub(/`[^`]*`/, "", line)
         # MDX comments {/* ... */} are valid (and used for license headers
         # and the auto-generated splice markers in recipe-health.md). Treat
         # them like code: continue an open multi-line comment, strip
@@ -94,8 +103,6 @@ for dir in "${SEARCH_DIRS[@]}"; do
           if (ci > 0) { line = substr(line, 1, cstart - 1) substr(rest, ci + 3) }
           else { line = substr(line, 1, cstart - 1); in_mdx_comment = 1; break }
         }
-        # Strip inline code spans so backticked tokens don'\''t trigger.
-        gsub(/`[^`]*`/, "", line)
         # Strip backslash-escaped angle brackets (\<word\>, or a lone \<) —
         # these are valid markdown escapes and MDX-safe.
         gsub(/\\</, "", line)
@@ -126,8 +133,7 @@ for dir in "${SEARCH_DIRS[@]}"; do
         errors++
       }
       END { exit (errors > 0) ? 1 : 0 }
-    ' "$file" 2>/dev/null
-    if [[ $? -ne 0 ]]; then
+    ' "$file" 2>/dev/null; then
       ERRORS=$((ERRORS + 1))
     fi
   done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) "${EXCLUDE_ARGS[@]}" 2>/dev/null)
