@@ -82,8 +82,18 @@ for dir in "${SEARCH_DIRS[@]}"; do
           if (ci > 0) { line = substr(line, ci + 3); in_mdx_comment = 0 }
           else { next }
         }
-        gsub(/\{\/\*.*\*\/\}/, "", line)
-        if (match(line, /\{\/\*/)) { line = substr(line, 1, RSTART - 1); in_mdx_comment = 1 }
+        # Strip MDX comments one {/* ... */} segment at a time. A greedy
+        # match would span from the first {/* to the last */} and delete a
+        # real hazard sitting between two separate comments on one line
+        # (e.g. `{/* a */} <30 s {/* b */}`), letting it evade the checks
+        # below. An unterminated {/* opens a multi-line region.
+        while (match(line, /\{\/\*/)) {
+          cstart = RSTART
+          rest = substr(line, cstart)
+          ci = index(rest, "*/}")
+          if (ci > 0) { line = substr(line, 1, cstart - 1) substr(rest, ci + 3) }
+          else { line = substr(line, 1, cstart - 1); in_mdx_comment = 1; break }
+        }
         # Strip inline code spans so backticked tokens don'\''t trigger.
         gsub(/`[^`]*`/, "", line)
         # Strip backslash-escaped angle brackets (\<word\>, or a lone \<) —
