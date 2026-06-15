@@ -9,9 +9,10 @@
 # common violations before they reach CI or break versioned doc snapshots.
 #
 # Scope: docs/user/, docs/integrator/, and docs/contributor/ (all published
-# to Fern). container-images.md and recipe-health.md carry auto-generated
-# HTML comment splice markers that VitePress still needs; both are excluded
-# until VitePress is removed (see EXCLUDE_NAMES below).
+# to Fern). container-images.md carries auto-generated HTML comment splice
+# markers that VitePress still needs and is not published to Fern, so it is
+# excluded (see EXCLUDE_NAMES below). recipe-health.md IS published to Fern
+# and uses MDX-safe {/* ... */} comment markers, so it is checked.
 # Override with positional args for frozen version content.
 #
 # Checks:
@@ -28,10 +29,11 @@ set -euo pipefail
 
 ERRORS=0
 SEARCH_DIRS=("docs/user/" "docs/integrator/" "docs/contributor/")
-# Docs with auto-generated HTML-comment splice markers that VitePress still
-# needs (excluded until VitePress is removed): the BOM inventory and the
-# recipe-health matrix, both spliced by `make *-docs` between marker comments.
-EXCLUDE_NAMES=("container-images.md" "recipe-health.md")
+# Docs excluded from the MDX scan: container-images.md carries auto-generated
+# HTML-comment splice markers that VitePress still needs and is not published
+# to Fern. (recipe-health.md is intentionally NOT excluded — it is Fern-
+# published and uses MDX-safe {/* ... */} markers.)
+EXCLUDE_NAMES=("container-images.md")
 EXCLUDE_ARGS=()
 for name in "${EXCLUDE_NAMES[@]}"; do
   EXCLUDE_ARGS+=(! -name "${name}")
@@ -70,8 +72,19 @@ for dir in "${SEARCH_DIRS[@]}"; do
       /^```/ { in_fence = !in_fence; next }
       in_fence { next }
       {
-        # Strip inline code spans so backticked tokens don'\''t trigger.
         line = $0
+        # MDX comments {/* ... */} are valid (and used for license headers
+        # and the auto-generated splice markers in recipe-health.md). Treat
+        # them like code: continue an open multi-line comment, strip
+        # single-line ones, and open a region for an unterminated {/*.
+        if (in_mdx_comment) {
+          ci = index(line, "*/}")
+          if (ci > 0) { line = substr(line, ci + 3); in_mdx_comment = 0 }
+          else { next }
+        }
+        gsub(/\{\/\*.*\*\/\}/, "", line)
+        if (match(line, /\{\/\*/)) { line = substr(line, 1, RSTART - 1); in_mdx_comment = 1 }
+        # Strip inline code spans so backticked tokens don'\''t trigger.
         gsub(/`[^`]*`/, "", line)
         # Strip backslash-escaped angle brackets (\<word\>, or a lone \<) —
         # these are valid markdown escapes and MDX-safe.
