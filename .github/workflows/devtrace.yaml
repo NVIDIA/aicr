@@ -1,0 +1,54 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: DevTrace PR Check
+
+# Purely informational: posts (or updates) a single PR comment with each
+# contributor's trust score. No min-score gate, no check run — nothing here
+# blocks a merge.
+#
+# pull_request_target so the DEVTRACE_TOKEN secret is available when scoring
+# external/fork contributors — the contributors this check exists to evaluate.
+# Safe here because the action only reads PR and author metadata via the
+# DevTrace API; it never checks out or runs PR code.
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  score:
+    name: Score Contributor Trust
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # post/update the trust score comment
+    timeout-minutes: 5
+    steps:
+      - name: DevTrace
+        uses: thingzio/devtrace-action@b35e96e42494859cfbab25d17499efb5cb30a59d  # v1.0.2
+        with:
+          token: ${{ secrets.DEVTRACE_TOKEN }}
+          # trusted-orgs: members of these GitHub orgs receive a trust-score
+          # boost (per the action docs). NVIDIA is this repo's owning org, so
+          # known internal contributors are recognized as trusted; external
+          # contributors are still scored, just without the boost.
+          trusted-orgs: NVIDIA
