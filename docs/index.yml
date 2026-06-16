@@ -24,6 +24,8 @@ navigation:
         path: user/installation.md
       - page: CLI Reference
         path: user/cli-reference.md
+      - page: Artifact Verification
+        path: user/artifact-verification.md
       - page: API Reference
         path: user/api-reference.md
       - page: Agent Deployment
