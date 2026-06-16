@@ -14,11 +14,14 @@
 
 package config
 
+import "github.com/NVIDIA/aicr/pkg/header"
+
 // Kind is the kind value for AICRConfig documents.
 const Kind = "AICRConfig"
 
-// APIVersion is the apiVersion for AICRConfig documents.
-const APIVersion = "aicr.nvidia.com/v1alpha1"
+// APIVersion is the apiVersion for AICRConfig documents. It aliases the
+// canonical header.GroupVersion (single source of truth).
+const APIVersion = header.GroupVersion
 
 // AICRConfig is the top-level schema for the --config file accepted by
 // the aicr CLI's snapshot, recipe, bundle, and validate commands.

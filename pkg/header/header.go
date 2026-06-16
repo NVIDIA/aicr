@@ -18,6 +18,44 @@ import (
 	"time"
 )
 
+// AICR artifact API versioning. These constants are the single source of
+// truth for the group/version stamped into every AICR artifact header
+// (snapshot, recipe, config). Package-local aliases (e.g.
+// snapshotter.FullAPIVersion, recipe.RecipeAPIVersion, config.APIVersion)
+// must reference GroupVersion rather than redeclaring the literal.
+//
+// Evolution policy (see docs/design/011-artifact-apiversion-policy.md):
+// schema changes within a version must be additive-only; a breaking change
+// requires a new version segment, after which both the old and new value are
+// accepted during a transition window before the old one is retired.
+const (
+	// APIGroup is the API group for AICR artifacts.
+	APIGroup = "aicr.nvidia.com"
+
+	// APIVersionV1Alpha1 is the current artifact API version segment.
+	APIVersionV1Alpha1 = "v1alpha1"
+
+	// GroupVersion is the canonical "group/version" string for AICR artifacts.
+	GroupVersion = APIGroup + "/" + APIVersionV1Alpha1
+)
+
+// IsSupportedAPIVersion reports whether v is an artifact apiVersion this binary
+// understands. The empty string is intentionally NOT supported here: callers
+// that tolerate a missing apiVersion for backward compatibility with older
+// artifacts must special-case "" before calling this.
+//
+// When the artifact schema is bumped, add the new value to the set below
+// (keeping the prior value) for the transition window, then remove the old
+// value once the deprecation window closes.
+func IsSupportedAPIVersion(v string) bool {
+	switch v {
+	case GroupVersion:
+		return true
+	default:
+		return false
+	}
+}
+
 // Kind represents the type of AICR resource.
 // All AICR resources should use these constants for consistency.
 type Kind string

@@ -20,6 +20,7 @@ import (
 	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -31,9 +32,15 @@ import (
 func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version string, dp DataProvider) (*RecipeResult, error) {
 	rec, err := serializer.FromFileWithKubeconfig[RecipeResult](path, kubeconfig)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to load recipe from %q", path), err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			fmt.Sprintf("failed to load recipe from %q", path))
 	}
+
+	// Capture the apiVersion declared in the source file before any overlay
+	// hydration reassigns rec; otherwise an unsupported apiVersion on a
+	// RecipeMetadata overlay input would slip past the gate below (the
+	// hydrated RecipeResult always carries a supported version).
+	inputAPIVersion := rec.APIVersion
 
 	// Users often pass overlay files directly; auto-hydrate so they don't need
 	// a separate "aicr recipe" step before consuming the recipe.
@@ -85,6 +92,18 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 			fmt.Sprintf("recipe file has kind %q, but %q is required; "+
 				"run \"aicr recipe\" to generate a hydrated RecipeResult first",
 				rec.Kind, RecipeResultKind))
+	}
+
+	// Reject a recipe stamped with an apiVersion this build does not understand.
+	// Empty is tolerated (older files predate the field); a non-empty unknown
+	// value means the recipe was produced by an incompatible aicr version, so
+	// fail closed rather than risk a schema mismatch downstream. Checked against
+	// the source file's declared version, not the (always-supported) hydrated one.
+	if inputAPIVersion != "" && !header.IsSupportedAPIVersion(inputAPIVersion) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q); "+
+				"regenerate the recipe with a matching aicr version",
+				inputAPIVersion, header.GroupVersion))
 	}
 
 	return rec, nil

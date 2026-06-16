@@ -34,7 +34,7 @@ func TestLoadFromFile(t *testing.T) {
 			name:       "nonexistent file returns error",
 			filePath:   "/tmp/does-not-exist-aicr-test.yaml",
 			wantErr:    true,
-			errContain: "failed to load recipe",
+			errContain: "/tmp/does-not-exist-aicr-test.yaml",
 		},
 		{
 			name:        "RecipeResult loads directly",
@@ -87,6 +87,29 @@ func TestLoadFromFile(t *testing.T) {
 				t.Helper()
 				if rec.Kind != "" {
 					t.Errorf("kind = %q, want empty", rec.Kind)
+				}
+			},
+		},
+		{
+			name:        "unsupported apiVersion rejected",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha2\ncriteria:\n  service: eks\n",
+			wantErr:     true,
+			errContain:  `apiVersion "aicr.nvidia.com/v1alpha2"`,
+		},
+		{
+			name:        "unsupported apiVersion on RecipeMetadata overlay rejected",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			wantErr:     true,
+			errContain:  `apiVersion "aicr.nvidia.com/v1alpha2"`,
+		},
+		{
+			name:        "empty apiVersion allowed for backward compat",
+			yamlContent: "kind: RecipeResult\ncriteria:\n  service: eks\n",
+			wantErr:     false,
+			checkResult: func(t *testing.T, rec *RecipeResult) {
+				t.Helper()
+				if rec.APIVersion != "" {
+					t.Errorf("apiVersion = %q, want empty", rec.APIVersion)
 				}
 			},
 		},
