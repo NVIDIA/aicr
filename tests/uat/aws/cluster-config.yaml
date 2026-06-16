@@ -35,6 +35,7 @@ cluster:
         - 216.228.127.128/30
         - 52.41.222.58/32
         - 54.68.11.139/32
+        - 128.77.49.32/30
     addOns:
       coreDns: ""
       kubeProxy: ""
@@ -64,6 +65,17 @@ network:
         - cidr: 100.65.0.0/16
           zone: us-east-1e
           disableEndpoints: true
+    securityGroups:
+      additionalRules:
+        - target: system
+          direction: ingress
+          fromPort: 4222
+          toPort: 4222
+          protocol: tcp
+          # VPC-CNI does not SNAT in-VPC pod-to-pod traffic, so NATS on the
+          # system node sees the pod source IP (pod subnet), not the node IP.
+          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker node + pod subnet CIDRs
+          description: "Allow NATS from worker nodes and pods"
 
 compute:
   eks:
