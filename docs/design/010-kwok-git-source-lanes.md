@@ -2,13 +2,15 @@
 
 ## Status
 
-**Implemented (flux-git)** — 2026-06-10.
+**Implemented (flux-git, argocd-git)** — flux-git 2026-06-10; argocd-git
+2026-06-16, completing [#963](https://github.com/NVIDIA/aicr/issues/963).
 
 Extends [ADR-008](008-kwok-deployer-matrix.md) (KWOK CI Deployer
-Matrix). Implementation tracked under
-[#963](https://github.com/NVIDIA/aicr/issues/963). The `flux-git` lane
-ships first; the `argocd-git` lane described in the issue follows the
-same infrastructure and is a follow-up.
+Matrix). The `flux-git` lane shipped first; `argocd-git` follows on the
+same Gitea infrastructure — the runner pushes the filesystem bundle to
+the in-cluster Gitea and Argo CD's repo-server clones and reconciles the
+app-of-apps from the Git `repoURL`. Both lanes close the Git-source
+round-trip gap for their respective GitOps controllers.
 
 ## Problem
 
@@ -46,42 +48,61 @@ the Git lanes cover the second documented product surface.
 
 ## Goals
 
-1. CI fails when the flux deployer's filesystem/Git bundle shape does
-   not reconcile end-to-end (clone → kustomize apply → HelmRelease
-   terminal state → pods Running).
+1. CI fails when a deployer's filesystem/Git bundle shape does not
+   reconcile end-to-end (clone → apply → terminal state → pods Running).
+   For `flux-git` this is GitRepository → kustomize apply → HelmRelease;
+   for `argocd-git` it is the app-of-apps Git `repoURL` → Argo CD sync.
 2. The Git path is exercised with a real Git server and the real
-   `git push` → `source-controller` clone protocol, not a shape check.
+   `git push` → controller-clone protocol (Flux source-controller or
+   Argo CD repo-server), not a shape check.
 3. Local repro matches CI:
-   `make kwok-test-deployer RECIPE=<r> DEPLOYER=flux-git`.
+   `make kwok-test-deployer RECIPE=<r> DEPLOYER=flux-git` (and
+   `DEPLOYER=argocd-git`).
 
 ## Non-Goals
 
-- `argocd-git` lane (same Gitea infra; follow-up under [#963](https://github.com/NVIDIA/aicr/issues/963)).
-- Git auth flows (`GitRepository.spec.secretRef`, deploy keys). The
-  bundler's gitrepo template emits no `secretRef`, so the contract
-  under test is anonymous read access (see Decision).
+- Git auth flows (`GitRepository.spec.secretRef`, deploy keys, Argo CD
+  repository Secrets). Neither the bundler's gitrepo template nor the
+  argocd Application emits credentials, so the contract under test is
+  anonymous read access (see Decision).
 - Tier 2 coverage (stays helm-only per ADR-008's tier rationale).
 - Replacing the OCI lanes — both transports stay in the matrix.
 
 ## Decision
 
-Add a `flux-git` value to the deployer matrix (Tier 1 + Tier 3). The
-lane installs **Gitea** in the existing `aicr-registry` namespace via
-`install-infra.sh`, bundles to the filesystem, pushes the bundle tree
-to Gitea over the Kind host-port mapping, applies an outer
-`GitRepository` + `Kustomization` wrapper pair, and reuses the
-existing chainsaw sync-gate framing and pod verification.
+Add `flux-git` and `argocd-git` values to the deployer matrix (Tier 1 +
+Tier 3). Both install **Gitea** in the existing `aicr-registry`
+namespace via `install-infra.sh`, bundle to the filesystem, and push the
+bundle tree to Gitea over the Kind host-port mapping.
+
+- `flux-git` applies an outer `GitRepository` + `Kustomization` wrapper
+  pair and lets Flux reconcile; its sync gate asserts the GitRepository
+  is Ready before the Kustomization/HelmRelease stages.
+- `argocd-git` applies the bundle's own `app-of-apps.yaml` (whose
+  `spec.source.repoURL` is the Git URL passed via `--repo`, baked into
+  the parent and every child Application at bundle time) and lets Argo
+  CD's repo-server clone and reconcile. Its sync gate is the
+  `argocd-git-sync` sibling of `argocd-sync`, with one extra leading
+  step asserting the root Application's Git `repoURL` (the Git-mode
+  proof — the argocd analogue of flux-git's GitRepository-Ready step).
+
+Both reuse the shared `compute_gitea_urls()` / `push_bundle_to_gitea()`
+helpers in `validate-scheduling.sh` so the runner→Service-DNS rewrite
+and the `git init/commit/push --force main` block live in one place.
 
 Key choices, in dependency order:
 
 **Anonymous public repos, no secretRef.** The bundler's
-`gitrepo-source.yaml.tmpl` has no `secretRef`, so the repo MUST be
-anonymously clonable for the rendered bundle to reconcile at all.
-Gitea is configured with
+`gitrepo-source.yaml.tmpl` (flux) has no `secretRef`, and the argocd
+deployer's Application carries no repository credentials, so the repo
+MUST be anonymously clonable for either rendered bundle to reconcile at
+all. Gitea is configured with
 `GITEA__repository__DEFAULT_PUSH_CREATE_PRIVATE=false` so pushed
-repos are public; Flux's source-controller clones with no credentials
-— exactly what the bundle's own source CR requires. This is a
-product-contract test, not a CI convenience.
+repos are public; both Flux's source-controller and Argo CD's
+repo-server clone with no credentials over plain HTTP — exactly what
+the bundle requires. This is a product-contract test, not a CI
+convenience. (Argo CD clones a public `http://` repo referenced by an
+Application without a pre-registered repository Secret.)
 
 **Push-to-create, no per-recipe API calls.**
 `GITEA__repository__ENABLE_PUSH_CREATE_USER=true` means the first
@@ -98,10 +119,12 @@ Host 3300, not Gitea's default 3000, for the same collision-avoidance
 reason as the registry's 5500-vs-5000 (port 3000 is commonly held by
 Grafana / local dev servers).
 
-**Branch `main` is a hard requirement.** The bundler defaults
-`GitRepository.ref.branch` to `main` (`resolveTargetRevision()`), and
-there is no CLI flag to change it for filesystem output, so the test
-driver pushes `main`.
+**Branch `main` is a hard requirement.** The bundler defaults the flux
+`GitRepository.ref.branch` to `main` (`resolveTargetRevision()`) and the
+argocd Application `targetRevision` to `main`
+(`pkg/bundler/deployer/argocd/resolveRepoSettings()`), and there is no
+CLI flag to change either for filesystem output, so the test driver
+pushes `main`.
 
 **Two GitRepository objects, accepted duplication.** The driver
 applies an outer `aicr-bundle` GitRepository (the Kustomization's
@@ -205,6 +228,32 @@ Per `(recipe, flux-git)` matrix cell:
    HelmRelease finalizer sweep + namespace force-finalize.
 ```
 
+Per `(recipe, argocd-git)` matrix cell — same Gitea, Argo CD instead of
+Flux:
+
+```
+1. Infra (once per cell): install-infra.sh DEPLOYER=argocd-git
+   ├── install_registry   (unconditional, harmless if unused)
+   ├── install_argocd     (same as argocd-oci) + apply_repo_secret
+   └── install_gitea      (shared with flux-git; exit codes 70/71/72)
+
+2. Per-recipe: validate-scheduling.sh --deployer argocd-git <recipe>
+   ├── aicr bundle --recipe ... --deployer argocd --output $WORK/bundle \
+   │       --repo http://gitea.aicr-registry.svc.cluster.local:3000/aicr/<recipe>.git
+   ├── assert app-of-apps.yaml exists AND its repoURL == the Git URL
+   │       (proves argocd git mode engaged — not an oci:// repoURL)
+   ├── git init -b main; add -A; commit; push --force \
+   │       http://aicr:…@localhost:3300/aicr/<recipe>.git main   (shared helper)
+   ├── kubectl apply app-of-apps.yaml (root App nvidia-stack, Git repoURL)
+   ├── wait_for_argocd_sync → chainsaw tests/chainsaw/kwok/argocd-git-sync
+   │       (--set repoURL=<git-url>; --assert-timeout from KWOK_ARGOCD_SYNC_TIMEOUT)
+   └── verify_pods (existing)
+
+3. Cleanup: delete root Application nvidia-stack (prune cascade) →
+   namespaces. Gitea repo state is emptyDir-ephemeral + force-pushed,
+   so no repo cleanup is needed.
+```
+
 ## Sync Gate: All-Resources Semantics
 
 Implementing this lane surfaced a latent bug in the flux sync gate
@@ -233,6 +282,8 @@ changing it alters the behavior of existing argocd lanes.
 
 ## Files Changed
 
+### flux-git (initial)
+
 | File | Change |
 |---|---|
 | `.settings.yaml` | Pin `testing_tools.gitea_image` |
@@ -246,10 +297,24 @@ changing it alters the behavior of existing argocd lanes.
 | `.github/actions/kwok-test/action.yml` | `gitrepositories` + Gitea log in debug artifacts |
 | `Makefile` | `kwok-test-deployer` help text |
 
-No Go changes: the bundler's Git output shape
+### argocd-git (follow-up, completing #963)
+
+| File | Change |
+|---|---|
+| `kwok/scripts/install-infra.sh` | `argocd-git` case (Argo CD + repo secret + Gitea); reuses `install_gitea()` |
+| `kwok/scripts/validate-scheduling.sh` | Extracted shared `compute_gitea_urls()` / `push_bundle_to_gitea()` helpers (flux-git refactored onto them); `argocd-git` branch in `resolve_argocd_root_app` (`nvidia-stack`), `generate_bundle` (bundle+repoURL assert+push), `deploy_bundle` (apply app-of-apps), per-deployer chainsaw routing in `wait_for_argocd_sync`, `argocd-*` cleanup |
+| `kwok/scripts/run-all-recipes.sh` | Allowlist `argocd-git` (3-strike rule already matched `argocd-*`) |
+| `tests/chainsaw/kwok/argocd-git-sync/chainsaw-test.yaml` | New sibling sync gate (extra leading step asserts root App Git `repoURL`) |
+| `tests/chainsaw/kwok/argocd-sync/chainsaw-test.yaml` | SYNC NOTE header binding the sibling |
+| `.github/workflows/kwok-recipes.yaml` | `argocd-git` in Tier 1 matrix + Tier 3 deployer list |
+| `Makefile` | `kwok-test-deployer` help text |
+
+No Go changes for either lane: the bundlers' Git output shapes — flux's
 (`collectGitSources()`, `gitrepo-source.yaml.tmpl`, GitRepository
-`sourceRef` on local-chart HelmReleases) already existed; this ADR
-adds the CI lane that protects it.
+`sourceRef`) and argocd's (`resolveRepoSettings()` defaulting
+`targetRevision` to `main`, `app-of-apps.yaml.tmpl`, per-component
+`application.yaml` `repoURL`) — already existed; this ADR adds the CI
+lanes that protect them.
 
 ## Error Handling and Failure Modes
 
@@ -260,25 +325,31 @@ adds the CI lane that protects it.
 | 3 | Admin user bootstrap failed | `gitea admin user create` non-zero and not "already exists" → exit 72 | Dump + fail fast; "already exists" is success (idempotent re-runs) |
 | 4 | Bundler silently took OCI path | `sources/gitrepo-*.yaml` glob assert in `generate_bundle` | Fail fast — the lane must not pass without exercising the Git shape |
 | 5 | `git push` fails | Captured combined output, non-zero exit | Logged verbatim; push-to-create + force-push make re-runs self-healing |
-| 6 | Clone/reconcile failure | chainsaw `flux-git-sync` steps (GitRepository Ready first) | Per-step `catch` dumps sources, controller logs, Gitea log; exit 50 feeds the 3-strike rule |
+| 6 | Clone/reconcile failure | chainsaw `flux-git-sync` (GitRepository Ready first) / `argocd-git-sync` (root App Git `repoURL` first) steps | Per-step `catch` dumps sources, controller logs, Gitea log; exit 50 feeds the 3-strike rule |
+| 7 | argocd bundler silently took OCI path | root App `repoURL` grep in `generate_bundle` + `argocd-git-sync` step 1 | Fail fast at bundle time and at the sync gate — the lane must not pass without exercising the Git shape |
 
 ## Acceptance Criteria
 
-1. `make kwok-test-deployer RECIPE=eks-training DEPLOYER=flux-git`
-   passes against a fresh Kind cluster, and a re-run of the same
-   recipe passes (force-push idempotency).
-2. The sync gate holds until **every** HelmRelease reaches the
+1. `make kwok-test-deployer RECIPE=eks-training DEPLOYER=flux-git` and
+   `DEPLOYER=argocd-git` each pass against a fresh Kind cluster, and a
+   re-run of the same recipe passes (force-push idempotency).
+2. The flux-git sync gate holds until **every** HelmRelease reaches the
    terminal-pass state (verified live: 13-release dependsOn chain no
-   longer short-circuits on the first Ready release).
-3. A deliberate regression in `gitrepo-source.yaml.tmpl` (e.g. wrong
-   branch) turns the Tier 1 `flux-git` cell red.
-4. `flux-oci` lane behavior is unchanged except for the
-   strictly-stronger HelmRelease gate.
+   longer short-circuits on the first Ready release). The argocd-git gate
+   reuses the existing `argocd-sync` chainsaw gate (root App present +
+   Applications reach a terminal-pass arm), behaving identically to
+   `argocd-oci`.
+3. A deliberate regression in the Git output (e.g. wrong branch in
+   `gitrepo-source.yaml.tmpl`, or an OCI `repoURL` leaking into the
+   argocd app-of-apps) turns the Tier 1 `flux-git` / `argocd-git` cell
+   red.
+4. `flux-oci` / `argocd-oci` lane behavior is unchanged.
 
 ## References
 
 - Issue [#963](https://github.com/NVIDIA/aicr/issues/963); parent [#843](https://github.com/NVIDIA/aicr/issues/843); PR #956 (OCI lanes)
 - [ADR-008](008-kwok-deployer-matrix.md) — deployer matrix, OCI-first rationale this ADR extends
-- Bundler Git sources: `pkg/bundler/deployer/flux/sources.go`, `pkg/bundler/deployer/flux/templates/gitrepo-source.yaml.tmpl`
-- Sync gates: `tests/chainsaw/kwok/flux-sync/`, `tests/chainsaw/kwok/flux-git-sync/`
+- Bundler Git sources (flux): `pkg/bundler/deployer/flux/sources.go`, `pkg/bundler/deployer/flux/templates/gitrepo-source.yaml.tmpl`
+- Bundler Git sources (argocd): `pkg/bundler/deployer/argocd/argocd.go` (`resolveRepoSettings`, `DefaultAppName`), `pkg/bundler/deployer/argocd/templates/{app-of-apps,application}.yaml.tmpl`
+- Sync gates: `tests/chainsaw/kwok/{argocd-sync,argocd-git-sync,flux-sync,flux-git-sync}/`
 - Gitea push-to-create: <https://docs.gitea.com/administration/config-cheat-sheet#repository-repository>

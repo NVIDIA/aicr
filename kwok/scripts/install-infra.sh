@@ -46,16 +46,18 @@
 #      but unused. Flux does NOT require a separate repo-creds-style secret
 #      for the in-cluster registry: per-OCIRepository `spec.insecure: true`
 #      toggles plain-HTTP at the source level.
-#   4. DEPLOYER=flux-git: Gitea Deployment + NodePort Service in the
-#      `aicr-registry` namespace (issue #963), mirroring the registry
+#   4. DEPLOYER=flux-git|argocd-git: Gitea Deployment + NodePort Service in
+#      the `aicr-registry` namespace (issue #963), mirroring the registry
 #      pattern. Service is exposed on nodePort 30300; kwok/kind-config.yaml
 #      maps host port 3300 -> nodePort 30300 so the runner can `git push`
 #      the filesystem bundle. Push-to-create is enabled and created repos
-#      are PUBLIC so Flux's source-controller clones anonymously — the
-#      bundler's GitRepository template has no secretRef.
+#      are PUBLIC so the GitOps controller (Flux's source-controller or
+#      Argo CD's repo-server) clones anonymously — the bundler's git
+#      source carries no credentials. argocd-git installs BOTH Argo CD
+#      (step 2) AND Gitea (this step).
 #
 # Usage:
-#   DEPLOYER=helm|argocd-oci|argocd-helm-oci|flux-oci|flux-git ./install-infra.sh
+#   DEPLOYER=helm|argocd-oci|argocd-helm-oci|argocd-git|flux-oci|flux-git ./install-infra.sh
 #   (DEPLOYER defaults to "helm"; under helm only the registry is installed,
 #    which is harmless if unused.)
 #
@@ -86,6 +88,7 @@
 #                                           helm             - registry only
 #                                           argocd-oci       - registry + Argo CD
 #                                           argocd-helm-oci  - registry + Argo CD
+#                                           argocd-git       - registry + Argo CD + Gitea
 #                                           flux-oci         - registry + Flux 2
 #                                           flux-git         - registry + Flux 2 + Gitea
 #                                         Unknown values fall back to the
@@ -97,7 +100,7 @@
 #                                         KWOK_REGISTRY_HOST_PORT: must match
 #                                         the Kind extraPortMappings hostPort.
 #   KWOK_GITEA_USER          (optional, default "aicr") - Gitea admin user the
-#                                         flux-git lane pushes as.
+#                                         flux-git / argocd-git lanes push as.
 #   KWOK_GITEA_PASSWORD      (optional, default "aicr-kwok-ci") - Password for
 #                                         KWOK_GITEA_USER. CI-only credential
 #                                         for the ephemeral in-cluster Gitea —
@@ -774,6 +777,27 @@ main() {
             install_argocd "${argocd_chart}"
             log_debug "Step 3 (argocd): apply repository secret"
             apply_repo_secret
+            ;;
+        argocd-git)
+            # Git-source round-trip (issue #963): same Argo CD install as
+            # the OCI lanes, PLUS Gitea so the runner can `git push` the
+            # filesystem bundle and Argo CD's repo-server clones it back.
+            # The OCI repo-creds secret is harmless here (the Git source
+            # carries no credentials and Argo CD clones the public repo
+            # anonymously) — applied unconditionally to keep this branch a
+            # superset of the OCI lane.
+            local argocd_chart gitea_image
+            argocd_chart=$(read_setting '.testing_tools.argocd_chart')
+            gitea_image=$(read_setting '.testing_tools.gitea_image')
+            log_info "argocd_chart:          ${argocd_chart}"
+            log_info "gitea_image:           ${gitea_image}"
+            log_info "gitea host port:       ${GITEA_HOST_PORT}"
+            log_debug "Step 2 (argocd): install Argo CD"
+            install_argocd "${argocd_chart}"
+            log_debug "Step 3 (argocd): apply repository secret"
+            apply_repo_secret
+            log_debug "Step 4 (argocd-git): install Gitea"
+            install_gitea "${gitea_image}"
             ;;
         flux-oci)
             local flux_version

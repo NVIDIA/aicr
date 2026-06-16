@@ -74,7 +74,7 @@ flowchart LR
 | `make kwok-nodes RECIPE=<name>` | Create simulated nodes |
 | `make kwok-nodes-delete` | Delete all KWOK-simulated nodes |
 | `make kwok-test RECIPE=<name>` | Validate scheduling only |
-| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<d>` | Validate under a GitOps deployer lane (`helm`, `argocd-oci`, `argocd-helm-oci`, `flux-oci`, `flux-git`) |
+| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<d>` | Validate under a GitOps deployer lane (`helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git`) |
 | `make kwok-status` | Show cluster and node status |
 | `make kwok-cluster-delete` | Delete cluster |
 
@@ -83,13 +83,14 @@ flowchart LR
 The GitOps lanes install shared infrastructure once per cluster via
 `kwok/scripts/install-infra.sh` (keyed on `DEPLOYER`): an in-cluster
 OCI registry (always), Argo CD (`argocd-*`), Flux 2 (`flux-*`), and
-Gitea (`flux-git`). Two host-port mappings in `kwok/kind-config.yaml`
-expose the in-cluster services to the runner:
+Gitea (the Git-source lanes `flux-git` and `argocd-git`). Two host-port
+mappings in `kwok/kind-config.yaml` expose the in-cluster services to
+the runner:
 
 | Service | Host port | NodePort | In-cluster DNS | Used by |
 |---------|-----------|----------|----------------|---------|
 | registry | 5500 | 30500 | `registry.aicr-registry.svc.cluster.local:5000` | `aicr bundle --output oci://localhost:5500/...` (OCI lanes) |
-| gitea | 3300 | 30300 | `gitea.aicr-registry.svc.cluster.local:3000` | `git push` of the filesystem bundle (`flux-git` lane) |
+| gitea | 3300 | 30300 | `gitea.aicr-registry.svc.cluster.local:3000` | `git push` of the filesystem bundle (`flux-git`, `argocd-git` lanes) |
 
 Clusters created before a port mapping existed must be recreated
 (`kind delete cluster --name aicr-kwok-test`) to pick it up.

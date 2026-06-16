@@ -27,6 +27,10 @@
 #                                           app-of-apps)
 #                         argocd-helm-oci  (in-cluster registry + Argo CD
 #                                           via OCI Helm chart wrapper)
+#                         argocd-git       (in-cluster registry + Argo CD +
+#                                           Gitea; filesystem bundle pushed
+#                                           to Git, app-of-apps cloned and
+#                                           reconciled from Git; issue #963)
 #                         flux-oci         (in-cluster registry + Flux 2
 #                                           OCIRepository → Kustomization →
 #                                           HelmRelease)
@@ -39,7 +43,7 @@
 #                       recipe loop with DEPLOYER exported so it installs the
 #                       shared in-cluster OCI registry plus the GitOps
 #                       controllers the selected deployer needs (Argo CD or
-#                       Flux, plus Gitea for flux-git). Their owning
+#                       Flux, plus Gitea for flux-git / argocd-git). Their owning
 #                       namespaces (`aicr-registry`, `argocd`, `flux-system`)
 #                       survive across recipe iterations.
 #
@@ -258,14 +262,15 @@ Usage: run-all-recipes.sh [--deployer <name>] [recipe1 recipe2 ...]
 
 Flags:
   --deployer <name>   Deployer to exercise for every recipe. One of:
-                        helm (default), argocd-oci, argocd-helm-oci, flux-oci,
-                        flux-git
+                        helm (default), argocd-oci, argocd-helm-oci, argocd-git,
+                        flux-oci, flux-git
 
 Examples:
   run-all-recipes.sh
   run-all-recipes.sh eks-training
   run-all-recipes.sh --deployer argocd-oci eks-training
   run-all-recipes.sh --deployer=argocd-helm-oci
+  run-all-recipes.sh --deployer argocd-git eks-training
   run-all-recipes.sh --deployer flux-oci eks-training
   run-all-recipes.sh --deployer flux-git eks-training
 EOF
@@ -315,11 +320,11 @@ main() {
     done
 
     case "$DEPLOYER" in
-        helm|argocd-oci|argocd-helm-oci|flux-oci|flux-git)
+        helm|argocd-oci|argocd-helm-oci|argocd-git|flux-oci|flux-git)
             ;;
         *)
             log_error "Invalid --deployer value: '${DEPLOYER}'"
-            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, flux-oci, flux-git"
+            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, argocd-git, flux-oci, flux-git"
             usage
             return 1
             ;;
@@ -349,7 +354,8 @@ main() {
 
     # Install shared in-cluster registry + the controller(s) the selected
     # deployer needs (Argo CD for argocd-*, Flux for flux-*, plus Gitea for
-    # flux-git). install-infra.sh is idempotent but unnecessary work per
+    # the Git-source lanes flux-git / argocd-git). install-infra.sh is
+    # idempotent but unnecessary work per
     # recipe; a failure here is fatal — the lane cannot run without it.
     # DEPLOYER is exported so install-infra.sh can branch on it. Its exit
     # code map: 10=yq/settings, 20=registry Deployment not Ready,
