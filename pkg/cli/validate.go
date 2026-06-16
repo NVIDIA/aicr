@@ -765,6 +765,12 @@ Run validation without failing on check errors (informational mode):
 				}
 			}
 
+			// Advisory: warn when the running binary, the recipe-producing
+			// binary, and the snapshot-producing binary report different
+			// release versions. Mixed-version artifacts can cause confusing
+			// validation failures; this does not fail the command.
+			warnVersionSkew(version, rec.Resolved().Metadata.Version, snap.Metadata["version"])
+
 			// Warn when a requested phase has no checks defined in the recipe.
 			// The helper reads the full recipe's Validation section, which the
 			// lossy facade RecipeResult does not expose — reach the underlying
