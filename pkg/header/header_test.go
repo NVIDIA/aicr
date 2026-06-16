@@ -22,6 +22,41 @@ import (
 // Test API version constant - matches aicr.nvidia.com/v1alpha1 used by snapshotter and recipe packages
 const testAPIVersion = "aicr.nvidia.com/v1alpha1"
 
+func TestGroupVersion(t *testing.T) {
+	t.Parallel()
+
+	if GroupVersion != testAPIVersion {
+		t.Errorf("GroupVersion = %q, want %q", GroupVersion, testAPIVersion)
+	}
+	if want := APIGroup + "/" + APIVersionV1Alpha1; GroupVersion != want {
+		t.Errorf("GroupVersion = %q, want %q", GroupVersion, want)
+	}
+}
+
+func TestIsSupportedAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{"current group version", GroupVersion, true},
+		{"empty not supported here", "", false},
+		{"future version not yet supported", "aicr.nvidia.com/v1alpha2", false},
+		{"foreign group", "validator.nvidia.com/v1alpha1", false},
+		{"garbage", "not-a-version", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsSupportedAPIVersion(tt.version); got != tt.want {
+				t.Errorf("IsSupportedAPIVersion(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestKind_String(t *testing.T) {
 	t.Parallel()
 

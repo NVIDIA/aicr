@@ -749,9 +749,9 @@ Run validation without failing on check errors (informational mode):
 
 			if snapshotFilePath != "" {
 				slog.Info("loading snapshot", "uri", snapshotFilePath)
-				snap, err = serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapshotFilePath, kubeconfig)
+				snap, err = snapshotter.LoadFromFileWithKubeconfig(ctx, snapshotFilePath, kubeconfig)
 				if err != nil {
-					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapshotFilePath), err)
+					return err
 				}
 			} else {
 				slog.Info("deploying agent to capture snapshot")
@@ -764,6 +764,12 @@ Run validation without failing on check errors (informational mode):
 					return deployErr
 				}
 			}
+
+			// Advisory: warn when the running binary, the recipe-producing
+			// binary, and the snapshot-producing binary report different
+			// release versions. Mixed-version artifacts can cause confusing
+			// validation failures; this does not fail the command.
+			warnVersionSkew(version, rec.Resolved().Metadata.Version, snap.Metadata["version"])
 
 			// Warn when a requested phase has no checks defined in the recipe.
 			// The helper reads the full recipe's Validation section, which the
