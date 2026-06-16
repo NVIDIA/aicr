@@ -170,9 +170,9 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)
-		snap, loadErr := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapFilePath, cmd.String("kubeconfig"))
+		snap, loadErr := snapshotter.LoadFromFileWithKubeconfig(ctx, snapFilePath, cmd.String("kubeconfig"))
 		if loadErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapFilePath), loadErr)
+			return nil, loadErr
 		}
 
 		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria(reg)
