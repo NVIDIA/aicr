@@ -117,6 +117,51 @@ func TestWriter_SerializeTable(t *testing.T) {
 	}
 }
 
+func TestWriter_SerializeTable_CompactNestedLeaves(t *testing.T) {
+	var buf bytes.Buffer
+	writer := NewWriter(FormatTable, &buf)
+
+	data := map[string]any{
+		"driver":          map[string]any{"version": "570.86", "rdma": true},
+		"deploymentOrder": []string{"cert-manager", "gpu-operator"},
+		"notes":           "line1\nline2",
+		"tabbed":          "col1\tcol2",
+		"replicas":        3,
+	}
+	if err := writer.Serialize(context.Background(), data); err != nil {
+		t.Fatalf("Serialize failed: %v", err)
+	}
+	output := buf.String()
+
+	// Nested map collapses to one compact-JSON cell (not exploded into
+	// driver.version / driver.rdma rows).
+	if !strings.Contains(output, `driver`) || !strings.Contains(output, `"version":"570.86"`) {
+		t.Errorf("nested map not rendered as compact JSON: %q", output)
+	}
+	if strings.Contains(output, "driver.version") {
+		t.Errorf("nested map should not be exploded into dotted rows: %q", output)
+	}
+	// Scalar slice collapses to a compact-JSON array.
+	if !strings.Contains(output, `["cert-manager","gpu-operator"]`) {
+		t.Errorf("scalar slice not rendered as compact JSON: %q", output)
+	}
+	// A multi-line string must not leak a raw newline into the value cell.
+	if strings.Contains(output, "line1\nline2") {
+		t.Errorf("multi-line string should be escaped, not raw: %q", output)
+	}
+	if !strings.Contains(output, `"line1\nline2"`) {
+		t.Errorf("multi-line string should be JSON-escaped: %q", output)
+	}
+	// A tab-containing string must likewise be escaped so it can't break columns.
+	if !strings.Contains(output, `"col1\tcol2"`) {
+		t.Errorf("tab string should be JSON-escaped: %q", output)
+	}
+	// Plain scalar stays native.
+	if !strings.Contains(output, "replicas") || !strings.Contains(output, "3") {
+		t.Errorf("scalar value missing: %q", output)
+	}
+}
+
 func TestWriter_UnsupportedFormat(t *testing.T) {
 	// Note: NewWriter now defaults unknown formats to JSON instead of erroring
 	// This test is kept to verify the fallback behavior

@@ -326,6 +326,12 @@ func writeCatalogEntries(ctx context.Context, cmd *cli.Command, entries []aicr.C
 			if _, err := fmt.Fprintln(w, "(no matching overlays)"); err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to write empty message", err)
 			}
+		} else {
+			// Legend so a bare "any" in the criteria columns reads as an
+			// intentional wildcard rather than a missing/unknown value (issue #1383).
+			if _, err := fmt.Fprintf(w, "\n%s = wildcard (dimension unconstrained — matches any value)\n", criteriaAny); err != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to write legend", err)
+			}
 		}
 	}
 

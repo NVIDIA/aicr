@@ -255,21 +255,74 @@ func flattenValue(out map[string]any, val reflect.Value, prefix string) {
 			flattenValue(out, val.Field(i), key)
 		}
 	case reflect.Map:
-		for _, mapKey := range val.MapKeys() {
-			key := joinKey(prefix, fmt.Sprintf("%v", mapKey.Interface()))
-			flattenValue(out, val.MapIndex(mapKey), key)
+		// Render maps as a single-line compact-JSON value rather than
+		// exploding every key into its own row. Deeply nested values.yaml
+		// fragments would otherwise flood the table, and a raw %v dump of a
+		// nested map breaks the FIELD/VALUE columns (issue #1383). An empty
+		// top-level map yields no rows so the caller prints "<empty>".
+		if prefix == "" && val.Len() == 0 {
+			return
 		}
+		storeTableLeaf(out, prefix, compactJSONLeaf(val))
 	case reflect.Slice, reflect.Array:
-		for i := 0; i < val.Len(); i++ {
-			key := joinKey(prefix, fmt.Sprintf("[%d]", i))
-			flattenValue(out, val.Index(i), key)
+		// Slices of structs (e.g. []ComponentRef) still recurse so each
+		// element's scalar fields get their own row; slices of scalars
+		// (e.g. deploymentOrder) collapse to one compact-JSON value.
+		if val.Len() > 0 && derefedKind(val.Index(0)) == reflect.Struct {
+			for i := 0; i < val.Len(); i++ {
+				key := joinKey(prefix, fmt.Sprintf("[%d]", i))
+				flattenValue(out, val.Index(i), key)
+			}
+		} else {
+			// An empty top-level slice yields no rows so the caller prints
+			// "<empty>"; a nested empty slice still renders as "[]".
+			if prefix == "" && val.Len() == 0 {
+				return
+			}
+			storeTableLeaf(out, prefix, compactJSONLeaf(val))
 		}
 	default:
-		if prefix == "" {
-			prefix = defaultValueKey
+		// Scalars render natively; a string with an embedded newline, tab, or
+		// carriage return is JSON-escaped so it can't shatter the tabwriter
+		// FIELD/VALUE columns.
+		if s, ok := val.Interface().(string); ok && strings.ContainsAny(s, "\n\r\t") {
+			storeTableLeaf(out, prefix, compactJSONLeaf(val))
+		} else {
+			storeTableLeaf(out, prefix, val.Interface())
 		}
-		out[prefix] = val.Interface()
 	}
+}
+
+// storeTableLeaf records a flattened leaf, substituting defaultValueKey when
+// the value sits at the root (no prefix).
+func storeTableLeaf(out map[string]any, prefix string, v any) {
+	if prefix == "" {
+		prefix = defaultValueKey
+	}
+	out[prefix] = v
+}
+
+// compactJSONLeaf renders a non-scalar (or multi-line) value as single-line
+// JSON so the table's FIELD/VALUE columns stay intact. Falls back to %v when
+// the value cannot be marshaled (e.g. a map with non-string keys).
+func compactJSONLeaf(val reflect.Value) string {
+	b, err := json.Marshal(val.Interface())
+	if err != nil {
+		return fmt.Sprintf("%v", val.Interface())
+	}
+	return string(b)
+}
+
+// derefedKind returns the underlying kind of v after unwrapping pointers and
+// interfaces; reflect.Invalid for a nil along the way.
+func derefedKind(v reflect.Value) reflect.Kind {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return reflect.Invalid
+		}
+		v = v.Elem()
+	}
+	return v.Kind()
 }
 
 func joinKey(prefix, suffix string) string {

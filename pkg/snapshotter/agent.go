@@ -206,6 +206,8 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 			// understand why agent logs are missing from their output.
 			if logCtx.Err() == nil {
 				slog.Warn("agent log streaming skipped: pod did not become ready",
+					slog.String("namespace", agentConfig.Namespace),
+					slog.String("job", agentConfig.JobName),
 					"error", podErr)
 			}
 			return
@@ -227,7 +229,10 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		msg := "job failed"
 		if autoInjectedGPUSelector {
 			msg = "job failed (auto-injected node selector nvidia.com/gpu.present=true — " +
-				"if no GPU nodes are schedulable, pass --node-selector or --require-gpu explicitly)"
+				"if no GPU nodes are schedulable, target a GPU node explicitly, e.g. " +
+				"--node-selector kubernetes.io/hostname=<gpu-node> " +
+				"(repeat the flag per key=value), or pass --require-gpu to schedule onto " +
+				"a node advertising the nvidia.com/gpu resource)"
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, msg, waitErr)
 	}

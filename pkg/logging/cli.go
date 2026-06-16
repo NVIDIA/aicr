@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -106,9 +107,12 @@ func (h *CLIHandler) Handle(_ context.Context, r slog.Record) error {
 		msg = msg + ": " + strings.Join(attrs, " ")
 	}
 
-	// Add color for error messages and success messages when supported.
+	// Add color when supported. Error-level records are red; otherwise the
+	// record is red when it carries a failure status attr (so a
+	// "validator completed status=failed" line logged at Info reads red, not
+	// green) and green for everything else.
 	if h.color {
-		if r.Level >= slog.LevelError {
+		if r.Level >= slog.LevelError || h.hasFailureStatus(r) {
 			msg = colorRed + msg + colorReset
 		} else {
 			msg = colorGreen + msg + colorReset
@@ -119,6 +123,37 @@ func (h *CLIHandler) Handle(_ context.Context, r slog.Record) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write log output", err)
 	}
 	return nil
+}
+
+// hasFailureStatus reports whether the record (or a handler-bound attr)
+// carries a `status` attribute whose value indicates failure. This lets the
+// CLI color a non-error-level completion line red — e.g. CTRF reports a failed
+// validator via slog.Info("validator completed", "status", "failed"), which
+// would otherwise render green because it is below LevelError.
+func (h *CLIHandler) hasFailureStatus(r slog.Record) bool {
+	isFailure := func(a slog.Attr) bool {
+		if a.Key != "status" {
+			return false
+		}
+		switch strings.ToLower(a.Value.String()) {
+		case "failed", "error":
+			return true
+		default:
+			return false
+		}
+	}
+	if slices.ContainsFunc(h.attrs, isFailure) {
+		return true
+	}
+	found := false
+	r.Attrs(func(a slog.Attr) bool {
+		if isFailure(a) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // formatAttr renders a slog.Attr as "key=value", prefixing key with the

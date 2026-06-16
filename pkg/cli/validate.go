@@ -675,6 +675,16 @@ Run validation without failing on check errors (informational mode):
 			failFast := boolFlagOrConfig(cmd, "fail-fast", derefBoolOr(resolved.FailFast, false))
 			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
 
+			// Mode banner: make it explicit whether this run touches a live
+			// cluster (issue #1383). --no-cluster is an offline dry-run that
+			// reports checks as skipped; otherwise validation deploys
+			// validator Jobs against the active kube-context.
+			if noCluster {
+				slog.Info("validating in --no-cluster mode — offline dry-run; checks are reported as skipped, no cluster is contacted")
+			} else {
+				slog.Info("validating against the live cluster — validator Jobs will be deployed to the active kube-context")
+			}
+
 			// Resolve shared fields once, before the snapshot/agent split, so
 			// CLI-overrides-config log lines fire exactly once per field even
 			// when both the agent-deploy path and the validator Job want the
