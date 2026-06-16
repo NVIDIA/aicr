@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -32,6 +33,14 @@ import (
 // FetchAmbientOIDCToken retrieves an OIDC identity token from the GitHub Actions
 // ambient credential endpoint. This is used for keyless Fulcio signing in CI.
 //
+// The request is wrapped in bounded exponential-backoff retry (the same
+// defaults.Sigstore* budget used by the signing path) so a transient TLS
+// handshake timeout or 5xx from GitHub's idtoken endpoint does not fail the
+// whole build. Only transient transport failures and 5xx responses are
+// retried; a 4xx (bad/missing request token) or an empty/undecodable token
+// body fails fast because no retry will recover it. See issue #1363 for the
+// CI-flake pattern this absorbs.
+//
 // Parameters:
 //   - requestURL: the ACTIONS_ID_TOKEN_REQUEST_URL environment variable
 //   - requestToken: the ACTIONS_ID_TOKEN_REQUEST_TOKEN environment variable
@@ -40,9 +49,6 @@ func FetchAmbientOIDCToken(ctx context.Context, requestURL, requestToken string)
 		return "", errors.New(errors.ErrCodeInvalidRequest, "OIDC request URL is empty")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.HTTPClientTimeout)
-	defer cancel()
-
 	u, err := url.Parse(requestURL)
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to parse OIDC request URL", err)
@@ -50,42 +56,116 @@ func FetchAmbientOIDCToken(ctx context.Context, requestURL, requestToken string)
 	q := u.Query()
 	q.Set("audience", "sigstore")
 	u.RawQuery = q.Encode()
+	reqURL := u.String()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create OIDC request", err)
+	var lastErr error
+	backoff := defaults.SigstoreRetryInitialBackoff
+	for n := 1; n <= defaults.SigstoreRetryBudget; n++ {
+		// Pre-attempt ctx check — don't pay for an attempt the caller's
+		// deadline / cancellation has already made pointless.
+		if err := ctx.Err(); err != nil {
+			return "", classifyOIDCFetchContextError(err, "before attempt")
+		}
+
+		attemptCtx, cancel := context.WithTimeout(ctx, defaults.HTTPClientTimeout)
+		token, retryable, attemptErr := fetchAmbientOIDCTokenAttempt(attemptCtx, reqURL, requestToken)
+		cancel()
+		if attemptErr == nil {
+			return token, nil
+		}
+		lastErr = attemptErr
+
+		// Outer ctx exhausted? Classify and stop — no retry can help.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", classifyOIDCFetchContextError(ctxErr, "during attempt")
+		}
+
+		// Terminal failure (4xx, empty/undecodable token): the error is
+		// already structured; surface it without burning retries.
+		if !retryable {
+			return "", attemptErr
+		}
+
+		if n >= defaults.SigstoreRetryBudget {
+			return "", errors.Wrap(errors.ErrCodeUnavailable,
+				"OIDC token request failed after retries", lastErr)
+		}
+		slog.Warn("OIDC token request attempt failed, retrying",
+			"attempt", n,
+			"budget", defaults.SigstoreRetryBudget,
+			"backoff", backoff,
+			"error", lastErr)
+
+		// Interruptible backoff: a recovering endpoint shouldn't waste the
+		// remaining budget, and a canceled/expired outer ctx exits promptly.
+		select {
+		case <-ctx.Done():
+			return "", classifyOIDCFetchContextError(ctx.Err(), "during retry backoff")
+		case <-time.After(backoff):
+		}
+		backoff *= time.Duration(defaults.SigstoreRetryBackoffFactor)
 	}
+	// Unreachable: the loop returns inside on every iteration after the final
+	// attempt. Kept so a future refactor that breaks the invariant surfaces as
+	// a clear error rather than a silent empty token.
+	return "", errors.Wrap(errors.ErrCodeInternal,
+		"OIDC token retry loop exited without returning", lastErr)
+}
 
+// fetchAmbientOIDCTokenAttempt performs a single ambient OIDC token request.
+// It returns the token on success. On failure, retryable is true for transient
+// transport errors and 5xx responses (worth another attempt) and false for
+// 4xx responses or an empty/undecodable token body (won't recover).
+func fetchAmbientOIDCTokenAttempt(ctx context.Context, reqURL, requestToken string) (token string, retryable bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "", false, errors.Wrap(errors.ErrCodeInternal, "failed to create OIDC request", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+requestToken)
 
 	client := defaults.NewHTTPClient(0)
 	resp, err := client.Do(req) //nolint:gosec // URL is from ACTIONS_ID_TOKEN_REQUEST_URL (trusted GitHub Actions env var)
 	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeUnavailable, "OIDC token request failed", err)
+		// Transport-level failure (TLS handshake timeout, connection reset,
+		// per-attempt deadline): transient, worth retrying.
+		return "", true, errors.Wrap(errors.ErrCodeUnavailable, "OIDC token request failed", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, defaults.MaxErrorBodySize))
 		msg := "OIDC token request returned " + resp.Status + ": " + string(body)
+		// 5xx is a server-side blip (retry); 4xx is a client error such as a
+		// bad/expired request token (fail fast — retry won't fix it).
+		retryable = resp.StatusCode >= http.StatusInternalServerError
 		if readErr != nil {
-			return "", errors.Wrap(errors.ErrCodeUnavailable, msg, readErr)
+			return "", retryable, errors.Wrap(errors.ErrCodeUnavailable, msg, readErr)
 		}
-		return "", errors.New(errors.ErrCodeUnavailable, msg)
+		return "", retryable, errors.New(errors.ErrCodeUnavailable, msg)
 	}
 
 	var result struct {
 		Value string `json:"value"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, defaults.MaxErrorBodySize)).Decode(&result); err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to decode OIDC token response", err)
+		return "", false, errors.Wrap(errors.ErrCodeInternal, "failed to decode OIDC token response", err)
 	}
 
 	if result.Value == "" {
-		return "", errors.New(errors.ErrCodeInternal, "OIDC token response contained empty value")
+		return "", false, errors.New(errors.ErrCodeInternal, "OIDC token response contained empty value")
 	}
 
-	return result.Value, nil
+	return result.Value, false, nil
+}
+
+// classifyOIDCFetchContextError maps an outer-context error encountered during
+// the ambient OIDC fetch to a structured error: deadline expiry is a timeout,
+// any other cause (typically caller cancellation) is reported as unavailable.
+func classifyOIDCFetchContextError(err error, phase string) error {
+	if stderrors.Is(err, context.DeadlineExceeded) {
+		return errors.Wrap(errors.ErrCodeTimeout, "OIDC token request timed out "+phase, err)
+	}
+	return errors.Wrap(errors.ErrCodeUnavailable, "OIDC token request canceled "+phase, err)
 }
 
 // Sigstore public-good OIDC configuration.

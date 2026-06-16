@@ -81,7 +81,11 @@
 // Three flows are exposed for obtaining a Sigstore OIDC identity token; the
 // CLI selects one and may also accept a pre-fetched token directly:
 //   - FetchAmbientOIDCToken: Uses ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN env vars
-//     (GitHub Actions). No browser required.
+//     (GitHub Actions). No browser required. The token request is wrapped in
+//     the same defaults.Sigstore* bounded exponential-backoff retry as the
+//     signing path: transient transport failures (e.g. a TLS handshake
+//     timeout to GitHub's idtoken endpoint) and 5xx responses are retried,
+//     while a 4xx or an empty/undecodable token body fails fast (see #1363).
 //   - FetchInteractiveOIDCToken: Opens a browser and binds a localhost
 //     redirect callback (default for workstations). Has a 5-minute timeout.
 //   - FetchDeviceCodeOIDCToken: OAuth 2.0 Device Authorization Grant
