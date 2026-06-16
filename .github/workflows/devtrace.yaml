@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: DevTrace
-        uses: thingzio/devtrace-action@b35e96e42494859cfbab25d17499efb5cb30a59d  # v1.0.2
+        uses: thingzio/devtrace-action@167f053a160c2ddf5cf1fcd288bbb83e1da28930  # v1.0.2
         with:
           token: ${{ secrets.DEVTRACE_TOKEN }}
           # trusted-orgs: members of these GitHub orgs receive a trust-score
