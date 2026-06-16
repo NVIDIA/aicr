@@ -95,6 +95,9 @@ spec:
   # EFA libfabric stack already present on the parent EKS leaf.
   # Deployment and conformance checks are inherited unchanged.
   validation:
+    conformance:
+      checks:
+        - slinky-slurm-health
     performance:
       checks: []
       constraints: []

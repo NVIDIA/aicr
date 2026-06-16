@@ -98,6 +98,9 @@ spec:
   # gke-nccl-tcpxo. Deployment and conformance checks are inherited
   # unchanged.
   validation:
+    conformance:
+      checks:
+        - slinky-slurm-health
     performance:
       checks: []
       constraints: []
