@@ -190,6 +190,65 @@ Pick a key that is easier to type (no hyphens) and document it in the
 displayName-adjacent comments if non-obvious. Override keys are
 globally unique — `ComponentRegistry.Validate` rejects duplicates.
 
+## Exposing Scheduling Knobs Without New Flags
+
+A recurring first-PR instinct is to add a new CLI flag for every
+placement knob a chart exposes — one flag for the controller, one for
+the workers, one for a sidecar, and so on. Don't. AICR already models
+node placement as **value paths**, not flags, so the existing
+primitives cover arbitrary chart depth without growing the CLI surface.
+
+Two separate mechanisms are at work — keep them distinct:
+
+**Path routing.** `nodeScheduling` is registry metadata that maps chart
+value paths onto the `system` / `accelerated` node classes (see
+[the section above](#nodeschedulingsystem-vs-accelerated)). It selects
+*which* chart paths receive a node selector / toleration; it does not
+participate in value precedence. The bundler fans `--system-node-selector`
+/ `--accelerated-node-selector` (and the matching `*-toleration` flags)
+out to **every** declared path, so one flag covers N workloads.
+
+**Value precedence.** Once a path is targeted, its value is resolved
+across layers, lowest precedence first:
+
+1. **Component value defaults** — ship sane defaults in
+   `recipes/components/<name>/values.yaml`, or per-recipe in an overlay
+   `componentRefs[].valuesFile` / inline `overrides`. This is where the
+   common case (e.g. a managed cluster's standard node labels) works
+   out of the box with no flags at all.
+2. **Deploy-time overrides** — `--set <key>:<path>=<value>` reaches any
+   value path for last-mile deviations; `--dynamic <key>:<path>` defers
+   a path to install time (it is stripped from `values.yaml` into
+   `cluster-values.yaml` for the operator to fill in).
+
+Merge order is base → `valuesFile` → overlay `overrides` →
+`--set` / `--dynamic`, so a bundle-time override always wins over a
+recipe default. The node-class flags (`--system-node-selector` et al.)
+write into their routed paths at bundle time, alongside `--set`.
+
+**Deciding where a knob belongs:**
+
+| Situation | Where it goes | Why |
+|---|---|---|
+| Workload must run on management / control-plane nodes | Path under `nodeScheduling.system` | Inherits `--system-node-selector` automatically |
+| Workload must run on GPU nodes | Path under `nodeScheduling.accelerated` | Inherits `--accelerated-node-selector` automatically |
+| A pool that is neither (e.g. a dedicated CPU-worker pool) | Leave it out of `nodeScheduling`; target via `--set <key>:that.path.nodeSelector.<label>=<value>` | The two-class model intentionally covers only system vs GPU; everything else is reachable by path |
+| Value is cluster-specific and unknown at bundle time | `--dynamic <key>:<path>` | Lands in `cluster-values.yaml` for install-time entry |
+
+"When omitted, inherit from the node class" needs no special logic — a
+path listed under `system` / `accelerated` **is** the inheritance.
+
+**Caveat: the chart must actually render the path.** A `nodeSelector`
+path only takes effect if the upstream chart template renders it. Some
+charts honor only `affinity` / `tolerations` and silently drop
+`nodeSelector`, so a declared path becomes a no-op. Verify against the
+chart's templates before adding a path. If the chart does not support
+it, either pin placement through the `affinity` path the chart *does*
+render (as a `values.yaml` default) or omit the path and document the
+limitation in a registry comment. The `slinky-slurm-operator` entry in
+[`registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml)
+is a worked example of the latter.
+
 ## `deploymentOrder`
 
 `RecipeResult.DeploymentOrder` is **derived**, not authored.
