@@ -20,7 +20,7 @@ inputs:
     description: 'Recipe name to test'
     required: true
   deployer:
-    description: 'Deployer to exercise: helm | argocd-oci | argocd-helm-oci | flux-oci | flux-git'
+    description: 'Deployer to exercise: helm | argocd-oci | argocd-helm-oci | argocd-git | flux-oci | flux-git'
     required: false
     default: 'helm'
   go_version:

@@ -14,80 +14,90 @@
 
 # yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
 #
-# KWOK argocd-* sync gate. Replaces the bash `wait_for_argocd_sync` +
-# `wait_for_argocd_root_app` + `dump_argocd_failures` functions previously
-# in kwok/scripts/validate-scheduling.sh. Driven by the `validate-scheduling.sh`
-# argocd-oci / argocd-helm-oci / argocd-git deployer branches; see issue #962
-# for the migration rationale.
+# KWOK argocd-git sync gate (issue #963). Sibling of ../argocd-sync/ — the
+# ONLY intended divergence is the extra step 1, which asserts the root
+# Application's Git source (spec.source.repoURL) so the lane fails closed
+# when the bundler silently rendered an OCI repoURL instead of the Git URL
+# it was given via --repo. The assert-root-app-present and
+# assert-all-applications-pass steps MUST stay byte-identical with
+# argocd-sync/chainsaw-test.yaml; when changing one, change both. See
+# ADR-010 (docs/design/010-kwok-git-source-lanes.md).
 #
-# SYNC NOTE (issue #963): ../argocd-git-sync/chainsaw-test.yaml is a sibling
-# of this test whose only intended divergence is an EXTRA leading step that
-# asserts the root Application's Git source (spec.source.repoURL). The
-# assert-root-app-present and assert-all-applications-pass steps MUST stay
-# byte-identical between the two files — when changing one, change both.
-#
-# The test takes one binding via `chainsaw test --values rootApp=<name>`:
-#   - rootApp: the parent App-of-Apps name (`nvidia-stack` for --deployer
-#     argocd, `aicr-stack` for --deployer argocd-helm). The bash driver
-#     selects the right name from DEPLOYER.
+# Driven by validate-scheduling.sh's argocd-git deployer branch via
+# `chainsaw test --set rootApp=<name> --set repoURL=<git-url>`. The driver
+# passes the IN-CLUSTER Git URL it baked into the bundle (Service DNS),
+# which is exactly what Argo CD's repo-server clones from.
 #
 # Pass predicate — every Application in the `argocd` namespace must match
-# one of these 4 terminal-pass states (mirroring the pre-migration jq
-# disjunction at validate-scheduling.sh:~1378):
+# one of these 4 terminal-pass states (mirroring argocd-sync):
 #
 #   1. Synced + Healthy                                   — canonical pass
 #   2. Synced + Progressing                               — KWOK pod-readiness gap (ADR-008)
 #   3. OutOfSync + Healthy + operationState=Succeeded     — operator mutation (ClusterPolicy, DeviceClass, etc.)
 #   4. Synced + Degraded + operationState=Succeeded       — health controller divergence after successful op
-#
-# The 4-arm disjunction is encoded as a single JMESPath expression that
-# Chainsaw re-evaluates per Application matched by the resource selector.
-# Chainsaw polls until ALL matched Applications satisfy the expression
-# (or the assert timeout fires).
-#
-# On failure, the catch block dumps per-App status + repo-server and
-# application-controller logs. The StatefulSet/Deployment fallback for
-# application-controller matches Argo CD chart 9.x (StatefulSet) and
-# older chart layouts (Deployment).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: kwok-argocd-sync
+  name: kwok-argocd-git-sync
 spec:
   description: |
-    Wait for Argo CD reconciliation to converge on the KWOK deployer matrix.
-    Asserts that the root Application is present and every Application in
-    the argocd namespace reaches one of the 4 terminal-pass states.
+    Wait for Argo CD reconciliation of a Git-sourced (Gitea) bundle to
+    converge on the KWOK deployer matrix. Asserts the root Application
+    sources from the expected Git URL, is present, and every Application
+    in the argocd namespace reaches one of the 4 terminal-pass states.
   bindings:
-    # rootApp is overridden via `chainsaw test --set rootApp=<name>`.
-    # The CLI's `--set key=value` populates the implicit `$values`
-    # binding; we surface it here as a top-level `$rootApp` binding so
-    # callers can leave the test invocable without arguments (defaulting
-    # to argocd-helm-oci's root App). The `$values.rootApp || 'aicr-stack'`
-    # fallback handles the no-arg case for ad-hoc local invocation.
+    # See the argocd-sync test for the $values vs bindings pattern.
+    # CLI `--set <key>=<value>` populates `$values.<key>`; the bindings
+    # below pull that through with a default fallback for ad-hoc runs.
     - name: rootApp
-      value: ($values.rootApp || 'aicr-stack')
+      value: ($values.rootApp || 'nvidia-stack')
+    # repoURL is the in-cluster Git URL the bundler baked into the
+    # app-of-apps source. No fallback default: an empty value here would
+    # make the step-1 assert vacuous, so leave it empty and let the
+    # assert fail loudly if the driver forgot to pass it.
+    - name: repoURL
+      value: ($values.repoURL || '')
   timeouts:
-    # KWOK_ARGOCD_SYNC_TIMEOUT default. The argocd-helm-oci wrapper takes
-    # slightly longer to converge than argocd-oci because the parent
-    # Application has to render the child Apps before they begin
-    # reconciling. 5 minutes is conservative for KWOK pod-readiness sim.
+    # KWOK_ARGOCD_SYNC_TIMEOUT default. Matches argocd-sync.
     assert: 5m
-  # Skip namespace and resource deletion during cleanup. The test creates
-  # no resources of its own (it only asserts on Application CRs in the
-  # argocd namespace), so there's nothing to clean. Chainsaw's default
-  # cleanup deletes the auto-created per-test namespace, which on KWOK
-  # gets stuck in Terminating forever — there's no kube-controller-manager
-  # to finalize the `kubernetes` namespace finalizer — and the 30s
-  # cleanup timeout fires, reporting the test as failed even when every
-  # assertion passed. See PR #1050.
+  # See argocd-sync for the skipDelete rationale (KWOK has no
+  # kube-controller-manager to finalize the auto-created test namespace).
   skipDelete: true
   steps:
+    - name: assert-root-app-git-source
+      description: |
+        Git-mode proof. The root App-of-Apps must source from the Git URL
+        the driver passed via --repo. If repoURL is an oci:// reference
+        instead, the bundler silently took the OCI path and this lane is
+        no longer exercising the Git output shape it exists to protect.
+        This is the argocd analogue of flux-git-sync's GitRepository-Ready
+        step.
+      try:
+        - assert:
+            timeout: 30s
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: ($rootApp)
+                namespace: argocd
+              spec:
+                source:
+                  (repoURL == ($repoURL)): true
+      catch:
+        - script:
+            content: |
+              echo "--- root Application source ---"
+              kubectl get application ($rootApp) -n argocd \
+                -o jsonpath='{.spec.source}' 2>&1 || true
+              echo "--- Applications in argocd namespace ---"
+              kubectl get applications -n argocd 2>&1 || true
+
     - name: assert-root-app-present
       description: |
         The root Application must exist within the grace period. If it
-        doesn't, the bundle apply step (helm install / kubectl apply)
-        either failed silently or produced no Application resource.
+        doesn't, the bundle apply step (kubectl apply) either failed
+        silently or produced no Application resource.
       try:
         - assert:
             timeout: 30s

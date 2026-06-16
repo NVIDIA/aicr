@@ -241,8 +241,8 @@ real hardware. CI uses it to validate two things per recipe:
    the overlay expects.
 2. **Deployer output correctness.** The same recipe is re-rendered
    through every output adapter — `helm`, `argocd-oci`,
-   `argocd-helm-oci`, `flux-oci`, `flux-git` — and each renders to a
-   working bundle the GitOps controllers can reconcile.
+   `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` — and each
+   renders to a working bundle the GitOps controllers can reconcile.
 
 KWOK nodes have no kubelet, so pods never actually run. KWOK testing
 **does not exercise** runtime validators (NCCL, inference-perf) or
@@ -256,8 +256,8 @@ simulated reflection of production shape, not a relaxed substitute.
 For the design rationale and the spike findings that justify the
 chart pin and Repository-secret shape, see
 [ADR-008](https://github.com/NVIDIA/aicr/blob/main/docs/design/008-kwok-deployer-matrix.md);
-for the Git-source lanes (in-cluster Gitea, `flux-git`), see
-[ADR-010](https://github.com/NVIDIA/aicr/blob/main/docs/design/010-kwok-git-source-lanes.md).
+for the Git-source lanes (in-cluster Gitea, `flux-git` and `argocd-git`),
+see [ADR-010](https://github.com/NVIDIA/aicr/blob/main/docs/design/010-kwok-git-source-lanes.md).
 For cluster-level KWOK setup (node profiles, recipe auto-discovery),
 see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 
@@ -265,15 +265,16 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 
 | Tier | Trigger | Deployers exercised |
 |------|---------|----------------------|
-| Tier 1 — generic overlays | every PR + push | `helm`, `argocd-oci`, `argocd-helm-oci`, `flux-oci`, `flux-git` |
+| Tier 1 — generic overlays | every PR + push | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
 | Tier 2 — diff-aware accelerator overlays | PR only, conditional on changed files | `helm` only |
-| Tier 3 — full overlay set | push to `main` + nightly schedule | `helm`, `argocd-oci`, `argocd-helm-oci`, `flux-oci`, `flux-git` |
+| Tier 3 — full overlay set | push to `main` + nightly schedule | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
 
 | Lane | Pull artifact | Apply manifests | Reconcile to Ready |
 |---|---|---|---|
 | `helm` | n/a (filesystem) | `helm install` | pods scheduled |
 | `argocd-oci` | repo-server OCI pull | Argo CD sync | `Synced+Healthy` |
 | `argocd-helm-oci` | `helm pull` OCI | wrapper chart install | `Synced+Healthy` |
+| `argocd-git` | repo-server Git clone (in-cluster Gitea) | Argo CD sync | root App Git `repoURL` + `Synced+Healthy` |
 | `flux-oci` | source-controller OCI pull | kustomize-controller apply | all HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `flux-git` | source-controller Git clone (in-cluster Gitea) | kustomize-controller apply | GitRepositories Ready + all HelmReleases `Ready=True` |
 
@@ -281,9 +282,10 @@ Tier 2 stays `helm`-only because its job is to verify accelerator-specific
 overlays still render correctly when their inputs change. The deployer
 shape is orthogonal — re-running through Argo CD would only re-exercise
 template rendering, which Tier 1 and Tier 3 already cover on the generic
-overlays. The `flux-git` lane covers the filesystem (Git-source)
-round-trip half of [#963](https://github.com/NVIDIA/aicr/issues/963);
-the `argocd-git` half is a follow-up on the same Gitea infrastructure.
+overlays. The `flux-git` and `argocd-git` lanes cover the filesystem
+(Git-source) round-trip of
+[#963](https://github.com/NVIDIA/aicr/issues/963) for both GitOps
+controllers, sharing the same in-cluster Gitea infrastructure.
 
 ### Running KWOK Locally
 
@@ -297,12 +299,12 @@ make kwok-test-deployer RECIPE=eks-training DEPLOYER=argocd-oci
 ```
 
 Valid `DEPLOYER` values: `helm`, `argocd-oci`, `argocd-helm-oci`,
-`flux-oci`, `flux-git`. The target invokes
+`argocd-git`, `flux-oci`, `flux-git`. The target invokes
 `kwok/scripts/run-all-recipes.sh --deployer <name> <recipe>`, which
 calls `install-infra.sh` once with `DEPLOYER` exported (in-cluster
 `registry:2` always; Argo CD for `argocd-*`; Flux 2 controllers for
-`flux-*`; Gitea additionally for `flux-git`), then runs
-`validate-scheduling.sh` for the recipe.
+`flux-*`; Gitea additionally for the Git-source lanes `flux-git` and
+`argocd-git`), then runs `validate-scheduling.sh` for the recipe.
 
 **Registry host port.** The Kind cluster exposes the in-cluster
 `registry:2` Service on **host port 5500** (`kwok/kind-config.yaml`'s
@@ -313,13 +315,13 @@ macOS. Linux runners have 5500 free too. The in-cluster NodePort
 independent — Argo CD's repo-server reaches the registry via Service
 DNS (`registry.aicr-registry.svc.cluster.local:5000`) regardless.
 
-**Gitea host port (flux-git).** The same pattern exposes the
-in-cluster Gitea on **host port 3300** (NodePort `30300`) so the
+**Gitea host port (flux-git / argocd-git).** The same pattern exposes
+the in-cluster Gitea on **host port 3300** (NodePort `30300`) so the
 runner can `git push` the filesystem bundle; 3300 avoids Gitea's
-default 3000, commonly held by Grafana / local dev servers. Flux's
-source-controller clones via Service DNS
-(`gitea.aicr-registry.svc.cluster.local:3000`). Clusters created
-before the 3300 mapping existed must be recreated
+default 3000, commonly held by Grafana / local dev servers. The GitOps
+controller (Flux's source-controller or Argo CD's repo-server) clones
+via Service DNS (`gitea.aicr-registry.svc.cluster.local:3000`).
+Clusters created before the 3300 mapping existed must be recreated
 (`kind delete cluster --name aicr-kwok-test`) — `install-infra.sh`
 exit code 71 is the telltale.
 
@@ -327,7 +329,7 @@ exit code 71 is the telltale.
 `helm`; there is no matrix-aware make target. Loop in shell:
 
 ```bash
-for d in helm argocd-oci argocd-helm-oci flux-oci flux-git; do
+for d in helm argocd-oci argocd-helm-oci argocd-git flux-oci flux-git; do
   make kwok-test-deployer RECIPE=eks-training DEPLOYER="$d" || break
 done
 
@@ -374,12 +376,13 @@ independent.
 | `KWOK_FLUX_SYNC_TIMEOUT` | `500` s | Deadline for source fetch (OCIRepository or GitRepository) + Kustomization apply + HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `KWOK_FLUX_ROOT_GRACE` | `30` s | Grace period for the outer Kustomization before deadline counting starts |
 
-The `flux-git` lane additionally honors `KWOK_GITEA_HOST_PORT`
-(default `3300`), `KWOK_GITEA_USER` (default `aicr`), and
-`KWOK_GITEA_PASSWORD` (default `aicr-kwok-ci`) — shared between
-`install-infra.sh` (Gitea install + admin bootstrap) and
+The Git-source lanes (`flux-git`, `argocd-git`) additionally honor
+`KWOK_GITEA_HOST_PORT` (default `3300`), `KWOK_GITEA_USER` (default
+`aicr`), and `KWOK_GITEA_PASSWORD` (default `aicr-kwok-ci`) — shared
+between `install-infra.sh` (Gitea install + admin bootstrap) and
 `validate-scheduling.sh` (`git push`). The password is a CI-only
 credential for the ephemeral in-cluster Gitea, not a secret.
+`argocd-git` reuses the `KWOK_ARGOCD_SYNC_TIMEOUT` budget.
 
 On a clean local Kind cluster `Synced+Healthy` lands in ~30 s; the
 300-second default exists to absorb CI variance. If a local run trips
@@ -396,7 +399,7 @@ When `kwok-test` fails, it uploads an artifact named
 - `<cluster>-argo-apps.yaml` plus the repo-server and application-controller logs (argocd lanes)
 - `<cluster>-flux-resources.yaml` (OCIRepositories, GitRepositories, Kustomizations, HelmReleases, ArtifactGenerators, ExternalArtifacts) plus source-, kustomize-, and helm-controller logs (flux-* lanes)
 - `<cluster>-registry.log` — last 200 lines of the in-cluster `registry:2`
-- `<cluster>-gitea.log` — last 200 lines of the in-cluster Gitea (flux-git lane)
+- `<cluster>-gitea.log` — last 200 lines of the in-cluster Gitea (Git-source lanes: `flux-git`, `argocd-git`)
 
 Start with the repo-server log (Argo CD) or source-controller log
 (Flux) for OCI-pull failures. Application-controller / kustomize-controller
@@ -406,18 +409,22 @@ helm-controller logs surface per-`HelmRelease` install outcomes.
 ### Adding a New Deployer Value
 
 The deployer set is finite and matches what `pkg/bundler` emits. To
-add a new value (say, `argocd-git`):
+add a new value:
 
 1. Add a `case` branch in `kwok/scripts/validate-scheduling.sh`'s
    `resolve_argocd_root_app()` (or `resolve_flux_root_names()` for
    Flux-reconciled lanes), plus branches in `generate_bundle` and
-   `deploy_bundle`. Reuse the existing `argocd-oci` / `flux-oci` /
-   `flux-git` branches as templates (`flux-git` is the closest model
-   for Git-source lanes — Gitea install, dual-view URLs, push-to-create).
+   `deploy_bundle`. Reuse the existing `argocd-oci` / `argocd-git` /
+   `flux-oci` / `flux-git` branches as templates. For a Git-source lane,
+   `argocd-git` and `flux-git` are the closest models — they share the
+   `compute_gitea_urls()` / `push_bundle_to_gitea()` helpers (Gitea
+   dual-view URLs, push-to-create, branch `main`).
 2. Extend the `DEPLOYER` allowlist in
    `kwok/scripts/run-all-recipes.sh` (`case "$DEPLOYER" in` in `main()`).
 3. Extend the `case "${DEPLOYER}"` branches in `install-infra.sh`'s
-   `main()` so the right controller stack is installed.
+   `main()` so the right controller stack is installed (a Git-source
+   lane composes its GitOps controller install with `install_gitea`,
+   as `argocd-git` and `flux-git` do).
 4. Extend the `deployer:` input description in
    `.github/actions/kwok-test/action.yml`.
 5. Add the value to the `deployer:` matrix in Tier 1 and Tier 3 of
@@ -505,5 +512,5 @@ the pre-push gate is local.
 - [validator.md](validator.md) — validator engine, chainsaw checks, container-per-validator pattern
 - [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md) — coding rules and anti-patterns table
 - [ADR-008](https://github.com/NVIDIA/aicr/blob/main/docs/design/008-kwok-deployer-matrix.md) — KWOK deployer matrix rationale
-- [ADR-010](https://github.com/NVIDIA/aicr/blob/main/docs/design/010-kwok-git-source-lanes.md) — Git-source lanes (Gitea, flux-git)
+- [ADR-010](https://github.com/NVIDIA/aicr/blob/main/docs/design/010-kwok-git-source-lanes.md) — Git-source lanes (Gitea, flux-git, argocd-git)
 - [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md) — KWOK cluster setup and node profiles

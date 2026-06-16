@@ -781,14 +781,14 @@ kwok-test-all: build ## Run all KWOK recipe tests in a shared cluster
 	@bash kwok/scripts/run-all-recipes.sh
 
 .PHONY: kwok-test-deployer
-kwok-test-deployer: build ## Validate scheduling under a specific deployer (RECIPE=… DEPLOYER=helm|argocd-oci|argocd-helm-oci|flux-oci|flux-git)
+kwok-test-deployer: build ## Validate scheduling under a specific deployer (RECIPE=… DEPLOYER=helm|argocd-oci|argocd-helm-oci|argocd-git|flux-oci|flux-git)
 ifndef RECIPE
 	@echo "Error: RECIPE is required"
 	@echo "Usage: make kwok-test-deployer RECIPE=eks-training DEPLOYER=argocd-oci"
 	@exit 1
 endif
 ifndef DEPLOYER
-	@echo "Error: DEPLOYER is required (helm | argocd-oci | argocd-helm-oci | flux-oci | flux-git)"
+	@echo "Error: DEPLOYER is required (helm | argocd-oci | argocd-helm-oci | argocd-git | flux-oci | flux-git)"
 	@exit 1
 endif
 	@echo "Validating $(RECIPE) under deployer=$(DEPLOYER)"

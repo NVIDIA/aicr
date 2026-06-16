@@ -31,6 +31,12 @@
 #                         argocd-helm-oci  (aicr bundle --deployer argocd-helm
 #                                           -> OCI push -> helm install OCI
 #                                           chart in argocd namespace)
+#                         argocd-git       (aicr bundle --deployer argocd ->
+#                                           filesystem output -> git push to
+#                                           in-cluster Gitea -> kubectl apply
+#                                           app-of-apps.yaml and let Argo CD
+#                                           clone + reconcile from Git;
+#                                           issue #963)
 #                         flux-oci         (aicr bundle --deployer flux ->
 #                                           OCI push -> apply OCIRepository +
 #                                           Kustomization wrappers and let
@@ -44,7 +50,7 @@
 #                       For argocd-* values the in-cluster registry + Argo CD
 #                       must already be installed; for flux-oci the registry
 #                       + Flux 2 controllers must be installed; for flux-git
-#                       additionally Gitea. All are managed by
+#                       and argocd-git additionally Gitea. All are managed by
 #                       `kwok/scripts/install-infra.sh` keyed on the DEPLOYER
 #                       env var.
 #
@@ -73,14 +79,14 @@
 #                            Kustomization after the grace window indicates
 #                            kubectl apply silently produced no resource
 #                            (RBAC denial, CRD missing). Default: 30.
-#   KWOK_GITEA_HOST_PORT     (flux-git only) Host port the in-cluster Gitea
-#                            is reachable on from the runner for `git push`.
-#                            MUST match install-infra.sh / kind-config.yaml.
-#                            Default: 3300.
-#   KWOK_GITEA_USER          (flux-git only) Gitea user to push as. Must
-#                            match the admin user bootstrapped by
+#   KWOK_GITEA_HOST_PORT     (flux-git / argocd-git) Host port the in-cluster
+#                            Gitea is reachable on from the runner for
+#                            `git push`. MUST match install-infra.sh /
+#                            kind-config.yaml. Default: 3300.
+#   KWOK_GITEA_USER          (flux-git / argocd-git) Gitea user to push as.
+#                            Must match the admin user bootstrapped by
 #                            install-infra.sh. Default: aicr.
-#   KWOK_GITEA_PASSWORD      (flux-git only) Password for KWOK_GITEA_USER.
+#   KWOK_GITEA_PASSWORD      (flux-git / argocd-git) Password for KWOK_GITEA_USER.
 #                            CI-only credential for the ephemeral in-cluster
 #                            Gitea — not a secret. Default: aicr-kwok-ci.
 #
@@ -159,6 +165,8 @@ OCI_IN_CLUSTER_REF=""
 # resolve_argocd_root_app():
 #   - argocd-oci      -> "nvidia-stack" (pkg/bundler/deployer/argocd/
 #                        templates/app-of-apps.yaml.tmpl)
+#   - argocd-git      -> "nvidia-stack" (same --deployer argocd app-of-apps;
+#                        only the source transport differs — Git vs OCI)
 #   - argocd-helm-oci -> "aicr-stack"   (pkg/bundler/deployer/argocdhelm/
 #                        argocdhelm.go: parentAppTemplate)
 # Default empty when DEPLOYER=helm; cleanup guards against empty before
@@ -169,9 +177,9 @@ ARGOCD_ROOT_APP=""
 # that consults ARGOCD_ROOT_APP (cleanup, wait_for_argocd_sync).
 resolve_argocd_root_app() {
     case "$DEPLOYER" in
-        argocd-oci)      ARGOCD_ROOT_APP="nvidia-stack" ;;
-        argocd-helm-oci) ARGOCD_ROOT_APP="aicr-stack"   ;;
-        *)               ARGOCD_ROOT_APP=""             ;;
+        argocd-oci|argocd-git) ARGOCD_ROOT_APP="nvidia-stack" ;;
+        argocd-helm-oci)       ARGOCD_ROOT_APP="aicr-stack"   ;;
+        *)                     ARGOCD_ROOT_APP=""             ;;
     esac
 }
 
@@ -204,12 +212,13 @@ FLUX_KUSTOMIZATION_NAME=""
 FLUX_OCIREPOSITORY_NAME=""
 FLUX_GITREPOSITORY_NAME=""
 
-# Git URLs for the flux-git lane (issue #963). Same dual-view pattern as
-# OCI_REF / OCI_IN_CLUSTER_REF: the runner pushes via the Kind host-port
-# mapping (localhost:3300), while Flux's source-controller clones via
-# Service DNS from inside the cluster. Populated in generate_bundle;
-# consumed by deploy_bundle. Script-globals so the runner→service-DNS
-# rewrite rule lives in exactly one place.
+# Git URLs for the Git-source lanes flux-git / argocd-git (issue #963).
+# Same dual-view pattern as OCI_REF / OCI_IN_CLUSTER_REF: the runner pushes
+# via the Kind host-port mapping (localhost:3300), while the GitOps
+# controller (Flux source-controller or Argo CD repo-server) clones via
+# Service DNS from inside the cluster. Populated by compute_gitea_urls()
+# in generate_bundle; consumed by deploy_bundle. Script-globals so the
+# runner→service-DNS rewrite rule lives in exactly one place.
 GIT_PUSH_URL=""
 GIT_IN_CLUSTER_URL=""
 
@@ -250,8 +259,10 @@ cleanup() {
         # Argo CD deployers: delete the root Application FIRST so prune
         # semantics tear down children before we touch the namespaces.
         # The Helm-OCI release (argocd-helm-oci) also needs to come down so
-        # the next recipe gets a clean argocd namespace.
-        if [[ "$DEPLOYER" == "argocd-oci" || "$DEPLOYER" == "argocd-helm-oci" ]]; then
+        # the next recipe gets a clean argocd namespace. argocd-git needs no
+        # repo cleanup: Gitea state is emptyDir-ephemeral and force-pushed
+        # each run, so deleting the root Application is sufficient.
+        if [[ "$DEPLOYER" == argocd-* ]]; then
             if [[ -n "$ARGOCD_ROOT_APP" ]]; then
                 log_info "Deleting Argo CD root Application ${ARGOCD_ROOT_APP} (prune cascade)..."
                 timeout 120s kubectl delete application "$ARGOCD_ROOT_APP" -n argocd \
@@ -647,6 +658,57 @@ verify_kwok_nodes() {
     log_info "Verified $actual_count KWOK nodes exist"
 }
 
+# compute_gitea_urls populates the dual-view Git URLs (GIT_IN_CLUSTER_URL,
+# GIT_PUSH_URL) for the Git-source lanes (flux-git, argocd-git; issue #963).
+# The IN-CLUSTER URL (Service DNS) is what gets baked into the bundle via
+# --repo and what the GitOps controller clones from inside the cluster; the
+# PUSH URL (localhost host-port + basic-auth) is what the runner pushes to.
+# Shared so the runner→Service-DNS rewrite rule lives in exactly one place.
+# The repo must be anonymously READABLE — install-infra.sh configures Gitea
+# with DEFAULT_PUSH_CREATE_PRIVATE=false because neither the flux gitrepo
+# source CR nor the argocd Application carries clone credentials.
+compute_gitea_urls() {
+    local recipe="$1"
+    local gitea_host_port="${KWOK_GITEA_HOST_PORT:-3300}"
+    local gitea_user="${KWOK_GITEA_USER:-aicr}"
+    local gitea_password="${KWOK_GITEA_PASSWORD:-aicr-kwok-ci}"
+    GIT_IN_CLUSTER_URL="http://gitea.aicr-registry.svc.cluster.local:3000/${gitea_user}/${recipe}.git"
+    GIT_PUSH_URL="http://${gitea_user}:${gitea_password}@localhost:${gitea_host_port}/${gitea_user}/${recipe}.git"
+}
+
+# push_bundle_to_gitea pushes the rendered bundle tree at ${WORK_DIR}/bundle
+# to Gitea on branch main. push-to-create makes the repo on first push;
+# --force resets state on re-runs so the lane is idempotent (Gitea state is
+# emptyDir-ephemeral anyway). Branch main is a hard requirement — both the
+# flux GitRepository refs and the argocd targetRevision default to main, and
+# there is no CLI flag to change it for filesystem output. compute_gitea_urls
+# must have run first (GIT_PUSH_URL / GIT_IN_CLUSTER_URL set).
+push_bundle_to_gitea() {
+    local recipe="$1"
+    local short_sha gitea_host_port gitea_user
+    short_sha=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "local")
+    gitea_host_port="${KWOK_GITEA_HOST_PORT:-3300}"
+    gitea_user="${KWOK_GITEA_USER:-aicr}"
+
+    log_info "Pushing bundle to Gitea (localhost:${gitea_host_port}, repo ${gitea_user}/${recipe})..."
+    local git_output
+    if ! git_output=$(
+        {
+            cd "${WORK_DIR}/bundle" &&
+            git init -q -b main &&
+            git add -A &&
+            git -c user.name=aicr-kwok -c user.email=aicr@example.invalid \
+                commit -q -m "bundle ${recipe} ${short_sha}-${DEPLOYER}" &&
+            git push -q --force "$GIT_PUSH_URL" main
+        } 2>&1
+    ); then
+        log_error "git push to Gitea failed"
+        log_error "$git_output"
+        return 1
+    fi
+    log_info "Bundle pushed; GitOps controller will clone from ${GIT_IN_CLUSTER_URL} (branch main)"
+}
+
 # Generate recipe and bundle
 generate_bundle() {
     local recipe="$1"
@@ -963,22 +1025,11 @@ generate_bundle() {
             # Flux's source-controller clone it back. This exercises the
             # flux deployer's GIT shape — GitRepository source CRs in
             # sources/gitrepo-*.yaml — which the OCI lane never renders.
-            local short_sha
-            short_sha=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "local")
-            local gitea_host_port="${KWOK_GITEA_HOST_PORT:-3300}"
-            local gitea_user="${KWOK_GITEA_USER:-aicr}"
-            local gitea_password="${KWOK_GITEA_PASSWORD:-aicr-kwok-ci}"
-            # Dual-view URLs (same pattern as OCI_REF / OCI_IN_CLUSTER_REF):
-            # the runner pushes via the Kind host-port mapping; Flux's
-            # source-controller clones via Service DNS. --repo gets the
-            # IN-CLUSTER URL because it is baked into the bundle's own
-            # GitRepository source CR, which source-controller resolves
-            # from inside the cluster. The repo must be anonymously
-            # readable: the bundler's gitrepo template has no secretRef
-            # (install-infra.sh configures Gitea so pushed repos are
-            # public via DEFAULT_PUSH_CREATE_PRIVATE=false).
-            GIT_IN_CLUSTER_URL="http://gitea.aicr-registry.svc.cluster.local:3000/${gitea_user}/${recipe}.git"
-            GIT_PUSH_URL="http://${gitea_user}:${gitea_password}@localhost:${gitea_host_port}/${gitea_user}/${recipe}.git"
+            #
+            # --repo gets the IN-CLUSTER URL because it is baked into the
+            # bundle's own GitRepository source CR, which source-controller
+            # resolves from inside the cluster.
+            compute_gitea_urls "$recipe"
 
             log_info "Bundling for flux (filesystem), repo URL ${GIT_IN_CLUSTER_URL}"
             # No --plain-http: that flag is OCI-only. No tag handling: the
@@ -1028,27 +1079,81 @@ generate_bundle() {
                 return 1
             fi
 
-            # Push the bundle tree to Gitea. push-to-create makes the repo
-            # on first push; --force resets state on re-runs so the lane is
-            # idempotent (Gitea state is emptyDir-ephemeral anyway). Branch
-            # main is a hard requirement — see the bundler note above.
-            log_info "Pushing bundle to Gitea (localhost:${gitea_host_port}, repo ${gitea_user}/${recipe})..."
-            local git_output
-            if ! git_output=$(
-                {
-                    cd "${WORK_DIR}/bundle" &&
-                    git init -q -b main &&
-                    git add -A &&
-                    git -c user.name=aicr-kwok -c user.email=aicr@example.invalid \
-                        commit -q -m "bundle ${recipe} ${short_sha}-${DEPLOYER}" &&
-                    git push -q --force "$GIT_PUSH_URL" main
-                } 2>&1
-            ); then
-                log_error "git push to Gitea failed"
-                log_error "$git_output"
+            # Push the bundle tree to Gitea (branch main, force-push for
+            # idempotent re-runs). See push_bundle_to_gitea for details.
+            if ! push_bundle_to_gitea "$recipe"; then
                 return 1
             fi
-            log_info "Bundle pushed; Flux will clone from ${GIT_IN_CLUSTER_URL} (branch main)"
+            ;;
+        argocd-git)
+            # Git-source round-trip for the argocd deployer (issue #963):
+            # bundle to a local directory with --repo set to the in-cluster
+            # Git URL, push the tree to Gitea, and let Argo CD's repo-server
+            # clone it back. This exercises the argocd deployer's GIT output
+            # shape — an app-of-apps plus per-component application.yaml whose
+            # spec.source.repoURL is the Git URL and targetRevision is `main`
+            # (pkg/bundler/deployer/argocd/resolveRepoSettings) — which the
+            # OCI lane never renders.
+            compute_gitea_urls "$recipe"
+
+            log_info "Bundling for argocd (filesystem), repo URL ${GIT_IN_CLUSTER_URL}"
+            # No --plain-http (OCI-only) and no OCI tag: with a filesystem
+            # --output the argocd deployer bakes --repo straight into every
+            # Application's repoURL and defaults targetRevision to main, so
+            # the push below MUST target main.
+            if ! bundle_output=$("$AICR_BIN" bundle \
+                --recipe "${WORK_DIR}/recipe.yaml" \
+                --deployer argocd \
+                --output "${WORK_DIR}/bundle" \
+                --repo "$GIT_IN_CLUSTER_URL" \
+                --system-node-selector "aicr.nvidia.com/node-type=system" \
+                --accelerated-node-selector "aicr.nvidia.com/node-type=accelerated" \
+                --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
+                --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
+                --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
+                --set "certmanager:startupapicheck.enabled=false" \
+                --set "slinkyslurmoperator:webhook.enabled=false" \
+                --set "slinkyslurmoperator:certManager.enabled=false" \
+                --set "slurmcluster:controller.persistence.enabled=false" \
+                --set "kubeprometheusstack:defaultRules.create=false" \
+                --set "kubeprometheusstack:alertmanager.enabled=false" \
+                --set "nodewright-customizations:enabled=false" \
+                --set "dynamoplatform:etcd.persistence.enabled=false" \
+                --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false" 2>&1); then
+                log_error "Bundle generation failed"
+                log_error "Bundle command output:"
+                echo "$bundle_output"
+                return 1
+            fi
+
+            # The argocd deployer's root manifest is app-of-apps.yaml; the
+            # deploy step applies it. Fail fast if it's missing.
+            if [[ ! -f "${WORK_DIR}/bundle/app-of-apps.yaml" ]]; then
+                log_error "Expected app-of-apps.yaml not found in bundle: ${WORK_DIR}/bundle"
+                log_error "Bundle contents:"
+                list_bundle_entries "${WORK_DIR}/bundle"
+                return 1
+            fi
+            # Git-mode proof: the root Application's repoURL must be the Git
+            # URL we passed via --repo. If it is an oci:// reference the
+            # bundler silently took the OCI path and the lane is no longer
+            # testing the Git shape it exists for. (The chainsaw gate asserts
+            # this on the live resource too; this is the fail-fast at bundle
+            # time before the push.) The repoURL is unquoted in app-of-apps
+            # and quoted in per-component application.yaml, so match either.
+            if ! grep -Eq "repoURL: '?${GIT_IN_CLUSTER_URL}'?[[:space:]]*$" \
+                    "${WORK_DIR}/bundle/app-of-apps.yaml"; then
+                log_error "app-of-apps.yaml repoURL is not the Git URL ${GIT_IN_CLUSTER_URL}"
+                log_error "argocd git mode did not engage; app-of-apps.yaml:"
+                cat "${WORK_DIR}/bundle/app-of-apps.yaml" || true
+                return 1
+            fi
+
+            # Push the bundle tree to Gitea (branch main, force-push for
+            # idempotent re-runs). See push_bundle_to_gitea for details.
+            if ! push_bundle_to_gitea "$recipe"; then
+                return 1
+            fi
             ;;
         *)
             log_error "Unknown deployer: ${DEPLOYER}"
@@ -1139,7 +1244,12 @@ deploy_bundle() {
                 return 1
             fi
             ;;
-        argocd-oci)
+        argocd-oci|argocd-git)
+            # Both lanes apply the same app-of-apps root manifest; they
+            # differ only in the source the Applications point at (OCI
+            # registry vs in-cluster Gitea), which is baked into the bundle
+            # at generate time. The sync gate (wait_for_argocd_sync) routes
+            # to the right chainsaw test per DEPLOYER.
             log_info "Applying app-of-apps manifest: ${bundle_dir}/app-of-apps.yaml"
             if ! kubectl apply -f "${bundle_dir}/app-of-apps.yaml"; then
                 log_error "kubectl apply -f app-of-apps.yaml failed"
@@ -1422,7 +1532,26 @@ wait_for_argocd_sync() {
         return 1
     fi
 
-    local test_dir="${REPO_ROOT}/tests/chainsaw/kwok/argocd-sync"
+    # Per-deployer gate: argocd-oci / argocd-helm-oci use the source-agnostic
+    # argocd-sync test; argocd-git uses the argocd-git-sync sibling, which
+    # adds a leading step asserting the root Application's Git repoURL (the
+    # Git-mode proof). The two tests' shared steps (root-App-present, 4-arm
+    # terminal-pass) are byte-identical — see the sync-note headers in both
+    # chainsaw-test.yaml files. argocd-git passes the extra repoURL binding.
+    local test_dir extra_args=()
+    case "$DEPLOYER" in
+        argocd-git)
+            test_dir="${REPO_ROOT}/tests/chainsaw/kwok/argocd-git-sync"
+            if [[ -z "$GIT_IN_CLUSTER_URL" ]]; then
+                log_error "GIT_IN_CLUSTER_URL is empty for argocd-git (bundle step skipped?)"
+                return 1
+            fi
+            extra_args+=(--set "repoURL=${GIT_IN_CLUSTER_URL}")
+            ;;
+        *)
+            test_dir="${REPO_ROOT}/tests/chainsaw/kwok/argocd-sync"
+            ;;
+    esac
     local sync_timeout="${KWOK_ARGOCD_SYNC_TIMEOUT:-300}s"
 
     log_info "Argo CD sync gate (chainsaw): rootApp=${ARGOCD_ROOT_APP} timeout=${sync_timeout}"
@@ -1440,6 +1569,7 @@ wait_for_argocd_sync() {
     # overrides.
     if "$chainsaw_bin" test "$test_dir" \
             --set "rootApp=${ARGOCD_ROOT_APP}" \
+            "${extra_args[@]}" \
             --assert-timeout "$sync_timeout" \
             --no-color; then
         log_info "Argo CD sync PASS (chainsaw)"
@@ -1809,11 +1939,11 @@ main() {
     fi
 
     case "$DEPLOYER" in
-        helm|argocd-oci|argocd-helm-oci|flux-oci|flux-git)
+        helm|argocd-oci|argocd-helm-oci|argocd-git|flux-oci|flux-git)
             ;;
         *)
             log_error "Invalid --deployer value: '${DEPLOYER}'"
-            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, flux-oci, flux-git"
+            log_error "Must be one of: helm, argocd-oci, argocd-helm-oci, argocd-git, flux-oci, flux-git"
             exit 1
             ;;
     esac
