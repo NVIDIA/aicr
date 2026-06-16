@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-06-15T15:22:56Z
+    bundle:
+      digest: sha256:a72d34fb3c2e03e66bf3cb4623ce08559fd45faba33c8cae62dda19eb1d28270
+      oci: ghcr.io/atif1996/aicr-evidence:h100-gke-cos-training-c7c84d1ed2ce
+      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+    signer:
+      identity: atif1996@gmail.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 1826548328
+recipe: h100-gke-cos-training
+schemaVersion: 1.0.0

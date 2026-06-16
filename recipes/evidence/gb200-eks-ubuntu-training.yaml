@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-06-15T16:58:03Z
+    bundle:
+      digest: sha256:eb37c8d5b465f8edc3c28d8563a0ecd3e42c652716b63aafe5791fc18f109e1f
+      oci: ghcr.io/atif1996/aicr-evidence:gb200-eks-ubuntu-training-fa91b7c53f5a
+      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+    signer:
+      identity: atif1996@gmail.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 1826568564
+recipe: gb200-eks-ubuntu-training
+schemaVersion: 1.0.0
