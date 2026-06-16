@@ -78,26 +78,29 @@ jobs:
               - '.github/renovate.json5'
               - 'Makefile'
 
-      # Detect docs-only PRs: true only when EVERY changed file is docs/md
+      # code = true iff at least one changed file is NOT docs/markdown/LICENSE.
+      #
+      # Exclusion idiom: dorny's `predicate-quantifier: 'every'` requires a file
+      # to match EVERY pattern in the filter, so a file matches `code` only when
+      # it matches '**' AND none of the docs patterns. The filter output is true
+      # when ANY changed file is code — so a docs-only PR yields code=false.
+      #
+      # NOTE: 'every' does NOT mean "every changed file matches"; the prior
+      # `only: [**.md, docs/**, LICENSE]` form required a single file to match
+      # all three at once (impossible), so it was always false and code was
+      # always true — docs-only PRs ran full qualification. '**' matches
+      # dotfiles too (dorny sets picomatch dot:true), so '.golangci.yaml',
+      # '.settings.yaml', etc. still count as code.
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
-        id: docs
+        id: code
         with:
           predicate-quantifier: 'every'
           filters: |
-            only:
-              - '**.md'
-              - 'docs/**'
-              - 'LICENSE'
-
-      # code = NOT docs-only (inverted because paths-filter can't negate)
-      - name: Compute code flag
-        id: code
-        run: |
-          if [ "${{ steps.docs.outputs.only }}" = "true" ]; then
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          fi
+            code:
+              - '**'
+              - '!**.md'
+              - '!docs/**'
+              - '!LICENSE'
 
   # ---------------------------------------------------------------------------
   # Qualification (Test, Lint, CLI E2E, E2E, Security Scan)
