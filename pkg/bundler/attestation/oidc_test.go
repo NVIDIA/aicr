@@ -21,7 +21,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestFetchAmbientOIDCToken(t *testing.T) {
@@ -58,15 +62,78 @@ func TestFetchAmbientOIDCToken_EmptyURL(t *testing.T) {
 	}
 }
 
+// TestFetchAmbientOIDCToken_ServerError verifies a persistent 5xx exhausts the
+// retry budget (every attempt runs) and then fails as ErrCodeUnavailable.
+// Parallel so its real backoff (1s + 5s) overlaps other tests' wall clock.
 func TestFetchAmbientOIDCToken_ServerError(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}))
 	defer server.Close()
 
 	_, err := FetchAmbientOIDCToken(context.Background(), server.URL, "token")
 	if err == nil {
-		t.Error("FetchAmbientOIDCToken() with server error should return error")
+		t.Fatal("FetchAmbientOIDCToken() with server error should return error")
+	}
+	if n := calls.Load(); int(n) != defaults.SigstoreRetryBudget {
+		t.Errorf("expected %d attempts on persistent 5xx, got %d", defaults.SigstoreRetryBudget, n)
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) || se.Code != errors.ErrCodeUnavailable {
+		t.Errorf("expected ErrCodeUnavailable after retries, got %v", err)
+	}
+}
+
+// TestFetchAmbientOIDCToken_RetryThenSuccess verifies a transient 5xx is
+// retried and a later success returns the token.
+func TestFetchAmbientOIDCToken_RetryThenSuccess(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "transient", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"value":"recovered-token"}`)
+	}))
+	defer server.Close()
+
+	token, err := FetchAmbientOIDCToken(context.Background(), server.URL, "token")
+	if err != nil {
+		t.Fatalf("FetchAmbientOIDCToken() error after transient 5xx: %v", err)
+	}
+	if token != "recovered-token" {
+		t.Errorf("token = %q, want %q", token, "recovered-token")
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("expected 2 attempts (1 fail + 1 success), got %d", n)
+	}
+}
+
+// TestFetchAmbientOIDCToken_ClientErrorFailsFast verifies a 4xx (bad request
+// token) is NOT retried — a single attempt, then fail.
+func TestFetchAmbientOIDCToken_ClientErrorFailsFast(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	_, err := FetchAmbientOIDCToken(context.Background(), server.URL, "token")
+	if err == nil {
+		t.Fatal("FetchAmbientOIDCToken() with 4xx should return error")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("expected exactly 1 attempt on 4xx (no retry), got %d", n)
 	}
 }
 
