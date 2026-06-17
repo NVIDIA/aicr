@@ -177,7 +177,7 @@ func TestCheckSlinkySlurmHealthRunsAllHealthCommands(t *testing.T) {
 	wantCommands := []string{
 		"scontrol ping",
 		"/bin/sh -c " + slinkySlurmSinfoIdleMixShell,
-		"srun --immediate=5 --time=0:01 hostname",
+		"srun --immediate=5 --time=0:03 hostname",
 	}
 	if strings.Join(gotCommands, ",") != strings.Join(wantCommands, ",") {
 		t.Fatalf("commands = %v, want %v", gotCommands, wantCommands)
@@ -199,6 +199,21 @@ func TestCheckSlinkySlurmHealthDiscoversPodsFromSlinkyCRSelectors(t *testing.T) 
 	}
 	if gotPodName != "custom-login-pod" {
 		t.Fatalf("exec pod = %q, want custom-login-pod", gotPodName)
+	}
+}
+
+func TestCheckSlinkySlurmHealthFailsOnMalformedControllerRefName(t *testing.T) {
+	ctx := slurmReadyTestContext(t, false)
+	loginSet := defaultLoginSet()
+	if err := unstructured.SetNestedField(loginSet.Object, map[string]any{"bad": "shape"},
+		"spec", "controllerRef", "name"); err != nil {
+		t.Fatalf("set malformed controllerRef.name: %v", err)
+	}
+	ctx.DynamicClient = newSlinkyDynamicClient(t, loginSet, defaultNodeSet())
+
+	err := CheckSlinkySlurmHealth(ctx)
+	if err == nil || !strings.Contains(err.Error(), "failed to read controllerRef.name") {
+		t.Fatalf("error = %v, want malformed controllerRef.name read failure", err)
 	}
 }
 

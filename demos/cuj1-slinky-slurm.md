@@ -8,7 +8,7 @@ Slurm leaves are built from criteria flags (`--service`, `--platform slurm`, …
 
 - `kubectl` is configured for the target cluster.
 - GPU leaves assume H100 nodes with drivers (or Kind for the CPU-only path).
-- Node pools use a `**nodeGroup`** label (adjust if your cluster uses different keys).
+- Node pools use a `nodeGroup` label (adjust if your cluster uses different keys).
 - Inspect taints before bundling: `kubectl get nodes -o custom-columns=NAME:.metadata.name,GROUP:.metadata.labels.nodeGroup,TAINTS:.spec.taints`
 
 ## Workflow
@@ -48,7 +48,7 @@ AICR injects placement from bundle flags using each component's registry paths:
 | Flag                                                            | Typical targets                                     |
 | --------------------------------------------------------------- | --------------------------------------------------- |
 | `--system-node-selector` / `--system-node-toleration`           | cert-manager, **slurm-operator**, prometheus, …     |
-| `--accelerated-node-selector` / `--accelerated-node-toleration` | `**nodesets.slinky`** (slurmd workers)              |
+| `--accelerated-node-selector` / `--accelerated-node-toleration` | `nodesets.slinky` (slurmd workers)                  |
 | `--set-json slinkyslurm:…`                                      | Per-leaf overrides on the cluster chart (see below) |
 
 
@@ -154,7 +154,7 @@ Use **deployment** and **conformance**. Performance validation is **not supporte
 | Phase         | What it checks                                                                                                         |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `deployment`  | Component Chainsaw health (CRs, Deployments, DaemonSets ready), including `slinky-slurm` readiness (long retry budget) |
-| `conformance` | `slinky-slurm-health`: `scontrol ping`, idle/mix node gate, bounded `srun --immediate=5 --time=0:01 hostname`          |
+| `conformance` | `slinky-slurm-health`: `scontrol ping`, idle/mix node gate, bounded `srun --immediate=5 --time=0:03 hostname`          |
 | `performance` | **Not supported yet** on slurm leaves                                                                                  |
 | `all`         | Runs deployment → conformance → performance in sequence; the performance step has nothing to run on slurm leaves       |
 
@@ -195,7 +195,7 @@ aicr validate \
 
 ### Scheduling flags on validate
 
-When validate captures cluster state inline (no `-s`), pass `**--node-selector**` and `**--toleration**` so the snapshot agent Job can schedule on tainted nodes. Match your **system** pool (not the GPU pool) unless you intend to run the agent on GPU nodes.
+When validate captures cluster state inline (no `-s`), pass `--node-selector` and `--toleration` so the snapshot agent Job can schedule on tainted nodes. Match your **system** pool (not the GPU pool) unless you intend to run the agent on GPU nodes.
 
 **EKS example** (agent on system nodes):
 
@@ -233,7 +233,7 @@ SSH is disabled by default on the login chart; use `kubectl exec`.
 ```shell
 kubectl exec -n slurm deploy/slinky-slurm-login-slinky -- sinfo
 kubectl exec -n slurm deploy/slinky-slurm-login-slinky -- \
-  srun --immediate=5 --time=0:01 hostname
+  srun --immediate=5 --time=0:03 hostname
 ```
 
 Multi-node (when `replicas >= 2`):

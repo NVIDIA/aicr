@@ -284,8 +284,16 @@ func listSlinkySetsForController(
 		if item.GetAPIVersion() != "slinky.slurm.net/v1beta1" || item.GetKind() != kind {
 			continue
 		}
-		controllerName, _, _ := unstructured.NestedString(item.Object, "spec", "controllerRef", "name")
-		controllerNamespace, _, _ := unstructured.NestedString(item.Object, "spec", "controllerRef", "namespace")
+		controllerName, _, controllerNameErr := unstructured.NestedString(item.Object, "spec", "controllerRef", "name")
+		if controllerNameErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to read controllerRef.name from %s/%s", kind, item.GetName()), controllerNameErr)
+		}
+		controllerNamespace, _, controllerNamespaceErr := unstructured.NestedString(item.Object, "spec", "controllerRef", "namespace")
+		if controllerNamespaceErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to read controllerRef.namespace from %s/%s", kind, item.GetName()), controllerNamespaceErr)
+		}
 		if controllerName != slinkySlurmComponent {
 			continue
 		}
