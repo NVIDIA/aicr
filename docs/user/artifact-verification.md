@@ -197,16 +197,21 @@ Both verifiers emit machine-readable JSON for pipeline gating.
 aicr verify ./my-bundle --format json
 
 # Evidence verification as JSON to a file.
-aicr evidence verify recipes/evidence/<recipe>.yaml -o result.json -t json
+aicr evidence verify recipes/evidence/<recipe>.yaml --format json -o result.json
 ```
 
 `aicr evidence verify` exits `0` when every check passes and `2` when the
 bundle is invalid or recorded validator results show failures. The JSON
 output's `exit` field further distinguishes recorded phase failures (`1`) from
-an invalid bundle (`2`), so a shell consumer can branch on it:
+an invalid bundle (`2`), so a shell consumer can branch on it. Write the JSON to
+a file and read the `exit` field from it rather than piping `aicr evidence
+verify` straight into `jq`: under `set -o pipefail` (common in CI) the verifier's
+non-zero exit would otherwise propagate through the pipeline and abort the script
+before the `case` runs. The `|| true` keeps that exit from tripping `set -e`:
 
 ```shell
-case "$(aicr evidence verify recipes/evidence/<recipe>.yaml --format json | jq '.exit')" in
+aicr evidence verify recipes/evidence/<recipe>.yaml --format json -o result.json || true
+case "$(jq '.exit' result.json)" in
   0) echo "evidence valid" ;;
   1) echo "validator phases failed" ;;
   2) echo "bundle invalid" ;;
