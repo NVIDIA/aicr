@@ -133,5 +133,6 @@ func execPodCommand(
 		result.ExitCode = exitErr.ExitStatus()
 		return result, nil
 	}
-	return result, streamErr
+	return result, errors.Wrap(errors.ErrCodeInternal,
+		fmt.Sprintf("pod exec stream failed for %s/%s", namespace, podName), streamErr)
 }

@@ -24,6 +24,7 @@ import (
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,6 +34,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 var (
@@ -129,6 +131,23 @@ func TestCheckSlinkySlurmHealthSkipsWhenSlinkyAPIUnavailable(t *testing.T) {
 	}
 }
 
+func TestCheckSlinkySlurmHealthFailsWhenSlinkyNamespaceMissing(t *testing.T) {
+	ctx := slurmReadyTestContext(t, false)
+	dynClient := newSlinkyDynamicClient(t)
+	dynClient.PrependReactor("list", "*", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, slinkySlurmNamespace)
+	})
+	ctx.DynamicClient = dynClient
+
+	err := CheckSlinkySlurmHealth(ctx)
+	if err == nil || !strings.Contains(err.Error(), "failed to list Slinky Slurm NodeSets in namespace slurm") {
+		t.Fatalf("error = %v, want namespace list failure", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "skip") {
+		t.Fatalf("error = %v, want real failure not skip", err)
+	}
+}
+
 func TestCheckSlinkySlurmHealthExecOutcomes(t *testing.T) {
 	errBoom := errors.New(errors.ErrCodeInternal, "exec failed")
 	tests := []struct {
@@ -206,6 +225,36 @@ func TestCheckSlinkySlurmHealthRunsAllHealthCommands(t *testing.T) {
 	}
 }
 
+func TestCheckSlinkySlurmHealthStopsWhenContextCanceled(t *testing.T) {
+	ctx := slurmReadyTestContext(t, false)
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx.Ctx = runCtx
+
+	var execCount int
+	restore := replaceSlinkyExecForTest(func(
+		_ context.Context,
+		_ *validators.Context,
+		_, _ string,
+		_ []string,
+		_ podExecOptions,
+	) (podExecResult, error) {
+
+		execCount++
+		cancel()
+		return podExecResult{Stdout: "ok\n"}, nil
+	})
+	defer restore()
+
+	err := CheckSlinkySlurmHealth(ctx)
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("error = %v, want context canceled failure", err)
+	}
+	if execCount != 1 {
+		t.Fatalf("exec count = %d, want 1", execCount)
+	}
+}
+
 func TestCheckSlinkySlurmHealthDiscoversPodsFromSlinkyCRSelectors(t *testing.T) {
 	var gotPodName string
 	restore := replaceSlinkyExecForTest(func(
@@ -279,6 +328,65 @@ func TestCheckSlinkySlurmHealthUsesComponentRefNamespace(t *testing.T) {
 	}
 	if gotNamespace != customNamespace {
 		t.Fatalf("exec namespace = %q, want %q", gotNamespace, customNamespace)
+	}
+}
+
+func TestCheckSlinkySlurmHealthSelectsNewestReadyLoginPod(t *testing.T) {
+	olderReady := readyLoginPod()
+	olderReady.Name = "slinky-login-old"
+	olderReady.CreationTimestamp = metav1.Unix(100, 0)
+
+	terminatingReady := readyLoginPod()
+	terminatingReady.Name = "slinky-login-terminating"
+	terminatingReady.CreationTimestamp = metav1.Unix(300, 0)
+	deletionTime := metav1.Unix(400, 0)
+	terminatingReady.DeletionTimestamp = &deletionTime
+
+	newerReady := readyLoginPod()
+	newerReady.Name = "slinky-login-new"
+	newerReady.CreationTimestamp = metav1.Unix(200, 0)
+
+	clientset := k8sfake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: slinkySlurmNamespace}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-node-0"}},
+		olderReady,
+		terminatingReady,
+		newerReady,
+		readyNodeSetPod(),
+	)
+	addSlinkyDiscovery(t, clientset)
+
+	var gotPodName string
+	restore := replaceSlinkyExecForTest(func(
+		_ context.Context,
+		_ *validators.Context,
+		_ string,
+		podName string,
+		_ []string,
+		_ podExecOptions,
+	) (podExecResult, error) {
+
+		gotPodName = podName
+		return podExecResult{Stdout: "ok\n"}, nil
+	})
+	defer restore()
+
+	ctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: newSlinkyDynamicClient(t, defaultLoginSet(), defaultNodeSet()),
+		RESTConfig:    &rest.Config{Host: "https://example.test"},
+		ValidationInput: &v1.ValidationInput{
+			ComponentRefs: []recipe.ComponentRef{{Name: slinkySlurmComponent}},
+		},
+	}
+
+	err := CheckSlinkySlurmHealth(ctx)
+	if err != nil {
+		t.Fatalf("error = %v, want nil", err)
+	}
+	if gotPodName != newerReady.Name {
+		t.Fatalf("exec pod = %q, want %q", gotPodName, newerReady.Name)
 	}
 }
 
@@ -374,6 +482,62 @@ func TestCheckSlinkySlurmHealthSkipsWhenAllNodeSetPodsAreOnKWOKNodes(t *testing.
 	err := CheckSlinkySlurmHealth(slurmReadyTestContext(t, true))
 	if !isSkipLike(err, "KWOK") {
 		t.Fatalf("error = %v, want KWOK skip", err)
+	}
+}
+
+func TestCheckSlinkySlurmHealthDoesNotSkipWhenNodeSetPodIsUnbound(t *testing.T) {
+	kwokNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "kwok-node-0",
+			Annotations: map[string]string{kwokNodeAnnotation: "fake"},
+		},
+	}
+	kwokPod := readyNodeSetPod()
+	kwokPod.Name = "slinky-nodeset-kwok"
+	kwokPod.Spec.NodeName = kwokNode.Name
+	unboundPod := readyNodeSetPod()
+	unboundPod.Name = "slinky-nodeset-unbound"
+	unboundPod.Spec.NodeName = ""
+
+	clientset := k8sfake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: slinkySlurmNamespace}},
+		kwokNode,
+		readyLoginPod(),
+		kwokPod,
+		unboundPod,
+	)
+	addSlinkyDiscovery(t, clientset)
+
+	var execRan bool
+	restore := replaceSlinkyExecForTest(func(
+		_ context.Context,
+		_ *validators.Context,
+		_, _ string,
+		_ []string,
+		_ podExecOptions,
+	) (podExecResult, error) {
+
+		execRan = true
+		return podExecResult{Stdout: "ok\n"}, nil
+	})
+	defer restore()
+
+	ctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: newSlinkyDynamicClient(t, defaultLoginSet(), defaultNodeSet()),
+		RESTConfig:    &rest.Config{Host: "https://example.test"},
+		ValidationInput: &v1.ValidationInput{
+			ComponentRefs: []recipe.ComponentRef{{Name: slinkySlurmComponent}},
+		},
+	}
+
+	err := CheckSlinkySlurmHealth(ctx)
+	if err != nil {
+		t.Fatalf("error = %v, want nil", err)
+	}
+	if !execRan {
+		t.Fatal("exec did not run; unbound NodeSet pod must prevent KWOK skip")
 	}
 }
 

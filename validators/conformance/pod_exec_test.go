@@ -276,6 +276,9 @@ func TestExecPodCommandReturnsStreamError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stream failed") {
 		t.Fatalf("error = %v, want stream failure", err)
 	}
+	if !strings.Contains(err.Error(), "pod exec stream failed for slurm/login-0") {
+		t.Fatalf("error = %v, want pod context", err)
+	}
 }
 
 func podExecHTTPContext(t *testing.T, pod corev1.Pod) *validators.Context {

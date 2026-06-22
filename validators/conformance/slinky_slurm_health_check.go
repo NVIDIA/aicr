@@ -139,6 +139,12 @@ func resolveSlinkySlurmNamespace(ctx *validators.Context) string {
 func runSlinkySlurmHealthCommands(ctx *validators.Context, namespace, loginPodName string) []string {
 	var failures []string
 	for _, check := range slinkySlurmHealthCommands {
+		select {
+		case <-ctx.Ctx.Done():
+			failures = append(failures, fmt.Sprintf("context canceled: %v", ctx.Ctx.Err()))
+			return failures
+		default:
+		}
 		result, execErr := slinkyExecCommand(
 			ctx.Ctx, ctx, namespace, loginPodName, check.command, slinkyLoginPodExecOptions)
 		recordSlinkyExecResult(ctx, namespace, loginPodName, check, result, execErr)
@@ -204,7 +210,7 @@ func skipIfAllNodeSetPodsAreKWOK(ctx *validators.Context, namespace string) erro
 			kwok++
 		}
 	}
-	if resolved > 0 && kwok == resolved {
+	if resolved == len(pods) && kwok == resolved {
 		return validators.Skip("Slinky NodeSet pods are on KWOK nodes; skipping Slurm health validation")
 	}
 	return nil
@@ -252,12 +258,22 @@ func findReadySlinkyLoginPod(ctx *validators.Context, namespace string) (*corev1
 	}
 
 	var summary strings.Builder
-	for _, pod := range pods {
+	var selected *corev1.Pod
+	for i := range pods {
+		pod := &pods[i]
 		fmt.Fprintf(&summary, "%s phase=%s ready=%t node=%s\n",
-			pod.Name, pod.Status.Phase, podIsReady(&pod), valueOrUnknown(pod.Spec.NodeName))
-		if pod.Status.Phase == corev1.PodRunning && podIsReady(&pod) {
-			return &pod, nil
+			pod.Name, pod.Status.Phase, podIsReady(pod), valueOrUnknown(pod.Spec.NodeName))
+		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodFailed {
+			continue
 		}
+		if pod.Status.Phase == corev1.PodRunning && podIsReady(pod) &&
+			(selected == nil || pod.CreationTimestamp.After(selected.CreationTimestamp.Time)) {
+
+			selected = pod
+		}
+	}
+	if selected != nil {
+		return selected, nil
 	}
 	return nil, errors.New(errors.ErrCodeNotFound,
 		fmt.Sprintf("no ready login pod found for Slinky LoginSet selectors in %s:\n%s",
@@ -283,10 +299,11 @@ func listSlinkySetsForController(
 	}
 	list, err := dynClient.Resource(gvr).Namespace(namespace).List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
+		code := errors.ErrCodeInternal
 		if apierrors.IsNotFound(err) {
-			return nil, validators.Skip(fmt.Sprintf("Slinky Slurm %s API not available", kind))
+			code = errors.ErrCodeNotFound
 		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to list Slinky Slurm %ss", kind), err)
+		return nil, errors.Wrap(code, fmt.Sprintf("failed to list Slinky Slurm %ss in namespace %s", kind, namespace), err)
 	}
 
 	selected := make([]slinkySetSelection, 0, len(list.Items))
