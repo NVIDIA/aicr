@@ -90,6 +90,21 @@ spec:
         topologyUpdater:
           enable: true
 
+    # GB300 (p6e-gb300r) uses a ConnectX RoCE fabric, not AWS EFA: the node has
+    # no EFA device, so the legacy aws-efa device plugin (inherited from the eks
+    # base) crash-loops ("not EFA enabled"). Disable it and expose the RoCE VFs
+    # via the AWS networking DRA plugin (DeviceClass roce.networking.k8s.aws).
+    # Mirrors the DGXC reference GB300 fabric config. See issue #1326.
+    - name: aws-efa
+      type: Helm
+      overrides:
+        enabled: false
+
+    - name: aws-net-dra
+      type: Helm
+      manifestFiles:
+        - components/aws-net-dra/manifests/roce.yaml
+
   # Validation checks for GB300 on EKS training workloads.
   # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
   validation:

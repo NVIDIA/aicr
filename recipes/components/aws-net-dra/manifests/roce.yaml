@@ -1,0 +1,164 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AWS networking device DRA plugin — RoCE device class.
+#
+# Vendored from the AWS-published `aws-net-k8s-dra-plugin` Helm chart v1.0.0
+# (image `eks/networking-device-dra-plugin:v1.0.0`, AWS public ECR). The chart
+# itself is hosted only in a private NGC repo, so AICR vendors the rendered
+# objects (deviceType=roce) to avoid a private-repo dependency. The image is
+# public.
+#
+# This exposes ConnectX RoCE VFs (e.g. on EC2 p6e-gb300r) to Kubernetes via DRA
+# as DeviceClass `roce.networking.k8s.aws` (driver `dra.networking.k8s.aws`),
+# topology-aware (advertises `resource.kubernetes.io/pcieRoot` for GPU-NIC
+# alignment). It replaces the legacy `aws-efa` device plugin on RoCE-fabric
+# GB300 instances, which have no EFA hardware. Mirrors the DGXC reference
+# (every managed GB300 EKS cluster ships this and omits aws-efa).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aws-net-k8s-dra-plugin
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: aws-net-k8s-dra-plugin
+    app.kubernetes.io/instance: aws-net-k8s-dra-plugin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aws-net-k8s-dra-plugin
+  labels:
+    app.kubernetes.io/name: aws-net-k8s-dra-plugin
+    app.kubernetes.io/instance: aws-net-k8s-dra-plugin
+rules:
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceslices"]
+    verbs: ["create", "update", "list", "watch"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aws-net-k8s-dra-plugin
+  labels:
+    app.kubernetes.io/name: aws-net-k8s-dra-plugin
+    app.kubernetes.io/instance: aws-net-k8s-dra-plugin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aws-net-k8s-dra-plugin
+subjects:
+  - kind: ServiceAccount
+    name: aws-net-k8s-dra-plugin
+    namespace: kube-system
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: roce.networking.k8s.aws
+  labels:
+    app.kubernetes.io/name: aws-net-k8s-dra-plugin
+    app.kubernetes.io/instance: aws-net-k8s-dra-plugin
+    aws-networking.k8s.aws/device-type: roce
+spec:
+  selectors:
+    - cel:
+        expression: |
+          device.driver == "dra.networking.k8s.aws" &&
+          device.attributes["dra.vpc.amazonaws.com"].deviceType == "roce"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: aws-net-k8s-dra-plugin
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: aws-net-k8s-dra-plugin
+    app.kubernetes.io/instance: aws-net-k8s-dra-plugin
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aws-net-k8s-dra-plugin
+      app.kubernetes.io/instance: aws-net-k8s-dra-plugin
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aws-net-k8s-dra-plugin
+        app.kubernetes.io/instance: aws-net-k8s-dra-plugin
+    spec:
+      serviceAccountName: aws-net-k8s-dra-plugin
+      priorityClassName: system-node-critical
+      hostNetwork: true
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      containers:
+        - name: network-plugin
+          image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/networking-device-dra-plugin:v1.0.0
+          imagePullPolicy: Always
+          command: ["aws-net-k8s-dra-plugin"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 0
+            capabilities:
+              add: ["SYS_ADMIN"]
+              drop: ["ALL"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CDI_ROOT
+              value: /var/run/cdi
+            - name: KUBELET_REGISTRAR_DIRECTORY_PATH
+              value: /var/lib/kubelet/plugins_registry
+            - name: KUBELET_PLUGINS_DIRECTORY_PATH
+              value: /var/lib/kubelet/plugins
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          resources:
+            requests:
+              cpu: 10m
+              memory: 20Mi
+          volumeMounts:
+            - { name: kubelet-plugins-dir, mountPath: /var/lib/kubelet/plugins }
+            - { name: kubelet-registry-dir, mountPath: /var/lib/kubelet/plugins_registry }
+            - { name: cdi-dir, mountPath: /var/run/cdi }
+            - { name: claiminfo-dir, mountPath: /var/run/claiminfo }
+            - { name: sys-class-infiniband, mountPath: /sys/class/infiniband, readOnly: true }
+            - { name: infiniband-volume, mountPath: /dev/infiniband/ }
+      volumes:
+        - { name: kubelet-plugins-dir, hostPath: { path: /var/lib/kubelet/plugins } }
+        - { name: kubelet-registry-dir, hostPath: { path: /var/lib/kubelet/plugins_registry } }
+        - { name: cdi-dir, hostPath: { path: /var/run/cdi } }
+        - { name: claiminfo-dir, hostPath: { path: /var/run/claiminfo, type: DirectoryOrCreate } }
+        - { name: sys-class-infiniband, hostPath: { path: /sys/class/infiniband, type: Directory } }
+        - { name: infiniband-volume, hostPath: { path: /dev/infiniband/, type: Directory } }

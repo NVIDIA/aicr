@@ -169,6 +169,23 @@ components:
         tolerationPaths:
           - tolerations
 
+  # AWS networking device DRA plugin (RoCE). Manifest-only component vendored
+  # from the AWS-published aws-net-k8s-dra-plugin chart v1.0.0 (the chart is
+  # private on NGC; the image is public ECR). Exposes ConnectX RoCE VFs via
+  # DeviceClass roce.networking.k8s.aws. Used on RoCE-fabric GB300 instances
+  # (p6e-gb300r) in place of aws-efa, which has no EFA hardware to manage.
+  - name: aws-net-dra
+    displayName: aws-net-dra
+    valueOverrideKeys:
+      - awsnetdra
+      - roce
+    healthCheck:
+      assertFile: checks/aws-net-dra/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: kube-system
+
   - name: cert-manager
     displayName: cert-manager
     valueOverrideKeys:
