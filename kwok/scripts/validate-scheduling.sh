@@ -63,7 +63,8 @@
 #                            free as well).
 #   KWOK_ARGOCD_SYNC_TIMEOUT Seconds to wait for all Argo CD Applications to
 #                            reach Synced + Healthy (or Progressing) before
-#                            failing. Default: 300.
+#                            failing. Default: 480 (matches the chainsaw test's
+#                            spec.timeouts.assert: 8m).
 #   KWOK_ARGOCD_ROOT_GRACE   Seconds to wait for the root Argo CD Application
 #                            (nvidia-stack for argocd-oci, aicr-stack for
 #                            argocd-helm-oci) to appear in the argocd
@@ -1552,7 +1553,7 @@ wait_for_argocd_sync() {
             test_dir="${REPO_ROOT}/tests/chainsaw/kwok/argocd-sync"
             ;;
     esac
-    local sync_timeout="${KWOK_ARGOCD_SYNC_TIMEOUT:-300}s"
+    local sync_timeout="${KWOK_ARGOCD_SYNC_TIMEOUT:-480}s"
 
     log_info "Argo CD sync gate (chainsaw): rootApp=${ARGOCD_ROOT_APP} timeout=${sync_timeout}"
 
@@ -1560,6 +1561,13 @@ wait_for_argocd_sync() {
     # letting the bash driver vary the deadline by env var without forking
     # the chainsaw test file per deployer. --no-color keeps the CI log
     # readable; the kwok-test composite action does not interpret ANSI.
+    #
+    # --error-timeout matters as much as --assert-timeout here: the
+    # assert-all-applications-pass gate is an error-polarity op (poll
+    # until NO Application matches the bad-state predicate), and
+    # chainsaw's default error timeout is 10s — far below what a fleet
+    # of Applications needs to converge. Without the override the gate
+    # would flake on every multi-component recipe.
     #
     # --set is the inline override flag in chainsaw — it populates the
     # $values binding from the command line. --values is YAML-only
@@ -1571,6 +1579,7 @@ wait_for_argocd_sync() {
             --set "rootApp=${ARGOCD_ROOT_APP}" \
             "${extra_args[@]}" \
             --assert-timeout "$sync_timeout" \
+            --error-timeout "$sync_timeout" \
             --no-color; then
         log_info "Argo CD sync PASS (chainsaw)"
         return 0
@@ -1887,7 +1896,7 @@ Usage: validate-scheduling.sh [--keep-namespace] [--deployer <name>] <recipe-nam
 Flags:
   --keep-namespace        Preserve releases/namespaces after the run.
   --deployer <name>       One of: helm (default), argocd-oci, argocd-helm-oci,
-                          flux-oci, flux-git.
+                          argocd-git, flux-oci, flux-git.
 
 Examples:
   validate-scheduling.sh h100-eks-ubuntu-training-kubeflow
