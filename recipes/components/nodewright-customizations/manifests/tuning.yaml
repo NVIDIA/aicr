@@ -79,7 +79,7 @@ spec:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "true"
         - name: NVIDIA_SETUP_KERNEL_ALLOW_NEWER
-          value: "false"
+          value: "true"
       resources:
         cpuLimit: 4000m
         cpuRequest: 2000m
