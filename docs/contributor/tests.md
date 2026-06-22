@@ -371,7 +371,7 @@ independent.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KWOK_ARGOCD_SYNC_TIMEOUT` | `300` s | Deadline for all child Argo CD Applications to reach `Synced+Healthy` |
+| `KWOK_ARGOCD_SYNC_TIMEOUT` | `480` s | Deadline for all child Argo CD Applications to reach `Synced+Healthy` |
 | `KWOK_ARGOCD_ROOT_GRACE` | `30` s | Grace period for the root Application before deadline counting starts |
 | `KWOK_FLUX_SYNC_TIMEOUT` | `500` s | Deadline for source fetch (OCIRepository or GitRepository) + Kustomization apply + HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `KWOK_FLUX_ROOT_GRACE` | `30` s | Grace period for the outer Kustomization before deadline counting starts |
@@ -385,7 +385,9 @@ credential for the ephemeral in-cluster Gitea, not a secret.
 `argocd-git` reuses the `KWOK_ARGOCD_SYNC_TIMEOUT` budget.
 
 On a clean local Kind cluster `Synced+Healthy` lands in ~30 s; the
-300-second default exists to absorb CI variance. If a local run trips
+480-second default exists to absorb CI variance (the all-semantics gate
+waits for every Application, not just the first one, so it needs more
+budget than the old exists-semantics check did). If a local run trips
 code 50 but the cluster is otherwise healthy, raise the relevant
 timeout before assuming the recipe is broken — cold-cluster image
 pulls are the most common cause.
