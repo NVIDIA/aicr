@@ -29,12 +29,16 @@
 # which is exactly what Argo CD's repo-server clones from.
 #
 # Pass predicate — every Application in the `argocd` namespace must match
-# one of these 4 terminal-pass states (mirroring argocd-sync):
+# one of these 4 terminal-pass states (mirroring argocd-sync). Note:
+# operationState.phase==Succeeded is validated only on the root Application
+# (assert-root-app-succeeded step) to close apply-time races; per-child
+# checks omit it to avoid hanging on health-gated apps like
+# kube-prometheus-stack that stay op=Running forever.
 #
-#   1. Synced + Healthy                                   — canonical pass
-#   2. Synced + Progressing                               — KWOK pod-readiness gap (ADR-008)
-#   3. OutOfSync + Healthy + operationState=Succeeded     — operator mutation (ClusterPolicy, DeviceClass, etc.)
-#   4. Synced + Degraded + operationState=Succeeded       — health controller divergence after successful op
+#   1. Synced + Healthy        — canonical pass
+#   2. Synced + Progressing    — KWOK pod-readiness gap (ADR-008)
+#   3. OutOfSync + Healthy     — operator mutation (ClusterPolicy, DeviceClass, etc.)
+#   4. Synced + Degraded       — health controller divergence after successful op
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -58,8 +62,16 @@ spec:
     - name: repoURL
       value: ($values.repoURL || '')
   timeouts:
-    # KWOK_ARGOCD_SYNC_TIMEOUT default. Matches argocd-sync.
-    assert: 5m
+    # KWOK_ARGOCD_SYNC_TIMEOUT default. Matches argocd-sync (8 minutes for
+    # all-semantics gate; see issue #1288).
+    # `error` needs the same budget as `assert`: assert-all-applications-pass
+    # uses error-polarity (poll until NO Application matches the bad-state
+    # predicate), and chainsaw's default error timeout is only 10s — far
+    # less than a fleet of Applications needs to converge. Both are
+    # overridden per-run by the driver (validate-scheduling.sh passes
+    # --assert-timeout AND --error-timeout from KWOK_ARGOCD_SYNC_TIMEOUT).
+    assert: 8m
+    error: 8m
   # See argocd-sync for the skipDelete rationale (KWOK has no
   # kube-controller-manager to finalize the auto-created test namespace).
   skipDelete: true
@@ -115,41 +127,81 @@ spec:
               echo "--- Applications in argocd namespace ---"
               kubectl get applications -n argocd 2>&1 || true
 
-    - name: assert-all-applications-pass
+    - name: assert-root-app-succeeded
       description: |
-        Every Application in the argocd namespace must satisfy the 4-arm
-        terminal-pass predicate. Chainsaw polls until convergence or the
-        spec.timeouts.assert deadline fires.
+        The root Application must reach operationState.phase==Succeeded before
+        we assert on the entire fleet. This gates the sweep against apply-time
+        races where kubectl apply creates the root with empty status and the
+        name-less sweep evaluates before the root has begun reconciliation,
+        causing a vacuous pass. For an App-of-Apps, this ensures children are
+        materialized (Argo's sync operation is not Succeeded until the parent
+        app has recursively applied all children).
       try:
         - assert:
             resource:
               apiVersion: argoproj.io/v1alpha1
               kind: Application
               metadata:
+                name: ($rootApp)
                 namespace: argocd
               status:
-                # The 4-arm OR is encoded as a single JMESPath expression
-                # because YAML doesn't accept multi-line mapping keys.
-                # Field paths are relative to `status:` here (e.g.,
-                # `sync.status` not `status.sync.status`). All four arms
-                # require `operationState.phase == 'Succeeded'` so that
-                # an Application can only count as passing AFTER Argo
-                # CD has completed at least one sync operation. For an
-                # App-of-Apps, that's the gate ensuring the child
-                # Applications have been materialized before the
-                # selector's "every Application in argocd ns" sweep
-                # accepts the root alone — otherwise the assertion
-                # races ahead and passes on the root's transient
-                # Synced state, returning before children even exist.
-                # See #1061 (and #1050 for the migration that
-                # introduced the race).
-                #
-                # Arms:
-                #   1. Synced + Healthy        — canonical pass
-                #   2. Synced + Progressing    — KWOK pod-readiness sim gap (ADR-008)
-                #   3. OutOfSync + Healthy     — operator mutation (ClusterPolicy, DeviceClass)
-                #   4. Synced + Degraded       — health controller divergence after a successful op
-                (operationState.phase == 'Succeeded' && ((sync.status == 'Synced' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Progressing') || (sync.status == 'OutOfSync' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Degraded'))): true
+                (operationState.phase == 'Succeeded'): true
+      catch:
+        - script:
+            content: |
+              echo "--- Root Application status ---"
+              kubectl get application -n argocd -o yaml ($rootApp) 2>&1 || true
+              echo "--- argocd-application-controller (tail=200) ---"
+              kubectl logs -n argocd statefulset/argocd-application-controller --tail=200 2>&1 \
+                || kubectl logs -n argocd deploy/argocd-application-controller --tail=200 2>&1 \
+                || true
+
+    - name: assert-all-applications-pass
+      description: |
+        Every Application in the argocd namespace must satisfy the 4-arm
+        terminal-pass predicate. Chainsaw polls until convergence or the
+        spec.timeouts.assert deadline fires. Uses inverted-polarity error
+        semantics to assert "all Applications in terminal state" rather than
+        "at least one Application in terminal state" — the error: block fails
+        when ANY Application *fails* the predicate (achieves all-semantics),
+        whereas assert: passes when ANY Application *matches* (exists-semantics).
+        See ADR-010 "Sync Gate: All-Resources Semantics".
+
+        Field paths are relative to `status:` here (e.g., `sync.status` not
+        `status.sync.status`). The per-child predicate does NOT include
+        `operationState.phase == 'Succeeded'` because on KWOK, health-gated
+        Applications (e.g., kube-prometheus-stack waiting for the kubelet to
+        report Pod readiness) may have `sync.status==Synced` but their sync
+        operation stays Running forever (the kubelet never comes up on KWOK).
+        `sync.status==Synced` alone is sufficient — it implies the sync
+        completed (or was aborted), and we skip the health-awaiting apps that
+        would hang the gate. The root check (assert-root-app-succeeded above)
+        still gates on `operationState.phase==Succeeded` to close the
+        apply-time race.
+
+        Arms (all require only sync + health state, no operationState check):
+        #   1. Synced + Healthy        — canonical pass
+        #   2. Synced + Progressing    — KWOK pod-readiness sim gap (ADR-008)
+        #   3. OutOfSync + Healthy     — operator mutation (ClusterPolicy, DeviceClass)
+        #   4. Synced + Degraded       — health controller divergence after a successful op
+        # Note: operationState.phase==Succeeded is gated by assert-root-app-succeeded
+        # to close apply-time races; per-child checks omit it to avoid hanging on
+        # health-gated apps like kube-prometheus-stack that stay op=Running forever on KWOK.
+      try:
+        - error:
+            # Inverted polarity: error: fails when ANY Application does NOT
+            # match the predicate. This achieves "assert all" semantics.
+            # Zero Applications is a pass (the sweep matched nothing, so there
+            # are no failures).
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                namespace: argocd
+              status:
+                # NOT (any of the 4 pass states) == NOT pass
+                # Encode as: the disjunction itself evaluates to false => application fails predicate
+                ((sync.status == 'Synced' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Progressing') || (sync.status == 'OutOfSync' && health.status == 'Healthy') || (sync.status == 'Synced' && health.status == 'Degraded')): false
       catch:
         - script:
             content: |
