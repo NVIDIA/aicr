@@ -32,13 +32,42 @@ import (
 	k8sexec "k8s.io/client-go/util/exec"
 )
 
+type podExecOptions struct {
+	DefaultContainerAnnotation string
+	PreferredContainerName     string
+}
+
 type podExecResult struct {
 	Stdout   string
 	Stderr   string
 	ExitCode int
 }
 
-type podExecFunc func(context.Context, *validators.Context, string, string, []string) (podExecResult, error)
+// selectExecContainer chooses which container to exec into using caller-provided
+// preferences. It first honors a configured default-container annotation when it
+// names an existing container, then a configured preferred container name, then
+// falls back to the pod's first container. Callers must ensure the pod has at
+// least one container.
+func selectExecContainer(pod *corev1.Pod, opts podExecOptions) string {
+	containers := pod.Spec.Containers
+	if annotated := pod.Annotations[opts.DefaultContainerAnnotation]; opts.DefaultContainerAnnotation != "" && annotated != "" {
+		for i := range containers {
+			if containers[i].Name == annotated {
+				return annotated
+			}
+		}
+	}
+	if opts.PreferredContainerName != "" {
+		for i := range containers {
+			if containers[i].Name == opts.PreferredContainerName {
+				return opts.PreferredContainerName
+			}
+		}
+	}
+	return containers[0].Name
+}
+
+type podExecFunc func(context.Context, *validators.Context, string, string, []string, podExecOptions) (podExecResult, error)
 
 type podExecExecutorFactory func(*rest.Config, string, string) (remotecommand.Executor, error)
 
@@ -50,7 +79,15 @@ var newPodExecExecutor podExecExecutorFactory = func(config *rest.Config, method
 	return remotecommand.NewSPDYExecutor(config, method, parsedURL)
 }
 
-func execPodCommand(streamCtx context.Context, ctx *validators.Context, namespace, podName string, command []string) (podExecResult, error) {
+func execPodCommand(
+	streamCtx context.Context,
+	ctx *validators.Context,
+	namespace string,
+	podName string,
+	command []string,
+	opts podExecOptions,
+) (podExecResult, error) {
+
 	pod, err := ctx.Clientset.CoreV1().Pods(namespace).Get(streamCtx, podName, metav1.GetOptions{})
 	if err != nil {
 		return podExecResult{}, errors.Wrap(errors.ErrCodeInternal,
@@ -67,7 +104,7 @@ func execPodCommand(streamCtx context.Context, ctx *validators.Context, namespac
 		Namespace(namespace).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Container: pod.Spec.Containers[0].Name,
+			Container: selectExecContainer(pod, opts),
 			Command:   command,
 			Stdout:    true,
 			Stderr:    true,

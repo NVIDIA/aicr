@@ -145,7 +145,15 @@ func TestCheckSlinkySlurmHealthExecOutcomes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			restore := replaceSlinkyExecForTest(func(context.Context, *validators.Context, string, string, []string) (podExecResult, error) {
+			restore := replaceSlinkyExecForTest(func(
+				context.Context,
+				*validators.Context,
+				string,
+				string,
+				[]string,
+				podExecOptions,
+			) (podExecResult, error) {
+
 				return tt.result, tt.err
 			})
 			defer restore()
@@ -163,8 +171,17 @@ func TestCheckSlinkySlurmHealthExecOutcomes(t *testing.T) {
 
 func TestCheckSlinkySlurmHealthRunsAllHealthCommands(t *testing.T) {
 	var gotCommands []string
-	restore := replaceSlinkyExecForTest(func(_ context.Context, _ *validators.Context, _, _ string, command []string) (podExecResult, error) {
+	var gotOptions []podExecOptions
+	restore := replaceSlinkyExecForTest(func(
+		_ context.Context,
+		_ *validators.Context,
+		_, _ string,
+		command []string,
+		opts podExecOptions,
+	) (podExecResult, error) {
+
 		gotCommands = append(gotCommands, strings.Join(command, " "))
+		gotOptions = append(gotOptions, opts)
 		return podExecResult{Stdout: strings.Join(command, " ") + "\n"}, nil
 	})
 	defer restore()
@@ -182,11 +199,23 @@ func TestCheckSlinkySlurmHealthRunsAllHealthCommands(t *testing.T) {
 	if strings.Join(gotCommands, ",") != strings.Join(wantCommands, ",") {
 		t.Fatalf("commands = %v, want %v", gotCommands, wantCommands)
 	}
+	for _, got := range gotOptions {
+		if got.DefaultContainerAnnotation != defaultContainerAnnotation || got.PreferredContainerName != slinkyLoginPodContainerName {
+			t.Fatalf("pod exec options = %+v, want Slinky login pod options", got)
+		}
+	}
 }
 
 func TestCheckSlinkySlurmHealthDiscoversPodsFromSlinkyCRSelectors(t *testing.T) {
 	var gotPodName string
-	restore := replaceSlinkyExecForTest(func(_ context.Context, _ *validators.Context, _, podName string, _ []string) (podExecResult, error) {
+	restore := replaceSlinkyExecForTest(func(
+		_ context.Context,
+		_ *validators.Context,
+		_, podName string,
+		_ []string,
+		_ podExecOptions,
+	) (podExecResult, error) {
+
 		gotPodName = podName
 		return podExecResult{Stdout: "ok\n"}, nil
 	})
@@ -199,6 +228,57 @@ func TestCheckSlinkySlurmHealthDiscoversPodsFromSlinkyCRSelectors(t *testing.T) 
 	}
 	if gotPodName != "custom-login-pod" {
 		t.Fatalf("exec pod = %q, want custom-login-pod", gotPodName)
+	}
+}
+
+func TestCheckSlinkySlurmHealthUsesComponentRefNamespace(t *testing.T) {
+	const customNamespace = "custom-slurm"
+
+	loginPod := readyLoginPod()
+	loginPod.Namespace = customNamespace
+	nodeSetPod := readyNodeSetPod()
+	nodeSetPod.Namespace = customNamespace
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-node-0"}}
+
+	clientset := k8sfake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: customNamespace}},
+		node,
+		loginPod,
+		nodeSetPod,
+	)
+	addSlinkyDiscovery(t, clientset)
+
+	var gotNamespace string
+	restore := replaceSlinkyExecForTest(func(
+		_ context.Context,
+		_ *validators.Context,
+		namespace string,
+		_ string,
+		_ []string,
+		_ podExecOptions,
+	) (podExecResult, error) {
+
+		gotNamespace = namespace
+		return podExecResult{Stdout: "ok\n"}, nil
+	})
+	defer restore()
+
+	ctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: newSlinkyDynamicClient(t, defaultLoginSetInNamespace(customNamespace), defaultNodeSetInNamespace(customNamespace)),
+		RESTConfig:    &rest.Config{Host: "https://example.test"},
+		ValidationInput: &v1.ValidationInput{
+			ComponentRefs: []recipe.ComponentRef{{Name: slinkySlurmComponent, Namespace: customNamespace}},
+		},
+	}
+
+	err := CheckSlinkySlurmHealth(ctx)
+	if err != nil {
+		t.Fatalf("error = %v, want nil", err)
+	}
+	if gotNamespace != customNamespace {
+		t.Fatalf("exec namespace = %q, want %q", gotNamespace, customNamespace)
 	}
 }
 
@@ -218,7 +298,14 @@ func TestCheckSlinkySlurmHealthFailsOnMalformedControllerRefName(t *testing.T) {
 }
 
 func TestCheckSlinkySlurmHealthCollectsAllCommandFailures(t *testing.T) {
-	restore := replaceSlinkyExecForTest(func(_ context.Context, _ *validators.Context, _, _ string, command []string) (podExecResult, error) {
+	restore := replaceSlinkyExecForTest(func(
+		_ context.Context,
+		_ *validators.Context,
+		_, _ string,
+		command []string,
+		_ podExecOptions,
+	) (podExecResult, error) {
+
 		joined := strings.Join(command, " ")
 		if strings.Contains(joined, "sinfo -h -Ne -t idle,mix") {
 			return podExecResult{Stderr: "down", ExitCode: 1}, nil
@@ -270,7 +357,15 @@ func slurmCustomCRSelectorContext(t *testing.T, kwok bool) *validators.Context {
 }
 
 func TestCheckSlinkySlurmHealthSkipsWhenAllNodeSetPodsAreOnKWOKNodes(t *testing.T) {
-	restore := replaceSlinkyExecForTest(func(context.Context, *validators.Context, string, string, []string) (podExecResult, error) {
+	restore := replaceSlinkyExecForTest(func(
+		context.Context,
+		*validators.Context,
+		string,
+		string,
+		[]string,
+		podExecOptions,
+	) (podExecResult, error) {
+
 		t.Fatal("exec should not run when all NodeSet pods are on KWOK nodes")
 		return podExecResult{}, nil
 	})
@@ -400,6 +495,14 @@ func defaultNodeSet() *unstructured.Unstructured {
 	return slinkySetObject("NodeSet", "slinky-slurm-worker-slinky", "app.kubernetes.io/name=slurm-nodeset")
 }
 
+func defaultLoginSetInNamespace(namespace string) *unstructured.Unstructured {
+	return slinkySetObjectInNamespace("LoginSet", "slinky-slurm-login-slinky", "app.kubernetes.io/name=slurm-login", namespace)
+}
+
+func defaultNodeSetInNamespace(namespace string) *unstructured.Unstructured {
+	return slinkySetObjectInNamespace("NodeSet", "slinky-slurm-worker-slinky", "app.kubernetes.io/name=slurm-nodeset", namespace)
+}
+
 func customLoginSet() *unstructured.Unstructured {
 	return slinkySetObject("LoginSet", "custom-login", "app.kubernetes.io/instance=custom-login,app.kubernetes.io/name=login")
 }
@@ -409,18 +512,22 @@ func customNodeSet() *unstructured.Unstructured {
 }
 
 func slinkySetObject(kind, name, selector string) *unstructured.Unstructured {
+	return slinkySetObjectInNamespace(kind, name, selector, slinkySlurmNamespace)
+}
+
+func slinkySetObjectInNamespace(kind, name, selector, namespace string) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "slinky.slurm.net/v1beta1",
 			"kind":       kind,
 			"metadata": map[string]any{
 				"name":      name,
-				"namespace": slinkySlurmNamespace,
+				"namespace": namespace,
 			},
 			"spec": map[string]any{
 				"controllerRef": map[string]any{
 					"name":      slinkySlurmComponent,
-					"namespace": slinkySlurmNamespace,
+					"namespace": namespace,
 				},
 			},
 			"status": map[string]any{

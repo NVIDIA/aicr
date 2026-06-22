@@ -95,8 +95,9 @@ spec:
   # wrong path. The equivalent signal here is a slurm-launched
   # `srun nccl-tests/all_reduce_perf` that goes through slurmd + the
   # GPUDirect TCPXO plugin already deployed by the parent leaf via
-  # gke-nccl-tcpxo. Deployment and conformance checks are inherited
-  # unchanged.
+  # gke-nccl-tcpxo. Deployment checks are inherited unchanged. Conformance
+  # keeps the inherited parent checks and appends the Slurm-specific health
+  # check below.
   validation:
     conformance:
       checks:

@@ -63,7 +63,7 @@ func TestExecPodCommandBuildsExecRequestAndStreamsOutput(t *testing.T) {
 	})
 	defer restore()
 
-	result, err := execPodCommand(context.Background(), ctx, "slurm", "login-0", []string{"srun", "hostname"})
+	result, err := execPodCommand(context.Background(), ctx, "slurm", "login-0", []string{"srun", "hostname"}, podExecOptions{})
 	if err != nil {
 		t.Fatalf("execPodCommand() error = %v", err)
 	}
@@ -90,6 +90,113 @@ func TestExecPodCommandBuildsExecRequestAndStreamsOutput(t *testing.T) {
 	}
 	if result.ExitCode != 0 {
 		t.Fatalf("exit code = %d, want 0", result.ExitCode)
+	}
+}
+
+func TestSelectExecContainer(t *testing.T) {
+	const defaultContainerAnnotationForTest = "example.com/default-container"
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		options     podExecOptions
+		containers  []string
+		want        string
+	}{
+		{
+			name:        "configured default-container annotation wins",
+			annotations: map[string]string{defaultContainerAnnotationForTest: "login"},
+			options:     podExecOptions{DefaultContainerAnnotation: defaultContainerAnnotationForTest},
+			containers:  []string{"sidecar", "login"},
+			want:        "login",
+		},
+		{
+			name:        "annotation ignored when not a real container",
+			annotations: map[string]string{defaultContainerAnnotationForTest: "ghost"},
+			options: podExecOptions{
+				DefaultContainerAnnotation: defaultContainerAnnotationForTest,
+				PreferredContainerName:     "login",
+			},
+			containers: []string{"sidecar", "login"},
+			want:       "login",
+		},
+		{
+			name:       "preferred container matched when no annotation",
+			options:    podExecOptions{PreferredContainerName: "login"},
+			containers: []string{"munge", "login"},
+			want:       "login",
+		},
+		{
+			name:       "fallback to first container when nothing matches",
+			options:    podExecOptions{PreferredContainerName: "login"},
+			containers: []string{"sidecar-a", "sidecar-b"},
+			want:       "sidecar-a",
+		},
+		{
+			name:       "empty options use first container",
+			want:       "sssd",
+			containers: []string{"sssd", "login"},
+		},
+		{
+			name:        "annotation is ignored unless configured",
+			annotations: map[string]string{defaultContainerAnnotationForTest: "login"},
+			containers:  []string{"sidecar", "login"},
+			want:        "sidecar",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containers := make([]corev1.Container, 0, len(tt.containers))
+			for _, name := range tt.containers {
+				containers = append(containers, corev1.Container{Name: name})
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "login-0", Namespace: "slurm"},
+				Spec:       corev1.PodSpec{Containers: containers},
+			}
+			if len(tt.annotations) > 0 {
+				pod.Annotations = tt.annotations
+			}
+			if got := selectExecContainer(pod, tt.options); got != tt.want {
+				t.Fatalf("selectExecContainer() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecPodCommandHonorsConfiguredDefaultContainerAnnotation(t *testing.T) {
+	const defaultContainerAnnotationForTest = "example.com/default-container"
+
+	ctx := podExecHTTPContext(t, corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "login-0",
+			Namespace:   "slurm",
+			Annotations: map[string]string{defaultContainerAnnotationForTest: "login"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "sidecar"},
+				{Name: "login"},
+			},
+		},
+	})
+
+	var gotURL string
+	restore := replacePodExecExecutorForTest(func(_ *rest.Config, _ string, url string) (remotecommand.Executor, error) {
+		gotURL = url
+		return fakePodExecutor{
+			stream: func(context.Context, remotecommand.StreamOptions) error { return nil },
+		}, nil
+	})
+	defer restore()
+
+	opts := podExecOptions{DefaultContainerAnnotation: defaultContainerAnnotationForTest}
+	if _, err := execPodCommand(context.Background(), ctx, "slurm", "login-0", []string{"hostname"}, opts); err != nil {
+		t.Fatalf("execPodCommand() error = %v", err)
+	}
+	if !strings.Contains(gotURL, "container=login") {
+		t.Fatalf("exec URL = %s, want container=login (not first container)", gotURL)
 	}
 }
 
@@ -123,7 +230,7 @@ func TestExecPodCommandReturnsPreStreamErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := execPodCommand(context.Background(), tt.ctx, "slurm", "missing", []string{"hostname"})
+			_, err := execPodCommand(context.Background(), tt.ctx, "slurm", "missing", []string{"hostname"}, podExecOptions{})
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 			}
@@ -143,7 +250,7 @@ func TestExecPodCommandReturnsExecutorFactoryError(t *testing.T) {
 	})
 	defer restore()
 
-	_, err := execPodCommand(context.Background(), ctx, "slurm", "login-0", []string{"hostname"})
+	_, err := execPodCommand(context.Background(), ctx, "slurm", "login-0", []string{"hostname"}, podExecOptions{})
 	if err == nil || !strings.Contains(err.Error(), "failed to create pod exec executor") || !strings.Contains(err.Error(), "factory failed") {
 		t.Fatalf("error = %v, want wrapped factory failure", err)
 	}
@@ -165,7 +272,7 @@ func TestExecPodCommandReturnsStreamError(t *testing.T) {
 	})
 	defer restore()
 
-	_, err := execPodCommand(context.Background(), ctx, "slurm", "login-0", []string{"hostname"})
+	_, err := execPodCommand(context.Background(), ctx, "slurm", "login-0", []string{"hostname"}, podExecOptions{})
 	if err == nil || !strings.Contains(err.Error(), "stream failed") {
 		t.Fatalf("error = %v, want stream failure", err)
 	}

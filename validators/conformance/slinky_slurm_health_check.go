@@ -29,9 +29,11 @@ import (
 )
 
 const (
-	slinkySlurmComponent = "slinky-slurm"
-	slinkySlurmNamespace = "slurm"
-	kwokNodeAnnotation   = "kwok.x-k8s.io/node"
+	slinkySlurmComponent        = "slinky-slurm"
+	slinkySlurmNamespace        = "slurm"
+	kwokNodeAnnotation          = "kwok.x-k8s.io/node"
+	defaultContainerAnnotation  = "kubectl.kubernetes.io/default-container"
+	slinkyLoginPodContainerName = "login"
 )
 
 var (
@@ -77,6 +79,11 @@ var slinkySlurmHealthCommands = []slinkySlurmHealthCommand{
 
 var slinkyExecCommand podExecFunc = execPodCommand
 
+var slinkyLoginPodExecOptions = podExecOptions{
+	DefaultContainerAnnotation: defaultContainerAnnotation,
+	PreferredContainerName:     slinkyLoginPodContainerName,
+}
+
 // CheckSlinkySlurmHealth validates that a Slinky-managed Slurm cluster is
 // reachable from the login pod, has idle or mixed worker nodes, and can
 // schedule a minimal job without queueing indefinitely.
@@ -90,24 +97,25 @@ func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
 	}
-	if !recipeHasEnabledComponent(ctx, slinkySlurmComponent) {
+	if !recipeHasComponent(ctx, slinkySlurmComponent) {
 		return validators.Skip("slinky-slurm component not present in recipe")
 	}
+	namespace := resolveSlinkySlurmNamespace(ctx)
 
 	if err := discoverSlinkySetAPIs(ctx); err != nil {
 		return err
 	}
-	if err := skipIfAllNodeSetPodsAreKWOK(ctx); err != nil {
+	if err := skipIfAllNodeSetPodsAreKWOK(ctx, namespace); err != nil {
 		return err
 	}
 
-	loginPod, err := findReadySlinkyLoginPod(ctx)
+	loginPod, err := findReadySlinkyLoginPod(ctx, namespace)
 	if err != nil {
 		return err
 	}
-	recordSlinkyInventories(ctx, loginPod)
+	recordSlinkyInventories(ctx, namespace, loginPod)
 
-	failures := runSlinkySlurmHealthCommands(ctx, loginPod.Name)
+	failures := runSlinkySlurmHealthCommands(ctx, namespace, loginPod.Name)
 	if len(failures) > 0 {
 		return errors.New(errors.ErrCodeInternal,
 			"Slinky Slurm health commands failed:\n"+strings.Join(failures, "\n"))
@@ -116,23 +124,24 @@ func CheckSlinkySlurmHealth(ctx *validators.Context) error {
 	return nil
 }
 
-func recipeHasEnabledComponent(ctx *validators.Context, name string) bool {
+func resolveSlinkySlurmNamespace(ctx *validators.Context) string {
 	if ctx.ValidationInput == nil {
-		return false
+		return slinkySlurmNamespace
 	}
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		if ref.Name == name && ref.IsEnabled() {
-			return true
+		if ref.Name == slinkySlurmComponent && ref.IsEnabled() && strings.TrimSpace(ref.Namespace) != "" {
+			return ref.Namespace
 		}
 	}
-	return false
+	return slinkySlurmNamespace
 }
 
-func runSlinkySlurmHealthCommands(ctx *validators.Context, loginPodName string) []string {
+func runSlinkySlurmHealthCommands(ctx *validators.Context, namespace, loginPodName string) []string {
 	var failures []string
 	for _, check := range slinkySlurmHealthCommands {
-		result, execErr := slinkyExecCommand(ctx.Ctx, ctx, slinkySlurmNamespace, loginPodName, check.command)
-		recordSlinkyExecResult(ctx, loginPodName, check, result, execErr)
+		result, execErr := slinkyExecCommand(
+			ctx.Ctx, ctx, namespace, loginPodName, check.command, slinkyLoginPodExecOptions)
+		recordSlinkyExecResult(ctx, namespace, loginPodName, check, result, execErr)
 		if execErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: exec failed: %v", check.label, execErr))
 			continue
@@ -171,8 +180,8 @@ func discoverSlinkySetAPIs(ctx *validators.Context) error {
 	return nil
 }
 
-func skipIfAllNodeSetPodsAreKWOK(ctx *validators.Context) error {
-	pods, err := listSlinkyNodeSetPods(ctx)
+func skipIfAllNodeSetPodsAreKWOK(ctx *validators.Context, namespace string) error {
+	pods, err := listSlinkyNodeSetPods(ctx, namespace)
 	if err != nil {
 		return err
 	}
@@ -201,17 +210,18 @@ func skipIfAllNodeSetPodsAreKWOK(ctx *validators.Context) error {
 	return nil
 }
 
-func listSlinkyNodeSetPods(ctx *validators.Context) ([]corev1.Pod, error) {
-	return listPodsForSlinkySetSelectors(ctx, slinkyNodeSetGVR, "NodeSet")
+func listSlinkyNodeSetPods(ctx *validators.Context, namespace string) ([]corev1.Pod, error) {
+	return listPodsForSlinkySetSelectors(ctx, namespace, slinkyNodeSetGVR, "NodeSet")
 }
 
 func listPodsForSlinkySetSelectors(
 	ctx *validators.Context,
+	namespace string,
 	gvr schema.GroupVersionResource,
 	kind string,
 ) ([]corev1.Pod, error) {
 
-	sets, err := listSlinkySetsForController(ctx, gvr, kind)
+	sets, err := listSlinkySetsForController(ctx, namespace, gvr, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -221,9 +231,9 @@ func listPodsForSlinkySetSelectors(
 		if _, parseErr := labels.Parse(set.selector); parseErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("invalid %s selector for %s/%s: %q",
-					kind, slinkySlurmNamespace, set.name, set.selector), parseErr)
+					kind, namespace, set.name, set.selector), parseErr)
 		}
-		podList, listErr := ctx.Clientset.CoreV1().Pods(slinkySlurmNamespace).List(ctx.Ctx, metav1.ListOptions{
+		podList, listErr := ctx.Clientset.CoreV1().Pods(namespace).List(ctx.Ctx, metav1.ListOptions{
 			LabelSelector: set.selector,
 		})
 		if listErr != nil {
@@ -235,8 +245,8 @@ func listPodsForSlinkySetSelectors(
 	return pods, nil
 }
 
-func findReadySlinkyLoginPod(ctx *validators.Context) (*corev1.Pod, error) {
-	pods, err := listPodsForSlinkySetSelectors(ctx, slinkyLoginSetGVR, "LoginSet")
+func findReadySlinkyLoginPod(ctx *validators.Context, namespace string) (*corev1.Pod, error) {
+	pods, err := listPodsForSlinkySetSelectors(ctx, namespace, slinkyLoginSetGVR, "LoginSet")
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +261,7 @@ func findReadySlinkyLoginPod(ctx *validators.Context) (*corev1.Pod, error) {
 	}
 	return nil, errors.New(errors.ErrCodeNotFound,
 		fmt.Sprintf("no ready login pod found for Slinky LoginSet selectors in %s:\n%s",
-			slinkySlurmNamespace, strings.TrimSpace(summary.String())))
+			namespace, strings.TrimSpace(summary.String())))
 }
 
 type slinkySetSelection struct {
@@ -262,6 +272,7 @@ type slinkySetSelection struct {
 
 func listSlinkySetsForController(
 	ctx *validators.Context,
+	namespace string,
 	gvr schema.GroupVersionResource,
 	kind string,
 ) ([]slinkySetSelection, error) {
@@ -270,7 +281,7 @@ func listSlinkySetsForController(
 	if err != nil {
 		return nil, err
 	}
-	list, err := dynClient.Resource(gvr).Namespace(slinkySlurmNamespace).List(ctx.Ctx, metav1.ListOptions{})
+	list, err := dynClient.Resource(gvr).Namespace(namespace).List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, validators.Skip(fmt.Sprintf("Slinky Slurm %s API not available", kind))
@@ -297,7 +308,7 @@ func listSlinkySetsForController(
 		if controllerName != slinkySlurmComponent {
 			continue
 		}
-		if controllerNamespace != "" && controllerNamespace != slinkySlurmNamespace {
+		if controllerNamespace != "" && controllerNamespace != namespace {
 			continue
 		}
 		selector, found, selectorErr := unstructured.NestedString(item.Object, "status", "selector")
@@ -332,10 +343,10 @@ func podIsReady(pod *corev1.Pod) bool {
 	return false
 }
 
-func recordSlinkyInventories(ctx *validators.Context, loginPod *corev1.Pod) {
-	slurmPods, slurmPodsErr := ctx.Clientset.CoreV1().Pods(slinkySlurmNamespace).List(ctx.Ctx, metav1.ListOptions{})
+func recordSlinkyInventories(ctx *validators.Context, namespace string, loginPod *corev1.Pod) {
+	slurmPods, slurmPodsErr := ctx.Clientset.CoreV1().Pods(namespace).List(ctx.Ctx, metav1.ListOptions{})
 	if slurmPodsErr != nil {
-		recordRawTextArtifact(ctx, "Slinky Slurm pods", "kubectl get pods -n slurm -o wide",
+		recordRawTextArtifact(ctx, "Slinky Slurm pods", fmt.Sprintf("kubectl get pods -n %s -o wide", namespace),
 			fmt.Sprintf("failed to list pods: %v", slurmPodsErr))
 	} else {
 		var podSummary strings.Builder
@@ -343,12 +354,12 @@ func recordSlinkyInventories(ctx *validators.Context, loginPod *corev1.Pod) {
 			fmt.Fprintf(&podSummary, "%-48s ready=%s phase=%s node=%s\n",
 				pod.Name, podReadyCount(pod), pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName))
 		}
-		recordRawTextArtifact(ctx, "Slinky Slurm pods", "kubectl get pods -n slurm -o wide", podSummary.String())
+		recordRawTextArtifact(ctx, "Slinky Slurm pods", fmt.Sprintf("kubectl get pods -n %s -o wide", namespace), podSummary.String())
 	}
 
-	nodeSetPods, nodeSetErr := listSlinkyNodeSetPods(ctx)
+	nodeSetPods, nodeSetErr := listSlinkyNodeSetPods(ctx, namespace)
 	if nodeSetErr != nil {
-		recordRawTextArtifact(ctx, "Slinky Slurm NodeSet pods", "kubectl get pods -n slurm",
+		recordRawTextArtifact(ctx, "Slinky Slurm NodeSet pods", fmt.Sprintf("kubectl get pods -n %s", namespace),
 			fmt.Sprintf("failed to list NodeSet pods: %v", nodeSetErr))
 	} else {
 		var nodeSetSummary strings.Builder
@@ -357,7 +368,7 @@ func recordSlinkyInventories(ctx *validators.Context, loginPod *corev1.Pod) {
 				pod.Name, podReadyCount(pod), pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName))
 		}
 		recordRawTextArtifact(ctx, "Slinky Slurm NodeSet pods",
-			"kubectl -n slurm get nodesets -o json | jq -r '.items[] | select(.apiVersion == \"slinky.slurm.net/v1beta1\") | .status.selector'",
+			fmt.Sprintf("kubectl -n %s get nodesets -o json | jq -r '.items[] | select(.apiVersion == \"slinky.slurm.net/v1beta1\") | .status.selector'", namespace),
 			nodeSetSummary.String())
 	}
 
@@ -366,9 +377,9 @@ func recordSlinkyInventories(ctx *validators.Context, loginPod *corev1.Pod) {
 			loginPod.Namespace, loginPod.Name, podIsReady(loginPod), valueOrUnknown(loginPod.Spec.NodeName)))
 }
 
-func recordSlinkyExecResult(ctx *validators.Context, podName string, check slinkySlurmHealthCommand, result podExecResult, execErr error) {
+func recordSlinkyExecResult(ctx *validators.Context, namespace, podName string, check slinkySlurmHealthCommand, result podExecResult, execErr error) {
 	var body strings.Builder
-	fmt.Fprintf(&body, "Pod:      %s/%s\n", slinkySlurmNamespace, podName)
+	fmt.Fprintf(&body, "Pod:      %s/%s\n", namespace, podName)
 	fmt.Fprintf(&body, "Command:  %s\n", strings.Join(check.command, " "))
 	fmt.Fprintf(&body, "ExitCode: %d\n", result.ExitCode)
 	if execErr != nil {
@@ -378,6 +389,6 @@ func recordSlinkyExecResult(ctx *validators.Context, podName string, check slink
 	fmt.Fprintf(&body, "\nstderr:\n%s\n", result.Stderr)
 
 	recordRawTextArtifact(ctx, fmt.Sprintf("Slinky Slurm %s result", check.label),
-		fmt.Sprintf("kubectl exec -n slurm %s -- %s", podName, strings.Join(check.command, " ")),
+		fmt.Sprintf("kubectl exec -n %s %s -- %s", namespace, podName, strings.Join(check.command, " ")),
 		body.String())
 }
