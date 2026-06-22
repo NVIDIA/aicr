@@ -386,20 +386,20 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
 
   # Invoke the per-folder install.sh with retry. On failure, dump kai-scheduler
   # diagnostics and clean up stale Helm hook Jobs between attempts.
-attempt=0
-while true; do
+  attempt=0
+  while true; do
     if ( cd "${dir}" && bash install.sh ); then
-        _step_ok "${name}"
-        break
+      _step_ok "${name}"
+      break
     fi
 
     attempt=$((attempt + 1))
     dump_kai_scheduler_helm_diagnostics "${namespace}"
 
     if [[ ${attempt} -gt ${COMPONENT_MAX_RETRIES} ]]; then
-        _step_fail "${name}" "${attempt}"
-        helm_failed "${name}"
-        break
+      _step_fail "${name}" "${attempt}"
+      helm_failed "${name}"
+      break
     fi
 
     cleanup_helm_hooks "${namespace}"
@@ -409,7 +409,7 @@ while true; do
     _step_retry "${name}" "${attempt}" "${COMPONENT_MAX_RETRIES}" "${wait_secs}"
 
     sleep "${wait_secs}"
-done
+  done
 
   # --- post-install name-matched blocks ---
   {{- range .Components }}

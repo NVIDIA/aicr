@@ -68,8 +68,10 @@ function _fail()     { printf '%s✗%s %s\n' "${_R}" "${_X}" "$*"; }
 function _warn_line(){ printf '%s⚠%s %s\n' "${_Y}" "${_X}" "$*"; }
 
 function _step_header() {
+  local manual_dir
+  printf -v manual_dir '%q' "$5"
   printf '\n%s┌─ [%s/%s] %s  →  %s%s\n' "${_B}" "$1" "$2" "$3" "$4" "${_X}"
-  printf '%s│  Manual: cd %s && bash install.sh%s\n' "${_D}" "$5" "${_X}"
+  printf '%s│  Manual (approx — set KUBECONFIG_FLAG/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
 }
 
 function _step_ok() {
@@ -372,20 +374,20 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
 
   # Invoke the per-folder install.sh with retry. On failure, dump kai-scheduler
   # diagnostics and clean up stale Helm hook Jobs between attempts.
-attempt=0
-while true; do
+  attempt=0
+  while true; do
     if ( cd "${dir}" && bash install.sh ); then
-        _step_ok "${name}"
-        break
+      _step_ok "${name}"
+      break
     fi
 
     attempt=$((attempt + 1))
     dump_kai_scheduler_helm_diagnostics "${namespace}"
 
     if [[ ${attempt} -gt ${COMPONENT_MAX_RETRIES} ]]; then
-        _step_fail "${name}" "${attempt}"
-        helm_failed "${name}"
-        break
+      _step_fail "${name}" "${attempt}"
+      helm_failed "${name}"
+      break
     fi
 
     cleanup_helm_hooks "${namespace}"
@@ -395,7 +397,7 @@ while true; do
     _step_retry "${name}" "${attempt}" "${COMPONENT_MAX_RETRIES}" "${wait_secs}"
 
     sleep "${wait_secs}"
-done
+  done
 
   # --- post-install name-matched blocks ---
 done
