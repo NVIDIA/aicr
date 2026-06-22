@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **27**
-- Unique images: **82**
+- Components: **28**
+- Unique images: **83**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -33,6 +33,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | agentgateway-crds | helm | agentgateway-crds | v2.2.1 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.26 | 1 |
+| aws-net-dra | manifest | — | — | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | dynamo-platform | helm | dynamo-platform | 1.2.0 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
@@ -79,6 +80,10 @@ _No images extracted._
 ### aws-efa
 
 - `602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin:v0.5.18`
+
+### aws-net-dra
+
+- `602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/networking-device-dra-plugin:v1.0.0`
 
 ### cert-manager
 
