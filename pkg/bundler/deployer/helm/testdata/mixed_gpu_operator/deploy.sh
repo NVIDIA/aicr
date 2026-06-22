@@ -71,7 +71,7 @@ function _step_header() {
   local manual_dir
   printf -v manual_dir '%q' "$5"
   printf '\n%s┌─ [%s/%s] %s  →  %s%s\n' "${_B}" "$1" "$2" "$3" "$4" "${_X}"
-  printf '%s│  Manual (approx — set KUBECONFIG_FLAG/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
+  printf '%s│  Manual (approx, set KUBECONFIG_FLAG/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
 }
 
 function _step_ok() {
