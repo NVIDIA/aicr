@@ -17,7 +17,14 @@
 # KWOK argocd-* sync gate. Replaces the bash `wait_for_argocd_sync` +
 # `wait_for_argocd_root_app` + `dump_argocd_failures` functions previously
 # in kwok/scripts/validate-scheduling.sh. Driven by the `validate-scheduling.sh`
-# argocd-* deployer branches; see issue #962 for the migration rationale.
+# argocd-oci / argocd-helm-oci / argocd-git deployer branches; see issue #962
+# for the migration rationale.
+#
+# SYNC NOTE (issue #963): ../argocd-git-sync/chainsaw-test.yaml is a sibling
+# of this test whose only intended divergence is an EXTRA leading step that
+# asserts the root Application's Git source (spec.source.repoURL). The
+# assert-root-app-present and assert-all-applications-pass steps MUST stay
+# byte-identical between the two files — when changing one, change both.
 #
 # The test takes one binding via `chainsaw test --values rootApp=<name>`:
 #   - rootApp: the parent App-of-Apps name (`nvidia-stack` for --deployer

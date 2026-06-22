@@ -235,7 +235,7 @@ The `--template` flag enables custom output formatting using Go templates with [
 .Measurements   # Array of Measurement objects
   .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology)
   .Subtypes     # Array of Subtype objects
-    .Name       # Subtype name (e.g., "server", "smi", "grub")
+    .Name       # Subtype name (e.g., "server", "hardware", "grub")
     .Data       # Map of readings (key -> Reading with .String method)
 
 # NodeTopology measurement type has subtypes: summary, taint, label
@@ -248,8 +248,8 @@ Example template extracting key cluster info:
 cluster:
   kubernetes: {{ with index .Measurements 0 }}{{ range .Subtypes }}{{ if eq .Name "server" }}
     version: {{ (index .Data "version").String }}{{ end }}{{ end }}{{ end }}
-  gpu: {{ range .Measurements }}{{ if eq .Type.String "GPU" }}{{ range .Subtypes }}{{ if eq .Name "smi" }}
-    model: {{ (index .Data "gpu.model").String }}
+  gpu: {{ range .Measurements }}{{ if eq .Type.String "GPU" }}{{ range .Subtypes }}{{ if eq .Name "hardware" }}
+    model: {{ (index .Data "model").String }}
     count: {{ (index .Data "gpu-count").String }}{{ end }}{{ end }}{{ end }}{{ end }}
 ```
 
@@ -837,6 +837,10 @@ Validation can be run in different phases to validate different aspects of the d
 | `all` | Runs all phases sequentially; results collected regardless of failures | Complete end-to-end validation |
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
+
+> **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
+
+> **apiVersion gate:** Snapshots and recipes also carry a schema `apiVersion` (currently `aicr.nvidia.com/v1alpha1`). Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 

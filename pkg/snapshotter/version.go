@@ -14,13 +14,9 @@
 
 package snapshotter
 
-const (
-	// apiDomain is the API domain for snapshot resources
-	apiDomain = "aicr.nvidia.com"
+import "github.com/NVIDIA/aicr/pkg/header"
 
-	// apiVersion is the current API version for snapshots
-	apiVersion = "v1alpha1"
-
-	// FullAPIVersion is the complete API version string
-	FullAPIVersion = apiDomain + "/" + apiVersion
-)
+// FullAPIVersion is the complete API version string stamped into snapshot
+// headers. It aliases the canonical header.GroupVersion so the artifact
+// apiVersion has a single source of truth across packages.
+const FullAPIVersion = header.GroupVersion

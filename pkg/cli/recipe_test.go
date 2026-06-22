@@ -298,9 +298,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "GPU",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "smi",
+								Name: "hardware",
 								Data: map[string]measurement.Reading{
-									"gpu.model": measurement.Str("NVIDIA H100 80GB HBM3"),
+									"model": measurement.Str("h100"),
 								},
 							},
 						},
@@ -321,9 +321,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "GPU",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "smi",
+								Name: "hardware",
 								Data: map[string]measurement.Reading{
-									"gpu.model": measurement.Str("NVIDIA GB200"),
+									"model": measurement.Str("gb200"),
 								},
 							},
 						},
@@ -378,9 +378,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "GPU",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "smi",
+								Name: "hardware",
 								Data: map[string]measurement.Reading{
-									"gpu.model": measurement.Str("NVIDIA A100-SXM4-80GB"),
+									"model": measurement.Str("a100"),
 								},
 							},
 						},

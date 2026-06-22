@@ -40,4 +40,10 @@ type HardwareInfo struct {
 	// DetectionSource identifies which detection method produced this result
 	// (e.g., "nfd", "sysfs").
 	DetectionSource string
+
+	// SKU is the AICR accelerator enum value (e.g. "h100", "l40") resolved
+	// from the GPU's PCI device ID, or "" when the device ID is unknown or
+	// the node carries a heterogeneous mix of GPU SKUs. Lets the fingerprint
+	// name the accelerator without nvidia-smi or a GFD node label.
+	SKU string
 }

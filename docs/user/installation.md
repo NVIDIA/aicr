@@ -177,14 +177,13 @@ sudo chmod +x /usr/local/bin/aicr
 
 ### GPU Detection Issues
 
-Snapshot GPU measurements require `nvidia-smi` in PATH:
-
-```shell
-# Verify NVIDIA drivers
-nvidia-smi
-
-# If missing, install NVIDIA drivers for your platform
-```
+Snapshot GPU detection is driver-free: it enumerates PCI devices via sysfs
+(NFD) and resolves the accelerator SKU from the device ID — no `nvidia-smi` or
+NVIDIA driver required. The GPU Operator's `nvidia.com/gpu.product` node label
+is **not** required to collect GPU data; when present (read in-cluster via the
+node topology), it improves SKU accuracy and powers the "GPU placement
+mismatch" warning. If a snapshot reports no GPU on a node you expect to have
+one, confirm the agent landed on the GPU node (it needs host `/sys` access).
 
 ## Uninstall
 

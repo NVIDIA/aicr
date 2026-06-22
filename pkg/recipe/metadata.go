@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -34,7 +35,8 @@ const RecipeMetadataKind = "RecipeMetadata"
 const RecipeResultKind = "RecipeResult"
 
 // RecipeAPIVersion is the API version for recipe metadata and result resources.
-const RecipeAPIVersion = "aicr.nvidia.com/v1alpha1"
+// It aliases the canonical header.GroupVersion (single source of truth).
+const RecipeAPIVersion = header.GroupVersion
 
 // ComponentType represents the type of component deployment.
 type ComponentType string

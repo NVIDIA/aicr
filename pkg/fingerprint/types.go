@@ -70,9 +70,21 @@ type Fingerprint struct {
 	// k8s.node.provider (parsed from spec.providerID).
 	Service Dimension `json:"service" yaml:"service"`
 
-	// Accelerator is the GPU SKU (h100, h200, gb200, b200, a100, l40,
-	// rtx-pro-6000). Parsed from gpu.smi.gpu.model.
+	// Accelerator is the recipe-supported GPU SKU used for criteria
+	// matching (h100, h200, gb200, b200, a100, l40, rtx-pro-6000). It is
+	// intentionally limited to the pkg/recipe accelerator enum: a GPU that
+	// AICR does not have recipe coverage for is left empty here (see
+	// GPUModel for the descriptive identity). Sourced from the GFD
+	// nvidia.com/gpu.product label or the PCI device ID.
 	Accelerator Dimension `json:"accelerator" yaml:"accelerator"`
+
+	// GPUModel is the descriptive accelerator SKU detected on the node
+	// (e.g. "l40s", "t4", "a800"), independent of whether AICR supports it
+	// for recipe matching. It is informational only — Match and ToCriteria
+	// never read it — and exists so the snapshot records the real hardware
+	// even for SKUs outside the Accelerator enum. Sourced from the PCI
+	// device ID via the GPU "hardware" subtype.
+	GPUModel Dimension `json:"gpuModel,omitempty" yaml:"gpuModel,omitempty"`
 
 	// OS is the worker node operating system, with the raw
 	// VERSION_ID retained for audit. Sourced from

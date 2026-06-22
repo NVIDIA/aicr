@@ -19,6 +19,12 @@
 # kwok/scripts/validate-scheduling.sh. Driven by the validate-scheduling.sh
 # flux-oci deployer branch; see issue #962 for the migration rationale.
 #
+# SYNC NOTE (issue #963): ../flux-git-sync/chainsaw-test.yaml is a sibling
+# of this test whose only intended divergence is the source-Ready step
+# (GitRepository instead of OCIRepository). The Kustomization, HelmRelease
+# terminal-pass predicate, and ArtifactGenerator steps MUST stay
+# byte-identical between the two files — when changing one, change both.
+#
 # Bindings passed via `chainsaw test --values <key>=<value>`:
 #   - ociRepositoryName: name of the outer OCIRepository CR (default
 #     "aicr-bundle", set by the bundler at push time).
@@ -53,7 +59,15 @@ spec:
     # KWOK_FLUX_SYNC_TIMEOUT default (500s in the bash gate). Flux's
     # reconcile loop has longer default intervals than Argo CD's
     # controller; 8 minutes accommodates the additional latency.
+    # `error` needs the same budget as `assert`: the all-HelmReleases
+    # and ArtifactGenerator steps use error-polarity (poll until NO
+    # resource matches the bad-state predicate), and chainsaw's default
+    # error timeout is only 30s — far less than a dependsOn chain needs
+    # to converge. Both are overridden per-run by the driver
+    # (validate-scheduling.sh passes --assert-timeout AND
+    # --error-timeout from KWOK_FLUX_SYNC_TIMEOUT).
     assert: 8m
+    error: 8m
   # See the comment on the argocd-sync test: chainsaw's default cleanup
   # deletes the auto-created per-test namespace, which on KWOK stalls
   # in Terminating because there's no kube-controller-manager to
@@ -128,21 +142,40 @@ spec:
                 Progressing arm). The Stalled gate prevents masking a
                 genuinely failed reconcile that left a stale Released
                 from a prior revision.
+        Encoded as existence + error-polarity pair: a name-less chainsaw
+        `assert` passes when ANY resource matches (exists semantics), so
+        a single Ready HelmRelease would short-circuit the gate while a
+        dependsOn chain is still converging (observed on the flux-git
+        lane: 1 Ready + 12 dependency-blocked HRs passed instantly).
+        The `error` op has the inverse semantics — it polls until NO
+        resource matches the bad-state predicate — which is the actual
+        "all HelmReleases terminal" contract. The bare assert in front
+        keeps the existence check the old assert provided implicitly
+        (zero HelmReleases must fail, not pass vacuously).
       try:
+        # Without metadata.namespace chainsaw scopes the resource
+        # selector to the auto-created per-test temp namespace
+        # (where no HelmReleases exist). The bundler places every
+        # HelmRelease in the Flux install namespace — flux-system
+        # by default, set via the Generator's Namespace field at
+        # pkg/bundler/deployer/flux/flux.go.
         - assert:
-            # Without metadata.namespace chainsaw scopes the resource
-            # selector to the auto-created per-test temp namespace
-            # (where no HelmReleases exist). The bundler places every
-            # HelmRelease in the Flux install namespace — flux-system
-            # by default, set via the Generator's Namespace field at
-            # pkg/bundler/deployer/flux/flux.go.
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                namespace: flux-system
+        # negation of the terminal-pass predicate above:
+        # NOT (Ready==True || (Released==True && deployed && !Stalled))
+        #   = Ready!=True && (Released!=True || !deployed || Stalled==True)
+        - error:
             resource:
               apiVersion: helm.toolkit.fluxcd.io/v2
               kind: HelmRelease
               metadata:
                 namespace: flux-system
               status:
-                ((conditions[?type=='Ready']|[0].status == 'True') || ((conditions[?type=='Released']|[0].status == 'True') && (history|[0].status == 'deployed') && (conditions[?type=='Stalled']|[0].status != 'True'))): true
+                ((conditions[?type=='Ready']|[0].status != 'True') && ((conditions[?type=='Released']|[0].status != 'True') || (history|[0].status != 'deployed') || (conditions[?type=='Stalled']|[0].status == 'True'))): true
       catch:
         - script:
             content: |

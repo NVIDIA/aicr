@@ -149,7 +149,10 @@ kos:
     build: aicr
     repositories:
       - ghcr.io/nvidia/aicr
-    base_image: nvcr.io/nvidia/cuda:13.2.1-runtime-ubuntu24.04
+    # No base_image: ko uses its default static, distroless base
+    # (cgr.dev/chainguard/static). The aicr CLI/agent is pure Go and discovers
+    # the GPU SKU driver-free via NFD/PCI, so it no longer needs nvidia-smi or
+    # the CUDA base image (and its CVE surface).
     platforms:
       - linux/amd64
       - linux/arm64
@@ -163,7 +166,10 @@ kos:
     build: aicrd
     repositories:
       - ghcr.io/nvidia/aicrd
-    base_image: gcr.io/distroless/static:nonroot
+    # No base_image: aicrd intentionally uses ko's default static, distroless
+    # base (cgr.dev/chainguard/static), same as aicr above. It runs as the
+    # nonroot user 65532 by default, preserving the security posture of the
+    # previous gcr.io/distroless/static:nonroot base (also UID 65532).
     platforms:
       - linux/amd64
       - linux/arm64

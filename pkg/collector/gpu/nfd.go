@@ -100,8 +100,9 @@ func (d *NFDHardwareDetector) Detect(ctx context.Context) (*HardwareInfo, error)
 }
 
 // extractHardwareInfo parses NFD PCI and kernel features to build HardwareInfo.
-// It counts NVIDIA GPUs by matching vendor ID and PCI class codes, and checks
-// whether the nvidia kernel module is loaded.
+// It counts NVIDIA GPUs by matching vendor ID and PCI class codes, resolves the
+// accelerator SKU from each device ID, and checks whether the nvidia kernel
+// module is loaded.
 func extractHardwareInfo(pciFeatures, kernelFeatures *nfdv1alpha1.Features) *HardwareInfo {
 	info := &HardwareInfo{}
 
@@ -109,14 +110,26 @@ func extractHardwareInfo(pciFeatures, kernelFeatures *nfdv1alpha1.Features) *Har
 		return info
 	}
 
-	// Count NVIDIA GPUs via PCI device enumeration
+	// Count NVIDIA GPUs via PCI device enumeration and resolve the SKU from
+	// each device ID. A node carrying more than one distinct SKU is left
+	// unresolved (SKU="") so the fingerprint records it as heterogeneous
+	// rather than claiming whichever device happened to enumerate first.
 	pciDevices, ok := pciFeatures.Instances[nfdPCIDeviceFeature]
 	if ok {
+		skus := make(map[string]struct{})
 		for _, dev := range pciDevices.Elements {
 			vendor := dev.Attributes["vendor"]
 			class := dev.Attributes["class"]
 			if vendor == nvidiaVendorID && (class == pciClassVGA || class == pciClass3D) {
 				info.GPUCount++
+				if sku := skuForDeviceID(dev.Attributes["device"]); sku != "" {
+					skus[sku] = struct{}{}
+				}
+			}
+		}
+		if len(skus) == 1 {
+			for sku := range skus {
+				info.SKU = sku
 			}
 		}
 	}

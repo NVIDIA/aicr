@@ -779,7 +779,9 @@ func ParseCriteriaFromValues(values url.Values, reg *CriteriaRegistry) (*Criteri
 const RecipeCriteriaKind = "RecipeCriteria"
 
 // RecipeCriteriaAPIVersion is the API version for RecipeCriteria resources.
-const RecipeCriteriaAPIVersion = "aicr.nvidia.com/v1alpha1"
+// It aliases RecipeAPIVersion (ultimately header.GroupVersion) so every AICR
+// artifact apiVersion has a single source of truth.
+const RecipeCriteriaAPIVersion = RecipeAPIVersion
 
 // RecipeCriteria represents a Kubernetes-style criteria resource.
 // This is the format used in criteria files and API requests.

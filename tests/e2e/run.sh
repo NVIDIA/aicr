@@ -447,22 +447,22 @@ test_snapshot() {
   local snapshot_data
   snapshot_data=$(kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" -o jsonpath='{.data.snapshot\.yaml}' 2>/dev/null)
 
-  # Extract and display GPU info from snapshot
-  local gpu_name gpu_count gpu_mem driver_ver cuda_ver
-  gpu_name=$(echo "$snapshot_data" | grep "gpu-product:" | head -1 | sed 's/.*gpu-product: //' || echo "unknown")
-  gpu_count=$(echo "$snapshot_data" | grep "gpu-count:" | head -1 | sed 's/.*gpu-count: //' || echo "0")
-  gpu_mem=$(echo "$snapshot_data" | grep "gpu-memory:" | head -1 | sed 's/.*gpu-memory: //' || echo "unknown")
-  driver_ver=$(echo "$snapshot_data" | grep "driver-version:" | head -1 | sed 's/.*driver-version: //' || echo "unknown")
-  cuda_ver=$(echo "$snapshot_data" | grep "cuda-version:" | head -1 | sed 's/.*cuda-version: //' || echo "unknown")
+  # Extract and display GPU info from the driver-free "hardware" subtype
+  # (the SMI subtype was removed; model is the PCI-derived accelerator SKU).
+  # Scope extraction to the GPU "hardware" subtype so a "model" key elsewhere in
+  # the snapshot can't be misread as the GPU SKU.
+  local gpu_name gpu_count driver_loaded
+  gpu_name=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data.model // "unknown"' - | head -1)
+  gpu_count=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["gpu-count"] // 0' - | head -1)
+  driver_loaded=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["driver-loaded"] // "unknown"' - | head -1)
 
   if [ -n "$gpu_name" ] && [ "$gpu_name" != "unknown" ]; then
-    detail "GPU: ${gpu_name}"
+    detail "GPU SKU: ${gpu_name}"
     detail "Count: ${gpu_count}"
-    detail "Memory: ${gpu_mem}"
-    detail "Driver: ${driver_ver}, CUDA: ${cuda_ver}"
+    detail "Driver loaded: ${driver_loaded}"
     pass "snapshot/gpu-data"
   else
-    warn "No GPU data in snapshot (may be expected without fake-gpu-operator)"
+    warn "No GPU SKU in snapshot (may be expected without fake-gpu-operator or for an unrecognized SKU)"
     pass "snapshot/gpu-data"
   fi
 }

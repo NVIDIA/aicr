@@ -15,8 +15,8 @@
 
 set -euo pipefail
 
-if [[ -z "${SNAPSHOT_AGENT_CUDA_IMAGE:-}" || "${SNAPSHOT_AGENT_CUDA_IMAGE}" == "null" ]]; then
-  echo "::error::SNAPSHOT_AGENT_CUDA_IMAGE must be provided by the aicr-build action"
+if [[ -z "${SNAPSHOT_AGENT_BASE_IMAGE:-}" || "${SNAPSHOT_AGENT_BASE_IMAGE}" == "null" ]]; then
+  echo "::error::SNAPSHOT_AGENT_BASE_IMAGE must be provided by the aicr-build action"
   exit 1
 fi
 
@@ -25,20 +25,26 @@ if [[ ! -f dist/aicr ]]; then
   exit 1
 fi
 
-# Build snapshot agent image with CUDA base (provides nvidia-smi for GPU detection).
-# Uses cuda:base (~250MB) instead of cuda:runtime (~1.8GB) because only nvidia-smi is needed.
+if [[ -z "${KIND_CLUSTER_NAME:-}" || "${KIND_CLUSTER_NAME}" == "null" ]]; then
+  echo "::error::KIND_CLUSTER_NAME must be provided by the aicr-build action"
+  exit 1
+fi
+
+# Build the snapshot agent image on a static, distroless base. The agent binary
+# is static Go and detects GPUs driver-free via NFD/PCI (sysfs), so it needs
+# neither the NVIDIA driver nor nvidia-smi — and no CUDA base image.
 timeout 900s docker build \
-  --build-arg SNAPSHOT_AGENT_CUDA_IMAGE="${SNAPSHOT_AGENT_CUDA_IMAGE}" \
+  --build-arg SNAPSHOT_AGENT_BASE_IMAGE="${SNAPSHOT_AGENT_BASE_IMAGE}" \
   -t ko.local:smoke-test -f - . <<'DOCKERFILE'
-ARG SNAPSHOT_AGENT_CUDA_IMAGE
-FROM ${SNAPSHOT_AGENT_CUDA_IMAGE}
+ARG SNAPSHOT_AGENT_BASE_IMAGE
+FROM ${SNAPSHOT_AGENT_BASE_IMAGE}
 COPY dist/aicr /usr/local/bin/aicr
 ENTRYPOINT ["/usr/local/bin/aicr"]
 DOCKERFILE
 
-# Load onto all nodes. The snapshot agent requests nvidia.com/gpu but does not
-# set a node selector, so it can land on any GPU-capable node including the
-# control-plane in the L40G smoke test.
+# Load onto all nodes. The snapshot agent has no node selector, so it can land
+# on any node including the control-plane in the smoke test; PCI enumeration
+# reads sysfs and needs no GPU resource/runtime-class.
 timeout 900 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
   echo "::warning::kind load attempt 1 failed for ko.local:smoke-test, retrying..."
   timeout 900 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"

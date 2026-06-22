@@ -484,6 +484,8 @@ components:
       defaultChart: dynamo-platform
       defaultVersion: "1.2.0"
       defaultNamespace: dynamo-system
+    storageClassPaths:
+      - nats.config.jetstream.fileStore.pvc.storageClassName
     nodeScheduling:
       system:
         nodeSelectorPaths:

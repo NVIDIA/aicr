@@ -107,12 +107,12 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 
 	slog.Debug("snapshot diff", slog.String("baseline", baselinePath), slog.String("target", targetPath))
 
-	baseline, err := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](baselinePath, kubeconfig)
+	baseline, err := snapshotter.LoadFromFileWithKubeconfig(ctx, baselinePath, kubeconfig)
 	if err != nil {
 		return err
 	}
 
-	target, err := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](targetPath, kubeconfig)
+	target, err := snapshotter.LoadFromFileWithKubeconfig(ctx, targetPath, kubeconfig)
 	if err != nil {
 		return err
 	}
