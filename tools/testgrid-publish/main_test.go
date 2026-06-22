@@ -111,8 +111,12 @@ constraints:
 
 	// Redirect stdout to capture dry-run output.
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	runErr := run(context.Background(), runConfig{
 		bundleDir:   dir,
@@ -122,7 +126,6 @@ constraints:
 	})
 
 	_ = w.Close()
-	os.Stdout = oldStdout
 
 	var buf [4096]byte
 	n, _ := r.Read(buf[:])
@@ -166,8 +169,12 @@ criteria:
 	}
 
 	oldStdout := os.Stdout
-	_, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	runErr := run(context.Background(), runConfig{
 		bundleDir:   dir,
@@ -177,10 +184,16 @@ criteria:
 	})
 
 	_ = w.Close()
-	os.Stdout = oldStdout
+
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	output := string(buf[:n])
 
 	if runErr != nil {
-		t.Fatalf("run() returned unexpected error: %v", runErr)
+		t.Fatalf("run() returned unexpected error: %v\noutput:\n%s", runErr, output)
+	}
+	if !strings.Contains(output, "passed=false") {
+		t.Errorf("dry-run output should show passed=false for failed CTRF:\n%s", output)
 	}
 }
 
@@ -238,6 +251,7 @@ func TestPrintDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = old })
 
 	started := startedJSON{
 		Timestamp: 1749600000,
@@ -257,7 +271,6 @@ func TestPrintDryRun(t *testing.T) {
 		started, finished, []byte("<testsuites/>"))
 
 	_ = w.Close()
-	os.Stdout = old
 
 	var buf [4096]byte
 	n, _ := r.Read(buf[:])

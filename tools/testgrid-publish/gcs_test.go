@@ -22,8 +22,9 @@ import (
 )
 
 // setupFakeGcloud writes a fake gcloud shell script to dir and prepends dir to
-// PATH so exec.Command("gcloud", ...) finds it. Returns a restore function.
-func setupFakeGcloud(t *testing.T, exitCode int) (restoreFn func()) {
+// PATH so exec.Command("gcloud", ...) finds it. Uses t.Setenv for race-safe,
+// automatic cleanup even when t.Fatal fires mid-test.
+func setupFakeGcloud(t *testing.T, exitCode int) {
 	t.Helper()
 	bin := t.TempDir()
 
@@ -37,16 +38,11 @@ func setupFakeGcloud(t *testing.T, exitCode int) (restoreFn func()) {
 		t.Fatal(err)
 	}
 
-	old := os.Getenv("PATH")
-	if err := os.Setenv("PATH", bin+string(os.PathListSeparator)+old); err != nil {
-		t.Fatal(err)
-	}
-	return func() { _ = os.Setenv("PATH", old) }
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestGcloudCopySuccess(t *testing.T) {
-	restore := setupFakeGcloud(t, 0)
-	defer restore()
+	setupFakeGcloud(t, 0)
 
 	src := filepath.Join(t.TempDir(), "test.json")
 	if err := os.WriteFile(src, []byte(`{}`), 0o600); err != nil {
@@ -60,8 +56,7 @@ func TestGcloudCopySuccess(t *testing.T) {
 }
 
 func TestGcloudCopyFailure(t *testing.T) {
-	restore := setupFakeGcloud(t, 1)
-	defer restore()
+	setupFakeGcloud(t, 1)
 
 	src := filepath.Join(t.TempDir(), "test.json")
 	if err := os.WriteFile(src, []byte(`{}`), 0o600); err != nil {
@@ -75,8 +70,7 @@ func TestGcloudCopyFailure(t *testing.T) {
 }
 
 func TestGcloudCopyCanceled(t *testing.T) {
-	restore := setupFakeGcloud(t, 0)
-	defer restore()
+	setupFakeGcloud(t, 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -88,8 +82,7 @@ func TestGcloudCopyCanceled(t *testing.T) {
 }
 
 func TestWriteGCS(t *testing.T) {
-	restore := setupFakeGcloud(t, 0)
-	defer restore()
+	setupFakeGcloud(t, 0)
 
 	started := startedJSON{
 		Timestamp: 1749600000,
@@ -112,8 +105,7 @@ func TestWriteGCS(t *testing.T) {
 }
 
 func TestWriteGCSUploadFailure(t *testing.T) {
-	restore := setupFakeGcloud(t, 1)
-	defer restore()
+	setupFakeGcloud(t, 1)
 
 	started := startedJSON{Timestamp: 1, Metadata: map[string]string{}}
 	finished := finishedJSON{Timestamp: 1, Metadata: map[string]string{}}
@@ -126,8 +118,7 @@ func TestWriteGCSUploadFailure(t *testing.T) {
 }
 
 func TestWriteGCSContextCanceled(t *testing.T) {
-	restore := setupFakeGcloud(t, 0)
-	defer restore()
+	setupFakeGcloud(t, 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

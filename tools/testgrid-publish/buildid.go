@@ -27,7 +27,8 @@ import (
 //
 // Properties:
 //   - Deterministic: same AttestedAt + digest always produces same build-id
-//   - Monotonic: lexicographic sort equals time sort (unix seconds zero-padded)
+//   - Monotonic: lexicographic sort equals time sort for timestamps in the
+//     range 2001–2286 (all 10 decimal digits); not guaranteed outside that range
 //   - Idempotent: re-ingesting the same bundle writes to the same GCS path
 //     (last-write-wins, no duplicate columns)
 //   - Digest-bound: two bundles with the same timestamp but different content

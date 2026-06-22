@@ -48,6 +48,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -162,13 +163,15 @@ func run(ctx context.Context, cfg runConfig) error {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "coordinate resolution failed", err)
 	}
 
-	// ── 3. Extract AttestedAt and aicr_version from the predicate ────────────
+	// ── 3. Extract AttestedAt, aicr_version, and k8s_version from the predicate
 	pred, predErr := loadPredicate(dir)
 	if predErr != nil {
 		// Unsigned / local bundles may not have a full predicate; use now.
 		slog.Warn("could not load predicate, using current time", "error", predErr)
 		pred = &attestation.Predicate{AttestedAt: time.Now().UTC()}
 	}
+	// Fingerprint carries the observed k8s server version; empty for local/unsigned bundles.
+	criteria.K8sVersion = pred.Fingerprint.K8sVersion.Value
 
 	// ── 4. Generate deterministic build-id ───────────────────────────────────
 	buildID := buildID(pred.AttestedAt, digest)
@@ -210,7 +213,9 @@ func run(ctx context.Context, cfg runConfig) error {
 	}
 
 	// ── 7. Write to GCS (ordered: started → junit → finished) ────────────────
-	writeCtx, writeCancel := context.WithTimeout(ctx, defaults.EvidenceBundleBuildTimeout)
+	// EvidenceBundlePushTimeout (2 min) is the right bound for three sequential
+	// network uploads; EvidenceBundleBuildTimeout is "local I/O only".
+	writeCtx, writeCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
 	defer writeCancel()
 
 	if err := writeGCS(writeCtx, cfg.bucket, gcsPrefix, started, finished, junitXML); err != nil {
@@ -267,26 +272,19 @@ func printDryRun(bucket, prefix string, started startedJSON, finished finishedJS
 
 // junitAllPassed returns true when the jUnit XML has no failures or errors.
 func junitAllPassed(xml []byte) bool {
-	// Quick check: if any <failure or <error tag exists, there was a failure.
-	// This avoids importing an XML parser just for this check.
+	// Quick scan: if any <failure or <error element exists, the run failed.
 	s := string(xml)
-	return !contains(s, "<failure") && !contains(s, "<error")
+	return !strings.Contains(s, "<failure") && !strings.Contains(s, "<error")
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-// readPointerFromAttestation is a stub — see attestation.go.
+// readPointerFromAttestation reads signer information from the DSSE-wrapped
+// attestation bundle. Returns nil without error when no attestation is present
+// (unsigned bundles are valid).
+//
+// TODO: implement DSSE envelope parsing to extract PointerSigner fields
+// (identity, issuer) from the Sigstore signing certificate in
+// attestation.AttestationFilename. Tracking issue: NVIDIA/aicr#1267.
 func readPointerFromAttestation(bundleDir string) (*attestation.Pointer, error) {
-	return nil, stderrors.New("not implemented")
+	_ = bundleDir
+	return nil, stderrors.New("signer extraction not yet implemented")
 }
