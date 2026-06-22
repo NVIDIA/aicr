@@ -1758,10 +1758,12 @@ func resolveModel(ctx *validators.Context) string {
 	return resolveInferenceModel()
 }
 
-// resolveRoutingMode returns where KV-aware routing decisions are made for the
+// resolveRoutingMode returns where routing decisions are made for the
 // benchmark workload. The default `dynamo-router` mode keeps routing in the
-// Dynamo frontend. `gateway-epp` switches to Gateway API Inference Extension:
-// EPP performs KV-aware endpoint selection and worker frontend sidecars run in
+// Dynamo frontend, which uses load-aware least-loaded routing
+// (DYN_ROUTER_MODE=least-loaded) — see the deployment template and issue
+// #1197. `gateway-epp` switches to Gateway API Inference Extension: EPP
+// performs KV-aware endpoint selection and worker frontend sidecars run in
 // direct mode so they honor EPP's routing headers. The sidecars do not relay
 // local vLLM ZMQ KV events onto NATS; that relay is handled by the worker
 // runtime.

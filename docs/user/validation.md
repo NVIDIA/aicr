@@ -190,12 +190,14 @@ with the `AICR_INFERENCE_PERF_MODEL` / `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU`
 catalog knobs (recipe wins over catalog env wins over default).
 
 `inference-routing-mode` selects the Dynamo 1.2 Kubernetes routing path. The
-default `dynamo-router` mode deploys a Dynamo frontend with KV-cache-aware
-routing (`DYN_ROUTER_MODE=kv`). Normal frontend-to-worker request/response
-traffic uses Dynamo's request plane (Dynamo 1.2 defaults to TCP); AICR does not
-set `DYN_REQUEST_PLANE=nats`. Workers publish local vLLM KV-cache events with
-the vLLM ZMQ publisher and the Dynamo worker runtime relays those events onto
-the NATS-backed event plane for the router to consume. Set it to `gateway-epp`
+default `dynamo-router` mode deploys a Dynamo frontend with load-aware
+least-loaded routing (`DYN_ROUTER_MODE=least-loaded`), which balances by each
+worker's active in-flight load so a transiently-slow worker stops receiving its
+full share (see issue #1197). Normal frontend-to-worker request/response traffic
+uses Dynamo's request plane (Dynamo 1.2 defaults to TCP); AICR does not set
+`DYN_REQUEST_PLANE=nats`. Workers still run the vLLM ZMQ KV-cache event
+publisher relayed onto the NATS event plane, but least-loaded routing does not
+consume those events. Set it to `gateway-epp`
 to exercise GAIE/EPP: the validator deploys an EPP component, worker frontend
 sidecars in direct mode, and an HTTPRoute through the AICR-managed inference
 gateway. The direct-mode sidecars honor EPP routing headers; they are not the
