@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -47,7 +48,7 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 	reports := make(map[attestation.Phase]*ctrf.Report, len(attestation.AllPhases))
 	for _, phase := range attestation.AllPhases {
 		path := filepath.Join(ctrfDir, string(phase)+".json")
-		data, err := os.ReadFile(path) //nolint:gosec // bundleDir is our own temp dir
+		data, err := readBoundedFile(path, defaults.MaxBundlePOSTBytes)
 		if err != nil {
 			if os.IsNotExist(err) {
 				// Phase not present in this bundle — skip silently.
@@ -79,9 +80,8 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 			continue
 		}
 		suite := jUnitTestSuite{
-			Name:    string(phase),
-			Tests:   r.Results.Summary.Tests,
-			Skipped: r.Results.Summary.Skipped + r.Results.Summary.Pending,
+			Name:  string(phase),
+			Tests: r.Results.Summary.Tests,
 		}
 
 		// Sort tests by name within each phase for determinism.
@@ -107,7 +107,17 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 				suite.Errors++
 			case ctrf.StatusSkipped, ctrf.StatusPending:
 				tc.Skipped = &jUnitSkipped{}
-			// ctrf.StatusPassed → bare testcase (no child element)
+				suite.Skipped++
+			case ctrf.StatusPassed:
+				// bare testcase, no child element
+			default:
+				// Unknown status: treat as error so unrecognized results never
+				// silently appear as passing testcases.
+				tc.Error = &jUnitError{
+					Message: "unrecognized CTRF status: " + string(t.Status),
+					Text:    "unrecognized CTRF status: " + string(t.Status),
+				}
+				suite.Errors++
 			}
 			suite.TestCases = append(suite.TestCases, tc)
 		}

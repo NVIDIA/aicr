@@ -17,14 +17,35 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
+
+// readBoundedFile reads a file up to maxBytes. It returns ErrCodeInvalidRequest
+// if the file exceeds the limit, preventing OOM on attacker-supplied bundles.
+func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // callers validate path origin
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s exceeds %d-byte size limit", path, maxBytes))
+	}
+	return data, nil
+}
 
 // recipeFile is the minimal subset of recipe.yaml we need for coordinate
 // resolution. Field names match the on-disk YAML schema.
@@ -47,7 +68,7 @@ type recipeFile struct {
 // RecipeCriteria suitable for CoordinateFor.
 func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 	path := filepath.Join(bundleDir, attestation.RecipeFilename)
-	data, err := os.ReadFile(path) //nolint:gosec // bundleDir is our own temp dir
+	data, err := readBoundedFile(path, defaults.MaxRecipePOSTBytes)
 	if err != nil {
 		return RecipeCriteria{}, errors.Wrap(errors.ErrCodeNotFound,
 			"recipe.yaml not found in bundle", err)
@@ -90,7 +111,7 @@ func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 // malformed — callers should fall back to sensible defaults.
 func loadPredicate(bundleDir string) (*attestation.Predicate, error) {
 	path := filepath.Join(bundleDir, attestation.StatementFilename)
-	data, err := os.ReadFile(path) //nolint:gosec // bundleDir is our own temp dir
+	data, err := readBoundedFile(path, defaults.MaxBundlePOSTBytes)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeNotFound, "statement.intoto.json not found", err)
 	}

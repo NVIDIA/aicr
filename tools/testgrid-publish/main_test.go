@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,9 +128,11 @@ constraints:
 
 	_ = w.Close()
 
-	var buf [4096]byte
-	n, _ := r.Read(buf[:])
-	output := string(buf[:n])
+	outBytes, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read dry-run output: %v", err)
+	}
+	output := string(outBytes)
 
 	if runErr != nil {
 		t.Fatalf("run() error = %v, output:\n%s", runErr, output)
@@ -185,9 +188,11 @@ criteria:
 
 	_ = w.Close()
 
-	var buf [4096]byte
-	n, _ := r.Read(buf[:])
-	output := string(buf[:n])
+	outBytes, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read dry-run output: %v", err)
+	}
+	output := string(outBytes)
 
 	if runErr != nil {
 		t.Fatalf("run() returned unexpected error: %v\noutput:\n%s", runErr, output)
@@ -272,9 +277,11 @@ func TestPrintDryRun(t *testing.T) {
 
 	_ = w.Close()
 
-	var buf [4096]byte
-	n, _ := r.Read(buf[:])
-	output := string(buf[:n])
+	outBytes, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read dry-run output: %v", err)
+	}
+	output := string(outBytes)
 
 	if err != nil {
 		t.Fatalf("printDryRun() error = %v", err)

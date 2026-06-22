@@ -51,7 +51,7 @@ type RecipeCriteria struct {
 	OS           string // e.g. "ubuntu"
 	Intent       string // e.g. "training"
 	Platform     string // optional, e.g. "kubeflow"
-	K8sVersion   string // observed major.minor, e.g. "1.30"
+	K8sVersion   string // full semver with leading "v" stripped, e.g. "1.33.4"
 	K8sConstraint string // declared constraint, e.g. ">=1.28"
 }
 

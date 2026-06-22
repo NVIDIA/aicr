@@ -248,6 +248,7 @@ func extractSigner(bundleDir string) (identity, issuer string) {
 	}
 	att := pointer.Attestations[0]
 	if att.Signer == nil {
+		slog.Warn("attestation present but signer is nil; signer metadata will be empty")
 		return "", ""
 	}
 	return att.Signer.Identity, att.Signer.Issuer
@@ -284,7 +285,6 @@ func junitAllPassed(xml []byte) bool {
 // TODO: implement DSSE envelope parsing to extract PointerSigner fields
 // (identity, issuer) from the Sigstore signing certificate in
 // attestation.AttestationFilename. Tracking issue: NVIDIA/aicr#1267.
-func readPointerFromAttestation(bundleDir string) (*attestation.Pointer, error) {
-	_ = bundleDir
+func readPointerFromAttestation(_ string) (*attestation.Pointer, error) {
 	return nil, stderrors.New("signer extraction not yet implemented")
 }
