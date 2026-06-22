@@ -208,6 +208,13 @@ validators:
     timeout: 10m
     args: ["secure-accelerator-access"]
     env: []
+  - name: slinky-slurm-health
+    phase: conformance
+    description: "Verify Slinky Slurm controller, node inventory, and job submission health"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["slinky-slurm-health"]
+    env: []
   - name: gpu-operator-health
     phase: conformance
     description: "Verify GPU operator health (conformance diagnostic)"

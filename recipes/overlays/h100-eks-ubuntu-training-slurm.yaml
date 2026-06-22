@@ -93,8 +93,12 @@ spec:
   # wrong path. The equivalent signal here is a slurm-launched
   # `srun nccl-tests/all_reduce_perf` that goes through slurmd + the
   # EFA libfabric stack already present on the parent EKS leaf.
-  # Deployment and conformance checks are inherited unchanged.
+  # Deployment checks are inherited unchanged. Conformance keeps the
+  # inherited parent checks and appends the Slurm-specific health check below.
   validation:
+    conformance:
+      checks:
+        - slinky-slurm-health
     performance:
       checks: []
       constraints: []

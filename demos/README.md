@@ -7,6 +7,7 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | Demo | Description |
 |------|-------------|
 | [cuj1-training.md](cuj1-training.md) | CUJ1 (training) - EKS + GKE end-to-end, plus a config-driven GKE + signed-evidence variant |
+| [cuj1-slinky-slurm.md](cuj1-slinky-slurm.md) | CUJ1 - Slinky Slurm on EKS / GKE / Kind (recipe → bundle → validate → `srun`) |
 | [cuj2-inference.md](cuj2-inference.md) | CUJ2 (inference) - EKS + GKE end-to-end with the Dynamo platform |
 | [cuj2-demo.md](cuj2-demo.md) | CUJ2 (inference) - Annotated slide-style demo walkthrough (training vs inference) |
 | [recipe-data-architecture.md](recipe-data-architecture.md) | Recipe metadata system: inheritance, criteria matching, deployment order, runtime external data |

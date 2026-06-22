@@ -734,6 +734,28 @@ make check-health-all                      # everything in recipes/checks/
 make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 ```
 
+### Timeout budgeting
+
+During `aicr validate --phase deployment`, registry health checks in
+`recipes/checks/<component>/health-check.yaml` run in-process inside
+the `expected-resources` check (`validators/chainsaw/inprocess.go`).
+
+A Test's `spec.timeouts.assert` is the **whole-Test budget** — one
+deadline shared across every step and retry. Slurm's
+[`health-check.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/checks/slinky-slurm/health-check.yaml)
+uses `assert: 7m` so workload-readiness steps can converge before the
+pod-phase guard runs.
+
+The `expected-resources` catalog timeout (8m in
+`recipes/validators/catalog.yaml`) is the **outer** envelope. It must
+exceed the longest in-tree `assert` value plus headroom for
+pre-chainsaw work, chainsaw teardown, and log flush
+(`defaults.JobEnvelopeMargin`). If assert runs too close to that
+catalog deadline, the Job can SIGKILL the pod before chainsaw reports
+the failing step — operators see truncated output instead of a useful
+failure. Raise the catalog `timeout` in tandem when you need a longer
+assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
+
 ## Constraint evaluation algorithm
 
 `pkg/constraints` is shared by surface 1, surface 2's recipe

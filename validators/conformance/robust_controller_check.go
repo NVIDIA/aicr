@@ -52,13 +52,14 @@ type webhookRejectionReport struct {
 	Message      string
 }
 
-// recipeHasComponent checks if a named component exists in the validation's componentRefs.
+// recipeHasComponent checks if a named component exists and is enabled in the
+// validation's componentRefs.
 func recipeHasComponent(ctx *validators.Context, name string) bool {
 	if ctx.ValidationInput == nil {
 		return false
 	}
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		if ref.Name == name {
+		if ref.Name == name && ref.IsEnabled() {
 			return true
 		}
 	}

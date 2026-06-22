@@ -37,6 +37,7 @@ func main() {
 		"cluster-autoscaling":       CheckClusterAutoscaling,
 		"robust-controller":         CheckRobustController,
 		"secure-accelerator-access": CheckSecureAcceleratorAccess,
+		"slinky-slurm-health":       CheckSlinkySlurmHealth,
 		"gpu-operator-health":       CheckGPUOperatorHealth,
 		"platform-health":           CheckPlatformHealth,
 	})
