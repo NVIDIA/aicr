@@ -52,9 +52,20 @@ type hpaBehaviorReport struct {
 }
 
 // CheckPodAutoscaling validates CNCF requirement #8b: Pod Autoscaling.
-// Verifies that the custom metrics API is available, GPU custom metrics have data
-// (with retries to account for prometheus-adapter relist delay), and the external
-// metrics API exposes GPU metrics.
+// Verifies that the custom metrics API is available and the external metrics API
+// exposes GPU metrics, then proves the capability end-to-end with an HPA
+// behavioral test (scale-up + scale-down) driven by a cluster-wide external GPU
+// metric.
+//
+// Pod-scoped GPU custom metrics (custom.metrics.k8s.io/.../pods/*/...) are
+// collected best-effort, not gated: they require dcgm-exporter to attribute each
+// GPU to its consuming pod via the kubelet pod-resources API, which today only
+// covers device-plugin (nvidia.com/gpu) allocations. DRA-claimed GPUs
+// (nvidia-dra-driver-gpu) are not attributed, so the per-pod series carry no
+// exported_pod label and the adapter returns empty. The autoscaling capability
+// is proven authoritatively by the external-metrics API plus the HPA behavioral
+// test below, which need no per-pod attribution — so absent pod-scoped metrics
+// is a warning, not a failure.
 func CheckPodAutoscaling(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -99,14 +110,19 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 		fmt.Sprintf("Endpoint:        %s\nHTTP Status:     %d\nGroupVersion:    %s\nResource count:  %d",
 			rawURL, statusCode, valueOrUnknown(customMetricsResp.GroupVersion), len(customMetricsResp.Resources)))
 
-	// 2. GPU custom metrics have data (poll with retries — adapter relist is 30s)
+	// 2. GPU custom metrics have data (best-effort poll — adapter relist is ~30s).
+	// This is no longer a gate (see godoc), so the retry budget is kept short:
+	// it only needs to cover one adapter relist cycle on device-plugin clusters
+	// where the metric will appear. On DRA clusters it never appears, so a long
+	// budget would just waste wall-clock before the warn-and-continue below.
 	metrics := []string{"gpu_utilization", "gpu_memory_used", "gpu_power_usage"}
 	namespaces := []string{defaults.GPUOperatorNamespace, namespaceDynamoSystem}
 
 	var found bool
 	var foundPath string
 	var foundItems int
-	maxAttempts := 12 // 2 minutes with 10s intervals
+	maxAttempts := 6 // ~1 minute with 10s intervals — covers one relist cycle
+pollLoop:
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		for _, metric := range metrics {
 			for _, ns := range namespaces {
@@ -136,22 +152,46 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 			break
 		}
 
-		// Wait before retry (respect context cancellation)
+		// Wait before retry. If the context is canceled during this best-effort
+		// poll, stop polling immediately; the guard below returns a clear timeout
+		// error for that case, while a plain attempt-exhaustion (no cancellation)
+		// falls through to warn-and-continue.
 		select {
 		case <-ctx.Ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"timed out waiting for GPU custom metrics", ctx.Ctx.Err())
+			break pollLoop
 		case <-time.After(defaults.HPAPollInterval):
 		}
 	}
 
-	if !found {
-		return errors.New(errors.ErrCodeNotFound,
-			"no GPU custom metrics available (DCGM → Prometheus → adapter pipeline broken)")
+	// Distinguish "ran out of best-effort attempts" (fall through to warn-and-
+	// continue) from "context canceled/deadline exceeded" (a genuine timeout that
+	// halts the whole check). The latter would also fail steps 3/4 below, but
+	// reporting it as a timeout here is clearer to an operator than a downstream
+	// "metric not available".
+	if !found && ctx.Ctx.Err() != nil {
+		return errors.Wrap(errors.ErrCodeTimeout,
+			"timed out waiting for GPU custom metrics", ctx.Ctx.Err())
 	}
-	recordRawTextArtifact(ctx, "Custom metric sample",
-		fmt.Sprintf("kubectl get --raw %s", foundPath),
-		fmt.Sprintf("Path:            %s\nItems observed:  %d", foundPath, foundItems))
+
+	if found {
+		recordRawTextArtifact(ctx, "Custom metric sample",
+			fmt.Sprintf("kubectl get --raw %s", foundPath),
+			fmt.Sprintf("Path:            %s\nItems observed:  %d", foundPath, foundItems))
+	} else {
+		// Best-effort, not a gate: pod-scoped GPU custom metrics are absent when
+		// dcgm-exporter cannot attribute GPUs to pods (e.g. DRA-claimed GPUs, which
+		// the kubelet pod-resources API does not surface for per-pod mapping). The
+		// autoscaling capability is still validated below via the external-metrics
+		// API and the HPA behavioral scale-up/down test, which drive off a
+		// cluster-wide GPU metric and need no per-pod attribution.
+		slog.Warn("pod-scoped GPU custom metrics unavailable; continuing with external-metric HPA validation " +
+			"(expected on DRA clusters where dcgm-exporter does not attribute GPUs to pods)")
+		recordRawTextArtifact(ctx, "Custom metric sample",
+			"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1/namespaces/<ns>/pods/*/gpu_utilization",
+			"Pod-scoped GPU custom metrics not available (no exported_pod attribution; typical for "+
+				"DRA-allocated GPUs). Autoscaling capability validated via the external-metrics API and "+
+				"the HPA behavioral test below.")
+	}
 
 	// 3. External metrics API has GPU metrics
 	extPath := "/apis/external.metrics.k8s.io/v1beta1/namespaces/default/dcgm_gpu_power_usage"
