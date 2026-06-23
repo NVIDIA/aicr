@@ -39,7 +39,10 @@
 
 image:
   repository: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin
-  tag: v0.5.18
+  # Pin to the appVersion of the chart pinned in registry.yaml
+  # (aws-efa-k8s-device-plugin v0.5.29 → appVersion v0.5.20) so the
+  # image override matches the chart's default rather than drifting behind it.
+  tag: v0.5.20
 
 # AICR aws-efa securityContext — intentional divergence from upstream.
 #
