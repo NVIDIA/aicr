@@ -275,6 +275,281 @@ func TestConstraintPath_ExtractValue(t *testing.T) {
 	}
 }
 
+func TestParseConstraintPath_ItemSelector(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		path         string
+		wantType     measurement.Type
+		wantSubtype  string
+		wantKey      string
+		wantSelector string // empty means no selector expected
+		wantIndex    *int   // non-nil when index selector expected
+		wantPredKey  string // non-empty when predicate expected
+		wantPredVal  string
+		expectError  bool
+	}{
+		{
+			name:         "index selector",
+			path:         "NetworkTopology.pfs[0].rail",
+			wantType:     measurement.TypeNetworkTopology,
+			wantSubtype:  "pfs",
+			wantKey:      "rail",
+			wantSelector: "0",
+			wantIndex:    intPtr(0),
+		},
+		{
+			name:         "index selector larger",
+			path:         "NetworkTopology.pfs[7].pciAddress",
+			wantType:     measurement.TypeNetworkTopology,
+			wantSubtype:  "pfs",
+			wantKey:      "pciAddress",
+			wantSelector: "7",
+			wantIndex:    intPtr(7),
+		},
+		{
+			name:         "predicate selector numeric value",
+			path:         "NetworkTopology.pfs[rail=3].pciAddress",
+			wantType:     measurement.TypeNetworkTopology,
+			wantSubtype:  "pfs",
+			wantKey:      "pciAddress",
+			wantSelector: "rail=3",
+			wantPredKey:  "rail",
+			wantPredVal:  "3",
+		},
+		{
+			name:         "predicate selector string value",
+			path:         "NetworkTopology.pfs[traffic=east-west].rdmaDevice",
+			wantType:     measurement.TypeNetworkTopology,
+			wantSubtype:  "pfs",
+			wantKey:      "rdmaDevice",
+			wantSelector: "traffic=east-west",
+			wantPredKey:  "traffic",
+			wantPredVal:  "east-west",
+		},
+		{
+			name:         "selector with dotted key after",
+			path:         "NetworkTopology.pfs[0]./some/dotted/key",
+			wantType:     measurement.TypeNetworkTopology,
+			wantSubtype:  "pfs",
+			wantKey:      "/some/dotted/key",
+			wantSelector: "0",
+			wantIndex:    intPtr(0),
+		},
+
+		// Error cases
+		{name: "unclosed bracket", path: "NetworkTopology.pfs[0.rail", expectError: true},
+		{name: "missing dot after selector", path: "NetworkTopology.pfs[0]rail", expectError: true},
+		{name: "missing key after selector", path: "NetworkTopology.pfs[0]", expectError: true},
+		{name: "missing key after selector with dot", path: "NetworkTopology.pfs[0].", expectError: true},
+		{name: "empty selector", path: "NetworkTopology.pfs[].rail", expectError: true},
+		{name: "empty subtype before bracket", path: "NetworkTopology.[0].rail", expectError: true},
+		{name: "negative index", path: "NetworkTopology.pfs[-1].rail", expectError: true},
+		{name: "non-integer non-predicate", path: "NetworkTopology.pfs[notnumber].rail", expectError: true},
+		{name: "predicate empty key", path: "NetworkTopology.pfs[=3].rail", expectError: true},
+		{name: "predicate empty value", path: "NetworkTopology.pfs[rail=].pciAddress", expectError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := ParseConstraintPath(tt.path)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error, got nil; result=%+v", result)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+			if result.Subtype != tt.wantSubtype {
+				t.Errorf("Subtype = %q, want %q", result.Subtype, tt.wantSubtype)
+			}
+			if result.Key != tt.wantKey {
+				t.Errorf("Key = %q, want %q", result.Key, tt.wantKey)
+			}
+			if result.Selector == nil {
+				t.Fatalf("Selector is nil; want %q", tt.wantSelector)
+			}
+			if result.Selector.Raw != tt.wantSelector {
+				t.Errorf("Selector.Raw = %q, want %q", result.Selector.Raw, tt.wantSelector)
+			}
+			if tt.wantIndex != nil {
+				if result.Selector.Index == nil {
+					t.Errorf("Selector.Index = nil, want %d", *tt.wantIndex)
+				} else if *result.Selector.Index != *tt.wantIndex {
+					t.Errorf("Selector.Index = %d, want %d", *result.Selector.Index, *tt.wantIndex)
+				}
+				if result.Selector.Predicate != nil {
+					t.Errorf("Selector.Predicate = %+v, want nil", result.Selector.Predicate)
+				}
+			}
+			if tt.wantPredKey != "" {
+				if result.Selector.Predicate == nil {
+					t.Errorf("Selector.Predicate = nil, want key=%s value=%s", tt.wantPredKey, tt.wantPredVal)
+				} else {
+					if result.Selector.Predicate.Key != tt.wantPredKey {
+						t.Errorf("Selector.Predicate.Key = %q, want %q", result.Selector.Predicate.Key, tt.wantPredKey)
+					}
+					if result.Selector.Predicate.Value != tt.wantPredVal {
+						t.Errorf("Selector.Predicate.Value = %q, want %q", result.Selector.Predicate.Value, tt.wantPredVal)
+					}
+				}
+				if result.Selector.Index != nil {
+					t.Errorf("Selector.Index = %d, want nil", *result.Selector.Index)
+				}
+			}
+		})
+	}
+}
+
+func intPtr(i int) *int { return &i }
+
+func TestConstraintPath_ExtractValue_ItemSelector(t *testing.T) {
+	t.Parallel()
+
+	snap := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeNetworkTopology,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "pfs",
+						Items: []measurement.ItemEntry{
+							{
+								Context: map[string]string{
+									"pciAddress": "0000:03:00.0",
+									"rdmaDevice": "mlx5_0",
+								},
+								Data: map[string]measurement.Reading{
+									"rail":    measurement.Int(0),
+									"traffic": measurement.Str("east-west"),
+								},
+							},
+							{
+								Context: map[string]string{
+									"pciAddress": "0000:03:00.1",
+									"rdmaDevice": "mlx5_1",
+								},
+								Data: map[string]measurement.Reading{
+									"rail":    measurement.Int(1),
+									"traffic": measurement.Str("east-west"),
+								},
+							},
+							{
+								Context: map[string]string{
+									"pciAddress": "0000:03:00.2",
+									"rdmaDevice": "mlx5_2",
+								},
+								Data: map[string]measurement.Reading{
+									"rail":    measurement.Int(2),
+									"traffic": measurement.Str("east-west"),
+								},
+							},
+						},
+					},
+					{
+						Name: "capabilities",
+						Data: map[string]measurement.Reading{
+							"sriov": measurement.Bool(true),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	mustParse := func(t *testing.T, path string) *ConstraintPath {
+		t.Helper()
+		p, err := ParseConstraintPath(path)
+		if err != nil {
+			t.Fatalf("ParseConstraintPath(%q) error = %v", path, err)
+		}
+		return p
+	}
+
+	tests := []struct {
+		name        string
+		path        string
+		want        string
+		expectError bool
+	}{
+		// Index selectors
+		{name: "index 0 data field", path: "NetworkTopology.pfs[0].rail", want: "0"},
+		{name: "index 1 data field", path: "NetworkTopology.pfs[1].rail", want: "1"},
+		{name: "index 0 context field", path: "NetworkTopology.pfs[0].pciAddress", want: "0000:03:00.0"},
+		{name: "index 2 rdmaDevice", path: "NetworkTopology.pfs[2].rdmaDevice", want: "mlx5_2"},
+		// Predicate selectors
+		{name: "predicate by data field", path: "NetworkTopology.pfs[rail=1].pciAddress", want: "0000:03:00.1"},
+		{name: "predicate by context field", path: "NetworkTopology.pfs[pciAddress=0000:03:00.2].rail", want: "2"},
+		// Backward compat: non-item path still works
+		{name: "non-item path data", path: "NetworkTopology.capabilities.sriov", want: "true"},
+
+		// Errors
+		{name: "index out of bounds", path: "NetworkTopology.pfs[99].rail", expectError: true},
+		{name: "predicate no match", path: "NetworkTopology.pfs[rail=99].pciAddress", expectError: true},
+		{name: "key not in item", path: "NetworkTopology.pfs[0].nonexistent", expectError: true},
+		{name: "selector on subtype with no items", path: "NetworkTopology.capabilities[0].sriov", expectError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := mustParse(t, tt.path)
+			got, err := path.ExtractValue(snap)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error, got nil; result=%q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ExtractValue() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConstraintPath_ExtractValue_PredicateAmbiguous(t *testing.T) {
+	t.Parallel()
+
+	snap := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeNetworkTopology,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "pfs",
+						Items: []measurement.ItemEntry{
+							{Data: map[string]measurement.Reading{"traffic": measurement.Str("east-west"), "rail": measurement.Int(0)}},
+							{Data: map[string]measurement.Reading{"traffic": measurement.Str("east-west"), "rail": measurement.Int(1)}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	path, err := ParseConstraintPath("NetworkTopology.pfs[traffic=east-west].rail")
+	if err != nil {
+		t.Fatalf("ParseConstraintPath() error = %v", err)
+	}
+	_, err = path.ExtractValue(snap)
+	if err == nil {
+		t.Fatal("expected ambiguous-match error, got nil")
+	}
+}
+
 func TestConstraintPath_String(t *testing.T) {
 	t.Parallel()
 
@@ -300,6 +575,26 @@ func TestConstraintPath_String(t *testing.T) {
 				Key:     "/proc/sys/kernel/osrelease",
 			},
 			want: "OS.sysctl./proc/sys/kernel/osrelease",
+		},
+		{
+			name: "index selector",
+			path: ConstraintPath{
+				Type:     measurement.TypeNetworkTopology,
+				Subtype:  "pfs",
+				Key:      "rail",
+				Selector: &itemSelector{Raw: "0", Index: intPtr(0)},
+			},
+			want: "NetworkTopology.pfs[0].rail",
+		},
+		{
+			name: "predicate selector",
+			path: ConstraintPath{
+				Type:     measurement.TypeNetworkTopology,
+				Subtype:  "pfs",
+				Key:      "pciAddress",
+				Selector: &itemSelector{Raw: "rail=3", Predicate: &itemPredicate{Key: "rail", Value: "3"}},
+			},
+			want: "NetworkTopology.pfs[rail=3].pciAddress",
 		},
 	}
 

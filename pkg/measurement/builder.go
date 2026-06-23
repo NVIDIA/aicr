@@ -16,8 +16,10 @@ package measurement
 
 // SubtypeBuilder provides a fluent API for building Subtype instances.
 type SubtypeBuilder struct {
-	name string
-	data map[string]Reading
+	name    string
+	data    map[string]Reading
+	context map[string]string
+	items   []ItemEntry
 }
 
 // NewSubtypeBuilder creates a new SubtypeBuilder with the given name.
@@ -76,11 +78,48 @@ func (b *SubtypeBuilder) SetBool(key string, value bool) *SubtypeBuilder {
 	return b
 }
 
+// WithContext sets a single key/value entry in the subtype Context.
+func (b *SubtypeBuilder) WithContext(key, value string) *SubtypeBuilder {
+	if b.context == nil {
+		b.context = make(map[string]string)
+	}
+	b.context[key] = value
+	return b
+}
+
+// WithContextMap merges the provided map into the subtype Context.
+func (b *SubtypeBuilder) WithContextMap(ctx map[string]string) *SubtypeBuilder {
+	if len(ctx) == 0 {
+		return b
+	}
+	if b.context == nil {
+		b.context = make(map[string]string, len(ctx))
+	}
+	for k, v := range ctx {
+		b.context[k] = v
+	}
+	return b
+}
+
+// WithItem appends a single ItemEntry to the subtype Items list.
+func (b *SubtypeBuilder) WithItem(item ItemEntry) *SubtypeBuilder {
+	b.items = append(b.items, item)
+	return b
+}
+
+// WithItems appends a slice of ItemEntry to the subtype Items list.
+func (b *SubtypeBuilder) WithItems(items []ItemEntry) *SubtypeBuilder {
+	b.items = append(b.items, items...)
+	return b
+}
+
 // Build constructs and returns the Subtype.
 func (b *SubtypeBuilder) Build() Subtype {
 	return Subtype{
-		Name: b.name,
-		Data: b.data,
+		Name:    b.name,
+		Data:    b.data,
+		Context: b.context,
+		Items:   b.items,
 	}
 }
 

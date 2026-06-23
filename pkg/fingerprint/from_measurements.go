@@ -77,6 +77,12 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 		case measurement.TypeSystemD:
 			// systemd measurements do not contribute to the cluster
 			// fingerprint; intentionally skipped.
+		case measurement.TypeNetworkTopology:
+			// network topology measurements describe per-group hardware
+			// (PFs, rails, RDMA capabilities) that doesn't currently feed
+			// any fingerprint dimension; intentionally skipped. Phase 4
+			// (multi-group support) will revisit this to derive multi-gpu
+			// from distinct `identity.gpuType` Context values.
 		}
 	}
 	if topo != nil {

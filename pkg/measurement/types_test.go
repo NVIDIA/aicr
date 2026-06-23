@@ -15,6 +15,7 @@
 package measurement
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -332,7 +333,7 @@ func TestSubtype_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid subtype",
+			name: "valid subtype with data",
 			st: &Subtype{
 				Name: "test",
 				Data: map[string]Reading{"key": Str("value")},
@@ -340,7 +341,28 @@ func TestSubtype_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "empty data",
+			name: "valid subtype with items only (no data)",
+			st: &Subtype{
+				Name: "test",
+				Items: []ItemEntry{
+					{Data: map[string]Reading{"rail": Int(0)}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid subtype with both data and items",
+			st: &Subtype{
+				Name: "test",
+				Data: map[string]Reading{"pf-count": Int(2)},
+				Items: []ItemEntry{
+					{Data: map[string]Reading{"rail": Int(0)}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty data and empty items",
 			st: &Subtype{
 				Name: "test",
 				Data: map[string]Reading{},
@@ -348,10 +370,28 @@ func TestSubtype_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "nil data",
+			name: "nil data and nil items",
 			st: &Subtype{
 				Name: "test",
 				Data: nil,
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty name with data",
+			st: &Subtype{
+				Name: "",
+				Data: map[string]Reading{"key": Str("value")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty name with items",
+			st: &Subtype{
+				Name: "",
+				Items: []ItemEntry{
+					{Data: map[string]Reading{"rail": Int(0)}},
+				},
 			},
 			wantErr: true,
 		},
@@ -678,6 +718,188 @@ func TestMeasurement_JSON(t *testing.T) {
 		if dataMap["version"] != testVersion {
 			t.Errorf("JSON subtype[0].data.version = %v, want 1.28.0", dataMap["version"])
 		}
+	}
+}
+
+// TestSubtype_Items_JSONRoundTrip verifies that a Subtype carrying an Items
+// list (and ItemEntry values with Reading inside Data) round-trips through
+// JSON correctly: scalars retain their type, Context strings survive, and
+// ordering is preserved.
+func TestSubtype_Items_JSONRoundTrip(t *testing.T) {
+	original := &Measurement{
+		Type: TypeNetworkTopology,
+		Subtypes: []Subtype{
+			{
+				Name: "identity",
+				Context: map[string]string{
+					"identifier":  "gb300-nvl-nvidia-gb300",
+					"machineType": "GB300-NVL",
+					"gpuType":     "NVIDIA-GB300",
+					"linkType":    "InfiniBand",
+				},
+				Data: map[string]Reading{
+					"pf-count":   Int(2),
+					"rail-count": Int(2),
+				},
+			},
+			{
+				Name: "pfs",
+				Items: []ItemEntry{
+					{
+						Context: map[string]string{
+							"pciAddress": "0000:03:00.0",
+							"deviceID":   "1023",
+							"rdmaDevice": "mlx5_0",
+						},
+						Data: map[string]Reading{
+							"rail":     Int(0),
+							"numaNode": Int(0),
+							"traffic":  Str("east-west"),
+						},
+					},
+					{
+						Context: map[string]string{
+							"pciAddress": "0000:03:00.1",
+							"deviceID":   "1023",
+							"rdmaDevice": "mlx5_1",
+						},
+						Data: map[string]Reading{
+							"rail":     Int(1),
+							"numaNode": Int(0),
+							"traffic":  Str("east-west"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	var decoded Measurement
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if decoded.Type != TypeNetworkTopology {
+		t.Errorf("decoded type = %v, want %v", decoded.Type, TypeNetworkTopology)
+	}
+	if len(decoded.Subtypes) != 2 {
+		t.Fatalf("decoded subtypes len = %d, want 2", len(decoded.Subtypes))
+	}
+
+	identity := decoded.Subtypes[0]
+	if identity.Name != "identity" {
+		t.Errorf("identity subtype name = %q, want identity", identity.Name)
+	}
+	if got := identity.Context["machineType"]; got != "GB300-NVL" {
+		t.Errorf("identity.context.machineType = %q, want GB300-NVL", got)
+	}
+	if pf, _ := identity.GetInt64("pf-count"); pf != 2 {
+		t.Errorf("identity.data.pf-count = %d, want 2", pf)
+	}
+
+	pfs := decoded.Subtypes[1]
+	if pfs.Name != "pfs" {
+		t.Errorf("pfs subtype name = %q, want pfs", pfs.Name)
+	}
+	if len(pfs.Items) != 2 {
+		t.Fatalf("pfs items len = %d, want 2", len(pfs.Items))
+	}
+	if pfs.Items[0].Context["pciAddress"] != "0000:03:00.0" {
+		t.Errorf("pfs[0].context.pciAddress = %q, want 0000:03:00.0", pfs.Items[0].Context["pciAddress"])
+	}
+	rail0, ok := pfs.Items[0].Data["rail"]
+	if !ok || rail0 == nil {
+		t.Fatalf("pfs[0].data.rail missing")
+	}
+	if got := rail0.String(); got != "0" {
+		t.Errorf("pfs[0].data.rail = %s, want 0", got)
+	}
+	if got := pfs.Items[1].Context["pciAddress"]; got != "0000:03:00.1" {
+		t.Errorf("pfs[1].context.pciAddress = %q, want 0000:03:00.1", got)
+	}
+}
+
+// TestSubtype_Items_YAMLRoundTrip mirrors TestSubtype_Items_JSONRoundTrip via
+// gopkg.in/yaml.v3 to cover the YAML un/marshal path on ItemEntry.
+func TestSubtype_Items_YAMLRoundTrip(t *testing.T) {
+	original := &Measurement{
+		Type: TypeNetworkTopology,
+		Subtypes: []Subtype{
+			{
+				Name: "pfs",
+				Items: []ItemEntry{
+					{
+						Context: map[string]string{"pciAddress": "0000:03:00.0"},
+						Data:    map[string]Reading{"rail": Int(0), "numaNode": Int(0)},
+					},
+					{
+						Context: map[string]string{"pciAddress": "0000:03:00.1"},
+						Data:    map[string]Reading{"rail": Int(1), "numaNode": Int(0)},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := yaml.Marshal(original)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+
+	var decoded Measurement
+	if err := yaml.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if len(decoded.Subtypes) != 1 {
+		t.Fatalf("decoded subtypes len = %d, want 1", len(decoded.Subtypes))
+	}
+	pfs := decoded.Subtypes[0]
+	if len(pfs.Items) != 2 {
+		t.Fatalf("pfs items len = %d, want 2", len(pfs.Items))
+	}
+	if pfs.Items[0].Data["rail"].String() != "0" {
+		t.Errorf("pfs[0].data.rail = %s, want 0", pfs.Items[0].Data["rail"].String())
+	}
+	if pfs.Items[1].Context["pciAddress"] != "0000:03:00.1" {
+		t.Errorf("pfs[1].context.pciAddress = %q, want 0000:03:00.1", pfs.Items[1].Context["pciAddress"])
+	}
+}
+
+// TestSubtype_BackwardCompat_NoItems verifies that a Subtype with no Items
+// produces output that does NOT contain an `items` key when marshaled — the
+// `omitempty` tag is honored so existing snapshots stay byte-identical after
+// the Items field is added.
+func TestSubtype_BackwardCompat_NoItems(t *testing.T) {
+	m := &Measurement{
+		Type: TypeK8s,
+		Subtypes: []Subtype{
+			{
+				Name: testSubtypeCluster,
+				Data: map[string]Reading{"version": Str(testVersion)},
+			},
+		},
+	}
+
+	jsonOut, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if bytes.Contains(jsonOut, []byte("items")) {
+		t.Errorf("JSON output contains `items` key but Items is empty: %s", jsonOut)
+	}
+
+	yamlOut, err := yaml.Marshal(m)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+	if bytes.Contains(yamlOut, []byte("items")) {
+		t.Errorf("YAML output contains `items` key but Items is empty: %s", yamlOut)
 	}
 }
 
