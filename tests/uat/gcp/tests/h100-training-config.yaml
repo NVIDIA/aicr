@@ -68,6 +68,16 @@ spec:
       storageClass: premium-rwo
 
   validate:
+    execution:
+      # The deployment phase is the readiness barrier (gpu-operator ClusterPolicy
+      # reaches state=ready, the DRA kubelet-plugin DaemonSet rolls out, nodewright
+      # node tuning completes). failFast stops the run if that phase fails, so the
+      # conformance/performance phases are not evaluated against a not-yet-converged
+      # cluster — which previously surfaced as misleading accelerator-metrics /
+      # ai-service-metrics / pod-autoscaling failures. The `../run` readiness gate
+      # gives the operator-driven stack time to converge before validate, so on a
+      # healthy cluster the deployment phase passes and all phases still run.
+      failFast: true
     input:
       recipe: recipe.yaml
       snapshot: snapshot.yaml
