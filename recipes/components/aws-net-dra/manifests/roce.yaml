@@ -108,6 +108,13 @@ spec:
         app.kubernetes.io/name: aws-net-k8s-dra-plugin
         app.kubernetes.io/instance: aws-net-k8s-dra-plugin
     spec:
+      # Explicit seccomp confinement (defense-in-depth): the pod runs
+      # privileged (SYS_ADMIN, hostNetwork, host mounts), so pin RuntimeDefault
+      # rather than inheriting the runtime's Unconfined default. Compatible with
+      # the SYS_ADMIN capability the plugin needs for device setup.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: aws-net-k8s-dra-plugin
       priorityClassName: system-node-critical
       hostNetwork: true
