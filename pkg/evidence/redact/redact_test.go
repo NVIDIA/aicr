@@ -162,10 +162,16 @@ func TestSnapshotKeepsAllowlistedSubtypesAndKeys(t *testing.T) {
 	}
 }
 
-func TestSnapshotDropsHeaderSourceNode(t *testing.T) {
-	out, _ := redact.Snapshot(fullSnapshot())
-	if _, ok := out.Metadata["source-node"]; ok {
-		t.Errorf("Header metadata source-node must be dropped")
+func TestSnapshotHeaderMetadataIsAllowlisted(t *testing.T) {
+	in := fullSnapshot()
+	// A future/unknown metadata key must be dropped (fail-closed), not just
+	// the known-sensitive source-node.
+	in.Metadata["future-sensitive-key"] = "tenant-acct-123"
+	out, _ := redact.Snapshot(in)
+	for _, dropped := range []string{"source-node", "future-sensitive-key"} {
+		if _, ok := out.Metadata[dropped]; ok {
+			t.Errorf("Header metadata %q must be dropped (fail-closed allowlist)", dropped)
+		}
 	}
 	for _, kept := range []string{"timestamp", "version"} {
 		if _, ok := out.Metadata[kept]; !ok {

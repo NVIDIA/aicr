@@ -55,9 +55,13 @@ const (
 	PolicyVersion = "v1"
 )
 
-// headerSourceNodeKey is the snapshot header metadata key carrying the
-// collecting node's name; dropped by the minimal policy.
-const headerSourceNodeKey = "source-node"
+// headerMetadataAllowlist is the fail-closed set of snapshot header metadata
+// keys safe to publish. The collecting node's name (`source-node`) and any key
+// a future writer adds are dropped unless listed here.
+var headerMetadataAllowlist = map[string]struct{}{
+	"timestamp": {},
+	"version":   {},
+}
 
 // subtypePolicy describes what survives within a kept subtype. A nil keys
 // set keeps every data key; a non-nil set keeps only the listed keys.
@@ -118,7 +122,7 @@ var snapshotAllowlist = map[measurement.Type]map[string]subtypePolicy{
 // policy removes from a snapshot. Static (rather than input-derived) so the
 // recorded redaction provenance stays byte-stable across runs.
 var snapshotAppliedRules = []string{
-	"snapshot.header.drop:source-node",
+	"snapshot.header.allowlist",
 	"snapshot.measurements.allowlist",
 }
 
@@ -136,7 +140,7 @@ func Snapshot(in *snapshotter.Snapshot) (*snapshotter.Snapshot, []string) {
 	}
 
 	out := &snapshotter.Snapshot{
-		Header: copyHeaderDroppingSourceNode(in.Header),
+		Header: redactHeader(in.Header),
 		// The advisory fingerprint is kept as-is: the same structured
 		// fingerprint is already computed and signed into the predicate, so
 		// retaining it here is not new disclosure. It is an immutable value,
@@ -208,16 +212,15 @@ func copySubtype(st *measurement.Subtype, pol subtypePolicy) measurement.Subtype
 	return measurement.Subtype{Name: st.Name, Data: data}
 }
 
-func copyHeaderDroppingSourceNode(h header.Header) header.Header {
+func redactHeader(h header.Header) header.Header {
 	out := header.Header{Kind: h.Kind, APIVersion: h.APIVersion}
-	if h.Metadata != nil {
-		md := make(map[string]string, len(h.Metadata))
-		for k, v := range h.Metadata {
-			if k == headerSourceNodeKey {
-				continue
-			}
+	md := make(map[string]string, len(headerMetadataAllowlist))
+	for k, v := range h.Metadata {
+		if _, ok := headerMetadataAllowlist[k]; ok {
 			md[k] = v
 		}
+	}
+	if len(md) > 0 {
 		out.Metadata = md
 	}
 	return out

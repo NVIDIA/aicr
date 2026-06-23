@@ -536,7 +536,7 @@ redaction:
   applied:
     - ctrf.tests.omit:message
     - ctrf.tests.omit:stdout
-    - snapshot.header.drop:source-node
+    - snapshot.header.allowlist
     - snapshot.measurements.allowlist
 chainManifest:
   leaf:
@@ -608,8 +608,9 @@ The minimal policy (`policy: minimal`, `version: v1`) applies two transforms:
   `K8s.node` (provider, kubelet/runtime/OS versions — *not* `source-node`,
   `provider-id`, `container-runtime-id`), `GPU.hardware`, `OS.release`, and
   `NodeTopology.summary`. It drops `OS.{grub,sysctl,kmod}`, the entire
-  `SystemD` measurement, `NodeTopology.{label,taint}`, and the header
-  `metadata.source-node`.
+  `SystemD` measurement, and `NodeTopology.{label,taint}`. The snapshot header
+  metadata is likewise allowlisted to `{timestamp, version}`, so `source-node`
+  (and any future key) is dropped by default.
 - **CTRF — log omission.** Per-test `stdout` and `message` are removed; the
   pass/fail signal (name, status, duration, suite, summary counts) is kept.
 
