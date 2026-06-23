@@ -311,6 +311,21 @@ aicr recipe [flags]
 
 **Modes:**
 
+`aicr recipe` resolves a recipe from **criteria** — `service`, `accelerator`, `os`, `intent`, `platform`, `nodes`. You can supply those criteria three ways, composed with the precedence **CLI flags > `--config` file > `--snapshot`**:
+
+- **Snapshot** (`--snapshot`) — criteria are auto-detected from a captured cluster snapshot: accelerator from the `nvidia.com/gpu.product` GFD label (primary — cluster-wide, so it surfaces heterogeneous clusters) or the per-node PCI device ID (fallback — maps the device ID to a SKU, e.g. `h100`, with no driver or GFD label required); service from the node's cloud-provider ID; OS from the node's OS release; node count from cluster topology. Use this when you already have a running cluster: you don't hand-specify the hardware, AICR reads it. (A detected SKU fills `criteria.accelerator` only when it's in the supported accelerator set; an unsupported GPU is recorded descriptively but not as a recipe criterion.)
+- **Config file** (`--config`) — criteria (and bundle settings) from an `AICRConfig` document; good for reproducible, version-controlled workflows.
+- **Query flags** (`--service`, `--accelerator`, …) — state the criteria directly. Use this when there is **no cluster to snapshot yet** — the common case when you generate a recipe in order to *provision* a cluster, or build one offline/ahead of time for hardware you can't reach.
+
+**Why you sometimes specify criteria the snapshot could detect:** recipe generation **does not collect live cluster state or deploy/modify workloads** — it reads inputs (criteria, embedded/`--data` catalog, an optional snapshot) and does **not** snapshot a cluster for you. Its only cluster interaction is explicit `cm://` ConfigMap reads/writes (snapshot input or recipe output). This keeps generation hermetic and reproducible (same inputs → same recipe) and lets it run before a target cluster even exists. So you state criteria explicitly when there's no cluster to read; when a cluster is available, capture it first and let detection fill them in:
+
+```shell
+aicr snapshot -o cm://default/snapshot      # captures the cluster (deploys the collector agent)
+aicr recipe   -s cm://default/snapshot --intent training
+```
+
+When both a snapshot and explicit criteria are given, the explicit values win (e.g. `--snapshot … --service gke` overrides the detected service).
+
 #### Config File Mode (Recommended)
 
 Generate recipes using an `AICRConfig` document. The same file format also drives the `bundle` command, so a single file can describe an end-to-end recipe-to-bundle workflow.
