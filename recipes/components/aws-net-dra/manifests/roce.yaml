@@ -127,7 +127,7 @@ spec:
           effect: NoExecute
       containers:
         - name: network-plugin
-          image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/networking-device-dra-plugin:v1.0.0
+          image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/networking-device-dra-plugin:v1.0.0@sha256:7c87f397b367b689b03407d079abdcae8ec36e27b06632864102a82c70ea4693
           imagePullPolicy: Always
           command: ["aws-net-k8s-dra-plugin"]
           securityContext:
