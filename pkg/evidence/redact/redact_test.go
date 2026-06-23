@@ -162,6 +162,64 @@ func TestSnapshotKeepsAllowlistedSubtypesAndKeys(t *testing.T) {
 	}
 }
 
+func TestSnapshotKeyConstrainsAllKeptSubtypes(t *testing.T) {
+	// Each formerly keep-all subtype now carries an extra unknown/sensitive
+	// key alongside its known keys; the unknown key must be dropped.
+	s := snapshotter.NewSnapshot()
+	s.Measurements = []*measurement.Measurement{
+		measurement.NewMeasurement(measurement.TypeK8s).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("server").
+				SetString("version", "v1.33.1").
+				SetString("future-leak", "secret")).
+			Build(),
+		measurement.NewMeasurement(measurement.TypeGPU).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("hardware").
+				SetString("model", "h100").
+				SetString("serial-number", "GPU-SENSITIVE-123")).
+			Build(),
+		measurement.NewMeasurement(measurement.TypeOS).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("release").
+				SetString("ID", "ubuntu").
+				SetString("VERSION_ID", "22.04").
+				// non-standard / operator-influenced os-release keys
+				SetString("HOME_URL", "https://internal.example.com").
+				SetString("CUSTOM_TENANT", "acct-123")).
+			Build(),
+		measurement.NewMeasurement(measurement.TypeNodeTopology).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("summary").
+				SetInt("node-count", 4).
+				SetString("internal-detail", "leak")).
+			Build(),
+	}
+	out, _ := redact.Snapshot(s)
+
+	cases := []struct {
+		typ        measurement.Type
+		sub        string
+		keptKey    string
+		droppedKey string
+	}{
+		{measurement.TypeK8s, "server", "version", "future-leak"},
+		{measurement.TypeGPU, "hardware", "model", "serial-number"},
+		{measurement.TypeOS, "release", "ID", "HOME_URL"},
+		{measurement.TypeOS, "release", "VERSION_ID", "CUSTOM_TENANT"},
+		{measurement.TypeNodeTopology, "summary", "node-count", "internal-detail"},
+	}
+	for _, c := range cases {
+		st := findSubtype(out, c.typ, c.sub)
+		if st == nil {
+			t.Errorf("%s.%s must be kept", c.typ, c.sub)
+			continue
+		}
+		if !st.Has(c.keptKey) {
+			t.Errorf("%s.%s.%s must be kept", c.typ, c.sub, c.keptKey)
+		}
+		if st.Has(c.droppedKey) {
+			t.Errorf("%s.%s.%s must be dropped (key-level fail-closed)", c.typ, c.sub, c.droppedKey)
+		}
+	}
+}
+
 func TestSnapshotHeaderMetadataIsAllowlisted(t *testing.T) {
 	in := fullSnapshot()
 	// A future/unknown metadata key must be dropped (fail-closed), not just

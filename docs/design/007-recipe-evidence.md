@@ -602,15 +602,19 @@ raw container stdout). The bundle is therefore **minimized by default**, with
 
 The minimal policy (`policy: minimal`, `version: v1`) applies two transforms:
 
-- **Snapshot — fail-closed allowlist.** Only an enumerated set of measurement
-  subtypes/keys survives; anything a future collector adds is dropped until
-  explicitly allowlisted. v1 keeps `K8s.server`, an allowlisted subset of
-  `K8s.node` (provider, kubelet/runtime/OS versions — *not* `source-node`,
-  `provider-id`, `container-runtime-id`), `GPU.hardware`, `OS.release`, and
-  `NodeTopology.summary`. It drops `OS.{grub,sysctl,kmod}`, the entire
-  `SystemD` measurement, and `NodeTopology.{label,taint}`. The snapshot header
-  metadata is likewise allowlisted to `{timestamp, version}`, so `source-node`
-  (and any future key) is dropped by default.
+- **Snapshot — fail-closed allowlist, enforced at type, subtype, AND key
+  level.** Only enumerated types, subtypes, and data keys survive; a new type,
+  subtype, or key a future collector adds is dropped until explicitly
+  allowlisted (no subtype is keep-all). v1 keeps key-constrained
+  `K8s.server` (version, platform, goVersion) and `K8s.node` (provider,
+  kubelet/runtime/OS versions — *not* `source-node`, `provider-id`,
+  `container-runtime-id`), `GPU.hardware` (present/count/model/driver-loaded/
+  detection-source), `OS.release` (standard distro-identity keys only — the
+  collector ships all of `/etc/os-release`, so non-standard keys are dropped),
+  and `NodeTopology.summary` (counts). It drops `OS.{grub,sysctl,kmod}`, the
+  entire `SystemD` measurement, and `NodeTopology.{label,taint}`. The snapshot
+  header metadata is likewise allowlisted to `{timestamp, version}`, so
+  `source-node` (and any future key) is dropped by default.
 - **CTRF — log omission.** Per-test `stdout` and `message` are removed; the
   pass/fail signal (name, status, duration, suite, summary counts) is kept.
 

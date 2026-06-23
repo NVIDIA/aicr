@@ -24,11 +24,13 @@
 //
 // Two transforms are applied by the minimal policy:
 //
-//   - Snapshot: a fail-closed allowlist keeps only an enumerated set of
-//     measurement subtypes/keys. Node names, provider instance IDs, the raw
-//     node label/taint set, kernel/sysctl tuning, loaded modules, and systemd
-//     service config are dropped. Anything a future collector adds is dropped
-//     until explicitly allowlisted.
+//   - Snapshot: a fail-closed allowlist that is enforced at every level —
+//     measurement type, subtype, AND data key. Only enumerated types,
+//     subtypes, and keys survive; a new type, subtype, or key a future
+//     collector adds is dropped until explicitly allowlisted (there is no
+//     keep-all subtype). Node names, provider instance IDs, the raw node
+//     label/taint set, kernel/sysctl tuning, loaded modules, and systemd
+//     service config are dropped.
 //   - CTRF: per-test Stdout and Message (free-form log text that can leak IPs,
 //     DNS names, secret/cert names, internal URLs) are omitted; the pass/fail
 //     signal (name, status, duration, suite, summary counts) is preserved.
@@ -63,16 +65,15 @@ var headerMetadataAllowlist = map[string]struct{}{
 	"version":   {},
 }
 
-// subtypePolicy describes what survives within a kept subtype. A nil keys
-// set keeps every data key; a non-nil set keeps only the listed keys.
+// subtypePolicy is the allowlist of data keys that survive within a kept
+// subtype. Every kept subtype is key-constrained — there is no keep-all
+// escape hatch — so a key a future collector attaches to an allowlisted
+// subtype is dropped by default until added here (fail-closed at key level).
 type subtypePolicy struct {
 	keys map[string]struct{}
 }
 
 func keep(keys ...string) subtypePolicy {
-	if len(keys) == 0 {
-		return subtypePolicy{}
-	}
 	set := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
 		set[k] = struct{}{}
@@ -81,9 +82,10 @@ func keep(keys ...string) subtypePolicy {
 }
 
 // snapshotAllowlist is the fail-closed allowlist: only the measurement types,
-// subtypes, and (where constrained) data keys listed here survive. A type not
-// present is dropped entirely; a subtype not present for a kept type is
-// dropped entirely.
+// subtypes, and data keys listed here survive. A type not present is dropped
+// entirely; a subtype not present for a kept type is dropped entirely; and a
+// data key not present in its subtype's policy is dropped. Every subtype is
+// key-constrained (no keep-all), so the guarantee holds at the key level too.
 //
 // The subtype names and data keys mirror the literals the collectors author
 // (pkg/collector/{k8s,os,gpu,topology}) — the same names pkg/fingerprint keys
@@ -93,7 +95,7 @@ func keep(keys ...string) subtypePolicy {
 // when the allowlist changes.
 var snapshotAllowlist = map[measurement.Type]map[string]subtypePolicy{
 	measurement.TypeK8s: {
-		"server": keep(), // version etc. — not sensitive
+		"server": keep("version", "platform", "goVersion"),
 		"node": keep(
 			"provider",
 			"kubelet-version",
@@ -105,14 +107,31 @@ var snapshotAllowlist = map[measurement.Type]map[string]subtypePolicy{
 		), // drops source-node, provider-id, container-runtime-id
 	},
 	measurement.TypeGPU: {
-		"hardware": keep(), // present/count/model/driver-loaded/detection-source
+		"hardware": keep(
+			"gpu-present",
+			"gpu-count",
+			"driver-loaded",
+			"detection-source",
+			"model",
+		),
 	},
 	measurement.TypeOS: {
-		"release": keep(), // /etc/os-release distro identity
+		// /etc/os-release distro identity. Key-constrained because the
+		// collector ships the whole file verbatim, so a non-standard distro
+		// could inject arbitrary (operator-influenced) keys otherwise.
+		"release": keep(
+			"ID",
+			"ID_LIKE",
+			"NAME",
+			"PRETTY_NAME",
+			"VERSION",
+			"VERSION_ID",
+			"VERSION_CODENAME",
+		),
 		// grub, sysctl, kmod intentionally absent → dropped (tuning/hardening posture)
 	},
 	measurement.TypeNodeTopology: {
-		"summary": keep(), // node-count etc. — counts, not identifiers
+		"summary": keep("node-count", "taint-count", "label-count"), // counts, not identifiers
 		// label, taint intentionally absent → dropped (node names + custom labels)
 	},
 	// TypeSystemD intentionally absent → entire measurement dropped.
@@ -190,24 +209,18 @@ func redactMeasurement(m *measurement.Measurement) *measurement.Measurement {
 	return out
 }
 
-// copySubtype copies st, retaining only the data keys permitted by pol.
-// Reading values are immutable wrappers, so sharing them is safe. The
-// subtype's Context is intentionally NOT carried over: it is not allowlisted
-// and carries no conformance signal, so passing it through would be a
-// fail-open path as collectors start attaching context.
+// copySubtype copies st, retaining only the data keys in pol — every other
+// key (including any a future collector adds to this subtype) is dropped,
+// fail-closed at the key level. Reading values are immutable wrappers, so
+// sharing them is safe. The subtype's Context is intentionally NOT carried
+// over: it is not allowlisted and carries no conformance signal, so passing
+// it through would be a fail-open path as collectors start attaching context.
 func copySubtype(st *measurement.Subtype, pol subtypePolicy) measurement.Subtype {
-	size := len(st.Data)
-	if pol.keys != nil {
-		size = len(pol.keys) // upper bound on survivors for a key-constrained subtype
-	}
-	data := make(map[string]measurement.Reading, size)
+	data := make(map[string]measurement.Reading, len(pol.keys)) // upper bound on survivors
 	for k, v := range st.Data {
-		if pol.keys != nil {
-			if _, allowed := pol.keys[k]; !allowed {
-				continue
-			}
+		if _, allowed := pol.keys[k]; allowed {
+			data[k] = v
 		}
-		data[k] = v
 	}
 	return measurement.Subtype{Name: st.Name, Data: data}
 }
