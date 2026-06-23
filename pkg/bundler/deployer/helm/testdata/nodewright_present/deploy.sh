@@ -53,6 +53,38 @@ while [[ $# -gt 0 ]]; do
     *) echo "Error: unknown option: $1"; echo "Usage: ./deploy.sh [--no-wait] [--best-effort] [--retries N]"; exit 1 ;;
   esac
 done
+# ==============================================================================
+# Output helpers (respects NO_COLOR and non-TTY)
+# ==============================================================================
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  _G=$'\033[0;32m';_R=$'\033[0;31m';_Y=$'\033[1;33m'
+  _B=$'\033[1m';_D=$'\033[2m';_X=$'\033[0m'
+else
+  _G='';_R='';_Y='';_B='';_D='';_X=''
+fi
+
+function _ok()       { printf '%s✓%s %s\n' "${_G}" "${_X}" "$*"; }
+function _fail()     { printf '%s✗%s %s\n' "${_R}" "${_X}" "$*"; }
+function _warn_line(){ printf '%s⚠%s %s\n' "${_Y}" "${_X}" "$*"; }
+
+function _step_header() {
+  local manual_dir
+  printf -v manual_dir '%q' "$5"
+  printf '\n%s┌─ [%s/%s] %s  →  %s%s\n' "${_B}" "$1" "$2" "$3" "$4" "${_X}"
+  printf '%s│  Manual (approx, set KUBECONFIG_FLAG/DRY_RUN_FLAG/COMPONENT_WAIT_ARGS as needed): cd %s && bash install.sh%s\n' "${_D}" "${manual_dir}" "${_X}"
+}
+
+function _step_ok() {
+  printf '%s└─ ✓%s %s installed\n' "${_G}" "${_X}" "$1"
+}
+
+function _step_fail() {
+  printf '%s└─ ✗%s %s FAILED (after %s attempts)\n' "${_R}" "${_X}" "$1" "$2"
+}
+
+function _step_retry() {
+  printf '%s  ↺%s %s: attempt %s/%s failed, retrying in %ss...\n' "${_Y}" "${_X}" "$1" "$2" "$3" "$4"
+}
 
 # Export env vars consumed by each folder's install.sh (rendered by localformat).
 # DRY_RUN_FLAG / KUBECONFIG_FLAG / HELM_DEBUG_FLAG default to empty strings.
@@ -62,7 +94,7 @@ export HELM_DEBUG_FLAG="${HELM_DEBUG_FLAG:-}"
 
 function helm_failed() {
   if [[ "${BEST_EFFORT}" == "true" ]]; then
-    echo "WARNING: $1 install failed, continuing (--best-effort)"
+    _warn_line "$1 install failed, continuing (--best-effort)"
     FAILED_COMPONENTS="${FAILED_COMPONENTS} $1"
   else
     exit 1
@@ -156,7 +188,7 @@ ASYNC_COMPONENTS="kai-scheduler"
 # namespaces, and orphaned API services from a previous install can block pod
 # creation and namespace deletion, causing silent deployment failures.
 
-echo "Running pre-flight checks..."
+printf '\n%s══ Pre-flight checks ══════════════════════════════════════════════%s\n' "${_B}" "${_X}"
 
 preflight_failed=false
 
@@ -260,13 +292,13 @@ fi
 
 if [[ "${preflight_failed}" == "true" ]]; then
   echo ""
-  echo "Pre-flight checks failed. Fix the issues above before deploying."
-  echo "To clean up partial state, run 'helm uninstall <release> -n <namespace>' for each affected component, then retry."
+  _fail "Pre-flight checks failed. Fix the issues above before deploying."
+  echo "  To clean up partial state, run 'helm uninstall <release> -n <namespace>' for each affected component, then retry."
   exit 1
 fi
 
-echo "Pre-flight checks passed."
-echo "Deploying AICR components..."
+_ok "Pre-flight checks passed"
+printf '\n%s══ Deploying AICR components ══════════════════════════════════════%s\n' "${_B}" "${_X}"
 
 # ==============================================================================
 # Install loop
@@ -276,19 +308,28 @@ echo "Deploying AICR components..."
 # knowledge here. Per-component special-case logic (async wait, DRA plugin
 # restart) runs in the post-install blocks below, matched by component name.
 cd "${HELM_WORKDIR}"
+
+# Pre-count folders for accurate [N/M] progress display.
+TOTAL_STEPS=0
+for _d in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
+  [[ -d "${_d}" ]] && TOTAL_STEPS=$((TOTAL_STEPS+1))
+done
+
+STEP=0
+
 for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
   [[ -d "${dir}" ]] || continue
   dir="${dir%/}"
   base="${dir##*/}"
   name="${base#[0-9][0-9][0-9]-}"
+  STEP=$((STEP+1))
   # Source the namespace from the folder's install.sh — not the folder
   # basename — because the helm release name and its target namespace can
   # differ (e.g. nodewright-operator → namespace skyhook; gpu-operator-post →
   # namespace gpu-operator). cleanup_helm_hooks and the kai diagnostics
   # both operate on the namespace.
   namespace=$(awk '{ for (i=1;i<NF;i++) if ($i=="--namespace") { print $(i+1); exit } }' "${dir}/install.sh")
-  echo "Installing ${name} (${base}) into namespace ${namespace}..."
-
+  _step_header "${STEP}" "${TOTAL_STEPS}" "${name}" "${namespace}" "${dir}"
   # Derive wait args: global --wait/--no-wait behavior + per-component timeout.
   COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
   COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
@@ -326,7 +367,7 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     if echo "${ASYNC_COMPONENTS}" | grep -qw "${name}"; then
       # Skip --wait (no readiness check) but keep --timeout for hook completion.
       COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
-      echo "  (async component — skipping --wait, keeping --timeout for hooks)"
+      printf '%s│%s  (async component — skipping --wait, keeping --timeout for hooks)\n' "${_D}" "${_X}"
     fi
   fi
   export COMPONENT_WAIT_ARGS
@@ -336,18 +377,25 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
   attempt=0
   while true; do
     if ( cd "${dir}" && bash install.sh ); then
+      _step_ok "${name}"
       break
     fi
+
     attempt=$((attempt + 1))
     dump_kai_scheduler_helm_diagnostics "${namespace}"
+
     if [[ ${attempt} -gt ${COMPONENT_MAX_RETRIES} ]]; then
-      echo "ERROR: ${name} install failed after ${attempt} attempts"
+      _step_fail "${name}" "${attempt}"
       helm_failed "${name}"
       break
     fi
+
     cleanup_helm_hooks "${namespace}"
+
     wait_secs=$(backoff_seconds "${attempt}")
-    echo "RETRY: ${name} install failed (attempt ${attempt}/${COMPONENT_MAX_RETRIES}), retrying in ${wait_secs}s..."
+
+    _step_retry "${name}" "${attempt}" "${COMPONENT_MAX_RETRIES}" "${wait_secs}"
+
     sleep "${wait_secs}"
   done
 
@@ -355,10 +403,9 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
 done
 
 if [[ -n "${FAILED_COMPONENTS}" ]]; then
-  echo "WARNING: the following components failed:${FAILED_COMPONENTS}"
-  echo "Deployment completed with non-fatal errors (--best-effort)."
+  _fail "Deployment completed with failures (--best-effort):${FAILED_COMPONENTS}"
 else
-  echo "Deployment complete."
+  _ok "All components installed successfully."
 fi
 echo
 echo "NOTE: The above status reflects Helm install and manifest apply results,"
