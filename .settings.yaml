@@ -85,7 +85,7 @@ testing_tools:
   yq: 'v4.53.3'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
-  awscli: '1.45.33'
+  awscli: '1.45.34'
   # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
   # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
   # to boot without a paid license token. Pinned (never :latest) for reproducibility.
