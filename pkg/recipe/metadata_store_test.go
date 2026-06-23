@@ -655,6 +655,68 @@ func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
 	}
 }
 
+func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	conformanceChecks := []string{
+		"platform-health",
+		"gpu-operator-health",
+		"dra-support",
+		"accelerator-metrics",
+		"ai-service-metrics",
+		"gang-scheduling",
+		"pod-autoscaling",
+		"cluster-autoscaling",
+		"robust-controller",
+		"secure-accelerator-access",
+		"slinky-slurm-health",
+	}
+	kindConformanceChecks := []string{
+		"platform-health",
+		"gpu-operator-health",
+		"dra-support",
+		"accelerator-metrics",
+		"ai-service-metrics",
+		"gang-scheduling",
+		"secure-accelerator-access",
+		"pod-autoscaling",
+		"cluster-autoscaling",
+		"slinky-slurm-health",
+	}
+
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
+		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},
+		{name: "h100-kind-training-slurm", want: kindConformanceChecks},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaf, ok := store.GetRecipeByName(tt.name)
+			if !ok {
+				t.Fatalf("overlay %q not found in store", tt.name)
+			}
+			result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
+			if err != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", err)
+			}
+			if result.Validation == nil || result.Validation.Conformance == nil {
+				t.Fatalf("conformance phase missing from resolved recipe")
+			}
+			if got := result.Validation.Conformance.Checks; !slices.Equal(got, tt.want) {
+				t.Errorf("conformance.checks = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestEvaluatorFailingLeafExcludesCandidate verifies that when a leaf overlay's
 // constraints fail evaluation, no ancestor overlay is used as a fallback
 // candidate. With maximal leaf selection, ancestors are not independent
