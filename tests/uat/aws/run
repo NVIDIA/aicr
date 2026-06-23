@@ -63,66 +63,13 @@ TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
-# Convergence budget for the post-install readiness gate. Spans nodewright
-# (skyhook) node tuning -- which REBOOTS the GPU node and re-inits the operator
-# stack after gpu-operator first reports ready -- plus cold-boot p5.48xlarge
-# GPU-operator convergence (driver build/load -> toolkit -> device-plugin ->
-# DCGM exporter) and prometheus-adapter APIService aggregation. Generous; the
-# gate fails closed if exceeded.
+# Budget for the post-install readiness gate, which runs the deployment
+# validation phase until it passes (see phase_install). Generous: it must span
+# nodewright (skyhook) node tuning -- which REBOOTS the GPU node and re-inits the
+# gpu-operator operands after the operator first reports ready -- plus cold-boot
+# p5.48xlarge GPU-operator convergence (driver/toolkit/device-plugin/DCGM) and
+# prometheus-adapter APIService aggregation. Fails closed if exceeded.
 READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1200}" # 20 min
-
-# wait_for polls <check-cmd...> every 10s until it succeeds (exit 0) or
-# <timeout-seconds> elapses. Fail-closed: returns non-zero with diagnostics on
-# timeout, so a cluster that never converges fails the install loudly instead of
-# handing a not-ready cluster to `aicr validate`. The check command must tolerate
-# the target resource not existing yet (a missing resource is a normal early
-# state), which the kubectl jsonpath checks below do by comparing to "".
-wait_for() {
-  local desc="$1" timeout="$2"; shift 2
-  # Callers share one budget by passing the time remaining until a common
-  # deadline, which can reach 0 (or briefly go negative) once earlier checks
-  # consume it — clamp so the final check still gets one fail-closed attempt
-  # rather than a deadline in the past.
-  (( timeout < 0 )) && timeout=0
-  local deadline=$(( SECONDS + timeout ))
-  echo "::group::Wait: ${desc} (timeout ${timeout}s)"
-  until "$@" >/dev/null 2>&1; do
-    if (( SECONDS >= deadline )); then
-      echo "::error::timed out after ${timeout}s waiting for: ${desc}" >&2
-      echo "::endgroup::"
-      return 1
-    fi
-    sleep 10
-  done
-  echo "ok: ${desc}"
-  echo "::endgroup::"
-}
-
-# Readiness predicates for the post-install gate. Each is fail-closed: an absent
-# resource or unset status yields a non-matching value, so wait_for keeps polling.
-_clusterpolicy_ready() {
-  [[ "$(kubectl get clusterpolicy cluster-policy \
-    -o jsonpath='{.status.state}' 2>/dev/null)" == "ready" ]]
-}
-_apiservice_available() {
-  [[ "$(kubectl get apiservice "$1" \
-    -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)" == "True" ]]
-}
-# _skyhook_complete is true when every nodewright (Skyhook) CR reports
-# status.status=complete. Skyhook node tuning REBOOTS the GPU node, which
-# re-initializes the gpu-operator operands AFTER ClusterPolicy first reports
-# ready — so this must clear before the GPU/metrics checks, else the gate passes
-# on a transient pre-reboot ready state and validate races the re-convergence.
-# Empty list (CR not created yet) => not complete => keep waiting. If the Skyhook
-# CRD is absent the recipe has no nodewright, so skip rather than block. Skyhook
-# CRs are cluster-scoped (see validators/deployment/expected_resources.go).
-_skyhook_complete() {
-  kubectl get crd skyhooks.skyhook.nvidia.com >/dev/null 2>&1 || return 0
-  local states
-  states="$(kubectl get skyhooks.skyhook.nvidia.com \
-    -o jsonpath='{range .items[*]}{.status.status}{"\n"}{end}' 2>/dev/null)"
-  [[ -n "$states" ]] && ! grep -qxv 'complete' <<<"$states"
-}
 
 # Per-run unique OCI repo suffix. The committed config carries the stable
 # prefix only; we append `-${RUN_ID}` once, idempotently, so re-running a
@@ -232,32 +179,39 @@ phase_install() {
   kubectl get pods -A | grep -Ev '\s+Running\s+|\s+Completed\s+' || true
   echo "::endgroup::"
 
-  # Readiness barrier the helmfile path lacks. The helm deploy.sh `kubectl wait`s
-  # on operator-driven convergence; `helmfile apply` returns once each release's
-  # own objects are Ready, leaving the GPU stack (ClusterPolicy -> DCGM exporter)
-  # and the prometheus-adapter metrics APIServices still reconciling. Gating here
-  # lets the stack converge before `aicr validate` runs, so deployment- and
-  # conformance-phase checks evaluate a ready cluster. ClusterPolicy=ready implies
-  # the DCGM exporter operand is rolled out; the two aggregated APIServices imply
-  # prometheus-adapter is serving custom/external metrics.
-  # All readiness checks share a SINGLE READINESS_TIMEOUT_SECONDS budget: compute
-  # one deadline up front and pass each call the time remaining until it, so the
-  # combined barrier cannot run N x the per-check timeout.
+  # Readiness gate: run the deployment validation phase -- the authoritative
+  # expected-resources / ClusterPolicy / DRA / nodewright checks the later
+  # `--phase all` run gates on -- in a retry loop until it passes. `helmfile
+  # apply` returns before operator-driven convergence, and nodewright (skyhook)
+  # reboots the GPU node AFTER gpu-operator first reports ready, re-initing the
+  # operands; proxy signals (ClusterPolicy=ready, Skyhook status.status) read that
+  # transient state as "done" prematurely, so we gate on the real check. It rides
+  # through the reboot via expected-resources' own poll plus this outer retry.
+  # Fail-closed: the install fails if the phase never passes within the budget.
   #
-  # nodewright (skyhook) tuning is waited on FIRST: it reboots the GPU node to
-  # apply kernel tuning, re-initializing the gpu-operator operands after the
-  # operator first reports ClusterPolicy=ready. Checking ClusterPolicy/operands
-  # before that reboot lets the gate pass on a transient pre-reboot ready state,
-  # so wait for tuning to complete before the GPU/metrics checks.
+  # Run against a copy of the config with spec.validate.evidence stripped so the
+  # gate never emits/pushes an evidence bundle -- that is the conformance phase's
+  # job (phase_conformance, `--phase all`).
+  local gate_config; gate_config="$(mktemp)"
+  yq 'del(.spec.validate.evidence)' "${config}" > "${gate_config}"
   local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
-  wait_for "nodewright (skyhook) tuning complete" "$(( ready_deadline - SECONDS ))" \
-    _skyhook_complete
-  wait_for "gpu-operator ClusterPolicy state=ready" "$(( ready_deadline - SECONDS ))" \
-    _clusterpolicy_ready
-  wait_for "custom.metrics.k8s.io APIService Available" "$(( ready_deadline - SECONDS ))" \
-    _apiservice_available v1beta1.custom.metrics.k8s.io
-  wait_for "external.metrics.k8s.io APIService Available" "$(( ready_deadline - SECONDS ))" \
-    _apiservice_available v1beta1.external.metrics.k8s.io
+  local attempt=1
+  echo "::group::Readiness gate: validate --phase deployment (timeout ${READINESS_TIMEOUT_SECONDS}s)"
+  until "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null >/dev/null 2>&1; do
+    if (( SECONDS >= ready_deadline )); then
+      echo "::error::deployment readiness gate did not pass within ${READINESS_TIMEOUT_SECONDS}s; final attempt:" >&2
+      "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null 2>&1 || true
+      rm -f "${gate_config}"
+      echo "::endgroup::"
+      exit 1
+    fi
+    echo "deployment phase not ready (attempt ${attempt}); retrying in 15s..."
+    attempt=$(( attempt + 1 ))
+    sleep 15
+  done
+  rm -f "${gate_config}"
+  echo "deployment readiness gate passed (attempt ${attempt})"
+  echo "::endgroup::"
 }
 
 phase_conformance() {

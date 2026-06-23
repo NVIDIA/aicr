@@ -40,10 +40,12 @@ jobs:
   uat-gcp:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    # Bumped from 90 to 110 to absorb the validate step now running all phases
-    # (deployment readiness gate + conformance + NCCL performance) rather than
-    # conformance alone.
-    timeout-minutes: 110
+    # Bumped from 90 to 110 for the validate step running all phases (deployment
+    # readiness gate + conformance + NCCL performance), then to 130 so the
+    # install step's deployment-phase readiness gate (up to
+    # READINESS_TIMEOUT_SECONDS, spanning a nodewright reboot) fits on top of
+    # helmfile apply without the job cap truncating later steps.
+    timeout-minutes: 130
     permissions:
       contents: read
       actions: read
@@ -192,7 +194,12 @@ jobs:
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
-        timeout-minutes: 25
+        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS) + the post-install
+        # readiness gate, which runs `aicr validate --phase deployment` until it
+        # passes (up to READINESS_TIMEOUT_SECONDS, 20m, spanning a nodewright
+        # reboot). Must exceed one helmfile attempt + the gate so the gate's own
+        # fail-closed path runs before GitHub Actions kills the step.
+        timeout-minutes: 45
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
