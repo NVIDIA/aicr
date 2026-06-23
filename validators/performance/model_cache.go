@@ -92,6 +92,16 @@ const (
 	// ResolveImage for registry-override parity is tracked in #1159. Note that
 	// registry parity alone is not air-gap support: the populate Job's
 	// snapshot_download still reaches huggingface.co for the weights.
+	//
+	// The -cuda13 variant is required for GB300 (Blackwell, sm_103), which CUDA
+	// 12 runtimes do not target. It is applied to ALL accelerators on purpose:
+	// CUDA 13 is backward-compatible down to sm_50, so it also serves the older
+	// generations covered by inference-perf overlays (A100 sm_80, H100/GB200
+	// sm_90, H200, B200). A single image keeps this constant in sync with the
+	// worker image in the dynamo-deployment templates (one drift guard, not
+	// per-accelerator branching). The populate Job only downloads weights — it
+	// does not exercise GPU kernels — so the runtime CUDA version does not gate
+	// cache population on any generation.
 	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0-cuda13"
 
 	// Resource requests for the populate container. snapshot_download is

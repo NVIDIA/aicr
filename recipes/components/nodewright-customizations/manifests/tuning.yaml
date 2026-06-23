@@ -78,8 +78,14 @@ spec:
       env:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "true"
+        # Allow nvidia-setup to install a kernel NEWER than the pinned baseline.
+        # Defaults to "false" (the safe behavior for x86 GPU families such as
+        # H100/H200/A100/GB200/B200, which run the pinned kernel). GB300's Grace
+        # ARM64 host requires the 64KB-page kernel, which is newer than the
+        # baseline, so only the GB300 overlays opt in via
+        # `kernelAllowNewer: true` in their nodewright-customizations override.
         - name: NVIDIA_SETUP_KERNEL_ALLOW_NEWER
-          value: "true"
+          value: "{{ ($cust.kernelAllowNewer | default false) | toString }}"
       resources:
         cpuLimit: 4000m
         cpuRequest: 2000m

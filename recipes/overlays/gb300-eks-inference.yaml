@@ -72,6 +72,11 @@ spec:
         service: eks
         accelerator: gb200
         intent: inference
+        # GB300's Grace ARM64 host needs the 64KB-page kernel, which is newer
+        # than the pinned baseline. Opt in to NVIDIA_SETUP_KERNEL_ALLOW_NEWER
+        # here so the override stays GB300-scoped (other GPU families default
+        # to "false" and keep the pinned kernel).
+        kernelAllowNewer: true
       dependencyRefs:
         - nodewright-operator
 
