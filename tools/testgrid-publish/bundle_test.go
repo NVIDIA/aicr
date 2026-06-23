@@ -72,6 +72,36 @@ criteria:
 			wantPlatform: "",
 		},
 		{
+			name: "uppercase service and accelerator are normalized",
+			recipeYAML: `
+criteria:
+  service: EKS
+  accelerator: H100
+  os: Ubuntu
+  intent: Training
+  platform: KubeFlow
+`,
+			wantService:  "eks",
+			wantAccel:    "h100",
+			wantOS:       "ubuntu",
+			wantIntent:   "training",
+			wantPlatform: "kubeflow",
+		},
+		{
+			name: "whitespace in quoted criteria fields is trimmed",
+			recipeYAML: `
+criteria:
+  service: " eks "
+  accelerator: " h100 "
+  os: ubuntu
+  intent: training
+`,
+			wantService: "eks",
+			wantAccel:   "h100",
+			wantOS:      "ubuntu",
+			wantIntent:  "training",
+		},
+		{
 			name: "missing service",
 			recipeYAML: `
 criteria:

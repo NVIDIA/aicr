@@ -80,6 +80,13 @@ func TestConvertCTRF(t *testing.T) {
 			phases:  nil,
 			wantErr: true,
 		},
+		{
+			name: "all phases present but zero tests",
+			phases: map[string]ctrf.Report{
+				"deployment": makeReport("deployment", nil),
+			},
+			wantErr: true, // zero total tests → error, not silent SUCCESS
+		},
 	}
 
 	for _, tt := range tests {

@@ -70,6 +70,18 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 			"bundle contains no CTRF phase reports under ctrf/")
 	}
 
+	// Reject bundles where every phase report has zero tests — a crashed
+	// test runner writes empty CTRF files, which would otherwise publish
+	// as a green SUCCESS with zero testcases.
+	totalTests := 0
+	for _, r := range reports {
+		totalTests += len(r.Results.Tests)
+	}
+	if totalTests == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"bundle CTRF reports contain zero test results across all phases")
+	}
+
 	suites := jUnitTestSuites{}
 
 	// Iterate phases in the canonical order from the attestation package
@@ -79,10 +91,7 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 		if !ok {
 			continue
 		}
-		suite := jUnitTestSuite{
-			Name:  string(phase),
-			Tests: r.Results.Summary.Tests,
-		}
+		suite := jUnitTestSuite{Name: string(phase)}
 
 		// Sort tests by name within each phase for determinism.
 		tests := make([]ctrf.TestResult, len(r.Results.Tests))
@@ -90,6 +99,9 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 		sort.Slice(tests, func(i, j int) bool {
 			return tests[i].Name < tests[j].Name
 		})
+		// Derive Tests from the actual slice, not Summary.Tests, so the
+		// attribute is accurate even when the CTRF producer miscounts.
+		suite.Tests = len(tests)
 
 		for _, t := range tests {
 			dur := fmt.Sprintf("%.3f", float64(t.Duration)/1000.0) // ms → s

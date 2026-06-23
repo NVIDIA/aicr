@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -80,19 +81,27 @@ func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 			"failed to parse recipe.yaml", err)
 	}
 
+	// Normalize: trim whitespace and lowercase so "EKS" and " eks " both
+	// map to the same GCS group path as the config-gen taxonomy expects.
 	c := r.Criteria
-	if c.Service == "" || c.Accelerator == "" || c.OS == "" || c.Intent == "" {
+	service := strings.ToLower(strings.TrimSpace(c.Service))
+	accelerator := strings.ToLower(strings.TrimSpace(c.Accelerator))
+	os_ := strings.ToLower(strings.TrimSpace(c.OS))
+	intent := strings.ToLower(strings.TrimSpace(c.Intent))
+	platform := strings.ToLower(strings.TrimSpace(c.Platform))
+
+	if service == "" || accelerator == "" || os_ == "" || intent == "" {
 		return RecipeCriteria{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe.yaml missing required criteria fields: service=%q accelerator=%q os=%q intent=%q",
-				c.Service, c.Accelerator, c.OS, c.Intent))
+				service, accelerator, os_, intent))
 	}
 
 	criteria := RecipeCriteria{
-		Service:     c.Service,
-		Accelerator: c.Accelerator,
-		OS:          c.OS,
-		Intent:      c.Intent,
-		Platform:    c.Platform,
+		Service:     service,
+		Accelerator: accelerator,
+		OS:          os_,
+		Intent:      intent,
+		Platform:    platform,
 	}
 
 	// Extract k8s constraint from recipe constraints list.
