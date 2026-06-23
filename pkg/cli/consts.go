@@ -54,6 +54,9 @@ const (
 	flagInsecureTLS    = "insecure-tls"
 	flagPlainHTTP      = "plain-http"
 	flagPush           = "push"
+	// flagFull ships an unredacted evidence bundle. By default the bundle is
+	// minimized (sensitive snapshot fields and CTRF logs removed).
+	flagFull = "full"
 	// flagAssumeYes bypasses the interactive keyless-signing identity
 	// disclosure prompt (see confirmKeylessSigningDisclosure). The banner is
 	// still emitted; only the y/N pause is skipped.

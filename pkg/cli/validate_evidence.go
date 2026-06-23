@@ -38,6 +38,11 @@ type recipeEvidenceConfig struct {
 	PlainHTTP   bool
 	InsecureTLS bool
 
+	// Full disables evidence minimization. Default (false) ships a redacted
+	// snapshot and CTRF reports with stdout/message omitted; --full ships the
+	// raw payloads. CLI-only — there is no config-file equivalent.
+	Full bool
+
 	// OIDC token resolution is deferred until adjacent to SignStatement
 	// (see attestation.Emit): Fulcio binds the token to a fresh nonce at
 	// issue, and a multi-minute validation run between resolve and sign
@@ -68,6 +73,7 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 		Push:        stringFlagOrConfig(cmd, flagPush, att.Push),
 		PlainHTTP:   boolFlagOrConfig(cmd, flagPlainHTTP, att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),
+		Full:        cmd.Bool(flagFull),
 		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
 		AssumeYes:   cmd.Bool(flagAssumeYes),
 	}
@@ -130,6 +136,7 @@ func emitRecipeEvidence(
 		Push:         cfg.Push,
 		PlainHTTP:    cfg.PlainHTTP,
 		InsecureTLS:  cfg.InsecureTLS,
+		Full:         cfg.Full,
 		Recipe:       rec,
 		Snapshot:     snap,
 		PhaseResults: results,

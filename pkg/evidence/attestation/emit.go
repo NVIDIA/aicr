@@ -17,11 +17,13 @@ package attestation
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/redact"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -48,6 +50,13 @@ type EmitOptions struct {
 	Push        string
 	PlainHTTP   bool
 	InsecureTLS bool
+
+	// Full disables minimization. By default (Full=false) the bundle ships a
+	// redacted snapshot and CTRF reports with stdout/message omitted, and the
+	// predicate records the redaction policy. Full=true ships the raw
+	// payloads (pre-feature behavior) and leaves the predicate's redaction
+	// field unset.
+	Full bool
 
 	Recipe       *recipe.RecipeResult
 	Snapshot     *snapshotter.Snapshot
@@ -112,7 +121,14 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for evidence", err)
 	}
-	snapshotYAML, err := serializer.MarshalYAMLDeterministic(opts.Snapshot)
+
+	// Minimize the backing content unless the operator opted into a full
+	// bundle. The predicate's Fingerprint/CriteriaMatch are still computed
+	// by Build from the raw opts.Snapshot, so the conformance signal is
+	// preserved; only the shipped snapshot/CTRF bytes are reduced.
+	snapshotForBundle, phaseResults, redaction := applyRedaction(opts)
+
+	snapshotYAML, err := serializer.MarshalYAMLDeterministic(snapshotForBundle)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal snapshot for evidence", err)
 	}
@@ -127,10 +143,11 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		Snapshot:                opts.Snapshot,
 		SnapshotYAML:            snapshotYAML,
 		BOM:                     BOMInputs{Body: bomBody, CycloneDXVersion: DefaultCycloneDXVersion},
-		PhaseResults:            opts.PhaseResults,
+		PhaseResults:            phaseResults,
 		AICRVersion:             opts.AICRVersion,
 		ValidatorCatalogVersion: CatalogVersion(opts.Catalog),
 		ValidatorImages:         ValidatorImagesForPredicate(opts.Catalog),
+		Redaction:               redaction,
 	})
 	if err != nil {
 		return nil, err
@@ -177,6 +194,47 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		Sign:        out.Sign,
 		PushSummary: out.PushSummary,
 	}, nil
+}
+
+// applyRedaction returns the snapshot and phase results to write into the
+// bundle, plus the redaction provenance to record in the predicate.
+//
+// Full bundles pass the raw inputs through unchanged with nil provenance.
+// Minimal bundles ship a redacted snapshot and CTRF reports with
+// stdout/message omitted; the applied-rule list is the sorted union of the
+// snapshot and CTRF rules. Phase results without a report pass through
+// untouched (their slot stays nil), preserving Build's nil-report skip.
+func applyRedaction(opts EmitOptions) (*snapshotter.Snapshot, []*validator.PhaseResult, *RedactionInfo) {
+	if opts.Full {
+		return opts.Snapshot, opts.PhaseResults, nil
+	}
+
+	redactedSnap, snapRules := redact.Snapshot(opts.Snapshot)
+
+	results := make([]*validator.PhaseResult, len(opts.PhaseResults))
+	var ctrfRules []string
+	for i, pr := range opts.PhaseResults {
+		if pr == nil || pr.Report == nil {
+			results[i] = pr
+			continue
+		}
+		redactedReport, rules := redact.CTRF(pr.Report)
+		ctrfRules = rules
+		clone := *pr
+		clone.Report = redactedReport
+		results[i] = &clone
+	}
+
+	// snapRules and ctrfRules are disjoint static sets; concatenate and sort
+	// for a stable, readable order in the recorded provenance.
+	applied := append(append([]string(nil), snapRules...), ctrfRules...)
+	sort.Strings(applied)
+
+	return redactedSnap, results, &RedactionInfo{
+		Policy:  redact.PolicyName,
+		Version: redact.PolicyVersion,
+		Applied: applied,
+	}
 }
 
 // emitOutcome carries the artifacts the pointer file needs from the

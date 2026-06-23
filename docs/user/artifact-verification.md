@@ -160,6 +160,15 @@ command verifies it against the Sigstore trusted root, recomputes every file's
 sha256 against `manifest.json`, and surfaces the predicate's fingerprint, phase
 counts, and BOM info.
 
+Bundles are **minimized by default**: the published `snapshot.yaml` keeps only
+an allowlisted set of fields and the CTRF reports omit per-test stdout/message,
+keeping sensitive operational detail (node names, provider instance IDs, the
+node label/taint set, OS tuning, raw container logs) out of the published
+artifact. The predicate records the applied policy in a `redaction` block, which
+`aicr evidence verify` surfaces. Minimal bundles self-verify exactly like full
+ones — the digests cover whatever bytes shipped. Pass `--full` to
+`aicr validate --emit-attestation` to publish the raw payloads instead.
+
 The positional argument is auto-detected. Prefer the committed **pointer file**,
 which pins the bundle by digest:
 

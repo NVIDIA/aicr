@@ -18,12 +18,151 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
+
+// snapshotWithSensitiveData builds a snapshot whose measurements include the
+// sensitive fields the minimal policy must strip from the shipped bundle.
+func snapshotWithSensitiveData() *snapshotter.Snapshot {
+	s := snapshotter.NewSnapshot()
+	s.Metadata = map[string]string{"source-node": "ip-10-0-248-107.ec2.internal", "version": "0.0.0"}
+	s.Measurements = []*measurement.Measurement{
+		measurement.NewMeasurement(measurement.TypeK8s).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("server").SetString("version", "v1.33.1")).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("node").
+				SetString("source-node", "ip-10-0-248-107.ec2.internal").
+				SetString("provider-id", "aws:///us-west-2a/i-0123456789abcdef0").
+				SetString("provider", "eks")).
+			Build(),
+		measurement.NewMeasurement(measurement.TypeGPU).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("hardware").
+				SetBool("gpu-present", true).SetString("model", "h100")).
+			Build(),
+		measurement.NewMeasurement(measurement.TypeNodeTopology).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("summary").SetInt("node-count", 2)).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("label").
+				SetString("custom-cost-center", "acct-99887766|node1,node2").
+				// region is sourced ONLY from this label subtype, which the
+				// minimal policy drops — so the fingerprint can only carry it
+				// if computed from the raw (pre-redaction) snapshot.
+				SetString("topology.kubernetes.io/region", "us-west-2|node1,node2")).
+			Build(),
+	}
+	return s
+}
+
+func emitRecipe() *recipe.RecipeResult {
+	return &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceEKS,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Intent:      recipe.CriteriaIntentTraining,
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Chart: "gpu-operator", Version: "v25.10.1"},
+		},
+	}
+}
+
+func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
+	dir := t.TempDir()
+	res, err := Emit(context.Background(), EmitOptions{
+		OutDir:      dir,
+		Recipe:      emitRecipe(),
+		Snapshot:    snapshotWithSensitiveData(),
+		AICRVersion: "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, "summary-bundle", "snapshot.yaml"))
+	if err != nil {
+		t.Fatalf("read snapshot.yaml: %v", err)
+	}
+	for _, secret := range []string{"source-node", "provider-id", "i-0123456789abcdef0", "custom-cost-center", "acct-99887766"} {
+		if strings.Contains(string(body), secret) {
+			t.Errorf("redacted snapshot.yaml still contains %q:\n%s", secret, body)
+		}
+	}
+	// Allowlisted signal survives.
+	if !strings.Contains(string(body), "v1.33.1") || !strings.Contains(string(body), "h100") {
+		t.Errorf("redacted snapshot dropped allowlisted signal:\n%s", body)
+	}
+
+	if res.Bundle.Predicate.Redaction == nil {
+		t.Fatalf("minimal bundle must record a redaction policy")
+	}
+	if res.Bundle.Predicate.Redaction.Policy != "minimal" || res.Bundle.Predicate.Redaction.Version != "v1" {
+		t.Errorf("unexpected redaction provenance: %+v", res.Bundle.Predicate.Redaction)
+	}
+	if len(res.Bundle.Predicate.Redaction.Applied) == 0 {
+		t.Errorf("expected applied rules recorded")
+	}
+}
+
+func TestEmit_FullKeepsRawSnapshotAndNoRedaction(t *testing.T) {
+	dir := t.TempDir()
+	res, err := Emit(context.Background(), EmitOptions{
+		OutDir:      dir,
+		Full:        true,
+		Recipe:      emitRecipe(),
+		Snapshot:    snapshotWithSensitiveData(),
+		AICRVersion: "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "summary-bundle", "snapshot.yaml"))
+	if err != nil {
+		t.Fatalf("read snapshot.yaml: %v", err)
+	}
+	if !strings.Contains(string(body), "provider-id") || !strings.Contains(string(body), "custom-cost-center") {
+		t.Errorf("full bundle must retain raw snapshot detail:\n%s", body)
+	}
+	if res.Bundle.Predicate.Redaction != nil {
+		t.Errorf("full bundle must not record redaction; got %+v", res.Bundle.Predicate.Redaction)
+	}
+}
+
+func TestEmit_MinimalPreservesFingerprintSignal(t *testing.T) {
+	minDir, fullDir := t.TempDir(), t.TempDir()
+	minRes, err := Emit(context.Background(), EmitOptions{
+		OutDir: minDir, Recipe: emitRecipe(), Snapshot: snapshotWithSensitiveData(), AICRVersion: "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("minimal Emit: %v", err)
+	}
+	fullRes, err := Emit(context.Background(), EmitOptions{
+		OutDir: fullDir, Full: true, Recipe: emitRecipe(), Snapshot: snapshotWithSensitiveData(), AICRVersion: "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("full Emit: %v", err)
+	}
+	mp, fp := minRes.Bundle.Predicate, fullRes.Bundle.Predicate
+	if mp.Fingerprint != fp.Fingerprint {
+		t.Errorf("fingerprint must be identical regardless of redaction:\nmin=%+v\nfull=%+v", mp.Fingerprint, fp.Fingerprint)
+	}
+	if mp.Fingerprint.Accelerator.Value != "h100" {
+		t.Errorf("expected accelerator signal preserved, got %+v", mp.Fingerprint.Accelerator)
+	}
+	// Region is sourced only from the NodeTopology label subtype, which the
+	// minimal policy drops from the shipped snapshot. Its presence in the
+	// minimal predicate proves the fingerprint was computed from the raw
+	// snapshot — a regression that computed it from the redacted bytes would
+	// leave Region empty.
+	if mp.Fingerprint.Region.Value != "us-west-2" {
+		t.Errorf("region must survive in the predicate (computed from raw snapshot), got %+v", mp.Fingerprint.Region)
+	}
+}
 
 func TestEmit_HappyPathNoPush(t *testing.T) {
 	dir := t.TempDir()

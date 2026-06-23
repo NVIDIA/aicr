@@ -43,6 +43,7 @@ func RenderMarkdown(r *VerifyResult) string {
 	writeFingerprint(&b, r.Predicate)
 	writePhases(&b, r.Predicate)
 	writeBOM(&b, r.Predicate)
+	writeRedaction(&b, r.Predicate)
 	writeSteps(&b, r)
 	writeFailedStepDetails(&b, r)
 	writeVerdict(&b, r)
@@ -165,6 +166,21 @@ func writeBOM(b *strings.Builder, p *attestation.Predicate) {
 	}
 	fmt.Fprintf(b, "### BOM\n%s %s — %d components (digest %s)\n\n",
 		p.BOM.Format, p.BOM.Version, p.BOM.ImageCount, p.BOM.Digest)
+}
+
+// writeRedaction surfaces the minimal-bundle redaction policy so a reader
+// knows the backing content (snapshot, CTRF logs) was reduced and exactly
+// which rules ran. Absent for full (unredacted) bundles.
+func writeRedaction(b *strings.Builder, p *attestation.Predicate) {
+	if p == nil || p.Redaction == nil {
+		return
+	}
+	fmt.Fprintf(b, "### Redaction\nPolicy **%s** (version %s) — backing content minimized; the cryptographic binding is unaffected.\n",
+		p.Redaction.Policy, p.Redaction.Version)
+	for _, rule := range p.Redaction.Applied {
+		fmt.Fprintf(b, "- `%s`\n", rule)
+	}
+	b.WriteString("\n")
 }
 
 func writeSteps(b *strings.Builder, r *VerifyResult) {

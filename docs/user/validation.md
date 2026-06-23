@@ -377,15 +377,22 @@ After the command finishes:
 ├── pointer.yaml                  # locator; copy into recipes/evidence/
 └── summary-bundle/
     ├── recipe.yaml               # canonical post-resolution recipe
-    ├── snapshot.yaml             # snapshot at validate-time
+    ├── snapshot.yaml             # snapshot at validate-time (minimized by default)
     ├── bom.cdx.json              # CycloneDX BOM (auto-generated from
     │                             #   recipe + validator catalog when
     │                             #   --bom is omitted)
-    ├── ctrf/                     # per-phase test results
+    ├── ctrf/                     # per-phase test results (per-test stdout/message omitted by default)
     ├── manifest.json             # per-file sha256 inventory
     ├── statement.intoto.json     # unsigned in-toto Statement
     └── attestation.intoto.jsonl  # signed (when --push is set)
 ```
+
+The bundle is **minimized by default**: `snapshot.yaml` keeps only an
+allowlisted set of fields (dropping node names, provider instance IDs, the
+node label/taint set, OS tuning, loaded modules, and systemd config) and the
+CTRF reports omit per-test stdout/message. The signed predicate records the
+applied policy in a `redaction` block, and the bundle self-verifies exactly
+like a full one. Pass `--full` to publish the raw payloads instead.
 
 Commit `pointer.yaml` to `recipes/evidence/<recipe>.yaml`; the bundle
 itself lives in OCI. Then self-verify before opening the PR — the same
@@ -400,7 +407,8 @@ aicr evidence verify recipes/evidence/<recipe>.yaml
 
 | Flag | What it does |
 |------|--------------|
-| `--emit-attestation <dir>` | Write the bundle to `<dir>`. Required to produce evidence. |
+| `--emit-attestation <dir>` | Write the bundle to `<dir>`. Required to produce evidence. The bundle is minimized by default — see `--full`. |
+| `--full` | Emit the full (unredacted) bundle. By default the snapshot is reduced to an allowlisted set of fields and per-test CTRF stdout/message are omitted, keeping node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs out of the published artifact. Minimal bundles record the policy in `predicate.redaction` and self-verify normally. |
 | `--push <oci-ref>` | Sign via cosign keyless OIDC and push to the registry. The digest pins the bundle, so the tag is just a label; omit it and aicr derives a unique per-recipe tag (`<recipe-slug>-<short-fingerprint>`). Pass an explicit tag to override. Without `--push`, the bundle is unsigned (development/self-debug only). |
 | `--bom <path>` | Embed an existing CycloneDX BOM instead of the auto-generated one. Pass `make bom` output for an exhaustive BOM that includes chart-default sub-images. |
 | `--identity-token <token>` | Pre-fetched OIDC identity token, skipping the browser flow. Reads `COSIGN_IDENTITY_TOKEN`. |
