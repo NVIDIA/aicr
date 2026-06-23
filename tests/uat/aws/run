@@ -63,11 +63,13 @@ TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
-# Convergence budget for the post-install readiness gate. Cold-boot p5.48xlarge
+# Convergence budget for the post-install readiness gate. Spans nodewright
+# (skyhook) node tuning -- which REBOOTS the GPU node and re-inits the operator
+# stack after gpu-operator first reports ready -- plus cold-boot p5.48xlarge
 # GPU-operator convergence (driver build/load -> toolkit -> device-plugin ->
-# DCGM exporter) plus prometheus-adapter APIService aggregation can take many
-# minutes, so this is generous; the gate fails closed if exceeded.
-READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-900}" # 15 min
+# DCGM exporter) and prometheus-adapter APIService aggregation. Generous; the
+# gate fails closed if exceeded.
+READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1200}" # 20 min
 
 # wait_for polls <check-cmd...> every 10s until it succeeds (exit 0) or
 # <timeout-seconds> elapses. Fail-closed: returns non-zero with diagnostics on
@@ -105,6 +107,21 @@ _clusterpolicy_ready() {
 _apiservice_available() {
   [[ "$(kubectl get apiservice "$1" \
     -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)" == "True" ]]
+}
+# _skyhook_complete is true when every nodewright (Skyhook) CR reports
+# status.status=complete. Skyhook node tuning REBOOTS the GPU node, which
+# re-initializes the gpu-operator operands AFTER ClusterPolicy first reports
+# ready — so this must clear before the GPU/metrics checks, else the gate passes
+# on a transient pre-reboot ready state and validate races the re-convergence.
+# Empty list (CR not created yet) => not complete => keep waiting. If the Skyhook
+# CRD is absent the recipe has no nodewright, so skip rather than block. Skyhook
+# CRs are cluster-scoped (see validators/deployment/expected_resources.go).
+_skyhook_complete() {
+  kubectl get crd skyhooks.skyhook.nvidia.com >/dev/null 2>&1 || return 0
+  local states
+  states="$(kubectl get skyhooks.skyhook.nvidia.com \
+    -o jsonpath='{range .items[*]}{.status.status}{"\n"}{end}' 2>/dev/null)"
+  [[ -n "$states" ]] && ! grep -qxv 'complete' <<<"$states"
 }
 
 # Per-run unique OCI repo suffix. The committed config carries the stable
@@ -223,10 +240,18 @@ phase_install() {
   # conformance-phase checks evaluate a ready cluster. ClusterPolicy=ready implies
   # the DCGM exporter operand is rolled out; the two aggregated APIServices imply
   # prometheus-adapter is serving custom/external metrics.
-  # All three checks share a SINGLE READINESS_TIMEOUT_SECONDS budget: compute one
-  # deadline up front and pass each call the time remaining until it, so the
+  # All readiness checks share a SINGLE READINESS_TIMEOUT_SECONDS budget: compute
+  # one deadline up front and pass each call the time remaining until it, so the
   # combined barrier cannot run N x the per-check timeout.
+  #
+  # nodewright (skyhook) tuning is waited on FIRST: it reboots the GPU node to
+  # apply kernel tuning, re-initializing the gpu-operator operands after the
+  # operator first reports ClusterPolicy=ready. Checking ClusterPolicy/operands
+  # before that reboot lets the gate pass on a transient pre-reboot ready state,
+  # so wait for tuning to complete before the GPU/metrics checks.
   local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
+  wait_for "nodewright (skyhook) tuning complete" "$(( ready_deadline - SECONDS ))" \
+    _skyhook_complete
   wait_for "gpu-operator ClusterPolicy state=ready" "$(( ready_deadline - SECONDS ))" \
     _clusterpolicy_ready
   wait_for "custom.metrics.k8s.io APIService Available" "$(( ready_deadline - SECONDS ))" \
