@@ -63,6 +63,49 @@ TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
+# Convergence budget for the post-install readiness gate. Cold-boot p5.48xlarge
+# GPU-operator convergence (driver build/load -> toolkit -> device-plugin ->
+# DCGM exporter) plus prometheus-adapter APIService aggregation can take many
+# minutes, so this is generous; the gate fails closed if exceeded.
+READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-900}" # 15 min
+
+# wait_for polls <check-cmd...> every 10s until it succeeds (exit 0) or
+# <timeout-seconds> elapses. Fail-closed: returns non-zero with diagnostics on
+# timeout, so a cluster that never converges fails the install loudly instead of
+# handing a not-ready cluster to `aicr validate`. The check command must tolerate
+# the target resource not existing yet (a missing resource is a normal early
+# state), which the kubectl jsonpath checks below do by comparing to "".
+wait_for() {
+  local desc="$1" timeout="$2"; shift 2
+  # Callers share one budget by passing the time remaining until a common
+  # deadline, which can reach 0 (or briefly go negative) once earlier checks
+  # consume it — clamp so the final check still gets one fail-closed attempt
+  # rather than a deadline in the past.
+  (( timeout < 0 )) && timeout=0
+  local deadline=$(( SECONDS + timeout ))
+  echo "::group::Wait: ${desc} (timeout ${timeout}s)"
+  until "$@" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo "::error::timed out after ${timeout}s waiting for: ${desc}" >&2
+      echo "::endgroup::"
+      return 1
+    fi
+    sleep 10
+  done
+  echo "ok: ${desc}"
+  echo "::endgroup::"
+}
+
+# Readiness predicates for the post-install gate. Each is fail-closed: an absent
+# resource or unset status yields a non-matching value, so wait_for keeps polling.
+_clusterpolicy_ready() {
+  [[ "$(kubectl get clusterpolicy cluster-policy \
+    -o jsonpath='{.status.state}' 2>/dev/null)" == "ready" ]]
+}
+_apiservice_available() {
+  [[ "$(kubectl get apiservice "$1" \
+    -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)" == "True" ]]
+}
 
 # Per-run unique OCI repo suffix. The committed config carries the stable
 # prefix only; we append `-${RUN_ID}` once, idempotently, so re-running a
@@ -171,6 +214,25 @@ phase_install() {
   kubectl get nodes -o wide
   kubectl get pods -A | grep -Ev '\s+Running\s+|\s+Completed\s+' || true
   echo "::endgroup::"
+
+  # Readiness barrier the helmfile path lacks. The helm deploy.sh `kubectl wait`s
+  # on operator-driven convergence; `helmfile apply` returns once each release's
+  # own objects are Ready, leaving the GPU stack (ClusterPolicy -> DCGM exporter)
+  # and the prometheus-adapter metrics APIServices still reconciling. Gating here
+  # lets the stack converge before `aicr validate` runs, so deployment- and
+  # conformance-phase checks evaluate a ready cluster. ClusterPolicy=ready implies
+  # the DCGM exporter operand is rolled out; the two aggregated APIServices imply
+  # prometheus-adapter is serving custom/external metrics.
+  # All three checks share a SINGLE READINESS_TIMEOUT_SECONDS budget: compute one
+  # deadline up front and pass each call the time remaining until it, so the
+  # combined barrier cannot run N x the per-check timeout.
+  local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
+  wait_for "gpu-operator ClusterPolicy state=ready" "$(( ready_deadline - SECONDS ))" \
+    _clusterpolicy_ready
+  wait_for "custom.metrics.k8s.io APIService Available" "$(( ready_deadline - SECONDS ))" \
+    _apiservice_available v1beta1.custom.metrics.k8s.io
+  wait_for "external.metrics.k8s.io APIService Available" "$(( ready_deadline - SECONDS ))" \
+    _apiservice_available v1beta1.external.metrics.k8s.io
 }
 
 phase_conformance() {
