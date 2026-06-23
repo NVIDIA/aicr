@@ -24,7 +24,8 @@
 # Phases:
 #   prep         snapshot + recipe + dry-run validate + bundle
 #   install      helmfile apply (deploys gpu-operator, kubeflow, ...)
-#   conformance  conformance validate + emit signed evidence bundle
+#   conformance  validate ALL phases (deployment + conformance + performance)
+#                + emit signed evidence bundle
 #   train        submit TrainJob, wait for completion, capture logs
 #   verify       aicr evidence verify against the signed bundle
 #   all          run every phase in order (for local reproduction)
@@ -174,10 +175,25 @@ phase_install() {
 
 phase_conformance() {
   inject_push_target
-  echo "::group::Conformance validate + emit signed evidence"
+  # Run ALL validation phases, not just conformance. The deployment phase is
+  # the readiness barrier this UAT was missing: its health-check asserts poll
+  # (chainsaw assert, ~6m budget) until the GPU stack converges — gpu-operator
+  # ClusterPolicy reaches state=ready, the DRA kubelet-plugin DaemonSet is
+  # fully rolled out, and nodewright node tuning completes. The helmfile bundle
+  # (unlike the helm deploy.sh, which `kubectl wait`s on these) returns from
+  # `helmfile apply` as soon as each release's own resources are ready, leaving
+  # operator-driven work in flight; running conformance alone then validated a
+  # not-yet-converged cluster and failed. The deployment phase gates that
+  # convergence deployer-agnostically. The performance phase's only check,
+  # nccl-all-reduce-bw, needs >=2 GPU nodes for its East-West fabric test and
+  # skips gracefully on this single-GPU-node cluster (skip != fail); it
+  # activates automatically if the cluster ever scales to multiple GPU nodes.
+  # Evidence is rendered/attested from the merged multi-phase report, so the
+  # signed bundle covers all phases.
+  echo "::group::Validate (all phases) + emit signed evidence"
   "${AICR_BIN}" validate \
     --config "${config}" \
-    --phase conformance \
+    --phase all \
     --output report.json
   echo "::endgroup::"
 
