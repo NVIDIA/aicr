@@ -40,7 +40,10 @@ jobs:
   uat-aws:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Bumped from 90 to 110 to absorb the validate step now running all phases
+    # (deployment readiness gate + conformance + NCCL performance) rather than
+    # conformance alone.
+    timeout-minutes: 110
     permissions:
       contents: read
       actions: read
@@ -227,10 +230,19 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run install "${TEST_CONFIG}"
 
-      - name: UAT - conformance (validate + emit signed evidence)
+      # Runs ALL validate phases (deployment + conformance + performance), not
+      # just conformance. The deployment phase polls component health checks
+      # until the GPU stack converges — the readiness barrier the helmfile
+      # bundle lacks (the helm deploy.sh `kubectl wait`s instead). Step id stays
+      # `conformance` so the train/verify gating below is unaffected.
+      - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
         if: steps.install.outcome == 'success'
-        timeout-minutes: 20
+        # Larger budget than conformance-only: the deployment phase waits out
+        # cold-start GPU bring-up (driver install/migration). (The performance
+        # phase's NCCL benchmark skips on single-GPU-node clusters like this
+        # one, so it is not the long pole here.)
+        timeout-minutes: 40
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -315,7 +327,7 @@ jobs:
             echo "| Connection | ${{ steps.client.outcome }} |"
             echo "| Prep | ${{ steps.prep.outcome }} |"
             echo "| Install | ${{ steps.install.outcome }} |"
-            echo "| Conformance | ${{ steps.conformance.outcome }} |"
+            echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then

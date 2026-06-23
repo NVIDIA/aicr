@@ -1301,12 +1301,35 @@ components:
           description: Optional unit of measurement
           example: "MB"
 
+    ItemEntry:
+      type: object
+      description: |
+        One ordered element of a Subtype.items list. Mirrors Subtype's
+        scalar-value contract: data holds Reading scalars; context holds
+        string-typed descriptive metadata. Used when a subtype carries a
+        homogeneous array of structured records (e.g. one entry per PF).
+      properties:
+        data:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Reading"
+          description: Key-value pairs of scalar measurements for this item.
+        context:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional descriptive metadata for this item (string-typed).
+
     Subtype:
       type: object
-      description: A subtype within a measurement containing specific configuration data
-      required: [name, data]
+      description: |
+        A subtype within a measurement. A subtype must carry at least one
+        entry in `data` or `items`. `items` is used when the subtype payload
+        is naturally a list of structured records (e.g. per-PF entries under
+        a NetworkTopology `pfs` subtype).
+      required: [subtype]
       properties:
-        name:
+        subtype:
           type: string
           description: Subtype identifier (e.g., service name, configuration category)
           example: containerd.service
@@ -1320,17 +1343,28 @@ components:
           additionalProperties: true
           description: Optional metadata about the source and collection method
           nullable: true
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ItemEntry"
+          description: |
+            Optional ordered list of structured records. Independent of `data` —
+            a subtype may carry either or both.
 
     Measurement:
       type: object
-      description: A measurement grouping related configuration subtypes
+      description: |
+        A measurement grouping related configuration subtypes. Most types
+        appear at most once per snapshot; `NetworkTopology` is currently
+        emitted at most once but is the planned multi-instance exception
+        (one Measurement per discovered hardware group).
       required: [type, subtypes]
       properties:
         type:
           type: string
           description: Measurement type category
-          enum: [systemd, os, k8s, gpu]
-          example: systemd
+          enum: [K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology]
+          example: SystemD
         subtypes:
           type: array
           items:
