@@ -537,7 +537,17 @@ func validateCmdFlags() []cli.Flag {
 			Name: "emit-attestation",
 			Usage: `Directory to write a recipe-evidence v1 attestation bundle (signed when --push is set).
 	Produces summary-bundle/, optionally logs-bundle/, and pointer.yaml suitable for copying to recipes/evidence/<recipe>.yaml.
+	The bundle is minimized by default (sensitive snapshot fields and CTRF logs removed); use --full to ship raw payloads.
 	See ADR-007 (docs/design/007-recipe-evidence.md).`,
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name: flagFull,
+			Usage: `Emit the full (unredacted) evidence bundle. By default the bundle is minimized:
+	the snapshot is reduced to an allowlisted set of fields and per-test CTRF stdout/message are omitted,
+	so node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs are
+	not published. --full restores the complete payloads. The cryptographic verification story
+	(predicate digests, manifest binding, signature) holds either way.`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{

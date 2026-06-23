@@ -42,7 +42,16 @@ type BuildOptions struct {
 	// recipe.yaml and the in-toto subject digest.
 	RecipeYAML []byte
 
-	Snapshot     *snapshotter.Snapshot
+	// Snapshot is the full (raw) snapshot. The predicate's Fingerprint and
+	// CriteriaMatch are deliberately derived from this — the unredacted
+	// cluster state — so the conformance signal is identical whether or not
+	// the shipped snapshot bytes were minimized.
+	Snapshot *snapshotter.Snapshot
+
+	// SnapshotYAML is the byte payload written to the bundle's snapshot.yaml
+	// and bound (transitively, via the manifest) to the signature. In a
+	// minimal bundle this is a redacted projection of Snapshot and therefore
+	// intentionally differs from MarshalYAMLDeterministic(Snapshot).
 	SnapshotYAML []byte
 
 	BOM BOMInputs
@@ -55,6 +64,10 @@ type BuildOptions struct {
 	// Digest fields stay blank: the catalog tracks refs by tag and
 	// resolving to digest would require a registry round-trip per image.
 	ValidatorImages []ValidatorImage
+
+	// Redaction records the minimal-bundle redaction policy in the
+	// predicate. nil for full bundles.
+	Redaction *RedactionInfo
 
 	// AttestedAt overrides the wall-clock for tests.
 	AttestedAt time.Time
@@ -201,6 +214,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 			Digest:    manifestDigest,
 			FileCount: len(manifest.Files),
 		},
+		Redaction: opts.Redaction,
 	})
 
 	stmt, err := BuildStatement(recipeName, subjectDigest, pred)
