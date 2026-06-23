@@ -77,6 +77,11 @@ READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-900}" # 15 min
 # state), which the kubectl jsonpath checks below do by comparing to "".
 wait_for() {
   local desc="$1" timeout="$2"; shift 2
+  # Callers share one budget by passing the time remaining until a common
+  # deadline, which can reach 0 (or briefly go negative) once earlier checks
+  # consume it — clamp so the final check still gets one fail-closed attempt
+  # rather than a deadline in the past.
+  (( timeout < 0 )) && timeout=0
   local deadline=$(( SECONDS + timeout ))
   echo "::group::Wait: ${desc} (timeout ${timeout}s)"
   until "$@" >/dev/null 2>&1; do
@@ -218,11 +223,15 @@ phase_install() {
   # conformance-phase checks evaluate a ready cluster. ClusterPolicy=ready implies
   # the DCGM exporter operand is rolled out; the two aggregated APIServices imply
   # prometheus-adapter is serving custom/external metrics.
-  wait_for "gpu-operator ClusterPolicy state=ready" "${READINESS_TIMEOUT_SECONDS}" \
+  # All three checks share a SINGLE READINESS_TIMEOUT_SECONDS budget: compute one
+  # deadline up front and pass each call the time remaining until it, so the
+  # combined barrier cannot run N x the per-check timeout.
+  local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
+  wait_for "gpu-operator ClusterPolicy state=ready" "$(( ready_deadline - SECONDS ))" \
     _clusterpolicy_ready
-  wait_for "custom.metrics.k8s.io APIService Available" "${READINESS_TIMEOUT_SECONDS}" \
+  wait_for "custom.metrics.k8s.io APIService Available" "$(( ready_deadline - SECONDS ))" \
     _apiservice_available v1beta1.custom.metrics.k8s.io
-  wait_for "external.metrics.k8s.io APIService Available" "${READINESS_TIMEOUT_SECONDS}" \
+  wait_for "external.metrics.k8s.io APIService Available" "$(( ready_deadline - SECONDS ))" \
     _apiservice_available v1beta1.external.metrics.k8s.io
 }
 
