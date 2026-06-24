@@ -84,23 +84,6 @@ builds:
       - amd64
       - arm64
 
-  - id: testgrid-publish
-    binary: testgrid-publish
-    mod_timestamp: *build-timestamp
-    dir: tools/testgrid-publish
-    env:
-      - CGO_ENABLED=0
-      - GOFLAGS=-mod=vendor
-    flags:
-      - -trimpath
-    ldflags:
-      - -w -s -extldflags "-static"
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-
   - id: aicrd
     binary: aicrd
     mod_timestamp: *build-timestamp

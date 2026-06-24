@@ -43,6 +43,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -72,7 +73,7 @@ func main() {
 	flag.StringVar(&bucket, "bucket", "", "GCS bucket to publish to (required)")
 	flag.StringVar(&sourceClass, "source-class", sourceClassUAT, "bundle origin: "+sourceClassUAT+" or "+sourceClassCommunity)
 	flag.BoolVar(&plainHTTP, "plain-http", false, "use plain HTTP for OCI registry (dev only)")
-	flag.BoolVar(&insecureTLS, "insecure-tls", false, "skip TLS verification for OCI registry")
+	flag.BoolVar(&insecureTLS, "insecure-tls", false, "skip TLS verification for OCI registry (dev only)")
 	flag.BoolVar(&dryRun, "dry-run", false, "print output paths and started.json without writing to GCS")
 	flag.Parse()
 
@@ -166,8 +167,14 @@ func run(ctx context.Context, cfg runConfig) error {
 	// ── 3. Extract AttestedAt, aicr_version, and k8s_version from the predicate
 	pred, predErr := loadPredicate(dir)
 	if predErr != nil {
-		// Unsigned / local bundles may not have a full predicate; use now.
-		slog.Warn("could not load predicate, using current time", "error", predErr)
+		// Only a missing predicate is a safe fallback — unsigned/local bundles
+		// legitimately omit statement.intoto.json. A corrupt or unparseable
+		// predicate means the bundle is broken; fail closed rather than
+		// fabricating an attestation timestamp.
+		if !stderrors.Is(predErr, errors.New(errors.ErrCodeNotFound, "")) {
+			return predErr
+		}
+		slog.Warn("predicate not found, using current time", "error", predErr)
 		pred = &attestation.Predicate{AttestedAt: time.Now().UTC()}
 	}
 	// Fingerprint carries the observed k8s server version; empty for local/unsigned bundles.

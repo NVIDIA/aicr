@@ -18,17 +18,23 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
-// setupFakeGcloud writes a fake gcloud shell script to dir and prepends dir to
-// PATH so exec.Command("gcloud", ...) finds it. Uses t.Setenv for race-safe,
-// automatic cleanup even when t.Fatal fires mid-test.
-func setupFakeGcloud(t *testing.T, exitCode int) {
+// setupFakeGcloud writes a fake gcloud shell script to bin and prepends bin to
+// PATH so exec.Command("gcloud", ...) finds it. The script records each GCS
+// destination ($4 of `gcloud storage cp <src> <dst>`) to GCLOUD_RECORD so
+// callers can assert upload order. Uses t.Setenv for race-safe cleanup.
+// Returns the path of the call-recorder file.
+func setupFakeGcloud(t *testing.T, exitCode int) string {
 	t.Helper()
 	bin := t.TempDir()
+	recordPath := filepath.Join(t.TempDir(), "calls.log")
 
-	script := "#!/bin/sh\n"
+	// $4 is the gs:// destination; $1=storage $2=cp $3=local-src $4=dst.
+	script := "#!/bin/sh\nprintf '%s\\n' \"$4\" >> \"$GCLOUD_RECORD\"\n"
 	if exitCode != 0 {
 		script += "exit 1\n"
 	}
@@ -39,6 +45,8 @@ func setupFakeGcloud(t *testing.T, exitCode int) {
 	}
 
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GCLOUD_RECORD", recordPath)
+	return recordPath
 }
 
 func TestGcloudCopySuccess(t *testing.T) {
@@ -76,13 +84,13 @@ func TestGcloudCopyCanceled(t *testing.T) {
 	cancel() // cancel immediately
 
 	err := gcloudCopy(ctx, "src", "gs://bucket/prefix/test.json")
-	// May or may not error depending on whether exec.CommandContext checks context
-	// before starting; we just verify it doesn't panic.
-	_ = err
+	if err == nil {
+		t.Fatal("gcloudCopy() expected error for pre-canceled context")
+	}
 }
 
 func TestWriteGCS(t *testing.T) {
-	setupFakeGcloud(t, 0)
+	recordPath := setupFakeGcloud(t, 0)
 
 	started := startedJSON{
 		Timestamp: 1749600000,
@@ -95,12 +103,29 @@ func TestWriteGCS(t *testing.T) {
 		Metadata:  started.Metadata,
 	}
 
+	const prefix = "groups/eks/h100-ubuntu/training/1749600000-abc12345"
 	err := writeGCS(context.Background(),
-		"aicr-testgrid-staging",
-		"groups/eks/h100-ubuntu/training/1749600000-abc12345",
+		"aicr-testgrid-staging", prefix,
 		started, finished, []byte("<testsuites/>"))
 	if err != nil {
 		t.Fatalf("writeGCS() unexpected error: %v", err)
+	}
+
+	// Assert the three uploads happened in the mandatory order:
+	// started.json → artifacts/junit.xml → finished.json
+	data, readErr := os.ReadFile(recordPath)
+	if readErr != nil {
+		t.Fatalf("read gcloud call record: %v", readErr)
+	}
+	got := strings.Fields(string(data))
+	base := "gs://aicr-testgrid-staging/" + prefix
+	want := []string{
+		base + "/started.json",
+		base + "/artifacts/junit.xml",
+		base + "/finished.json",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("upload order\n got:  %v\n want: %v", got, want)
 	}
 }
 
@@ -126,7 +151,6 @@ func TestWriteGCSContextCanceled(t *testing.T) {
 	started := startedJSON{Timestamp: 1, Metadata: map[string]string{}}
 	finished := finishedJSON{Timestamp: 1, Metadata: map[string]string{}}
 
-	// Should fail with context canceled error.
 	err := writeGCS(ctx, "bucket", "prefix", started, finished, []byte("<testsuites/>"))
 	if err == nil {
 		t.Fatal("writeGCS() expected error for canceled context")
