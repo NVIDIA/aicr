@@ -43,11 +43,11 @@ package main
 
 import (
 	"context"
-	stderrors "errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -174,7 +174,7 @@ func run(ctx context.Context, cfg runConfig) error {
 	criteria.K8sVersion = pred.Fingerprint.K8sVersion.Value
 
 	// ── 4. Generate deterministic build-id ───────────────────────────────────
-	buildID := buildID(pred.AttestedAt, digest)
+	bid := buildID(pred.AttestedAt, digest)
 
 	// ── 5. Convert CTRF phases → jUnit XML ───────────────────────────────────
 	junitXML, err := convertCTRF(dir)
@@ -183,7 +183,7 @@ func run(ctx context.Context, cfg runConfig) error {
 	}
 
 	// ── 6. Build GCS payload ──────────────────────────────────────────────────
-	gcsPrefix := fmt.Sprintf("groups/%s/%s", coord.Path(), buildID)
+	gcsPrefix := fmt.Sprintf("groups/%s/%s", coord.Path(), bid)
 
 	signerIdentity, signerIssuer := extractSigner(dir)
 
@@ -213,6 +213,7 @@ func run(ctx context.Context, cfg runConfig) error {
 	}
 
 	// ── 7. Write to GCS (ordered: started → junit → finished) ────────────────
+	slog.Info("writing to GCS", "bucket", cfg.bucket, "prefix", gcsPrefix)
 	// EvidenceBundlePushTimeout (2 min) is the right bound for three sequential
 	// network uploads; EvidenceBundleBuildTimeout is "local I/O only".
 	writeCtx, writeCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
@@ -261,8 +262,13 @@ func printDryRun(bucket, prefix string, started startedJSON, finished finishedJS
 	fmt.Printf("  artifacts/junit.xml (%d bytes)\n", len(junitXML))
 	fmt.Printf("  finished.json (passed=%v)\n", finished.Passed)
 	fmt.Printf("\nstarted.json metadata:\n")
-	for k, v := range started.Metadata {
-		if v != "" {
+	keys := make([]string, 0, len(started.Metadata))
+	for k := range started.Metadata {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if v := started.Metadata[k]; v != "" {
 			fmt.Printf("  %-20s = %s\n", k, v)
 		} else {
 			fmt.Printf("  %-20s = (missing)\n", k)
@@ -286,5 +292,5 @@ func junitAllPassed(xml []byte) bool {
 // (identity, issuer) from the Sigstore signing certificate in
 // attestation.AttestationFilename. Tracking issue: NVIDIA/aicr#1267.
 func readPointerFromAttestation(_ string) (*attestation.Pointer, error) {
-	return nil, stderrors.New("signer extraction not yet implemented")
+	return nil, errors.New(errors.ErrCodeMethodNotAllowed, "signer extraction not yet implemented")
 }
