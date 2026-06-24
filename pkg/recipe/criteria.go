@@ -117,6 +117,7 @@ const (
 	CriteriaAcceleratorB200       CriteriaAcceleratorType = "b200"
 	CriteriaAcceleratorA100       CriteriaAcceleratorType = "a100"
 	CriteriaAcceleratorL40        CriteriaAcceleratorType = "l40"
+	CriteriaAcceleratorL40S       CriteriaAcceleratorType = "l40s"
 	CriteriaAcceleratorRTXPro6000 CriteriaAcceleratorType = "rtx-pro-6000"
 )
 
@@ -139,6 +140,8 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 		return CriteriaAcceleratorA100, nil
 	case "l40":
 		return CriteriaAcceleratorL40, nil
+	case "l40s":
+		return CriteriaAcceleratorL40S, nil
 	case "rtx-pro-6000":
 		return CriteriaAcceleratorRTXPro6000, nil
 	default:
@@ -153,7 +156,7 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaAcceleratorTypes.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "b200", "gb200", "h100", "h200", "l40", "rtx-pro-6000"}
+	return []string{"a100", "b200", "gb200", "h100", "h200", "l40", "l40s", "rtx-pro-6000"}
 }
 
 // AllAcceleratorTypes returns the union of the static OSS list and values
@@ -346,7 +349,7 @@ type Criteria struct {
 	// Service is the Kubernetes service type (eks, gke, aks, oke, kind, lke, bcm).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, rtx-pro-6000).
+	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).

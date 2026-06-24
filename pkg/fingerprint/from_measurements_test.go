@@ -67,15 +67,17 @@ func TestFromMeasurements_PCIBackfill(t *testing.T) {
 	})
 
 	t.Run("unsupported SKU populates GPUModel + unknown-sku note, never the matching Accelerator value", func(t *testing.T) {
-		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("l40s")})
+		// a10 is a known PCI SKU (device_ids.go) but is not a recipe-supported
+		// accelerator enum, so it exercises the unsupported-SKU path.
+		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("a10")})
 		if got.Accelerator.Value != "" {
-			t.Errorf("Accelerator.Value = %q, want empty (l40s is not a recipe-supported enum)", got.Accelerator.Value)
+			t.Errorf("Accelerator.Value = %q, want empty (a10 is not a recipe-supported enum)", got.Accelerator.Value)
 		}
 		if got.Accelerator.Note != noteUnknownSKU || got.Accelerator.Source != sourceAcceleratorPCI {
 			t.Errorf("Accelerator = %+v, want unknown-sku note from PCI (GPU present but unsupported)", got.Accelerator)
 		}
-		if got.GPUModel.Value != "l40s" || got.GPUModel.Source != sourceAcceleratorPCI {
-			t.Errorf("GPUModel = %+v, want value l40s from PCI", got.GPUModel)
+		if got.GPUModel.Value != "a10" || got.GPUModel.Source != sourceAcceleratorPCI {
+			t.Errorf("GPUModel = %+v, want value a10 from PCI", got.GPUModel)
 		}
 	})
 

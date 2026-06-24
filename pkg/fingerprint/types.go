@@ -71,7 +71,7 @@ type Fingerprint struct {
 	Service Dimension `json:"service" yaml:"service"`
 
 	// Accelerator is the recipe-supported GPU SKU used for criteria
-	// matching (h100, h200, gb200, b200, a100, l40, rtx-pro-6000). It is
+	// matching (h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000). It is
 	// intentionally limited to the pkg/recipe accelerator enum: a GPU that
 	// AICR does not have recipe coverage for is left empty here (see
 	// GPUModel for the descriptive identity). Sourced from the GFD
