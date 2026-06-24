@@ -272,7 +272,7 @@ func TestPrintDryRun(t *testing.T) {
 		Metadata:  started.Metadata,
 	}
 
-	err = printDryRun("my-bucket", "groups/eks/h100-ubuntu/training/1749600000-abc12345",
+	printErr := printDryRun("my-bucket", "groups/eks/h100-ubuntu/training/1749600000-abc12345",
 		started, finished, []byte("<testsuites/>"))
 
 	_ = w.Close()
@@ -283,8 +283,8 @@ func TestPrintDryRun(t *testing.T) {
 	}
 	output := string(outBytes)
 
-	if err != nil {
-		t.Fatalf("printDryRun() error = %v", err)
+	if printErr != nil {
+		t.Fatalf("printDryRun() error = %v", printErr)
 	}
 	if !strings.Contains(output, "my-bucket") {
 		t.Errorf("output missing bucket name:\n%s", output)

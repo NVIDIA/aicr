@@ -71,8 +71,11 @@ func parseCriteria(bundleDir string) (RecipeCriteria, error) {
 	path := filepath.Join(bundleDir, attestation.RecipeFilename)
 	data, err := readBoundedFile(path, defaults.MaxRecipePOSTBytes)
 	if err != nil {
-		return RecipeCriteria{}, errors.Wrap(errors.ErrCodeNotFound,
-			"recipe.yaml not found in bundle", err)
+		if os.IsNotExist(err) {
+			return RecipeCriteria{}, errors.Wrap(errors.ErrCodeNotFound,
+				"recipe.yaml not found in bundle", err)
+		}
+		return RecipeCriteria{}, err // already structured (e.g. ErrCodeInvalidRequest for size limit)
 	}
 
 	var r recipeFile
@@ -122,7 +125,10 @@ func loadPredicate(bundleDir string) (*attestation.Predicate, error) {
 	path := filepath.Join(bundleDir, attestation.StatementFilename)
 	data, err := readBoundedFile(path, defaults.MaxBundlePOSTBytes)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, "statement.intoto.json not found", err)
+		if os.IsNotExist(err) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound, "statement.intoto.json not found", err)
+		}
+		return nil, err
 	}
 
 	// The statement is a JSON object with a predicateType and predicate field.

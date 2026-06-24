@@ -112,6 +112,10 @@ func gcloudCopy(ctx context.Context, src, dst string) error {
 	cmd.Stdout = os.Stderr // gcloud progress to stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return errors.Wrap(errors.ErrCodeUnavailable,
+				fmt.Sprintf("gcloud storage cp %s → %s canceled", src, dst), ctx.Err())
+		}
 		return errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("gcloud storage cp %s → %s", src, dst), err)
 	}
