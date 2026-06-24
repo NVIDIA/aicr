@@ -1,0 +1,135 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Fork-based evidence signing — the Fulcio-bound leg of two-phase publish.
+#
+# A contributor publishes an UNSIGNED evidence bundle locally (where the
+# cluster lives, often behind a VPN that blocks Sigstore) and commits the
+# pointer:
+#
+#   aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml \
+#     --emit-attestation ./out --push ghcr.io/<owner>/aicr-evidence --no-sign
+#   cp ./out/pointer.yaml recipes/evidence/<slug>.yaml
+#
+# They then run THIS workflow from their fork's Actions tab. It discovers
+# every committed pointer with an empty signer block, signs the bundle each
+# one references with the runner's ambient OIDC identity (where Sigstore IS
+# reachable), patches the pointer's signer block in place, and commits it
+# back to the branch. Clean no-op when there is nothing unsigned.
+#
+# Why workflow_dispatch (Option A): no recipe-name or bundle-ref inputs to
+# thread through — the committed pointer is the work item, and it already
+# carries bundle.oci + bundle.digest. Manual dispatch keeps the commit-back
+# predictable (no surprise commits) and avoids the loop-guards an automatic
+# push trigger would require.
+#
+# Follow-up — Option B (auto-trigger on push). Lower friction but needs:
+#   * skip the run entirely when no unsigned pointer is present;
+#   * a loop-guard so the workflow's own signing commit does not re-trigger
+#     it (e.g. gate on the actor / commit message, or [skip ci]);
+#   * graceful handling on forks where Actions or id-token are disabled.
+# Land Option A first; add B once the discover-and-patch path is proven.
+#
+# Security note: this runs in the *contributor's fork* on a branch they
+# control, signing with the fork's own GitHub Actions OIDC identity. The
+# id-token:write / contents:write grants act on the fork, not upstream —
+# there is no pull_request_target / untrusted-ref exposure (it is manual
+# dispatch on the fork's own code).
+#
+# The fork's aicr-evidence registry package must be PUBLIC: the pre-sign
+# pull (and the upstream evidence gate) fetch the bundle, and a private
+# package returns HTTP 403. The signing step fails with a clear message
+# pointing at this when it can't pull.
+
+name: "Recipe Evidence: Sign"
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # commit the patched pointer(s) back to the branch
+  id-token: write   # ambient OIDC for keyless Fulcio/Rekor signing
+
+concurrency:
+  # Serialize per branch; do NOT cancel in progress — a cancel mid-sign
+  # could leave a bundle signed in the registry but its pointer un-patched.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sign unsigned evidence pointers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          # Do not persist the push token in .git/config: it would sit there
+          # across the fork-controlled `go build` step. The push step below
+          # supplies the token explicitly only when it needs it.
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Build aicr
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          # Verify the vendored dependency tree against go.sum before building
+          # the binary that will sign with the runner's OIDC identity.
+          go mod verify
+          go build -o ./bin/aicr ./cmd/aicr
+
+      - name: Sign unsigned evidence pointers
+        id: sign
+        env:
+          AICR: ${{ github.workspace }}/bin/aicr
+        run: .github/scripts/evidence-sign-unsigned.sh
+
+      - name: Commit signed pointers
+        # always() so that if one pointer fails to sign, the ones that DID
+        # sign are still committed — otherwise the registry would hold a signed
+        # bundle whose committed pointer stays unsigned. The job still fails
+        # (the sign step exited non-zero), surfacing the failure.
+        if: ${{ always() && steps.sign.outputs.signed != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- recipes/evidence/; then
+            echo "No pointer changes to commit (nothing to sign)."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add recipes/evidence/
+          # -s adds a `Signed-off-by:` (DCO) trailer matching the bot author,
+          # so the DCO bot passes on the commit-back. The commit is NOT
+          # cryptographically signed (no -S) — it fills in the evidence
+          # pointer's signer block (the bundle signature); repo commit-signing
+          # policy is satisfied by the eventual squash-merge.
+          git commit -s -m "chore(evidence): sign pending evidence pointers"
+          # Push with the token supplied inline (credentials are not persisted
+          # in .git/config). A non-fast-forward here is a clear, recoverable
+          # failure: re-dispatch after pulling.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:${GITHUB_REF_NAME}"
