@@ -97,6 +97,16 @@ func TestConvertCTRF(t *testing.T) {
 			wantPassed:  true,
 			wantContain: []string{"<skipped"},
 		},
+		{
+			name: "unrecognized status produces error element",
+			phases: map[string]ctrf.Report{
+				"deployment": makeReport("deployment", []ctrf.TestResult{
+					{Name: "bogus-check", Status: "bogus", Message: "unknown status"},
+				}),
+			},
+			wantPassed:  false,
+			wantContain: []string{"<error", "unrecognized CTRF status: bogus"},
+		},
 	}
 
 	for _, tt := range tests {

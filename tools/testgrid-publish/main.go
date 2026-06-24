@@ -304,12 +304,14 @@ func printDryRun(bucket, prefix string, started startedJSON, finished finishedJS
 }
 
 // readPointerFromAttestation reads signer information from the DSSE-wrapped
-// attestation bundle. Returns nil without error when no attestation is present
-// (unsigned bundles are valid).
+// attestation bundle. Currently a stub — always returns ErrCodeInternal.
+// extractSigner swallows the error and emits empty signer metadata fields.
 //
 // TODO: implement DSSE envelope parsing to extract PointerSigner fields
 // (identity, issuer) from the Sigstore signing certificate in
 // attestation.AttestationFilename. Tracking issue: NVIDIA/aicr#1267.
+// When implemented, parse failures must NOT be swallowed the same way —
+// only a genuinely absent attestation file should fall back to empty strings.
 func readPointerFromAttestation(_ string) (*attestation.Pointer, error) {
 	return nil, errors.New(errors.ErrCodeInternal, "signer extraction not yet implemented")
 }
