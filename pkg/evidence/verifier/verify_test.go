@@ -69,6 +69,69 @@ func TestVerify_DirectoryHappyPath(t *testing.T) {
 	}
 }
 
+// TestVerify_PendingOnlyWhenExitZero guards the contract that "pending
+// signature" is strictly an exit-0 state: an unsigned bundle that verifies
+// cleanly is Pending, but one that also fails the manifest hash check is
+// reported as that failure (exit 2) and must NOT serialize as pending.
+func TestVerify_PendingOnlyWhenExitZero(t *testing.T) {
+	tests := []struct {
+		name        string
+		build       func(t *testing.T) string             // bundle root; defaults to buildTestBundle
+		tamper      func(t *testing.T, summaryDir string) // nil = leave the bundle intact
+		wantExit    int
+		wantPending bool
+	}{
+		{
+			name:        "clean unsigned bundle is pending",
+			wantExit:    ExitValidPassed,
+			wantPending: true,
+		},
+		{
+			name: "unsigned bundle with phase failures is not pending",
+			// An unsigned bundle that records a failed phase verifies as the
+			// informational exit-1, which must not be reported as pending.
+			build:       buildTestBundleFailedPhase,
+			wantExit:    ExitValidPhaseFailures,
+			wantPending: false,
+		},
+		{
+			name: "unsigned bundle that fails integrity is not pending",
+			// Tamper a bundle file so the manifest hash check fails (exit 2)
+			// while the signature step still skips as unsigned.
+			tamper: func(t *testing.T, summaryDir string) {
+				if err := os.WriteFile(filepath.Join(summaryDir, "recipe.yaml"),
+					[]byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: RecipeResult\nmaterialEdit: 1\n"), 0o600); err != nil {
+					t.Fatalf("write recipe: %v", err)
+				}
+			},
+			wantExit:    ExitInvalid,
+			wantPending: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			build := tt.build
+			if build == nil {
+				build = buildTestBundle
+			}
+			summary := summaryDirOf(t, build(t))
+			if tt.tamper != nil {
+				tt.tamper(t, summary)
+			}
+			res, err := Verify(context.Background(), VerifyOptions{Input: summary})
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if res.Exit != tt.wantExit {
+				t.Fatalf("Exit = %d, want %d", res.Exit, tt.wantExit)
+			}
+			if res.Pending != tt.wantPending {
+				t.Errorf("Pending = %v, want %v (exit %d)", res.Pending, tt.wantPending, res.Exit)
+			}
+		})
+	}
+}
+
 func TestVerify_TamperedFileFails(t *testing.T) {
 	bundleDir := buildTestBundle(t)
 	summary := summaryDirOf(t, bundleDir)

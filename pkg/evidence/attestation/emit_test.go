@@ -267,6 +267,30 @@ func TestBuildPointerInputsFromOutcome_SignedWithoutRekorLeavesIndexNil(t *testi
 	}
 }
 
+// TestBuildPointerInputsFromOutcome_PushedUnsigned covers the --no-sign
+// outcome: the bundle was pushed (so bundle.oci/digest are populated) but
+// not signed (Sign nil), so the resulting pointer carries a content
+// reference with an empty signer block — the "pending signature" state the
+// fork-based signing workflow later completes.
+func TestBuildPointerInputsFromOutcome_PushedUnsigned(t *testing.T) {
+	bundle := &Bundle{RecipeName: "x", Predicate: &Predicate{}}
+	in := buildPointerInputsFromOutcome(bundle, emitOutcome{
+		PushSummary: &PushResult{
+			Reference: "oci://ghcr.io/owner/aicr-evidence:tag",
+			Digest:    "sha256:abc",
+		},
+	})
+	if in.Signer != nil {
+		t.Errorf("pushed-unsigned outcome should leave Signer nil; got %+v", in.Signer)
+	}
+	if in.BundleOCI != "ghcr.io/owner/aicr-evidence:tag" {
+		t.Errorf("BundleOCI should be the scheme-trimmed push reference; got %q", in.BundleOCI)
+	}
+	if in.BundleHash != "sha256:abc" {
+		t.Errorf("BundleHash = %q, want sha256:abc", in.BundleHash)
+	}
+}
+
 func TestSignAndPush_NoPushReturnsZeroOutcome(t *testing.T) {
 	bundle := &Bundle{SummaryDir: "/tmp/x"}
 	out, err := signAndPush(context.Background(), bundle, signPushOptions{})

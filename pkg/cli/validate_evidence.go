@@ -38,6 +38,12 @@ type recipeEvidenceConfig struct {
 	PlainHTTP   bool
 	InsecureTLS bool
 
+	// NoSign pushes an unsigned bundle and writes a pointer with an empty
+	// signer block (requires Push). Defers Fulcio/Rekor signing; see
+	// attestation.EmitOptions.NoSign. CLI-only — there is no config-file
+	// equivalent, mirroring Full.
+	NoSign bool
+
 	// Full disables evidence minimization. Default (false) ships a redacted
 	// snapshot and CTRF reports with stdout/message omitted; --full ships the
 	// raw payloads. CLI-only — there is no config-file equivalent.
@@ -73,6 +79,7 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 		Push:        stringFlagOrConfig(cmd, flagPush, att.Push),
 		PlainHTTP:   boolFlagOrConfig(cmd, flagPlainHTTP, att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),
+		NoSign:      cmd.Bool(flagNoSign),
 		Full:        cmd.Bool(flagFull),
 		OIDCResolve: oidcResolveOptionsFromFlags(cmd),
 		AssumeYes:   cmd.Bool(flagAssumeYes),
@@ -115,11 +122,13 @@ func emitRecipeEvidence(
 	cfg *recipeEvidenceConfig,
 ) error {
 
-	// Signing happens only when --push is set (see attestation.Emit). Gate the
-	// interactive keyless login behind the identity-disclosure prompt before
-	// the long validation-and-push run can open a browser/device-code flow.
-	// Non-interactive token sources and non-TTY runs pass through inside the gate.
-	if cfg.Push != "" {
+	// Signing happens only when --push is set without --no-sign (see
+	// attestation.Emit). Gate the interactive keyless login behind the
+	// identity-disclosure prompt before the long validation-and-push run can
+	// open a browser/device-code flow. Non-interactive token sources and
+	// non-TTY runs pass through inside the gate; --no-sign skips it entirely
+	// because no OIDC flow runs.
+	if cfg.Push != "" && !cfg.NoSign {
 		if err := confirmKeylessSigningDisclosure(cfg.OIDCResolve, cfg.AssumeYes, os.Stdin, os.Stderr); err != nil {
 			return err
 		}
@@ -136,6 +145,7 @@ func emitRecipeEvidence(
 		Push:         cfg.Push,
 		PlainHTTP:    cfg.PlainHTTP,
 		InsecureTLS:  cfg.InsecureTLS,
+		NoSign:       cfg.NoSign,
 		Full:         cfg.Full,
 		Recipe:       rec,
 		Snapshot:     snap,
