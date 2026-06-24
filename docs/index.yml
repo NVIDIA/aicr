@@ -90,3 +90,5 @@ navigation:
         path: contributor/skills.md
       - page: Maintaining AICR
         path: contributor/maintaining.md
+      - page: Publishing Recipe Evidence
+        path: contributor/evidence-publishing.md
