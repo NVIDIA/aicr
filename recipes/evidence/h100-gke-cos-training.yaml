@@ -1,26 +1,12 @@
-# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 attestations:
-  - attestedAt: 2026-06-15T15:22:56Z
+  - attestedAt: 2026-06-23T19:40:07Z
     bundle:
-      digest: sha256:a72d34fb3c2e03e66bf3cb4623ce08559fd45faba33c8cae62dda19eb1d28270
-      oci: ghcr.io/atif1996/aicr-evidence:h100-gke-cos-training-c7c84d1ed2ce
+      digest: sha256:33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317
+      oci: ghcr.io/yuanchen8911/aicr-evidence:h100-gke-cos-training-ee1657fedd59
       predicateType: https://aicr.nvidia.com/recipe-evidence/v1
     signer:
-      identity: atif1996@gmail.com
+      identity: yuanchen97@gmail.com
       issuer: https://github.com/login/oauth
-      rekorLogIndex: 1826548328
+      rekorLogIndex: 1931193974
 recipe: h100-gke-cos-training
 schemaVersion: 1.0.0

@@ -70,6 +70,11 @@ Example:
 				Category: catEvidence,
 			},
 			&cli.BoolFlag{
+				Name:     flagNoSign,
+				Usage:    "Push the bundle unsigned and write a pointer with an empty signer block, instead of signing. Sign it later via the fork-based CI workflow. Skips all OIDC/Fulcio/Rekor steps.",
+				Category: catEvidence,
+			},
+			&cli.BoolFlag{
 				Name:     flagPlainHTTP,
 				Usage:    "Use HTTP instead of HTTPS when pushing the evidence OCI artifact (local registry tests).",
 				Category: catEvidence,
@@ -112,13 +117,17 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "--push <oci-ref> is required")
 	}
 
-	// `evidence publish` always signs (push is required), so gate the
-	// interactive keyless login behind the identity-disclosure prompt before
-	// it can open a browser/device-code flow. Non-interactive token sources
-	// and non-TTY runs pass through inside the gate.
+	// Unless --no-sign is set, `evidence publish` signs (push is required), so
+	// gate the interactive keyless login behind the identity-disclosure prompt
+	// before it can open a browser/device-code flow. Non-interactive token
+	// sources and non-TTY runs pass through inside the gate. With --no-sign no
+	// OIDC flow runs, so the prompt is skipped entirely.
+	noSign := cmd.Bool(flagNoSign)
 	oidcResolve := oidcResolveOptionsFromFlags(cmd)
-	if err := confirmKeylessSigningDisclosure(oidcResolve, cmd.Bool(flagAssumeYes), os.Stdin, os.Stderr); err != nil {
-		return err
+	if !noSign {
+		if err := confirmKeylessSigningDisclosure(oidcResolve, cmd.Bool(flagAssumeYes), os.Stdin, os.Stderr); err != nil {
+			return err
+		}
 	}
 
 	err := attestation.Publish(ctx, attestation.PublishOptions{
@@ -126,6 +135,7 @@ func runEvidencePublishCmd(ctx context.Context, cmd *cli.Command) error {
 		Push:        push,
 		PlainHTTP:   cmd.Bool(flagPlainHTTP),
 		InsecureTLS: cmd.Bool(flagInsecureTLS),
+		NoSign:      noSign,
 		AICRVersion: version,
 		OIDCResolve: oidcResolve,
 	})

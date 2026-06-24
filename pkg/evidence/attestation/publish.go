@@ -46,6 +46,12 @@ type PublishOptions struct {
 	PlainHTTP   bool
 	InsecureTLS bool
 
+	// NoSign pushes the unsigned bundle and writes a pointer with an empty
+	// signer block instead of signing. The Fulcio/Rekor leg is deferred to
+	// `aicr evidence sign` (or the fork-based CI workflow). When false,
+	// Publish signs as before.
+	NoSign bool
+
 	// AICRVersion is stamped into the pushed OCI manifest's annotations.
 	// It does not alter the signed predicate, which is read verbatim from
 	// the bundle's statement.intoto.json — the bundle bytes (and their
@@ -101,6 +107,7 @@ func Publish(ctx context.Context, opts PublishOptions) error {
 		InsecureTLS: opts.InsecureTLS,
 		AICRVersion: opts.AICRVersion,
 		OIDCResolve: opts.OIDCResolve,
+		NoSign:      opts.NoSign,
 	})
 	if err != nil {
 		return err
