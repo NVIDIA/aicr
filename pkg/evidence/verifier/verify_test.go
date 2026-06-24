@@ -76,15 +76,23 @@ func TestVerify_DirectoryHappyPath(t *testing.T) {
 func TestVerify_PendingOnlyWhenExitZero(t *testing.T) {
 	tests := []struct {
 		name        string
+		build       func(t *testing.T) string             // bundle root; defaults to buildTestBundle
 		tamper      func(t *testing.T, summaryDir string) // nil = leave the bundle intact
 		wantExit    int
 		wantPending bool
 	}{
 		{
 			name:        "clean unsigned bundle is pending",
-			tamper:      nil,
 			wantExit:    ExitValidPassed,
 			wantPending: true,
+		},
+		{
+			name: "unsigned bundle with phase failures is not pending",
+			// An unsigned bundle that records a failed phase verifies as the
+			// informational exit-1, which must not be reported as pending.
+			build:       buildTestBundleFailedPhase,
+			wantExit:    ExitValidPhaseFailures,
+			wantPending: false,
 		},
 		{
 			name: "unsigned bundle that fails integrity is not pending",
@@ -102,7 +110,11 @@ func TestVerify_PendingOnlyWhenExitZero(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			summary := summaryDirOf(t, buildTestBundle(t))
+			build := tt.build
+			if build == nil {
+				build = buildTestBundle
+			}
+			summary := summaryDirOf(t, build(t))
 			if tt.tamper != nil {
 				tt.tamper(t, summary)
 			}

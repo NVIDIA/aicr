@@ -153,6 +153,9 @@ type VerifyResult struct {
 	// "all checks passed" or a false "invalid".
 	Pending bool `json:"pending,omitempty" yaml:"pending,omitempty"`
 
-	// FailureCause classifies a non-zero Exit. nil when Exit is 0/1.
+	// FailureCause classifies why the bundle was rejected. Set only when
+	// Exit is ExitInvalid (2); nil for Exit 0 (valid, possibly pending) and
+	// Exit 1 (valid bundle with recorded phase failures), which are not
+	// bundle-invalid outcomes.
 	FailureCause *FailureCause `json:"failureCause,omitempty" yaml:"failureCause,omitempty"`
 }
