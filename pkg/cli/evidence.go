@@ -25,7 +25,7 @@ func evidenceCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "evidence",
 		Category: functionalCategoryName,
-		Usage:    "Manage recipe evidence bundles: digest, publish, verify.",
+		Usage:    "Manage recipe evidence bundles: digest, publish, sign, verify.",
 		Description: `Operations on recipe-evidence v1 bundles.
 
 Bundles are produced by ` + "`aicr validate --emit-attestation`" + ` and consumed
@@ -37,12 +37,14 @@ Subcommands:
 
   digest   Print the canonical digest of a resolved recipe.
   publish  Sign and push an already-emitted bundle, then write its pointer.
+  sign     Sign an already-pushed, unsigned bundle and patch its pointer.
   verify   Verify a bundle's integrity claims.
 
 See docs/design/007-recipe-evidence.md for the trust model.`,
 		Commands: []*cli.Command{
 			evidenceDigestCmd(),
 			evidencePublishCmd(),
+			evidenceSignCmd(),
 			evidenceVerifyCmd(),
 		},
 	}
