@@ -14,86 +14,38 @@
 
 package main
 
-// Local implementation of the coordinate mapping from NVIDIA/aicr#1409
-// (pkg/recipe/coordinate.go). Once that PR merges and is tagged, replace
-// this file with:
-//
-//	import "github.com/NVIDIA/aicr/pkg/recipe"
-//	coord, err := recipe.CoordinateFor(criteria)
-//
-// The API here is intentionally identical to #1409 so the switch is a
-// find-replace with no logic change.
-
-import "github.com/NVIDIA/aicr/pkg/errors"
-
-const criteriaAnyValue = "any"
-
-// Coordinate is the canonical placement of an evidence bundle.
-// See https://github.com/NVIDIA/aicr/issues/1272 and PR #1409.
-type Coordinate struct {
-	Group     string // service, e.g. "eks"
-	Dashboard string // accelerator-os, e.g. "h100-ubuntu"
-	Tab       string // intent[-platform], e.g. "training" or "training-kubeflow"
-}
-
-// Path returns "<group>/<dashboard>/<tab>" — the GCS infix for
-// groups/{Path}/{build-id}/.
-func (co Coordinate) Path() string {
-	return co.Group + "/" + co.Dashboard + "/" + co.Tab
-}
-
-func (co Coordinate) String() string { return co.Path() }
+import (
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
 
 // RecipeCriteria holds the resolved dimensions extracted from recipe.yaml.
+// The coordinate dimensions (Service–Platform) feed pkg/recipe.CoordinateFor;
+// the K8s fields are testgrid-specific metadata that do not exist in recipe.Criteria.
 type RecipeCriteria struct {
-	Service      string // e.g. "eks"
-	Accelerator  string // e.g. "h100"
-	OS           string // e.g. "ubuntu"
-	Intent       string // e.g. "training"
-	Platform     string // optional, e.g. "kubeflow"
-	K8sVersion   string // full semver with leading "v" stripped, e.g. "1.33.4"
+	Service       string // e.g. "eks"
+	Accelerator   string // e.g. "h100"
+	OS            string // e.g. "ubuntu"
+	Intent        string // e.g. "training"
+	Platform      string // optional, e.g. "kubeflow"
+	K8sVersion    string // full semver with leading "v" stripped, e.g. "1.33.4"
 	K8sConstraint string // declared constraint, e.g. ">=1.28"
 }
 
-// CoordinateFor maps resolved criteria to a Coordinate.
-// Matches pkg/recipe.CoordinateFor from NVIDIA/aicr#1409 exactly.
-//
-// Required: service, accelerator, os, intent (concrete, non-"any").
-// Optional: platform (bare intent tab when empty or "any").
-func CoordinateFor(c RecipeCriteria) (Coordinate, error) {
-	service, err := requireConcrete("service", c.Service)
-	if err != nil {
-		return Coordinate{}, err
-	}
-	accelerator, err := requireConcrete("accelerator", c.Accelerator)
-	if err != nil {
-		return Coordinate{}, err
-	}
-	os, err := requireConcrete("os", c.OS)
-	if err != nil {
-		return Coordinate{}, err
-	}
-	intent, err := requireConcrete("intent", c.Intent)
-	if err != nil {
-		return Coordinate{}, err
-	}
-
-	tab := intent
-	if p := c.Platform; p != "" && p != criteriaAnyValue {
-		tab = intent + "-" + p
-	}
-
-	return Coordinate{
-		Group:     service,
-		Dashboard: accelerator + "-" + os,
-		Tab:       tab,
-	}, nil
+// CoordinateFor delegates to pkg/recipe.CoordinateFor after converting the
+// plain-string RecipeCriteria to a typed *recipe.Criteria.
+func CoordinateFor(c RecipeCriteria) (recipe.Coordinate, error) {
+	return recipe.CoordinateFor(toRecipeCriteria(c))
 }
 
-func requireConcrete(dim, value string) (string, error) {
-	if value == "" || value == criteriaAnyValue {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
-			dim+` dimension must be concrete (got "`+value+`")`)
+// toRecipeCriteria converts our local plain-string struct to the typed
+// *recipe.Criteria required by pkg/recipe.CoordinateFor. Normalization
+// (lowercase, trimSpace) has already been applied by parseCriteria.
+func toRecipeCriteria(c RecipeCriteria) *recipe.Criteria {
+	return &recipe.Criteria{
+		Service:     recipe.CriteriaServiceType(c.Service),
+		Accelerator: recipe.CriteriaAcceleratorType(c.Accelerator),
+		OS:          recipe.CriteriaOSType(c.OS),
+		Intent:      recipe.CriteriaIntentType(c.Intent),
+		Platform:    recipe.CriteriaPlatformType(c.Platform),
 	}
-	return value, nil
 }
