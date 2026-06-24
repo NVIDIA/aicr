@@ -40,6 +40,26 @@ spec:
   # in addition to the upstream `node-role.kubernetes.io/control-plane`,
   # and ships `local-path` as the default StorageClass.
   componentRefs:
+    # cert-manager: required by gpu-operator and nvsentinel.
+    # Not pre-installed on BCM.
+    - name: cert-manager
+      type: Helm
+      source: https://charts.jetstack.io
+      version: v1.20.2
+      valuesFile: components/cert-manager/values.yaml
+
+    # Restore cert-manager as a dependency for gpu-operator and nvsentinel
+    # (removed from base since OKE pre-installs it).
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - cert-manager
+
+    - name: nvsentinel
+      type: Helm
+      dependencyRefs:
+        - cert-manager
+
     # Persist Prometheus on the BCM-provisioned local-path StorageClass.
     - name: kube-prometheus-stack
       type: Helm

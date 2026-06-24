@@ -38,6 +38,14 @@ spec:
     # No aws-ebs-csi-driver equivalent needed.
     # Azure Disk CSI is a built-in AKS addon (enabled by default since AKS 1.21).
 
+    # cert-manager: required by gpu-operator and nvsentinel.
+    # Not pre-installed on AKS.
+    - name: cert-manager
+      type: Helm
+      source: https://charts.jetstack.io
+      version: v1.20.2
+      valuesFile: components/cert-manager/values.yaml
+
     # AKS-specific GPU Operator overrides
     # AKS pre-installs NVIDIA container toolkit; disable toolkit installation
     - name: gpu-operator
@@ -46,6 +54,7 @@ spec:
       valuesFile: components/gpu-operator/values-aks.yaml
       dependencyRefs:
         - network-operator
+        - cert-manager
 
     # NVIDIA Network Operator for InfiniBand RDMA on AKS ND-series.
     # Manifests deliver the full RDMA stack that the Helm chart does not template:
@@ -93,6 +102,13 @@ spec:
         controller:
           affinity:
             nodeAffinity: null
+
+    # Restore cert-manager as a dependency for nvsentinel
+    # (removed from base since OKE pre-installs it).
+    - name: nvsentinel
+      type: Helm
+      dependencyRefs:
+        - cert-manager
 
   validation:
     conformance:

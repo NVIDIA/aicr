@@ -32,13 +32,25 @@ spec:
 
   # LKE-specific components
   componentRefs:
-    # No CSI driver component needed.
-    # LKE provides default storage classes out of the box.
-    #
-    # No GPU operator overrides needed.
-    # LKE clusters start empty — GPU Operator manages all NVIDIA software
-    # (drivers, toolkit, DCGM). Base values are correct as-is.
-    []
+    # cert-manager: required by gpu-operator and nvsentinel.
+    # Not pre-installed on LKE.
+    - name: cert-manager
+      type: Helm
+      source: https://charts.jetstack.io
+      version: v1.20.2
+      valuesFile: components/cert-manager/values.yaml
+
+    # Restore cert-manager as a dependency for gpu-operator and nvsentinel
+    # (removed from base since OKE pre-installs it).
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - cert-manager
+
+    - name: nvsentinel
+      type: Helm
+      dependencyRefs:
+        - cert-manager
 
   validation:
     conformance:

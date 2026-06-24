@@ -41,7 +41,6 @@ spec:
       type: Helm
       dependencyRefs:
         - nfd
-        - cert-manager
         - kube-prometheus-stack
       overrides:
         gdrcopy:

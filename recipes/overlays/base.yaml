@@ -31,12 +31,6 @@ spec:
       version: 0.18.3
       valuesFile: components/nfd/values.yaml
 
-    - name: cert-manager
-      type: Helm
-      source: https://charts.jetstack.io
-      version: v1.20.2
-      valuesFile: components/cert-manager/values.yaml
-
     - name: gpu-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
@@ -44,7 +38,6 @@ spec:
       valuesFile: components/gpu-operator/values.yaml
       dependencyRefs:
         - nfd
-        - cert-manager
         - kube-prometheus-stack
 
     - name: nvsentinel
@@ -53,7 +46,6 @@ spec:
       version: v1.3.0
       valuesFile: components/nvsentinel/values.yaml
       dependencyRefs:
-        - cert-manager
         - gpu-operator
         # Direct edge so a refactor of an intermediate node (e.g.,
         # removing gpu-operator → kube-prometheus-stack) cannot

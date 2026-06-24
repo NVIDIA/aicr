@@ -113,7 +113,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+				"kubeflow-trainer": {"kube-prometheus-stack", "gpu-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "kubeflow-trainer"},
@@ -132,7 +132,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+				"kubeflow-trainer": {"kube-prometheus-stack", "gpu-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "kubeflow-trainer"},
@@ -168,7 +168,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+				"kubeflow-trainer": {"kube-prometheus-stack", "gpu-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "kubeflow-trainer"},

@@ -232,7 +232,8 @@ func TestAllValuesFileReferencesExist(t *testing.T) {
 }
 
 // TestAllDependencyReferencesExist verifies that all dependencyRefs
-// reference components that are defined in the same file or base.yaml.
+// reference components that are defined in the same file, base.yaml, or
+// any ancestor in the spec.base chain.
 func TestAllDependencyReferencesExist(t *testing.T) {
 	// Load base components first
 	baseContent, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
@@ -250,6 +251,7 @@ func TestAllDependencyReferencesExist(t *testing.T) {
 		baseComponents[comp.Name] = true
 	}
 
+	byName := loadOverlaysByName(t)
 	files := collectMetadataFiles(t)
 
 	for _, path := range files {
@@ -275,10 +277,13 @@ func TestAllDependencyReferencesExist(t *testing.T) {
 				overlayComponents[comp.Name] = true
 			}
 
+			// Build set of components from the full spec.base ancestor chain
+			chainComps := ancestorComponents(metadata.Metadata.Name, byName)
+
 			// Check all dependency references
 			for _, comp := range metadata.Spec.ComponentRefs {
 				for _, dep := range comp.DependencyRefs {
-					if !baseComponents[dep] && !overlayComponents[dep] {
+					if !baseComponents[dep] && !overlayComponents[dep] && !chainComps[dep] {
 						t.Errorf("componentRef %q references unknown dependency %q", comp.Name, dep)
 					}
 				}
@@ -732,8 +737,9 @@ func TestBaseAndOverlaysMergeWithoutConflict(t *testing.T) {
 	}
 }
 
-// TestMergedRecipesHaveNoCycles verifies that after merging base + overlay,
-// the resulting recipe has no circular dependencies.
+// TestMergedRecipesHaveNoCycles verifies that after merging the full
+// spec.base ancestor chain into base.yaml and then the overlay, the
+// resulting recipe has no circular dependencies.
 func TestMergedRecipesHaveNoCycles(t *testing.T) {
 	// Load base
 	baseContent, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
@@ -746,6 +752,7 @@ func TestMergedRecipesHaveNoCycles(t *testing.T) {
 		t.Fatalf("failed to parse %s: %v", baseYAMLFile, err)
 	}
 
+	byName := loadOverlaysByName(t)
 	files := collectMetadataFiles(t)
 
 	for _, path := range files {
@@ -765,10 +772,15 @@ func TestMergedRecipesHaveNoCycles(t *testing.T) {
 				t.Fatalf("failed to parse %s: %v", path, err)
 			}
 
-			// Create a copy of base spec for merging
+			// Start from base and merge all ancestors in chain order (oldest first)
 			mergedSpec := baseMetadata.Spec
+			for _, ancestorName := range ancestorChain(overlayMetadata.Metadata.Name, byName) {
+				if ancestor, ok := byName[ancestorName]; ok {
+					mergedSpec.Merge(&ancestor.Spec)
+				}
+			}
 
-			// Merge overlay
+			// Merge the overlay itself
 			mergedSpec.Merge(&overlayMetadata.Spec)
 
 			// Validate no cycles in merged result
@@ -1253,6 +1265,67 @@ func collectManifestFiles(t *testing.T) []string {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+// loadOverlaysByName loads all overlay YAML files into a map keyed by
+// metadata.name. Used to resolve spec.base chains in tests.
+func loadOverlaysByName(t *testing.T) map[string]*RecipeMetadata {
+	t.Helper()
+	files := collectMetadataFiles(t)
+	byName := make(map[string]*RecipeMetadata, len(files))
+	for _, path := range files {
+		content, err := GetEmbeddedFS().ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", path, err)
+		}
+		var md RecipeMetadata
+		if err := yaml.Unmarshal(content, &md); err != nil {
+			t.Fatalf("failed to parse %s: %v", path, err)
+		}
+		byName[md.Metadata.Name] = &md
+	}
+	return byName
+}
+
+// ancestorChain returns the ordered list of overlay names in the spec.base
+// chain of the given overlay (from oldest ancestor to direct parent), not
+// including the overlay itself or "base" (base.yaml is handled separately).
+// A cycle guard prevents infinite loops on malformed data.
+func ancestorChain(name string, byName map[string]*RecipeMetadata) []string {
+	var chain []string
+	visited := make(map[string]bool)
+	cur := name
+	for {
+		md, ok := byName[cur]
+		if !ok || md.Spec.Base == "" || md.Spec.Base == "base" {
+			break
+		}
+		parent := md.Spec.Base
+		if visited[parent] {
+			break // cycle guard
+		}
+		visited[parent] = true
+		chain = append([]string{parent}, chain...)
+		cur = parent
+	}
+	return chain
+}
+
+// ancestorComponents returns the set of component names defined across all
+// ancestors in the base chain of the given overlay (not including base.yaml
+// or the overlay itself).
+func ancestorComponents(name string, byName map[string]*RecipeMetadata) map[string]bool {
+	result := make(map[string]bool)
+	for _, ancestor := range ancestorChain(name, byName) {
+		md, ok := byName[ancestor]
+		if !ok {
+			continue
+		}
+		for _, comp := range md.Spec.ComponentRefs {
+			result[comp.Name] = true
+		}
+	}
+	return result
+}
 
 // collectMetadataFiles returns all YAML files in overlays/ (metadata only).
 func collectMetadataFiles(t *testing.T) []string {

@@ -36,4 +36,3 @@ spec:
         - components/agentgateway/manifests/inference-gateway.yaml
       dependencyRefs:
         - agentgateway-crds
-        - cert-manager

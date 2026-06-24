@@ -31,6 +31,14 @@ spec:
       value: ">= 1.28"
 
   componentRefs:
+    # cert-manager: required by gpu-operator and nvsentinel.
+    # Not pre-installed on GKE.
+    - name: cert-manager
+      type: Helm
+      source: https://charts.jetstack.io
+      version: v1.20.2
+      valuesFile: components/cert-manager/values.yaml
+
     # GKE-COS-specific GPU Operator overrides
     # GKE preinstalls NVIDIA drivers on COS; disable driver installation.
     # The GKE ResourceQuota that admits system-*-critical pods is synthesized
@@ -39,6 +47,7 @@ spec:
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-gke-cos.yaml
+      dependencyRefs: [cert-manager]
 
     # Enable Prometheus persistent storage for GKE (GKE PD CSI is built-in)
     - name: kube-prometheus-stack
@@ -76,6 +85,13 @@ spec:
               copyDirRoot: /etc/nodewright
               # Because what nodewright does is generally on /etc we need to reapply on reboot
               reapplyOnReboot: "true"
+
+    # Restore cert-manager as a dependency for nvsentinel
+    # (removed from base since OKE pre-installs it).
+    - name: nvsentinel
+      type: Helm
+      dependencyRefs:
+        - cert-manager
 
   validation:
     conformance:

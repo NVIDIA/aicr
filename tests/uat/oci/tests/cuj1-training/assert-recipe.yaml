@@ -34,7 +34,6 @@ constraints:
   - name: OS.sysctl./proc/sys/kernel/osrelease
     value: '>= 6.8'
 componentRefs: ## alphabetically sorted
-  - name: cert-manager
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler
@@ -46,7 +45,6 @@ componentRefs: ## alphabetically sorted
   - name: prometheus-adapter
   - name: prometheus-operator-crds
 deploymentOrder:
-  - cert-manager
   - nfd
   - nodewright-operator
   - prometheus-operator-crds

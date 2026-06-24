@@ -37,7 +37,6 @@ spec:
       type: Helm
       dependencyRefs:
         - nfd
-        - cert-manager
         - kube-prometheus-stack
 
     - name: nfd

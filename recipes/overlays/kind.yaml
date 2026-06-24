@@ -31,6 +31,14 @@ spec:
 
   # Kind-specific component overrides
   componentRefs:
+    # cert-manager: required by gpu-operator and nvsentinel.
+    # Not pre-installed on kind.
+    - name: cert-manager
+      type: Helm
+      source: https://charts.jetstack.io
+      version: v1.20.2
+      valuesFile: components/cert-manager/values.yaml
+
     # gpu-operator: configure for kind with GPU passthrough (nvkind)
     # Assumes host has NVIDIA drivers and container toolkit pre-configured
     - name: gpu-operator
@@ -98,6 +106,7 @@ spec:
             limits:
               cpu: 500m
               memory: 500Mi
+      dependencyRefs: [cert-manager]
 
     # kube-prometheus-stack: use emptyDir storage (default), reduce resources
     - name: kube-prometheus-stack
@@ -167,6 +176,7 @@ spec:
     # nvsentinel: reduce resources for local development
     - name: nvsentinel
       type: Helm
+      dependencyRefs: [cert-manager]
       overrides:
         platformConnector:
           resources:
