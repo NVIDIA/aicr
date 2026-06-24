@@ -131,13 +131,19 @@ func loadPredicate(bundleDir string) (*attestation.Predicate, error) {
 		return nil, err
 	}
 
-	// The statement is a JSON object with a predicateType and predicate field.
+	// The statement is a JSON object with predicateType and predicate fields.
 	var stmt struct {
-		Predicate json.RawMessage `json:"predicate"`
+		PredicateType string          `json:"predicateType"`
+		Predicate     json.RawMessage `json:"predicate"`
 	}
 	if err := json.Unmarshal(data, &stmt); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"failed to parse statement.intoto.json", err)
+	}
+	if stmt.PredicateType != "" && stmt.PredicateType != attestation.PredicateTypeV1 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("unsupported predicateType %q, expected %q",
+				stmt.PredicateType, attestation.PredicateTypeV1))
 	}
 	if stmt.Predicate == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "statement has no predicate field")

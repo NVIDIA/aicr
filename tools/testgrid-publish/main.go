@@ -161,7 +161,7 @@ func run(ctx context.Context, cfg runConfig) error {
 			nil, // pointer not used for direct OCI input
 		)
 		if err != nil {
-			return errors.Wrap(errors.ErrCodeUnavailable, "pull failed", err)
+			return errors.PropagateOrWrap(err, errors.ErrCodeUnavailable, "pull failed")
 		}
 		dir = mat.BundleDir
 		digest = mat.Digest
