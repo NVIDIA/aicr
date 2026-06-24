@@ -87,13 +87,23 @@ func TestConvertCTRF(t *testing.T) {
 			},
 			wantErr: true, // zero total tests → error, not silent SUCCESS
 		},
+		{
+			name: "pending test produces skipped element",
+			phases: map[string]ctrf.Report{
+				"deployment": makeReport("deployment", []ctrf.TestResult{
+					{Name: "pending-check", Status: ctrf.StatusPending},
+				}),
+			},
+			wantPassed:  true,
+			wantContain: []string{"<skipped"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			bundleDir := writeFakeCTRF(t, tt.phases)
 
-			xml, err := convertCTRF(bundleDir)
+			xmlBytes, passed, err := convertCTRF(bundleDir)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("convertCTRF() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -101,7 +111,7 @@ func TestConvertCTRF(t *testing.T) {
 				return
 			}
 
-			xmlStr := string(xml)
+			xmlStr := string(xmlBytes)
 			for _, want := range tt.wantContain {
 				if !strings.Contains(xmlStr, want) {
 					t.Errorf("XML missing %q\nXML:\n%s", want, xmlStr)
@@ -113,8 +123,8 @@ func TestConvertCTRF(t *testing.T) {
 				}
 			}
 
-			if got := junitAllPassed(xml); got != tt.wantPassed {
-				t.Errorf("junitAllPassed() = %v, want %v\nXML:\n%s", got, tt.wantPassed, xmlStr)
+			if passed != tt.wantPassed {
+				t.Errorf("allPassed = %v, want %v\nXML:\n%s", passed, tt.wantPassed, xmlStr)
 			}
 		})
 	}
@@ -130,11 +140,11 @@ func TestConvertCTRFDeterminism(t *testing.T) {
 	}
 	bundleDir := writeFakeCTRF(t, phases)
 
-	first, err := convertCTRF(bundleDir)
+	first, _, err := convertCTRF(bundleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := convertCTRF(bundleDir)
+	second, _, err := convertCTRF(bundleDir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,6 +48,11 @@ func writeGCS(
 	finished finishedJSON,
 	junitXML []byte,
 ) error {
+	if _, err := exec.LookPath("gcloud"); err != nil {
+		return errors.New(errors.ErrCodeUnavailable,
+			"gcloud not found in PATH: install Google Cloud SDK (https://cloud.google.com/sdk/docs/install)")
+	}
+
 	// Stage files locally first so each gcloud upload is a completed file.
 	tmp, err := os.MkdirTemp("", "testgrid-publish-gcs-")
 	if err != nil {
@@ -86,6 +91,8 @@ func writeGCS(
 
 	// Upload in order: started → junit → finished.
 	// The updater marks a build complete only when finished.json exists.
+	// Idempotency: build-id is deterministic (attestation timestamp + digest),
+	// so a retry after partial failure overwrites the same GCS paths cleanly.
 	uploads := []struct {
 		localPath string
 		gcsObject string

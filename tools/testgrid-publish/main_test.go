@@ -43,27 +43,6 @@ func TestResultString(t *testing.T) {
 	}
 }
 
-func TestJUnitAllPassed(t *testing.T) {
-	tests := []struct {
-		name string
-		xml  string
-		want bool
-	}{
-		{"empty", `<testsuites></testsuites>`, true},
-		{"all pass", `<testsuites><testsuite><testcase name="x"/></testsuite></testsuites>`, true},
-		{"has failure", `<testsuites><testsuite><testcase><failure message="oops"/></testcase></testsuite></testsuites>`, false},
-		{"has error", `<testsuites><testsuite><testcase><error message="crash"/></testcase></testsuite></testsuites>`, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := junitAllPassed([]byte(tt.xml))
-			if got != tt.want {
-				t.Errorf("junitAllPassed() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestExtractSignerNoAttestation(t *testing.T) {
 	// Bundle dir with no attestation.intoto.jsonl — both should be empty.
 	dir := t.TempDir()
@@ -245,6 +224,72 @@ func TestRunDryRunInvalidRecipe(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("run() expected error for invalid recipe, got nil")
+	}
+}
+
+// TestRunDryRunSummaryBundleAutoResolve verifies that --bundle-dir pointing at
+// a bundle parent directory auto-resolves to the nested summary-bundle/ subdir.
+func TestRunDryRunSummaryBundleAutoResolve(t *testing.T) {
+	parent := t.TempDir()
+	bundleDir := filepath.Join(parent, attestation.SummaryBundleDirName)
+	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	recipe := `
+criteria:
+  service: gke
+  accelerator: h100
+  os: cos
+  intent: inference
+`
+	if err := os.WriteFile(filepath.Join(bundleDir, attestation.RecipeFilename), []byte(recipe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report := makeReport("deployment", []ctrf.TestResult{
+		{Name: "ok", Status: ctrf.StatusPassed, Duration: 500},
+	})
+	data, _ := json.Marshal(report)
+	ctrfDir := filepath.Join(bundleDir, ctrfDirName)
+	if err := os.MkdirAll(ctrfDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ctrfDir, "deployment.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldStdout := os.Stdout
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	// Point at the *parent* dir — run() should auto-resolve to summary-bundle/.
+	err := run(context.Background(), runConfig{
+		bundleDir:   parent,
+		bucket:      "aicr-testgrid-staging",
+		sourceClass: sourceClassUAT,
+		dryRun:      true,
+	})
+	_ = w.Close()
+	if err != nil {
+		t.Fatalf("run() expected success with auto-resolved summary-bundle, got: %v", err)
+	}
+}
+
+// TestWriteGCSGcloudNotFound verifies writeGCS returns a clear error when
+// gcloud is not found on PATH.
+func TestWriteGCSGcloudNotFound(t *testing.T) {
+	// Set PATH to an empty dir so gcloud is not found.
+	t.Setenv("PATH", t.TempDir())
+
+	started := startedJSON{Timestamp: 1, Metadata: map[string]string{}}
+	finished := finishedJSON{Timestamp: 1, Metadata: map[string]string{}}
+
+	err := writeGCS(context.Background(), "bucket", "prefix",
+		started, finished, []byte("<testsuites/>"))
+	if err == nil {
+		t.Fatal("writeGCS() expected error when gcloud not in PATH")
 	}
 }
 

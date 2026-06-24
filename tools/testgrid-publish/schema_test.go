@@ -14,7 +14,18 @@
 
 package main
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+)
 
 func TestMetaKeys(t *testing.T) {
 	keys := MetaKeys()
@@ -60,6 +71,89 @@ func TestMetaKeys(t *testing.T) {
 	for i := range keys {
 		if i >= len(keys2) || keys[i] != keys2[i] {
 			t.Errorf("MetaKeys() not stable at index %d: %q vs %q", i, keys[i], keys2[i])
+		}
+	}
+}
+
+// TestMetaKeysMatchEmittedMetadata verifies that every key declared by
+// MetaKeys() actually appears in the started.json metadata emitted by run().
+func TestMetaKeysMatchEmittedMetadata(t *testing.T) {
+	dir := t.TempDir()
+
+	recipe := `
+criteria:
+  service: eks
+  accelerator: h100
+  os: ubuntu
+  intent: training
+`
+	if err := os.WriteFile(filepath.Join(dir, attestation.RecipeFilename), []byte(recipe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report := ctrf.Report{
+		ReportFormat: ctrf.ReportFormatCTRF,
+		SpecVersion:  ctrf.SpecVersion,
+		Results: ctrf.Results{
+			Tool:    ctrf.Tool{Name: "deployment"},
+			Summary: ctrf.Summary{Tests: 1, Passed: 1},
+			Tests:   []ctrf.TestResult{{Name: "ok", Status: ctrf.StatusPassed, Duration: 100}},
+		},
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrfDir := filepath.Join(dir, ctrfDirName)
+	if mkErr := os.MkdirAll(ctrfDir, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	if wErr := os.WriteFile(filepath.Join(ctrfDir, "deployment.json"), data, 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+
+	// Capture dry-run stdout.
+	oldStdout := os.Stdout
+	r, w, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatal(pipeErr)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
+
+	if runErr := run(context.Background(), runConfig{
+		bundleDir:   dir,
+		bucket:      "test-bucket",
+		sourceClass: sourceClassUAT,
+		dryRun:      true,
+	}); runErr != nil {
+		_ = w.Close()
+		t.Fatalf("run() error = %v", runErr)
+	}
+	_ = w.Close()
+
+	outBytes, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	output := string(outBytes)
+
+	// Parse emitted key names from lines like "  key_name             = ..."
+	emitted := make(map[string]bool)
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) == 2 {
+			emitted[strings.TrimSpace(parts[0])] = true
+		}
+	}
+
+	for _, k := range MetaKeys() {
+		if !emitted[k] {
+			t.Errorf("MetaKeys() key %q not found in dry-run output:\n%s", k, output)
 		}
 	}
 }

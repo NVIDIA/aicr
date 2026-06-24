@@ -42,7 +42,7 @@ import (
 //	other   → <testcase><error>
 //	skipped → <testcase><skipped/>
 //	pending → <testcase><skipped/>
-func convertCTRF(bundleDir string) ([]byte, error) {
+func convertCTRF(bundleDir string) ([]byte, bool, error) {
 	ctrfDir := filepath.Join(bundleDir, ctrfDirName)
 
 	reports := make(map[attestation.Phase]*ctrf.Report, len(attestation.AllPhases))
@@ -54,19 +54,19 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 				// Phase not present in this bundle — skip silently.
 				continue
 			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
+			return nil, false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("read %s.json", phase), err)
 		}
 		var r ctrf.Report
 		if err := json.Unmarshal(data, &r); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			return nil, false, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("parse %s.json", phase), err)
 		}
 		reports[phase] = &r
 	}
 
 	if len(reports) == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
+		return nil, false, errors.New(errors.ErrCodeInvalidRequest,
 			"bundle contains no CTRF phase reports under ctrf/")
 	}
 
@@ -78,7 +78,7 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 		totalTests += len(r.Results.Tests)
 	}
 	if totalTests == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
+		return nil, false, errors.New(errors.ErrCodeInvalidRequest,
 			"bundle CTRF reports contain zero test results across all phases")
 	}
 
@@ -138,9 +138,18 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 
 	out, err := xml.MarshalIndent(suites, "", "  ")
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "marshal junit xml", err)
+		return nil, false, errors.Wrap(errors.ErrCodeInternal, "marshal junit xml", err)
 	}
-	return append([]byte(xml.Header), out...), nil
+
+	// Derive allPassed from accumulated counts — avoids re-scanning marshaled XML.
+	allPassed := true
+	for _, s := range suites.TestSuites {
+		if s.Failures > 0 || s.Errors > 0 {
+			allPassed = false
+			break
+		}
+	}
+	return append([]byte(xml.Header), out...), allPassed, nil
 }
 
 // ctrfDirName is the bundle subdirectory holding CTRF phase reports.

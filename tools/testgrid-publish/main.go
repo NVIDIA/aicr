@@ -48,8 +48,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -128,16 +128,33 @@ func run(ctx context.Context, cfg runConfig) error {
 		digest = "local"
 		cleanup = func() {}
 		slog.Info("using pre-materialized bundle", "dir", dir)
+		// Auto-resolve a nested summary-bundle/ subdir: aicr validate writes
+		// bundles as <output>/summary-bundle/, so --bundle-dir <output> is the
+		// natural argument. Redirect silently if recipe.yaml is absent at the
+		// top level but present one level down.
+		if _, statErr := os.Stat(filepath.Join(dir, attestation.RecipeFilename)); os.IsNotExist(statErr) {
+			candidate := filepath.Join(dir, attestation.SummaryBundleDirName)
+			if _, statErr2 := os.Stat(filepath.Join(candidate, attestation.RecipeFilename)); statErr2 == nil {
+				slog.Info("auto-resolved summary-bundle subdir", "dir", candidate)
+				dir = candidate
+			}
+		}
 	} else {
 		// ── 1. Materialize the OCI bundle to a local temp directory ───────────
 		slog.Info("pulling bundle", "ref", cfg.bundleRef)
-		mat, err := verifier.MaterializeBundle(ctx,
+		// Bound the pull to the same 2-minute budget used for GCS uploads.
+		pullCtx, pullCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
+		defer pullCancel()
+		mat, err := verifier.MaterializeBundle(pullCtx,
 			verifier.VerifyOptions{
 				Input:       cfg.bundleRef,
 				PlainHTTP:   cfg.plainHTTP,
 				InsecureTLS: cfg.insecureTLS,
-				// Allow unpinned tags for CI convenience; digest-pinning is
-				// enforced at the GitHub Actions level (TG5 uses digest refs).
+				// Allow unpinned tags so operators can test with :latest during
+				// local dev. TG5 (the GitHub Actions integration) will enforce
+				// digest-pinned refs at the workflow level — NVIDIA/aicr#1267.
+				// Pinning here would break --bundle-dir smoke tests and early
+				// adoption before TG5 ships.
 				AllowUnpinnedTag: true,
 			},
 			verifier.InputFormOCI,
@@ -184,7 +201,7 @@ func run(ctx context.Context, cfg runConfig) error {
 	bid := buildID(pred.AttestedAt, digest)
 
 	// ── 5. Convert CTRF phases → jUnit XML ───────────────────────────────────
-	junitXML, err := convertCTRF(dir)
+	junitXML, allPassed, err := convertCTRF(dir)
 	if err != nil {
 		return err
 	}
@@ -207,7 +224,6 @@ func run(ctx context.Context, cfg runConfig) error {
 		},
 	}
 
-	allPassed := junitAllPassed(junitXML)
 	finishedMeta := make(map[string]string, len(started.Metadata))
 	for k, v := range started.Metadata {
 		finishedMeta[k] = v
@@ -285,13 +301,6 @@ func printDryRun(bucket, prefix string, started startedJSON, finished finishedJS
 			fmt.Printf("  %-20s = (missing)\n", k)
 		}
 	}
-}
-
-// junitAllPassed returns true when the jUnit XML has no failures or errors.
-func junitAllPassed(xml []byte) bool {
-	// Quick scan: if any <failure or <error element exists, the run failed.
-	s := string(xml)
-	return !strings.Contains(s, "<failure") && !strings.Contains(s, "<error")
 }
 
 // readPointerFromAttestation reads signer information from the DSSE-wrapped

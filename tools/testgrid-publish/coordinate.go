@@ -40,6 +40,7 @@ func CoordinateFor(c RecipeCriteria) (recipe.Coordinate, error) {
 // toRecipeCriteria converts our local plain-string struct to the typed
 // *recipe.Criteria required by pkg/recipe.CoordinateFor. Normalization
 // (lowercase, trimSpace) has already been applied by parseCriteria.
+// Validation (empty, "any", "/") is enforced by recipe.CoordinateFor itself.
 func toRecipeCriteria(c RecipeCriteria) *recipe.Criteria {
 	return &recipe.Criteria{
 		Service:     recipe.CriteriaServiceType(c.Service),

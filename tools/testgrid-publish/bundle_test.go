@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
@@ -159,6 +160,19 @@ func TestParseCriteriaMissingFile(t *testing.T) {
 	_, err := parseCriteria(t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for missing recipe.yaml")
+	}
+}
+
+func TestParseCriteriaOversizeFile(t *testing.T) {
+	dir := t.TempDir()
+	big := make([]byte, defaults.MaxRecipePOSTBytes+1)
+	copy(big, []byte("criteria:\n  service: eks\n"))
+	if err := os.WriteFile(filepath.Join(dir, attestation.RecipeFilename), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseCriteria(dir)
+	if err == nil {
+		t.Fatal("expected error for oversized recipe.yaml")
 	}
 }
 
