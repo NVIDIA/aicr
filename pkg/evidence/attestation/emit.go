@@ -386,18 +386,9 @@ func buildPointerInputsFromOutcome(bundle *Bundle, out emitOutcome) PointerInput
 		in.BundleOCI = oci.TrimScheme(out.PushSummary.Reference)
 		in.BundleHash = out.PushSummary.Digest
 	}
-	if out.Sign != nil {
-		signer := &PointerSigner{
-			Identity: out.Sign.Identity,
-			Issuer:   out.Sign.Issuer,
-		}
-		// --no-rekor signing returns RekorLogIndex == 0 with no entry
-		// created; treat zero as "no Rekor entry" at this boundary.
-		if out.Sign.RekorLogIndex > 0 {
-			idx := out.Sign.RekorLogIndex
-			signer.RekorLogIndex = &idx
-		}
-		in.Signer = signer
-	}
+	// PointerSignerFromSignature applies the zero-Rekor rule: a
+	// SignedAttestation.RekorLogIndex of 0 is the "no Rekor entry" sentinel
+	// (e.g. --no-rekor) and maps to a nil index. nil when out.Sign is nil.
+	in.Signer = PointerSignerFromSignature(out.Sign)
 	return in
 }
