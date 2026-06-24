@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // createTestBundle creates a minimal bundle directory with checksums generated
@@ -134,7 +136,7 @@ func TestVerifyBundle_RejectsEmptyDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := attestation.NewKeylessVerificationIdentity(certID)
+	id := attestation.NewKeylessVerificationIdentity(certID, nil)
 	tlog := attestation.NewRequireTLogPolicy()
 
 	_, err = attestation.VerifyStatementWith(context.Background(), []byte("{}"), id, tlog, nil)
@@ -538,6 +540,50 @@ func writeFakeBundleAttestation(t *testing.T, dir, content string) {
 	}
 }
 
+// writeMinimalBundleAttestation writes a bundle attestation that is just valid
+// enough to parse through sigstore-go's bundle.NewBundle (a v0.3 bundle with a
+// public-key verification material, a DSSE envelope, and no tlog entries) so
+// that VerifyStatementWith reaches id.TrustedMaterial(ctx). It carries no real
+// signature, so verification fails; the point is that the failure occurs at
+// trust-root resolution, not bundle parsing, which is exactly what the
+// --trust-root flow test needs to exercise.
+func writeMinimalBundleAttestation(t *testing.T, dir string) {
+	t.Helper()
+	payload := base64.StdEncoding.EncodeToString([]byte(`{"_type":"https://in-toto.io/Statement/v1"}`))
+	sig := base64.StdEncoding.EncodeToString([]byte("not-a-real-signature"))
+	pub := base64.StdEncoding.EncodeToString([]byte("fake-public-key-bytes"))
+	content := fmt.Sprintf(`{
+"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json",
+"verificationMaterial":{"publicKey":{"hint":"%s"}},
+"dsseEnvelope":{"payload":"%s","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"%s"}]}
+}`, pub, payload, sig)
+	writeFakeBundleAttestation(t, dir, content)
+}
+
+// TestVerify_TrustRootOption_LoaderFailure proves that opts.TrustRoot is
+// resolved up front and that a bad --trust-root file fails fast with the
+// loader's coded error rather than being folded into a verification-failure
+// result. A missing trusted_root.json must surface as a hard
+// ErrCodeInvalidRequest whose message names the trust root file (proving the
+// trust-root branch ran, not a generic attestation failure).
+func TestVerify_TrustRootOption_LoaderFailure(t *testing.T) {
+	dir := createTestBundle(t)
+	writeMinimalBundleAttestation(t, dir)
+
+	_, err := Verify(context.Background(), dir, &VerifyOptions{
+		TrustRoot: "/no/such/trusted_root.json",
+	})
+	if err == nil {
+		t.Fatal("expected a hard error for a missing --trust-root file, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "trust root file") {
+		t.Errorf("error does not name the trust root file (trust-root branch may not have run); got: %v", err)
+	}
+}
+
 func TestVerify_KeyOption_UnknownScheme(t *testing.T) {
 	// "bogus://x" is not a recognized KMS scheme, so NewKeyVerificationIdentity
 	// treats it as a PEM path, fails to open the file, and returns
@@ -590,5 +636,20 @@ func TestVerify_InvalidIdentityPattern(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("Verify() with invalid identity pattern should return error")
+	}
+}
+
+// TestNewUnionTrustedRoot_LoaderErrorPropagates confirms newUnionTrustedRoot
+// loads the private root eagerly and returns the loader's classified error: a
+// missing trusted_root.json is a user-file failure (ErrCodeInvalidRequest), not
+// a server fault. Returning the error here (rather than deferring it into the
+// source closure) is what lets Verify fail fast on a bad --trust-root.
+func TestNewUnionTrustedRoot_LoaderErrorPropagates(t *testing.T) {
+	src, err := newUnionTrustedRoot("/no/such/file.json")
+	if src != nil {
+		t.Error("expected nil source on loader failure, got non-nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }

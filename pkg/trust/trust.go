@@ -45,7 +45,10 @@ package trust
 import (
 	"context"
 	stderrors "errors"
+	"io"
 	"log/slog"
+	"os"
+	"syscall"
 
 	prototrustroot "github.com/sigstore/protobuf-specs/gen/pb-go/trustroot/v1"
 	"github.com/sigstore/sigstore-go/pkg/root"
@@ -199,21 +202,65 @@ func trustedMaterialFromClient(client *tuf.Client) (root.TrustedMaterial, error)
 		return nil, errors.Wrap(code, msg, err)
 	}
 
-	var trustedRootPB prototrustroot.TrustedRoot
-	if unmarshalErr := protojson.Unmarshal(trustedRootJSON, &trustedRootPB); unmarshalErr != nil {
-		// The bytes came from the TUF target / local cache, not from user
-		// input — a parse failure here means the cache is corrupt or the
-		// upstream payload changed shape. Classify as Internal (5xx),
-		// not InvalidRequest (4xx).
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse trusted root", unmarshalErr)
-	}
+	// The bytes came from the TUF target / local cache, not from user input —
+	// a parse failure here means the cache is corrupt or the upstream payload
+	// changed shape. Classify as Internal (5xx), not InvalidRequest (4xx).
+	return parseTrustedRoot(trustedRootJSON, errors.ErrCodeInternal)
+}
 
+// parseTrustedRoot parses sigstore trusted_root.json bytes into TrustedMaterial.
+// parseErrCode classifies structural failures: ErrCodeInternal for bytes aicr
+// produced (the TUF cache target), ErrCodeInvalidRequest for a user-supplied
+// --trust-root file.
+func parseTrustedRoot(data []byte, parseErrCode errors.ErrorCode) (root.TrustedMaterial, error) {
+	var trustedRootPB prototrustroot.TrustedRoot
+	if err := protojson.Unmarshal(data, &trustedRootPB); err != nil {
+		return nil, errors.Wrap(parseErrCode, "failed to parse trusted root", err)
+	}
 	trustedRoot, err := root.NewTrustedRootFromProtobuf(&trustedRootPB)
 	if err != nil {
-		// Same reasoning: structural validation failure on bytes the user
-		// did not supply is a server-side problem.
-		return nil, errors.Wrap(errors.ErrCodeInternal, "invalid trusted root", err)
+		return nil, errors.Wrap(parseErrCode, "invalid trusted root", err)
+	}
+	return trustedRoot, nil
+}
+
+// LoadTrustedMaterialFromFile reads a sigstore-go trusted_root.json from a
+// user-supplied path and returns its TrustedMaterial, for verifying bundles
+// signed against a private Fulcio/Rekor (aicr verify --trust-root). The read is
+// bounded by defaults.MaxTrustedRootBytes so an attacker-influenced path cannot
+// OOM the process, and the path must be a regular file so a FIFO or device node
+// cannot block the read indefinitely. A missing/unreadable/non-regular/oversized/
+// malformed file is a user error (ErrCodeInvalidRequest), unlike the TUF-cache
+// path which is Internal.
+func LoadTrustedMaterialFromFile(path string) (root.TrustedMaterial, error) {
+	// Open with O_NONBLOCK and validate the resulting descriptor, rather than
+	// stat-ing the pathname first. O_NONBLOCK means opening a FIFO/device never
+	// blocks in the kernel open() (a regular-file read ignores it), and
+	// inspecting the opened descriptor with fstat closes the stat/open TOCTOU
+	// window: a pathname swapped between a pre-open stat and the open could
+	// otherwise slip a non-regular file (or a blocking FIFO) past the guard. The
+	// size cap below only bounds bytes once reads start.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // user-supplied verifier input, regular-file checked on the descriptor + bounded below
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to open trust root file", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to stat trust root file", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "trust root file must be a regular file")
 	}
 
-	return trustedRoot, nil
+	limited := io.LimitReader(f, defaults.MaxTrustedRootBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read trust root file", err)
+	}
+	if int64(len(data)) > defaults.MaxTrustedRootBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "trust root file exceeds size limit")
+	}
+	return parseTrustedRoot(data, errors.ErrCodeInvalidRequest)
 }
