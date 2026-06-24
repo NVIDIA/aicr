@@ -829,6 +829,7 @@ aicr validate [flags]
 | `--full` | | bool | false | Emit the full (unredacted) evidence bundle. By default the bundle is minimized: `snapshot.yaml` is reduced to an allowlisted set of fields (dropping node names, provider instance IDs, the node label/taint set, OS tuning, loaded modules, systemd config) and per-test CTRF `stdout`/`message` are omitted. `--full` ships the raw payloads. The cryptographic verification story holds either way; minimal bundles record the applied policy in `predicate.redaction` and self-verify with `aicr evidence verify`. |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
+| `--no-sign` | | bool | false | Push the evidence bundle **unsigned** (requires `--emit-attestation` and `--push`) and write a `pointer.yaml` with an empty `signer` block. Defers Fulcio/Rekor signing to the fork-based CI workflow, so the network-light push can run where the cluster lives even when Sigstore egress is blocked. No-op unless both `--emit-attestation` and `--push` are set. `aicr evidence verify` reports the resulting pointer as a non-failing **pending signature** state. |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -2613,23 +2614,25 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omit the tag and aicr derives a unique per-recipe one (`<recipe-slug>-<short-fingerprint>`); pass an explicit tag to override. See [`aicr validate --push`](#aicr-validate). |
+| `--no-sign` | | bool | `false` | Push the bundle **unsigned** and write a `pointer.yaml` with an empty `signer` block, instead of signing. Skips all OIDC/Fulcio/Rekor steps (and the identity-disclosure prompt), so it runs even where Sigstore egress is blocked. The bundle's content reference (`bundle.oci`/`bundle.digest`) is still recorded; complete the signing leg later with the fork-based CI workflow. `aicr evidence verify` reports such a pointer as a non-failing **pending signature** state. |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
 | `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
 | `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 | `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS when pushing the OCI artifact (local-registry tests). |
 | `--insecure-tls` | | bool | `false` | Skip TLS verification when pushing the OCI artifact (self-signed registries). |
 
-> **Identity disclosure:** `evidence publish` always signs. On the interactive
-> (browser / device-code) keyless paths it publishes the signer's identity
-> (email + issuer) to the public Rekor log, so on a TTY it pauses for
-> confirmation first (`--yes` skips it). See
+> **Identity disclosure:** `evidence publish` signs unless `--no-sign` is set.
+> On the interactive (browser / device-code) keyless paths it publishes the
+> signer's identity (email + issuer) to the public Rekor log, so on a TTY it
+> pauses for confirmation first (`--yes` skips it). `--no-sign` runs no OIDC
+> flow, so the prompt is skipped entirely. See
 > [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures).
 
 **Exit codes:**
 
 | Code | Meaning |
 |------|---------|
-| 0 | Bundle signed, pushed, and `pointer.yaml` written. |
+| 0 | Bundle pushed and `pointer.yaml` written (signed, or unsigned with `--no-sign`). |
 | non-zero | Identity-disclosure prompt declined, or bundle could not be loaded, signed, or pushed. |
 
 **Examples:**
@@ -2721,10 +2724,15 @@ The positional argument is auto-detected as one of:
 
 | Code | Meaning |
 |------|---------|
-| 0 | Bundle valid; every check passed. |
-| 2 | Bundle invalid (signature, integrity, or predicate failure), OR recorded validator results show failures. |
+| 0 | Bundle valid; every check passed (or valid but **unsigned** — see pending below). |
+| 1 | Bundle valid, but recorded validator phase results show failures (informational). |
+| 2 | Bundle invalid. The `failureCause.class` field gives the specific reason — registry access (`registry-forbidden`/`not-found`/`registry`), `signature`, `integrity`, `schema`, or `unknown` (see Failure cause below). |
 
-The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the library API) still distinguishes the two non-zero cases as `1` (recorded phase failures) vs `2` (bundle invalid). Shell consumers can branch via `jq '.exit'` on `--format json` output.
+The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the library API. Shell consumers can branch via `jq '.exit'` on `--format json` output.
+
+**Pending signature.** An unsigned bundle whose pointer carries no `signer` (e.g. one published with `--no-sign`, awaiting the signing leg) is **not** a failure: it verifies at exit `0` with `pending: true` in the JSON output and a "pending signature" verdict in the Markdown summary. This lets an in-flight PR commit an unsigned pointer without the gate flagging it as broken.
+
+**Failure cause.** On a non-zero exit, the JSON output carries a structured `failureCause` object — `class` (one of `registry-forbidden`, `not-found`, `registry`, `signature`, `integrity`, `schema`, `unknown`), an optional `httpStatus`, and an actionable `hint`. For example, a private fork registry returns `class: registry-forbidden`, `httpStatus: 403` with a hint to make the package public — so the reason is self-serviceable rather than a bare "invalid". The Markdown summary renders the same as **Cause**/**Hint** lines.
 
 **Examples:**
 ```shell

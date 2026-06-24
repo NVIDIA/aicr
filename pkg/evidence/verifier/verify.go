@@ -76,6 +76,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	mat, err := MaterializeBundle(ctx, opts, form, pointer)
 	if err != nil {
 		record(r, stepMaterialize, StepFailed, err.Error(), nil)
+		setFailureCause(r, stepMaterialize, err)
 		r.Exit = ExitInvalid
 		return r, nil
 	}
@@ -89,7 +90,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	// present, sigstore-go anchors the DSSE-wrapped Statement to a
 	// Fulcio cert + optional Rekor entry. The predicate inside that
 	// verified Statement is the cryptographically authoritative value.
-	verifiedPredicate := stepSignatureCheck(ctx, r, mat, opts)
+	verifiedPredicate, pendingSignature := stepSignatureCheck(ctx, r, mat, opts)
 
 	// Step 3 — predicate parse. Prefer the predicate the signature
 	// step produced (cryptographically anchored); fall back to the
@@ -98,6 +99,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	pred, perr := resolvePredicate(verifiedPredicate, mat)
 	if perr != nil {
 		record(r, stepPredicate, StepFailed, perr.Error(), nil)
+		setFailureCause(r, stepPredicate, perr)
 		r.Exit = ExitInvalid
 		return r, nil
 	}
@@ -117,6 +119,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	mismatches, invErr := CheckInventory(ctx, mat, pred.Manifest.Digest)
 	if invErr != nil {
 		record(r, stepInventory, StepFailed, invErr.Error(), mismatches)
+		setFailureCause(r, stepInventory, invErr)
 		r.Exit = ExitInvalid
 	} else {
 		record(r, stepInventory, StepPassed,
@@ -128,19 +131,31 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		r.Exit = ExitValidPhaseFailures
 	}
 
+	// "Pending signature" is strictly an exit-0 state. Set it only once the
+	// final exit is known, so an unsigned bundle that later failed predicate
+	// parsing, the manifest hash check, or carries phase failures is reported
+	// as that failure — never as a misleading pending result with a non-zero
+	// exit.
+	if r.Exit == ExitValidPassed && pendingSignature {
+		r.Pending = true
+	}
+
 	record(r, stepRender, StepInformational, "report assembled", nil)
 	return r, nil
 }
 
 // stepSignatureCheck runs step 2 and returns the cryptographically
-// anchored predicate when the bundle is signed (nil otherwise). Side
-// effects: records the step row, sets r.Signer, may update r.Exit.
+// anchored predicate when the bundle is signed (nil otherwise) plus whether
+// the bundle is unsigned (a candidate "pending signature" state). Side
+// effects: records the step row, sets r.Signer, may update r.Exit. The
+// caller decides whether to surface Pending, since that is only valid once
+// the final exit is known.
 //
 // When the input is a pointer file with a signer claim, this step also
 // cross-checks the pointer's claim against the actual cert. A
 // malicious pointer that names a different signer than the bundle
 // fails here.
-func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions) *attestation.Predicate {
+func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions) (*attestation.Predicate, bool) {
 	sig, sigErr := VerifySignature(ctx, mat, opts)
 
 	var claimedSigner *attestation.PointerSigner
@@ -154,22 +169,29 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 		if claimedSigner != nil {
 			if ccErr := CrossCheckPointerSigner(claimedSigner, nil); ccErr != nil {
 				record(r, stepSignature, StepFailed, ccErr.Error(), nil)
+				setFailureCause(r, stepSignature, ccErr)
 				r.Exit = ExitInvalid
-				return nil
+				return nil, false
 			}
 		}
-		record(r, stepSignature, StepSkipped, "no signature attached (unsigned bundle)", nil)
-		return nil
+		// Unsigned with no signer claim: a candidate "pending signature"
+		// state, not a failure. The bundle was pushed (often via --no-sign)
+		// and awaits the signing leg; verification of the rest of the bundle
+		// continues. The caller sets r.Pending only if the final exit is 0.
+		record(r, stepSignature, StepSkipped, "no signature attached (unsigned bundle — pending signature)", nil)
+		return nil, true
 	case sigErr != nil:
 		record(r, stepSignature, StepFailed, sigErr.Error(), nil)
+		setFailureCause(r, stepSignature, sigErr)
 		r.Exit = ExitInvalid
-		return nil
+		return nil, false
 	default:
 		r.Signer = sig.Signer
 		if ccErr := CrossCheckPointerSigner(claimedSigner, sig.Signer); ccErr != nil {
 			record(r, stepSignature, StepFailed, ccErr.Error(), nil)
+			setFailureCause(r, stepSignature, ccErr)
 			r.Exit = ExitInvalid
-			return nil
+			return nil, false
 		}
 		detail := "signer " + sig.Signer.Identity + " (issuer " + sig.Signer.Issuer + ")"
 		var sub []KV
@@ -178,7 +200,7 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 				Value: strconv.FormatInt(*sig.Signer.RekorLogIndex, 10)}}
 		}
 		record(r, stepSignature, StepPassed, detail, sub)
-		return sig.Predicate
+		return sig.Predicate, false
 	}
 }
 

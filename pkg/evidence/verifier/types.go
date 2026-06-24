@@ -105,6 +105,36 @@ type KV struct {
 	Value string `json:"value" yaml:"value"`
 }
 
+// Failure-cause classes recorded in FailureCause.Class. Stable strings so
+// the gate script (and future tooling) can branch on them without parsing
+// human prose. They classify *why* a verification failed, complementing the
+// coarse Exit code.
+const (
+	CauseRegistryForbidden = "registry-forbidden" // 401/403 pulling the bundle
+	CauseNotFound          = "not-found"          // 404 — bundle/referrer absent at ref
+	CauseRegistry          = "registry"           // other registry/transport failure
+	CauseSignature         = "signature"          // signature/cert/identity verification failed
+	CauseIntegrity         = "integrity"          // manifest hash-chain mismatch
+	CauseSchema            = "schema"             // predicate parse / schema / type error
+	CauseUnknown           = "unknown"            // unclassified
+)
+
+// FailureCause is the structured, machine-readable reason a verification
+// produced a non-zero Exit. The gate renders Class/Hint into the PR comment
+// so a contributor can self-serve the fix (e.g. a 403 → "make the fork's
+// aicr-evidence package public") instead of seeing a bare "invalid".
+type FailureCause struct {
+	// Class is one of the Cause* constants — a stable identifier.
+	Class string `json:"class" yaml:"class"`
+	// Detail is the underlying error message (sanitized).
+	Detail string `json:"detail" yaml:"detail"`
+	// HTTPStatus is the registry HTTP status when the failure was a
+	// registry response (0 otherwise).
+	HTTPStatus int `json:"httpStatus,omitempty" yaml:"httpStatus,omitempty"`
+	// Hint is an actionable, human-facing remediation when one is known.
+	Hint string `json:"hint,omitempty" yaml:"hint,omitempty"`
+}
+
 // VerifyResult is what Verify returns to its caller.
 type VerifyResult struct {
 	Input        InputForm              `json:"input" yaml:"input"`
@@ -115,4 +145,17 @@ type VerifyResult struct {
 	BundleDigest string                 `json:"bundleDigest,omitempty" yaml:"bundleDigest,omitempty"`
 	Steps        []StepResult           `json:"steps" yaml:"steps"`
 	Exit         int                    `json:"exit" yaml:"exit"`
+
+	// Pending is true when the bundle is unsigned — a "pending signature"
+	// state, not a failure. An in-flight PR that committed an unsigned
+	// pointer (via `--no-sign`) verifies with Exit 0 and Pending true, so
+	// the gate can render "pending signature" instead of a misleading
+	// "all checks passed" or a false "invalid".
+	Pending bool `json:"pending,omitempty" yaml:"pending,omitempty"`
+
+	// FailureCause classifies why the bundle was rejected. Set only when
+	// Exit is ExitInvalid (2); nil for Exit 0 (valid, possibly pending) and
+	// Exit 1 (valid bundle with recorded phase failures), which are not
+	// bundle-invalid outcomes.
+	FailureCause *FailureCause `json:"failureCause,omitempty" yaml:"failureCause,omitempty"`
 }

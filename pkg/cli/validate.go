@@ -568,6 +568,13 @@ func validateCmdFlags() []cli.Flag {
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
+			Name: flagNoSign,
+			Usage: `Push the evidence bundle unsigned (requires --emit-attestation and --push) and write a pointer with an empty signer block.
+	Defers Fulcio/Rekor signing to a later step (the fork-based CI workflow), so the network-light push can run
+	where the cluster lives even when Sigstore egress is blocked. No-op unless both --emit-attestation and --push are set.`,
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
 			Name:     flagPlainHTTP,
 			Usage:    "Use HTTP instead of HTTPS when pushing the evidence OCI artifact (local registry tests).",
 			Category: catEvidence,
