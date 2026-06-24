@@ -376,6 +376,41 @@ surface item 1 below for the full schema).
    since the field is additive metadata) but its motivation is the
    evidence lifecycle this ADR establishes.
 
+### Gate report structure (implemented)
+
+The CI gate (`.github/scripts/recipe-evidence-check.sh`) renders its
+warning-only Markdown comment around two ideas that keep it low-noise on
+broad-impact PRs:
+
+- **Protected vs. other affected.** A recipe is *protected* — implicitly —
+  iff it has a committed pointer at `recipes/evidence/<slug>.yaml`. The
+  protected set is what the gate actively verifies (pointer present →
+  verify → digest compare) and renders as a status table. Recipes that are
+  affected but carry no pointer are best-effort: evidence is
+  hardware-gated and most recipes have none yet, so they are collapsed
+  into a single `<details>` count rather than shown as alarming "missing"
+  rows. Adding a pointer is the only action that moves a recipe into the
+  protected set — there is no separate list to maintain, and it converges
+  with the recipes validated on real hardware.
+
+- **Component-scoped registry cascade.** A change to
+  `recipes/registry.yaml` does not promote every leaf recipe. The gate
+  diffs the registry at the component-*entry* level and marks a recipe
+  affected only if its resolved component set — walked across the base
+  chain and `spec.mixins` — intersects the changed entries, so an
+  `aws-efa`-only edit flags only recipes that reference `aws-efa`. A change
+  to `recipes/overlays/base.yaml` is still treated as broad (it sits at the
+  root of nearly every base chain). The recomputed digest remains the
+  ground truth: a protected recipe whose digest still matches its pointer
+  is reported as a match, never as drift, regardless of promotion.
+
+- **Classified verify failures.** When `aicr evidence verify` fails, the
+  gate surfaces the structured `failureCause` from its `--format json`
+  output (registry 401/403 → "make the fork's aicr-evidence package
+  public", 404, signature, integrity, schema) in the verify column and
+  echoes the full error into the job log — so a contributor can self-serve
+  the fix instead of seeing a bare "invalid".
+
 ### Material-slice canonicalization (proposed)
 
 The material slice is the projection of the recipe-resolution surface
