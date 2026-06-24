@@ -126,8 +126,8 @@ func convertCTRF(bundleDir string) ([]byte, error) {
 				// Unknown status: treat as error so unrecognized results never
 				// silently appear as passing testcases.
 				tc.Error = &jUnitError{
-					Message: "unrecognized CTRF status: " + string(t.Status),
-					Text:    "unrecognized CTRF status: " + string(t.Status),
+					Message: "unrecognized CTRF status: " + t.Status,
+					Text:    "unrecognized CTRF status: " + t.Status,
 				}
 				suite.Errors++
 			}

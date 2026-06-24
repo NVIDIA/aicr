@@ -103,11 +103,11 @@ constraints:
 		t.Fatal(err)
 	}
 	ctrfDir := filepath.Join(dir, ctrfDirName)
-	if err := os.MkdirAll(ctrfDir, 0o700); err != nil {
-		t.Fatal(err)
+	if mkErr := os.MkdirAll(ctrfDir, 0o700); mkErr != nil {
+		t.Fatal(mkErr)
 	}
-	if err := os.WriteFile(filepath.Join(ctrfDir, "deployment.json"), data, 0o600); err != nil {
-		t.Fatal(err)
+	if wErr := os.WriteFile(filepath.Join(ctrfDir, "deployment.json"), data, 0o600); wErr != nil {
+		t.Fatal(wErr)
 	}
 
 	// Redirect stdout to capture dry-run output.
@@ -272,7 +272,7 @@ func TestPrintDryRun(t *testing.T) {
 		Metadata:  started.Metadata,
 	}
 
-	printErr := printDryRun("my-bucket", "groups/eks/h100-ubuntu/training/1749600000-abc12345",
+	printDryRun("my-bucket", "groups/eks/h100-ubuntu/training/1749600000-abc12345",
 		started, finished, []byte("<testsuites/>"))
 
 	_ = w.Close()
@@ -282,10 +282,6 @@ func TestPrintDryRun(t *testing.T) {
 		t.Fatalf("read dry-run output: %v", err)
 	}
 	output := string(outBytes)
-
-	if printErr != nil {
-		t.Fatalf("printDryRun() error = %v", printErr)
-	}
 	if !strings.Contains(output, "my-bucket") {
 		t.Errorf("output missing bucket name:\n%s", output)
 	}

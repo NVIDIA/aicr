@@ -150,7 +150,7 @@ func TestConvertCTRFDeterminism(t *testing.T) {
 	if aIdx < 0 || mIdx < 0 || zIdx < 0 {
 		t.Fatal("one or more test names not found in XML")
 	}
-	if !(aIdx < mIdx && mIdx < zIdx) {
+	if aIdx >= mIdx || mIdx >= zIdx {
 		t.Errorf("tests not sorted: a=%d m=%d z=%d", aIdx, mIdx, zIdx)
 	}
 }

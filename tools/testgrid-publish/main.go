@@ -20,18 +20,18 @@
 //
 // Pipeline:
 //
-//	 OCI bundle  ──ORAS pull──▶  bundle dir
-//	                               │
-//	                               ├── recipe.yaml      ──▶ CoordinateFor() ──▶ GCS path
-//	                               └── ctrf/*.json      ──▶ jUnit XML
-//	                                   (+ predicate.json for AttestedAt / digest)
-//	                                                          │
-//	                                          ┌──────────────┘
-//	                                          ▼
-//	                          gs://<bucket>/groups/<group>/<dashboard>/<tab>/<build-id>/
-//	                              started.json
-//	                              finished.json
-//	                              artifacts/junit.xml
+//	OCI bundle  ──ORAS pull──▶  bundle dir
+//	                              │
+//	                              ├── recipe.yaml      ──▶ CoordinateFor() ──▶ GCS path
+//	                              └── ctrf/*.json      ──▶ jUnit XML
+//	                                  (+ predicate.json for AttestedAt / digest)
+//	                                                         │
+//	                                         ┌──────────────┘
+//	                                         ▼
+//	                         gs://<bucket>/groups/<group>/<dashboard>/<tab>/<build-id>/
+//	                             started.json
+//	                             finished.json
+//	                             artifacts/junit.xml
 //
 // Usage:
 //
@@ -213,7 +213,8 @@ func run(ctx context.Context, cfg runConfig) error {
 	}
 
 	if cfg.dryRun {
-		return printDryRun(cfg.bucket, gcsPrefix, started, finished, junitXML)
+		printDryRun(cfg.bucket, gcsPrefix, started, finished, junitXML)
+		return nil
 	}
 
 	// ── 7. Write to GCS (ordered: started → junit → finished) ────────────────
@@ -259,7 +260,7 @@ func extractSigner(bundleDir string) (identity, issuer string) {
 }
 
 // printDryRun prints the planned GCS paths and started.json to stdout.
-func printDryRun(bucket, prefix string, started startedJSON, finished finishedJSON, junitXML []byte) error {
+func printDryRun(bucket, prefix string, started startedJSON, finished finishedJSON, junitXML []byte) {
 	fmt.Printf("dry-run: would write to gs://%s/%s/\n", bucket, prefix)
 	fmt.Printf("  started.json\n")
 	fmt.Printf("  artifacts/junit.xml (%d bytes)\n", len(junitXML))
@@ -277,7 +278,6 @@ func printDryRun(bucket, prefix string, started startedJSON, finished finishedJS
 			fmt.Printf("  %-20s = (missing)\n", k)
 		}
 	}
-	return nil
 }
 
 // junitAllPassed returns true when the jUnit XML has no failures or errors.

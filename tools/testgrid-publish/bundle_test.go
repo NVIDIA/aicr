@@ -26,15 +26,15 @@ import (
 
 func TestParseCriteria(t *testing.T) {
 	tests := []struct {
-		name          string
-		recipeYAML    string
-		wantService   string
-		wantAccel     string
-		wantOS        string
-		wantIntent    string
-		wantPlatform  string
+		name           string
+		recipeYAML     string
+		wantService    string
+		wantAccel      string
+		wantOS         string
+		wantIntent     string
+		wantPlatform   string
 		wantConstraint string
-		wantErr       bool
+		wantErr        bool
 	}{
 		{
 			name: "full criteria with k8s constraint",
