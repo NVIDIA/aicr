@@ -16,6 +16,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -64,6 +65,17 @@ const (
 
 	// maxExtractedFileSize caps individual file sizes during tar extraction (50 MB).
 	maxExtractedFileSize = 50 * 1024 * 1024
+
+	// jobSetStagingImageRepo is the JobSet controller image repository referenced by the
+	// upstream Kubeflow Trainer v2.2.0 manifests. It points at the Kubernetes staging
+	// registry, whose tags are garbage-collected (MANIFEST_UNKNOWN/404), so jobset-controller-manager
+	// lands in ImagePullBackOff and its admission webhook has no endpoints.
+	jobSetStagingImageRepo = "us-central1-docker.pkg.dev/k8s-staging-images/jobset/jobset"
+
+	// jobSetPromotedImageRepo is the promoted, permanent JobSet image repository on the
+	// production registry. The same tag (e.g. v0.11.0) exists here, so rewriting the repo
+	// prefix is sufficient to make the controller pullable.
+	jobSetPromotedImageRepo = "registry.k8s.io/jobset/jobset"
 )
 
 // trainerResourceRef identifies a Kubernetes resource applied during Trainer installation,
@@ -127,6 +139,10 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 		if err != nil {
 			return applied, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to marshal Trainer resource to YAML", err)
 		}
+
+		// Repoint the JobSet controller image off the garbage-collected staging registry
+		// onto the promoted production registry before applying (see issue #1430).
+		yamlBytes = rewriteJobSetStagingImage(yamlBytes)
 
 		obj := &unstructured.Unstructured{}
 		if unmarshalErr := yaml.Unmarshal(yamlBytes, obj); unmarshalErr != nil {
@@ -192,6 +208,23 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 	}
 
 	return applied, nil
+}
+
+// rewriteJobSetStagingImage rewrites any reference to the garbage-collected JobSet
+// staging-registry image repository onto the promoted production registry, preserving
+// the tag/digest. The Kubeflow Trainer v2.2.0 manifests pin the JobSet controller image
+// to the Kubernetes staging registry, whose tags have been garbage-collected; left as-is
+// the jobset-controller-manager enters ImagePullBackOff and its admission webhook has no
+// endpoints, so the NCCL TrainJob cannot create pods (issue #1430). The replacement is a
+// repo-prefix swap only, so it is tag-agnostic and a no-op when the staging repo is absent.
+func rewriteJobSetStagingImage(yamlBytes []byte) []byte {
+	if !bytes.Contains(yamlBytes, []byte(jobSetStagingImageRepo)) {
+		return yamlBytes
+	}
+	rewritten := bytes.ReplaceAll(yamlBytes, []byte(jobSetStagingImageRepo), []byte(jobSetPromotedImageRepo))
+	slog.Info("Rewrote JobSet image off staging registry",
+		"from", jobSetStagingImageRepo, "to", jobSetPromotedImageRepo)
+	return rewritten
 }
 
 // deleteTrainer removes every resource that was created by installTrainer, in reverse
