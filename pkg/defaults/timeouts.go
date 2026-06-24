@@ -454,6 +454,14 @@ const (
 
 	// HPAPollInterval is the interval for polling HPA status during behavioral tests.
 	HPAPollInterval = 10 * time.Second
+
+	// MetricsAPIWarmupTimeout bounds the retry while the aggregated metrics APIs
+	// (custom/external.metrics.k8s.io) warm up: prometheus-adapter registers its
+	// APIServices before its first Prometheus relist populates metric data, so a
+	// single-shot GET right after the deployment phase can race that window. Kept
+	// short so the pod-autoscaling metric-API steps plus the HPA behavioral test
+	// stay within the validator's catalog timeout.
+	MetricsAPIWarmupTimeout = 60 * time.Second
 )
 
 // Karpenter behavioral test timeouts for conformance validation.

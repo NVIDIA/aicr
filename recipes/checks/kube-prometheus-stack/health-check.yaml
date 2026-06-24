@@ -40,6 +40,26 @@ spec:
                 namespace: monitoring
               status:
                 (availableReplicas > `0`): true
+    - name: validate-prometheus-server-ready
+      try:
+        # The operator-only check above passes as soon as the prometheus-operator
+        # Deployment is up -- BEFORE the operator has created and started the
+        # Prometheus server StatefulSet. Gate on the server itself being Ready so
+        # the deployment phase does not hand a not-yet-serving Prometheus to the
+        # conformance metric checks (ai-service-metrics / pod-autoscaling), which
+        # query Prometheus and the prometheus-adapter metrics APIs. The StatefulSet
+        # name derives from the chart fullnameOverride (kube-prometheus) + the
+        # Prometheus CR: prometheus-kube-prometheus-prometheus (matches the
+        # prometheus-kube-prometheus-prometheus-0 pod).
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: StatefulSet
+              metadata:
+                name: prometheus-kube-prometheus-prometheus
+                namespace: monitoring
+              status:
+                (readyReplicas > `0`): true
     - name: validate-all-pods-healthy
       try:
         # Assert no prometheus stack pods are in unhealthy phases

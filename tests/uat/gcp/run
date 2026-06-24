@@ -192,24 +192,34 @@ phase_install() {
   # Run against a copy of the config with spec.validate.evidence stripped so the
   # gate never emits/pushes an evidence bundle -- that is the conformance phase's
   # job (phase_conformance, `--phase all`).
-  local gate_config; gate_config="$(mktemp)"
+  local gate_config gate_log
+  gate_config="$(mktemp)"
+  gate_log="$(mktemp)"
   yq 'del(.spec.validate.evidence)' "${config}" > "${gate_config}"
   local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
-  local attempt=1
+  local attempt=1 ready=false
   echo "::group::Readiness gate: validate --phase deployment (timeout ${READINESS_TIMEOUT_SECONDS}s)"
-  until "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null >/dev/null 2>&1; do
-    if (( SECONDS >= ready_deadline )); then
-      echo "::error::deployment readiness gate did not pass within ${READINESS_TIMEOUT_SECONDS}s; final attempt:" >&2
-      "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null 2>&1 || true
-      rm -f "${gate_config}"
-      echo "::endgroup::"
-      exit 1
+  # Check the deadline BEFORE each attempt so no validation run is launched once
+  # the budget is spent (a single run can itself take minutes). The last
+  # attempt's output is captured in gate_log for the failure diagnostic rather
+  # than re-running validate past the deadline.
+  while (( SECONDS < ready_deadline )); do
+    if "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null > "${gate_log}" 2>&1; then
+      ready=true
+      break
     fi
     echo "deployment phase not ready (attempt ${attempt}); retrying in 15s..."
     attempt=$(( attempt + 1 ))
     sleep 15
   done
-  rm -f "${gate_config}"
+  if [[ "${ready}" != true ]]; then
+    echo "::error::deployment readiness gate did not pass within ${READINESS_TIMEOUT_SECONDS}s; last attempt output:" >&2
+    cat "${gate_log}" >&2 || true
+    rm -f "${gate_config}" "${gate_log}"
+    echo "::endgroup::"
+    exit 1
+  fi
+  rm -f "${gate_config}" "${gate_log}"
   echo "deployment readiness gate passed (attempt ${attempt})"
   echo "::endgroup::"
 }

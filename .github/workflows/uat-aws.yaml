@@ -40,12 +40,13 @@ jobs:
   uat-aws:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    # Bumped from 90 to 110 for the validate step running all phases (deployment
-    # readiness gate + conformance + NCCL performance), then to 130 so the
-    # install step's deployment-phase readiness gate (up to
-    # READINESS_TIMEOUT_SECONDS, spanning a nodewright reboot) fits on top of
-    # helmfile apply without the job cap truncating later steps.
-    timeout-minutes: 130
+    # Covers the uncapped non-UAT steps (build, validator image push, EKS
+    # provisioning, evidence upload) + the UAT phase steps (prep 15 + install 45
+    # + validate 40 + train 25 + verify 5 = 130) + the always()-run Destroy
+    # Cluster teardown. The teardown MUST fit in this budget: a job-level timeout
+    # cancels pending always() steps, so an undersized cap would skip teardown
+    # and leak the GPU node / capacity reservation.
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read
