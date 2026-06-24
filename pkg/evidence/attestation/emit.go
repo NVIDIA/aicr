@@ -51,6 +51,13 @@ type EmitOptions struct {
 	PlainHTTP   bool
 	InsecureTLS bool
 
+	// NoSign pushes the bundle unsigned and writes a pointer with an empty
+	// signer block. Consulted only when Push is set; with Push empty the
+	// bundle is already local-only and unsigned. Lets the network-light push
+	// run where the cluster lives and defers Fulcio/Rekor signing to the
+	// fork-based CI workflow.
+	NoSign bool
+
 	// Full disables minimization. By default (Full=false) the bundle ships a
 	// redacted snapshot and CTRF reports with stdout/message omitted, and the
 	// predicate records the redaction policy. Full=true ships the raw
@@ -164,6 +171,7 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		InsecureTLS: opts.InsecureTLS,
 		AICRVersion: opts.AICRVersion,
 		OIDCResolve: opts.OIDCResolve,
+		NoSign:      opts.NoSign,
 	})
 	if err != nil {
 		return nil, err
@@ -255,6 +263,13 @@ type signPushOptions struct {
 	InsecureTLS bool
 	AICRVersion string
 	OIDCResolve bundleattest.ResolveOptions
+
+	// NoSign pushes the bundle but skips the Fulcio/Rekor signing and the
+	// Sigstore-referrer attach. The resulting pointer carries
+	// bundle.oci/digest with an empty signer block, to be signed later by
+	// the fork-based CI workflow. Decouples the network-light push leg from
+	// the Fulcio-bound signing leg.
+	NoSign bool
 }
 
 // signAndPush handles the optional sign+push pipeline. Returns a
@@ -292,6 +307,16 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 	})
 	if err != nil {
 		return emitOutcome{}, err
+	}
+
+	// Push-without-sign: stop after the content-addressed push. The pointer
+	// built from this outcome carries bundle.oci/digest with a nil Signer,
+	// signaling "pending signature" to verifiers and the gate.
+	if opts.NoSign {
+		slog.Info("evidence bundle pushed unsigned (--no-sign); sign later via the fork-based CI workflow",
+			"reference", summary.Reference,
+			"digest", summary.Digest)
+		return emitOutcome{PushSummary: summary}, nil
 	}
 
 	artifactDigestHex := strings.TrimPrefix(summary.Digest, "sha256:")
