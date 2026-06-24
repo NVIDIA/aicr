@@ -76,11 +76,17 @@ git push
 
 ### 3. Sign in your fork via GitHub Actions
 
-Run the **Recipe Evidence: Sign** workflow
-(`.github/workflows/evidence-publish.yaml`) from your fork's *Actions* tab
-(it is `workflow_dispatch` — no inputs). The filename says *publish* because it
-anticipates a future auto-publish leg (see the workflow header); today it only
-signs. The workflow:
+The **Recipe Evidence: Sign** workflow (`.github/workflows/evidence-publish.yaml`)
+runs two ways in your fork:
+
+- **Automatically** when you push a change under `recipes/evidence/**` to any
+  branch other than your default — so step 2's push usually triggers it for you.
+- **Manually** from your fork's *Actions* tab (`workflow_dispatch`, no inputs) —
+  use this to re-run after making the registry package public, or if the auto-run
+  didn't fire.
+
+The auto-trigger is fork-only (it never runs on the canonical repo) and skips its
+own signing commit, so it can't loop. The workflow:
 
 - discovers every pointer in `recipes/evidence/*.yaml` with an empty
   `signer` (i.e. unsigned),
