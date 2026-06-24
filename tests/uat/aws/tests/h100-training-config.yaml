@@ -77,8 +77,14 @@ spec:
       systemNodeTolerations:
         - dedicated=system-workload:NoSchedule
         - dedicated=system-workload:NoExecute
-      # EKS default backed by the EBS CSI driver. Matches the UAT cluster.
-      storageClass: gp3
+      # Consume the cluster's default StorageClass rather than hardcoding a
+      # name. The aws-ebs-csi-driver component provisions a gp3-backed default
+      # named "ebs-csi-default-sc" (annotated is-default-class=true), so an
+      # empty value binds PVCs to it automatically. Pinning a literal "gp3"
+      # only works on clusters using the AWS managed EBS CSI addon (which
+      # auto-creates a class named "gp3") — not on an aicr-bundle-deployed
+      # cluster, where the StatefulSet would otherwise never be created.
+      storageClass: ""
 
   validate:
     execution:
