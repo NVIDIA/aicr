@@ -2645,6 +2645,46 @@ aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence
 
 ---
 
+### aicr evidence sign
+
+Complete the signing leg for a bundle that was already pushed **unsigned** (via `aicr evidence publish --no-sign` or `validate --emit-attestation --push --no-sign`). It reads the committed pointer, pulls the bundle it references (`bundle.oci` + `bundle.digest` — no recipe-name or bundle-ref input needed), signs the predicate with keyless OIDC, attaches the Sigstore Bundle as an OCI referrer of the existing artifact, and patches the pointer's `signer` block in place.
+
+Signing is the only leg that needs Fulcio/Rekor egress, so this command is designed to run in CI (GitHub Actions ambient OIDC) where Sigstore is reachable, while the push leg runs wherever the cluster lives. The bundle is **not** re-emitted: the predicate is read verbatim from the pulled bundle, so the signature binds the same bytes the unsigned push produced.
+
+**Synopsis:**
+
+```shell
+aicr evidence sign <pointer> [flags]
+```
+
+The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. The pointer must carry exactly one attestation that is already pushed (`bundle.oci`/`bundle.digest` set) and not yet signed (empty `signer`); otherwise the command fails closed (an already-signed pointer is never re-signed).
+
+**Flags:**
+
+| Flag | Alias | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr evidence publish`. |
+| `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
+| `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. |
+| `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS for the registry (pull + referrer attach; local-registry tests). |
+| `--insecure-tls` | | bool | `false` | Skip TLS verification for the registry (pull + referrer attach; self-signed registries). |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Bundle signed, referrer attached, and the pointer's `signer` block written back. |
+| non-zero | Pointer already signed / has nothing pushed to sign, bundle could not be pulled (e.g. a private registry returns 403), identity-disclosure prompt declined, or signing/attach failed. |
+
+**Examples:**
+
+```shell
+# In CI (ambient OIDC), after a contributor committed an unsigned pointer:
+aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml
+```
+
+---
+
 ### aicr evidence verify
 
 Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.

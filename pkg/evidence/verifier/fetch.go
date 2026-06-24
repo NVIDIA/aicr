@@ -63,6 +63,15 @@ type MaterializedBundle struct {
 	Reference string
 	Digest    string
 
+	// MediaType and Size are the pulled manifest's descriptor fields,
+	// populated for OCI sources (empty/zero for a local directory). Together
+	// with Digest they form the subject descriptor needed to attach a
+	// Sigstore referrer to the already-pushed artifact — the input the
+	// sign-existing path (`aicr evidence sign`) needs that a pointer alone
+	// (digest only) cannot supply.
+	MediaType string
+	Size      int64
+
 	cleanup func()
 }
 
@@ -265,6 +274,8 @@ func materializeOCIRefRequireDigest(ctx context.Context, ref string, opts Verify
 		BundleDir: resolved,
 		Reference: formatOCIReference(registry, repo, refTarget),
 		Digest:    desc.Digest.String(),
+		MediaType: desc.MediaType,
+		Size:      desc.Size,
 		cleanup:   cleanup,
 	}, nil
 }
