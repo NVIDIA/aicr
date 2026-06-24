@@ -34,12 +34,22 @@
 # predictable (no surprise commits) and avoids the loop-guards an automatic
 # push trigger would require.
 #
-# Follow-up — Option B (auto-trigger on push). Lower friction but needs:
-#   * skip the run entirely when no unsigned pointer is present;
-#   * a loop-guard so the workflow's own signing commit does not re-trigger
-#     it (e.g. gate on the actor / commit message, or [skip ci]);
-#   * graceful handling on forks where Actions or id-token are disabled.
-# Land Option A first; add B once the discover-and-patch path is proven.
+# Two triggers:
+#   * workflow_dispatch — manual, works anywhere (incl. upstream).
+#   * push to recipes/evidence/** — auto-sign (Option B), forks only.
+#
+# Loop / scope guards for the auto-trigger (it commits back to the branch):
+#   * GitHub does not re-run workflows for pushes made with the default
+#     GITHUB_TOKEN, so the commit-back below does not re-trigger this on its
+#     own. The job `if:` also skips a push whose head commit is our own
+#     signing commit — belt-and-suspenders for forks pushing via a PAT.
+#   * The job `if:` restricts the push path to forks (github.repository !=
+#     'NVIDIA/aicr') and skips the fork's default branch (matched dynamically
+#     via github.event.repository.default_branch, so a non-`main` default is
+#     still covered), so it never auto-commits to a default branch.
+#   * The signer script no-ops cleanly when no unsigned pointer is present.
+#   * On forks with Actions or id-token disabled, the workflow simply does
+#     not run / the sign step fails closed with a clear message.
 #
 # Security note: this runs in the *contributor's fork* on a branch they
 # control, signing with the fork's own GitHub Actions OIDC identity. The
@@ -56,6 +66,9 @@ name: "Recipe Evidence: Sign"
 
 on:
   workflow_dispatch: {}
+  push:
+    paths:
+      - 'recipes/evidence/**'
 
 permissions:
   contents: write   # commit the patched pointer(s) back to the branch
@@ -72,6 +85,16 @@ jobs:
     name: Sign unsigned evidence pointers
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Manual dispatch runs anywhere. The push auto-trigger runs only in forks
+    # (never the canonical repo), never on the fork's default branch (matched
+    # dynamically so a renamed default is still covered), and skips our own
+    # signing commit so the commit-back can't loop (GITHUB_TOKEN pushes already
+    # don't re-trigger; this also covers forks pushing via a PAT).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.repository != 'NVIDIA/aicr' &&
+       github.ref_name != github.event.repository.default_branch &&
+       !startsWith(github.event.head_commit.message, 'chore(evidence): sign pending evidence pointers'))
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
