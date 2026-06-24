@@ -1,0 +1,74 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# OCI OKE cluster configuration for L40S UAT.
+#
+# Provisions a BM.GPU.L40S.4 bare-metal OKE cluster in us-chicago-1 for
+# the OKE L40S training UAT workflow. The cluster uses a private worker
+# subnet with a public API endpoint for CI access.
+
+apiVersion: github.com/mchmarny/cluster/v1alpha1
+kind: Cluster
+
+deployment:
+  id: aicr-uat
+  provider: oci
+  tenancy: ocid1.tenancy.oc1..aaaaaaaaqvqukvgf4e4fjizxe2zmdrvn7rdbckadw5okycnygvrtilrti25q
+  location: us-chicago-1
+  state: tenancy
+  destroy: false
+  tags:
+    env: dev
+
+cluster:
+  oke:
+    version: "1.34"
+    endpoint: PUBLIC_ENDPOINT
+    addOns:
+      coreDns: true
+      kubeProxy: true
+
+network:
+  oci:
+    vcn:
+      cidr: 10.0.0.0/16
+    subnets:
+      api:
+        cidr: 10.0.0.0/28
+      system:
+        cidr: 10.0.1.0/24
+      worker:
+        cidr: 10.0.32.0/19
+        private: true
+
+compute:
+  oci:
+    nodePools:
+      system:
+        shape: VM.Standard.E5.Flex
+        ocpus: 4
+        memoryGb: 64
+        capacity:
+          desired: 3
+        labels:
+          nodeGroup: system-pool
+      gpu-worker:
+        shape: BM.GPU.L40S.4
+        capacity:
+          desired: 1
+        labels:
+          nodeGroup: customer-gpu
+          node.dgxc.nvidia.com/has-gpu: "true"
+        taints:
+          - skyhook.nvidia.com=runtime-required:NoSchedule
