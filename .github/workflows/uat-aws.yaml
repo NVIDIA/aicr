@@ -361,6 +361,23 @@ jobs:
             fi
           done
 
+      # Re-assume the role immediately before teardown. The `Configure AWS
+      # credentials` step at the top of the job mints a 1-hour session (the
+      # action's default with no role-duration-seconds), but the UAT phases
+      # (prep + install + conformance + train + verify) can run the full job
+      # timeout before teardown, so by the time `Destroy Cluster` runs the
+      # original session token has expired. Passing that stale token into the
+      # actuator made every retry fail with ExpiredToken and leaked the GPU
+      # node. The `id-token: write` permission is granted for the whole job,
+      # so configure-aws-credentials can mint a fresh session here.
+      - name: Refresh AWS credentials for teardown
+        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Teardown
+
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
       #
