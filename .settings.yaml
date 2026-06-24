@@ -126,7 +126,7 @@ testing_tools:
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.
   # renovate: datasource=docker depName=gitea/gitea depType=testing_tools
-  gitea_image: 'gitea/gitea:1.26.2-rootless'
+  gitea_image: 'gitea/gitea:1.26.3-rootless'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v1.4.3'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
