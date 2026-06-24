@@ -960,15 +960,27 @@ func (s *RecipeMetadataSpec) TopologicalLevels() ([][]string, error) {
 // []ComponentRef slice. Callers that have refs but not a full
 // RecipeMetadataSpec (e.g., the bundler post-resolution) use this.
 func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
-	inDegree := make(map[string]int, len(refs))
+	declared, enabled := componentSets(refs)
+
+	// Only enabled components are nodes; an edge pointing at a declared-but-
+	// disabled (externally-provided) component is treated as satisfied, while
+	// an edge to an undeclared component is retained so it still surfaces as a
+	// cycle/missing-dependency error. See componentSets and TopologicalSort.
+	inDegree := make(map[string]int, len(enabled))
+	dependents := make(map[string][]string, len(enabled))
 	for _, c := range refs {
-		inDegree[c.Name] = len(c.DependencyRefs)
-	}
-	dependents := make(map[string][]string, len(refs))
-	for _, c := range refs {
+		if _, ok := enabled[c.Name]; !ok {
+			continue
+		}
+		degree := 0
 		for _, dep := range c.DependencyRefs {
+			if edgeSatisfiedExternally(dep, declared, enabled) {
+				continue
+			}
+			degree++
 			dependents[dep] = append(dependents[dep], c.Name)
 		}
+		inDegree[c.Name] = degree
 	}
 
 	// Seed level 0: components with no incoming edges.
@@ -999,7 +1011,7 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 		current = next
 	}
 
-	if processed != len(refs) {
+	if processed != len(enabled) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"cannot determine deployment levels: circular dependencies exist")
 	}
@@ -1010,9 +1022,29 @@ func ComponentRefsTopologicalLevels(refs []ComponentRef) ([][]string, error) {
 // Components with no dependencies come first, then components that depend only
 // on already-listed components, etc.
 func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
-	inDegree := make(map[string]int, len(s.ComponentRefs))
+	declared, enabled := componentSets(s.ComponentRefs)
+
+	// Only enabled components are nodes. A dependency edge pointing at a
+	// declared-but-disabled component is treated as already satisfied (the
+	// dependency is assumed to be provided externally, e.g. a CSP-managed
+	// cert-manager) and excluded from the in-degree count. An edge to an
+	// undeclared component is still counted so it surfaces as a cycle/missing
+	// dependency error, matching the prior behavior. See componentSets.
+	inDegree := make(map[string]int, len(enabled))
+	dependents := make(map[string][]string) // dep -> list of components that depend on it
 	for _, c := range s.ComponentRefs {
-		inDegree[c.Name] = len(c.DependencyRefs)
+		if _, ok := enabled[c.Name]; !ok {
+			continue
+		}
+		degree := 0
+		for _, dep := range c.DependencyRefs {
+			if edgeSatisfiedExternally(dep, declared, enabled) {
+				continue
+			}
+			degree++
+			dependents[dep] = append(dependents[dep], c.Name)
+		}
+		inDegree[c.Name] = degree
 	}
 
 	// Kahn's algorithm
@@ -1026,14 +1058,7 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 	// Sort queue for deterministic output
 	sort.Strings(queue)
 
-	result := make([]string, 0, len(s.ComponentRefs))
-	dependents := make(map[string][]string) // dep -> list of components that depend on it
-	for _, c := range s.ComponentRefs {
-		for _, dep := range c.DependencyRefs {
-			dependents[dep] = append(dependents[dep], c.Name)
-		}
-	}
-
+	result := make([]string, 0, len(enabled))
 	for len(queue) > 0 {
 		node := queue[0]
 		queue = queue[1:]
@@ -1048,12 +1073,44 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 		sort.Strings(queue)
 	}
 
-	// Check if all nodes were processed (no cycles)
-	if len(result) != len(s.ComponentRefs) {
+	// Check if all enabled nodes were processed (no cycles)
+	if len(result) != len(enabled) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "cannot determine deployment order: circular dependencies exist")
 	}
 
 	return result, nil
+}
+
+// componentSets returns two sets over refs: every declared component name,
+// and the subset whose IsEnabled() reports true. Components disabled via
+// overrides.enabled=false are excluded from dependency ordering: they are
+// assumed to be provided externally (for example a CSP-managed cert-manager on
+// OKE), so dependency edges pointing at them are treated as already satisfied
+// rather than causing a false "circular dependencies" error. This mirrors the
+// bundler, which filters disabled components before generating deployment
+// artifacts. The declared set lets callers distinguish a disabled component
+// (skip the edge) from an undeclared one (still an error).
+func componentSets(refs []ComponentRef) (declared, enabled map[string]struct{}) {
+	declared = make(map[string]struct{}, len(refs))
+	enabled = make(map[string]struct{}, len(refs))
+	for _, c := range refs {
+		declared[c.Name] = struct{}{}
+		if c.IsEnabled() {
+			enabled[c.Name] = struct{}{}
+		}
+	}
+	return declared, enabled
+}
+
+// edgeSatisfiedExternally reports whether a dependency edge pointing at dep
+// should be dropped from ordering because dep is a declared-but-disabled
+// component (assumed provided externally). Edges to enabled components are
+// real, and edges to undeclared components are retained so they still surface
+// as missing-dependency errors.
+func edgeSatisfiedExternally(dep string, declared, enabled map[string]struct{}) bool {
+	_, isDeclared := declared[dep]
+	_, isEnabled := enabled[dep]
+	return isDeclared && !isEnabled
 }
 
 // deepMergeMap copies all key-value pairs from src into dst. For keys whose

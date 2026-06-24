@@ -346,6 +346,86 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 	}
 }
 
+// TestMake_DisabledDependencyPruned verifies that disabling a component that
+// others depend on bundles successfully: the dangling dependency edge on the
+// dependent is pruned so the helmfile level computation does not see an
+// undeclared dependency and fail with a false circular-dependency error.
+func TestMake_DisabledDependencyPruned(t *testing.T) {
+	// Use the helmfile deployer: it recomputes levels via
+	// ComponentRefsTopologicalLevels, the only path that inspects dependency
+	// edges at bundle time. Without the prune loop, the dangling
+	// gpu-operator → cert-manager edge would surface here as a false
+	// circular-dependency error, so this is where the regression is pinned.
+	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager disabled (platform-provided); gpu-operator depends on it.
+			{Name: "cert-manager", Version: "v1.20.2", Type: "helm", Source: "https://charts.jetstack.io", Overrides: map[string]any{"enabled": false}},
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	if _, err := bundler.Make(ctx, recipeResult, tmpDir); err != nil {
+		t.Fatalf("Make() with disabled depended-upon component error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator")); os.IsNotExist(statErr) {
+		t.Error("expected 001-gpu-operator to be created")
+	}
+	for _, dir := range []string{"cert-manager", "001-cert-manager", "002-cert-manager"} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s directory to NOT be created", dir)
+		}
+	}
+}
+
+// TestMake_UndeclaredDependencyErrors verifies the pruning does not mask a
+// genuinely undeclared dependency: an enabled component depending on a
+// component that does not exist in the recipe must still fail rather than have
+// the bad edge silently erased.
+func TestMake_UndeclaredDependencyErrors(t *testing.T) {
+	// Use the helmfile deployer: it recomputes levels via
+	// ComponentRefsTopologicalLevels, which is where an undeclared dependency
+	// must surface (the default helm deployer sorts by DeploymentOrder and does
+	// not validate edges at bundle time).
+	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager is neither declared nor disabled — it simply does not exist.
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	_, err = bundler.Make(ctx, recipeResult, tmpDir)
+	if err == nil {
+		t.Fatal("Make() with undeclared dependency expected error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
 func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 	t.Parallel()
 
@@ -357,10 +437,13 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 		expectErr      bool
 	}{
 		{
-			name:           "recipe disabled + --set enabled=true => included",
-			recipeEnabled:  new(bool),
-			setEnabled:     "true",
-			expectIncluded: true,
+			// A component the recipe disabled cannot be re-enabled at bundle
+			// time: doing so would install a conflicting second copy of a
+			// platform-provided component, and there is no authored order for it.
+			name:          "recipe disabled + --set enabled=true => error",
+			recipeEnabled: new(bool),
+			setEnabled:    "true",
+			expectErr:     true,
 		},
 		{
 			name:           "recipe enabled + --set enabled=false => excluded",
@@ -431,6 +514,11 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			if tt.expectErr {
 				if makeErr == nil {
 					t.Fatalf("Make() expected error, got nil")
+				}
+				// Pin the structured code: both the re-enable rejection and the
+				// unparseable --set value are invalid-request errors.
+				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				return
 			}
