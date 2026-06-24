@@ -201,11 +201,15 @@ func run(ctx context.Context, cfg runConfig) error {
 	}
 
 	allPassed := junitAllPassed(junitXML)
+	finishedMeta := make(map[string]string, len(started.Metadata))
+	for k, v := range started.Metadata {
+		finishedMeta[k] = v
+	}
 	finished := finishedJSON{
 		Timestamp: pred.AttestedAt.Unix(),
 		Passed:    allPassed,
 		Result:    resultString(allPassed),
-		Metadata:  started.Metadata,
+		Metadata:  finishedMeta,
 	}
 
 	if cfg.dryRun {
@@ -249,7 +253,6 @@ func extractSigner(bundleDir string) (identity, issuer string) {
 	}
 	att := pointer.Attestations[0]
 	if att.Signer == nil {
-		slog.Warn("attestation present but signer is nil; signer metadata will be empty")
 		return "", ""
 	}
 	return att.Signer.Identity, att.Signer.Issuer
@@ -292,5 +295,5 @@ func junitAllPassed(xml []byte) bool {
 // (identity, issuer) from the Sigstore signing certificate in
 // attestation.AttestationFilename. Tracking issue: NVIDIA/aicr#1267.
 func readPointerFromAttestation(_ string) (*attestation.Pointer, error) {
-	return nil, errors.New(errors.ErrCodeMethodNotAllowed, "signer extraction not yet implemented")
+	return nil, errors.New(errors.ErrCodeInternal, "signer extraction not yet implemented")
 }
