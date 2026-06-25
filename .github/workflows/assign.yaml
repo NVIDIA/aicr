@@ -13,10 +13,14 @@
 # limitations under the License.
 
 # Lets contributors self-serve issue assignment by commenting on an issue:
-#   /assign            -> assigns the commenter
-#   /assign @user ...  -> assigns the mentioned user(s)
-#   /unassign          -> removes the commenter
-#   /unassign @user ...-> removes the mentioned user(s)
+#   /assign            -> claims the issue (commenter), only if unassigned
+#   /assign @user ...  -> assigns the mentioned user(s), only if unassigned
+#   /unassign          -> releases the issue, only if assigned to the commenter
+#
+# Single-owner model: /assign is refused when the issue already has an
+# assignee (comment /unassign to release it first). /unassign only ever
+# removes the commenter and is refused when they are not currently
+# assigned, so nobody can drop another person's claim.
 #
 # issue_comment always runs in the base-repo context with the base-repo
 # token, so there is no fork/pwn-request exposure here: the job only needs
@@ -59,14 +63,13 @@ jobs:
             const body = context.payload.comment.body.trim();
             const commenter = context.payload.comment.user.login;
 
-            // First token is the command; /unassign must precede /assign in
-            // this check because startsWith('/assign') would also match it.
+            // /unassign must be checked first: startsWith('/assign') would
+            // not match it, but keep the order explicit for clarity.
             const unassign = body.startsWith('/unassign');
 
-            // "@user" mentions anywhere in the comment; fall back to the
-            // commenter when none are given (self assign/unassign).
-            const mentioned = [...body.matchAll(/@([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?)/g)].map(m => m[1]);
-            const targets = mentioned.length ? [...new Set(mentioned)] : [commenter];
+            // Assignees as of the triggering event. Good enough for gating;
+            // concurrent /assign comments are a benign, rare race.
+            const current = (context.payload.issue.assignees || []).map(a => a.login);
 
             const common = {
               owner: context.repo.owner,
@@ -75,14 +78,40 @@ jobs:
             };
 
             if (unassign) {
-              const { data: issue } = await github.rest.issues.removeAssignees({
+              // Self-only: a commenter may only release their own claim.
+              if (!current.includes(commenter)) {
+                core.info(`${commenter} is not assigned; nothing to unassign`);
+                await github.rest.issues.createComment({
+                  ...common,
+                  body: `@${commenter} you are not currently assigned to this issue, so there is nothing to release.`,
+                });
+                return;
+              }
+              await github.rest.issues.removeAssignees({
                 ...common,
-                assignees: targets,
+                assignees: [commenter],
               });
-              const remaining = new Set(issue.assignees.map(a => a.login));
-              core.info(`Unassigned ${targets.join(', ')}; remaining: ${[...remaining].join(', ') || 'none'}`);
+              core.info(`Unassigned ${commenter}`);
               return;
             }
+
+            // Assign only on an unassigned issue (single-owner model).
+            if (current.length) {
+              core.info(`Issue already assigned to ${current.join(', ')}; refusing`);
+              await github.rest.issues.createComment({
+                ...common,
+                body: [
+                  `This issue is already assigned to ${current.map(u => '@' + u).join(', ')}.`,
+                  'The assignee can comment `/unassign` to release it first.',
+                ].join('\n'),
+              });
+              return;
+            }
+
+            // "@user" mentions anywhere in the comment; fall back to the
+            // commenter when none are given (self claim).
+            const mentioned = [...body.matchAll(/@([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?)/g)].map(m => m[1]);
+            const targets = mentioned.length ? [...new Set(mentioned)] : [commenter];
 
             const { data: issue } = await github.rest.issues.addAssignees({
               ...common,
