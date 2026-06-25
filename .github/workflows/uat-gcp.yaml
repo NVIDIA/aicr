@@ -332,6 +332,21 @@ jobs:
             fi
           done
 
+      # Re-authenticate to GCP immediately before teardown. The WIF credential
+      # file written by the `Authenticate to GCP` step at the top of the job
+      # references a short-lived GitHub OIDC token; the UAT phases can run the
+      # full job timeout before teardown, by which point that token has expired
+      # and the actuator's STS exchange fails. The `id-token: write` permission
+      # is granted for the whole job, so re-running auth mints a fresh token
+      # file. Mirrors the AWS teardown credential refresh.
+      - name: Re-authenticate to GCP for teardown
+        id: auth_teardown
+        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
       - name: Destroy Cluster
@@ -341,16 +356,24 @@ jobs:
           set -euxo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
+          destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
             if docker run \
               -e CONFIG_CONTENT="$(base64 < $CLUSTER_CONFIG)" \
               -e AUTO_APPROVE=true \
-              -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
+              -e KEY_CONTENT="$(base64 < ${{ steps.auth_teardown.outputs.credentials_file_path }})" \
               ${{ env.GKE_ACTUATOR_IMAGE }} apply; then
               echo "Cluster destroyed successfully"
+              destroyed=true
               break
             fi
             echo "Destroy attempt ${attempt} failed, retrying..."
             sleep 30
           done
+          # Fail the step if every attempt failed; otherwise a genuine destroy
+          # failure exits 0 and the GPU node leaks silently.
+          if [ "$destroyed" != true ]; then
+            echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
+            exit 1
+          fi
