@@ -64,3 +64,8 @@ spec:
       dependencyRefs:
         - slinky-slurm-operator
         - slinky-slurm-operator-crds
+
+  validation:
+    conformance:
+      checks:
+        - slinky-slurm-health

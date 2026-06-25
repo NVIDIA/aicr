@@ -32,7 +32,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | agentgateway | helm | agentgateway | v2.2.1 | 1 |
 | agentgateway-crds | helm | agentgateway-crds | v2.2.1 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
-| aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.26 | 1 |
+| aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | dynamo-platform | helm | dynamo-platform | 1.2.0 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
@@ -78,7 +78,7 @@ _No images extracted._
 
 ### aws-efa
 
-- `602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin:v0.5.18`
+- `602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin:v0.5.20`
 
 ### cert-manager
 

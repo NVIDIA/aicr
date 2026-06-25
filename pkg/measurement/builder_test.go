@@ -15,6 +15,7 @@
 package measurement
 
 import (
+	"strconv"
 	"testing"
 )
 
@@ -133,6 +134,128 @@ func TestSubtypeBuilder(t *testing.T) {
 			t.Errorf("GetString(key) = %v, %v; want value2, nil", value, err)
 		}
 	})
+}
+
+func TestSubtypeBuilder_WithContext(t *testing.T) {
+	t.Parallel()
+
+	st := NewSubtypeBuilder("identity").
+		WithContext("machineType", "GB300-NVL").
+		WithContext("gpuType", "NVIDIA-GB300").
+		SetInt("pf-count", 8).
+		Build()
+
+	if got := st.Context["machineType"]; got != "GB300-NVL" {
+		t.Errorf("Context[machineType] = %q, want GB300-NVL", got)
+	}
+	if got := st.Context["gpuType"]; got != "NVIDIA-GB300" {
+		t.Errorf("Context[gpuType] = %q, want NVIDIA-GB300", got)
+	}
+	if pf, _ := st.GetInt64("pf-count"); pf != 8 {
+		t.Errorf("pf-count = %d, want 8", pf)
+	}
+}
+
+func TestSubtypeBuilder_WithContextMap(t *testing.T) {
+	t.Parallel()
+
+	t.Run("merges into empty context", func(t *testing.T) {
+		t.Parallel()
+		st := NewSubtypeBuilder("identity").
+			WithContextMap(map[string]string{
+				"identifier":  "gb300-nvl-nvidia-gb300",
+				"machineType": "GB300-NVL",
+			}).
+			SetInt("pf-count", 8).
+			Build()
+
+		if got := st.Context["identifier"]; got != "gb300-nvl-nvidia-gb300" {
+			t.Errorf("Context[identifier] = %q, want gb300-nvl-nvidia-gb300", got)
+		}
+		if got := st.Context["machineType"]; got != "GB300-NVL" {
+			t.Errorf("Context[machineType] = %q, want GB300-NVL", got)
+		}
+	})
+
+	t.Run("merges with WithContext", func(t *testing.T) {
+		t.Parallel()
+		st := NewSubtypeBuilder("identity").
+			WithContext("machineType", "GB300-NVL").
+			WithContextMap(map[string]string{
+				"identifier": "gb300-nvl-nvidia-gb300",
+				"gpuType":    "NVIDIA-GB300",
+			}).
+			SetInt("pf-count", 8).
+			Build()
+
+		if got := st.Context["machineType"]; got != "GB300-NVL" {
+			t.Errorf("Context[machineType] = %q, want GB300-NVL", got)
+		}
+		if got := st.Context["identifier"]; got != "gb300-nvl-nvidia-gb300" {
+			t.Errorf("Context[identifier] = %q, want gb300-nvl-nvidia-gb300", got)
+		}
+		if got := st.Context["gpuType"]; got != "NVIDIA-GB300" {
+			t.Errorf("Context[gpuType] = %q, want NVIDIA-GB300", got)
+		}
+	})
+
+	t.Run("empty map is a no-op", func(t *testing.T) {
+		t.Parallel()
+		st := NewSubtypeBuilder("identity").
+			WithContextMap(nil).
+			WithContextMap(map[string]string{}).
+			SetInt("pf-count", 8).
+			Build()
+
+		if st.Context != nil {
+			t.Errorf("Context = %v, want nil", st.Context)
+		}
+	})
+}
+
+func TestSubtypeBuilder_WithItem(t *testing.T) {
+	t.Parallel()
+
+	st := NewSubtypeBuilder("pfs").
+		WithItem(ItemEntry{
+			Context: map[string]string{"pciAddress": "0000:03:00.0"},
+			Data:    map[string]Reading{"rail": Int(0)},
+		}).
+		WithItem(ItemEntry{
+			Context: map[string]string{"pciAddress": "0000:03:00.1"},
+			Data:    map[string]Reading{"rail": Int(1)},
+		}).
+		Build()
+
+	if len(st.Items) != 2 {
+		t.Fatalf("Items len = %d, want 2", len(st.Items))
+	}
+	if got := st.Items[0].Context["pciAddress"]; got != "0000:03:00.0" {
+		t.Errorf("Items[0].Context[pciAddress] = %q, want 0000:03:00.0", got)
+	}
+	if got := st.Items[1].Data["rail"].String(); got != "1" {
+		t.Errorf("Items[1].Data[rail] = %q, want 1", got)
+	}
+}
+
+func TestSubtypeBuilder_WithItems(t *testing.T) {
+	t.Parallel()
+
+	items := []ItemEntry{
+		{Data: map[string]Reading{"rail": Int(0)}},
+		{Data: map[string]Reading{"rail": Int(1)}},
+		{Data: map[string]Reading{"rail": Int(2)}},
+	}
+	st := NewSubtypeBuilder("pfs").WithItems(items).Build()
+
+	if len(st.Items) != 3 {
+		t.Fatalf("Items len = %d, want 3", len(st.Items))
+	}
+	for i := range items {
+		if got := st.Items[i].Data["rail"].String(); got != strconv.Itoa(i) {
+			t.Errorf("Items[%d].Data[rail] = %q, want %d", i, got, i)
+		}
+	}
 }
 
 func TestMeasurementBuilder(t *testing.T) {

@@ -35,6 +35,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -85,10 +86,17 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeInternal, "discovery REST client is not available")
 	}
 	rawURL := "/apis/custom.metrics.k8s.io/v1beta1"
-	result := restClient.Get().AbsPath(rawURL).Do(ctx.Ctx)
-	if err := result.Error(); err != nil {
+	// Retry: the aggregated APIService can be registered but not yet serving
+	// (prometheus-adapter relist) right after the deployment phase. Fail closed
+	// after the warmup budget.
+	var result rest.Result
+	if pollErr := waitForMetricsAPI(ctx.Ctx, defaults.MetricsAPIWarmupTimeout, defaults.HPAPollInterval,
+		func(c context.Context) error {
+			result = restClient.Get().AbsPath(rawURL).Do(c)
+			return result.Error()
+		}); pollErr != nil {
 		return errors.Wrap(errors.ErrCodeNotFound,
-			"custom metrics API not available (prometheus-adapter not ready)", err)
+			"custom metrics API not available (prometheus-adapter not ready)", pollErr)
 	}
 	var statusCode int
 	result.StatusCode(&statusCode)
@@ -193,26 +201,39 @@ pollLoop:
 				"the HPA behavioral test below.")
 	}
 
-	// 3. External metrics API has GPU metrics
+	// 3. External metrics API has GPU metrics. Retry: the adapter may have
+	// registered the APIService but not yet relisted the metric, or Prometheus
+	// may not hold a DCGM sample yet, right after the deployment phase. Fail
+	// closed (unreachable / no data) after the warmup budget.
 	extPath := "/apis/external.metrics.k8s.io/v1beta1/namespaces/default/dcgm_gpu_power_usage"
-	extResult := restClient.Get().AbsPath(extPath).Do(ctx.Ctx)
-	if extErr := extResult.Error(); extErr != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
-			"external metric dcgm_gpu_power_usage not available", extErr)
-	}
-	var extStatusCode int
-	extResult.StatusCode(&extStatusCode)
-	extRaw, err := extResult.Raw()
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed reading external metric response", err)
-	}
+	var extResult rest.Result
 	var extResp struct {
 		Items []json.RawMessage `json:"items"`
 	}
-	if json.Unmarshal(extRaw, &extResp) == nil && len(extResp.Items) == 0 {
-		return errors.New(errors.ErrCodeNotFound,
-			"external metric dcgm_gpu_power_usage has no data")
+	if pollErr := waitForMetricsAPI(ctx.Ctx, defaults.MetricsAPIWarmupTimeout, defaults.HPAPollInterval,
+		func(c context.Context) error {
+			extResult = restClient.Get().AbsPath(extPath).Do(c)
+			if extErr := extResult.Error(); extErr != nil {
+				return extErr
+			}
+			extRaw, rawErr := extResult.Raw()
+			if rawErr != nil {
+				return rawErr
+			}
+			extResp.Items = nil
+			if unmarshalErr := json.Unmarshal(extRaw, &extResp); unmarshalErr != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed reading external metric response", unmarshalErr)
+			}
+			if len(extResp.Items) == 0 {
+				return errors.New(errors.ErrCodeNotFound, "external metric dcgm_gpu_power_usage has no data")
+			}
+			return nil
+		}); pollErr != nil {
+		return errors.Wrap(errors.ErrCodeNotFound,
+			"external metric dcgm_gpu_power_usage not available", pollErr)
 	}
+	var extStatusCode int
+	extResult.StatusCode(&extStatusCode)
 
 	recordRawTextArtifact(ctx, "External Metrics API",
 		fmt.Sprintf("kubectl get --raw %s", extPath),
@@ -236,6 +257,29 @@ pollLoop:
 	recordRawTextArtifact(ctx, "Delete test namespace",
 		"kubectl delete namespace hpa-test --ignore-not-found",
 		fmt.Sprintf("Deleted namespace %s after HPA behavioral test.", hpaReport.Namespace))
+	return nil
+}
+
+// waitForMetricsAPI polls probe until it returns nil or the budget elapses,
+// returning the last probe error on timeout. prometheus-adapter registers its
+// aggregated APIServices before its first Prometheus relist populates metric
+// data, so a single-shot GET right after the deployment phase can race that
+// warm-up; this bounds the wait and fails closed. probe runs immediately, then
+// every interval.
+func waitForMetricsAPI(ctx context.Context, timeout, interval time.Duration, probe func(context.Context) error) error {
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var lastErr error
+	if err := wait.PollUntilContextCancel(pollCtx, interval, true,
+		func(c context.Context) (bool, error) {
+			lastErr = probe(c)
+			return lastErr == nil, nil
+		}); err != nil {
+		if lastErr != nil {
+			return lastErr
+		}
+		return err
+	}
 	return nil
 }
 

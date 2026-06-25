@@ -40,7 +40,13 @@ jobs:
   uat-aws:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Covers the uncapped non-UAT steps (build, validator image push, EKS
+    # provisioning, evidence upload) + the UAT phase steps (prep 15 + install 45
+    # + validate 40 + train 25 + verify 5 = 130) + the always()-run Destroy
+    # Cluster teardown. The teardown MUST fit in this budget: a job-level timeout
+    # cancels pending always() steps, so an undersized cap would skip teardown
+    # and leak the GPU node / capacity reservation.
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read
@@ -74,7 +80,7 @@ jobs:
 
       # Build from source
       - name: Setup Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -220,17 +226,31 @@ jobs:
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
-        timeout-minutes: 25
+        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS) + the post-install
+        # readiness gate, which runs `aicr validate --phase deployment` until it
+        # passes (up to READINESS_TIMEOUT_SECONDS, 20m, spanning a nodewright
+        # reboot). Must exceed one helmfile attempt + the gate so the gate's own
+        # fail-closed path runs before GitHub Actions kills the step.
+        timeout-minutes: 45
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run install "${TEST_CONFIG}"
 
-      - name: UAT - conformance (validate + emit signed evidence)
+      # Runs ALL validate phases (deployment + conformance + performance), not
+      # just conformance. The deployment phase polls component health checks
+      # until the GPU stack converges — the readiness barrier the helmfile
+      # bundle lacks (the helm deploy.sh `kubectl wait`s instead). Step id stays
+      # `conformance` so the train/verify gating below is unaffected.
+      - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
         if: steps.install.outcome == 'success'
-        timeout-minutes: 20
+        # Larger budget than conformance-only: the deployment phase waits out
+        # cold-start GPU bring-up (driver install/migration). (The performance
+        # phase's NCCL benchmark skips on single-GPU-node clusters like this
+        # one, so it is not the long pole here.)
+        timeout-minutes: 40
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -315,7 +335,7 @@ jobs:
             echo "| Connection | ${{ steps.client.outcome }} |"
             echo "| Prep | ${{ steps.prep.outcome }} |"
             echo "| Install | ${{ steps.install.outcome }} |"
-            echo "| Conformance | ${{ steps.conformance.outcome }} |"
+            echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then
@@ -340,6 +360,23 @@ jobs:
                 "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
             fi
           done
+
+      # Re-assume the role immediately before teardown. The `Configure AWS
+      # credentials` step at the top of the job mints a 1-hour session (the
+      # action's default with no role-duration-seconds), but the UAT phases
+      # (prep + install + conformance + train + verify) can run the full job
+      # timeout before teardown, so by the time `Destroy Cluster` runs the
+      # original session token has expired. Passing that stale token into the
+      # actuator made every retry fail with ExpiredToken and leaked the GPU
+      # node. The `id-token: write` permission is granted for the whole job,
+      # so configure-aws-credentials can mint a fresh session here.
+      - name: Refresh AWS credentials for teardown
+        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Teardown
 
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.

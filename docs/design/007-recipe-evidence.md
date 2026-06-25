@@ -168,7 +168,7 @@ and introduces kind-scoped flag names for the new attestation kind:
 | Kind | Production flags on `aicr validate` |
 |---|---|
 | `cncf-conformance` | `--evidence-dir <path>` (existing), `--cncf-submission`, `--feature <name>` |
-| `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--push <oci-ref>`; `--include-logs` and `--push-logs` are deferred (log capture not implemented in V1) |
+| `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--push <oci-ref>`, `--full` (opt out of default minimization); `--include-logs` and `--push-logs` are deferred (log capture not implemented in V1) |
 
 Both kinds may run from a single `aicr validate` invocation (each
 flag set produces its own output tree) — they are independent
@@ -376,6 +376,41 @@ surface item 1 below for the full schema).
    since the field is additive metadata) but its motivation is the
    evidence lifecycle this ADR establishes.
 
+### Gate report structure (implemented)
+
+The CI gate (`.github/scripts/recipe-evidence-check.sh`) renders its
+warning-only Markdown comment around two ideas that keep it low-noise on
+broad-impact PRs:
+
+- **Protected vs. other affected.** A recipe is *protected* — implicitly —
+  iff it has a committed pointer at `recipes/evidence/<slug>.yaml`. The
+  protected set is what the gate actively verifies (pointer present →
+  verify → digest compare) and renders as a status table. Recipes that are
+  affected but carry no pointer are best-effort: evidence is
+  hardware-gated and most recipes have none yet, so they are collapsed
+  into a single `<details>` count rather than shown as alarming "missing"
+  rows. Adding a pointer is the only action that moves a recipe into the
+  protected set — there is no separate list to maintain, and it converges
+  with the recipes validated on real hardware.
+
+- **Component-scoped registry cascade.** A change to
+  `recipes/registry.yaml` does not promote every leaf recipe. The gate
+  diffs the registry at the component-*entry* level and marks a recipe
+  affected only if its resolved component set — walked across the base
+  chain and `spec.mixins` — intersects the changed entries, so an
+  `aws-efa`-only edit flags only recipes that reference `aws-efa`. A change
+  to `recipes/overlays/base.yaml` is still treated as broad (it sits at the
+  root of nearly every base chain). The recomputed digest remains the
+  ground truth: a protected recipe whose digest still matches its pointer
+  is reported as a match, never as drift, regardless of promotion.
+
+- **Classified verify failures.** When `aicr evidence verify` fails, the
+  gate surfaces the structured `failureCause` from its `--format json`
+  output (registry 401/403 → "make the fork's aicr-evidence package
+  public", 404, signature, integrity, schema) in the verify column and
+  echoes the full error into the job log — so a contributor can self-serve
+  the fix instead of seeing a bare "invalid".
+
 ### Material-slice canonicalization (proposed)
 
 The material slice is the projection of the recipe-resolution surface
@@ -455,14 +490,20 @@ oci://ghcr.io/<owner>/aicr-evidence:<digest>
 └── (OCI artifact whose layers contain:)
     ├── attestation.intoto.jsonl    # DSSE-wrapped, cosign keyless signed
     ├── recipe.yaml                 # post-resolution canonical YAML
-    ├── snapshot.yaml               # cluster snapshot at validate-time
+    ├── snapshot.yaml               # cluster snapshot at validate-time (minimized by default)
     ├── bom.cdx.json                # CycloneDX BOM (per #739)
-    ├── ctrf/
+    ├── ctrf/                       # per-test stdout/message omitted by default
     │   ├── deployment.json
     │   ├── performance.json
     │   └── conformance.json
     └── manifest.json               # file inventory + per-file sha256
 ```
+
+The bundle is **minimized by default** (see "Minimal-by-default redaction"
+below): `snapshot.yaml` ships an allowlisted subset of fields and the
+`ctrf/*.json` reports omit per-test `stdout`/`message`. `--full` ships the
+raw payloads. Either way the manifest binds whatever bytes shipped, so the
+bundle self-verifies.
 
 Optional logs bundle (contributor-controlled; absent when not published):
 
@@ -523,6 +564,15 @@ bom:
 manifest:
   digest: sha256:...
   fileCount: 9
+# Present only for minimal (default) bundles; omitted entirely with --full.
+redaction:
+  policy: minimal
+  version: v1
+  applied:
+    - ctrf.tests.omit:message
+    - ctrf.tests.omit:stdout
+    - snapshot.header.allowlist
+    - snapshot.measurements.allowlist
 chainManifest:
   leaf:
     path: recipes/overlays/h100-eks-ubuntu-training.yaml
@@ -572,6 +622,57 @@ in turn binds every supporting file (snapshot, BOM, CTRF) by the
 hashes the manifest enumerates. Without this field, only the material
 digest would be bound — adversaries could swap any other file
 undetected. The verifier's inventory check is what closes the chain.
+
+### Minimal-by-default redaction
+
+An evidence bundle's trust signal is digest-based: the signed predicate
+commits to artifacts by hash and carries the derived fingerprint,
+criteria-match, and per-phase counts. The bundled `snapshot.yaml` and CTRF
+`stdout`/`message` are the *backing content* those digests point at — not the
+signal itself. As collectors grow they accumulate operational detail that is
+sensitive to publish (node names, cloud provider instance IDs, the full node
+label/taint set, kernel/sysctl tuning, loaded modules, systemd service config,
+raw container stdout). The bundle is therefore **minimized by default**, with
+`--full` as the opt-out for operators who want to publish everything.
+
+The minimal policy (`policy: minimal`, `version: v1`) applies two transforms:
+
+- **Snapshot — fail-closed allowlist, enforced at type, subtype, AND key
+  level.** Only enumerated types, subtypes, and data keys survive; a new type,
+  subtype, or key a future collector adds is dropped until explicitly
+  allowlisted (no subtype is keep-all). v1 keeps key-constrained
+  `K8s.server` (version, platform, goVersion) and `K8s.node` (provider,
+  kubelet/runtime/OS versions — *not* `source-node`, `provider-id`,
+  `container-runtime-id`), `GPU.hardware` (present/count/model/driver-loaded/
+  detection-source), `OS.release` (standard distro-identity keys only — the
+  collector ships all of `/etc/os-release`, so non-standard keys are dropped),
+  and `NodeTopology.summary` (counts). It drops `OS.{grub,sysctl,kmod}`, the
+  entire `SystemD` measurement, and `NodeTopology.{label,taint}`. The snapshot
+  header metadata is likewise allowlisted to `{timestamp, version}`, so
+  `source-node` (and any future key) is dropped by default.
+- **CTRF — log omission.** Per-test `stdout` and `message` are removed; the
+  pass/fail signal (name, status, duration, suite, summary counts) is kept.
+
+**The fingerprint is computed from the raw (unredacted) snapshot, not the
+shipped one.** `fingerprint.FromMeasurements` reads several fields the
+allowlist drops (e.g. `NodeTopology.label`), so deriving the predicate's
+`fingerprint`/`criteriaMatch` from the full snapshot keeps the conformance
+signal identical whether or not the shipped bytes were minimized. The verifier
+trusts the fingerprint via the signature; it does not recompute it from
+`snapshot.yaml`. The recorded `redaction` block makes the divergence explicit:
+an auditor can see exactly which rules ran. Because the predicate digests
+(recipe, CTRF, BOM, manifest) all cover the bytes that actually shipped, a
+minimal bundle self-verifies with `aicr evidence verify` — predicate parse,
+manifest inventory, and signature all validate.
+
+The redaction is deterministic (same input → same bytes) and pure
+(`pkg/evidence/redact` never mutates its inputs, so the `--full` path and the
+fingerprint-from-raw computation keep the originals). A `--full` bundle omits
+the `redaction` field entirely and is byte-identical to pre-feature output.
+
+This extends the same reasoning ADR-007 already applied to logs (split into an
+opt-in artifact because they are large and frequently sensitive) to the
+snapshot and CTRF payloads that still ship in the summary bundle.
 
 ### Pointer schema (1.0) (proposed)
 

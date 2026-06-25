@@ -77,10 +77,26 @@ spec:
       systemNodeTolerations:
         - dedicated=system-workload:NoSchedule
         - dedicated=system-workload:NoExecute
-      # EKS default backed by the EBS CSI driver. Matches the UAT cluster.
-      storageClass: gp3
+      # Consume the cluster's default StorageClass rather than hardcoding a
+      # name. The aws-ebs-csi-driver component provisions a gp3-backed default
+      # named "ebs-csi-default-sc" (annotated is-default-class=true), so an
+      # empty value binds PVCs to it automatically. Pinning a literal "gp3"
+      # only works on clusters using the AWS managed EBS CSI addon (which
+      # auto-creates a class named "gp3") — not on an aicr-bundle-deployed
+      # cluster, where the StatefulSet would otherwise never be created.
+      storageClass: ""
 
   validate:
+    execution:
+      # The deployment phase is the readiness barrier (gpu-operator ClusterPolicy
+      # reaches state=ready, the DRA kubelet-plugin DaemonSet rolls out, nodewright
+      # node tuning completes). failFast stops the run if that phase fails, so the
+      # conformance/performance phases are not evaluated against a not-yet-converged
+      # cluster — which previously surfaced as misleading accelerator-metrics /
+      # ai-service-metrics / pod-autoscaling failures. The `../run` readiness gate
+      # gives the operator-driven stack time to converge before validate, so on a
+      # healthy cluster the deployment phase passes and all phases still run.
+      failFast: true
     input:
       recipe: recipe.yaml
       snapshot: snapshot.yaml

@@ -44,6 +44,31 @@ func TestBuildPredicate_SortsValidatorImages(t *testing.T) {
 	}
 }
 
+func TestBuildPredicate_CarriesRedaction(t *testing.T) {
+	ri := &RedactionInfo{Policy: "minimal", Version: "v1", Applied: []string{"a", "b"}}
+	p := BuildPredicate(PredicateInputs{Redaction: ri})
+	if p.Redaction == nil {
+		t.Fatalf("expected Redaction to be set")
+	}
+	if p.Redaction.Policy != "minimal" || p.Redaction.Version != "v1" {
+		t.Errorf("unexpected redaction policy/version: %+v", p.Redaction)
+	}
+}
+
+func TestBuildPredicate_RedactionOmittedWhenNil(t *testing.T) {
+	p := BuildPredicate(PredicateInputs{})
+	if p.Redaction != nil {
+		t.Errorf("expected nil Redaction for full bundle, got %+v", p.Redaction)
+	}
+	body, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(body), "redaction") {
+		t.Errorf("redaction key must be omitted when nil; body=%s", body)
+	}
+}
+
 func TestBuildPredicate_OnlyKnownPhasesEmitted(t *testing.T) {
 	p := BuildPredicate(PredicateInputs{
 		Phases: map[Phase]PhaseSummary{
