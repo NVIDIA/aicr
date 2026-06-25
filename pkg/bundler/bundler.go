@@ -1275,9 +1275,6 @@ func sourceRangesAreScoped(values map[string]any, path string) bool {
 		return false
 	}
 	for _, r := range items {
-		if _, _, err := net.ParseCIDR(strings.TrimSpace(r)); err != nil {
-			return false
-		}
 		if netutil.IsAnySourceCIDR(r) {
 			return false
 		}
