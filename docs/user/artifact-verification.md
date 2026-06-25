@@ -121,6 +121,51 @@ is only part of verification: by default the bundle's Rekor transparency-log
 entry is also checked (see the next section), so a PEM key makes verification
 fully offline only when the Sigstore trusted-root cache is already warm.
 
+## Privately-Signed Bundle Verification
+
+Air-gapped and private-deployment sites often run their own Sigstore stack (a
+self-hosted Fulcio CA and Rekor log, for example from sigstore/scaffolding)
+rather than the public-good infrastructure. `aicr bundle --attest` signs
+against that stack with `--fulcio-url` / `--rekor-url`; `aicr verify
+--trust-root` is the verify counterpart. Point it at the `trusted_root.json`
+your private Sigstore stack emits:
+
+```shell
+# Verify a bundle signed against a private Fulcio/Rekor.
+aicr verify ./my-bundle --trust-root ./trusted_root.json
+```
+
+`--trust-root` is **additive**: the supplied root is unioned with AICR's
+built-in public-good root, not substituted for it. So a single command verifies
+both org-signed bundles (against the private root) and NVIDIA-signed bundles
+(against the public-good root); you do not need to switch flags per artifact.
+
+The flag supplies trust anchors only; it does not by itself require a bundle to
+be privately signed. To pin a specific signer, keep using `--require-creator`
+(and, for the binary attestation's identity, `--certificate-identity-regexp`):
+
+```shell
+# Verify against the org root and require a specific signer identity.
+aicr verify ./my-bundle \
+  --trust-root ./trusted_root.json \
+  --require-creator ci@myorg.example.com
+```
+
+`--trust-root` composes with `--key`, so a KMS- or PEM-key-signed bundle whose
+signature was logged to a private Rekor verifies with both flags together:
+
+```shell
+aicr verify ./my-bundle \
+  --trust-root ./trusted_root.json \
+  --key ./bundle-signer.pub
+```
+
+Only the **bundle attestation** consults the private root. The **binary
+attestation** is always produced by NVIDIA's public CI and continues to verify
+against the public-good root, regardless of `--trust-root`. Errors with the
+supplied `trusted_root.json` (missing, unreadable, oversized, or malformed) are
+reported as invalid-request failures.
+
 ## Offline and Air-Gapped Considerations
 
 `aicr verify` is offline by default and does not call out to Sigstore at verify
@@ -144,13 +189,10 @@ Two scope limits to be aware of, both reflected in the current CLI reference:
   supported**. It is tracked in
   [#1154](https://github.com/NVIDIA/aicr/issues/1154).
 - **Private Sigstore verification**: `aicr bundle --attest` can redirect
-  *signing* to a private Fulcio/Rekor with `--fulcio-url` / `--rekor-url`, but
-  `aicr verify` does **not yet** support a custom Sigstore trust root, so
-  bundles signed against private Sigstore infrastructure **cannot be verified
-  with `aicr verify` today**. Public Sigstore is currently the only supported
-  verification root. Verifier support is tracked in
-  [#1149](https://github.com/NVIDIA/aicr/issues/1149) and
-  [#1153](https://github.com/NVIDIA/aicr/issues/1153).
+  *signing* to a private Fulcio/Rekor with `--fulcio-url` / `--rekor-url`, and
+  `aicr verify --trust-root` verifies the resulting bundles against that
+  infrastructure's `trusted_root.json`. See
+  [Privately-Signed Bundle Verification](#privately-signed-bundle-verification).
 
 ## Recipe Evidence Verification
 
@@ -251,6 +293,7 @@ references because tags are registry-rewritable. Pass the committed pointer file
 require a stricter level, re-create the bundle with attestation and without
 external data, then verify with `--min-trust-level verified`.
 
-**Private-Sigstore-signed bundle won't verify.** This is expected. `aicr
-verify` does not yet support a custom Sigstore trust root. See
-[Offline and Air-Gapped Considerations](#offline-and-air-gapped-considerations).
+**Private-Sigstore-signed bundle won't verify.** A bundle signed against a
+private Fulcio/Rekor needs that infrastructure's trusted root. Pass it with
+`aicr verify --trust-root ./trusted_root.json`. See
+[Privately-Signed Bundle Verification](#privately-signed-bundle-verification).
