@@ -2142,10 +2142,10 @@ func TestWarnMissingStorageClassForPVCs_DynamoPlatformNATS(t *testing.T) {
 }
 
 // TestAgentgatewayComponentExistsInRegistry locks agentgatewayComponentName to a
-// real registry entry. warnAgentgatewayOpenExposure keys into componentValues by
+// real registry entry. resolveAgentgatewayExposure keys into componentValues by
 // this name; if the "agentgateway" component were renamed in recipes/registry.yaml,
-// the lookup would silently return nil and the open-exposure warning would never
-// fire — with no other test failing. Mirrors the validator-side
+// the lookup would silently return nil and the private-by-default exposure logic
+// would never fire — with no other test failing. Mirrors the validator-side
 // TestEmbeddedCatalog_InferenceGatewayEntryExists guard. See #1160.
 func TestAgentgatewayComponentExistsInRegistry(t *testing.T) {
 	registry, err := recipe.GetComponentRegistry()
@@ -2157,59 +2157,90 @@ func TestAgentgatewayComponentExistsInRegistry(t *testing.T) {
 	}
 }
 
-func TestWarnAgentgatewayOpenExposure(t *testing.T) {
+func TestResolveAgentgatewayExposure(t *testing.T) {
 	tests := []struct {
 		name        string
 		values      map[string]any
 		present     bool
+		wantErr     bool
 		wantWarning bool
+		wantDefault bool // expects allowedSourceRanges defaulted to the RFC1918 set
 	}{
 		{
-			name:        "warns when allowedSourceRanges is unset",
+			name:        "defaults to private ranges when allowedSourceRanges is unset",
 			values:      map[string]any{"fullnameOverride": "agentgateway"},
 			present:     true,
 			wantWarning: true,
+			wantDefault: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an empty list",
+			name:        "defaults to private ranges when allowedSourceRanges is an empty list",
 			values:      map[string]any{"allowedSourceRanges": []any{}},
 			present:     true,
 			wantWarning: true,
+			wantDefault: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is a bare string (mistaken --set)",
-			values:      map[string]any{"allowedSourceRanges": "216.228.127.128/30"},
-			present:     true,
-			wantWarning: true,
+			name:    "errors when allowedSourceRanges is a bare string (mistaken --set)",
+			values:  map[string]any{"allowedSourceRanges": "216.228.127.128/30"},
+			present: true,
+			wantErr: true,
 		},
 		{
-			name:        "does not warn when allowedSourceRanges is a non-empty list",
-			values:      map[string]any{"allowedSourceRanges": []any{"216.228.127.128/30"}},
-			present:     true,
-			wantWarning: false,
+			name:    "errors when allowedSourceRanges contains an invalid CIDR",
+			values:  map[string]any{"allowedSourceRanges": []any{"not-a-cidr"}},
+			present: true,
+			wantErr: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an explicit 0.0.0.0/0",
+			name:    "errors when allowedSourceRanges contains a bare IP (no prefix)",
+			values:  map[string]any{"allowedSourceRanges": []any{"10.0.0.0"}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors when allowedSourceRanges contains a non-canonical CIDR",
+			values:  map[string]any{"allowedSourceRanges": []any{"1.2.3.4/24"}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "passes silently when allowedSourceRanges is a scoped list",
+			values:  map[string]any{"allowedSourceRanges": []any{"216.228.127.128/30"}},
+			present: true,
+		},
+		{
+			name:    "passes silently when allowedSourceRanges is a []string scoped list",
+			values:  map[string]any{"allowedSourceRanges": []string{"216.228.127.128/30"}},
+			present: true,
+		},
+		{
+			name:    "errors when allowedSourceRanges contains a non-string entry",
+			values:  map[string]any{"allowedSourceRanges": []any{"10.0.0.0/8", 123}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:        "allows but warns on explicit 0.0.0.0/0 opt-in",
 			values:      map[string]any{"allowedSourceRanges": []any{"0.0.0.0/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an explicit ::/0",
+			name:        "allows but warns on explicit ::/0 opt-in",
 			values:      map[string]any{"allowedSourceRanges": []any{"::/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "warns when a scoped range is mixed with an any-source CIDR",
+			name:        "allows but warns when a scoped range is mixed with an any-source CIDR",
 			values:      map[string]any{"allowedSourceRanges": []any{"10.0.0.0/8", "0.0.0.0/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "does not warn when agentgateway is absent",
-			present:     false,
-			wantWarning: false,
+			name:    "no-op when agentgateway is absent",
+			present: false,
 		},
 	}
 
@@ -2225,17 +2256,40 @@ func TestWarnAgentgatewayOpenExposure(t *testing.T) {
 				componentValues[agentgatewayComponentName] = tt.values
 			}
 
-			b.warnAgentgatewayOpenExposure(componentValues)
+			gotErr := b.resolveAgentgatewayExposure(componentValues)
+			if (gotErr != nil) != tt.wantErr {
+				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(gotErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", gotErr)
+				}
+			}
 
 			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
 				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
 			}
 			if tt.wantWarning {
 				warning := b.warnings[0]
-				for _, want := range []string{"inference-gateway", "0.0.0.0/0", "allowedSourceRanges"} {
+				for _, want := range []string{"inference-gateway", "allowedSourceRanges"} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
 					}
+				}
+			}
+
+			if tt.wantDefault {
+				got, ok := componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath].([]any)
+				if !ok {
+					t.Fatalf("allowedSourceRanges = %#v, want defaulted []any",
+						componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath])
+				}
+				want := make([]any, len(agentgatewayDefaultSourceRanges))
+				for i, r := range agentgatewayDefaultSourceRanges {
+					want[i] = r
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("defaulted allowedSourceRanges = %#v, want %#v", got, want)
 				}
 			}
 		})

@@ -40,11 +40,15 @@ inferenceExtension:
 # OCI cloud load balancers alike — so one setting locks the gateway down on
 # every platform.
 #
-# Default is EMPTY, which leaves the load balancer reachable from any source
-# (0.0.0.0/0) so deployments work out of the box regardless of network. This is
-# intentionally NOT defaulted to an NVIDIA-specific range: a baked-in CIDR would
-# firewall every downstream deployment to NVIDIA's network and lock external
-# operators out of their own gateway.
+# This value is EMPTY here, but it is NOT what ships: when it is left empty,
+# `aicr bundle` injects the private RFC1918 ranges (10.0.0.0/8, 172.16.0.0/12,
+# 192.168.0.0/16) before rendering, so the deployed load balancer is reachable
+# from inside the cluster/VPC but denied to the public internet — it is never
+# emitted open to 0.0.0.0/0 (see #1373). It is intentionally NOT defaulted to an
+# NVIDIA-specific range: a baked-in customer CIDR would firewall every downstream
+# deployment to NVIDIA's network and lock external operators out of their own
+# gateway. A corporate VPN egresses from a public IP and is therefore NOT covered
+# by the RFC1918 default — admit it explicitly via the flag/override below.
 #
 # Each operator should scope this to their trusted networks. Do NOT use plain
 # `--set` for this key: `--set agentgateway:allowedSourceRanges=<cidr>` exits 0

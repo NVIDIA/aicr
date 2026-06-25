@@ -43,12 +43,17 @@ spec:
                 --intent inference \
                 --output "${WORK}/recipe.yaml"
 
-    ## ── Default: no scheduling overrides ───────────────────────────────
+    ## ── Default: private-by-default when allowedSourceRanges is unset ──
 
-    - name: bundle-defaults
-      description: Generate bundle with no system node scheduling flags.
+    - name: bundle-defaults-private
+      description: |
+        With no allowedSourceRanges override, bundle succeeds but defaults the
+        inference-gateway to private RFC1918 ranges (#1373) — it never emits a
+        LoadBalancer open to 0.0.0.0/0.
       try:
         - script:
+            # set -e so EVERY assertion is fail-closed: a missing resource or a
+            # missing default range must fail the step.
             content: |
               set -e
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
@@ -57,32 +62,24 @@ spec:
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle-defaults"
-
-    - name: assert-gateway-defaults
-      description: Verify AgentgatewayParameters and Gateway resources exist.
-      try:
-        - script:
-            # set -e so EVERY assertion below is fail-closed: without it, /bin/sh -c
-            # only surfaces the last command's status, letting an earlier failed
-            # grep (e.g. a missing resource) pass silently when the final negative
-            # grep happens to succeed.
-            content: |
-              set -e
-              WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               ## agentgateway is a mixed component (upstream Helm + raw manifests),
               ## so its raw manifests render into an injected NNN-agentgateway-post/
               ## wrapped chart's templates/ folder under #662's layout.
               MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-agentgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
               [ -n "${MANIFEST}" ] || { echo "agentgateway inference-gateway.yaml not found" >&2; exit 1; }
-              ## The manifest contains two resources (AgentgatewayParameters + Gateway).
-              ## Verify both are present.
               grep -q 'kind: AgentgatewayParameters' "${MANIFEST}"
               grep -q 'kind: Gateway' "${MANIFEST}"
-              ## allowedSourceRanges defaults to empty, so no LoadBalancer source
-              ## restriction is rendered out of the box (deployments stay reachable
-              ## regardless of network). Operators opt in via an overlay override;
-              ## see assert-gateway-source-ranges below for the configured path.
-              ! grep -q 'loadBalancerSourceRanges:' "${MANIFEST}"
+              ## The private-by-default RFC1918 ranges must be rendered onto the
+              ## Service, and an any-source range must NOT appear.
+              grep -q 'loadBalancerSourceRanges:' "${MANIFEST}"
+              ## Match list entries, not the surrounding template comments (which
+              ## mention these tokens), so the assertions key off the rendered
+              ## loadBalancerSourceRanges list only.
+              grep -Eq '^[[:space:]]*-[[:space:]]*10\.0\.0\.0/8([[:space:]]|$)' "${MANIFEST}"
+              grep -Eq '^[[:space:]]*-[[:space:]]*172\.16\.0\.0/12([[:space:]]|$)' "${MANIFEST}"
+              grep -Eq '^[[:space:]]*-[[:space:]]*192\.168\.0\.0/16([[:space:]]|$)' "${MANIFEST}"
+              ! grep -Eq '^[[:space:]]*-[[:space:]]*0\.0\.0\.0/0([[:space:]]|$)' "${MANIFEST}"
+              ! grep -Eq '^[[:space:]]*-[[:space:]]*::/0([[:space:]]|$)' "${MANIFEST}"
 
     ## ── With LoadBalancer source-range restriction ─────────────────────
 
@@ -131,6 +128,10 @@ spec:
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-agentgateway-templates"
               rm -rf "${WORK}/bundle-scheduling"
+              ## Plain recipe (no allowedSourceRanges override): the bundle
+              ## generates fine because allowedSourceRanges defaults to private
+              ## RFC1918 ranges (#1373). This step asserts scheduling injection,
+              ## not the exposure behavior.
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle-scheduling" \

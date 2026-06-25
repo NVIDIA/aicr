@@ -39,8 +39,11 @@ spec:
   # inference endpoint to the entire internet. spec.service.spec is merged onto
   # the generated Service, and loadBalancerSourceRanges is a portable Service
   # field honored by the AWS, GCP, Azure, and OCI cloud load balancers — so this
-  # single setting locks the gateway down on every platform. An empty
-  # allowedSourceRanges list leaves the Service unrestricted (0.0.0.0/0).
+  # single setting locks the gateway down on every platform. Through `aicr
+  # bundle`, allowedSourceRanges is never empty here: the bundler injects the
+  # private RFC1918 ranges by default (see #1373). A literally-empty value (e.g.
+  # rendering this chart standalone, outside the bundler) leaves the Service
+  # unrestricted (0.0.0.0/0).
   {{- if $agw.allowedSourceRanges }}
   service:
     spec:

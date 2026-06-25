@@ -263,7 +263,9 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, warningErr
 	}
 
-	b.warnAgentgatewayOpenExposure(componentValues)
+	if exposureErr := b.resolveAgentgatewayExposure(componentValues); exposureErr != nil {
+		return nil, exposureErr
+	}
 
 	// Run component-specific validations
 	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
@@ -1217,49 +1219,130 @@ const (
 	agentgatewaySourceRangesPath = "allowedSourceRanges"
 )
 
-// warnAgentgatewayOpenExposure emits a bundle note when the agentgateway
-// component is included but its allowedSourceRanges does not scope the
-// inference-gateway LoadBalancer — i.e. the list is empty/unset or includes an
-// any-source CIDR (0.0.0.0/0 or ::/0) — leaving it reachable from any source.
-// The open-by-default behavior is intentional (#1138) — a baked-in
-// CIDR would lock external operators out of their own gateway — but it is
-// otherwise silent: nothing in bundle output flags that the gateway is
-// internet-facing. This surfaces the exposure so scoping it becomes a conscious
-// choice, mirroring the storageClassName PVC warning. See #1160.
-func (b *DefaultBundler) warnAgentgatewayOpenExposure(componentValues map[string]map[string]any) {
-	values := componentValues[agentgatewayComponentName]
-	if values == nil {
-		return
-	}
-	if sourceRangesAreScoped(values, agentgatewaySourceRangesPath) {
-		return
-	}
-
-	msg := fmt.Sprintf(
-		"%s: inference-gateway will be provisioned as an internet-facing LoadBalancer open to 0.0.0.0/0 "+
-			"(%s is empty or includes an any-source CIDR). Scope it to trusted networks via a recipe componentRef override or "+
-			"--set-json %s:%s='[\"<cidr>\"]'. See docs/user/component-catalog.md.",
-		agentgatewayComponentName, agentgatewaySourceRangesPath,
-		agentgatewayComponentName, agentgatewaySourceRangesPath,
-	)
-	b.appendWarning(msg)
-	slog.Warn("agentgateway inference-gateway is open to 0.0.0.0/0 (allowedSourceRanges empty or any-source)",
-		"component", agentgatewayComponentName,
-		"path", agentgatewaySourceRangesPath,
-	)
+// agentgatewayDefaultSourceRanges is the private-by-default scope applied to the
+// inference-gateway LoadBalancer when the operator supplies no allowedSourceRanges
+// (and does not override it via a recipe componentRef). These are the RFC1918
+// private ranges: they keep the gateway reachable from inside the cluster/VPC and
+// from privately-routed peers, while denying the public internet (which includes
+// VPN egress that presents a public source IP). Operators open specific public
+// clients with --set-json agentgateway:allowedSourceRanges='["<cidr>"]', or
+// expose it publicly with ["0.0.0.0/0"]. This is deliberately generic (not a
+// customer-specific network) to avoid firewalling every deployment to one site.
+// To flip to a deny-all default instead, replace this with a single unreachable
+// CIDR such as "255.255.255.255/32". See #1373.
+var agentgatewayDefaultSourceRanges = []string{
+	"10.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
 }
 
-// sourceRangesAreScoped reports whether the value at path is a non-empty list
-// of CIDRs that actually scopes the LoadBalancer — i.e. it omits any-source
-// ranges (0.0.0.0/0, ::/0). A missing value, an empty list, a non-list value
-// (e.g. a bare string from a mistaken scalar --set, which would itself render
-// an invalid Service), or a list that includes an any-source CIDR all count as
-// "not scoped" so the open-exposure warning still fires. See #1160.
-func sourceRangesAreScoped(values map[string]any, path string) bool {
+// agentgatewayExposure classifies how the agentgateway.allowedSourceRanges
+// value scopes the inference-gateway LoadBalancer.
+type agentgatewayExposure int
+
+const (
+	// exposureScoped: a non-empty list of valid CIDRs, none of them an
+	// any-source range. The LoadBalancer is locked to trusted networks.
+	exposureScoped agentgatewayExposure = iota
+	// exposureOpen: a non-empty list that includes an any-source CIDR
+	// (0.0.0.0/0 or ::/0) — a deliberate, explicit public opt-in.
+	exposureOpen
+	// exposureUnset: the value is missing or an empty list. Kubernetes treats
+	// an empty loadBalancerSourceRanges as allow-all, so this would render an
+	// internet-facing gateway by default.
+	exposureUnset
+	// exposureInvalid: the value is not a list of valid CIDR strings (e.g. a
+	// bare scalar from a mistaken --set, a non-string entry, or an
+	// unparseable CIDR) and would render an invalid Service.
+	exposureInvalid
+)
+
+// resolveAgentgatewayExposure enforces a private-by-default posture for the
+// agentgateway inference-gateway LoadBalancer. Kubernetes treats an empty
+// loadBalancerSourceRanges as allow-all (0.0.0.0/0), so when the operator
+// supplies no allowedSourceRanges (and no recipe componentRef override),
+// emitting nothing would silently expose the gateway to the whole internet.
+// Instead this injects a private RFC1918 default (see
+// agentgatewayDefaultSourceRanges) into the merged values so the deployed
+// gateway denies the public internet while staying reachable from inside the
+// cluster/VPC. Operators scope to specific public clients via
+// --set-json agentgateway:allowedSourceRanges='["<cidr>"]'; an explicit
+// any-source opt-in is still permitted but logged loudly; an invalid value is
+// rejected. It mutates componentValues only in the unset case. See #1373.
+func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]map[string]any) error {
+	values := componentValues[agentgatewayComponentName]
+	if values == nil {
+		return nil
+	}
+
+	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
+	switch state {
+	case exposureScoped:
+		return nil
+
+	case exposureOpen:
+		// Deliberate, explicit public opt-in: allowed, but logged loudly and
+		// surfaced as a bundle warning so it is never silent.
+		msg := fmt.Sprintf(
+			"%s: inference-gateway is explicitly opened to the entire internet "+
+				"(%s includes an any-source CIDR such as 0.0.0.0/0). This is a deliberate opt-in; "+
+				"scope it to trusted networks unless public exposure is intended.",
+			agentgatewayComponentName, agentgatewaySourceRangesPath,
+		)
+		b.appendWarning(msg)
+		slog.Warn("agentgateway inference-gateway is explicitly opened via an any-source CIDR (deliberate public opt-in)",
+			"component", agentgatewayComponentName,
+			"path", agentgatewaySourceRangesPath,
+		)
+		return nil
+
+	case exposureInvalid:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s must be a list of CIDR strings (%s); set it via "+
+				"--set-json %s:%s='[\"<cidr>\"]' — a bare --set value renders an invalid Service",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, detail,
+			agentgatewayComponentName, agentgatewaySourceRangesPath,
+		))
+
+	case exposureUnset:
+		// Private-by-default: inject RFC1918 ranges so the gateway is never
+		// emitted open to 0.0.0.0/0 without an explicit operator choice.
+		ranges := make([]any, len(agentgatewayDefaultSourceRanges))
+		for i, r := range agentgatewayDefaultSourceRanges {
+			ranges[i] = r
+		}
+		values[agentgatewaySourceRangesPath] = ranges
+		b.appendWarning(fmt.Sprintf(
+			"%s: %s was not set; defaulting the inference-gateway to private ranges (%s) so it is "+
+				"not exposed to the public internet. To allow specific public clients (e.g. a corporate VPN), "+
+				"set --set-json %s:%s='[\"<cidr>\"]'; to expose it publicly, use [\"0.0.0.0/0\"]. "+
+				"See docs/user/component-catalog.md.",
+			agentgatewayComponentName, agentgatewaySourceRangesPath,
+			strings.Join(agentgatewayDefaultSourceRanges, ", "),
+			agentgatewayComponentName, agentgatewaySourceRangesPath,
+		))
+		slog.Info("defaulting agentgateway inference-gateway to private source ranges (allowedSourceRanges unset)",
+			"component", agentgatewayComponentName,
+			"path", agentgatewaySourceRangesPath,
+			"ranges", agentgatewayDefaultSourceRanges,
+		)
+		return nil
+
+	default:
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+			"unhandled agentgateway exposure state %d", state))
+	}
+}
+
+// classifyAgentgatewaySourceRanges inspects the value at path and reports how it
+// scopes the LoadBalancer. The detail string is populated only for
+// exposureInvalid to explain why the value was rejected. See #1373.
+func classifyAgentgatewaySourceRanges(values map[string]any, path string) (agentgatewayExposure, string) {
 	v, ok := component.GetValueByPath(values, path)
 	if !ok || v == nil {
-		return false
+		return exposureUnset, ""
 	}
+
 	var items []string
 	switch list := v.(type) {
 	case []any:
@@ -1267,26 +1350,33 @@ func sourceRangesAreScoped(values map[string]any, path string) bool {
 		for _, e := range list {
 			s, ok := e.(string)
 			if !ok {
-				// A non-string entry can't be a valid CIDR; the rendered
-				// Service would be invalid, so treat it as not-scoped.
-				return false
+				return exposureInvalid, fmt.Sprintf("entry %v is not a string", e)
 			}
 			items = append(items, s)
 		}
 	case []string:
 		items = list
 	default:
-		return false
+		return exposureInvalid, fmt.Sprintf("got %T, not a list", v)
 	}
+
 	if len(items) == 0 {
-		return false
+		return exposureUnset, ""
 	}
+
+	hasAnySource := false
 	for _, r := range items {
+		if !netutil.IsValidCIDR(r) {
+			return exposureInvalid, fmt.Sprintf("%q is not a valid CIDR", r)
+		}
 		if netutil.IsAnySourceCIDR(r) {
-			return false
+			hasAnySource = true
 		}
 	}
-	return true
+	if hasAnySource {
+		return exposureOpen, ""
+	}
+	return exposureScoped, ""
 }
 
 func storageClassPathHasPVCSpec(values map[string]any, path string) bool {

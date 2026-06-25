@@ -40,3 +40,32 @@ func TestIsAnySourceCIDR(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidCIDR(t *testing.T) {
+	tests := []struct {
+		name string
+		cidr string
+		want bool
+	}{
+		{"scoped ipv4", "10.0.0.0/8", true},
+		{"host route ipv4", "1.2.3.4/32", true},
+		{"any ipv4", "0.0.0.0/0", true},
+		{"scoped ipv6", "2001:db8::/32", true},
+		{"any ipv6", "::/0", true},
+		{"valid with whitespace", "  10.0.0.0/8 ", true},
+		{"bare ip without prefix", "10.0.0.0", false},
+		{"not a cidr", "not-a-cidr", false},
+		{"empty", "", false},
+		{"host bits set (non-canonical)", "1.2.3.4/24", false},
+		{"leading zero in prefix", "1.2.3.0/024", false},
+		{"ipv6 host bits set", "2001:db8::1/32", false},
+		{"ipv4-mapped ipv6", "::ffff:192.12.2.0/120", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsValidCIDR(tt.cidr); got != tt.want {
+				t.Errorf("IsValidCIDR(%q) = %v, want %v", tt.cidr, got, tt.want)
+			}
+		})
+	}
+}
