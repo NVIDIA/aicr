@@ -218,38 +218,9 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			"recipe must contain at least one component reference")
 	}
 
-	// Filter out disabled components on a local copy to avoid mutating the caller's input.
-	// Check order: --set overrides take precedence over recipe overrides.
-	// This allows users to enable/disable components at bundle time:
-	//   --set awsebscsidriver:enabled=false  (disable)
-	//   --set awsebscsidriver:enabled=true   (re-enable)
-	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
-	enabledSet := make(map[string]struct{})
-	for _, ref := range recipeResult.ComponentRefs {
-		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
-		if overrideErr != nil {
-			return nil, overrideErr
-		}
-		if ok {
-			if !setEnabled {
-				slog.Info("skipping component disabled via --set", "component", ref.Name)
-				continue
-			}
-			// --set enabled=true overrides recipe-level disabled
-		} else if !ref.IsEnabled() {
-			slog.Info("skipping disabled component", "component", ref.Name)
-			continue
-		}
-		enabledRefs = append(enabledRefs, ref)
-		enabledSet[ref.Name] = struct{}{}
-	}
-
-	// Filter DeploymentOrder to match enabled components
-	filteredOrder := make([]string, 0, len(recipeResult.DeploymentOrder))
-	for _, name := range recipeResult.DeploymentOrder {
-		if _, ok := enabledSet[name]; ok {
-			filteredOrder = append(filteredOrder, name)
-		}
+	enabledRefs, filteredOrder, filterErr := b.filterEnabledComponents(recipeResult)
+	if filterErr != nil {
+		return nil, filterErr
 	}
 
 	// Work on a shallow copy so the caller's RecipeResult is not mutated
@@ -257,11 +228,6 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	filtered.ComponentRefs = enabledRefs
 	filtered.DeploymentOrder = filteredOrder
 	recipeResult = &filtered
-
-	if len(enabledRefs) == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"recipe has no enabled components after filtering")
-	}
 
 	// Set default output directory
 	if dir == "" {
@@ -800,6 +766,99 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 	}
 
 	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
+}
+
+// filterEnabledComponents resolves the set of components to bundle by applying
+// recipe-level overrides.enabled and bundle-time --set enabled toggles, then
+// returns the enabled refs (with dangling dependency edges pruned) alongside
+// the deployment order filtered to those refs.
+//
+// Bundle-time --set can disable a component the recipe enabled
+// (--set <c>:enabled=false), but it cannot re-enable a component the recipe
+// deliberately disabled: the author disables a component because the platform
+// already provides it (e.g. a CSP-managed cert-manager on OKE), so re-enabling
+// would install a conflicting second copy and there is no authored deployment
+// order for it. Such an attempt is rejected with ErrCodeInvalidRequest.
+func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, []string, error) {
+	// declaredSet is every component the recipe names, regardless of enabled
+	// state. It distinguishes a declared-but-disabled dependency (prune the
+	// edge — satisfied externally) from an undeclared one (keep it so topology
+	// validation still errors on a malformed recipe).
+	declaredSet := make(map[string]struct{}, len(recipeResult.ComponentRefs))
+	for _, ref := range recipeResult.ComponentRefs {
+		declaredSet[ref.Name] = struct{}{}
+	}
+
+	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
+	enabledSet := make(map[string]struct{})
+	for _, ref := range recipeResult.ComponentRefs {
+		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
+		if overrideErr != nil {
+			return nil, nil, overrideErr
+		}
+		recipeEnabled := ref.IsEnabled()
+		if ok {
+			if setEnabled && !recipeEnabled {
+				return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"component %q is disabled by the recipe and cannot be re-enabled with "+
+						"--set %s:%s=true", ref.Name, ref.Name, config.ComponentEnabledKey))
+			}
+			if !setEnabled {
+				slog.Info("skipping component disabled via --set", "component", ref.Name)
+				continue
+			}
+			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
+		} else if !recipeEnabled {
+			slog.Info("skipping disabled component", "component", ref.Name)
+			continue
+		}
+		enabledRefs = append(enabledRefs, ref)
+		enabledSet[ref.Name] = struct{}{}
+	}
+
+	if len(enabledRefs) == 0 {
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+			"recipe has no enabled components after filtering")
+	}
+
+	// Prune dependency edges that point at a declared-but-disabled component
+	// removed above. After filtering, such a dependency is no longer present in
+	// the ref slice, so a deployer that recomputes ordering from these refs
+	// (e.g. helmfile via ComponentRefsTopologicalLevels) would otherwise treat
+	// the dangling edge as an undeclared dependency and fail with a false
+	// circular-dependency error. The dependency is assumed satisfied externally
+	// (the reason it was disabled). An edge to a genuinely undeclared component
+	// is left intact so topology validation still errors on a malformed recipe.
+	for i := range enabledRefs {
+		deps := enabledRefs[i].DependencyRefs
+		if len(deps) == 0 {
+			continue
+		}
+		pruned := make([]string, 0, len(deps))
+		for _, dep := range deps {
+			_, isEnabled := enabledSet[dep]
+			_, isDeclared := declaredSet[dep]
+			if isDeclared && !isEnabled {
+				// declared-but-disabled: satisfied externally, drop the edge.
+				continue
+			}
+			pruned = append(pruned, dep)
+		}
+		if len(pruned) != len(deps) {
+			enabledRefs[i].DependencyRefs = pruned
+		}
+	}
+
+	// Filter DeploymentOrder to match enabled components, preserving the
+	// recipe's authored order.
+	filteredOrder := make([]string, 0, len(recipeResult.DeploymentOrder))
+	for _, name := range recipeResult.DeploymentOrder {
+		if _, ok := enabledSet[name]; ok {
+			filteredOrder = append(filteredOrder, name)
+		}
+	}
+
+	return enabledRefs, filteredOrder, nil
 }
 
 // getSetEnabledOverride checks if --set overrides contain an "enabled" key

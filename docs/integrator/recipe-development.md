@@ -271,6 +271,37 @@ Base → ValuesFile → Overrides → CLI --set flags
 # Result: driver.version="580.13.01", driver.repository="nvcr.io/nvidia" (preserved)
 ```
 
+## Disable a Component in an Overlay
+
+Set `overrides.enabled: false` on a `componentRef` to drop a component a base
+recipe would otherwise install. Use this when the target platform already
+provides that component — for example a CSP-managed cert-manager on OKE, where
+installing a second copy would conflict.
+
+```yaml
+# Leaf overlay: the platform supplies cert-manager, so don't install ours.
+componentRefs:
+  - name: cert-manager
+    overrides:
+      enabled: false
+```
+
+A disabled component is excluded from the recipe's `deploymentOrder` and from
+the generated bundle. A dependency edge pointing at it is treated as **already
+satisfied** (the component is assumed provided externally), so components that
+declare it in `dependencyRefs` — such as `gpu-operator` — still resolve and
+order correctly instead of failing with a circular-dependency error. A
+`dependencyRefs` entry that names a component which does not exist in the recipe
+at all is still an error.
+
+The disabled `componentRef` remains in the resolved recipe's `componentRefs`
+(with `overrides.enabled: false`) for transparency, but it cannot be re-enabled at
+bundle time — `--set <component>:enabled=true` on a recipe-disabled component
+is rejected, because re-enabling a platform-provided component would install a
+conflicting second copy. Disabling is therefore an authoring decision: to ship
+the component, remove the `enabled: false` override from the recipe/overlay.
+See [Enable or disable components](../user/bundling.md#enable-or-disable-components).
+
 ## File Naming Conventions
 
 File names are for human readability—matching uses `spec.criteria`, not file names.

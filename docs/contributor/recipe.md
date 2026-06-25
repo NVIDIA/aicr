@@ -331,7 +331,13 @@ Implementation notes:
    would fail downstream far from the root cause.
 5. **Topological sort.** `TopologicalSort()` orders components by
    `dependencyRefs` for the final `DeploymentOrder`. Cycles produce
-   `ErrCodeInvalidRequest`.
+   `ErrCodeInvalidRequest`. Components disabled via
+   `overrides.enabled: false` (`ComponentRef.IsEnabled()`) are excluded
+   from the ordering, and an edge pointing at a declared-but-disabled
+   component is treated as satisfied (assumed provided externally) so it
+   does not trigger a false cycle; an edge to an *undeclared* component
+   still surfaces as `ErrCodeInvalidRequest`. `TopologicalLevels()` /
+   `ComponentRefsTopologicalLevels()` apply the same filter.
 
 **Deep-copy semantics.** `deepMergeMap` (`metadata.go`) recurses into
 nested `map[string]any`. Non-map values (scalars *and* `[]any`) are
