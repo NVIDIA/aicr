@@ -1,0 +1,92 @@
+machineType: ThinkSystem-SR675-V3
+manufacturer: Lenovo
+gpuType: NVIDIA-H200-NVL
+nicModel: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16 (ConnectX-7)
+gpuInterconnect: NV6
+numaNodes: 2
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: true
+
+# H200 NVL: GPUs are grouped into 2-GPU NVLink-bridge pairs (NV6).
+# Each rail NIC is PIX to BOTH GPUs of a pair; rail tied to the lowest-index GPU.
+# GPU0/GPU1 pair has no PIX NIC — the only NUMA-0 east-west NIC is tied to the GPU2/GPU3 pair.
+
+pfs:
+  # --- NUMA 0: GPUs 0-3, CPUs 0-63,128-191 ---
+  - deviceID: a2dc
+    rdmaDevice: mlx5_0
+    pciAddress: 0000:21:00.0
+    networkInterface: ens15f0np0
+    traffic: east-west
+    numaNode: 0
+    rail: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: lnv0000000071
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: mlx5_2
+    pciAddress: 0000:65:00.0
+    networkInterface: ens16f0np0
+    traffic: east-west
+    rail: 1
+    numaNode: 0
+    connectedGPU: GPU2
+    gpuProximity: PIX
+    psid: lnv0000000071
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+
+  # --- NUMA 1: GPUs 4-7, CPUs 64-127,192-255 ---
+  - deviceID: "1021"
+    rdmaDevice: mlx5_4
+    pciAddress: 0000:85:00.0
+    networkInterface: ens2f0np0
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: GPU4
+    gpuProximity: PIX
+    psid: lnv0000000058
+    partNumber: SN37B06010
+    model: Nvidia ConnectX-7 NDR200/HDR QSFP112 2-port PCIe Gen5 x16 InfiniBand Adapter
+  - deviceID: "1021"
+    rdmaDevice: mlx5_5
+    pciAddress: 0000:85:00.1
+    networkInterface: ens2f1np1
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: GPU4
+    gpuProximity: PIX
+    psid: lnv0000000058
+    partNumber: SN37B06010
+    model: Nvidia ConnectX-7 NDR200/HDR QSFP112 2-port PCIe Gen5 x16 InfiniBand Adapter
+
+  - deviceID: a2dc
+    rdmaDevice: mlx5_3
+    pciAddress: 0000:c1:00.0
+    networkInterface: ens20f0np0
+    traffic: east-west
+    rail: 2
+    numaNode: 1
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: lnv0000000071
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: mlx5_1
+    pciAddress: 0000:e5:00.0
+    networkInterface: ens21f0np0
+    traffic: east-west
+    rail: 3
+    numaNode: 1
+    connectedGPU: GPU6
+    gpuProximity: PIX
+    psid: lnv0000000071
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16

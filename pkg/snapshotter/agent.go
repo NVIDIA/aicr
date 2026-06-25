@@ -106,6 +106,20 @@ type AgentConfig struct {
 	// empty, defaults preserve the systemd-based behavior.
 	OS string
 
+	// ClusterConfigPath, when set, asks the in-pod network collector to
+	// ingest a pre-existing l8k cluster-config.yaml at this path. In
+	// Job-mode the path must resolve inside the agent pod (ConfigMap
+	// mount, etc.) — this iteration plumbs the field through but does
+	// not yet auto-mount the file; the typical use today is local mode
+	// (AICR_AGENT_MODE=true) where the file lives on the caller's host.
+	ClusterConfigPath string
+
+	// DiscoverNetwork enables the in-pod network collector's live l8k
+	// discovery path. Discovery is NOT read-only — it writes node labels
+	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
+	// server-side-apply. RBAC must allow those writes.
+	DiscoverNetwork bool
+
 	// Requests overrides the agent container's per-resource requests.
 	// When nil, the privileged/restricted defaults baked into
 	// pkg/k8s/agent are used. Useful for right-sizing the agent on
@@ -145,6 +159,8 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		RuntimeClassName:   config.RuntimeClassName,
 		MaxNodesPerEntry:   config.MaxNodesPerEntry,
 		OS:                 config.OS,
+		ClusterConfigPath:  config.ClusterConfigPath,
+		DiscoverNetwork:    config.DiscoverNetwork,
 		Requests:           config.Requests,
 		Limits:             config.Limits,
 	}

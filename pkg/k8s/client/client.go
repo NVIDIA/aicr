@@ -59,6 +59,37 @@ type cachedPathClient struct {
 	config *rest.Config
 }
 
+// ResolveKubeconfigPath returns the kubeconfig path aicr should use given an
+// optional explicit override. Resolution order:
+//
+//  1. The supplied path, after whitespace trimming. A stray space in a CLI
+//     flag or env var would otherwise become a guaranteed "stat   : no
+//     such file" error inside clientcmd; trimming aligns explicit-override
+//     semantics with empty-as-defaults.
+//  2. KUBECONFIG environment variable (whitespace-trimmed).
+//  3. ~/.kube/config when the file exists.
+//  4. Empty string, signaling "fall through to in-cluster config" — the
+//     correct behavior when aicr is running inside a Kubernetes pod with a
+//     mounted service account token.
+//
+// Exported so any consumer that needs a concrete kubeconfig path (e.g. the
+// network collector handing one to l8k's kubeclient.New) walks the same
+// chain BuildKubeClient does, avoiding subtle divergence.
+func ResolveKubeconfigPath(kubeconfig string) string {
+	kubeconfig = strings.TrimSpace(kubeconfig)
+	if kubeconfig != "" {
+		return kubeconfig
+	}
+	if env := strings.TrimSpace(os.Getenv("KUBECONFIG")); env != "" {
+		return env
+	}
+	defaultPath := filepath.Join(homedir.HomeDir(), ".kube", "config")
+	if _, err := os.Stat(defaultPath); err == nil {
+		return defaultPath
+	}
+	return ""
+}
+
 // GetKubeClient returns a singleton Kubernetes client, creating it on first call.
 // Subsequent calls return the cached client for connection reuse and reduced overhead.
 // This prevents connection exhaustion and reduces load on the Kubernetes API server.
@@ -104,21 +135,7 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 	var config *rest.Config
 	var err error
 
-	// Treat whitespace-only paths as unset so a stray space in a CLI flag
-	// or env var doesn't bypass the default discovery chain into a guaranteed
-	// "stat   : no such file" error from clientcmd.
-	kubeconfig = strings.TrimSpace(kubeconfig)
-
-	if kubeconfig == "" {
-		kubeconfig = strings.TrimSpace(os.Getenv("KUBECONFIG"))
-
-		if kubeconfig == "" {
-			kubeconfig = filepath.Join(homedir.HomeDir(), ".kube", "config")
-			if _, err = os.Stat(kubeconfig); os.IsNotExist(err) {
-				kubeconfig = ""
-			}
-		}
-	}
+	kubeconfig = ResolveKubeconfigPath(kubeconfig)
 
 	// Use InClusterConfig directly when no kubeconfig is available
 	// This avoids the warning: "Neither --kubeconfig nor --master was specified"

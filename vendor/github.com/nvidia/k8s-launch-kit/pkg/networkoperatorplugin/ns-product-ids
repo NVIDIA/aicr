@@ -1,0 +1,30 @@
+# BlueField DPU Product IDs (NOT SuperNIC) — north-south traffic
+#
+# These are NVIDIA product codes for BlueField products classified as DPUs
+# (not SuperNICs). During discovery, devices whose partNumber matches any
+# product code or legacy product ID in this file have their PFs marked
+# as "north-south" traffic.
+#
+# Format: ProductCode | LegacyProductId | ProductName
+#
+# BlueField-4 DPU
+900-9D4B4-00CV-SA0 | 900-9D4B4-00CV-SA0 | NVIDIA BlueField-4 B4240L 800G Liquid Cooled
+900-9D4B4-00CV-AA0 | 900-9D4B4-00CAV-AA0 | NVIDIA BlueField-4 B4240 800G Air Cooled
+#
+# BlueField-3 B3210E DPU (E-Series FHHL, HDR100 IB)
+900-9D3B6-00CC-EA0 | 900-9D3B6-00CC-EA0 | BlueField-3 B3210E, Crypto
+900-9D3B6-005C-EA0 | 900-9D3B6-005C-EA0 | BlueField-3 B3210E, No crypto
+#
+# BlueField-3 B3220 P-Series DPU (FHHL)
+900-9D3B6-00CV-AA0 | 900-9D3B6-00CV-AA0 | NVIDIA BlueField-3 B3220 P-Series FHHL DPU
+#
+# BlueField-3 B3210L DPU
+900-9D3B4-005C-EA0 | 900-9D384-005C-EA0 | BlueField-3 B3210L, No Crypto
+900-9D3B4-00CC-EA0 | 900-9D384-00CC-EA0 | BlueField-3 B3210L, Crypto
+#
+# BlueField-3 B3240 DPU
+900-9D3B6-00CN-A80 | 900-9D3B6-00CN-A80 | BlueField-3 B3240, Crypto
+900-9D3B6-00CV-PA0 | 900-9D3B6-005V-PA0 | NVIDIA BlueField-3 B3240 cold aisle
+#
+# BlueField-3 B3220 DPU (non-SH, non-P-Series)
+900-9D3B6-005V-AA0 | 900-9D3B6-005V-AA0 | BlueField-3 B3220, No Crypto
