@@ -1148,7 +1148,19 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 	pathSet := make(map[string]struct{})
 	for key, paths := range raw {
 		comp := registry.GetByOverrideKey(key)
-		if comp == nil || comp.Name != componentName {
+		if comp == nil {
+			// buildDynamicValuesMap validates all --dynamic keys before
+			// extractComponentValues runs, so an unresolved key here means
+			// a gap in upstream validation. Warn so it surfaces immediately
+			// rather than silently baking in a toleration the user expected
+			// to leave dynamic.
+			slog.Warn("dynamicPathSetFor: unresolved --dynamic override key, toleration will be baked in",
+				"key", key,
+				"component", componentName,
+			)
+			continue
+		}
+		if comp.Name != componentName {
 			continue
 		}
 		for _, p := range paths {

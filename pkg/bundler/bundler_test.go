@@ -2475,32 +2475,32 @@ func TestMake_DynamicValuesValidComponent(t *testing.T) {
 // TestDynamicPathSetFor verifies the helper correctly resolves override
 // keys to component names and returns only that component's declared paths.
 func TestDynamicPathSetFor(t *testing.T) {
-    cfg := config.NewConfig(
-        config.WithDynamicValues(map[string][]string{
-            "gpuoperator": {"daemonsets.tolerations", "daemonsets.nodeSelector"},
-            "nfd":         {"worker.tolerations"},
-        }),
-    )
-    b, err := New(WithConfig(cfg))
-    if err != nil {
-        t.Fatalf("New() error = %v", err)
-    }
+	cfg := config.NewConfig(
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations", "daemonsets.nodeSelector"},
+			"nfd":         {"worker.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 
-    got := b.dynamicPathSetFor("gpu-operator", nil)
-    wantPaths := []string{"daemonsets.tolerations", "daemonsets.nodeSelector"}
-    for _, p := range wantPaths {
-        if _, ok := got[p]; !ok {
-            t.Errorf("dynamicPathSetFor(gpu-operator) missing %q", p)
-        }
-    }
-    if _, ok := got["worker.tolerations"]; ok {
-        t.Errorf("dynamicPathSetFor(gpu-operator) should not contain nfd path worker.tolerations")
-    }
+	got := b.dynamicPathSetFor("gpu-operator", nil)
+	wantPaths := []string{"daemonsets.tolerations", "daemonsets.nodeSelector"}
+	for _, p := range wantPaths {
+		if _, ok := got[p]; !ok {
+			t.Errorf("dynamicPathSetFor(gpu-operator) missing %q", p)
+		}
+	}
+	if _, ok := got["worker.tolerations"]; ok {
+		t.Errorf("dynamicPathSetFor(gpu-operator) should not contain nfd path worker.tolerations")
+	}
 
-    // Unknown component returns nil
-    if got2 := b.dynamicPathSetFor("cert-manager", nil); got2 != nil {
-        t.Errorf("expected nil for component with no dynamic paths, got %v", got2)
-    }
+	// Unknown component returns nil
+	if got2 := b.dynamicPathSetFor("cert-manager", nil); got2 != nil {
+		t.Errorf("expected nil for component with no dynamic paths, got %v", got2)
+	}
 }
 
 // TestDynamicTolerationPathExcludedFromBakeIn verifies that when a toleration
@@ -2509,38 +2509,38 @@ func TestDynamicPathSetFor(t *testing.T) {
 // the dynamic cluster-values.yaml placeholder stays empty so operators
 // can inject tolerations at install time without rebuilding the bundle.
 func TestDynamicTolerationPathExcludedFromBakeIn(t *testing.T) {
-    tol := corev1.Toleration{Key: "reserved-by", Effect: corev1.TaintEffectNoSchedule}
-    cfg := config.NewConfig(
-        config.WithAcceleratedNodeTolerations([]corev1.Toleration{tol}),
-        config.WithDynamicValues(map[string][]string{
-            "gpuoperator": {"daemonsets.tolerations"},
-        }),
-    )
-    b, err := New(WithConfig(cfg))
-    if err != nil {
-        t.Fatalf("New() error = %v", err)
-    }
+	tol := corev1.Toleration{Key: "reserved-by", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{tol}),
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 
-    values := map[string]any{}
-    policy := b.computeSchedulingPathPolicy(
-        &recipe.ComponentRef{Name: "gpu-operator"},
-        nil,
-        nil,
-    )
+	values := map[string]any{}
+	policy := b.computeSchedulingPathPolicy(
+		&recipe.ComponentRef{Name: "gpu-operator"},
+		nil,
+		nil,
+	)
 
-    // Merge dynamic paths into optOut — this is what extractComponentValues does
-    if dynPaths := b.dynamicPathSetFor("gpu-operator", nil); len(dynPaths) > 0 {
-        for path := range dynPaths {
-            policy.optOut[path] = struct{}{}
-        }
-    }
+	// Merge dynamic paths into optOut — this is what extractComponentValues does
+	if dynPaths := b.dynamicPathSetFor("gpu-operator", nil); len(dynPaths) > 0 {
+		for path := range dynPaths {
+			policy.optOut[path] = struct{}{}
+		}
+	}
 
-    b.applyNodeSchedulingOverrides("gpu-operator", values, nil, policy)
+	b.applyNodeSchedulingOverrides("gpu-operator", values, nil, policy)
 
-    // daemonsets.tolerations must NOT be written — it's dynamic
-    if val, ok := component.GetValueByPath(values, "daemonsets.tolerations"); ok {
-        t.Errorf("daemonsets.tolerations should not be baked in when declared dynamic, got: %v", val)
-    }
+	// daemonsets.tolerations must NOT be written — it's dynamic
+	if val, ok := component.GetValueByPath(values, "daemonsets.tolerations"); ok {
+		t.Errorf("daemonsets.tolerations should not be baked in when declared dynamic, got: %v", val)
+	}
 }
 
 func TestMake_DisabledComponentWithDynamic(t *testing.T) {
