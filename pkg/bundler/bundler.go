@@ -678,6 +678,16 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// are intentionally excluded — see authoritativeSchedulingPaths godoc.
 		policy := b.computeSchedulingPathPolicy(&ref, provider, setOverrides)
 
+		// Paths declared via --dynamic must not have scheduling values baked in.
+		// Merging them into optOut causes applyNodeSchedulingOverrides to skip
+		// injection for those paths, so cluster-values.yaml gets an empty
+		// placeholder that operators fill at install time. See #1371.
+		if dynPaths := b.dynamicPathSetFor(ref.Name, provider); len(dynPaths) > 0 {
+			for path := range dynPaths {
+				policy.optOut[path] = struct{}{}
+			}
+		}
+
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
 		b.applyNodeSchedulingOverrides(ref.Name, values, provider, policy)
 
@@ -1096,6 +1106,59 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 			}
 		}
 	}
+
+    // Apply storage class to all registry-declared storageClassPaths, but only when the path
+	// was not explicitly set via a per-component --set override. Overlay/default values in the
+	// values map must not block injection; only CLI --set inputs take precedence.
+	if sc := b.Config.StorageClass(); sc != "" {
+		if paths := comp.GetStorageClassPaths(); len(paths) > 0 {
+			explicitOverrides := b.getValueOverridesForComponent(componentName, provider)
+			overrides := make(map[string]string, len(paths))
+			for _, path := range paths {
+				if _, isExplicit := explicitOverrides[path]; !isExplicit {
+					overrides[path] = sc
+				}
+			}
+			if len(overrides) > 0 {
+				if err := component.ApplyMapOverrides(values, overrides); err != nil {
+					slog.Warn("failed to apply storage class",
+						"component", componentName,
+						"error", err,
+					)
+				}
+			}
+		}
+	}
+}
+
+// dynamicPathSetFor returns the set of value paths declared as dynamic for
+// componentName. Dynamic paths are excluded from scheduling injection so that
+// cluster-values.yaml carries an empty placeholder rather than a baked-in
+// value, letting operators supply tolerations at install time without
+// rebuilding the bundle. See #1371.
+func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe.DataProvider) map[string]struct{} {
+	if b.Config == nil || !b.Config.HasDynamicValues() {
+		return nil
+	}
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		return nil
+	}
+	raw := b.Config.DynamicValues()
+	pathSet := make(map[string]struct{})
+	for key, paths := range raw {
+		comp := registry.GetByOverrideKey(key)
+		if comp == nil || comp.Name != componentName {
+			continue
+		}
+		for _, p := range paths {
+			pathSet[p] = struct{}{}
+		}
+	}
+	if len(pathSet) == 0 {
+		return nil
+	}
+	return pathSet
 }
 
 // warnMissingStorageClassForPVCs emits a bundle note when a rendered component creates
