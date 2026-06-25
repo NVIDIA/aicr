@@ -102,9 +102,17 @@ type snapshotCmdOptions struct {
 	runtimeClass       string
 	os                 string
 	maxNodesPerEntry   int
-	requests           corev1.ResourceList
-	limits             corev1.ResourceList
-	tmplOpts           *snapshotTemplateOptions
+	// clusterConfigPath, when non-empty, asks the network collector to
+	// ingest a pre-existing l8k cluster-config.yaml. Local-mode only in
+	// this iteration — Job-mode would need ConfigMap mounting.
+	clusterConfigPath string
+	// discoverNetwork enables the network collector's live-discovery
+	// path. The collector calls l8k.Discover against the resolved
+	// kubeconfig; discovery is NOT read-only.
+	discoverNetwork bool
+	requests        corev1.ResourceList
+	limits          corev1.ResourceList
+	tmplOpts        *snapshotTemplateOptions
 }
 
 // toAgentConfig converts the resolved options into the snapshotter.AgentConfig
@@ -129,6 +137,8 @@ func (o *snapshotCmdOptions) toAgentConfig() *snapshotter.AgentConfig {
 		TemplatePath:       o.tmplOpts.templatePath,
 		MaxNodesPerEntry:   o.maxNodesPerEntry,
 		OS:                 o.os,
+		ClusterConfigPath:  o.clusterConfigPath,
+		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
 	}
@@ -139,7 +149,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *snapshotter.AgentConfig {
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
 func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits"); err != nil {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config"); err != nil {
 		return nil, err
 	}
 
@@ -223,6 +233,8 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		runtimeClass:       runtimeClass,
 		os:                 osVal,
 		maxNodesPerEntry:   intFlagOrConfig(cmd, "max-nodes-per-entry", resolved.MaxNodesPerEntry),
+		clusterConfigPath:  cmd.String("cluster-config"),
+		discoverNetwork:    cmd.Bool("discover-network"),
 		requests:           resourceRequests,
 		limits:             resourceLimits,
 		tmplOpts:           tmplOpts,
@@ -383,6 +395,18 @@ func snapshotCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_LIMITS"),
 			Category: catAgentDeployment,
 		},
+		&cli.StringFlag{
+			Name:     "cluster-config",
+			Usage:    "Path to a pre-existing k8s-launch-kit (l8k) cluster-config.yaml. Ingests the file's network topology into the snapshot as a NetworkTopology Measurement. Local agent mode only (AICR_AGENT_MODE=true) — Job mode rejects this flag with INVALID_REQUEST until ConfigMap mounting is implemented; use --discover-network for live cluster discovery in Job mode. Mutually exclusive with --discover-network at the collector level — file path wins when both are set.",
+			Sources:  cli.EnvVars("AICR_CLUSTER_CONFIG_PATH"),
+			Category: catAgentDeployment,
+		},
+		&cli.BoolFlag{
+			Name:     "discover-network",
+			Usage:    "Enable live l8k discovery to populate the NetworkTopology Measurement. NOT read-only — discovery writes nvidia.kubernetes-launch-kit.* node labels and may patch NicClusterPolicy via server-side-apply.",
+			Sources:  cli.EnvVars("AICR_DISCOVER_NETWORK"),
+			Category: catAgentDeployment,
+		},
 		outputFlag(),
 		formatFlag(),
 		configFlag(),
@@ -470,10 +494,19 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				return err
 			}
 
-			// Create factory
+			// Create factory. Network-collector options come from the
+			// flags we just parsed; their env-var Sources mean a Job
+			// running our binary inside the cluster picks up
+			// AICR_CLUSTER_CONFIG_PATH / AICR_DISCOVER_NETWORK
+			// straight into opts before we get here, so this single
+			// builder serves both the local-mode bypass and the
+			// inside-the-Job rerun without a separate rebuild path.
 			factory := collector.NewDefaultFactory(
 				collector.WithMaxNodesPerEntry(opts.maxNodesPerEntry),
 				collector.WithOS(opts.os),
+				collector.WithClusterConfigPath(opts.clusterConfigPath),
+				collector.WithDiscoverNetwork(opts.discoverNetwork),
+				collector.WithKubeconfigPath(opts.kubeconfig),
 			)
 
 			// Create output serializer
@@ -498,11 +531,16 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			}
 
 			// When running inside an agent Job, collect locally instead of
-			// deploying another agent (prevents infinite nesting).
-			// Clear pre-created factory so measure() rebuilds it from env vars
-			// (AICR_MAX_NODES_PER_ENTRY).
+			// deploying another agent (prevents infinite nesting). The
+			// already-built `factory` above carries every CLI-resolved
+			// option — opts.clusterConfigPath, opts.discoverNetwork,
+			// opts.kubeconfig, opts.os, opts.maxNodesPerEntry — so we
+			// reuse it directly. The flags' cli.EnvVars Sources have
+			// already populated opts from the Job-set env vars before
+			// we reach this point, which keeps the dev-bypass case
+			// (`AICR_AGENT_MODE=true aicr snapshot --cluster-config
+			// <path>`) consistent with the in-pod path.
 			if os.Getenv("AICR_AGENT_MODE") == "true" {
-				ns.Factory = nil
 				return ns.Measure(ctx)
 			}
 

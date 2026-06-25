@@ -20,4 +20,9 @@ const (
 	verbList   = "list"
 	verbGet    = "get"
 	resourceCM = "configmaps"
+
+	// rbacAPIGroup is the API group RoleRef / ClusterRoleRef values bind
+	// against, and that PolicyRules use when permitting Role / RoleBinding
+	// / ClusterRole / ClusterRoleBinding resources.
+	rbacAPIGroup = "rbac.authorization.k8s.io"
 )
