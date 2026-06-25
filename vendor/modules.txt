@@ -1651,7 +1651,7 @@ k8s.io/streaming/pkg/httpstream
 k8s.io/streaming/pkg/httpstream/spdy
 k8s.io/streaming/pkg/httpstream/wsstream
 k8s.io/streaming/pkg/runtime
-# k8s.io/utils v0.0.0-20260507154919-ff6756f316d2
+# k8s.io/utils v0.0.0-20260617174310-a95e086a2553
 ## explicit; go 1.23
 k8s.io/utils/buffer
 k8s.io/utils/clock

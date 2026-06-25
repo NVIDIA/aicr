@@ -31,7 +31,7 @@ require (
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.2
-	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2
+	k8s.io/utils v0.0.0-20260617174310-a95e086a2553
 	oras.land/oras-go/v2 v2.6.1
 	sigs.k8s.io/controller-runtime v0.24.1
 	sigs.k8s.io/kustomize/api v0.21.1
