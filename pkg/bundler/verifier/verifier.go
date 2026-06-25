@@ -28,6 +28,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
@@ -35,6 +36,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
 // readBoundedFile streams a file through io.LimitReader against maxBytes.
@@ -85,6 +87,47 @@ type VerifyOptions struct {
 	// Independent of CertificateIdentityRegexp, which pins the (separate) binary
 	// attestation; the two coexist (see #1152).
 	Key string
+
+	// TrustRoot is a path to a sigstore-go trusted_root.json for verifying the
+	// bundle attestation against a private Fulcio/Rekor. ADDITIVE: unioned with
+	// AICR's public-good root, so NVIDIA-signed and privately-signed bundles
+	// both verify. Counterpart to `bundle --fulcio-url`/`--rekor-url`.
+	// Composable with Key. Does NOT affect the binary attestation, which is
+	// always NVIDIA-public-CI-signed and stays pinned to the public-good root.
+	TrustRoot string
+}
+
+// resolveBundleTrustRoot returns the TrustedRootSource for the bundle
+// attestation: the public-good root by default, or its union with the private
+// trusted_root.json named by opts.TrustRoot. The binary attestation is
+// unaffected and always uses the public-good root (see VerifyBinaryAttestation).
+func resolveBundleTrustRoot(opts *VerifyOptions) (attestation.TrustedRootSource, error) {
+	if opts.TrustRoot == "" {
+		return attestation.PublicGoodTrustedRoot, nil
+	}
+	return newUnionTrustedRoot(opts.TrustRoot)
+}
+
+// newUnionTrustedRoot loads the private trusted_root.json at path and returns a
+// TrustedRootSource that unions it with AICR's public-good root. The public-good
+// half keeps NVIDIA-signed bundles verifiable; the private half admits bundles
+// signed against a private Fulcio/Rekor. The file is loaded eagerly so a bad
+// --trust-root (missing, oversized, malformed) fails fast with the loader's
+// ErrCodeInvalidRequest, rather than being deferred into the lazy source where
+// Verify would fold it into a generic verification-failure result. The
+// public-good half stays lazy inside the closure so it resolves under ctx.
+func newUnionTrustedRoot(path string) (attestation.TrustedRootSource, error) {
+	priv, err := trust.LoadTrustedMaterialFromFile(path)
+	if err != nil {
+		return nil, err // already ErrCodeInvalidRequest
+	}
+	return func(ctx context.Context) (root.TrustedMaterial, error) {
+		pg, err := attestation.PublicGoodTrustedRoot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return root.TrustedMaterialCollection{pg, priv}, nil
+	}, nil
 }
 
 // ValidateIdentityPattern checks that a certificate identity pattern contains
@@ -127,6 +170,14 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 		return nil, err
 	}
 
+	// Resolve the trust anchors for the bundle attestation up front, so a bad
+	// --trust-root file fails fast with its ErrCodeInvalidRequest instead of
+	// being folded into a verification-failure result downstream.
+	bundleSource, srcErr := resolveBundleTrustRoot(opts)
+	if srcErr != nil {
+		return nil, srcErr
+	}
+
 	result := &VerifyResult{}
 
 	// Step 1: Read and verify checksums (single read to prevent TOCTOU)
@@ -162,9 +213,9 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 		err           error
 	)
 	if opts.Key != "" {
-		bundleCreator, err = verifyKeySignedBundle(ctx, bundleAttestPath, checksumDigest, opts.Key)
+		bundleCreator, err = verifyKeySignedBundle(ctx, bundleAttestPath, checksumDigest, opts.Key, bundleSource)
 	} else {
-		bundleCreator, err = verifySigstoreBundle(ctx, bundleAttestPath, checksumDigest)
+		bundleCreator, err = verifySigstoreBundle(ctx, bundleAttestPath, checksumDigest, bundleSource)
 	}
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("bundle attestation verification failed: %v", err))
@@ -372,7 +423,7 @@ func extractBinaryDigest(bundlePath string) ([]byte, error) {
 // proves someone signed it, not necessarily NVIDIA — identity pinning to NVIDIA
 // is enforced separately on the binary attestation).
 // Returns the signer identity on success.
-func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest []byte) (string, error) {
+func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest []byte, src attestation.TrustedRootSource) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before bundle attestation verification", err)
 	}
@@ -389,7 +440,7 @@ func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest
 	}
 
 	return attestation.VerifyStatementWith(ctx, data,
-		attestation.NewKeylessVerificationIdentity(identity),
+		attestation.NewKeylessVerificationIdentity(identity, src),
 		attestation.NewRequireTLogPolicy(), artifactDigest)
 }
 
@@ -397,8 +448,8 @@ func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest
 // KMS signing or a local PEM) against the key named by keyRef, binding it to
 // artifactDigest. Returns the key identity (KMS URI or pem:<fp>) as the bundle
 // creator, since a key-signed bundle has no certificate SAN.
-func verifyKeySignedBundle(ctx context.Context, bundlePath string, artifactDigest []byte, keyRef string) (string, error) {
-	id, err := attestation.NewKeyVerificationIdentity(ctx, keyRef)
+func verifyKeySignedBundle(ctx context.Context, bundlePath string, artifactDigest []byte, keyRef string, src attestation.TrustedRootSource) (string, error) {
+	id, err := attestation.NewKeyVerificationIdentity(ctx, keyRef, src)
 	if err != nil {
 		return "", err // already classified (ErrCodeInvalidRequest / ErrCodeUnavailable)
 	}
@@ -441,7 +492,10 @@ func VerifyBinaryAttestation(ctx context.Context, bundlePath string, identityPat
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create identity matcher", err)
 	}
 
+	// Binary attestation is always signed by NVIDIA's public GitHub-OIDC CI, so
+	// it verifies against the public-good root only (nil source) regardless of
+	// any --trust-root for the bundle attestation.
 	return attestation.VerifyStatementWith(ctx, data,
-		attestation.NewKeylessVerificationIdentity(identity),
+		attestation.NewKeylessVerificationIdentity(identity, nil),
 		attestation.NewRequireTLogPolicy(), artifactDigest)
 }

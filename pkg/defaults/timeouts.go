@@ -692,6 +692,13 @@ const (
 	// FUSE filesystem) before the bytes are read into memory.
 	MaxPublicKeyPEMBytes int64 = 64 * 1024 // 64 KiB
 
+	// MaxTrustedRootBytes caps the size of a user-supplied Sigstore
+	// trusted_root.json passed to `aicr verify --trust-root`. A real trusted
+	// root is a few KB; 1 MiB is generous headroom while bounding an
+	// attacker-influenced path (a /proc symlink, an NFS mount) so it cannot
+	// OOM the process the way os.ReadFile would.
+	MaxTrustedRootBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxExternalDataFileBytes caps the size of recipe/registry data files
 	// read from the external data directory by LayeredDataProvider. This is
 	// the single source of truth for the external-data size limit:

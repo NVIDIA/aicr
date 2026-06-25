@@ -45,7 +45,7 @@ func anyCertIdentity(t *testing.T) VerificationIdentity {
 	if err != nil {
 		t.Fatalf("failed to build certificate identity: %v", err)
 	}
-	return NewKeylessVerificationIdentity(certID)
+	return NewKeylessVerificationIdentity(certID, nil)
 }
 
 func TestVerifyStatementWith_NilArgs(t *testing.T) {

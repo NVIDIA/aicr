@@ -17,6 +17,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +37,7 @@ func TestBundleVerifyCmd_HasExpectedFlags(t *testing.T) {
 		t.Errorf("Name = %q, want %q", cmd.Name, "verify")
 	}
 
-	expectedFlags := []string{"min-trust-level", "require-creator", "cli-version-constraint", "certificate-identity-regexp", "key", "format"}
+	expectedFlags := []string{"min-trust-level", "require-creator", "cli-version-constraint", "certificate-identity-regexp", "key", "trust-root", "format"}
 	for _, name := range expectedFlags {
 		found := false
 		for _, f := range cmd.Flags {
@@ -151,6 +153,127 @@ func TestBundleVerifyCmd_KeyFlagPlumbing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// writeParseableTrustRootFixture builds a bundle directory that passes the
+// checksum step and carries a bundle attestation parseable as a sigstore v0.3
+// bundle (public-key material + DSSE envelope, no real signature). Because it
+// parses, verification reaches the trust-root resolution step rather than
+// stopping at bundle parsing, so pointing --trust-root at a missing
+// trusted_root.json makes the union loader fail there. That isolates and proves
+// the --trust-root plumbing into the bundle-attestation step; it does not assert
+// how the default public-good path treats this unsigned fixture (that path also
+// fails here, just at a different point).
+func writeParseableTrustRootFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	valuesPath := filepath.Join(dir, "values.yaml")
+	if err := os.WriteFile(valuesPath, []byte("replicas: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checksum.GenerateChecksums(context.Background(), dir, []string{valuesPath}); err != nil {
+		t.Fatalf("GenerateChecksums: %v", err)
+	}
+	payload := base64.StdEncoding.EncodeToString([]byte(`{"_type":"https://in-toto.io/Statement/v1"}`))
+	sig := base64.StdEncoding.EncodeToString([]byte("not-a-real-signature"))
+	pub := base64.StdEncoding.EncodeToString([]byte("fake-public-key-bytes"))
+	content := fmt.Sprintf(`{
+"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json",
+"verificationMaterial":{"publicKey":{"hint":"%s"}},
+"dsseEnvelope":{"payload":"%s","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"%s"}]}
+}`, pub, payload, sig)
+	attestPath := filepath.Join(dir, attestation.BundleAttestationFile)
+	if err := os.MkdirAll(filepath.Dir(attestPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attestPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestBundleVerifyCmd_TrustRootFlagPlumbing runs the real verify command with
+// --trust-root against a fixture that passes checksums and has a parseable
+// bundle attestation. A nonexistent trusted_root.json path drives the union
+// trust-root loader to a load error which Verify returns up front as a coded
+// ErrCodeInvalidRequest naming the "trust root file". Asserting that
+// loader-specific detail proves verifyOpts.TrustRoot is plumbed and reaches
+// trust-root resolution (not a generic attestation failure), and that
+// --trust-root coexists with --key and --certificate-identity-regexp (no mutual
+// exclusivity, no flag-parse error).
+func TestBundleVerifyCmd_TrustRootFlagPlumbing(t *testing.T) {
+	tests := []struct {
+		name string
+		args func(dir string) []string
+	}{
+		{
+			name: "trust-root alone reaches trust-root resolution",
+			args: func(dir string) []string {
+				return []string{"verify", dir, "--trust-root", "/no/such/trusted_root.json"}
+			},
+		},
+		{
+			name: "trust-root coexists with key and certificate-identity-regexp",
+			args: func(dir string) []string {
+				return []string{
+					"verify", dir,
+					"--trust-root", "/no/such/trusted_root.json",
+					"--key", "/nonexistent/key.pem",
+					"--certificate-identity-regexp", "https://github.com/NVIDIA/aicr/.+",
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeParseableTrustRootFixture(t)
+			cmd := bundleVerifyCmd()
+			var buf bytes.Buffer
+			cmd.Writer = &buf
+
+			err := cmd.Run(context.Background(), tt.args(dir))
+
+			// Must not be a flag-parse/usage error: the flags were accepted and
+			// the action ran (proves --trust-root coexists with the other flags).
+			if err != nil {
+				for _, bad := range []string{"flag provided but not defined", "no such flag", "flag needs an argument"} {
+					if strings.Contains(err.Error(), bad) {
+						t.Fatalf("got flag-level error %q for args %v", err.Error(), tt.args(dir))
+					}
+				}
+			}
+
+			// Prove the trust-root path was consulted: with a missing
+			// trusted_root.json the union loader fails fast and Verify returns
+			// the loader's "trust root file" error (ErrCodeInvalidRequest)
+			// before any attestation work. The loader-specific detail (not the
+			// generic verification banner) proves --trust-root reached
+			// trust-root resolution.
+			combined := buf.String()
+			if err != nil {
+				combined += " " + err.Error()
+			}
+			if !strings.Contains(combined, "trust root file") {
+				t.Errorf("output does not show the trust-root loader failing; got:\n%s", combined)
+			}
+		})
+	}
+}
+
+func TestBundleVerifyCmd_TrustRootFlagDefinition(t *testing.T) {
+	cmd := bundleVerifyCmd()
+	for _, f := range cmd.Flags {
+		if f.Names()[0] != "trust-root" {
+			continue
+		}
+		// --trust-root is a plain StringFlag (not completion-wrapped): there is
+		// no natural completion source for a filesystem path.
+		if _, ok := f.(*cli.StringFlag); !ok {
+			t.Fatalf("--trust-root should be a plain *cli.StringFlag, got %T", f)
+		}
+		return
+	}
+	t.Fatal("--trust-root flag not found")
 }
 
 func TestBundleVerifyCmd_KeyFlagDefinition(t *testing.T) {

@@ -25,7 +25,30 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/trust"
 )
+
+// TrustedRootSource resolves the Sigstore trust anchors a verification should
+// use. It is the third, orthogonal axis of VerifyStatementWith (alongside the
+// signer-matching VerificationIdentity and the VerifyTransparencyPolicy): it
+// decides WHICH root of trust validates the bundle. The default is
+// PublicGoodTrustedRoot; `aicr verify --trust-root` supplies a source that
+// unions the public-good root with a private trusted_root.json.
+type TrustedRootSource func(ctx context.Context) (root.TrustedMaterial, error)
+
+// PublicGoodTrustedRoot is the default TrustedRootSource: AICR's offline
+// public-good root (embedded/cached, no network). ctx satisfies
+// TrustedRootSource; trust.GetTrustedMaterial is synchronous and offline.
+func PublicGoodTrustedRoot(context.Context) (root.TrustedMaterial, error) {
+	tm, err := trust.GetTrustedMaterial()
+	if err != nil {
+		// GetTrustedMaterial already classifies TUF/cache failures
+		// (Unavailable, Unauthorized, Internal); preserve that code and only
+		// fall back to Internal for an uncoded error.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load trusted root")
+	}
+	return tm, nil
+}
 
 // VerificationIdentity is the verification dual of SigningIdentity: it supplies
 // the trust anchors and the signer-matching policy for one verification flavor.

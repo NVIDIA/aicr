@@ -50,8 +50,10 @@
 # artifact) together with a matching AICR_IDENTITY_REGEXP. A plain goreleaser
 # --snapshot build is NOT attested and will stop at the bundle step.
 #
-# PREREQUISITES: kind, kubectl, helm, mkcert, chainsaw, go, yq, docker
+# PREREQUISITES: kind, kubectl, helm, mkcert, chainsaw, cosign, go, yq, docker
 #   (goreleaser is additionally required only when AICR_BIN is unset, to build aicr)
+#   cosign is used by the chainsaw assemble-private-trust-root step to build the
+#   private trusted_root.json exercised by `aicr verify --trust-root` (#1153).
 #
 # USAGE:
 #   AICR_BIN=/path/to/aicr \
@@ -104,6 +106,15 @@ CERT_DIR="${TMPDIR:-/tmp}/aicr-sigstore-e2e-tls"
 # signing endpoints, so run.sh `go build`s the committed proxy source to this
 # temp binary at runtime; the compiled artifact is not checked in.
 PROXY_BIN="${TMPDIR:-/tmp}/aicr-sigstore-e2e-tlsproxy"
+# CTLog (CTFE) public key extracted from the in-cluster secret. The chainsaw
+# `assemble-private-trust-root` step needs this to build a trusted_root.json
+# (cosign trusted-root create --ctfe requires it, and sigstore-go's bundle
+# verification fails the SCT check without it). It lives ONLY in a k8s secret
+# (ctlog-system/ctlog-public-key), so run.sh (which has authenticated kubectl)
+# extracts it here and hands the path to chainsaw, the same way it hands over
+# FULCIO_URL/REKOR_URL/OIDC_TOKEN. The Fulcio chain and Rekor key, by contrast,
+# are served over HTTP and the chainsaw step fetches those itself.
+CTLOG_PUBKEY="${TMPDIR:-/tmp}/aicr-sigstore-e2e-ctfe.pub"
 CLUSTER_CREATED=false
 PROXY_PID=""
 PF_PIDS=()
@@ -123,7 +134,7 @@ cleanup() {
       kill "${pid}" 2>/dev/null || true
     fi
   done
-  rm -rf "${CERT_DIR}" "${PROXY_BIN}"
+  rm -rf "${CERT_DIR}" "${PROXY_BIN}" "${CTLOG_PUBKEY}"
   if [ "${CLUSTER_CREATED}" = "true" ]; then
     if [ "${KEEP_CLUSTER}" = "true" ]; then
       log_warning "KEEP_CLUSTER=true: leaving cluster '${CLUSTER_NAME}' running (kind delete cluster --name ${CLUSTER_NAME})"
@@ -295,6 +306,37 @@ setup_tls_and_forwards() {
   wait_url "https://127.0.0.1:${REKOR_TLS_PORT}/api/v1/log/publicKey"
 }
 
+# extract_ctlog_pubkey pulls the CTFE (CTLog) public key from the in-cluster
+# secret and writes it as PEM to CTLOG_PUBKEY. The scaffold chart's
+# ctlog-createcerts job generates this key into secret ctlog-public-key
+# (namespace ctlog-system, data key "public"; see scaffold-values.yaml
+# secrets.ctlog). The chainsaw assemble-private-trust-root step feeds it to
+# `cosign trusted-root create --ctfe public-key=...`; without it, sigstore-go's
+# SCT verification of the private Fulcio cert fails. This is the one piece of
+# trust material not served over HTTP, so it is extracted here (where kubectl is
+# authenticated against the kind context) rather than from the --no-cluster
+# chainsaw step.
+# base64_decode reads base64 from stdin and writes the decoded bytes to stdout,
+# portable across GNU coreutils (base64 -d) and BSD/macOS (base64 -D). The
+# documented local harness path runs on macOS, where -d may be unavailable; the
+# probe selects the decode flag this platform's base64 actually accepts.
+base64_decode() {
+  if printf '' | base64 -d >/dev/null 2>&1; then
+    base64 -d
+  else
+    base64 -D
+  fi
+}
+
+extract_ctlog_pubkey() {
+  msg "Extracting CTLog (CTFE) public key from ctlog-system/ctlog-public-key"
+  kubectl --context "${KCTX}" -n ctlog-system get secret ctlog-public-key \
+    -o jsonpath='{.data.public}' | base64_decode >"${CTLOG_PUBKEY}"
+  # Fail closed: a non-empty PEM block is required before chainsaw runs.
+  [ -s "${CTLOG_PUBKEY}" ] || err "CTLog public key extraction produced an empty file"
+  grep -q "BEGIN PUBLIC KEY" "${CTLOG_PUBKEY}" || err "CTLog public key is not a PEM public key"
+}
+
 run_chainsaw() {
   msg "Running private-sigstore chainsaw tests"
   local token
@@ -306,6 +348,9 @@ run_chainsaw() {
   REKOR_URL="https://127.0.0.1:${REKOR_TLS_PORT}" \
   OIDC_TOKEN="${token}" \
   AICR_IDENTITY_REGEXP="${AICR_IDENTITY_REGEXP}" \
+  AICR_CTLOG_PUBKEY="${CTLOG_PUBKEY}" \
+  FULCIO_PF_PORT="${FULCIO_PF_PORT}" \
+  REKOR_PF_PORT="${REKOR_PF_PORT}" \
     chainsaw test \
       --no-cluster \
       --config "${ROOT}/tests/chainsaw/chainsaw-config.yaml" \
@@ -320,10 +365,13 @@ msg "Starting Private Sigstore E2E Integration Tests"
 # goreleaser is only needed to build the binary when AICR_BIN is unset; require
 # it up front in that case so the run fails with a clear prereq error rather
 # than a late "command not found" in resolve_binary.
+# cosign is required by the chainsaw assemble-private-trust-root step, which
+# runs `cosign trusted-root create` to build the private trusted_root.json from
+# the Fulcio chain, Rekor key, and CTLog key (the #1153 trust-root proof).
 if [ -z "${AICR_BIN}" ]; then
-  has_tools kind kubectl helm mkcert chainsaw go yq docker goreleaser
+  has_tools kind kubectl helm mkcert chainsaw cosign go yq docker goreleaser
 else
-  has_tools kind kubectl helm mkcert chainsaw go yq docker
+  has_tools kind kubectl helm mkcert chainsaw cosign go yq docker
 fi
 
 resolve_binary
@@ -331,4 +379,5 @@ build_tls_proxy
 create_cluster
 deploy_stack
 setup_tls_and_forwards
+extract_ctlog_pubkey
 run_chainsaw

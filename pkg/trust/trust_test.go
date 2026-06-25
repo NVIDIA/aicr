@@ -16,8 +16,15 @@ package trust
 
 import (
 	"context"
+	stderrors "errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestGetTrustedMaterial(t *testing.T) {
@@ -87,4 +94,60 @@ func TestUpdate_CancelledContext(t *testing.T) {
 	if err == nil {
 		t.Error("Update() with cancelled context should return error")
 	}
+}
+
+func TestLoadTrustedMaterialFromFile(t *testing.T) {
+	t.Run("valid file", func(t *testing.T) {
+		tm, err := LoadTrustedMaterialFromFile("testdata/trusted_root.json")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if tm == nil {
+			t.Fatal("expected non-nil trusted material")
+		}
+	})
+	t.Run("missing file is InvalidRequest", func(t *testing.T) {
+		_, err := LoadTrustedMaterialFromFile("testdata/does-not-exist.json")
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+	})
+	t.Run("malformed JSON is InvalidRequest", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "bad.json")
+		if err := os.WriteFile(p, []byte("{not valid json"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadTrustedMaterialFromFile(p)
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+	})
+	t.Run("empty file is InvalidRequest", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "empty.json")
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadTrustedMaterialFromFile(p)
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+	})
+	t.Run("oversized file is InvalidRequest", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "big.json")
+		if err := os.WriteFile(p, make([]byte, defaults.MaxTrustedRootBytes+1), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadTrustedMaterialFromFile(p)
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+		// Assert on the distinct message to prove the size guard runs BEFORE
+		// parse, rather than passing only because the zero bytes fail to parse.
+		if !strings.Contains(err.Error(), "trust root file exceeds size limit") {
+			t.Fatalf("want size-limit error message, got %v", err)
+		}
+	})
 }

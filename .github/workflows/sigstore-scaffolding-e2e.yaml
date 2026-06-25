@@ -26,8 +26,10 @@
 # endpoints, so a small TLS proxy (tlsproxy/) fronts the port-forwards with an
 # mkcert certificate the runner trust store accepts.
 #
-# Phase 2 (deferred, issue #1215): once `aicr verify` accepts --rekor-url /
-# --fulcio-url, assert full transparency-log proof against the local stack.
+# Trust-root verification (#1153): the suite also runs `aicr verify --trust-root`
+# against a trusted_root.json built (with cosign trusted-root create) from the
+# local Fulcio chain, Rekor key, and CTLog key, asserting the bundle attestation
+# validates against the private stack. cosign is installed below.
 
 name: Private Sigstore E2E
 
