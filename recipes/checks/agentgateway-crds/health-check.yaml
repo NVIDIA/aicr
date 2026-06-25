@@ -18,18 +18,9 @@
 # has reached the `Established=True` condition (CRD storage is up and
 # the apiserver will accept CRs of those kinds).
 #
-# Scope: this component bundles BOTH the chart's
-# agentgateway.dev/v1alpha1 CRDs AND the vendored Gateway API +
-# Inference Extension manifests under
-# recipes/components/agentgateway-crds/manifests/. The asserts below
-# cover the vendored set (deterministic from in-tree files). The
-# chart's own CRDs are described in
-# recipes/components/agentgateway-crds/values.yaml as
-# {AgentgatewayBackend, AgentgatewayPolicy, AgentgatewayParameters}
-# under agentgateway.dev/v1alpha1; their plural metadata.name values
-# are not vendored in-tree at v2.2.1 and should be added here once
-# verified against a real cluster install (live-run is the load-bearing
-# step). See #1221.
+# Scope: this component bundles BOTH the chart's agentgateway.dev/v1alpha1
+# CRDs and the vendored Gateway API + Inference Extension manifests under
+# recipes/components/agentgateway-crds/manifests/.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -85,6 +76,37 @@ spec:
               kind: CustomResourceDefinition
               metadata:
                 name: referencegrants.gateway.networking.k8s.io
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+    - name: validate-agentgateway-crds-established
+      # agentgateway.dev/v1alpha1 CRDs installed by the agentgateway-crds
+      # Helm chart.
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: agentgatewaybackends.agentgateway.dev
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: agentgatewayparameters.agentgateway.dev
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: agentgatewaypolicies.agentgateway.dev
               status:
                 (conditions[?type == 'Established']):
                   - status: "True"

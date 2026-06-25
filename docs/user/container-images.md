@@ -29,8 +29,8 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 
 | Component | Type | Chart | Pinned Version | Images |
 |-----------|------|-------|----------------|--------|
-| agentgateway | helm | agentgateway | v2.2.1 | 1 |
-| agentgateway-crds | helm | agentgateway-crds | v2.2.1 | 0 |
+| agentgateway | helm | agentgateway | v1.3.1 | 1 |
+| agentgateway-crds | helm | agentgateway-crds | v1.3.1 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
@@ -61,7 +61,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 
 ### agentgateway
 
-- `cr.agentgateway.dev/controller:v2.2.1`
+- `cr.agentgateway.dev/controller:v1.3.1`
 
 ### agentgateway-crds
 
