@@ -159,6 +159,70 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		}
 	})
 
+	// Discover-network mode pulls in l8k's extra cluster-scoped rules
+	// (CRDs, bootstrap workload resources, pods/exec, nodes/patch,
+	// nicdevices, nicclusterpolicies). Verify the rule appears for the
+	// most discovery-specific resource (mellanox.com NicClusterPolicy
+	// SSA patch) — that's the marker rule the snapshot Job needs to
+	// run successfully under non-cluster-admin RBAC.
+	t.Run("ClusterRole gains discovery rules when DiscoverNetwork is set", func(t *testing.T) {
+		discoverClientset := fake.NewClientset()
+		discoverConfig := config
+		discoverConfig.DiscoverNetwork = true
+		d := NewDeployer(discoverClientset, discoverConfig)
+		if err := d.ensureClusterRole(ctx); err != nil {
+			t.Fatalf("failed to create ClusterRole: %v", err)
+		}
+		cr, err := discoverClientset.RbacV1().ClusterRoles().
+			Get(ctx, "aicr-node-reader", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("ClusterRole not found: %v", err)
+		}
+		hasNCPPatch := false
+		hasPodsExec := false
+		hasNodesPatch := false
+		for _, r := range cr.Rules {
+			for _, g := range r.APIGroups {
+				if g == "mellanox.com" {
+					for _, res := range r.Resources {
+						if res == "nicclusterpolicies" {
+							for _, v := range r.Verbs {
+								if v == "patch" {
+									hasNCPPatch = true
+								}
+							}
+						}
+					}
+				}
+			}
+			for _, res := range r.Resources {
+				if res == "pods/exec" {
+					for _, v := range r.Verbs {
+						if v == "create" {
+							hasPodsExec = true
+						}
+					}
+				}
+				if res == "nodes" {
+					for _, v := range r.Verbs {
+						if v == "patch" {
+							hasNodesPatch = true
+						}
+					}
+				}
+			}
+		}
+		if !hasNCPPatch {
+			t.Error("expected mellanox.com/nicclusterpolicies patch rule")
+		}
+		if !hasPodsExec {
+			t.Error("expected pods/exec create rule")
+		}
+		if !hasNodesPatch {
+			t.Error("expected nodes/patch rule")
+		}
+	})
+
 	// Test ClusterRoleBinding creation
 	t.Run("create ClusterRoleBinding", func(t *testing.T) {
 		if err := deployer.ensureClusterRoleBinding(ctx); err != nil {

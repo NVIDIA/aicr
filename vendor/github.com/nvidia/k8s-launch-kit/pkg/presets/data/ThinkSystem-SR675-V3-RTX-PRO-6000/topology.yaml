@@ -1,0 +1,94 @@
+machineType: ThinkSystem-SR675-V3
+manufacturer: Lenovo
+gpuType: NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition
+nicModel: NVIDIA BlueField-3 (integrated ConnectX-7) — 4x SuperNIC east-west + 1x dual-port DPU north-south
+gpuInterconnect: ""
+numaNodes: 2
+
+# All NICs are BlueField-3 (deviceID a2dc), in two SKUs:
+#   - SuperNIC, single-port, PSID mt_0000001069 / PN 900-9D3D4-00EN-HA0 — the
+#     east-west GPU rail fabric (4 PFs at 05/75/85/f5). Each sits on a PCIe
+#     switch shared with two GPUs (== PIX), so all four are rail NICs.
+#   - DPU, dual-port, PSID mt_0000000884 / PN 900-9D3B6-00CV-AA0 — north-south
+#     (61:00.0/.1, bonded as mlx5_bond_0 / bond0). Its switch has no GPU under
+#     it; it carries OOB/management traffic, not GPU rails.
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: true
+
+pfs:
+  # --- NUMA 0 ---
+  # East-west rail 0: BF3 SuperNIC on PCIe switch [02-08] shared with GPU0/GPU1
+  - deviceID: a2dc
+    rdmaDevice: mlx5_1
+    pciAddress: 0000:05:00.0
+    networkInterface: ens15f0np0
+    traffic: east-west
+    rail: 0
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: PIX
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0
+
+  # North-south: BF3 dual-port 200G DPU (61:xx.x), bonded (mlx5_bond_0 / bond0).
+  # Own PCIe switch [61], no GPU under it.
+  - deviceID: a2dc
+    rdmaDevice: mlx5_bond_0
+    pciAddress: 0000:61:00.0
+    networkInterface: ens1f0np0
+    traffic: north-south
+    numaNode: 0
+    psid: mt_0000000884
+    partNumber: 900-9D3B6-00CV-AA0
+  - deviceID: a2dc
+    rdmaDevice: ""
+    pciAddress: 0000:61:00.1
+    networkInterface: ens1f1np1
+    traffic: north-south
+    numaNode: 0
+    psid: mt_0000000884
+    partNumber: 900-9D3B6-00CV-AA0
+
+  # East-west rail 1: BF3 SuperNIC on PCIe switch [72-77] shared with GPU2/GPU3
+  - deviceID: a2dc
+    rdmaDevice: mlx5_0
+    pciAddress: 0000:75:00.0
+    networkInterface: ens16f0np0
+    traffic: east-west
+    rail: 1
+    numaNode: 0
+    connectedGPU: GPU2
+    gpuProximity: PIX
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0
+
+  # --- NUMA 1 ---
+  # East-west rail 2: BF3 SuperNIC on PCIe switch [82-88] shared with GPU4/GPU5
+  - deviceID: a2dc
+    rdmaDevice: mlx5_5
+    pciAddress: 0000:85:00.0
+    networkInterface: ens20f0np0
+    traffic: east-west
+    rail: 2
+    numaNode: 1
+    connectedGPU: GPU4
+    gpuProximity: PIX
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0
+
+  # East-west rail 3: BF3 SuperNIC on PCIe switch [f2-f7] shared with GPU6/GPU7
+  - deviceID: a2dc
+    rdmaDevice: mlx5_4
+    pciAddress: 0000:f5:00.0
+    networkInterface: ens21f0np0
+    traffic: east-west
+    rail: 3
+    numaNode: 1
+    connectedGPU: GPU6
+    gpuProximity: PIX
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0

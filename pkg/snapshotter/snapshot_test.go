@@ -93,6 +93,10 @@ func TestNodeSnapshotter_Measure(t *testing.T) {
 		if !factory.osCalled {
 			t.Error("OS collector not called")
 		}
+
+		if !factory.networkCalled {
+			t.Error("Network collector not called")
+		}
 	})
 
 	t.Run("degrades gracefully on collector errors", func(t *testing.T) {
@@ -119,9 +123,12 @@ func TestNodeSnapshotter_Measure(t *testing.T) {
 		if !ok {
 			t.Fatal("serialized data is not a *Snapshot")
 		}
-		// k8s and os failed, systemd, gpu, and topology succeeded = 3 measurements
-		if len(snap.Measurements) != 3 {
-			t.Errorf("expected 3 measurements (from working collectors), got %d", len(snap.Measurements))
+		// k8s and os failed; systemd, gpu, topology, and network
+		// succeeded = 4 measurements. mockCollector returns a default
+		// non-nil Measurement when neither error nor result override is
+		// set, so the network collector contributes a measurement here.
+		if len(snap.Measurements) != 4 {
+			t.Errorf("expected 4 measurements (from working collectors), got %d", len(snap.Measurements))
 		}
 	})
 }
@@ -324,12 +331,14 @@ type mockFactory struct {
 	osCalled       bool
 	gpuCalled      bool
 	topologyCalled bool
+	networkCalled  bool
 
 	k8sError      error
 	systemdError  error
 	osError       error
 	gpuError      error
 	topologyError error
+	networkError  error
 
 	// gpuMeasurement overrides the default mock measurement for the GPU collector.
 	gpuMeasurement *measurement.Measurement
@@ -339,6 +348,7 @@ type mockFactory struct {
 	k8sMeasurement      *measurement.Measurement
 	osMeasurement       *measurement.Measurement
 	topologyMeasurement *measurement.Measurement
+	networkMeasurement  *measurement.Measurement
 }
 
 func (m *mockFactory) CreateKubernetesCollector() collector.Collector {
@@ -364,6 +374,11 @@ func (m *mockFactory) CreateGPUCollector() collector.Collector {
 func (m *mockFactory) CreateNodeTopologyCollector() collector.Collector {
 	m.topologyCalled = true
 	return &mockCollector{err: m.topologyError, result: m.topologyMeasurement}
+}
+
+func (m *mockFactory) CreateNetworkCollector() collector.Collector {
+	m.networkCalled = true
+	return &mockCollector{err: m.networkError, result: m.networkMeasurement}
 }
 
 type mockCollector struct {

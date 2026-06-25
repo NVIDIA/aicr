@@ -1,0 +1,91 @@
+machineType: PowerEdge-R760xa
+manufacturer: Dell Inc.
+gpuType: NVIDIA-H100-NVL
+nicModel: Nvidia BlueField-3 B3140H E-series HHHL SuperNIC 400GbE/NDR (ConnectX-7)
+gpuInterconnect: NV12
+numaNodes: 2
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: false
+
+pfs:
+  # --- NUMA 0: GPUs 0-1, CPUs 0-23,48-71 ---
+  # N-S: BF3 dual-port 200G DPU (0d:xx.x)
+  - deviceID: a2dc
+    rdmaDevice: mlx5_0
+    pciAddress: 0000:0d:00.0
+    networkInterface: eth2
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000000884
+    partNumber: 0HFWRM
+    model: Bluefield-3 Dual Port 200 GbE QSFP Crypto DPU
+  - deviceID: a2dc
+    rdmaDevice: mlx5_1
+    pciAddress: 0000:0d:00.1
+    networkInterface: eth3
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000000884
+    partNumber: 0HFWRM
+    model: Bluefield-3 Dual Port 200 GbE QSFP Crypto DPU
+
+  # N-S: ConnectX-6 Lx dual-port 25GbE (22:xx.x) — OOB / management
+  - deviceID: "101f"
+    rdmaDevice: mlx5_2
+    pciAddress: 0000:22:00.0
+    networkInterface: eth4
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: del0000000030
+    partNumber: 0DN78C
+    model: NVIDIA ConnectX-6 Lx 2x 25G SFP28 OCP3.0 SFF
+  - deviceID: "101f"
+    rdmaDevice: mlx5_3
+    pciAddress: 0000:22:00.1
+    networkInterface: eth5
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: del0000000030
+    partNumber: 0DN78C
+    model: NVIDIA ConnectX-6 Lx 2x 25G SFP28 OCP3.0 SFF
+
+  # East-west: BF3 single-port 400G SuperNIC (37:xx.x) — NODE to GPU0
+  - deviceID: a2dc
+    rdmaDevice: mlx5_4
+    pciAddress: 0000:37:00.0
+    networkInterface: eth6
+    traffic: east-west
+    rail: 0
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: NODE
+    psid: mt_0000001069
+    partNumber: 0KK4NR
+    model: Nvidia BlueField-3 B3140H E-series HHHL SuperNIC, 400GbE(default mode)/NDR IB, Single-port QSFP112, PCIe Gen5.0 x16, 8 Arm cores, 16GB DDR, BMC, Crypto Enabled
+
+  # --- NUMA 1: GPUs 2-3, CPUs 24-47,72-95 ---
+  # East-west: BF3 single-port 400G SuperNIC (b5:xx.x) — NODE to GPU2
+  - deviceID: a2dc
+    rdmaDevice: mlx5_5
+    pciAddress: 0000:b5:00.0
+    networkInterface: eth7
+    traffic: east-west
+    rail: 1
+    numaNode: 1
+    connectedGPU: GPU2
+    gpuProximity: NODE
+    psid: mt_0000001069
+    partNumber: 0KK4NR
+    model: Nvidia BlueField-3 B3140H E-series HHHL SuperNIC, 400GbE(default mode)/NDR IB, Single-port QSFP112, PCIe Gen5.0 x16, 8 Arm cores, 16GB DDR, BMC, Crypto Enabled

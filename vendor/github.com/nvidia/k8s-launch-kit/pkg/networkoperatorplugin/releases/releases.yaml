@@ -1,0 +1,42 @@
+# Component versions per Network Operator minor release line.
+# Keys are MAJOR.MINOR — patch bumps update the values in place.
+# The flag --network-operator-release takes one of these keys.
+#
+# The `repository` and `operatorRepository` fields split intentionally:
+#   - repository         — registry path for COMPONENT images
+#                          (ofedDriver, nvIpam, multus, device plugins,
+#                          rendered into NicClusterPolicy / NicNodePolicy).
+#   - operatorRepository — registry path for the network-operator
+#                          BINARY image, set on values.yaml's
+#                          `operator.repository`. Stable releases publish
+#                          the operator at `nvcr.io/nvidia/cloud-native`
+#                          while components live at `nvcr.io/nvidia/mellanox`;
+#                          staging lumps both under `nvcr.io/nvstaging/mellanox`.
+releases:
+  "25.10":
+    networkOperator:
+      version: v25.10.0
+      componentVersion: network-operator-v25.10.0
+      repository: nvcr.io/nvidia/mellanox
+      operatorRepository: nvcr.io/nvidia/cloud-native
+      helmRepoURL: https://helm.ngc.nvidia.com/nvidia
+    docaDriver:
+      version: doca3.2.2-25.10-2.4.1.0-4
+  "26.1":
+    networkOperator:
+      version: v26.1.1
+      componentVersion: network-operator-v26.1.1
+      repository: nvcr.io/nvidia/mellanox
+      operatorRepository: nvcr.io/nvidia/cloud-native
+      helmRepoURL: https://helm.ngc.nvidia.com/nvidia
+    docaDriver:
+      version: doca3.3.0-26.01-1.0.0.0-0
+  "26.4":
+    networkOperator:
+      version: v26.4.0
+      componentVersion: network-operator-v26.4.0
+      repository: nvcr.io/nvidia/mellanox
+      operatorRepository: nvcr.io/nvidia/cloud-native
+      helmRepoURL: https://helm.ngc.nvidia.com/nvidia
+    docaDriver:
+      version: doca3.4.0-26.04-0.8.6.0-0

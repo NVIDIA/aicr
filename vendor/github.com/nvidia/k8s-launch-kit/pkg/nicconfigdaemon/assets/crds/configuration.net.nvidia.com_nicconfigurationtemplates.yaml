@@ -1,0 +1,284 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: nicconfigurationtemplates.configuration.net.nvidia.com
+spec:
+  group: configuration.net.nvidia.com
+  names:
+    kind: NicConfigurationTemplate
+    listKind: NicConfigurationTemplateList
+    plural: nicconfigurationtemplates
+    singular: nicconfigurationtemplate
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: NicConfigurationTemplate is the Schema for the nicconfigurationtemplates
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Defines the desired state of NICs
+            properties:
+              nicSelector:
+                description: NIC selector configuration
+                properties:
+                  nicType:
+                    description: Type of the NIC to be selected, e.g. 101d,1015,a2d6
+                      etc.
+                    type: string
+                  pciAddresses:
+                    description: Array of PCI addresses to be selected, e.g. "0000:03:00.0"
+                    items:
+                      pattern: ^0000:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$
+                      type: string
+                    type: array
+                  serialNumbers:
+                    description: Serial numbers of the NICs to be selected, e.g. MT2116X09299
+                    items:
+                      type: string
+                    type: array
+                required:
+                - nicType
+                type: object
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: NodeSelector contains labels required on the node. When
+                  empty, the template will be applied to matching devices on all nodes.
+                type: object
+              resetToDefault:
+                default: false
+                description: |-
+                  ResetToDefault specifies whether node agent needs to perform a reset flow
+                  The following operations will be performed:
+                  * Nvconfig reset of all non-volatile configurations
+                    - Mstconfig -d <device> reset for each PF
+                    - Mstconfig -d <device> set ADVANCED_PCI_SETTINGS=1
+                  * Node reboot
+                    - Applies new NIC NV config
+                    - Will undo any runtime configuration previously performed for the device/driver
+                type: boolean
+              template:
+                description: Configuration template to be applied to matching devices
+                properties:
+                  gpuDirectOptimized:
+                    description: GPU Direct optimization settings
+                    properties:
+                      enabled:
+                        description: Optimize GPU Direct
+                        type: boolean
+                      env:
+                        description: GPU direct environment, e.g. Baremetal
+                        type: string
+                    required:
+                    - enabled
+                    - env
+                    type: object
+                  linkType:
+                    description: LinkType to be configured, Ethernet|Infiniband
+                    enum:
+                    - Ethernet
+                    - Infiniband
+                    type: string
+                  numVfs:
+                    description: Number of VFs to be configured
+                    type: integer
+                  pciPerformanceOptimized:
+                    description: PCI performance optimization settings
+                    properties:
+                      enabled:
+                        description: Specifies whether to enable PCI performance optimization
+                        type: boolean
+                      maxAccOutRead:
+                        description: Specifies the PCIe Max Accumulative Outstanding
+                          read bytes
+                        type: integer
+                      maxReadRequest:
+                        description: Specifies the size of a single PCI read request
+                          in bytes
+                        enum:
+                        - 128
+                        - 256
+                        - 512
+                        - 1024
+                        - 2048
+                        - 4096
+                        type: integer
+                    required:
+                    - enabled
+                    type: object
+                  rawNvConfig:
+                    description: List of arbitrary nv config parameters
+                    items:
+                      properties:
+                        name:
+                          description: Name of the arbitrary nvconfig parameter
+                          type: string
+                        value:
+                          description: Value of the arbitrary nvconfig parameter
+                          type: string
+                      required:
+                      - name
+                      - value
+                      type: object
+                    type: array
+                  roceOptimized:
+                    description: RoCE optimization settings
+                    properties:
+                      enabled:
+                        description: Optimize RoCE
+                        type: boolean
+                      qos:
+                        description: Quality of Service settings
+                        properties:
+                          pfc:
+                            description: Priority-based Flow Control configuration,
+                              e.g. "0,0,0,1,0,0,0,0"
+                            pattern: ^([01],){7}[01]$
+                            type: string
+                          tos:
+                            description: 8-bit value for type of service
+                            type: integer
+                          trust:
+                            description: Trust mode for QoS settings, e.g. trust-dscp
+                            type: string
+                        required:
+                        - pfc
+                        - trust
+                        type: object
+                    required:
+                    - enabled
+                    type: object
+                  spectrumXOptimized:
+                    description: Spectrum-X optimization settings. Works only with
+                      linkType==Ethernet && numVfs==0. Other optimizations must be
+                      skipped or disabled. RawNvConfig must be empty.
+                    properties:
+                      enabled:
+                        description: Optimize Spectrum X
+                        type: boolean
+                      multiplaneMode:
+                        default: none
+                        description: |-
+                          Multiplane mode to be configured
+                          Can be "none", "swplb", "hwplb", or "uniplane"
+                        enum:
+                        - none
+                        - swplb
+                        - hwplb
+                        - uniplane
+                        type: string
+                      numberOfPlanes:
+                        default: 1
+                        description: Number of planes to be configured
+                        enum:
+                        - 1
+                        - 2
+                        - 4
+                        type: integer
+                      overlay:
+                        default: none
+                        description: |-
+                          Overlay mode to be configured
+                          Can be "l3" or "none"
+                        enum:
+                        - l3
+                        - none
+                        type: string
+                      version:
+                        description: Version of the Spectrum-X architecture to optimize
+                          for
+                        enum:
+                        - RA1.3
+                        - RA2.0
+                        - RA2.1
+                        type: string
+                    required:
+                    - enabled
+                    - version
+                    type: object
+                    x-kubernetes-validations:
+                    - message: when MultiplaneMode is none, numberOfPlanes must be
+                        1
+                      rule: '!has(self.multiplaneMode) || !has(self.numberOfPlanes)
+                        || self.multiplaneMode != ''none'' || self.numberOfPlanes
+                        == 1'
+                    - message: when MultiplaneMode is not none, numberOfPlanes must
+                        not be 1
+                      rule: '!has(self.multiplaneMode) || !has(self.numberOfPlanes)
+                        || self.multiplaneMode == ''none'' || self.numberOfPlanes
+                        != 1'
+                    - message: when Version is RA1.3 or RA2.0, MultiplaneMode must
+                        be none and numberOfPlanes must be 1
+                      rule: '!has(self.version) || !has(self.multiplaneMode) || !has(self.numberOfPlanes)
+                        || !(self.version == ''RA1.3'' || self.version == ''RA2.0'')
+                        || (self.multiplaneMode == ''none'' && self.numberOfPlanes
+                        == 1)'
+                required:
+                - linkType
+                - numVfs
+                type: object
+                x-kubernetes-validations:
+                - message: spectrumXOptimized can be enabled only when linkType=='Ethernet'
+                    and numVfs==1
+                  rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
+                    || (self.linkType == ''Ethernet'' && self.numVfs == 1)'
+                - message: spectrumXOptimized includes RoCE optimizations, so separate
+                    roceOptimized section must not be enabled
+                  rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
+                    || !(has(self.roceOptimized) && self.roceOptimized.enabled)'
+                - message: when spectrumXOptimized is enabled, rawNvConfig must be
+                    empty
+                  rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
+                    || !has(self.rawNvConfig) || size(self.rawNvConfig) == 0'
+            required:
+            - nicSelector
+            - template
+            type: object
+            x-kubernetes-validations:
+            - message: spectrumXOptimized can be enabled only for ConnectX-8 or BlueField-3
+                SuperNICs
+              rule: '!(has(self.template.spectrumXOptimized) && self.template.spectrumXOptimized.enabled)
+                || (self.nicSelector.nicType == ''1023'' || self.nicSelector.nicType
+                == ''a2dc'')'
+            - message: hwplb MultiplaneMode can only be enabled for ConnectX-8 (NicType
+                1023)
+              rule: '!has(self.template.spectrumXOptimized) || !has(self.template.spectrumXOptimized.multiplaneMode)
+                || self.template.spectrumXOptimized.multiplaneMode != ''hwplb'' ||
+                self.nicSelector.nicType == ''1023'''
+          status:
+            description: Defines the observed state of NicConfigurationTemplate
+            properties:
+              nicDevices:
+                description: NicDevice CRs matching this configuration / firmware
+                  template
+                items:
+                  type: string
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

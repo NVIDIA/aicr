@@ -1,0 +1,117 @@
+machineType: PowerEdge-XE7745
+manufacturer: Dell Inc.
+gpuType: NVIDIA-RTX-PRO-4500-Blackwell
+nicModel: BlueField-3 B3140H E-series HHHL SuperNIC 400GbE/NDR Single-port QSFP112 (ConnectX-7)
+gpuInterconnect: ""
+numaNodes: 2
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: false
+
+pfs:
+  # --- NUMA 0: no GPUs, CPUs 0-95 ---
+  # East-west: BF3 single-port 400G SuperNIC (44:00.0) — cross-NUMA to GPU1
+  - deviceID: a2dc
+    rdmaDevice: mlx5_0
+    pciAddress: 0000:44:00.0
+    networkInterface: eth0
+    traffic: east-west
+    rail: 1
+    numaNode: 0
+    connectedGPU: GPU1
+    gpuProximity: SYS
+    psid: mt_0000001069
+    partNumber: 0KK4NR
+    model: Nvidia BlueField-3 B3140H E-series HHHL DPU, 400GbE(default mode)/NDR IB, Single-port QSFP112, PCIe Gen5.0 x16, 8 Arm cores, 16GB DDR, BMC, Crypto Enabled
+  # East-west: BF3 single-port 400G SuperNIC (8e:00.0) — cross-NUMA to GPU2
+  - deviceID: a2dc
+    rdmaDevice: mlx5_1
+    pciAddress: 0000:8e:00.0
+    networkInterface: eth1
+    traffic: east-west
+    rail: 2
+    numaNode: 0
+    connectedGPU: GPU2
+    gpuProximity: SYS
+    psid: mt_0000001069
+    partNumber: 0KK4NR
+    model: Nvidia BlueField-3 B3140H E-series HHHL DPU, 400GbE(default mode)/NDR IB, Single-port QSFP112, PCIe Gen5.0 x16, 8 Arm cores, 16GB DDR, BMC, Crypto Enabled
+
+  # N-S: ConnectX-6 Lx dual-port 25GbE (c8:xx.x) — OOB / management
+  - deviceID: "101f"
+    rdmaDevice: mlx5_2
+    pciAddress: 0000:c8:00.0
+    networkInterface: eth2
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000000547
+    partNumber: 07GGY4
+    model: ConnectX-6 Lx EN adapter card, 25GbE OCP3.0, With Host management, Dual-port SFP28, Crypto and Secure Boot, Thumbscrew (Pull Tab) Brack
+  - deviceID: "101f"
+    rdmaDevice: mlx5_3
+    pciAddress: 0000:c8:00.1
+    networkInterface: eth3
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000000547
+    partNumber: 07GGY4
+    model: ConnectX-6 Lx EN adapter card, 25GbE OCP3.0, With Host management, Dual-port SFP28, Crypto and Secure Boot, Thumbscrew (Pull Tab) Brack
+
+  # N-S: BF3 dual-port 200G DPU (ca:xx.x)
+  - deviceID: a2dc
+    rdmaDevice: mlx5_4
+    pciAddress: 0000:ca:00.0
+    networkInterface: eth4
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000000884
+    partNumber: 0HFWRM
+    model: Bluefield-3 Dual Port 200 GbE QSFP Crypto DPU
+  - deviceID: a2dc
+    rdmaDevice: mlx5_5
+    pciAddress: 0000:ca:00.1
+    networkInterface: eth5
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000000884
+    partNumber: 0HFWRM
+    model: Bluefield-3 Dual Port 200 GbE QSFP Crypto DPU
+
+  # --- NUMA 1: GPUs 0-3 (PCI domain 0001), CPUs 96-191 ---
+  # East-west: BF3 single-port 400G SuperNIC (0001:05:00.0) — PIX to GPU0
+  - deviceID: a2dc
+    rdmaDevice: mlx5_6
+    pciAddress: 0001:05:00.0
+    networkInterface: eth6
+    traffic: east-west
+    rail: 0
+    numaNode: 1
+    connectedGPU: GPU0
+    gpuProximity: PIX
+    psid: mt_0000001069
+    partNumber: 0KK4NR
+    model: Nvidia BlueField-3 B3140H E-series HHHL DPU, 400GbE(default mode)/NDR IB, Single-port QSFP112, PCIe Gen5.0 x16, 8 Arm cores, 16GB DDR, BMC, Crypto Enabled
+  # East-west: BF3 single-port 400G SuperNIC (0001:c9:00.0) — PIX to GPU3
+  - deviceID: a2dc
+    rdmaDevice: mlx5_7
+    pciAddress: 0001:c9:00.0
+    networkInterface: eth7
+    traffic: east-west
+    rail: 3
+    numaNode: 1
+    connectedGPU: GPU3
+    gpuProximity: PIX
+    psid: mt_0000001069
+    partNumber: 0KK4NR
+    model: Nvidia BlueField-3 B3140H E-series HHHL DPU, 400GbE(default mode)/NDR IB, Single-port QSFP112, PCIe Gen5.0 x16, 8 Arm cores, 16GB DDR, BMC, Crypto Enabled

@@ -59,6 +59,65 @@ type cachedPathClient struct {
 	config *rest.Config
 }
 
+// ResolveKubeconfigPath returns the kubeconfig path aicr should use given an
+// optional explicit override. Resolution order:
+//
+//  1. The supplied path, after whitespace trimming. A stray space in a CLI
+//     flag or env var would otherwise become a guaranteed "stat   : no
+//     such file" error inside clientcmd; trimming aligns explicit-override
+//     semantics with empty-as-defaults.
+//  2. KUBECONFIG environment variable (whitespace-trimmed) when it names a
+//     single file. A multi-file KUBECONFIG (e.g. `/base:/overlay`) is
+//     deliberately NOT returned: clientcmd.BuildConfigFromFlags("", v)
+//     treats v as one explicit path and would fail to load a merged
+//     multi-file value. Returning "" here is correct for callers that
+//     then run their own clientcmd loading rules (the standard
+//     NewDefaultClientConfigLoadingRules path honors a multi-file
+//     KUBECONFIG natively) — e.g. l8k's kubeclient.New("") and any
+//     consumer that uses NewNonInteractiveDeferredLoadingClientConfig.
+//     This package's own BuildKubeClient (see below) skips clientcmd's
+//     loading rules entirely and falls through to InClusterConfig() on
+//     an empty path, so a multi-file KUBECONFIG run locally through
+//     BuildKubeClient is not a supported path; it was not supported
+//     before this change either (BuildConfigFromFlags rejected the
+//     joined value), so no regression.
+//  3. ~/.kube/config when the file exists.
+//  4. Empty string, signaling "fall through to in-cluster config" — the
+//     correct behavior when aicr is running inside a Kubernetes pod with a
+//     mounted service account token.
+//
+// Exported so any consumer that needs a concrete kubeconfig path (e.g. the
+// network collector handing one to l8k's kubeclient.New) walks the same
+// chain BuildKubeClient does, avoiding subtle divergence.
+func ResolveKubeconfigPath(kubeconfig string) string {
+	kubeconfig = strings.TrimSpace(kubeconfig)
+	if kubeconfig != "" {
+		return kubeconfig
+	}
+	if env := strings.TrimSpace(os.Getenv("KUBECONFIG")); env != "" {
+		// A KUBECONFIG holding multiple files (':'-separated on
+		// Unix, ';'-separated on Windows) is a clientcmd loading-rules
+		// concept — feeding the raw multi-path string into
+		// BuildConfigFromFlags would treat the whole value as one
+		// explicit path. Return "" immediately so loading-rules-aware
+		// callers (l8k's kubeclient.New("") and anything using
+		// NewNonInteractiveDeferredLoadingClientConfig) honor the env
+		// natively. We must NOT fall through to ~/.kube/config: a
+		// caller who explicitly set KUBECONFIG=/a:/b doesn't want their
+		// home kubeconfig silently substituted for the merge they asked
+		// for.
+		if strings.ContainsAny(env, ":;") {
+			return ""
+		}
+		return env
+	}
+	defaultPath := filepath.Join(homedir.HomeDir(), ".kube", "config")
+	if _, err := os.Stat(defaultPath); err == nil {
+		return defaultPath
+	}
+	return ""
+}
+
 // GetKubeClient returns a singleton Kubernetes client, creating it on first call.
 // Subsequent calls return the cached client for connection reuse and reduced overhead.
 // This prevents connection exhaustion and reduces load on the Kubernetes API server.
@@ -104,21 +163,7 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 	var config *rest.Config
 	var err error
 
-	// Treat whitespace-only paths as unset so a stray space in a CLI flag
-	// or env var doesn't bypass the default discovery chain into a guaranteed
-	// "stat   : no such file" error from clientcmd.
-	kubeconfig = strings.TrimSpace(kubeconfig)
-
-	if kubeconfig == "" {
-		kubeconfig = strings.TrimSpace(os.Getenv("KUBECONFIG"))
-
-		if kubeconfig == "" {
-			kubeconfig = filepath.Join(homedir.HomeDir(), ".kube", "config")
-			if _, err = os.Stat(kubeconfig); os.IsNotExist(err) {
-				kubeconfig = ""
-			}
-		}
-	}
+	kubeconfig = ResolveKubeconfigPath(kubeconfig)
 
 	// Use InClusterConfig directly when no kubeconfig is available
 	// This avoids the warning: "Neither --kubeconfig nor --master was specified"

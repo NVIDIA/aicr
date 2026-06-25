@@ -106,6 +106,20 @@ type AgentConfig struct {
 	// empty, defaults preserve the systemd-based behavior.
 	OS string
 
+	// ClusterConfigPath, when set, asks the in-pod network collector to
+	// ingest a pre-existing l8k cluster-config.yaml at this path. In
+	// Job-mode the path must resolve inside the agent pod (ConfigMap
+	// mount, etc.) — this iteration plumbs the field through but does
+	// not yet auto-mount the file; the typical use today is local mode
+	// (AICR_AGENT_MODE=true) where the file lives on the caller's host.
+	ClusterConfigPath string
+
+	// DiscoverNetwork enables the in-pod network collector's live l8k
+	// discovery path. Discovery is NOT read-only — it writes node labels
+	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
+	// server-side-apply. RBAC must allow those writes.
+	DiscoverNetwork bool
+
 	// Requests overrides the agent container's per-resource requests.
 	// When nil, the privileged/restricted defaults baked into
 	// pkg/k8s/agent are used. Useful for right-sizing the agent on
@@ -125,6 +139,21 @@ type AgentConfig struct {
 // It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
 // and retrieves the snapshot data from the result ConfigMap.
 func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string) ([]byte, error) {
+	// Job mode forwards --cluster-config as an env var into the pod
+	// (AICR_CLUSTER_CONFIG_PATH) without mounting the host file: the
+	// caller's filesystem isn't reachable from inside the Job, and the
+	// in-pod CLI would fail to open the path. Reject the combination
+	// up front instead of producing a confusing failure deep in the
+	// network collector. ConfigMap-backed file forwarding is tracked
+	// as a follow-up; until then --cluster-config is local-mode-only
+	// (AICR_AGENT_MODE=true) and --discover-network is the supported
+	// Job-mode path.
+	if config.ClusterConfigPath != "" {
+		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"--cluster-config is not supported in agent Job mode (the host path is not visible to the in-pod CLI); use --discover-network for live cluster discovery, or run with AICR_AGENT_MODE=true to use --cluster-config locally",
+			map[string]any{"path": config.ClusterConfigPath})
+	}
+
 	// Auto-inject GPU node selector when no placement constraints are set.
 	// Returns true when injection occurred, so the wait-timeout error can
 	// name the injected selector (TOCTOU: node may be cordoned after detection).
@@ -145,6 +174,8 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		RuntimeClassName:   config.RuntimeClassName,
 		MaxNodesPerEntry:   config.MaxNodesPerEntry,
 		OS:                 config.OS,
+		ClusterConfigPath:  config.ClusterConfigPath,
+		DiscoverNetwork:    config.DiscoverNetwork,
 		Requests:           config.Requests,
 		Limits:             config.Limits,
 	}

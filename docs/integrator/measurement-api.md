@@ -102,11 +102,14 @@ subtypes:
     items:
       - context:
           pciAddress:       <e.g. 0000:03:00.0>
-          deviceID:         <hex, e.g. 1023>
+          deviceID:         <hex PCI device ID, e.g. 1023>
           psid:             <PSID string>
-          partNumber:       <part number string>
+          partNumber:       <NVIDIA SKU / part number>
           rdmaDevice:       <e.g. mlx5_0>
           networkInterface: <e.g. enp3s0f0np0>
+          model:            <human-readable NIC model from VPD, when set>
+          connectedGPU:     <GPU identifier from preset topology, e.g. GPU0>
+          gpuProximity:     <PCIe-topology class to connectedGPU, e.g. PIX>
         data:
           rail:     <int>
           numaNode: <int>
@@ -130,8 +133,10 @@ subtypes:
   scalar `Reading` values in `data`.
 - **`pfs`** — per-PF records as `items`. Per-PF descriptive identifiers
   (PCI address, device ID, PSID, part number, RDMA device name, netdev
-  name) live in `context`; per-PF scalar facts (rail index, NUMA node,
-  traffic class) live in `data`.
+  name, VPD model string, connectedGPU + gpuProximity from preset
+  topology) live in `context`; per-PF scalar facts (rail index, NUMA
+  node, traffic class) live in `data`. Optional fields (`model`,
+  `connectedGPU`, `gpuProximity`) are omitted when unset by l8k.
 - **`kernel-modules`** — flat ordered lists of storage and third-party RDMA
   modules. Keys are dotted with a numeric suffix (`storage.0`, `storage.1`,
   `thirdParty.0`, ...) to preserve order and stay within the scalar

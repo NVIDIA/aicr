@@ -1,0 +1,61 @@
+machineType: ThinkSystem-SR675-V3-System-Board
+gpuType: NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition
+linkType: Ethernet
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: true
+  pfs:
+  - deviceID: a2dc
+    rdmaDevice: mlx5_1
+    pciAddress: "0000:05:00.0"
+    networkInterface: ens15f0np0
+    traffic: east-west
+    rail: 0
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0
+    numaNode: 0
+  - deviceID: a2dc
+    rdmaDevice: mlx5_2
+    pciAddress: 0000:61:00.0
+    networkInterface: ens1f0np0
+    traffic: north-south
+    psid: mt_0000000884
+    partNumber: 900-9D3B6-00CV-AA0
+    numaNode: 0
+  - deviceID: a2dc
+    rdmaDevice: mlx5_3
+    pciAddress: 0000:61:00.1
+    networkInterface: ens1f1np1
+    traffic: north-south
+    psid: mt_0000000884
+    partNumber: 900-9D3B6-00CV-AA0
+    numaNode: 0
+  - deviceID: a2dc
+    rdmaDevice: mlx5_0
+    pciAddress: 0000:75:00.0
+    networkInterface: ens16f0np0
+    traffic: east-west
+    rail: 1
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0
+    numaNode: 0
+  - deviceID: a2dc
+    rdmaDevice: mlx5_5
+    pciAddress: 0000:85:00.0
+    networkInterface: ens20f0np0
+    traffic: east-west
+    rail: 2
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0
+    numaNode: 1
+  - deviceID: a2dc
+    rdmaDevice: mlx5_4
+    pciAddress: 0000:f5:00.0
+    networkInterface: ens21f0np0
+    traffic: east-west
+    rail: 3
+    psid: mt_0000001069
+    partNumber: 900-9D3D4-00EN-HA0
+    numaNode: 1
