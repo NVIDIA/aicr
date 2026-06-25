@@ -218,9 +218,38 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			"recipe must contain at least one component reference")
 	}
 
-	enabledRefs, filteredOrder, filterErr := b.filterEnabledComponents(recipeResult)
-	if filterErr != nil {
-		return nil, filterErr
+	// Filter out disabled components on a local copy to avoid mutating the caller's input.
+	// Check order: --set overrides take precedence over recipe overrides.
+	// This allows users to enable/disable components at bundle time:
+	//   --set awsebscsidriver:enabled=false  (disable)
+	//   --set awsebscsidriver:enabled=true   (re-enable)
+	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
+	enabledSet := make(map[string]struct{})
+	for _, ref := range recipeResult.ComponentRefs {
+		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
+		if overrideErr != nil {
+			return nil, overrideErr
+		}
+		if ok {
+			if !setEnabled {
+				slog.Info("skipping component disabled via --set", "component", ref.Name)
+				continue
+			}
+			// --set enabled=true overrides recipe-level disabled
+		} else if !ref.IsEnabled() {
+			slog.Info("skipping disabled component", "component", ref.Name)
+			continue
+		}
+		enabledRefs = append(enabledRefs, ref)
+		enabledSet[ref.Name] = struct{}{}
+	}
+
+	// Filter DeploymentOrder to match enabled components
+	filteredOrder := make([]string, 0, len(recipeResult.DeploymentOrder))
+	for _, name := range recipeResult.DeploymentOrder {
+		if _, ok := enabledSet[name]; ok {
+			filteredOrder = append(filteredOrder, name)
+		}
 	}
 
 	// Work on a shallow copy so the caller's RecipeResult is not mutated
@@ -228,6 +257,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	filtered.ComponentRefs = enabledRefs
 	filtered.DeploymentOrder = filteredOrder
 	recipeResult = &filtered
+
+	if len(enabledRefs) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"recipe has no enabled components after filtering")
+	}
 
 	// Set default output directory
 	if dir == "" {
@@ -263,9 +297,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, warningErr
 	}
 
-	if exposureErr := b.resolveAgentgatewayExposure(componentValues); exposureErr != nil {
-		return nil, exposureErr
-	}
+	b.warnAgentgatewayOpenExposure(componentValues)
 
 	// Run component-specific validations
 	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
@@ -648,8 +680,9 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 
 		// Paths declared via --dynamic must not have scheduling values baked in.
 		// Merging them into optOut causes applyNodeSchedulingOverrides to skip
-		// injection for those paths, so cluster-values.yaml gets an empty
-		// placeholder that operators fill at install time. See #1371.
+		// injection for those paths; the path will be absent from values entirely
+		// so operators can supply the toleration at install time without
+		// rebuilding the bundle. See #1371.
 		if dynPaths := b.dynamicPathSetFor(ref.Name, provider); len(dynPaths) > 0 {
 			for path := range dynPaths {
 				policy.optOut[path] = struct{}{}
@@ -778,99 +811,6 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 	}
 
 	return mergeOverridesAcrossKeys(allOverrides, b.componentOverrideKeys(componentName, provider))
-}
-
-// filterEnabledComponents resolves the set of components to bundle by applying
-// recipe-level overrides.enabled and bundle-time --set enabled toggles, then
-// returns the enabled refs (with dangling dependency edges pruned) alongside
-// the deployment order filtered to those refs.
-//
-// Bundle-time --set can disable a component the recipe enabled
-// (--set <c>:enabled=false), but it cannot re-enable a component the recipe
-// deliberately disabled: the author disables a component because the platform
-// already provides it (e.g. a CSP-managed cert-manager on OKE), so re-enabling
-// would install a conflicting second copy and there is no authored deployment
-// order for it. Such an attempt is rejected with ErrCodeInvalidRequest.
-func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, []string, error) {
-	// declaredSet is every component the recipe names, regardless of enabled
-	// state. It distinguishes a declared-but-disabled dependency (prune the
-	// edge — satisfied externally) from an undeclared one (keep it so topology
-	// validation still errors on a malformed recipe).
-	declaredSet := make(map[string]struct{}, len(recipeResult.ComponentRefs))
-	for _, ref := range recipeResult.ComponentRefs {
-		declaredSet[ref.Name] = struct{}{}
-	}
-
-	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
-	enabledSet := make(map[string]struct{})
-	for _, ref := range recipeResult.ComponentRefs {
-		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
-		if overrideErr != nil {
-			return nil, nil, overrideErr
-		}
-		recipeEnabled := ref.IsEnabled()
-		if ok {
-			if setEnabled && !recipeEnabled {
-				return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-					"component %q is disabled by the recipe and cannot be re-enabled with "+
-						"--set %s:%s=true", ref.Name, ref.Name, config.ComponentEnabledKey))
-			}
-			if !setEnabled {
-				slog.Info("skipping component disabled via --set", "component", ref.Name)
-				continue
-			}
-			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
-		} else if !recipeEnabled {
-			slog.Info("skipping disabled component", "component", ref.Name)
-			continue
-		}
-		enabledRefs = append(enabledRefs, ref)
-		enabledSet[ref.Name] = struct{}{}
-	}
-
-	if len(enabledRefs) == 0 {
-		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
-			"recipe has no enabled components after filtering")
-	}
-
-	// Prune dependency edges that point at a declared-but-disabled component
-	// removed above. After filtering, such a dependency is no longer present in
-	// the ref slice, so a deployer that recomputes ordering from these refs
-	// (e.g. helmfile via ComponentRefsTopologicalLevels) would otherwise treat
-	// the dangling edge as an undeclared dependency and fail with a false
-	// circular-dependency error. The dependency is assumed satisfied externally
-	// (the reason it was disabled). An edge to a genuinely undeclared component
-	// is left intact so topology validation still errors on a malformed recipe.
-	for i := range enabledRefs {
-		deps := enabledRefs[i].DependencyRefs
-		if len(deps) == 0 {
-			continue
-		}
-		pruned := make([]string, 0, len(deps))
-		for _, dep := range deps {
-			_, isEnabled := enabledSet[dep]
-			_, isDeclared := declaredSet[dep]
-			if isDeclared && !isEnabled {
-				// declared-but-disabled: satisfied externally, drop the edge.
-				continue
-			}
-			pruned = append(pruned, dep)
-		}
-		if len(pruned) != len(deps) {
-			enabledRefs[i].DependencyRefs = pruned
-		}
-	}
-
-	// Filter DeploymentOrder to match enabled components, preserving the
-	// recipe's authored order.
-	filteredOrder := make([]string, 0, len(recipeResult.DeploymentOrder))
-	for _, name := range recipeResult.DeploymentOrder {
-		if _, ok := enabledSet[name]; ok {
-			filteredOrder = append(filteredOrder, name)
-		}
-	}
-
-	return enabledRefs, filteredOrder, nil
 }
 
 // getSetEnabledOverride checks if --set overrides contain an "enabled" key
@@ -1167,29 +1107,6 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 			}
 		}
 	}
-
-    // Apply storage class to all registry-declared storageClassPaths, but only when the path
-	// was not explicitly set via a per-component --set override. Overlay/default values in the
-	// values map must not block injection; only CLI --set inputs take precedence.
-	if sc := b.Config.StorageClass(); sc != "" {
-		if paths := comp.GetStorageClassPaths(); len(paths) > 0 {
-			explicitOverrides := b.getValueOverridesForComponent(componentName, provider)
-			overrides := make(map[string]string, len(paths))
-			for _, path := range paths {
-				if _, isExplicit := explicitOverrides[path]; !isExplicit {
-					overrides[path] = sc
-				}
-			}
-			if len(overrides) > 0 {
-				if err := component.ApplyMapOverrides(values, overrides); err != nil {
-					slog.Warn("failed to apply storage class",
-						"component", componentName,
-						"error", err,
-					)
-				}
-			}
-		}
-	}
 }
 
 // dynamicPathSetFor returns the set of value paths declared as dynamic for
@@ -1209,19 +1126,7 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 	pathSet := make(map[string]struct{})
 	for key, paths := range raw {
 		comp := registry.GetByOverrideKey(key)
-		if comp == nil {
-			// buildDynamicValuesMap validates all --dynamic keys before
-			// extractComponentValues runs, so an unresolved key here means
-			// a gap in upstream validation. Warn so it surfaces immediately
-			// rather than silently baking in a toleration the user expected
-			// to leave dynamic.
-			slog.Warn("dynamicPathSetFor: unresolved --dynamic override key, toleration will be baked in",
-				"key", key,
-				"component", componentName,
-			)
-			continue
-		}
-		if comp.Name != componentName {
+		if comp == nil || comp.Name != componentName {
 			continue
 		}
 		for _, p := range paths {
@@ -1234,7 +1139,6 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 	return pathSet
 }
 
-// warnMissingStorageClassForPVCs emits a bundle note when a rendered component creates
 // a PVC but leaves storageClassName unset, causing Kubernetes to rely on the
 // target cluster's default StorageClass.
 func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
@@ -1294,130 +1198,49 @@ const (
 	agentgatewaySourceRangesPath = "allowedSourceRanges"
 )
 
-// agentgatewayDefaultSourceRanges is the private-by-default scope applied to the
-// inference-gateway LoadBalancer when the operator supplies no allowedSourceRanges
-// (and does not override it via a recipe componentRef). These are the RFC1918
-// private ranges: they keep the gateway reachable from inside the cluster/VPC and
-// from privately-routed peers, while denying the public internet (which includes
-// VPN egress that presents a public source IP). Operators open specific public
-// clients with --set-json agentgateway:allowedSourceRanges='["<cidr>"]', or
-// expose it publicly with ["0.0.0.0/0"]. This is deliberately generic (not a
-// customer-specific network) to avoid firewalling every deployment to one site.
-// To flip to a deny-all default instead, replace this with a single unreachable
-// CIDR such as "255.255.255.255/32". See #1373.
-var agentgatewayDefaultSourceRanges = []string{
-	"10.0.0.0/8",
-	"172.16.0.0/12",
-	"192.168.0.0/16",
-}
-
-// agentgatewayExposure classifies how the agentgateway.allowedSourceRanges
-// value scopes the inference-gateway LoadBalancer.
-type agentgatewayExposure int
-
-const (
-	// exposureScoped: a non-empty list of valid CIDRs, none of them an
-	// any-source range. The LoadBalancer is locked to trusted networks.
-	exposureScoped agentgatewayExposure = iota
-	// exposureOpen: a non-empty list that includes an any-source CIDR
-	// (0.0.0.0/0 or ::/0) — a deliberate, explicit public opt-in.
-	exposureOpen
-	// exposureUnset: the value is missing or an empty list. Kubernetes treats
-	// an empty loadBalancerSourceRanges as allow-all, so this would render an
-	// internet-facing gateway by default.
-	exposureUnset
-	// exposureInvalid: the value is not a list of valid CIDR strings (e.g. a
-	// bare scalar from a mistaken --set, a non-string entry, or an
-	// unparseable CIDR) and would render an invalid Service.
-	exposureInvalid
-)
-
-// resolveAgentgatewayExposure enforces a private-by-default posture for the
-// agentgateway inference-gateway LoadBalancer. Kubernetes treats an empty
-// loadBalancerSourceRanges as allow-all (0.0.0.0/0), so when the operator
-// supplies no allowedSourceRanges (and no recipe componentRef override),
-// emitting nothing would silently expose the gateway to the whole internet.
-// Instead this injects a private RFC1918 default (see
-// agentgatewayDefaultSourceRanges) into the merged values so the deployed
-// gateway denies the public internet while staying reachable from inside the
-// cluster/VPC. Operators scope to specific public clients via
-// --set-json agentgateway:allowedSourceRanges='["<cidr>"]'; an explicit
-// any-source opt-in is still permitted but logged loudly; an invalid value is
-// rejected. It mutates componentValues only in the unset case. See #1373.
-func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]map[string]any) error {
+// warnAgentgatewayOpenExposure emits a bundle note when the agentgateway
+// component is included but its allowedSourceRanges does not scope the
+// inference-gateway LoadBalancer — i.e. the list is empty/unset or includes an
+// any-source CIDR (0.0.0.0/0 or ::/0) — leaving it reachable from any source.
+// The open-by-default behavior is intentional (#1138) — a baked-in
+// CIDR would lock external operators out of their own gateway — but it is
+// otherwise silent: nothing in bundle output flags that the gateway is
+// internet-facing. This surfaces the exposure so scoping it becomes a conscious
+// choice, mirroring the storageClassName PVC warning. See #1160.
+func (b *DefaultBundler) warnAgentgatewayOpenExposure(componentValues map[string]map[string]any) {
 	values := componentValues[agentgatewayComponentName]
 	if values == nil {
-		return nil
+		return
+	}
+	if sourceRangesAreScoped(values, agentgatewaySourceRangesPath) {
+		return
 	}
 
-	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
-	switch state {
-	case exposureScoped:
-		return nil
-
-	case exposureOpen:
-		// Deliberate, explicit public opt-in: allowed, but logged loudly and
-		// surfaced as a bundle warning so it is never silent.
-		msg := fmt.Sprintf(
-			"%s: inference-gateway is explicitly opened to the entire internet "+
-				"(%s includes an any-source CIDR such as 0.0.0.0/0). This is a deliberate opt-in; "+
-				"scope it to trusted networks unless public exposure is intended.",
-			agentgatewayComponentName, agentgatewaySourceRangesPath,
-		)
-		b.appendWarning(msg)
-		slog.Warn("agentgateway inference-gateway is explicitly opened via an any-source CIDR (deliberate public opt-in)",
-			"component", agentgatewayComponentName,
-			"path", agentgatewaySourceRangesPath,
-		)
-		return nil
-
-	case exposureInvalid:
-		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"%s: %s must be a list of CIDR strings (%s); set it via "+
-				"--set-json %s:%s='[\"<cidr>\"]' — a bare --set value renders an invalid Service",
-			agentgatewayComponentName, agentgatewaySourceRangesPath, detail,
-			agentgatewayComponentName, agentgatewaySourceRangesPath,
-		))
-
-	case exposureUnset:
-		// Private-by-default: inject RFC1918 ranges so the gateway is never
-		// emitted open to 0.0.0.0/0 without an explicit operator choice.
-		ranges := make([]any, len(agentgatewayDefaultSourceRanges))
-		for i, r := range agentgatewayDefaultSourceRanges {
-			ranges[i] = r
-		}
-		values[agentgatewaySourceRangesPath] = ranges
-		b.appendWarning(fmt.Sprintf(
-			"%s: %s was not set; defaulting the inference-gateway to private ranges (%s) so it is "+
-				"not exposed to the public internet. To allow specific public clients (e.g. a corporate VPN), "+
-				"set --set-json %s:%s='[\"<cidr>\"]'; to expose it publicly, use [\"0.0.0.0/0\"]. "+
-				"See docs/user/component-catalog.md.",
-			agentgatewayComponentName, agentgatewaySourceRangesPath,
-			strings.Join(agentgatewayDefaultSourceRanges, ", "),
-			agentgatewayComponentName, agentgatewaySourceRangesPath,
-		))
-		slog.Info("defaulting agentgateway inference-gateway to private source ranges (allowedSourceRanges unset)",
-			"component", agentgatewayComponentName,
-			"path", agentgatewaySourceRangesPath,
-			"ranges", agentgatewayDefaultSourceRanges,
-		)
-		return nil
-
-	default:
-		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
-			"unhandled agentgateway exposure state %d", state))
-	}
+	msg := fmt.Sprintf(
+		"%s: inference-gateway will be provisioned as an internet-facing LoadBalancer open to 0.0.0.0/0 "+
+			"(%s is empty or includes an any-source CIDR). Scope it to trusted networks via a recipe componentRef override or "+
+			"--set-json %s:%s='[\"<cidr>\"]'. See docs/user/component-catalog.md.",
+		agentgatewayComponentName, agentgatewaySourceRangesPath,
+		agentgatewayComponentName, agentgatewaySourceRangesPath,
+	)
+	b.appendWarning(msg)
+	slog.Warn("agentgateway inference-gateway is open to 0.0.0.0/0 (allowedSourceRanges empty or any-source)",
+		"component", agentgatewayComponentName,
+		"path", agentgatewaySourceRangesPath,
+	)
 }
 
-// classifyAgentgatewaySourceRanges inspects the value at path and reports how it
-// scopes the LoadBalancer. The detail string is populated only for
-// exposureInvalid to explain why the value was rejected. See #1373.
-func classifyAgentgatewaySourceRanges(values map[string]any, path string) (agentgatewayExposure, string) {
+// sourceRangesAreScoped reports whether the value at path is a non-empty list
+// of CIDRs that actually scopes the LoadBalancer — i.e. it omits any-source
+// ranges (0.0.0.0/0, ::/0). A missing value, an empty list, a non-list value
+// (e.g. a bare string from a mistaken scalar --set, which would itself render
+// an invalid Service), or a list that includes an any-source CIDR all count as
+// "not scoped" so the open-exposure warning still fires. See #1160.
+func sourceRangesAreScoped(values map[string]any, path string) bool {
 	v, ok := component.GetValueByPath(values, path)
 	if !ok || v == nil {
-		return exposureUnset, ""
+		return false
 	}
-
 	var items []string
 	switch list := v.(type) {
 	case []any:
@@ -1425,33 +1248,26 @@ func classifyAgentgatewaySourceRanges(values map[string]any, path string) (agent
 		for _, e := range list {
 			s, ok := e.(string)
 			if !ok {
-				return exposureInvalid, fmt.Sprintf("entry %v is not a string", e)
+				// A non-string entry can't be a valid CIDR; the rendered
+				// Service would be invalid, so treat it as not-scoped.
+				return false
 			}
 			items = append(items, s)
 		}
 	case []string:
 		items = list
 	default:
-		return exposureInvalid, fmt.Sprintf("got %T, not a list", v)
+		return false
 	}
-
 	if len(items) == 0 {
-		return exposureUnset, ""
+		return false
 	}
-
-	hasAnySource := false
 	for _, r := range items {
-		if !netutil.IsValidCIDR(r) {
-			return exposureInvalid, fmt.Sprintf("%q is not a valid CIDR", r)
-		}
 		if netutil.IsAnySourceCIDR(r) {
-			hasAnySource = true
+			return false
 		}
 	}
-	if hasAnySource {
-		return exposureOpen, ""
-	}
-	return exposureScoped, ""
+	return true
 }
 
 func storageClassPathHasPVCSpec(values map[string]any, path string) bool {
