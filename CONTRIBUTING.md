@@ -209,6 +209,16 @@ Automated bots manage the lifecycle of issues and pull requests:
 
 **To prevent auto-close:** Add the `lifecycle/frozen` label. PRs with `do-not-merge` are also exempt.
 
+### Claiming an Issue
+
+To pick up an unassigned issue, comment `/assign` and a bot assigns it to you
+(or `/assign @user` to assign someone else). Issues use a single-owner model:
+if one is already assigned, the bot refuses and asks the current assignee to
+release it first with `/unassign`. Comment `/unassign` to release an issue
+assigned to you — it only ever removes your own claim. GitHub only allows
+assigning users with triage/write access or prior activity in the repository;
+the bot comments if it cannot assign a requested user.
+
 ### After Merging
 
 ```bash

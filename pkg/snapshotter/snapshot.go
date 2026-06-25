@@ -105,6 +105,32 @@ func parseOSEnv() string {
 	return val
 }
 
+// parseClusterConfigPathEnv reads AICR_CLUSTER_CONFIG_PATH, set by the
+// agent Job when --cluster-config was supplied at the CLI. Empty when
+// unset; the network collector treats an empty path as "file mode
+// disabled."
+func parseClusterConfigPathEnv() string {
+	return strings.TrimSpace(os.Getenv("AICR_CLUSTER_CONFIG_PATH"))
+}
+
+// parseDiscoverNetworkEnv reads AICR_DISCOVER_NETWORK. Returns true only
+// when the env var parses cleanly as a positive boolean — silent fallback
+// to false on garbage to avoid accidentally turning on cluster-mutating
+// discovery from a malformed config.
+func parseDiscoverNetworkEnv() bool {
+	val := strings.TrimSpace(os.Getenv("AICR_DISCOVER_NETWORK"))
+	if val == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		slog.Warn("invalid AICR_DISCOVER_NETWORK value, ignoring",
+			slog.String("value", val))
+		return false
+	}
+	return b
+}
+
 // measure collects configuration measurements from the current node.
 func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	if n.Factory == nil {
@@ -115,6 +141,17 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 		if osVal := parseOSEnv(); osVal != "" {
 			opts = append(opts, collector.WithOS(osVal))
 		}
+		if ccPath := parseClusterConfigPathEnv(); ccPath != "" {
+			opts = append(opts, collector.WithClusterConfigPath(ccPath))
+		}
+		if parseDiscoverNetworkEnv() {
+			opts = append(opts, collector.WithDiscoverNetwork(true))
+		}
+		// In agent mode the in-cluster config is auto-resolved by l8k's
+		// kubeclient.New (kubeconfigPath == "" → InClusterConfig). In
+		// local mode (AICR_AGENT_MODE=false) we honor KUBECONFIG from
+		// the environment, which l8k.kubeclient.New also picks up. No
+		// explicit WithKubeconfigPath in this path.
 		n.Factory = collector.NewDefaultFactory(opts...)
 	}
 
@@ -153,6 +190,16 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 					slog.String("error", err.Error()))
 				return nil
 			}
+			if m == nil {
+				// Inactive collector (e.g. the network collector when
+				// neither --cluster-config nor --discover-network was
+				// supplied). Treat as a no-op — appending nil would
+				// pollute the Measurements slice and fail downstream
+				// nil-guards in fingerprint / validator code paths.
+				slog.Debug("collector returned nil measurement - inactive, skipping",
+					slog.String("collector", name))
+				return nil
+			}
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -181,6 +228,7 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	g.Go(collectSafe(gctx, "os", n.Factory.CreateOSCollector()))
 	g.Go(collectSafe(gctx, "gpu", n.Factory.CreateGPUCollector()))
 	g.Go(collectSafe(gctx, "topology", n.Factory.CreateNodeTopologyCollector()))
+	g.Go(collectSafe(gctx, "network", n.Factory.CreateNetworkCollector()))
 
 	_ = g.Wait() // Individual collector errors are logged and swallowed today; reserved for future cancel-on-error.
 

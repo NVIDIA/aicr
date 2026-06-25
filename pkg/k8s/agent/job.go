@@ -319,6 +319,20 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 		})
 	}
 
+	if d.config.ClusterConfigPath != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AICR_CLUSTER_CONFIG_PATH",
+			Value: d.config.ClusterConfigPath,
+		})
+	}
+
+	if d.config.DiscoverNetwork {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AICR_DISCOVER_NETWORK",
+			Value: "true",
+		})
+	}
+
 	// NVIDIA_VISIBLE_DEVICES=all is set explicitly here because no GPU resource is
 	// requested (we rely on runtimeClassName to get container-runtime access to the
 	// driver). On CDI-enabled clusters the runtime would normally inject this via the

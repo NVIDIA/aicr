@@ -1,0 +1,161 @@
+machineType: ThinkSystem-SR680a-V3
+manufacturer: Lenovo
+gpuType: NVIDIA-H200
+nicModel: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16 (ConnectX-7)
+gpuInterconnect: NV18
+numaNodes: 2
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: true
+
+pfs:
+  # --- NUMA 0: GPUs 0-3, CPUs 0-55,112-167 ---
+  - deviceID: a2dc
+    rdmaDevice: rocep25s0f0
+    pciAddress: 0000:19:00.0
+    networkInterface: eth0
+    traffic: east-west
+    rail: 0
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: rocep42s0f0
+    pciAddress: 0000:2a:00.0
+    networkInterface: eth1
+    traffic: east-west
+    rail: 1
+    numaNode: 0
+    connectedGPU: GPU1
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: rocep59s0f0
+    pciAddress: 0000:3b:00.0
+    networkInterface: eth2
+    traffic: east-west
+    rail: 2
+    numaNode: 0
+    connectedGPU: GPU2
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: rocep76s0f0
+    pciAddress: 0000:4c:00.0
+    networkInterface: eth3
+    traffic: east-west
+    rail: 3
+    numaNode: 0
+    connectedGPU: GPU3
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+
+  # --- N-S: ConnectX-6 Lx dual-port 10/25GbE (NUMA 0) --- # Ignored, OOB interface
+  - deviceID: "101f"
+    rdmaDevice: rocep90s0f0
+    pciAddress: 0000:5a:00.0
+    networkInterface: eth4
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: SN37A28487
+    model: Mellanox ConnectX-6 Lx 10/25GbE SFP28 2-port PCIe Ethernet Adapter
+  - deviceID: "101f"
+    rdmaDevice: rocep90s0f1
+    pciAddress: 0000:5a:00.1
+    networkInterface: eth5
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: SN37A28487
+    model: Mellanox ConnectX-6 Lx 10/25GbE SFP28 2-port PCIe Ethernet Adapter
+
+  # --- NUMA 1: GPUs 4-7, CPUs 56-111,168-223 ---
+  - deviceID: a2dc
+    rdmaDevice: rocep155s0f0
+    pciAddress: 0000:9b:00.0
+    networkInterface: eth6
+    traffic: east-west
+    rail: 4
+    numaNode: 1
+    connectedGPU: GPU4
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: rocep171s0f0
+    pciAddress: 0000:ab:00.0
+    networkInterface: eth7
+    traffic: east-west
+    rail: 5
+    numaNode: 1
+    connectedGPU: GPU5
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: rocep193s0f0
+    pciAddress: 0000:c1:00.0
+    networkInterface: eth8
+    traffic: east-west
+    rail: 6
+    numaNode: 1
+    connectedGPU: GPU6
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: rocep203s0f0
+    pciAddress: 0000:cb:00.0
+    networkInterface: eth9
+    traffic: east-west
+    rail: 7
+    numaNode: 1
+    connectedGPU: GPU7
+    gpuProximity: PIX
+    psid: ""
+    partNumber: SN37B82788
+    model: Nvidia BlueField-3 VPI QSFP112 1P 400G PCIe Gen5 x16
+
+  # --- N-S bond slave: BF3 dual-port (NUMA 1) ---
+  - deviceID: a2dc
+    rdmaDevice: rocep216s0f0
+    pciAddress: 0000:d8:00.0
+    networkInterface: eth10
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: SN37B36732
+    model: Nvidia BlueField-3 VPI QSFP112 2P 200G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: ""
+    pciAddress: 0000:d8:00.1
+    networkInterface: eth11
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: SN37B36732
+    model: Nvidia BlueField-3 VPI QSFP112 2P 200G PCIe Gen5 x16

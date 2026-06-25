@@ -17,6 +17,7 @@ package collector
 import (
 	"github.com/NVIDIA/aicr/pkg/collector/gpu"
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
+	"github.com/NVIDIA/aicr/pkg/collector/network"
 	"github.com/NVIDIA/aicr/pkg/collector/os"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
 	"github.com/NVIDIA/aicr/pkg/collector/talos"
@@ -33,6 +34,7 @@ type Factory interface {
 	CreateKubernetesCollector() Collector
 	CreateGPUCollector() Collector
 	CreateNodeTopologyCollector() Collector
+	CreateNetworkCollector() Collector
 }
 
 // Option defines a configuration option for DefaultFactory.
@@ -62,6 +64,36 @@ func WithOS(os string) Option {
 	}
 }
 
+// WithClusterConfigPath configures the network collector to ingest a
+// pre-existing l8k cluster-config.yaml from disk. Mutually exclusive with
+// WithDiscoverNetwork at the collector level — the file path wins when
+// both are set so callers can default discovery from a flag without
+// inadvertent cluster contact when the file path is also supplied.
+func WithClusterConfigPath(path string) Option {
+	return func(f *DefaultFactory) {
+		f.ClusterConfigPath = path
+	}
+}
+
+// WithDiscoverNetwork enables live l8k network discovery for the network
+// collector. Discovery is NOT read-only — it writes nvidia.kubernetes-
+// launch-kit.* node labels and patches NicClusterPolicy via server-side
+// apply. Default off.
+func WithDiscoverNetwork(enabled bool) Option {
+	return func(f *DefaultFactory) {
+		f.DiscoverNetwork = enabled
+	}
+}
+
+// WithKubeconfigPath threads a kubeconfig override into the network
+// collector's live-discovery path. Empty falls back to the usual
+// kubeconfig resolution order (KUBECONFIG env, in-cluster).
+func WithKubeconfigPath(path string) Option {
+	return func(f *DefaultFactory) {
+		f.KubeconfigPath = path
+	}
+}
+
 // DefaultFactory is the standard implementation of Factory that creates collectors
 // with production dependencies. It configures default systemd services to monitor.
 type DefaultFactory struct {
@@ -72,6 +104,18 @@ type DefaultFactory struct {
 	// return Talos-aware collectors that read state from the Kubernetes API.
 	// Empty preserves the existing systemd D-Bus / /proc-based defaults.
 	OS string
+
+	// ClusterConfigPath, when set, points the network collector at a
+	// pre-existing l8k cluster-config.yaml. Mutually exclusive with
+	// DiscoverNetwork — file path wins when both are set.
+	ClusterConfigPath string
+	// DiscoverNetwork, when true, opts the network collector into live
+	// l8k discovery. Discovery is NOT read-only.
+	DiscoverNetwork bool
+	// KubeconfigPath overrides the kubeconfig used by the network
+	// collector's discovery path. Empty falls back to KUBECONFIG /
+	// in-cluster resolution.
+	KubeconfigPath string
 
 	// Lazily-initialized Talos collector pair sharing one config so a
 	// single snapshot performs exactly one Node API fetch regardless of
@@ -154,5 +198,19 @@ func (f *DefaultFactory) CreateKubernetesCollector() Collector {
 func (f *DefaultFactory) CreateNodeTopologyCollector() Collector {
 	return &topology.Collector{
 		MaxNodesPerEntry: f.MaxNodesPerEntry,
+	}
+}
+
+// CreateNetworkCollector creates the network topology collector. When
+// neither ClusterConfigPath nor DiscoverNetwork is configured, the
+// returned collector is inactive — Collect returns (nil, nil) and the
+// snapshotter treats it as a no-op. Activating it is an explicit opt-in
+// because live discovery is cluster-mutating and the file-source path
+// requires a user-supplied YAML.
+func (f *DefaultFactory) CreateNetworkCollector() Collector {
+	return &network.Collector{
+		ClusterConfigPath: f.ClusterConfigPath,
+		DiscoverNetwork:   f.DiscoverNetwork,
+		KubeconfigPath:    f.KubeconfigPath,
 	}
 }
