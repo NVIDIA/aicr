@@ -209,6 +209,14 @@ Automated bots manage the lifecycle of issues and pull requests:
 
 **To prevent auto-close:** Add the `lifecycle/frozen` label. PRs with `do-not-merge` are also exempt.
 
+### Claiming an Issue
+
+To pick up an issue, comment `/assign` on it and a bot assigns it to you. Use
+`/assign @user` to assign someone else, and `/unassign` (optionally with
+`@user`) to release it. GitHub only allows assigning users with triage/write
+access or prior activity in the repository; the bot comments if it cannot
+assign a requested user.
+
 ### After Merging
 
 ```bash

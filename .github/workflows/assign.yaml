@@ -1,0 +1,106 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Lets contributors self-serve issue assignment by commenting on an issue:
+#   /assign            -> assigns the commenter
+#   /assign @user ...  -> assigns the mentioned user(s)
+#   /unassign          -> removes the commenter
+#   /unassign @user ...-> removes the mentioned user(s)
+#
+# issue_comment always runs in the base-repo context with the base-repo
+# token, so there is no fork/pwn-request exposure here: the job only needs
+# `issues: write` and never checks out untrusted code. GitHub's
+# addAssignees silently ignores users who are not assignable (no triage/
+# write access and no prior repo activity); we detect and report those.
+
+name: Self-Assign Issues
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+
+  assign:
+    name: Handle /assign and /unassign
+    # Issues only (not PRs); comment starts with /assign or /unassign.
+    if: >-
+      !github.event.issue.pull_request &&
+      (startsWith(github.event.comment.body, '/assign') ||
+       startsWith(github.event.comment.body, '/unassign'))
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    timeout-minutes: 5
+    steps:
+
+      - name: Apply assignment change
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const body = context.payload.comment.body.trim();
+            const commenter = context.payload.comment.user.login;
+
+            // First token is the command; /unassign must precede /assign in
+            // this check because startsWith('/assign') would also match it.
+            const unassign = body.startsWith('/unassign');
+
+            // "@user" mentions anywhere in the comment; fall back to the
+            // commenter when none are given (self assign/unassign).
+            const mentioned = [...body.matchAll(/@([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?)/g)].map(m => m[1]);
+            const targets = mentioned.length ? [...new Set(mentioned)] : [commenter];
+
+            const common = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            };
+
+            if (unassign) {
+              const { data: issue } = await github.rest.issues.removeAssignees({
+                ...common,
+                assignees: targets,
+              });
+              const remaining = new Set(issue.assignees.map(a => a.login));
+              core.info(`Unassigned ${targets.join(', ')}; remaining: ${[...remaining].join(', ') || 'none'}`);
+              return;
+            }
+
+            const { data: issue } = await github.rest.issues.addAssignees({
+              ...common,
+              assignees: targets,
+            });
+
+            // GitHub drops non-assignable users without erroring — surface them.
+            const got = new Set(issue.assignees.map(a => a.login));
+            const skipped = targets.filter(u => !got.has(u));
+            if (skipped.length) {
+              core.warning(`Could not assign: ${skipped.join(', ')}`);
+              await github.rest.issues.createComment({
+                ...common,
+                body: [
+                  `Could not assign ${skipped.map(u => '@' + u).join(', ')}.`,
+                  '',
+                  'GitHub only allows assigning users with triage/write access or',
+                  'prior activity in this repository.',
+                ].join('\n'),
+              });
+            }
