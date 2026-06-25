@@ -48,6 +48,7 @@ func writeGCS(
 	finished finishedJSON,
 	junitXML []byte,
 ) error {
+
 	if _, err := exec.LookPath("gcloud"); err != nil {
 		return errors.New(errors.ErrCodeUnavailable,
 			"gcloud not found in PATH: install Google Cloud SDK (https://cloud.google.com/sdk/docs/install)")
