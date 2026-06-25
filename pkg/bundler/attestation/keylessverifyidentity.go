@@ -19,35 +19,33 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
-
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
-// keylessVerificationIdentity verifies a keyless (Fulcio) signature against the
-// Sigstore public-good trusted root, pinning the signer to a Fulcio
-// certificate identity. It is the verification dual of keylessIdentity and the
-// VerificationIdentity used by both bundle attestation (any OIDC issuer) and
-// binary attestation (NVIDIA-pinned issuer + repository pattern); the caller
-// supplies the certificate matcher.
-type keylessVerificationIdentity struct{ id verify.CertificateIdentity }
-
-// NewKeylessVerificationIdentity returns a VerificationIdentity that validates
-// a keyless Fulcio signature against the Sigstore public-good trusted root and
-// requires the signing certificate to match id.
-func NewKeylessVerificationIdentity(id verify.CertificateIdentity) VerificationIdentity {
-	return &keylessVerificationIdentity{id: id}
+// keylessVerificationIdentity verifies a keyless (Fulcio) signature against a
+// TrustedRootSource, pinning the signer to a Fulcio certificate identity. It is
+// the verification dual of keylessIdentity and the VerificationIdentity used by
+// both bundle attestation (any OIDC issuer) and binary attestation
+// (NVIDIA-pinned issuer + repository pattern); the caller supplies the
+// certificate matcher. The trust anchors come from src, which defaults to the
+// public-good root but may be a union source supplied by `verify --trust-root`.
+type keylessVerificationIdentity struct {
+	id  verify.CertificateIdentity
+	src TrustedRootSource
 }
 
-func (k *keylessVerificationIdentity) TrustedMaterial(context.Context) (root.TrustedMaterial, error) {
-	// trust.GetTrustedMaterial is offline (ForceCache) and takes no context, so
-	// the ctx is accepted only to satisfy the interface and to keep the
-	// key-based identity (which may make a context-bounded KMS call) uniform.
-	tm, err := trust.GetTrustedMaterial()
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load trusted root", err)
+// NewKeylessVerificationIdentity returns a VerificationIdentity that validates
+// a keyless Fulcio signature against the trust anchors from src and requires
+// the signing certificate to match id. A nil src defaults to
+// PublicGoodTrustedRoot.
+func NewKeylessVerificationIdentity(id verify.CertificateIdentity, src TrustedRootSource) VerificationIdentity {
+	if src == nil {
+		src = PublicGoodTrustedRoot
 	}
-	return tm, nil
+	return &keylessVerificationIdentity{id: id, src: src}
+}
+
+func (k *keylessVerificationIdentity) TrustedMaterial(ctx context.Context) (root.TrustedMaterial, error) {
+	return k.src(ctx)
 }
 
 func (k *keylessVerificationIdentity) PolicyOption() verify.PolicyOption {
