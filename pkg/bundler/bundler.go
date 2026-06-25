@@ -1111,7 +1111,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 
 // dynamicPathSetFor returns the set of value paths declared as dynamic for
 // componentName. Dynamic paths are excluded from scheduling injection so that
-// cluster-values.yaml carries an empty placeholder rather than a baked-in
+// the path stays absent from values entirely rather than carrying a baked-in
 // value, letting operators supply tolerations at install time without
 // rebuilding the bundle. See #1371.
 func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe.DataProvider) map[string]struct{} {
@@ -1120,13 +1120,24 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 	}
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
+		slog.Debug("dynamicPathSetFor: failed to load registry, dynamic opt-out disabled",
+			"component", componentName,
+			"error", err,
+		)
 		return nil
 	}
 	raw := b.Config.DynamicValues()
 	pathSet := make(map[string]struct{})
 	for key, paths := range raw {
 		comp := registry.GetByOverrideKey(key)
-		if comp == nil || comp.Name != componentName {
+		if comp == nil {
+			slog.Warn("dynamicPathSetFor: unresolved --dynamic override key, toleration will be baked in",
+				"key", key,
+				"component", componentName,
+			)
+			continue
+		}
+		if comp.Name != componentName {
 			continue
 		}
 		for _, p := range paths {
@@ -1139,9 +1150,10 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 	return pathSet
 }
 
+// warnMissingStorageClassForPVCs emits a bundle note when a rendered component creates
 // a PVC but leaves storageClassName unset, causing Kubernetes to rely on the
 // target cluster's default StorageClass.
-func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
+func (b *DefaultBundler) warnMissingStorageClassForPVCs(
 	if b.Config == nil {
 		return nil
 	}
