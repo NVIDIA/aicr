@@ -54,6 +54,12 @@ const (
 	flagInsecureTLS    = "insecure-tls"
 	flagPlainHTTP      = "plain-http"
 	flagPush           = "push"
+	// flagNoSign pushes an unsigned evidence bundle and writes a pointer whose
+	// attestation has a nil Signer (the unsigned state — distinct from a
+	// signed-without-Rekor pointer, which has a Signer with a nil
+	// rekorLogIndex). Decouples the network-light push leg from the
+	// Fulcio-bound signing leg, which the fork-based CI workflow completes later.
+	flagNoSign = "no-sign"
 	// flagFull ships an unredacted evidence bundle. By default the bundle is
 	// minimized (sensitive snapshot fields and CTRF logs removed).
 	flagFull = "full"

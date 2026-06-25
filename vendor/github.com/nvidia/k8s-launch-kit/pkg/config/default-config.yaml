@@ -1,0 +1,164 @@
+networkOperator:
+  # selectedRelease pins the Network Operator release line (MAJOR.MINOR).
+  # Equivalent to passing --network-operator-release on the CLI. When set,
+  # version/componentVersion/repository/operatorRepository/helmRepoURL (below)
+  # and docaDriver.version are populated from the embedded catalog;
+  # explicit values here are overridden.
+  # Supported: 25.10, 26.1, 26.4. Leave empty to use the explicit values
+  # below as-is.
+  # selectedRelease: "26.4"
+  version: v26.4.0
+  componentVersion: network-operator-v26.4.0
+  selectedRelease: "26.4"
+  # repository — registry path for COMPONENT images managed by the operator
+  # (ofedDriver, nvIpam, multus, device plugins, …). Rendered into
+  # NicClusterPolicy / NicNodePolicy.
+  repository: nvcr.io/nvidia/mellanox
+  # operatorRepository — registry path for the network-operator BINARY
+  # image itself. Distinct from `repository` because stable releases ship
+  # the operator at `nvcr.io/nvidia/cloud-native` while components live at
+  # `nvcr.io/nvidia/mellanox`. Rendered into the helm chart's
+  # `operator.repository` value.
+  operatorRepository: nvcr.io/nvidia/cloud-native
+  # helmRepoURL — Helm chart repository URL the `l8k deploy` Phase 0 fetches
+  # the network-operator chart from. Stable releases publish under
+  # `helm.ngc.nvidia.com/nvidia`; staging under `helm.ngc.nvidia.com/nvstaging/mellanox`.
+  helmRepoURL: https://helm.ngc.nvidia.com/nvidia
+  namespace: nvidia-network-operator
+  # imagePullSecrets:
+  #   - my-registry-secret
+
+podNamespace: default
+
+# workload:
+#   manifest: /path/to/my-deployment.yaml  # Custom workload manifest (replaces default example DaemonSet)
+
+docaDriver:
+  enable: true
+  version: doca3.4.0-26.04-0.8.6.0-0
+  unloadStorageModules: true
+  enableNFSRDMA: false
+  unloadThirdPartyRDMAModules: true
+  skipPreflightChecks: false
+
+nvIpam:
+  poolName: nv-ipam-pool
+  # --- Option 1: Auto-generate subnets (used when subnets list is empty) --- 
+  # Each group gets its own unique subnet slice; gateway = network address + 1.
+  startingSubnet: "192.168.0.0"
+  mask: 22
+  offset: 1
+  # IP exclusions (optional). reserveFirstIPs/reserveLastIPs apply to EVERY
+  # subnet, including each auto-generated per-rail subnet — they reserve the
+  # first N and last N host addresses (gateway is covered by the low block).
+  # reserveFirstIPs: 10   # e.g. .0–.9 on a /24
+  # reserveLastIPs: 6     # e.g. .250–.255 on a /24
+  # 
+  # --- Option 2: Manually list subnets (takes precedence if non-empty) ---
+  # subnets:
+  # - subnet: 192.168.2.0/24
+  #   gateway: 192.168.2.1
+  #   # explicit per-subnet exclusions are merged on top of the reserve pattern:
+  #   exclusions:
+  #   - {startIP: 192.168.2.2, endIP: 192.168.2.3}
+  # - subnet: 192.168.3.0/24
+  #   gateway: 192.168.3.1
+  # - subnet: 192.168.4.0/24
+  #   gateway: 192.168.4.1
+  # - subnet: 192.168.5.0/24
+  #   gateway: 192.168.5.1
+  # - subnet: 192.168.6.0/24
+  #   gateway: 192.168.6.1
+  # - subnet: 192.168.7.0/24
+  #   gateway: 192.168.7.1
+  # - subnet: 192.168.8.0/24
+  #   gateway: 192.168.8.1
+  # - subnet: 192.168.9.0/24
+  #   gateway: 192.168.9.1
+  # - subnet: 192.168.10.0/24
+  #   gateway: 192.168.10.1
+
+sriov:
+  ethernetMtu: 9000
+  infinibandMtu: 4000
+  numVfs: 8
+  priority: 90
+  resourceName: sriov_resource
+  networkName: sriov-network
+
+hostdev:
+  resourceName: hostdev_resource
+  networkName: hostdev-network
+
+rdmaShared:
+  resourceName: rdma_shared_resource # with multiple pools, _rail_0, _rail_1, etc. suffixes are added to the resource name
+  hcaMax: 63
+
+ipoib:
+  networkName: ipoib-network # with multiple networks, -rail-0, -rail-1, etc. suffixes are added to the network name
+
+macvlan:
+  networkName: macvlan-network # with multiple networks, -rail-0, -rail-1, etc. suffixes are added to the network name
+
+nicConfigurationOperator:
+  deployNicInterfaceNameTemplate: true
+  rdmaPrefix: "rdma_r%rail_id%"
+  netdevPrefix: "eth_r%rail_id%"
+
+spectrumX:
+  nicType: "1023" # "1023" for ConnectX-8, "a2dc" for BlueField-3 SuperNIC
+  overlay: "none"
+  rdmaPrefix: "roce_p%plane_id%_r%rail_id%"
+  netdevPrefix: "eth_p%plane_id%_r%rail_id%"
+
+profile:
+  fabric: ethernet # infiniband, ethernet TODO consider ETH/IB
+  deployment: sriov # rdma_shared, sriov, host_device
+  multirail: false
+  spectrumX: # Spectrum-X configuration (set enable: true or use --spectrum-x CLI flag)
+    enable: false # CLI parameter (overrides this value): --spectrum-x
+    spcxVersion: "RA2.2" # CLI parameter (overrides this value): --spcx-version
+    multiplaneMode: swplb # CLI parameter (overrides this value): --multiplane-mode (swplb, hwplb, uniplane)
+    numberOfPlanes: 4 # CLI parameter (overrides this value): --number-of-planes, also used as pfsPerNic
+  ai: false
+
+clusterConfig:
+  - identifier: ""
+    capabilities:
+      nodes:
+        sriov: true # has nodes with feature.node.kubernetes.io/pci-15b3.present=true
+        rdma: true # has nodes with feature.node.kubernetes.io/rdma.capable=true
+        ib: true # has nodes with IB capable NICs (find via nic config op)
+    workerNodes: ["worker-0", "worker-1", "worker-2"]
+    pfs:
+      - deviceID: 1023
+        pciAddress: 0000:05:00.0
+        rdmaDevice: "mlx5_0"
+        networkInterface: "net1"
+        traffic: east-west
+        rail: 0
+      - deviceID: 1023
+        pciAddress: 0000:75:00.0
+        rdmaDevice: "mlx5_1"
+        networkInterface: "net2"
+        traffic: east-west
+        rail: 1
+      - deviceID: 1023
+        pciAddress: 0000:85:00.0
+        rdmaDevice: "mlx5_2"
+        networkInterface: "net3"
+        traffic: east-west
+        rail: 2
+      - deviceID: 1023
+        pciAddress: 0000:f5:00.0
+        rdmaDevice: "mlx5_3"
+        networkInterface: "net4"
+        traffic: east-west
+        rail: 3
+      - deviceID: 1023
+        pciAddress: 0000:6a:00.0
+        rdmaDevice: "mlx5_4"
+        networkInterface: "net5"
+        traffic: north-south
+    nodeSelector:
+      feature.node.kubernetes.io/pci-15b3.present: "true"

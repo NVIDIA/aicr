@@ -346,6 +346,86 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 	}
 }
 
+// TestMake_DisabledDependencyPruned verifies that disabling a component that
+// others depend on bundles successfully: the dangling dependency edge on the
+// dependent is pruned so the helmfile level computation does not see an
+// undeclared dependency and fail with a false circular-dependency error.
+func TestMake_DisabledDependencyPruned(t *testing.T) {
+	// Use the helmfile deployer: it recomputes levels via
+	// ComponentRefsTopologicalLevels, the only path that inspects dependency
+	// edges at bundle time. Without the prune loop, the dangling
+	// gpu-operator → cert-manager edge would surface here as a false
+	// circular-dependency error, so this is where the regression is pinned.
+	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager disabled (platform-provided); gpu-operator depends on it.
+			{Name: "cert-manager", Version: "v1.20.2", Type: "helm", Source: "https://charts.jetstack.io", Overrides: map[string]any{"enabled": false}},
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	if _, err := bundler.Make(ctx, recipeResult, tmpDir); err != nil {
+		t.Fatalf("Make() with disabled depended-upon component error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator")); os.IsNotExist(statErr) {
+		t.Error("expected 001-gpu-operator to be created")
+	}
+	for _, dir := range []string{"cert-manager", "001-cert-manager", "002-cert-manager"} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s directory to NOT be created", dir)
+		}
+	}
+}
+
+// TestMake_UndeclaredDependencyErrors verifies the pruning does not mask a
+// genuinely undeclared dependency: an enabled component depending on a
+// component that does not exist in the recipe must still fail rather than have
+// the bad edge silently erased.
+func TestMake_UndeclaredDependencyErrors(t *testing.T) {
+	// Use the helmfile deployer: it recomputes levels via
+	// ComponentRefsTopologicalLevels, which is where an undeclared dependency
+	// must surface (the default helm deployer sorts by DeploymentOrder and does
+	// not validate edges at bundle time).
+	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager is neither declared nor disabled — it simply does not exist.
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	_, err = bundler.Make(ctx, recipeResult, tmpDir)
+	if err == nil {
+		t.Fatal("Make() with undeclared dependency expected error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
 func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 	t.Parallel()
 
@@ -357,10 +437,13 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 		expectErr      bool
 	}{
 		{
-			name:           "recipe disabled + --set enabled=true => included",
-			recipeEnabled:  new(bool),
-			setEnabled:     "true",
-			expectIncluded: true,
+			// A component the recipe disabled cannot be re-enabled at bundle
+			// time: doing so would install a conflicting second copy of a
+			// platform-provided component, and there is no authored order for it.
+			name:          "recipe disabled + --set enabled=true => error",
+			recipeEnabled: new(bool),
+			setEnabled:    "true",
+			expectErr:     true,
 		},
 		{
 			name:           "recipe enabled + --set enabled=false => excluded",
@@ -431,6 +514,11 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			if tt.expectErr {
 				if makeErr == nil {
 					t.Fatalf("Make() expected error, got nil")
+				}
+				// Pin the structured code: both the re-enable rejection and the
+				// unparseable --set value are invalid-request errors.
+				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				return
 			}
@@ -2054,10 +2142,10 @@ func TestWarnMissingStorageClassForPVCs_DynamoPlatformNATS(t *testing.T) {
 }
 
 // TestAgentgatewayComponentExistsInRegistry locks agentgatewayComponentName to a
-// real registry entry. warnAgentgatewayOpenExposure keys into componentValues by
+// real registry entry. resolveAgentgatewayExposure keys into componentValues by
 // this name; if the "agentgateway" component were renamed in recipes/registry.yaml,
-// the lookup would silently return nil and the open-exposure warning would never
-// fire — with no other test failing. Mirrors the validator-side
+// the lookup would silently return nil and the private-by-default exposure logic
+// would never fire — with no other test failing. Mirrors the validator-side
 // TestEmbeddedCatalog_InferenceGatewayEntryExists guard. See #1160.
 func TestAgentgatewayComponentExistsInRegistry(t *testing.T) {
 	registry, err := recipe.GetComponentRegistry()
@@ -2069,59 +2157,90 @@ func TestAgentgatewayComponentExistsInRegistry(t *testing.T) {
 	}
 }
 
-func TestWarnAgentgatewayOpenExposure(t *testing.T) {
+func TestResolveAgentgatewayExposure(t *testing.T) {
 	tests := []struct {
 		name        string
 		values      map[string]any
 		present     bool
+		wantErr     bool
 		wantWarning bool
+		wantDefault bool // expects allowedSourceRanges defaulted to the RFC1918 set
 	}{
 		{
-			name:        "warns when allowedSourceRanges is unset",
+			name:        "defaults to private ranges when allowedSourceRanges is unset",
 			values:      map[string]any{"fullnameOverride": "agentgateway"},
 			present:     true,
 			wantWarning: true,
+			wantDefault: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an empty list",
+			name:        "defaults to private ranges when allowedSourceRanges is an empty list",
 			values:      map[string]any{"allowedSourceRanges": []any{}},
 			present:     true,
 			wantWarning: true,
+			wantDefault: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is a bare string (mistaken --set)",
-			values:      map[string]any{"allowedSourceRanges": "216.228.127.128/30"},
-			present:     true,
-			wantWarning: true,
+			name:    "errors when allowedSourceRanges is a bare string (mistaken --set)",
+			values:  map[string]any{"allowedSourceRanges": "216.228.127.128/30"},
+			present: true,
+			wantErr: true,
 		},
 		{
-			name:        "does not warn when allowedSourceRanges is a non-empty list",
-			values:      map[string]any{"allowedSourceRanges": []any{"216.228.127.128/30"}},
-			present:     true,
-			wantWarning: false,
+			name:    "errors when allowedSourceRanges contains an invalid CIDR",
+			values:  map[string]any{"allowedSourceRanges": []any{"not-a-cidr"}},
+			present: true,
+			wantErr: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an explicit 0.0.0.0/0",
+			name:    "errors when allowedSourceRanges contains a bare IP (no prefix)",
+			values:  map[string]any{"allowedSourceRanges": []any{"10.0.0.0"}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors when allowedSourceRanges contains a non-canonical CIDR",
+			values:  map[string]any{"allowedSourceRanges": []any{"1.2.3.4/24"}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "passes silently when allowedSourceRanges is a scoped list",
+			values:  map[string]any{"allowedSourceRanges": []any{"216.228.127.128/30"}},
+			present: true,
+		},
+		{
+			name:    "passes silently when allowedSourceRanges is a []string scoped list",
+			values:  map[string]any{"allowedSourceRanges": []string{"216.228.127.128/30"}},
+			present: true,
+		},
+		{
+			name:    "errors when allowedSourceRanges contains a non-string entry",
+			values:  map[string]any{"allowedSourceRanges": []any{"10.0.0.0/8", 123}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:        "allows but warns on explicit 0.0.0.0/0 opt-in",
 			values:      map[string]any{"allowedSourceRanges": []any{"0.0.0.0/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an explicit ::/0",
+			name:        "allows but warns on explicit ::/0 opt-in",
 			values:      map[string]any{"allowedSourceRanges": []any{"::/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "warns when a scoped range is mixed with an any-source CIDR",
+			name:        "allows but warns when a scoped range is mixed with an any-source CIDR",
 			values:      map[string]any{"allowedSourceRanges": []any{"10.0.0.0/8", "0.0.0.0/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "does not warn when agentgateway is absent",
-			present:     false,
-			wantWarning: false,
+			name:    "no-op when agentgateway is absent",
+			present: false,
 		},
 	}
 
@@ -2137,17 +2256,40 @@ func TestWarnAgentgatewayOpenExposure(t *testing.T) {
 				componentValues[agentgatewayComponentName] = tt.values
 			}
 
-			b.warnAgentgatewayOpenExposure(componentValues)
+			gotErr := b.resolveAgentgatewayExposure(componentValues)
+			if (gotErr != nil) != tt.wantErr {
+				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(gotErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", gotErr)
+				}
+			}
 
 			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
 				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
 			}
 			if tt.wantWarning {
 				warning := b.warnings[0]
-				for _, want := range []string{"inference-gateway", "0.0.0.0/0", "allowedSourceRanges"} {
+				for _, want := range []string{"inference-gateway", "allowedSourceRanges"} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
 					}
+				}
+			}
+
+			if tt.wantDefault {
+				got, ok := componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath].([]any)
+				if !ok {
+					t.Fatalf("allowedSourceRanges = %#v, want defaulted []any",
+						componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath])
+				}
+				want := make([]any, len(agentgatewayDefaultSourceRanges))
+				for i, r := range agentgatewayDefaultSourceRanges {
+					want[i] = r
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("defaulted allowedSourceRanges = %#v, want %#v", got, want)
 				}
 			}
 		})

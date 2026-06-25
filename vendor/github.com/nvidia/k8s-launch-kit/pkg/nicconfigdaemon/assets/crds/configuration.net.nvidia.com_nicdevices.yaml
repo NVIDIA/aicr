@@ -1,0 +1,409 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: nicdevices.configuration.net.nvidia.com
+spec:
+  group: configuration.net.nvidia.com
+  names:
+    kind: NicDevice
+    listKind: NicDeviceList
+    plural: nicdevices
+    singular: nicdevice
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: NicDevice is the Schema for the nicdevices API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NicDeviceSpec defines the desired state of NicDevice
+            properties:
+              configuration:
+                description: Configuration specifies the configuration requested by
+                  NicConfigurationTemplate
+                properties:
+                  resetToDefault:
+                    description: |-
+                      ResetToDefault specifies whether node agent needs to perform a reset flow.
+                      The following operations will be performed:
+                      * Nvconfig reset of all non-volatile configurations
+                        - Mstconfig -d <device> reset for each PF
+                        - Mstconfig -d <device> set ADVANCED_PCI_SETTINGS=1
+                      * Node reboot
+                        - Applies new NIC NV config
+                        - Will undo any runtime configuration previously performed for the device/driver
+                    type: boolean
+                  template:
+                    description: Configuration template applied from the NicConfigurationTemplate
+                      CR
+                    properties:
+                      gpuDirectOptimized:
+                        description: GPU Direct optimization settings
+                        properties:
+                          enabled:
+                            description: Optimize GPU Direct
+                            type: boolean
+                          env:
+                            description: GPU direct environment, e.g. Baremetal
+                            type: string
+                        required:
+                        - enabled
+                        - env
+                        type: object
+                      linkType:
+                        description: LinkType to be configured, Ethernet|Infiniband
+                        enum:
+                        - Ethernet
+                        - Infiniband
+                        type: string
+                      numVfs:
+                        description: Number of VFs to be configured
+                        type: integer
+                      pciPerformanceOptimized:
+                        description: PCI performance optimization settings
+                        properties:
+                          enabled:
+                            description: Specifies whether to enable PCI performance
+                              optimization
+                            type: boolean
+                          maxAccOutRead:
+                            description: Specifies the PCIe Max Accumulative Outstanding
+                              read bytes
+                            type: integer
+                          maxReadRequest:
+                            description: Specifies the size of a single PCI read request
+                              in bytes
+                            enum:
+                            - 128
+                            - 256
+                            - 512
+                            - 1024
+                            - 2048
+                            - 4096
+                            type: integer
+                        required:
+                        - enabled
+                        type: object
+                      rawNvConfig:
+                        description: List of arbitrary nv config parameters
+                        items:
+                          properties:
+                            name:
+                              description: Name of the arbitrary nvconfig parameter
+                              type: string
+                            value:
+                              description: Value of the arbitrary nvconfig parameter
+                              type: string
+                          required:
+                          - name
+                          - value
+                          type: object
+                        type: array
+                      roceOptimized:
+                        description: RoCE optimization settings
+                        properties:
+                          enabled:
+                            description: Optimize RoCE
+                            type: boolean
+                          qos:
+                            description: Quality of Service settings
+                            properties:
+                              pfc:
+                                description: Priority-based Flow Control configuration,
+                                  e.g. "0,0,0,1,0,0,0,0"
+                                pattern: ^([01],){7}[01]$
+                                type: string
+                              tos:
+                                description: 8-bit value for type of service
+                                type: integer
+                              trust:
+                                description: Trust mode for QoS settings, e.g. trust-dscp
+                                type: string
+                            required:
+                            - pfc
+                            - trust
+                            type: object
+                        required:
+                        - enabled
+                        type: object
+                      spectrumXOptimized:
+                        description: Spectrum-X optimization settings. Works only
+                          with linkType==Ethernet && numVfs==0. Other optimizations
+                          must be skipped or disabled. RawNvConfig must be empty.
+                        properties:
+                          enabled:
+                            description: Optimize Spectrum X
+                            type: boolean
+                          multiplaneMode:
+                            default: none
+                            description: |-
+                              Multiplane mode to be configured
+                              Can be "none", "swplb", "hwplb", or "uniplane"
+                            enum:
+                            - none
+                            - swplb
+                            - hwplb
+                            - uniplane
+                            type: string
+                          numberOfPlanes:
+                            default: 1
+                            description: Number of planes to be configured
+                            enum:
+                            - 1
+                            - 2
+                            - 4
+                            type: integer
+                          overlay:
+                            default: none
+                            description: |-
+                              Overlay mode to be configured
+                              Can be "l3" or "none"
+                            enum:
+                            - l3
+                            - none
+                            type: string
+                          version:
+                            description: Version of the Spectrum-X architecture to
+                              optimize for
+                            enum:
+                            - RA1.3
+                            - RA2.0
+                            - RA2.1
+                            type: string
+                        required:
+                        - enabled
+                        - version
+                        type: object
+                        x-kubernetes-validations:
+                        - message: when MultiplaneMode is none, numberOfPlanes must
+                            be 1
+                          rule: '!has(self.multiplaneMode) || !has(self.numberOfPlanes)
+                            || self.multiplaneMode != ''none'' || self.numberOfPlanes
+                            == 1'
+                        - message: when MultiplaneMode is not none, numberOfPlanes
+                            must not be 1
+                          rule: '!has(self.multiplaneMode) || !has(self.numberOfPlanes)
+                            || self.multiplaneMode == ''none'' || self.numberOfPlanes
+                            != 1'
+                        - message: when Version is RA1.3 or RA2.0, MultiplaneMode
+                            must be none and numberOfPlanes must be 1
+                          rule: '!has(self.version) || !has(self.multiplaneMode) ||
+                            !has(self.numberOfPlanes) || !(self.version == ''RA1.3''
+                            || self.version == ''RA2.0'') || (self.multiplaneMode
+                            == ''none'' && self.numberOfPlanes == 1)'
+                    required:
+                    - linkType
+                    - numVfs
+                    type: object
+                    x-kubernetes-validations:
+                    - message: spectrumXOptimized can be enabled only when linkType=='Ethernet'
+                        and numVfs==1
+                      rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
+                        || (self.linkType == ''Ethernet'' && self.numVfs == 1)'
+                    - message: spectrumXOptimized includes RoCE optimizations, so
+                        separate roceOptimized section must not be enabled
+                      rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
+                        || !(has(self.roceOptimized) && self.roceOptimized.enabled)'
+                    - message: when spectrumXOptimized is enabled, rawNvConfig must
+                        be empty
+                      rule: '!(has(self.spectrumXOptimized) && self.spectrumXOptimized.enabled)
+                        || !has(self.rawNvConfig) || size(self.rawNvConfig) == 0'
+                type: object
+              firmware:
+                description: Firmware specifies the fw upgrade policy requested by
+                  NicFirmwareTemplate
+                properties:
+                  nicFirmwareSourceRef:
+                    description: NicFirmwareSourceRef refers to existing NicFirmwareSource
+                      CR on where to get the FW from
+                    type: string
+                  updatePolicy:
+                    description: UpdatePolicy indicates whether the operator needs
+                      to validate installed FW or upgrade it
+                    enum:
+                    - Validate
+                    - Update
+                    type: string
+                required:
+                - nicFirmwareSourceRef
+                - updatePolicy
+                type: object
+              interfaceNameTemplate:
+                description: InterfaceNameTemplate specifies the interface name template
+                  to be applied to the NIC
+                properties:
+                  netDevicePrefix:
+                    description: NetDevicePrefix specifies the prefix for the net
+                      device name
+                    type: string
+                  nicIndex:
+                    description: NicIndex is the index of the NIC in the flattened
+                      list of NICs based on the Template
+                    type: integer
+                  planeIndices:
+                    description: PlaneIndices is the indices of the planes for the
+                      given NIC based on the Template
+                    items:
+                      type: integer
+                    type: array
+                  railIndex:
+                    description: RailIndex is the index of the rail where the given
+                      NIC belongs to based on the Template
+                    type: integer
+                  rdmaDevicePrefix:
+                    type: string
+                required:
+                - netDevicePrefix
+                - nicIndex
+                - planeIndices
+                - railIndex
+                - rdmaDevicePrefix
+                type: object
+            type: object
+          status:
+            description: NicDeviceStatus defines the observed state of NicDevice
+            properties:
+              conditions:
+                description: List of conditions observed for the device
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              dpu:
+                description: DPU indicates if the device is a BlueField in DPU mode
+                type: boolean
+              firmwareVersion:
+                description: Firmware version currently installed on the device, e.g.
+                  22.31.1014
+                type: string
+              modelName:
+                description: ModelName is the model name of the device, e.g. ConnectX-6
+                  or BlueField-3
+                type: string
+              node:
+                description: Node where the device is located
+                type: string
+              partNumber:
+                description: Part number of the device, e.g. MCX713106AEHEA_QP1
+                type: string
+              ports:
+                description: List of ports for the device
+                items:
+                  description: NicDevicePortSpec describes the ports of the NIC
+                  properties:
+                    networkInterface:
+                      description: NetworkInterface is the name of the network interface
+                        for this port, e.g. eth1
+                      type: string
+                    pci:
+                      description: PCI is a PCI address of the port, e.g. 0000:3b:00.0
+                      type: string
+                    rdmaInterface:
+                      description: RdmaInterface is the name of the rdma interface
+                        for this port, e.g. mlx5_1
+                      type: string
+                  required:
+                  - pci
+                  type: object
+                type: array
+              psid:
+                description: Product Serial ID of the device, e.g. MT_0000000221
+                type: string
+              serialNumber:
+                description: Serial number of the device, e.g. MT2116X09299
+                type: string
+              superNIC:
+                description: SuperNIC indicates if the device is a SuperNIC
+                type: boolean
+              type:
+                description: Type of device, e.g. ConnectX7
+                type: string
+            required:
+            - dpu
+            - firmwareVersion
+            - modelName
+            - node
+            - partNumber
+            - ports
+            - psid
+            - serialNumber
+            - superNIC
+            - type
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

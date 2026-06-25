@@ -39,17 +39,24 @@ spec:
                              ServiceAccount issuer that Fulcio trusts
       AICR_IDENTITY_REGEXP - --certificate-identity-regexp pinning the *binary*
                              attestation identity (verified against public Sigstore)
+      AICR_CTLOG_PUBKEY    - path to the CTLog (CTFE) public key PEM, extracted by
+                             the harness from the in-cluster ctlog-public-key
+                             secret (the one trust-root input not served over HTTP)
+      FULCIO_PF_PORT       - localhost plain-HTTP port-forward for Fulcio
+      REKOR_PF_PORT        - localhost plain-HTTP port-forward for Rekor
 
-    Deferred (Phase 2):
-    - aicr verify does not yet accept --rekor-url / --fulcio-url, so the
-      verify step checks only bundle checksums (its sigstore attestation check
-      runs against the public trust root and cannot validate the private Rekor
-      entry). See the verify-bundle-checksums step.
-    - aicr verify --certificate-identity-regexp requires the pattern to contain
-      "://github.com/NVIDIA/aicr/", so it cannot pin the in-cluster SA identity.
-      Attestation-level verification against the private CA is therefore not
-      exercised by aicr verify in this phase.
-    See issue #1215 for Phase 2 scope.
+    Trust-root verification (#1153, formerly the Phase 2 deferral):
+    aicr verify now accepts --trust-root, so this suite also exercises full
+    bundle-attestation verification against the PRIVATE Fulcio/Rekor. The
+    assemble-private-trust-root step builds a trusted_root.json for the local
+    stack (cosign trusted-root create over the Fulcio chain, Rekor key, and
+    CTLog key); verify-private-trust-root asserts the bundle attestation
+    verifies with it; and verify-public-root-rejects-private-bundle is the
+    negative control proving --trust-root is what makes the difference. The
+    binary-attestation half still verifies against public-good and is pinned by
+    AICR_IDENTITY_REGEXP (--trust-root is unioned with, not a replacement for,
+    the public-good root). The verify-bundle-checksums step is retained to keep
+    the checksum assertion independent of attestation trust.
 
     Skip in normal runs with: --selector 'requires!=private-sigstore'
   timeouts:
@@ -154,28 +161,27 @@ spec:
 
     - name: verify-bundle-checksums
       description: |
-        Confirm aicr verify reports checksumsPassed for the bundle. aicr verify
-        does not yet accept --rekor-url / a custom trust root (deferred to
-        Phase 2, issue #1215), so its sigstore attestation check runs against
+        Confirm aicr verify reports checksumsPassed for the bundle. Run WITHOUT
+        --trust-root, so verify's sigstore attestation check runs against only
         the PUBLIC trust root and necessarily fails log-inclusion for a bundle
-        recorded in the PRIVATE Rekor — verify therefore exits non-zero. That
+        recorded in the PRIVATE Rekor, so verify exits non-zero. That
         attestation failure is expected here; this step asserts only the
         checksum result, which is independent of attestation trust. The JSON
         report is written to stdout even on non-zero exit, so we capture it,
-        tolerate the exit code, and assert the checksum field with yq.
+        tolerate the exit code, and assert the checksum field with yq. The
+        --trust-root path that DOES validate the private Rekor is exercised by
+        the verify-private-trust-root step below (#1153).
       try:
         - script:
             content: |
               set -e
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
-              # Phase 2 (#1215): once verify accepts --rekor-url/--fulcio-url,
-              # assert --min-trust-level verified against the local stack here.
-              # verify exits non-zero (expected: it cannot validate the private
-              # Rekor against the public trust root) but still writes the JSON
-              # report to stdout, so capture it, tolerate the exit, and assert the
-              # boolean checksum result with yq (type-aware, not a brittle
-              # whitespace-sensitive string match).
+              # verify exits non-zero (expected: WITHOUT --trust-root it cannot
+              # validate the private Rekor against the public trust root) but
+              # still writes the JSON report to stdout, so capture it, tolerate
+              # the exit, and assert the boolean checksum result with yq
+              # (type-aware, not a brittle whitespace-sensitive string match).
               OUT="$(${AICR_BIN} verify "${WORK}/bundle" --min-trust-level unknown --format json 2>/dev/null || true)"
               echo "${OUT}"
               echo "${OUT}" | yq -p json -e '.checksumsPassed == true' >/dev/null
@@ -183,6 +189,144 @@ spec:
               # The yq assertion above fails (non-zero) on a checksum mismatch, so this
               # confirms checksums passed without coupling to verify's exit code
               # (which reflects the expected private-Rekor attestation failure).
+              ($error == null): true
+
+    - name: assemble-private-trust-root
+      description: |
+        Build a sigstore-go trusted_root.json for the LOCAL stack so the
+        following step can verify the bundle attestation against the private
+        Fulcio/Rekor (#1153). The three trust inputs come from:
+          - Fulcio CA chain: GET <Fulcio>/api/v1/rootCert (PEM chain)
+          - Rekor public key: GET <Rekor>/api/v1/log/publicKey (PEM)
+          - CTLog (CTFE) public key: AICR_CTLOG_PUBKEY, extracted by run.sh from
+            the in-cluster ctlog-public-key secret (the only input not served
+            over HTTP; the harness owns the authenticated kubectl access).
+        The CTLog key is mandatory: aicr's verifier does not disable Signed
+        Certificate Timestamp checks, so sigstore-go fails verification of the
+        private Fulcio cert unless the CTFE key is in the trusted root.
+        Fulcio/Rekor are reached over the plain-HTTP localhost port-forwards
+        (FULCIO_PF_PORT / REKOR_PF_PORT) that run.sh exposes; cosign reads local
+        PEM files, so no TLS proxy is needed for assembly. Every fetch is
+        fail-closed (curl -fsS + a non-empty-file assertion).
+      try:
+        - script:
+            content: |
+              set -e
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              CTLOG_PUBKEY="${AICR_CTLOG_PUBKEY:?Set AICR_CTLOG_PUBKEY to the CTLog public key PEM path}"
+              FULCIO_PF_PORT="${FULCIO_PF_PORT:?Set FULCIO_PF_PORT to the Fulcio port-forward port}"
+              REKOR_PF_PORT="${REKOR_PF_PORT:?Set REKOR_PF_PORT to the Rekor port-forward port}"
+              # The CTLog key file must already exist and be non-empty (run.sh
+              # extracts it from the cluster); fail closed if it does not.
+              test -s "${CTLOG_PUBKEY}"
+
+              # Fetch the Fulcio CA chain and Rekor public key over plain HTTP.
+              # curl -fsS fails (non-zero) on any HTTP error, and the -s file
+              # tests below reject an empty body, so a half-up endpoint cannot
+              # silently yield an unusable trust root.
+              curl -fsS --connect-timeout 5 --max-time 15 \
+                "http://localhost:${FULCIO_PF_PORT}/api/v1/rootCert" -o "${WORK}/fulcio-chain.pem"
+              curl -fsS --connect-timeout 5 --max-time 15 \
+                "http://localhost:${REKOR_PF_PORT}/api/v1/log/publicKey" -o "${WORK}/rekor.pub"
+              test -s "${WORK}/fulcio-chain.pem"
+              test -s "${WORK}/rekor.pub"
+
+              # Build the trusted root. --no-default-* drops the public-good
+              # services so the file describes ONLY the local stack; that proves
+              # verify is trusting the supplied private root (aicr unions it with
+              # its own built-in public-good root at verify time). start-time
+              # anchors validity to the unix epoch so the freshly issued local
+              # certs/keys fall inside the trusted window.
+              cosign trusted-root create \
+                --no-default-fulcio --no-default-rekor --no-default-ctfe --no-default-tsa \
+                --fulcio="url=http://localhost:${FULCIO_PF_PORT},certificate-chain=${WORK}/fulcio-chain.pem,start-time=1970-01-01T00:00:00Z" \
+                --rekor="url=http://localhost:${REKOR_PF_PORT},public-key=${WORK}/rekor.pub,start-time=1970-01-01T00:00:00Z" \
+                --ctfe="url=http://localhost:${FULCIO_PF_PORT},public-key=${CTLOG_PUBKEY},start-time=1970-01-01T00:00:00Z" \
+                --out "${WORK}/trusted_root.json"
+
+              # Fail closed: the trusted root must exist and carry both a Fulcio
+              # CA and a Rekor tlog, or the verify step below cannot validate the
+              # private chain.
+              test -s "${WORK}/trusted_root.json"
+              yq -p json -e '.certificateAuthorities | length > 0' "${WORK}/trusted_root.json" >/dev/null
+              yq -p json -e '.tlogs | length > 0' "${WORK}/trusted_root.json" >/dev/null
+              yq -p json -e '.ctlogs | length > 0' "${WORK}/trusted_root.json" >/dev/null
+            check:
+              ($error == null): true
+
+    - name: verify-private-trust-root
+      description: |
+        The core #1153 proof: aicr verify --trust-root validates the bundle
+        attestation against the PRIVATE Fulcio/Rekor supplied by the assembled
+        trusted_root.json. The bundle-attestation step uses a permissive
+        identity matcher, so --trust-root alone validates the private Fulcio
+        cert chain and the private Rekor inclusion proof.
+
+        We assert the robust bundleAttested == true (and trustLevel at least
+        "attested") rather than gating on --min-trust-level verified. Both are
+        cryptographically true here: the CI binary is attested against public
+        Sigstore and AICR_IDENTITY_REGEXP pins its identity, so the full chain
+        reaches "verified". But "verified" depends on the binary attestation +
+        identity pin lining up, which is a separate axis from the trust-root
+        feature under test; asserting bundleAttested isolates the #1153 behavior
+        and keeps this step from failing for an unrelated binary-attestation
+        reason. The binary half is still covered: verify exits 0 (no tolerated
+        exit) and we additionally assert binaryAttested == true to confirm the
+        full chain succeeds when it can, without making it the gating condition.
+      try:
+        - script:
+            content: |
+              set -e
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              # No tolerated exit code here: with --trust-root the private chain
+              # must verify, so verify is expected to exit 0. set -e gates the
+              # command itself; the yq assertions then pin the JSON result.
+              OUT="$(${AICR_BIN} verify "${WORK}/bundle" \
+                --trust-root "${WORK}/trusted_root.json" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP}" \
+                --format json)"
+              echo "${OUT}"
+              # Core proof: the bundle attestation verified against the private root.
+              echo "${OUT}" | yq -p json -e '.bundleAttested == true' >/dev/null
+              # trustLevel must be at least "attested" (attested or verified).
+              echo "${OUT}" | yq -p json -e '.trustLevel == "attested" or .trustLevel == "verified"' >/dev/null
+              # The CI binary is attested + identity-pinned, so the full chain
+              # also reaches the binary half; assert it without gating on the
+              # exact top-level trust level.
+              echo "${OUT}" | yq -p json -e '.binaryAttested == true' >/dev/null
+            check:
+              ($error == null): true
+
+    - name: verify-public-root-rejects-private-bundle
+      description: |
+        Negative control: WITHOUT --trust-root, the bundle attestation must NOT
+        verify, because its signing cert chains to the private Fulcio and its
+        inclusion proof is in the private Rekor; neither is in the public-good
+        root. This proves --trust-root is precisely what makes the difference in
+        the step above (same bundle, same binary, only the flag changes).
+        Mirrors the verify-bundle-checksums tolerate-exit pattern: verify exits
+        non-zero, but writes JSON to stdout, so we capture it, tolerate the
+        exit, and assert bundleAttested == false on the parsed result.
+      try:
+        - script:
+            content: |
+              set -e
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-private-sigstore"
+              # Tolerate the non-zero exit (expected: public root cannot validate
+              # the private chain) and assert the boolean result with yq, so a
+              # spuriously-passing verify (bundleAttested true without the flag)
+              # is caught rather than masked by the exit code.
+              # Same flags as verify-private-trust-root EXCEPT --trust-root, so
+              # the private trust root is the only variable between the two.
+              OUT="$(${AICR_BIN} verify "${WORK}/bundle" \
+                --certificate-identity-regexp "${AICR_IDENTITY_REGEXP}" \
+                --min-trust-level unknown \
+                --format json 2>/dev/null || true)"
+              echo "${OUT}"
+              echo "${OUT}" | yq -p json -e '.bundleAttested == false' >/dev/null
+            check:
               ($error == null): true
 
     - name: cleanup

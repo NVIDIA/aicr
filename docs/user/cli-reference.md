@@ -99,6 +99,8 @@ aicr snapshot [flags]
 | `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
 | `--requests` | | string | | Override agent container resource requests as a comma-separated list of `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. Reads `AICR_REQUESTS` env when unset. |
 | `--limits` | | string | | Override agent container resource limits as a comma-separated list of `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when `--limits` does not already contain that key — an explicit `--limits nvidia.com/gpu=N` wins. Reads `AICR_LIMITS` env when unset. |
+| `--cluster-config` | | string | | Path to a pre-existing k8s-launch-kit (l8k) `cluster-config.yaml`. Ingests the file's per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) into the snapshot as a `NetworkTopology` Measurement. **Local agent mode only for now** (`AICR_AGENT_MODE=true`) — Job-mode rejects this flag with an `INVALID_REQUEST` error until ConfigMap mounting is implemented. Mutually exclusive with `--discover-network` at the collector level — file path wins when both are set, so callers can default discovery from a flag without inadvertent cluster contact. Reads `AICR_CLUSTER_CONFIG_PATH` env when unset. |
+| `--discover-network` | | bool | false | Opt into live k8s-launch-kit (l8k) discovery: bootstraps an in-cluster nic-configuration daemon, walks the cluster's NICs, and emits a `NetworkTopology` Measurement. **NOT read-only** — writes `nvidia.kubernetes-launch-kit.machine` / `.gpu` labels on matched nodes and patches `NicClusterPolicy` via server-side apply. Job-mode is supported (the snapshot Job's ClusterRole gains discovery-specific RBAC when this flag is set). Reads `AICR_DISCOVER_NETWORK` env when unset. |
 
 **Output Destinations:**
 - **stdout**: Default when no `-o` flag specified
@@ -829,6 +831,7 @@ aicr validate [flags]
 | `--full` | | bool | false | Emit the full (unredacted) evidence bundle. By default the bundle is minimized: `snapshot.yaml` is reduced to an allowlisted set of fields (dropping node names, provider instance IDs, the node label/taint set, OS tuning, loaded modules, systemd config) and per-test CTRF `stdout`/`message` are omitted. `--full` ships the raw payloads. The cryptographic verification story holds either way; minimal bundles record the applied policy in `predicate.redaction` and self-verify with `aicr evidence verify`. |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
+| `--no-sign` | | bool | false | Push the evidence bundle **unsigned** (requires `--emit-attestation` and `--push`) and write a `pointer.yaml` with an empty `signer` block. Defers Fulcio/Rekor signing to the fork-based CI workflow, so the network-light push can run where the cluster lives even when Sigstore egress is blocked. No-op unless both `--emit-attestation` and `--push` are set. `aicr evidence verify` reports the resulting pointer as a non-failing **pending signature** state. |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -1367,7 +1370,7 @@ When `--storage-class` is not set, any `storageClassName` values already defined
 
 If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
 
-Similarly, when a bundle includes the `agentgateway` component with an unscoped `allowedSourceRanges` — empty, or including an any-source CIDR such as `0.0.0.0/0` or `::/0` — `aicr bundle` emits a non-blocking warning that the inference-gateway will be provisioned as an internet-facing `LoadBalancer` open to `0.0.0.0/0`. Scope it to trusted CIDRs via a recipe `componentRef` override or the list-aware [`--set-json`](#list-and-object-value-overrides) flag (`agentgateway:allowedSourceRanges='["<cidr>"]'`). See [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
+In contrast, when a bundle includes the `agentgateway` component with an empty or unset `allowedSourceRanges`, `aicr bundle` is **private by default**: it injects the RFC1918 private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) into the inference-gateway's `loadBalancerSourceRanges` and records a bundle note, so the deployed gateway is reachable from inside the cluster/VPC but denied to the public internet — it is never emitted open to `0.0.0.0/0`. (Kubernetes treats an empty `loadBalancerSourceRanges` as allow-all, so the safe default has to be a real list.) An invalid value — a bare-string `--set`, a non-list, an unparseable CIDR, or a non-canonical CIDR such as `1.2.3.4/24` — is rejected with an error. To admit specific clients (e.g. a corporate VPN, which egresses from a public IP not covered by the default), scope it via a recipe `componentRef` override or the list-aware [`--set-json`](#list-and-object-value-overrides) flag (`agentgateway:allowedSourceRanges='["<cidr>"]'`); to deliberately expose it publicly, opt in explicitly with `'["0.0.0.0/0"]'`, which generates with a loud warning. See [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
 
 #### Deployment Methods
 
@@ -1409,7 +1412,7 @@ Override any value in the generated bundle files using dot notation:
 - **Duplicate keys**: When the same `bundler:path` is specified multiple times, the **last value wins**
 - **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). `--set` is **scalar-only** — pointing it at a list/object field writes a bare string and produces type-invalid output. To replace an entire array or object from the CLI, use [`--set-json` / `--set-file`](#list-and-object-value-overrides); recipe-level overrides in `componentRefs[].overrides` are the alternative.
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
-- **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes the component; `--set <component>:enabled=true` re-enables a recipe-disabled component. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
+- **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes a component the recipe enabled. A component the recipe **disabled** (`overrides.enabled: false`) cannot be re-enabled this way — `--set <component>:enabled=true` on such a component is rejected, since re-enabling a platform-provided component would install a conflicting second copy. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
 - **Aliases merge**: overrides supplied under both a component's canonical name and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are **combined, not dropped**; the canonical name wins on any shared path. (Same alias-merge behavior as [`--set-json` / `--set-file`](#list-and-object-value-overrides).)
 - **Repeat to add; commas are literal**: To supply multiple overrides, repeat the flag (`--set a:x=1 --set b:y=2`). On the `bundle` command, commas inside a single slice-flag value are taken **literally** (not treated as a value separator), so a value containing a comma — and the comma-heavy JSON passed to `--set-json` — is preserved intact. This applies to all repeatable `bundle` flags (`--set`, `--set-json`, `--set-file`, `--dynamic`, `--*-node-selector`, `--*-node-toleration`, `--workload-selector`).
 
@@ -2112,7 +2115,7 @@ Attestation is opt-in; bundles are unsigned by default. By default, signing uses
 
 **Private Sigstore infrastructure:** organizations running their own Fulcio CA or Rekor log can redirect signing with `--fulcio-url` and `--rekor-url` (both must be absolute `https://` URLs with no embedded credentials). The two are independent, so a private Fulcio can pair with the public Rekor or vice versa. Public Sigstore remains the default when the flags are omitted.
 
-> **Verification caveat:** these flags redirect **signing** only. `aicr verify` does not yet support a custom Sigstore trust root, so bundles signed against private Fulcio/Rekor **cannot be verified with `aicr verify` today** — public Sigstore is currently the only supported verification root. Verifier support for private trust roots is tracked under [#1149](https://github.com/NVIDIA/aicr/issues/1149) / [#1153](https://github.com/NVIDIA/aicr/issues/1153).
+> **Verification:** these flags redirect **signing** only. Verify the resulting bundles with `aicr verify --trust-root <trusted_root.json>`, supplying the `trusted_root.json` your self-hosted Fulcio/Rekor emits. That root is unioned with AICR's built-in public-good root, so privately-signed and NVIDIA-signed bundles both verify; see the [`aicr verify`](#aicr-verify) `--trust-root` flag.
 
 ##### OIDC Token Sources
 
@@ -2500,6 +2503,7 @@ aicr verify <bundle-dir> [flags]
 | `--cli-version-constraint` | string | | Version constraint for the aicr CLI version in the attestation predicate. Supports `>=`, `>`, `<=`, `<`, `==`, `!=`. A bare version (e.g. `"0.8.0"`) defaults to `>=`. |
 | `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 | `--key` | string | | Verify a key-signed bundle attestation against a KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://`) or a local PEM public-key file. This is the counterpart to `bundle --signing-key`. It coexists with `--certificate-identity-regexp`, which pins the binary attestation; the two verify different attestations. |
+| `--trust-root` | string | | Verify the bundle attestation against a private Sigstore trusted root (a `trusted_root.json` from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with `--key` and `--certificate-identity-regexp`. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
 
 #### Trust Levels
@@ -2540,6 +2544,9 @@ aicr verify ./bundles/<bundle-dir> --key gcpkms://projects/p/locations/l/keyRing
 
 # Or verify against an exported PEM public key (no KMS access needed)
 aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
+
+# Verify a privately-signed bundle against an org trusted root
+aicr verify ./my-bundle --trust-root ./trusted_root.json
 ```
 
 > **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
@@ -2613,23 +2620,25 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omit the tag and aicr derives a unique per-recipe one (`<recipe-slug>-<short-fingerprint>`); pass an explicit tag to override. See [`aicr validate --push`](#aicr-validate). |
+| `--no-sign` | | bool | `false` | Push the bundle **unsigned** and write a `pointer.yaml` with an empty `signer` block, instead of signing. Skips all OIDC/Fulcio/Rekor steps (and the identity-disclosure prompt), so it runs even where Sigstore egress is blocked. The bundle's content reference (`bundle.oci`/`bundle.digest`) is still recorded; complete the signing leg later with the fork-based CI workflow. `aicr evidence verify` reports such a pointer as a non-failing **pending signature** state. |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
 | `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
 | `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 | `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS when pushing the OCI artifact (local-registry tests). |
 | `--insecure-tls` | | bool | `false` | Skip TLS verification when pushing the OCI artifact (self-signed registries). |
 
-> **Identity disclosure:** `evidence publish` always signs. On the interactive
-> (browser / device-code) keyless paths it publishes the signer's identity
-> (email + issuer) to the public Rekor log, so on a TTY it pauses for
-> confirmation first (`--yes` skips it). See
+> **Identity disclosure:** `evidence publish` signs unless `--no-sign` is set.
+> On the interactive (browser / device-code) keyless paths it publishes the
+> signer's identity (email + issuer) to the public Rekor log, so on a TTY it
+> pauses for confirmation first (`--yes` skips it). `--no-sign` runs no OIDC
+> flow, so the prompt is skipped entirely. See
 > [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures).
 
 **Exit codes:**
 
 | Code | Meaning |
 |------|---------|
-| 0 | Bundle signed, pushed, and `pointer.yaml` written. |
+| 0 | Bundle pushed and `pointer.yaml` written (signed, or unsigned with `--no-sign`). |
 | non-zero | Identity-disclosure prompt declined, or bundle could not be loaded, signed, or pushed. |
 
 **Examples:**
@@ -2641,6 +2650,46 @@ aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out
 # Off VPN: sign, push, and write the pointer. Omit the tag and aicr derives
 # a unique per-recipe one (<recipe-slug>-<fingerprint>).
 aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence
+```
+
+---
+
+### aicr evidence sign
+
+Complete the signing leg for a bundle that was already pushed **unsigned** (via `aicr evidence publish --no-sign` or `validate --emit-attestation --push --no-sign`). It reads the committed pointer, pulls the bundle it references (`bundle.oci` + `bundle.digest` — no recipe-name or bundle-ref input needed), signs the predicate with keyless OIDC, attaches the Sigstore Bundle as an OCI referrer of the existing artifact, and patches the pointer's `signer` block in place.
+
+Signing is the only leg that needs Fulcio/Rekor egress, so this command is designed to run in CI (GitHub Actions ambient OIDC) where Sigstore is reachable, while the push leg runs wherever the cluster lives. The bundle is **not** re-emitted: the predicate is read verbatim from the pulled bundle, so the signature binds the same bytes the unsigned push produced.
+
+**Synopsis:**
+
+```shell
+aicr evidence sign <pointer> [flags]
+```
+
+The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. The pointer must carry exactly one attestation that is already pushed (`bundle.oci`/`bundle.digest` set) and not yet signed (empty `signer`); otherwise the command fails closed (an already-signed pointer is never re-signed).
+
+**Flags:**
+
+| Flag | Alias | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr evidence publish`. |
+| `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
+| `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. |
+| `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS for the registry (pull + referrer attach; local-registry tests). |
+| `--insecure-tls` | | bool | `false` | Skip TLS verification for the registry (pull + referrer attach; self-signed registries). |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Bundle signed, referrer attached, and the pointer's `signer` block written back. |
+| non-zero | Pointer already signed / has nothing pushed to sign, bundle could not be pulled (e.g. a private registry returns 403), identity-disclosure prompt declined, or signing/attach failed. |
+
+**Examples:**
+
+```shell
+# In CI (ambient OIDC), after a contributor committed an unsigned pointer:
+aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml
 ```
 
 ---
@@ -2681,10 +2730,15 @@ The positional argument is auto-detected as one of:
 
 | Code | Meaning |
 |------|---------|
-| 0 | Bundle valid; every check passed. |
-| 2 | Bundle invalid (signature, integrity, or predicate failure), OR recorded validator results show failures. |
+| 0 | Bundle valid; every check passed (or valid but **unsigned** — see pending below). |
+| 1 | Bundle valid, but recorded validator phase results show failures (informational). |
+| 2 | Bundle invalid. The `failureCause.class` field gives the specific reason — registry access (`registry-forbidden`/`not-found`/`registry`), `signature`, `integrity`, `schema`, or `unknown` (see Failure cause below). |
 
-The JSON/Markdown output's `exit` field (and `VerifyResult.Exit` from the library API) still distinguishes the two non-zero cases as `1` (recorded phase failures) vs `2` (bundle invalid). Shell consumers can branch via `jq '.exit'` on `--format json` output.
+The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the library API. Shell consumers can branch via `jq '.exit'` on `--format json` output.
+
+**Pending signature.** An unsigned bundle whose pointer carries no `signer` (e.g. one published with `--no-sign`, awaiting the signing leg) is **not** a failure: it verifies at exit `0` with `pending: true` in the JSON output and a "pending signature" verdict in the Markdown summary. This lets an in-flight PR commit an unsigned pointer without the gate flagging it as broken.
+
+**Failure cause.** On a non-zero exit, the JSON output carries a structured `failureCause` object — `class` (one of `registry-forbidden`, `not-found`, `registry`, `signature`, `integrity`, `schema`, `unknown`), an optional `httpStatus`, and an actionable `hint`. For example, a private fork registry returns `class: registry-forbidden`, `httpStatus: 403` with a hint to make the package public — so the reason is self-serviceable rather than a bare "invalid". The Markdown summary renders the same as **Cause**/**Hint** lines.
 
 **Examples:**
 ```shell

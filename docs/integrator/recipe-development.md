@@ -148,7 +148,7 @@ spec:
           value: ">= v25.10.0"
 ```
 
-Only use this pattern when the content is truly uniform across the wildcard dimension — if values diverge per service, keep them inline in each service-specific overlay. NCCL performance thresholds, for example, are explicitly **not** a good fit for this pattern: each service has a different network fabric (EFA, TCPXO, RoCE, etc.) and the same bandwidth number is rarely correct across two fabrics. The intent-scoped `gb200-any-training.yaml` shape that previously carried a cross-service NCCL threshold was retired in #1052 in favor of per-leaf performance blocks. See [Data Architecture](../contributor/recipe.md#criteria-wildcard-overlays) for when to use wildcard overlays vs mixins.
+Only use this pattern when the content is truly uniform across the wildcard dimension — if values diverge per service, keep them inline in each service-specific overlay. NCCL performance thresholds, for example, are explicitly **not** a good fit for this pattern: each service has a different network fabric (EFA, TCPXO, RoCE, etc.) and the same bandwidth number is rarely correct across two fabrics. The intent-scoped `gb200-any-training.yaml` and `b200-any-training.yaml` shapes that previously carried cross-service NCCL thresholds were retired (`gb200-any-training` in #1052, `b200-any-training` in #1053) in favor of per-leaf performance blocks. See [Data Architecture](../contributor/recipe.md#criteria-wildcard-overlays) for when to use wildcard overlays vs mixins.
 
 **Merge order:** `base.yaml` (lowest) → intermediate → leaf → mixins (highest)
 
@@ -270,6 +270,37 @@ Base → ValuesFile → Overrides → CLI --set flags
 # Override: driver.version="580.13.01"
 # Result: driver.version="580.13.01", driver.repository="nvcr.io/nvidia" (preserved)
 ```
+
+## Disable a Component in an Overlay
+
+Set `overrides.enabled: false` on a `componentRef` to drop a component a base
+recipe would otherwise install. Use this when the target platform already
+provides that component — for example a CSP-managed cert-manager on OKE, where
+installing a second copy would conflict.
+
+```yaml
+# Leaf overlay: the platform supplies cert-manager, so don't install ours.
+componentRefs:
+  - name: cert-manager
+    overrides:
+      enabled: false
+```
+
+A disabled component is excluded from the recipe's `deploymentOrder` and from
+the generated bundle. A dependency edge pointing at it is treated as **already
+satisfied** (the component is assumed provided externally), so components that
+declare it in `dependencyRefs` — such as `gpu-operator` — still resolve and
+order correctly instead of failing with a circular-dependency error. A
+`dependencyRefs` entry that names a component which does not exist in the recipe
+at all is still an error.
+
+The disabled `componentRef` remains in the resolved recipe's `componentRefs`
+(with `overrides.enabled: false`) for transparency, but it cannot be re-enabled at
+bundle time — `--set <component>:enabled=true` on a recipe-disabled component
+is rejected, because re-enabling a platform-provided component would install a
+conflicting second copy. Disabling is therefore an authoring decision: to ship
+the component, remove the `enabled: false` override from the recipe/overlay.
+See [Enable or disable components](../user/bundling.md#enable-or-disable-components).
 
 ## File Naming Conventions
 

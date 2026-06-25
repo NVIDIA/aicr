@@ -47,7 +47,7 @@ func writeTempPubPEM(t *testing.T, pub interface{}) string {
 }
 
 func TestNewKeyVerificationIdentity_UnknownScheme(t *testing.T) {
-	_, err := NewKeyVerificationIdentity(context.Background(), "bogus://x")
+	_, err := NewKeyVerificationIdentity(context.Background(), "bogus://x", nil)
 	// A "bogus://" ref is not a recognized KMS URI, so it falls through to the
 	// PEM path and fails to open as a file — both surface ErrCodeInvalidRequest.
 	requireErrCode(t, err, errors.ErrCodeInvalidRequest)
@@ -60,7 +60,7 @@ func TestNewKeyVerificationIdentity_PEM(t *testing.T) {
 	}
 	pemPath := writeTempPubPEM(t, &priv.PublicKey)
 
-	id, err := NewKeyVerificationIdentity(context.Background(), pemPath)
+	id, err := NewKeyVerificationIdentity(context.Background(), pemPath, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -88,12 +88,12 @@ func TestNewKeyVerificationIdentity_BadPEM(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not a pem"), 0o600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
-	_, err := NewKeyVerificationIdentity(context.Background(), path)
+	_, err := NewKeyVerificationIdentity(context.Background(), path, nil)
 	requireErrCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
 func TestNewKeyVerificationIdentity_MissingFile(t *testing.T) {
-	_, err := NewKeyVerificationIdentity(context.Background(), "/no/such/key.pem")
+	_, err := NewKeyVerificationIdentity(context.Background(), "/no/such/key.pem", nil)
 	requireErrCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
@@ -103,6 +103,6 @@ func TestNewKeyVerificationIdentity_OversizePEM(t *testing.T) {
 	if err := os.WriteFile(path, oversized, 0o600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
-	_, err := NewKeyVerificationIdentity(context.Background(), path)
+	_, err := NewKeyVerificationIdentity(context.Background(), path, nil)
 	requireErrCode(t, err, errors.ErrCodeInvalidRequest)
 }

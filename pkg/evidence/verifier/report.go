@@ -196,11 +196,36 @@ func writeVerdict(b *strings.Builder, r *VerifyResult) {
 	b.WriteString("---\n")
 	switch r.Exit {
 	case ExitValidPassed:
-		b.WriteString("**Verdict:** bundle valid — all checks passed (exit 0)\n")
+		if r.Pending {
+			b.WriteString("**Verdict:** bundle valid but unsigned — pending signature (exit 0)\n")
+		} else {
+			b.WriteString("**Verdict:** bundle valid — all checks passed (exit 0)\n")
+		}
 	case ExitValidPhaseFailures:
 		b.WriteString("**Verdict:** bundle valid; recorded validator phase results show failures (exit 1, informational)\n")
 	case ExitInvalid:
-		b.WriteString("**Verdict:** bundle invalid — integrity check(s) failed (exit 2)\n")
+		b.WriteString("**Verdict:** bundle invalid — verification failed (exit 2)\n")
+		writeFailureCause(b, r.FailureCause)
+	}
+}
+
+// writeFailureCause appends a classified, actionable cause line so a reader
+// of the PR comment sees *why* verification failed (e.g. a registry 403),
+// not just "invalid".
+func writeFailureCause(b *strings.Builder, c *FailureCause) {
+	if c == nil {
+		return
+	}
+	fmt.Fprintf(b, "**Cause:** `%s`", c.Class)
+	if c.HTTPStatus != 0 {
+		fmt.Fprintf(b, " (HTTP %d)", c.HTTPStatus)
+	}
+	b.WriteString("\n")
+	if c.Hint != "" {
+		fmt.Fprintf(b, "**Hint:** %s\n", c.Hint)
+	}
+	if c.Detail != "" {
+		fmt.Fprintf(b, "\n> %s\n", escapeMD(c.Detail))
 	}
 }
 

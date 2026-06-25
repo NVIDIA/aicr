@@ -48,10 +48,10 @@ column-metadata schema that its consumers share.
   They *import* this mapping; their internals are owned by their own issues.
 - The API and UI that render the board (GP5).
 - The live board / hosting / navigation host.
-- The user-facing `docs/user/` TestGrid page. It is **deferred**: it has a soft
-  dependency on TG4a's served URL form, so it is authored alongside that work
-  rather than here. This design spec is the internal contract that unblocks the
-  dependent workstreams in the meantime.
+
+The user-facing TestGrid page ([`docs/user/testgrid.md`](../user/testgrid.md))
+presents this contract for end users; this ADR remains the internal source of
+truth that the page and the dependent workstreams derive from.
 
 ## Taxonomy
 

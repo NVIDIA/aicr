@@ -68,9 +68,11 @@ The output lists every component with its pinned version and configuration value
 
 ## Inference Gateway Network Exposure
 
-Inference recipes include the **agentgateway** component, which deploys an `inference-gateway` Gateway. The agentgateway controller materializes that Gateway into a `Service` of type `LoadBalancer`, so on every cloud the platform provisions an internet-facing load balancer for the (plaintext HTTP, unauthenticated) inference endpoint. By default that load balancer accepts traffic from any source (`0.0.0.0/0`).
+Inference recipes include the **agentgateway** component, which deploys an `inference-gateway` Gateway. The agentgateway controller materializes that Gateway into a `Service` of type `LoadBalancer`, so on every cloud the platform provisions a load balancer for the (plaintext HTTP, unauthenticated) inference endpoint. Left unrestricted that load balancer is internet-facing, so `aicr bundle` scopes it to private networks by default — the opt-in path for public exposure and the validation behavior are described below.
 
-To restrict it to trusted networks, set `agentgateway.allowedSourceRanges` to a list of CIDR (Classless Inter-Domain Routing) blocks. The values are rendered into the generated Service's `spec.loadBalancerSourceRanges`, which the AWS, GCP, Azure, and OCI cloud load balancers all honor — so one setting locks the gateway down on every platform.
+`aicr bundle` is **private by default**: when a bundle includes `agentgateway` and `agentgateway.allowedSourceRanges` is empty or unset, the bundler injects the private RFC1918 ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) into the generated Service's `spec.loadBalancerSourceRanges`. The deployed gateway is therefore reachable from inside the cluster/VPC (and from privately-routed peers) but **denied to the public internet** — it is never emitted open to `0.0.0.0/0` without an explicit opt-in. (Kubernetes treats an empty `loadBalancerSourceRanges` as allow-all, so a safe default has to be a real list, not an empty one.) A bundle note records when the default was applied.
+
+To restrict it to specific trusted networks instead — for example to allow a corporate VPN, which egresses from a **public** IP and is therefore *not* covered by the RFC1918 default — set `agentgateway.allowedSourceRanges` to a list of CIDR (Classless Inter-Domain Routing) blocks. The values replace the default and are rendered into the generated Service's `spec.loadBalancerSourceRanges`, which the AWS, GCP, Azure, and OCI cloud load balancers all honor — so one setting locks the gateway down on every platform.
 
 Do **not** use plain `--set` for this key. `--set agentgateway:allowedSourceRanges=<cidr>` exits 0 but renders `loadBalancerSourceRanges` as a bare string instead of a list, producing a type-invalid Service (the gateway may stay open to `0.0.0.0/0`, or the CR apply is rejected). Use the list-aware [`--set-json` / `--set-file`](cli-reference.md#list-and-object-value-overrides) flags from the CLI:
 
@@ -90,16 +92,23 @@ componentRefs:
         - 216.228.127.128/30   # e.g. corporate egress
 ```
 
-The default is intentionally empty rather than a fixed CIDR: a baked-in range would firewall every downstream deployment to one network and lock other operators out of their own gateway. Each operator should scope this to their own trusted networks. An empty list leaves the load balancer open to `0.0.0.0/0`.
+The default is the generic RFC1918 private set rather than a fixed customer CIDR: a baked-in specific range would firewall every downstream deployment to one network and lock other operators out of their own gateway. RFC1918 is universal — it trusts only privately-routed traffic — so it is a safe default that still denies the public internet. Override it whenever you need to admit a specific public client.
+
+If public exposure is genuinely intended, opt in **explicitly** with an any-source CIDR — bundle generation then succeeds but logs a loud warning that the gateway is open to the entire internet:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:allowedSourceRanges='["0.0.0.0/0"]'
+```
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
 
 ### Exposure guardrails
 
-Because the open-by-default load balancer is otherwise silent, AICR surfaces it in two places:
+AICR enforces and surfaces inference-gateway exposure in two places:
 
-- **Bundle-time warning.** When a bundle includes `agentgateway` with an unscoped `allowedSourceRanges` — empty, or including an any-source CIDR such as `0.0.0.0/0` or `::/0` — `aicr bundle` prints a warning that the inference-gateway will be provisioned open to `0.0.0.0/0`, with the remediation above. This mirrors the existing storage-class PVC warning and does not block bundle generation.
-- **Conformance check.** The `inference-gateway` conformance check (run during `aicr validate --phase conformance` on a live cluster) inspects the gateway's `LoadBalancer` Service and records its exposure as evidence — the source ranges if scoped, or an explicit "open to `0.0.0.0/0`" finding if not. By default an open gateway is a non-fatal warning (open-by-default is intentional). Set `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true` on the validator environment to escalate an open gateway to a check **failure** (fail-closed policy).
+- **Bundle-time private-by-default.** When a bundle includes `agentgateway` and `allowedSourceRanges` is empty/unset, `aicr bundle` injects the RFC1918 private ranges so the deployed gateway denies the public internet, and records a bundle note. An invalid value (a bare-string `--set`, a non-list, an unparseable CIDR, or a non-canonical CIDR such as `1.2.3.4/24` that Kubernetes' strict validation would reject at apply time) is rejected with `ErrCodeInvalidRequest`. A scoped list passes silently; an explicit any-source CIDR (`0.0.0.0/0` or `::/0`) passes with a loud warning as a deliberate opt-in. See [#1373](https://github.com/NVIDIA/aicr/issues/1373).
+- **Conformance check.** The `inference-gateway` conformance check (run during `aicr validate --phase conformance` on a live cluster) inspects the gateway's `LoadBalancer` Service and records its exposure as evidence — the source ranges if scoped, or an explicit "open to `0.0.0.0/0`" finding if not. Set `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true` on the validator environment to escalate an open gateway to a check **failure**.
 
 ## Adding Components
 
