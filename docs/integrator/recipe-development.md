@@ -148,7 +148,7 @@ spec:
           value: ">= v25.10.0"
 ```
 
-Only use this pattern when the content is truly uniform across the wildcard dimension — if values diverge per service, keep them inline in each service-specific overlay. NCCL performance thresholds, for example, are explicitly **not** a good fit for this pattern: each service has a different network fabric (EFA, TCPXO, RoCE, etc.) and the same bandwidth number is rarely correct across two fabrics. The intent-scoped `gb200-any-training.yaml` shape that previously carried a cross-service NCCL threshold was retired in #1052 in favor of per-leaf performance blocks. See [Data Architecture](../contributor/recipe.md#criteria-wildcard-overlays) for when to use wildcard overlays vs mixins.
+Only use this pattern when the content is truly uniform across the wildcard dimension — if values diverge per service, keep them inline in each service-specific overlay. NCCL performance thresholds, for example, are explicitly **not** a good fit for this pattern: each service has a different network fabric (EFA, TCPXO, RoCE, etc.) and the same bandwidth number is rarely correct across two fabrics. The intent-scoped `gb200-any-training.yaml` and `b200-any-training.yaml` shapes that previously carried cross-service NCCL thresholds were retired (`gb200-any-training` in #1052, `b200-any-training` in #1053) in favor of per-leaf performance blocks. See [Data Architecture](../contributor/recipe.md#criteria-wildcard-overlays) for when to use wildcard overlays vs mixins.
 
 **Merge order:** `base.yaml` (lowest) → intermediate → leaf → mixins (highest)
 
