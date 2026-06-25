@@ -36,6 +36,8 @@ navigation:
         path: user/component-catalog.md
       - page: Recipe Health
         path: user/recipe-health.md
+      - page: TestGrid
+        path: user/testgrid.md
       - page: Validation
         path: user/validation.md
       - page: Coverage Matrix
