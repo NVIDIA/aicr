@@ -54,6 +54,7 @@ const (
 	CriteriaServiceKind CriteriaServiceType = "kind"
 	CriteriaServiceLKE  CriteriaServiceType = "lke"
 	CriteriaServiceBCM  CriteriaServiceType = "bcm"
+	CriteriaServiceOCP  CriteriaServiceType = "ocp"
 )
 
 // ParseService parses a string into a CriteriaServiceType against this
@@ -83,6 +84,8 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceLKE, nil
 	case "bcm":
 		return CriteriaServiceBCM, nil
+	case "ocp", "openshift":
+		return CriteriaServiceOCP, nil
 	default:
 		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
@@ -96,7 +99,7 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 // across `--data` configurations; for the union of static + registry
 // (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "oke"}
+	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "ocp", "oke"}
 }
 
 // AllServiceTypes returns the union of the static OSS list and values
@@ -343,7 +346,7 @@ func mergeCriteriaTypes(staticTypes, registered []string) []string {
 // Criteria represents the input parameters for recipe matching.
 // All fields are optional and default to "any" if not specified.
 type Criteria struct {
-	// Service is the Kubernetes service type (eks, gke, aks, oke, kind, lke, bcm).
+	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
 	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, rtx-pro-6000).

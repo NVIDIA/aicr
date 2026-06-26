@@ -113,7 +113,7 @@ body:
       placeholder: |
         - AICR version (CLI `aicr version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
-        - Platform (eks/gke/aks/oke/kind/lke/bcm/other):
+        - Platform (eks/gke/aks/oke/ocp/kind/lke/bcm/other):
         - Kubernetes version:
         - OS (ubuntu/cos/other) + version:
         - Kernel version:
@@ -122,7 +122,7 @@ body:
       value: |
         - AICR version (CLI `aicr version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
-        - Platform (eks/gke/aks/oke/kind/lke/bcm/other):
+        - Platform (eks/gke/aks/oke/ocp/kind/lke/bcm/other):
         - Kubernetes version:
         - OS (ubuntu/cos/other) + version:
         - Kernel version:
