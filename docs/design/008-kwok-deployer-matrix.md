@@ -8,6 +8,12 @@ Implementation tracked under [#843](https://github.com/NVIDIA/aicr/issues/843).
 The matrix dimensions, in-cluster topology, OCI flow, and acceptance
 criteria described below are intent, not current behavior.
 
+Extended by [ADR-010](010-kwok-git-source-lanes.md) [#963](https://github.com/NVIDIA/aicr/issues/963),
+which adds Git-source lanes (`flux-git` via in-cluster Gitea) for the
+filesystem-bundle round-trip. The "OCI over Git source" rationale
+below scoped the *first* lanes to OCI; ADR-010 supplements rather
+than reverses it.
+
 ## Problem
 
 The KWOK CI workflow validates bundle deployment for the default

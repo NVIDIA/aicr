@@ -15,6 +15,7 @@ This section is for integrators who:
 | Document | Description |
 |----------|-------------|
 | [Public API Surface](public-api.md) | Stability tiers for every exported Go package; facade type ownership |
+| [Measurement Schema](measurement-api.md) | Cross-repo Measurement contract: Type cardinality, Subtype layout, NetworkTopology shape, constraint paths |
 | [Go Library Integration](go-library.md) | Using `github.com/NVIDIA/aicr/pkg/client/v1` as a Go library |
 | [Automation](automation.md) | CI/CD integration patterns for GitHub Actions, GitLab CI, Jenkins, and Terraform |
 | [Data Flow](data-flow.md) | Understanding snapshots, recipes, validation, and bundles data transformations |

@@ -23,7 +23,7 @@ import (
 func h100Fingerprint() *Fingerprint {
 	return &Fingerprint{
 		Service:     Dimension{Value: "eks", Source: "k8s.node.provider"},
-		Accelerator: Dimension{Value: "h100", Source: "gpu.smi.gpu.model"},
+		Accelerator: Dimension{Value: "h100", Source: "gpu.hardware.model"},
 		OS:          OSDimension{Value: "ubuntu", Version: "22.04", Source: "os.release"},
 		K8sVersion:  Dimension{Value: "1.33.4", Source: "k8s.server.version"},
 		NodeCount:   IntDimension{Value: 12, Source: "nodeTopology.summary.node-count"},

@@ -27,9 +27,11 @@
 # admission, per the demo. Tolerations below must match the actual taints,
 # not the labels.
 #
-# `spec.validate.evidence.attestation.push` carries the stable repo prefix
-# only; `../run` appends `-${RUN_ID}` at runtime so each UAT execution
-# publishes evidence to a uniquely traceable OCI repo.
+# `spec.validate.evidence.attestation.push` carries the stable per-recipe
+# repo only; `../run` appends a `:run-${RUN_ID}` tag at runtime so each UAT
+# execution publishes a uniquely traceable, digest-addressed point under one
+# stable repo (`oras repo tags` lists run history). Consumers pin immutably
+# via `@sha256:…`.
 kind: AICRConfig
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
@@ -77,10 +79,26 @@ spec:
       systemNodeTolerations:
         - dedicated=system-workload:NoSchedule
         - dedicated=system-workload:NoExecute
-      # EKS default backed by the EBS CSI driver. Matches the UAT cluster.
-      storageClass: gp3
+      # Consume the cluster's default StorageClass rather than hardcoding a
+      # name. The aws-ebs-csi-driver component provisions a gp3-backed default
+      # named "ebs-csi-default-sc" (annotated is-default-class=true), so an
+      # empty value binds PVCs to it automatically. Pinning a literal "gp3"
+      # only works on clusters using the AWS managed EBS CSI addon (which
+      # auto-creates a class named "gp3") — not on an aicr-bundle-deployed
+      # cluster, where the StatefulSet would otherwise never be created.
+      storageClass: ""
 
   validate:
+    execution:
+      # The deployment phase is the readiness barrier (gpu-operator ClusterPolicy
+      # reaches state=ready, the DRA kubelet-plugin DaemonSet rolls out, nodewright
+      # node tuning completes). failFast stops the run if that phase fails, so the
+      # conformance/performance phases are not evaluated against a not-yet-converged
+      # cluster — which previously surfaced as misleading accelerator-metrics /
+      # ai-service-metrics / pod-autoscaling failures. The `../run` readiness gate
+      # gives the operator-driven stack time to converge before validate, so on a
+      # healthy cluster the deployment phase passes and all phases still run.
+      failFast: true
     input:
       recipe: recipe.yaml
       snapshot: snapshot.yaml
@@ -93,6 +111,7 @@ spec:
     evidence:
       attestation:
         # Setting `out` enables emit. The push target below is the stable
-        # repo prefix; ../run appends `-${RUN_ID}` for per-run isolation.
+        # per-recipe repo; ../run appends a `:run-${RUN_ID}` tag for per-run
+        # isolation. Consumers pin immutably via the artifact digest.
         out: ./evidence
-        push: ghcr.io/nvidia/aicr-uat-eks-h100-training
+        push: ghcr.io/nvidia/aicr-evidence/h100-eks-ubuntu-training-kubeflow

@@ -179,6 +179,15 @@ func TestRecipeList_NonLeafStatusPlaceholder(t *testing.T) {
 	}
 }
 
+// TestRecipeList_WildcardLegend confirms the table output explains that a
+// bare "any" in the criteria columns is an intentional wildcard (issue #1383).
+func TestRecipeList_WildcardLegend(t *testing.T) {
+	out := runRecipeList(t)
+	if !strings.Contains(out, criteriaAny+" = wildcard") {
+		t.Errorf("expected wildcard legend for %q in table output:\n%s", criteriaAny, out)
+	}
+}
+
 // TestRecipeList_FilteredJSONHealth drives the CLI filter end-to-end and
 // confirms ListCatalog and ComputeHealth agree on the same narrowed set: every
 // returned leaf carries a health block and matches the filter.

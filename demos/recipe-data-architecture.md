@@ -47,7 +47,7 @@ Constraint format: `{MeasurementType}.{Subtype}.{Key}`
 Examples:
 - `K8s.server.version` - Kubernetes version
 - `OS.release.ID` - Operating system ID
-- `GPU.smi.driver_version` - GPU driver version
+- `GPU.hardware.model` - accelerator SKU (e.g. `h100`)
 
 ### Base Values
 

@@ -19,6 +19,7 @@ package netutil
 
 import (
 	"net"
+	"net/netip"
 	"strings"
 )
 
@@ -39,4 +40,33 @@ func IsAnySourceCIDR(cidr string) bool {
 	}
 	ones, _ := ipNet.Mask.Size()
 	return ones == 0
+}
+
+// IsValidCIDR reports whether cidr is a canonical CIDR prefix that Kubernetes
+// will accept in a Service loadBalancerSourceRanges entry (e.g. 10.0.0.0/8 or
+// ::/0). It accepts surrounding whitespace.
+//
+// Canonical means: the address has no bits set outside the prefix length (so
+// 1.2.3.4/24 is rejected — the network address is 1.2.3.0/24), and the prefix
+// length has no leading zeros (so 1.2.3.0/024 is rejected). net.ParseCIDR is
+// too lax here — it accepts both forms — but Kubernetes 1.36+ enables strict
+// CIDR validation by default and rejects them at apply time. Because the
+// bundler renders the operator's original strings verbatim, validating the
+// canonical form here keeps a bundle that generates from failing when the
+// Service is applied. netip.ParsePrefix gives us the strict parse; comparing
+// against Masked() confirms there are no host bits.
+//
+// IPv4-mapped IPv6 prefixes (e.g. ::ffff:192.12.2.0/120) are also rejected:
+// netip parses them and they can be canonical, but Kubernetes 1.36+ strict
+// validation rejects the 4-in-6 form outright, so accepting them here would be
+// another generate-pass/apply-fail trap.
+func IsValidCIDR(cidr string) bool {
+	p, err := netip.ParsePrefix(strings.TrimSpace(cidr))
+	if err != nil {
+		return false
+	}
+	if p.Addr().Is4In6() {
+		return false
+	}
+	return p == p.Masked()
 }

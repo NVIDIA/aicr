@@ -1,0 +1,94 @@
+machineType: ThinkSystem-SR650-V4
+manufacturer: Lenovo
+gpuType: NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition
+nicModel: NVIDIA ConnectX-8 C8240 HHHL SuperNIC, 400GbE / 400Gb/s IB, Dual-port QSFP112 (ConnectX-8)
+gpuInterconnect: ""
+numaNodes: 2
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: true
+
+# No PIX NIC<->GPU relationships on this machine (no PCIe switches).
+# - ConnectX-8 (1023): NODE-fallback to lowest-index GPU on the same NUMA.
+# - BF3 dual-port 200G DPU (SN37B36732 / VPI QSFP112 2P 200G): always north-south by SKU.
+# - ConnectX-6 Lx (101f): always north-south by SKU.
+
+pfs:
+  # --- NUMA 0: GPU0 (0000:6c:00.0), CPUs 0-47,96-143 ---
+  # N-S: ConnectX-6 Lx 10/25GbE (0b:xx.x)
+  - deviceID: "101f"
+    rdmaDevice: mlx5_0
+    pciAddress: 0000:0b:00.0
+    networkInterface: ens13f0np0
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: lnv0000000037
+    partNumber: SN37A28493
+    model: Mellanox ConnectX-6 Lx 10/25GbE SFP28 2-port OCP Ethernet Adapter
+  - deviceID: "101f"
+    rdmaDevice: mlx5_1
+    pciAddress: 0000:0b:00.1
+    networkInterface: ens13f1np1
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: lnv0000000037
+    partNumber: SN37A28493
+    model: Mellanox ConnectX-6 Lx 10/25GbE SFP28 2-port OCP Ethernet Adapter
+
+  # East-west (NODE-fallback): ConnectX-8 400G dual-port (46:xx.x)
+  - deviceID: "1023"
+    rdmaDevice: mlx5_2
+    pciAddress: 0000:46:00.0
+    networkInterface: ens3f0np0
+    traffic: east-west
+    rail: 0
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: NODE
+    psid: mt_0000001222
+    partNumber: 900-9X81Q-00CN-ST0
+    model: NVIDIA ConnectX-8 C8240 HHHL SuperNIC, 400GbE / 400Gb/s IB, Dual-port QSFP112, PCIe 6 x16 with x16 PCIe Socket Direct Extension option, Crypto and Secure Boot Enabled
+  - deviceID: "1023"
+    rdmaDevice: mlx5_3
+    pciAddress: 0000:46:00.1
+    networkInterface: ens3f1np1
+    traffic: east-west
+    rail: 1
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: NODE
+    psid: mt_0000001222
+    partNumber: 900-9X81Q-00CN-ST0
+    model: NVIDIA ConnectX-8 C8240 HHHL SuperNIC, 400GbE / 400Gb/s IB, Dual-port QSFP112, PCIe 6 x16 with x16 PCIe Socket Direct Extension option, Crypto and Secure Boot Enabled
+
+  # --- NUMA 1: GPU1 (0000:d8:00.0), CPUs 48-95,144-191 ---
+  # N-S: BF3 dual-port 200G DPU (8b:xx.x) — SKU-classified north-south despite NUMA proximity to GPU1
+  - deviceID: a2dc
+    rdmaDevice: mlx5_4
+    pciAddress: 0000:8b:00.0
+    networkInterface: ""
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: SN37B36732
+    model: Nvidia BlueField-3 VPI QSFP112 2P 200G PCIe Gen5 x16
+  - deviceID: a2dc
+    rdmaDevice: mlx5_5
+    pciAddress: 0000:8b:00.1
+    networkInterface: ""
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: SN37B36732
+    model: Nvidia BlueField-3 VPI QSFP112 2P 200G PCIe Gen5 x16

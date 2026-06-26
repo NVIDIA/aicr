@@ -26,7 +26,7 @@ Each subdirectory is one collector; one collector emits one
 
 | Kind | Package | Emits | Notes |
 |------|---------|-------|-------|
-| GPU | `pkg/collector/gpu` | `TypeGPU` | Two subtypes: `hardware` (NFD/PCI) + `smi` (nvidia-smi XML). Degrades to zero-GPU when driver missing. |
+| GPU | `pkg/collector/gpu` | `TypeGPU` | One subtype: `hardware` (NFD/PCI enumeration; resolves the accelerator SKU from the PCI device ID). Driver-free — no nvidia-smi. Degrades to no subtype when sysfs is unavailable. |
 | Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image info, network policy, node-local info. Uses the singleton `pkg/k8s/client`. |
 | OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
@@ -57,8 +57,8 @@ Two rules:
   `Type` set and `Subtypes` populated. Returning `nil` plus an error is
   fine on hard failure; returning a partial measurement with a logged
   warning is fine on graceful degradation (the GPU collector models
-  this — when nvidia-smi is absent, it emits a zero-GPU `smi`
-  subtype rather than failing).
+  this — when sysfs/PCI enumeration is unavailable, it emits a GPU
+  measurement with no subtypes rather than failing).
 
 ## Registration via the Factory
 

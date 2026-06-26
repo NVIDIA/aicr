@@ -12,47 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package gpu collects GPU hardware and driver configuration data using a
-// two-phase detection model.
+// Package gpu collects GPU hardware data via driver-free NFD/PCI enumeration.
 //
-// # Two-Phase Collection
+// # Detection
 //
-// The collector runs two independent detection phases, each producing a
-// separate measurement subtype:
+// The collector uses a single, driver-free detector backed by NFD source
+// packages: it enumerates PCI devices from sysfs, counts NVIDIA GPUs by
+// vendor/class, resolves the accelerator SKU from each device ID (see
+// device_ids.go), and checks the nvidia kernel-module state. It requires
+// neither the NVIDIA driver nor nvidia-smi — only Linux with sysfs mounted —
+// which is what makes day-0 detection on freshly provisioned nodes possible.
 //
-//	Phase 1 ("hardware"): NFD-based PCI enumeration — detects NVIDIA GPUs
-//	    via sysfs PCI device scan and checks nvidia kernel module state.
-//	    No GPU drivers required. Requires Linux with sysfs mounted.
-//
-//	Phase 2 ("smi"): nvidia-smi XML query — collects driver version, CUDA
-//	    version, per-GPU hardware specs, and runtime settings. Requires
-//	    nvidia-smi in PATH with a loaded NVIDIA driver.
-//
-// Phase 1 enables day-0 GPU detection on freshly provisioned nodes where
-// drivers have not yet been installed. Phase 2 provides the full telemetry
-// used for recipe generation and validation.
+// (Historically a second "smi" phase shelled out to nvidia-smi for the SKU and
+// extra telemetry; it was removed once the PCI device ID could name the SKU,
+// eliminating the CUDA-image dependency. The accelerator SKU now also comes
+// from the GPU-operator nvidia.com/gpu.product label during fingerprinting.)
 //
 // # Graceful Degradation
 //
-// Each phase degrades independently:
+// Detection degrades to an empty result rather than an error:
 //
-//   - Phase 1 failure (e.g., no sysfs on macOS): logged as warning, skipped.
-//     Only the "smi" subtype is returned.
-//   - Phase 2 failure (e.g., nvidia-smi not installed): logged as warning.
-//     A zero-GPU "smi" subtype is returned with gpu-count=0.
-//   - Both phases fail: measurement contains only the zero-GPU "smi" subtype.
-//   - Phase 1 nil (no HardwareDetector configured): Phase 1 is skipped entirely,
-//     preserving the pre-NFD single-phase behavior.
+//   - Detector failure (e.g., no sysfs on macOS): logged as a warning; the GPU
+//     measurement is returned with no subtypes.
+//   - No HardwareDetector configured: the GPU measurement is returned with no
+//     subtypes.
 //
 // # Measurement Structure
-//
-// A successful two-phase collection produces:
 //
 //	Measurement{
 //	    Type: "GPU",
 //	    Subtypes: [
-//	        {Name: "hardware", Data: {gpu-present, gpu-count, driver-loaded, detection-source}},
-//	        {Name: "smi",      Data: {gpu-count, driver, cuda-version, gpu.model, ...}},
+//	        {Name: "hardware", Data: {gpu-present, gpu-count, driver-loaded, detection-source, model}},
 //	    ],
 //	}
 //
@@ -61,8 +51,9 @@
 //   - KeyGPUCount: int — number of NVIDIA GPUs detected
 //   - KeyGPUDriverLoaded: bool — true if nvidia kernel module is loaded
 //   - KeyGPUDetectionSource: string — detection method (e.g., "nfd")
-//
-// The "smi" subtype contains driver telemetry and per-GPU hardware details.
+//   - KeyGPUModel: string — accelerator SKU resolved from the PCI device ID
+//     (omitted when the device ID is unknown). This is a descriptive discovery
+//     vocabulary broader than the recipe accelerator enum.
 //
 // # Usage
 //
@@ -73,18 +64,12 @@
 //	)
 //	m, err := collector.Collect(ctx)
 //
-// Without WithHardwareDetector, Phase 1 is skipped (backward compatible).
+// Without WithHardwareDetector, Collect returns a GPU measurement with no
+// subtypes.
 //
 // # Context and Timeouts
 //
 // The collector respects context cancellation and applies a bounded timeout
 // (defaults.CollectorTimeout). NFD detection has its own sub-timeout
-// (defaults.NFDDetectionTimeout = 5s). The context is passed to each phase,
-// so cancellation is respected within each phase's I/O operations.
-//
-// # Platform Support
-//
-//   - Linux with sysfs: Both phases run (full two-phase detection)
-//   - macOS / containers without /sys: Phase 1 fails gracefully, Phase 2 only
-//   - No nvidia-smi: Phase 2 returns zero-GPU subtype
+// (defaults.NFDDetectionTimeout).
 package gpu

@@ -28,6 +28,7 @@ func TestExtractHardwareInfo(t *testing.T) {
 		wantPresent    bool
 		wantCount      int
 		wantDriver     bool
+		wantSKU        string
 	}{
 		{
 			name: "NVIDIA GPUs present (2 NVIDIA + 1 Intel)",
@@ -35,15 +36,48 @@ func TestExtractHardwareInfo(t *testing.T) {
 				Instances: map[string]nfdv1alpha1.InstanceFeatureSet{
 					nfdPCIDeviceFeature: {
 						Elements: []nfdv1alpha1.InstanceFeature{
-							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClassVGA}},
-							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClass3D}},
-							{Attributes: map[string]string{"vendor": "8086", "class": pciClassVGA}},
+							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClassVGA, "device": "2330"}},
+							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClass3D, "device": "2330"}},
+							{Attributes: map[string]string{"vendor": "8086", "class": pciClassVGA, "device": "1234"}},
 						},
 					},
 				},
 			},
 			wantPresent: true,
 			wantCount:   2,
+			wantSKU:     "h100",
+		},
+		{
+			name: "two distinct SKUs leave SKU unresolved (heterogeneous)",
+			pciFeatures: &nfdv1alpha1.Features{
+				Instances: map[string]nfdv1alpha1.InstanceFeatureSet{
+					nfdPCIDeviceFeature: {
+						Elements: []nfdv1alpha1.InstanceFeature{
+							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClassVGA, "device": "2330"}}, // H100
+							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClassVGA, "device": "20b0"}}, // A100
+						},
+					},
+				},
+			},
+			wantPresent: true,
+			wantCount:   2,
+			wantSKU:     "",
+		},
+		{
+			name: "known SKU among an unrecognized device still reports the known SKU",
+			pciFeatures: &nfdv1alpha1.Features{
+				Instances: map[string]nfdv1alpha1.InstanceFeatureSet{
+					nfdPCIDeviceFeature: {
+						Elements: []nfdv1alpha1.InstanceFeature{
+							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClassVGA, "device": "2330"}}, // H100
+							{Attributes: map[string]string{"vendor": nvidiaVendorID, "class": pciClassVGA, "device": "ffff"}}, // unrecognized
+						},
+					},
+				},
+			},
+			wantPresent: true,
+			wantCount:   2,
+			wantSKU:     "h100",
 		},
 		{
 			name: "no NVIDIA GPUs (Intel only)",
@@ -146,6 +180,9 @@ func TestExtractHardwareInfo(t *testing.T) {
 			}
 			if info.DriverLoaded != tt.wantDriver {
 				t.Errorf("DriverLoaded = %v, want %v", info.DriverLoaded, tt.wantDriver)
+			}
+			if info.SKU != tt.wantSKU {
+				t.Errorf("SKU = %q, want %q", info.SKU, tt.wantSKU)
 			}
 		})
 	}

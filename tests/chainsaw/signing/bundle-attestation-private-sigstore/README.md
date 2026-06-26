@@ -59,21 +59,45 @@ No Dex, no browser flow, no GitHub OIDC for the bundle signing.
 | `attested-bundle-has-files` | `bundle-attestation.sigstore.json`, `checksums.txt`, and `recipe.yaml` all present |
 | `attestation-bundle-has-fulcio-certificate` | Sigstore bundle contains a Fulcio certificate (keyless path, not public-key path) |
 | `attestation-bundle-has-tlog-entry` | Bundle contains a Rekor transparency log entry (`tlogEntries`) |
-| `verify-bundle-checksums` | `aicr verify` reports `"checksumsPassed": true` |
+| `verify-bundle-checksums` | `aicr verify` (no `--trust-root`) reports `"checksumsPassed": true` |
+| `assemble-private-trust-root` | Builds a `trusted_root.json` for the local stack from the Fulcio chain, Rekor key, and CTLog key (`cosign trusted-root create`) |
+| `verify-private-trust-root` | `aicr verify --trust-root` reports `bundleAttested: true` (bundle attestation validated against the private Fulcio/Rekor) |
+| `verify-public-root-rejects-private-bundle` | Negative control: WITHOUT `--trust-root`, `bundleAttested` is `false` |
 
 The test is gated by the label `requires: private-sigstore` and is skipped in
 normal `chainsaw test --no-cluster` runs. Activate with
 `--selector 'requires=private-sigstore'`.
 
-## Known limitation: verify trust level
+## Verify trust level: `--trust-root`
 
-`aicr verify` does not yet accept `--rekor-url` or a custom trust root, so its
-sigstore attestation check runs against the **public** trust root and cannot
-validate a bundle recorded in the private Rekor (it fails log inclusion and
-exits non-zero). The `verify-bundle-checksums` step therefore asserts only the
-checksum result, which is independent of attestation trust. Full
-transparency-log proof verification against the local Rekor is deferred to after
-issue #1153 (private trust root) lands; see issue #1215 for Phase 2 scope.
+`aicr verify --trust-root` (issue #1153) verifies the bundle attestation against
+a self-hosted Sigstore by taking a `trusted_root.json` that is **additive** to
+AICR's built-in public-good root. This suite exercises it end-to-end:
+
+- `assemble-private-trust-root` builds the `trusted_root.json` for the local
+  stack with `cosign trusted-root create`, combining the Fulcio CA chain
+  (`/api/v1/rootCert`), the Rekor public key (`/api/v1/log/publicKey`), and the
+  CTLog (CTFE) public key. The CTLog key is mandatory: aicr does not disable
+  Signed Certificate Timestamp checks, so sigstore-go rejects the private Fulcio
+  certificate without it. It is the one trust input not served over HTTP, so
+  `run.sh` extracts it from the in-cluster `ctlog-public-key` secret (namespace
+  `ctlog-system`, data key `public`; see `secrets.ctlog` in the scaffold chart)
+  and passes the path to chainsaw as `AICR_CTLOG_PUBKEY`. Fulcio and Rekor are
+  fetched by the chainsaw step itself over the plain-HTTP localhost
+  port-forwards (`FULCIO_PF_PORT` / `REKOR_PF_PORT`).
+- `verify-private-trust-root` asserts `bundleAttested: true` and a trust level
+  of at least `attested`. The bundle-attestation step uses a permissive identity
+  matcher, so `--trust-root` alone validates the private Fulcio cert chain and
+  the private Rekor inclusion proof. The binary-attestation half still verifies
+  against public-good Sigstore (pinned by `AICR_IDENTITY_REGEXP`); the step
+  additionally asserts `binaryAttested: true` to confirm the full chain succeeds,
+  without making the exact top-level trust level the gating condition.
+- `verify-public-root-rejects-private-bundle` is the negative control: with the
+  same bundle and binary but no `--trust-root`, `bundleAttested` is `false`,
+  proving the flag is what admits the private chain.
+
+The `verify-bundle-checksums` step is retained to keep the checksum assertion
+(independent of attestation trust) covered.
 
 ## Prerequisites
 
@@ -83,6 +107,7 @@ issue #1153 (private trust root) lands; see issue #1215 for Phase 2 scope.
 | `kubectl` | `make tools-setup` |
 | `helm` | `make tools-setup` |
 | `chainsaw` | `make tools-setup` |
+| `cosign` | `brew install cosign` (macOS) / package manager (Linux) |
 | `mkcert` | `brew install mkcert` (macOS) / package manager (Linux) |
 | `go`, `yq` | `make tools-setup` |
 | `docker` | Docker Desktop / Colima |
@@ -96,8 +121,9 @@ AICR_BIN=/path/to/attested/aicr \
 
 `run.sh` creates a Kind cluster, `helm install`s the `scaffold` chart, configures
 Fulcio's OIDC trust, port-forwards Fulcio/Rekor, fronts them with the localhost
-TLS proxy, mints an SA OIDC token, runs the chainsaw suite, and tears everything
-down on exit. Pass `KEEP_CLUSTER=true` to leave the cluster running between runs.
+TLS proxy, extracts the CTLog public key from the in-cluster secret, mints an SA
+OIDC token, runs the chainsaw suite, and tears everything down on exit. Pass
+`KEEP_CLUSTER=true` to leave the cluster running between runs.
 
 `aicr bundle --attest` requires an NVIDIA-CI-attested binary (a co-located
 `<binary>-attestation.sigstore.json`, verified against public Sigstore). Provide
@@ -113,12 +139,21 @@ REKOR_URL=https://127.0.0.1:8444 \
 OIDC_TOKEN=<token> \
 AICR_BIN=/path/to/aicr \
 AICR_IDENTITY_REGEXP='https://github.com/NVIDIA/aicr/\.github/workflows/build-attested\.yaml@.*' \
+AICR_CTLOG_PUBKEY=/path/to/ctfe.pub \
+FULCIO_PF_PORT=8080 \
+REKOR_PF_PORT=8081 \
   chainsaw test \
     --no-cluster \
     --config tests/chainsaw/chainsaw-config.yaml \
     --test-dir tests/chainsaw/signing/bundle-attestation-private-sigstore/ \
     --selector 'requires=private-sigstore'
 ```
+
+The trust-root steps additionally need `AICR_CTLOG_PUBKEY` (CTLog public key
+PEM, e.g. `kubectl -n ctlog-system get secret ctlog-public-key -o
+jsonpath='{.data.public}' | base64 -d`) and the plain-HTTP Fulcio/Rekor
+port-forward ports (`FULCIO_PF_PORT` / `REKOR_PF_PORT`). `run.sh` sets all of
+these for you.
 
 ## CI
 
@@ -139,3 +174,6 @@ locally — so CI and local runs are identical.
 | `OIDC_TOKEN` | `run.sh` / workflow | SA identity token Fulcio accepts (`kubectl create token`) |
 | `AICR_BIN` | caller / workflow | Path to the built (attested) `aicr` binary |
 | `AICR_IDENTITY_REGEXP` | caller / workflow | `--certificate-identity-regexp` for the binary attestation |
+| `AICR_CTLOG_PUBKEY` | `run.sh` / workflow | Path to the CTLog (CTFE) public key PEM, extracted from the in-cluster `ctlog-public-key` secret |
+| `FULCIO_PF_PORT` | `run.sh` / workflow | localhost plain-HTTP port-forward for Fulcio (trust-root assembly fetches the CA chain here) |
+| `REKOR_PF_PORT` | `run.sh` / workflow | localhost plain-HTTP port-forward for Rekor (trust-root assembly fetches the public key here) |

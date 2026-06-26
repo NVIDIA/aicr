@@ -536,8 +536,18 @@ func validateCmdFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name: "emit-attestation",
 			Usage: `Directory to write a recipe-evidence v1 attestation bundle (signed when --push is set).
-	Produces summary-bundle/, optionally logs-bundle/, and pointer.yaml suitable for copying to recipes/evidence/<recipe>.yaml.
+	Produces summary-bundle/, optionally logs-bundle/, and pointer.yaml suitable for copying to recipes/evidence/<recipe>/<source>/<digest>.yaml (see the emit 'copyTo' hint).
+	The bundle is minimized by default (sensitive snapshot fields and CTRF logs removed); use --full to ship raw payloads.
 	See ADR-007 (docs/design/007-recipe-evidence.md).`,
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name: flagFull,
+			Usage: `Emit the full (unredacted) evidence bundle. By default the bundle is minimized:
+	the snapshot is reduced to an allowlisted set of fields and per-test CTRF stdout/message are omitted,
+	so node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs are
+	not published. --full restores the complete payloads. The cryptographic verification story
+	(predicate digests, manifest binding, signature) holds either way.`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
@@ -555,6 +565,13 @@ func validateCmdFlags() []cli.Flag {
 	Sigstore keyless OIDC signing uses the same precedence chain as ` + "`aicr bundle --attest`" + `:
 	--identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
 	--oidc-device-flow > interactive browser flow.`,
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name: flagNoSign,
+			Usage: `Push the evidence bundle unsigned (requires --emit-attestation and --push) and write a pointer with an empty signer block.
+	Defers Fulcio/Rekor signing to a later step (the fork-based CI workflow), so the network-light push can run
+	where the cluster lives even when Sigstore egress is blocked. No-op unless both --emit-attestation and --push are set.`,
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
@@ -675,6 +692,16 @@ Run validation without failing on check errors (informational mode):
 			failFast := boolFlagOrConfig(cmd, "fail-fast", derefBoolOr(resolved.FailFast, false))
 			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
 
+			// Mode banner: make it explicit whether this run touches a live
+			// cluster (issue #1383). --no-cluster is an offline dry-run that
+			// reports checks as skipped; otherwise validation deploys
+			// validator Jobs against the active kube-context.
+			if noCluster {
+				slog.Info("validating in --no-cluster mode — offline dry-run; checks are reported as skipped, no cluster is contacted")
+			} else {
+				slog.Info("validating against the live cluster — validator Jobs will be deployed to the active kube-context")
+			}
+
 			// Resolve shared fields once, before the snapshot/agent split, so
 			// CLI-overrides-config log lines fire exactly once per field even
 			// when both the agent-deploy path and the validator Job want the
@@ -749,9 +776,9 @@ Run validation without failing on check errors (informational mode):
 
 			if snapshotFilePath != "" {
 				slog.Info("loading snapshot", "uri", snapshotFilePath)
-				snap, err = serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapshotFilePath, kubeconfig)
+				snap, err = snapshotter.LoadFromFileWithKubeconfig(ctx, snapshotFilePath, kubeconfig)
 				if err != nil {
-					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapshotFilePath), err)
+					return err
 				}
 			} else {
 				slog.Info("deploying agent to capture snapshot")
@@ -764,6 +791,12 @@ Run validation without failing on check errors (informational mode):
 					return deployErr
 				}
 			}
+
+			// Advisory: warn when the running binary, the recipe-producing
+			// binary, and the snapshot-producing binary report different
+			// release versions. Mixed-version artifacts can cause confusing
+			// validation failures; this does not fail the command.
+			warnVersionSkew(version, rec.Resolved().Metadata.Version, snap.Metadata["version"])
 
 			// Warn when a requested phase has no checks defined in the recipe.
 			// The helper reads the full recipe's Validation section, which the

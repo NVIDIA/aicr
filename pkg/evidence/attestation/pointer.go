@@ -17,6 +17,7 @@ package attestation
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -77,15 +78,78 @@ func MarshalPointer(p *Pointer) ([]byte, error) {
 	return body, nil
 }
 
+// PointerCopyToHint returns the repo-relative destination a built pointer
+// should be committed to, following the #1347 Option A per-source layout
+// recipes/evidence/<recipe>/<source>/<bundle-digest>.yaml. The <source>
+// slug is derived from the signer's OIDC identity (SourceSlug) and the
+// filename from the bundle digest (':' → '-' for path-safety).
+//
+// A pointer with no signer or no pushed digest has no committable
+// destination — only signed, pushed bundles earn a place in the tree — so
+// the hint returns guidance instead of a path.
+func PointerCopyToHint(p *Pointer) string {
+	const unpushed = "(sign and push the bundle, then commit under recipes/evidence/<recipe>/<source>/)"
+	if p == nil || len(p.Attestations) == 0 {
+		return unpushed
+	}
+	att := p.Attestations[0]
+	if att.Signer == nil || att.Bundle.Digest == "" {
+		return unpushed
+	}
+	source, err := SourceSlug(att.Signer.Issuer, att.Signer.Identity)
+	if err != nil {
+		return unpushed
+	}
+	file := strings.ReplaceAll(att.Bundle.Digest, ":", "-") + ".yaml"
+	return "recipes/evidence/" + p.Recipe + "/" + source + "/" + file
+}
+
 // WritePointer writes the pointer file to outputDir/pointer.yaml.
 func WritePointer(outputDir string, p *Pointer) (string, error) {
+	return WritePointerFile(filepath.Join(outputDir, PointerFilename), p)
+}
+
+// WritePointerFile writes the pointer to an exact path, overwriting it. Used
+// to patch a committed pointer in place (e.g. `aicr evidence sign` filling in
+// the signer block), where the destination is the recipes/evidence/<recipe>.yaml
+// the caller read — not a generated pointer.yaml beside a bundle dir.
+//
+// The write is atomic: it writes to a temp file in the same directory and
+// renames it into place, so a crash or write error mid-flight cannot leave a
+// committed pointer truncated/corrupt. The temp's Close error is propagated
+// (a writable Close can surface buffered-write failures), and a leftover temp
+// is removed on any failure before the rename.
+func WritePointerFile(path string, p *Pointer) (string, error) {
 	body, err := MarshalPointer(p)
 	if err != nil {
 		return "", err
 	}
-	out := filepath.Join(outputDir, PointerFilename)
-	if err := os.WriteFile(out, body, 0o600); err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to write pointer file", err)
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".pointer-*.tmp") // 0o600 by default
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create temp pointer file", err)
 	}
-	return out, nil
+	tmpName := tmp.Name()
+	// Remove the temp on any path that does not rename it into place.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, werr := tmp.Write(body); werr != nil {
+		_ = tmp.Close()
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to write temp pointer file", werr)
+	}
+	// Closing a writable handle flushes buffered data — propagate its error.
+	if cerr := tmp.Close(); cerr != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to close temp pointer file", cerr)
+	}
+	if rerr := os.Rename(tmpName, path); rerr != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to rename pointer file into place", rerr)
+	}
+	committed = true
+	return path, nil
 }

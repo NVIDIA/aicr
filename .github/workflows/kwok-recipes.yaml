@@ -68,7 +68,7 @@ jobs:
       tier3_batches: ${{ steps.classify.outputs.tier3_batches }}
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
           # Full checkout needed for diff-aware Tier 2 discovery
@@ -101,8 +101,8 @@ jobs:
             name=$(basename "$overlay" .yaml)
             service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
 
-            # Skip overlays without a concrete service
-            if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+            # Skip non-testable overlays (no service, or OCP — needs OpenShift operators)
+            if [[ -z "$service" || "$service" == "null" || "$service" == "any" || "$service" == "ocp" ]]; then
               continue
             fi
 
@@ -140,8 +140,8 @@ jobs:
               service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
               accel=$(yq eval '.spec.criteria.accelerator // ""' "$overlay" 2>/dev/null || true)
 
-              # Only accelerator-specific overlays belong in Tier 2
-              if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+              # Only accelerator-specific, KWOK-testable overlays belong in Tier 2
+              if [[ -z "$service" || "$service" == "null" || "$service" == "any" || "$service" == "ocp" ]]; then
                 continue
               fi
               if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
@@ -228,7 +228,7 @@ jobs:
           # shard's matrix under the limit. Keep this deployer list in sync
           # with the test-tier1 matrix above and the input doc in
           # .github/actions/kwok-test/action.yml.
-          deployers='["helm","argocd-oci","argocd-helm-oci","flux-oci"]'
+          deployers='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
           readonly TIER3_BATCH_SIZE=200  # headroom under GitHub's 256 cap
 
           # Fail closed if the batch size is ever raised past the hard limit —
@@ -275,10 +275,10 @@ jobs:
       fail-fast: false
       matrix:
         recipe: ${{ fromJSON(needs.discover.outputs.tier1) }}
-        deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci]
+        deployer: [helm, argocd-oci, argocd-helm-oci, argocd-git, flux-oci, flux-git]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -319,7 +319,7 @@ jobs:
         recipe: ${{ fromJSON(needs.discover.outputs.tier2) }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 

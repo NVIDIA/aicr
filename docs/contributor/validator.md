@@ -478,13 +478,15 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   counts (stddev 0), a pinned prompt pool, and greedy decoding
   (`temperature: 0`). Input determinism stabilizes *throughput*; it does not
   remove system-side p99 jitter at the knee.
-- **Routing matters.** The inference-perf workload uses Dynamo's KV router
-  (`DYN_ROUTER_MODE=kv`) with live worker KV events. Frontend-to-worker
+- **Routing matters.** The inference-perf workload uses Dynamo's load-aware
+  least-loaded router (`DYN_ROUTER_MODE=least-loaded`), which balances by each
+  worker's active in-flight load so a transiently-slow worker stops receiving
+  its full share — mitigating the stochastic EKS H100 worker-stall / throughput
+  degradation at the saturation knee (issue #1197). Frontend-to-worker
   requests use Dynamo's request plane (Dynamo 1.2 defaults to TCP; AICR does
-  not set `DYN_REQUEST_PLANE=nats`). The platform chart enables the NATS event
-  plane, the local vLLM engine publishes KV-cache events through its ZMQ
-  publisher, and the Dynamo worker runtime relays those events onto NATS so
-  routing decisions use observed cache state instead of approximate prediction.
+  not set `DYN_REQUEST_PLANE=nats`). Workers still publish local vLLM KV-cache
+  events through their ZMQ publisher (relayed onto the NATS event plane), but
+  least-loaded routing does not consume them.
   The `inference-routing-mode` recipe input defaults to `dynamo-router`; set
   `gateway-epp` to validate the GAIE/EPP path through agentgateway with worker
   frontend sidecars in direct mode. The direct-mode sidecars honor EPP routing
@@ -731,6 +733,28 @@ make check-health COMPONENT=gpu-operator   # one component
 make check-health-all                      # everything in recipes/checks/
 make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 ```
+
+### Timeout budgeting
+
+During `aicr validate --phase deployment`, registry health checks in
+`recipes/checks/<component>/health-check.yaml` run in-process inside
+the `expected-resources` check (`validators/chainsaw/inprocess.go`).
+
+A Test's `spec.timeouts.assert` is the **whole-Test budget** — one
+deadline shared across every step and retry. Slurm's
+[`health-check.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/checks/slinky-slurm/health-check.yaml)
+uses `assert: 7m` so workload-readiness steps can converge before the
+pod-phase guard runs.
+
+The `expected-resources` catalog timeout (8m in
+`recipes/validators/catalog.yaml`) is the **outer** envelope. It must
+exceed the longest in-tree `assert` value plus headroom for
+pre-chainsaw work, chainsaw teardown, and log flush
+(`defaults.JobEnvelopeMargin`). If assert runs too close to that
+catalog deadline, the Job can SIGKILL the pod before chainsaw reports
+the failing step — operators see truncated output instead of a useful
+failure. Raise the catalog `timeout` in tandem when you need a longer
+assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
 
 ## Constraint evaluation algorithm
 

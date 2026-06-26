@@ -41,6 +41,7 @@ func runEvidenceCmd(t *testing.T, args []string, resolved *config.ValidateResolv
 			&cli.BoolFlag{Name: "insecure-tls"},
 			&cli.StringFlag{Name: "identity-token"},
 			&cli.BoolFlag{Name: "oidc-device-flow"},
+			&cli.BoolFlag{Name: "full"},
 		},
 		Action: func(_ context.Context, c *cli.Command) error {
 			got = buildRecipeEvidenceConfig(c, resolved)
@@ -110,6 +111,24 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 			},
 		},
 		{
+			name:     "full flag sets Full",
+			args:     []string{"--emit-attestation", "/tmp/out", "--full"},
+			resolved: &config.ValidateResolved{},
+			want: &recipeEvidenceConfig{
+				OutDir: "/tmp/out",
+				Full:   true,
+			},
+		},
+		{
+			name:     "minimal by default (full unset)",
+			args:     []string{"--emit-attestation", "/tmp/out"},
+			resolved: &config.ValidateResolved{},
+			want: &recipeEvidenceConfig{
+				OutDir: "/tmp/out",
+				Full:   false,
+			},
+		},
+		{
 			name: "flag overrides config when both set",
 			args: []string{"--emit-attestation", "/flag/out", "--push", "ttl.sh/flag:1h"},
 			resolved: &config.ValidateResolved{
@@ -163,6 +182,9 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 			if got.OIDCResolve.DeviceFlow != tt.want.OIDCResolve.DeviceFlow {
 				t.Errorf("DeviceFlow = %v, want %v",
 					got.OIDCResolve.DeviceFlow, tt.want.OIDCResolve.DeviceFlow)
+			}
+			if got.Full != tt.want.Full {
+				t.Errorf("Full = %v, want %v", got.Full, tt.want.Full)
 			}
 		})
 	}

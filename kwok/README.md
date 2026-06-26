@@ -74,8 +74,34 @@ flowchart LR
 | `make kwok-nodes RECIPE=<name>` | Create simulated nodes |
 | `make kwok-nodes-delete` | Delete all KWOK-simulated nodes |
 | `make kwok-test RECIPE=<name>` | Validate scheduling only |
+| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<d>` | Validate under a GitOps deployer lane (`helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git`) |
 | `make kwok-status` | Show cluster and node status |
 | `make kwok-cluster-delete` | Delete cluster |
+
+## Deployer Lanes (GitOps Matrix)
+
+The GitOps lanes install shared infrastructure once per cluster via
+`kwok/scripts/install-infra.sh` (keyed on `DEPLOYER`): an in-cluster
+OCI registry (always), Argo CD (`argocd-*`), Flux 2 (`flux-*`), and
+Gitea (the Git-source lanes `flux-git` and `argocd-git`). Two host-port
+mappings in `kwok/kind-config.yaml` expose the in-cluster services to
+the runner:
+
+| Service | Host port | NodePort | In-cluster DNS | Used by |
+|---------|-----------|----------|----------------|---------|
+| registry | 5500 | 30500 | `registry.aicr-registry.svc.cluster.local:5000` | `aicr bundle --output oci://localhost:5500/...` (OCI lanes) |
+| gitea | 3300 | 30300 | `gitea.aicr-registry.svc.cluster.local:3000` | `git push` of the filesystem bundle (`flux-git`, `argocd-git` lanes) |
+
+Clusters created before a port mapping existed must be recreated
+(`kind delete cluster --name aicr-kwok-test`) to pick it up.
+
+Lane details, sync gates, exit codes, and tuning variables are
+documented in
+[docs/contributor/tests.md](../docs/contributor/tests.md) ("KWOK
+Matrix Testing"); design rationale in
+[ADR-008](../docs/design/008-kwok-deployer-matrix.md) (OCI lanes) and
+[ADR-010](../docs/design/010-kwok-git-source-lanes.md) (Git-source
+lanes).
 
 ## Adding Recipes
 
@@ -134,6 +160,8 @@ GPU pods need toleration `kwok.x-k8s.io/node=fake:NoSchedule` and selector `nvid
 ## Limitations
 
 KWOK validates scheduling, not runtime: node selectors, tolerations, resource requests, scheduling decisions, and Helm chart generation are checked. Container execution, GPU functionality, and network connectivity are NOT. For runtime testing, use Tilt (`make dev-env`) or a real cluster.
+
+**OCP recipes are excluded** from KWOK testing. OCP requires the full OpenShift operator ecosystem (OLM and operator controllers) which cannot run in a plain Kind cluster. OCP bundle structure is validated by Chainsaw tests instead.
 
 ## Resources
 

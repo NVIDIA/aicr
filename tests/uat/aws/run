@@ -24,15 +24,16 @@
 # Phases:
 #   prep         snapshot + recipe + dry-run validate + bundle
 #   install      helmfile apply (deploys gpu-operator, kubeflow, ...)
-#   conformance  conformance validate + emit signed evidence bundle
+#   conformance  validate ALL phases (deployment + conformance + performance)
+#                + emit signed evidence bundle
 #   train        submit TrainJob, wait for completion, capture logs
 #   verify       aicr evidence verify against the signed bundle
 #   all          run every phase in order (for local reproduction)
 #
 # Required env:
 #   AICR_BIN    Path to the aicr binary
-#   RUN_ID      Per-run correlation suffix appended to the evidence push
-#               target (e.g. ${{ github.run_id }} in CI, or `local-$(date +%s)`)
+#   RUN_ID      Per-run correlation tag (`run-<id>`) applied to the evidence
+#               push target (e.g. ${{ github.run_id }} in CI, or `local-$(date +%s)`)
 #
 # Working files are written to $PWD: snapshot.yaml, recipe.yaml, bundle/,
 # dry-run.json, report.json, evidence/, evidence-result.json, train-logs/.
@@ -62,14 +63,27 @@ TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
+# Budget for the post-install readiness gate, which runs the deployment
+# validation phase until it passes (see phase_install). Generous: it must span
+# nodewright (skyhook) node tuning -- which REBOOTS the GPU node and re-inits the
+# gpu-operator operands after the operator first reports ready -- plus cold-boot
+# p5.48xlarge GPU-operator convergence (driver/toolkit/device-plugin/DCGM) and
+# prometheus-adapter APIService aggregation. Fails closed if exceeded.
+READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1200}" # 20 min
 
-# Per-run unique OCI repo suffix. The committed config carries the stable
-# prefix only; we append `-${RUN_ID}` once, idempotently, so re-running a
-# phase from the same workspace does not double-append.
+# Per-run OCI tag. The committed config carries the stable per-recipe repo
+# only; we apply a `:run-${RUN_ID}` tag idempotently, stripping any existing
+# `:run-…` tag first so re-running a phase from the same workspace (or with a
+# changed RUN_ID) does not double-append. The repo stays stable across runs so
+# `oras repo tags` lists run history; each run is addressable by tag and pinned
+# immutably by digest. An explicit tag also suppresses the aicr
+# `<recipe-slug>-<fingerprint>` tag derivation, which would re-duplicate the
+# coordinate dims the repo path already carries.
 inject_push_target() {
-  local current expected
+  local current repo expected
   current="$(yq '.spec.validate.evidence.attestation.push' "${config}")"
-  expected="${current%-"${RUN_ID}"}-${RUN_ID}"
+  repo="${current%%:run-*}"
+  expected="${repo}:run-${RUN_ID}"
   if [[ "${current}" != "${expected}" ]]; then
     yq -i ".spec.validate.evidence.attestation.push = \"${expected}\"" "${config}"
   fi
@@ -170,14 +184,73 @@ phase_install() {
   kubectl get nodes -o wide
   kubectl get pods -A | grep -Ev '\s+Running\s+|\s+Completed\s+' || true
   echo "::endgroup::"
+
+  # Readiness gate: run the deployment validation phase -- the authoritative
+  # expected-resources / ClusterPolicy / DRA / nodewright checks the later
+  # `--phase all` run gates on -- in a retry loop until it passes. `helmfile
+  # apply` returns before operator-driven convergence, and nodewright (skyhook)
+  # reboots the GPU node AFTER gpu-operator first reports ready, re-initing the
+  # operands; proxy signals (ClusterPolicy=ready, Skyhook status.status) read that
+  # transient state as "done" prematurely, so we gate on the real check. It rides
+  # through the reboot via expected-resources' own poll plus this outer retry.
+  # Fail-closed: the install fails if the phase never passes within the budget.
+  #
+  # Run against a copy of the config with spec.validate.evidence stripped so the
+  # gate never emits/pushes an evidence bundle -- that is the conformance phase's
+  # job (phase_conformance, `--phase all`).
+  local gate_config gate_log
+  gate_config="$(mktemp)"
+  gate_log="$(mktemp)"
+  yq 'del(.spec.validate.evidence)' "${config}" > "${gate_config}"
+  local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
+  local attempt=1 ready=false
+  echo "::group::Readiness gate: validate --phase deployment (timeout ${READINESS_TIMEOUT_SECONDS}s)"
+  # Check the deadline BEFORE each attempt so no validation run is launched once
+  # the budget is spent (a single run can itself take minutes). The last
+  # attempt's output is captured in gate_log for the failure diagnostic rather
+  # than re-running validate past the deadline.
+  while (( SECONDS < ready_deadline )); do
+    if "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null > "${gate_log}" 2>&1; then
+      ready=true
+      break
+    fi
+    echo "deployment phase not ready (attempt ${attempt}); retrying in 15s..."
+    attempt=$(( attempt + 1 ))
+    sleep 15
+  done
+  if [[ "${ready}" != true ]]; then
+    echo "::error::deployment readiness gate did not pass within ${READINESS_TIMEOUT_SECONDS}s; last attempt output:" >&2
+    cat "${gate_log}" >&2 || true
+    rm -f "${gate_config}" "${gate_log}"
+    echo "::endgroup::"
+    exit 1
+  fi
+  rm -f "${gate_config}" "${gate_log}"
+  echo "deployment readiness gate passed (attempt ${attempt})"
+  echo "::endgroup::"
 }
 
 phase_conformance() {
   inject_push_target
-  echo "::group::Conformance validate + emit signed evidence"
+  # Run ALL validation phases, not just conformance. The deployment phase is
+  # the readiness barrier this UAT was missing: its health-check asserts poll
+  # (chainsaw assert, ~6m budget) until the GPU stack converges — gpu-operator
+  # ClusterPolicy reaches state=ready, the DRA kubelet-plugin DaemonSet is
+  # fully rolled out, and nodewright node tuning completes. The helmfile bundle
+  # (unlike the helm deploy.sh, which `kubectl wait`s on these) returns from
+  # `helmfile apply` as soon as each release's own resources are ready, leaving
+  # operator-driven work in flight; running conformance alone then validated a
+  # not-yet-converged cluster and failed. The deployment phase gates that
+  # convergence deployer-agnostically. The performance phase's only check,
+  # nccl-all-reduce-bw, needs >=2 GPU nodes for its East-West fabric test and
+  # skips gracefully on this single-GPU-node cluster (skip != fail); it
+  # activates automatically if the cluster ever scales to multiple GPU nodes.
+  # Evidence is rendered/attested from the merged multi-phase report, so the
+  # signed bundle covers all phases.
+  echo "::group::Validate (all phases) + emit signed evidence"
   "${AICR_BIN}" validate \
     --config "${config}" \
-    --phase conformance \
+    --phase all \
     --output report.json
   echo "::endgroup::"
 

@@ -49,6 +49,21 @@ v2.49+). RELEASING.md §Container Attestations has both `gh` and
 Registry (GHCR) pull
 failure during the first 60s after tag publish. Re-run the workflow.
 
+## Release Supply-Chain Monitoring
+
+The `Rekor Monitor` workflow (`.github/workflows/rekor-monitor.yaml`) runs
+hourly and calls the upstream `sigstore/rekor-monitor` reusable workflow. It
+watches the public-good Rekor transparency log for two things: that the log
+stays append-only (consistency), and that no entry appears under AICR's release
+signing identity that a release did not produce (identity). On either failure it
+opens an issue.
+
+This protects the trust root every AICR consumer depends on: the release
+binaries, the signed recipe catalog, and the container images all chain to that
+one identity. When the workflow files an issue, follow the triage steps in the
+workflow file's header comment; an unrecognized identity hit should be treated
+as potential OIDC/key compromise.
+
 ## Reviewing Recipe Contributions
 
 A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
@@ -87,9 +102,10 @@ Use this checklist on any PR that touches `recipes/overlays/**`,
 Items 1–5 are validated automatically by the `recipe-evidence` check;
 items 6–8 are maintainer judgement calls.
 
-1. **Pointer file present.** `recipes/evidence/<recipe>.yaml` exists
-   for every touched overlay. The CI gate fails closed when a recipe
-   change has no matching pointer.
+1. **Pointer file present.** At least one per-source pointer file under
+   `recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml` — one immutable
+   file per signed run — exists for every touched overlay. The CI gate fails
+   closed when a recipe change has no matching pointer.
 2. **`recipe-evidence` check is green.** Exit 0 means the bundle
    signature, schema, inventory, fingerprint match, constraint replay,
    and BOM cross-reference all passed. Exit 1 requires explicit
@@ -197,7 +213,7 @@ git log --since='6 months ago' --diff-filter=AM \
   -- recipes/evidence/ | sort -u
 
 # For each, re-verify against the current OCI artifact
-aicr evidence verify recipes/evidence/<recipe>.yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 ```
 
 Exit 0 confirms the bundle is still fetchable and the signature still
