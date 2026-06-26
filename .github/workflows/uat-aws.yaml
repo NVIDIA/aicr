@@ -350,9 +350,9 @@ jobs:
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
-            if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then
+            if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
-              echo "**Evidence (OCI):** \`ghcr.io/nvidia/aicr-evidence/h100-eks-ubuntu-training-kubeflow:run-${{ github.run_id }}\`"
+              echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
