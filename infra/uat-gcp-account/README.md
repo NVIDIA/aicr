@@ -26,6 +26,25 @@ cluster lifecycle management (create, connect, destroy):
 All bindings use `google_project_iam_member` (additive), so they cannot conflict
 with `demo-api-server`'s bindings on the same service account.
 
+## Evidence-dashboard read SA (GP5)
+
+`evidence-dashboard.tf` adds a dedicated **read-only** service account,
+`evidence-read`, for the GP5 Pages publish workflow
+(`.github/workflows/evidence-dashboard-publish.yaml`). Its only grant is
+`roles/storage.objectViewer` on the UAT evidence bucket
+(`var.evidence_bucket`, default `aicr-testgrid-staging`) -- a bucket-scoped,
+additive `google_storage_bucket_iam_member` binding; the bucket itself is
+managed elsewhere and is **not** created or owned here. It is impersonated
+through the existing `github-actions-pool` federation (repository-scoped) and
+is deliberately separate from the shared `github-actions` SA and the GP2
+evidence-publish writer, so a Pages build can only read published evidence.
+
+The publish workflow inlines this SA email directly (matching the repo norm for
+`GCP_WIF_SERVICE_ACCOUNT`); the `EVIDENCE_READ_SERVICE_ACCOUNT` output exists so
+the value can be confirmed against what the workflow hardcodes. GP3
+(`infra/evidence-dashboard`) still owns the hardened data bucket and the
+dedicated `objectCreator` writer.
+
 ## State
 
 Backend: `gs://eidos-tf-state/uat-gcp` (separate prefix from `demo`).

@@ -26,3 +26,8 @@ output "SERVICE_ACCOUNT" {
   value       = data.google_service_account.github_actions.email
   description = "Service account email for GitHub Actions federated auth."
 }
+
+output "EVIDENCE_READ_SERVICE_ACCOUNT" {
+  value       = google_service_account.evidence_read.email
+  description = "Read-only SA the GP5 dashboard build impersonates (set as the EVIDENCE_READ_SERVICE_ACCOUNT repo var)."
+}

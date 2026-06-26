@@ -5,7 +5,8 @@ bundle into the **source-keyed tree** that the corroboration dashboard
 generator consumes. It is the bridge between the per-run attestation
 bundles produced by `aicr validate --emit-attestation --push` (see
 [ADR-007](../design/007-recipe-evidence.md)) and the aggregated,
-consensus view.
+consensus view. The tree it writes is rendered and served by
+[dashboard-publish (GP5)](evidence-dashboard-publish.md).
 
 Its defining property is **verify-before-count**: a bundle's signature,
 issuer, identity, and source registry are all checked in a step that

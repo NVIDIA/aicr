@@ -1,0 +1,168 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GP5 — Evidence dashboard publish to GitHub Pages (#1405).
+#
+# The repo's FIRST GitHub Pages pipeline. On merge to main (and on demand),
+# it syncs the source-keyed corroboration evidence tree from GCS read-only,
+# runs the GP4 generator (tools/corroborate) to emit the deterministic static
+# site, verifies the build is reproducible, then publishes via the canonical
+# configure-pages -> upload-pages-artifact -> deploy-pages chain.
+#
+# (Fern publishes the product docs to docs.nvidia.com via publish-fern-docs.yml,
+# a separate surface; this is the only workflow that deploys to GitHub Pages.)
+#
+# Identity & fork safety, per hippo:reviewer-cicd norms:
+#   - The build job authenticates to GCS with a READ-ONLY identity (objectViewer
+#     only) impersonated through the existing github-actions-pool federation. It
+#     is NOT the GP2 write/publish SA and NOT the shared project-wide SA. GP3
+#     provisions the dedicated read SA; the name is overridable via the
+#     EVIDENCE_READ_SERVICE_ACCOUNT repo var so it can be retargeted without a
+#     code change.
+#   - Every job is gated to the canonical repo, so a fork PR never obtains GCS
+#     credentials or Pages write.
+#   - The credentialed build job (id-token for GCS WIF) is separate from the
+#     deploy job (pages: write); neither grants the other's scope.
+
+name: "Evidence: Dashboard Publish"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Least privilege at the top level; jobs widen only what they need.
+permissions:
+  contents: read
+
+# Serialize deploys to the single Pages environment and let an in-flight
+# publish finish (do not cancel — a half-deployed site is worse than a stale
+# one for the few extra seconds a queued run waits).
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Build: holds the GCS READ-ONLY credentials. Syncs the evidence tree,
+  # runs the deterministic generator twice and diffs the output (the
+  # determinism gate), then uploads the site as a Pages artifact. Holds NO
+  # pages: write.
+  # ---------------------------------------------------------------------
+  build:
+    name: Build site
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write  # GCS Workload Identity Federation only
+    env:
+      GCP_WIF_PROVIDER: "projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
+      # Read-only (objectViewer) SA, scoped to the evidence bucket by
+      # infra/uat-gcp-account/evidence-dashboard.tf. Deliberately NOT the shared
+      # github-actions@eidosx SA and NOT the GP2 evidence-publish writer.
+      GCS_READ_SERVICE_ACCOUNT: "evidence-read@eidosx.iam.gserviceaccount.com"
+      BUCKET: "aicr-testgrid-staging"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Build corroborate generator
+        env:
+          GOFLAGS: -mod=vendor
+        run: go build -o ./bin/corroborate ./tools/corroborate
+
+      - name: Authenticate to GCP (read-only)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCS_READ_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
+
+      - name: Sync evidence tree from GCS
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/results
+          # Mirror the source-keyed tree to disk; the generator has no embedded
+          # cloud client and reads from a local directory. Read-only: rsync here
+          # only pulls (the SA cannot write back).
+          gcloud storage rsync -r "gs://${BUCKET}/results" evidence/results
+
+      - name: Generate site (with determinism gate)
+        run: |
+          set -euo pipefail
+          # Two independent builds from the same inputs must be byte-identical
+          # (the generator carries no clock/random). A drift here means a
+          # non-reproducible build — fail loudly rather than publish it.
+          #
+          # No -allowlist: each source's class is already re-derived from its
+          # VERIFIED signer at GP2 ingest time and baked into meta.json, which
+          # is the trust gate. The generator's own -allowlist re-derivation is
+          # deferred until its loader (pkg/corroborate) is reconciled with the
+          # GP1 allowlist schema (recipes/evidence/allowlist.yaml uses
+          # identityPattern/source; the loader still expects identity).
+          ./bin/corroborate -in evidence -out _site
+          ./bin/corroborate -in evidence -out _site_check
+          if ! diff -r _site _site_check; then
+            echo "::error::corroborate output is not reproducible (determinism gate failed)"
+            exit 1
+          fi
+          rm -rf _site_check
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: _site
+
+  # ---------------------------------------------------------------------
+  # Deploy: holds pages: write and deploys the artifact to the github-pages
+  # environment. Holds NO GCS credentials.
+  # ---------------------------------------------------------------------
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    # Publish only from main. A workflow_dispatch run on a non-main branch still
+    # builds (a credential-free preview of the generator output), but must never
+    # overwrite the single live Pages site with a branch build.
+    if: github.repository == 'nvidia/aicr' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write     # deploy to the Pages environment
+      id-token: write  # OIDC verification for deploy-pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0

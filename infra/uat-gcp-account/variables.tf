@@ -29,3 +29,9 @@ variable "region" {
   type        = string
   default     = "us-central1"
 }
+
+variable "evidence_bucket" {
+  description = "GCS bucket holding the source-keyed evidence tree the GP5 dashboard build reads (read-only)."
+  type        = string
+  default     = "aicr-testgrid-staging"
+}
