@@ -124,7 +124,7 @@ func Publish(ctx context.Context, opts PublishOptions) error {
 
 	slog.Info("evidence pointer written",
 		"path", pointerPath,
-		"copyTo", "recipes/evidence/"+bundle.RecipeName+".yaml")
+		"copyTo", PointerCopyToHint(pointer))
 
 	if out.PushSummary != nil {
 		slog.Info("evidence bundle pushed",

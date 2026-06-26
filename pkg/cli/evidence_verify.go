@@ -47,7 +47,7 @@ phase counts, and BOM info.
 
 Input is auto-detected as one of:
 
-  pointer    recipes/evidence/<recipe>.yaml — pulls the OCI artifact named inside.
+  pointer    recipes/evidence/<recipe>/<source>/<digest>.yaml — pulls the OCI artifact named inside.
   oci        ghcr.io/owner/aicr-evidence@sha256:abc... or oci://...
   directory  ./out/summary-bundle/ (or a parent containing it).
 

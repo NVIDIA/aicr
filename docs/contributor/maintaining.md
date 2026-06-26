@@ -102,9 +102,10 @@ Use this checklist on any PR that touches `recipes/overlays/**`,
 Items 1–5 are validated automatically by the `recipe-evidence` check;
 items 6–8 are maintainer judgement calls.
 
-1. **Pointer file present.** `recipes/evidence/<recipe>.yaml` exists
-   for every touched overlay. The CI gate fails closed when a recipe
-   change has no matching pointer.
+1. **Pointer file present.** At least one per-source pointer file under
+   `recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml` — one immutable
+   file per signed run — exists for every touched overlay. The CI gate fails
+   closed when a recipe change has no matching pointer.
 2. **`recipe-evidence` check is green.** Exit 0 means the bundle
    signature, schema, inventory, fingerprint match, constraint replay,
    and BOM cross-reference all passed. Exit 1 requires explicit
@@ -212,7 +213,7 @@ git log --since='6 months ago' --diff-filter=AM \
   -- recipes/evidence/ | sort -u
 
 # For each, re-verify against the current OCI artifact
-aicr evidence verify recipes/evidence/<recipe>.yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 ```
 
 Exit 0 confirms the bundle is still fetchable and the signature still

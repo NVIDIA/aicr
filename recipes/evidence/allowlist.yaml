@@ -1,0 +1,60 @@
+# Maintained signer allowlist for recipe-evidence corroboration.
+#
+# This file is the trust root for the interim evidence-corroboration
+# dashboard (epic #1400, contract #1347). It pins, per class, the signers
+# that may contribute corroborating evidence:
+#
+#   - first-party : the AICR project's own GitHub Actions CI.
+#   - community   : individual external contributors.
+#   - partner     : vetted partner organizations.
+#
+# GP2's verify step and GP4's consensus model classify a verified signer
+# against this file and weight its corroboration accordingly. A verified
+# signer that is NOT listed here is admitted as "reported" only — it never
+# counts toward corroboration.
+#
+# Privacy: community/partner entries are keyed by the one-way `source` slug
+# (first 32 hex of sha256(issuer + "\n" + identity) of the verified signer);
+# the cleartext identity (e.g. a personal email) is deliberately NOT stored,
+# so it is never committed to the repo. An optional `label` carries a non-PII
+# display string (e.g. a GitHub handle) — omit it to stay fully pseudonymous.
+# (Keyless Sigstore still records the identity in the public Rekor log; this
+# only keeps it out of the repository.) The loader rejects an `identity:`
+# field, so cleartext cannot be reintroduced by accident.
+#
+# Anti-sybil rules (enforced by pkg/evidence/allowlist.Validate and the
+# evidence-pointer-check CI job; see docs/user/artifact-verification.md):
+#   - Each entry is anchored: a content-addressed `source` slug, or a
+#     tightly-bounded anchored `identityPattern` whose issuer/org/repo/
+#     workflow segment is literal (a wildcard is permitted only in the ref,
+#     right of the OIDC subject's '@').
+#   - The three classes are disjoint and no two entries overlap (no duplicate
+#     source slug, no overlapping patterns).
+#
+# To contribute community/partner evidence, open a PR adding a slug entry
+# here (in the correct class) alongside your pointer file under
+# recipes/evidence/<recipe>/<src>/. Maintainer review is the trust gate.
+schemaVersion: 1.0.0
+
+# First-party: the AICR project's own UAT workflows. These sign with the
+# GitHub Actions OIDC issuer and ingest evidence directly (no committed
+# per-run pointer), so they pin a branch-bounded identityPattern. The
+# patterns are CI workflow URLs (not personal PII) and mirror the
+# EXPECTED_IDENTITY_REGEXP each workflow already enforces at verify time.
+firstParty:
+  - label: aicr-uat-aws
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
+  - label: aicr-uat-gcp
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-gcp\.yaml@refs/heads/.+$'
+
+# Community: individual external contributors, keyed by source slug only.
+# Each commits pointers under recipes/evidence/<recipe>/<src>/ where <src> is
+# the slug below.
+community:
+  - issuer: https://github.com/login/oauth
+    source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
+
+# Partner: vetted partner organizations. None onboarded yet.
+partner: []

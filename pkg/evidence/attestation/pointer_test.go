@@ -84,6 +84,39 @@ func TestBuildPointer_RequiresBundle(t *testing.T) {
 	}
 }
 
+func TestPointerCopyToHint(t *testing.T) {
+	signed := &Pointer{
+		SchemaVersion: PointerSchemaVersion,
+		Recipe:        "h100-gke-cos-training",
+		Attestations: []PointerAttestation{{
+			Bundle: PointerBundle{
+				OCI:           "ghcr.io/yuanchen8911/aicr-evidence:x",
+				Digest:        "sha256:33d4cf36",
+				PredicateType: PredicateTypeV1,
+			},
+			Signer: &PointerSigner{
+				Identity: "yuanchen97@gmail.com",
+				Issuer:   "https://github.com/login/oauth",
+			},
+		}},
+	}
+	// 7c4c0edc8c765a95a0f3afdb3bbb8e91 is SourceSlug(issuer, identity) for this signer.
+	want := "recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4cf36.yaml"
+	if got := PointerCopyToHint(signed); got != want {
+		t.Errorf("signed hint = %q, want %q", got, want)
+	}
+
+	// Unsigned / unpushed pointers have no committable destination.
+	unsigned := &Pointer{
+		SchemaVersion: PointerSchemaVersion,
+		Recipe:        "h100-gke-cos-training",
+		Attestations:  []PointerAttestation{{Bundle: PointerBundle{PredicateType: PredicateTypeV1}}},
+	}
+	if got := PointerCopyToHint(unsigned); strings.HasPrefix(got, "recipes/evidence/") {
+		t.Errorf("unsigned hint should not be a path, got %q", got)
+	}
+}
+
 func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
 	bundle := &Bundle{
 		RecipeName: "h100-eks-ubuntu-training",

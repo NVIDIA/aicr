@@ -406,13 +406,16 @@ CTRF reports omit per-test stdout/message. The signed predicate records the
 applied policy in a `redaction` block, and the bundle self-verifies exactly
 like a full one. Pass `--full` to publish the raw payloads instead.
 
-Commit `pointer.yaml` to `recipes/evidence/<recipe>.yaml`; the bundle
-itself lives in OCI. Then self-verify before opening the PR — the same
-verifier runs against the committed pointer in the CI gate, so exit 0
+Commit `pointer.yaml` to its per-source path
+`recipes/evidence/<recipe>/<src>/<digest>.yaml` — the emit output prints
+the exact `copyTo` path, and `<src>` is the slug derived from your signer
+identity (see [Artifact Verification](artifact-verification.md#per-source-pointer-layout-and-the-signer-allowlist)).
+The bundle itself lives in OCI. Then self-verify before opening the PR — the
+same verifier runs against the committed pointer in the CI gate, so exit 0
 locally means the gate will pass:
 
 ```bash
-aicr evidence verify recipes/evidence/<recipe>.yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 ```
 
 **Flag reference:**
