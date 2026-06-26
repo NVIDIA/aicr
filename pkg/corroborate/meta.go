@@ -16,8 +16,10 @@ package corroborate
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"io"
 	"os"
+	"syscall"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -73,32 +75,34 @@ type RunMetaSigner struct {
 //
 // It refuses to follow symlinks and to read non-regular files (FIFOs, devices,
 // sockets): a hostile input tree could otherwise point a meta.json at /proc or
-// /dev to read unintended content or block on a pipe. It also preserves the
-// open/stat error classification (not-found vs permission/other) so callers can
-// tell a missing run apart from an I/O failure.
+// /dev to read unintended content or block on a pipe. The open is atomic with
+// the symlink check (O_NOFOLLOW) so there is no window between an Lstat and the
+// open in which the final path component could be swapped for a symlink (TOCTOU);
+// the regular-file check then validates the opened descriptor itself, not the
+// path. It preserves the open error classification (not-found vs symlink vs
+// permission/other) so callers can tell a missing run apart from an I/O failure.
 func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
-	fi, err := os.Lstat(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) //nolint:gosec // O_NOFOLLOW rejects symlinks atomically; descriptor validated below; operator-supplied input tree / allowlist
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, errors.Wrap(errors.ErrCodeNotFound, "stat "+path, err)
+		switch {
+		case os.IsNotExist(err):
+			return nil, errors.Wrap(errors.ErrCodeNotFound, "open "+path, err)
+		case stderrors.Is(err, syscall.ELOOP):
+			// O_NOFOLLOW on a symlink final component fails with ELOOP.
+			return nil, errors.New(errors.ErrCodeInvalidRequest, path+" is a symlink (refusing to follow)")
+		default:
+			return nil, errors.Wrap(errors.ErrCodeInternal, "open "+path, err)
 		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, "stat "+path, err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, path+" is a symlink (refusing to follow)")
+	defer func() { _ = f.Close() }()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "stat "+path, err)
 	}
 	if !fi.Mode().IsRegular() {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, path+" is not a regular file")
 	}
-
-	f, err := os.Open(path) //nolint:gosec // path validated above (regular file, not a symlink); operator-supplied input tree / allowlist
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, errors.Wrap(errors.ErrCodeNotFound, "open "+path, err)
-		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, "open "+path, err)
-	}
-	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {

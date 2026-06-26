@@ -165,8 +165,16 @@ var phaseNames = func() []string {
 // collectRuns walks inputDir for every meta.json and parses each run with its
 // sibling ctrf/<phase>.json reports.
 func collectRuns(inputDir string, allowlist *Allowlist) ([]*signerRun, error) {
-	if info, err := os.Stat(inputDir); err != nil || !info.IsDir() {
+	info, statErr := os.Stat(inputDir)
+	switch {
+	case os.IsNotExist(statErr):
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "input dir not found: "+inputDir)
+	case statErr != nil:
+		// A permission or filesystem error is not "not found" — surface it as an
+		// operational failure with its original cause rather than masking it.
+		return nil, errors.Wrap(errors.ErrCodeInternal, "stat input dir "+inputDir, statErr)
+	case !info.IsDir():
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "input dir is not a directory: "+inputDir)
 	}
 
 	var metaPaths []string
@@ -375,15 +383,37 @@ func build(recipes map[string]*recipeAgg) (Index, map[string]Series, GenerateRes
 // buildRecipe computes one recipe's grid (Tab) and time-series (Series), and
 // registers its grid signers into the shared sources map.
 func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
-	// Sort each signer's runs newest-first and pick the latest.
-	signerIDs := make([]string, 0, len(agg.bySigner))
-	latest := make(map[string]*signerRun, len(agg.bySigner))
+	// Pre-reduce by the VERIFIED (issuer, identity), not the contributor-
+	// controlled IDHash that keys agg.bySigner: one verified signer that submitted
+	// runs under two IDHashes must render as ONE source with one latest result,
+	// not two. (ComputeConsensus already de-dups the count via signerIdentityKey;
+	// this aligns the grid/series display with that count.) Each verified identity
+	// gets a canonical display IDHash — its newest run's — so the public keys
+	// (Latest.Src, Sources, Series) stay IDHashes. Distinct identities never share
+	// an IDHash (it is sha256(issuer\nidentity)), so the canonical IDs do not
+	// collide across signers.
+	runsByID := make(map[string][]*signerRun, len(agg.bySigner)) // canonical display IDHash -> all of that identity's runs
 	runCount := 0
-	for id, rs := range agg.bySigner {
-		sortRunsNewestFirst(rs)
+	{
+		byIdentity := make(map[string][]*signerRun, len(agg.bySigner))
+		for _, rs := range agg.bySigner {
+			for _, r := range rs {
+				k := signerIdentityKey(r.meta.Signer)
+				byIdentity[k] = append(byIdentity[k], r)
+			}
+		}
+		for _, rs := range byIdentity {
+			sortRunsNewestFirst(rs)
+			runsByID[rs[0].meta.Signer.IDHash] = rs
+			runCount += len(rs)
+		}
+	}
+
+	signerIDs := make([]string, 0, len(runsByID))
+	latest := make(map[string]*signerRun, len(runsByID))
+	for id, rs := range runsByID {
 		latest[id] = rs[0]
 		signerIDs = append(signerIDs, id)
-		runCount += len(rs)
 	}
 	sort.Strings(signerIDs)
 
@@ -444,7 +474,7 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 		PhaseRollup: phaseRollup(statesByPhase),
 		Tests:       rows,
 	}
-	series := buildSeries(agg, gridSigners, rowKeys)
+	series := buildSeries(agg, gridSigners, rowKeys, runsByID)
 	return tab, series, runCount
 }
 
@@ -507,7 +537,10 @@ func registerSource(sources map[string]Source, run *signerRun) {
 }
 
 // buildSeries assembles the per-recipe time-series for the grid signers.
-func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowKey) Series {
+// runsByID maps each signer's canonical display IDHash to all of that verified
+// identity's runs (newest-first), pre-reduced in buildRecipe so a signer that
+// submitted under two IDHashes contributes one column series, not two.
+func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowKey, runsByID map[string][]*signerRun) Series {
 	names := make([]string, 0, len(rowKeys))
 	nameSeen := map[string]struct{}{}
 	for _, rk := range rowKeys {
@@ -521,7 +554,7 @@ func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowK
 	builds := make(map[string][]SeriesBuild)
 	health := make(map[string]SeriesHealth)
 	for id := range gridSigners {
-		runs := agg.bySigner[id] // already newest-first from buildRecipe
+		runs := runsByID[id] // already newest-first from buildRecipe
 		cols := make([]SeriesBuild, 0, len(runs))
 		for i, run := range runs {
 			flat := run.flatten()
