@@ -15,6 +15,8 @@
 package corroborate
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -53,8 +55,10 @@ func criteriaFromCoordinate(co recipe.Coordinate) (recipe.Criteria, error) {
 
 	got, err := recipe.CoordinateFor(&crit)
 	if err != nil {
-		return recipe.Criteria{}, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"coordinate "+co.Path()+" does not round-trip through CoordinateFor", err)
+		// CoordinateFor already returns a coded *StructuredError; PropagateOrWrap
+		// preserves that code instead of overwriting it with a fresh wrapper.
+		return recipe.Criteria{}, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"coordinate "+co.Path()+" does not round-trip through CoordinateFor")
 	}
 	if got.Path() != co.Path() {
 		return recipe.Criteria{}, errors.New(errors.ErrCodeInvalidRequest,
@@ -169,6 +173,20 @@ func isCodeHost(host string) bool {
 // serialized; display still uses the IDHash.
 func signerIdentityKey(s RunMetaSigner) string {
 	return s.Issuer + "\n" + s.Identity
+}
+
+// canonicalSourceID is the locally-derived display key for a verified signer:
+// the first 12 hex chars of sha256(issuer\nidentity). The grid, the Sources map,
+// and the per-recipe series are all keyed by this value rather than meta.json's
+// contributor-controlled IDHash. Because GP4 computes it itself from the verified
+// (issuer, identity) pair, two distinct verified identities can never collide on
+// one display key — which, if the IDHash were trusted, would let a claimed hash
+// overwrite another signer's row and silently drop it from the dashboard. It is
+// derived from the same identity pair as the consensus distinct-signer key
+// (signerIdentityKey), so display and consensus stay consistent.
+func canonicalSourceID(s RunMetaSigner) string {
+	sum := sha256.Sum256([]byte(signerIdentityKey(s)))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // formatWhen renders an RFC3339 AttestedAt as "YYYY-MM-DD HH:MM UTC" for the

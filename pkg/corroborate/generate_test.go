@@ -16,6 +16,7 @@ package corroborate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,10 +26,20 @@ import (
 
 const fixtureGCS = "testdata/gcs"
 
+// Fixture signer identities (see testdata/gcs/.../meta.json). The dashboard keys
+// the Sources map and the per-recipe series by canonicalSourceID(issuer,
+// identity) — never the contributor-controlled meta.json idHash — so tests
+// derive the expected keys the same way rather than hard-coding hashes.
+var (
+	srcNVIDIA = canonicalSourceID(RunMetaSigner{Issuer: ghIssuer, Identity: "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"})
+	srcAcme   = canonicalSourceID(RunMetaSigner{Issuer: ghIssuer, Identity: "https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main"})
+	srcRogue  = canonicalSourceID(RunMetaSigner{Issuer: ghIssuer, Identity: "https://github.com/rogue-org/rogue-repo/.github/workflows/x.yaml@refs/heads/main"})
+)
+
 func generateInto(t *testing.T, allowlist string) (string, Index) {
 	t.Helper()
 	out := t.TempDir()
-	res, err := Generate(Options{InputDir: fixtureGCS, OutputDir: out, AllowlistPath: allowlist})
+	res, err := Generate(context.Background(), Options{InputDir: fixtureGCS, OutputDir: out, AllowlistPath: allowlist})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -99,9 +110,9 @@ func TestGenerateEndToEnd(t *testing.T) {
 		class string
 		allow bool
 	}{
-		"a1nvidia": {"first-party", true},
-		"b2acme":   {"community", true},
-		"c3rogue":  {"community", false},
+		srcNVIDIA: {"first-party", true},
+		srcAcme:   {"community", true},
+		srcRogue:  {"community", false},
 	}
 	for id, want := range wantSources {
 		s, ok := idx.Sources[id]
@@ -128,7 +139,7 @@ func TestGenerateEndToEnd(t *testing.T) {
 	// (v0.14.0) must not pull this to CONTESTED.
 	var nvidia *Latest
 	for i := range oh.Signers {
-		if oh.Signers[i].Src == "a1nvidia" {
+		if oh.Signers[i].Src == srcNVIDIA {
 			nvidia = &oh.Signers[i]
 		}
 	}
@@ -196,14 +207,14 @@ func TestGenerateTrustsMetaClassWithoutAllowlist(t *testing.T) {
 	// free flag — GP2 wrote them). The fixtures carry the same classes, so the
 	// result matches the allowlist path.
 	_, idx := generateInto(t, "")
-	rogue, ok := idx.Sources["c3rogue"]
+	rogue, ok := idx.Sources[srcRogue]
 	if !ok {
 		t.Fatal("rogue source missing from index")
 	}
 	if rogue.Allowlisted {
 		t.Errorf("rogue allowlisted via meta = %v, want false", rogue.Allowlisted)
 	}
-	nvidia, ok := idx.Sources["a1nvidia"]
+	nvidia, ok := idx.Sources[srcNVIDIA]
 	if !ok {
 		t.Fatal("nvidia source missing from index")
 	}
@@ -230,7 +241,7 @@ func TestGenerateSkipsUnparseableAttestedAt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := Generate(Options{InputDir: dir, OutputDir: t.TempDir()})
+	res, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -272,7 +283,7 @@ func TestGenerateConsensusKeyedByVerifiedIdentityNotIDHash(t *testing.T) {
 	writeRun("sybilB", "run-b")
 
 	out := t.TempDir()
-	if _, err := Generate(Options{InputDir: dir, OutputDir: out}); err != nil {
+	if _, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: out}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	idx := readIndex(t, filepath.Join(out, "data", "index.json"))
@@ -282,13 +293,23 @@ func TestGenerateConsensusKeyedByVerifiedIdentityNotIDHash(t *testing.T) {
 	}
 }
 
+func TestGenerateContextCanceled(t *testing.T) {
+	// An already-canceled context stops the walk/collect before any output is
+	// written and surfaces as an error rather than a partial dashboard.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Generate(ctx, Options{InputDir: fixtureGCS, OutputDir: t.TempDir()}); err == nil {
+		t.Fatal("expected error from a canceled context")
+	}
+}
+
 func TestGenerateDeterministic(t *testing.T) {
 	// Same inputs -> byte-identical index.json + series + index.html, proving
 	// no clock/random/UUID on the emit path (timestamps come from the predicate).
 	out1 := t.TempDir()
 	out2 := t.TempDir()
 	for _, out := range []string{out1, out2} {
-		if _, err := Generate(Options{InputDir: fixtureGCS, OutputDir: out, AllowlistPath: filepath.Join("testdata", "allowlist.yaml")}); err != nil {
+		if _, err := Generate(context.Background(), Options{InputDir: fixtureGCS, OutputDir: out, AllowlistPath: filepath.Join("testdata", "allowlist.yaml")}); err != nil {
 			t.Fatalf("Generate: %v", err)
 		}
 	}
@@ -323,7 +344,7 @@ func TestGenerateSeries(t *testing.T) {
 		t.Fatalf("parse series: %v", err)
 	}
 	// nvidia has two runs; newest first; the newest build records the pass.
-	nv := s.Builds["a1nvidia"]
+	nv := s.Builds[srcNVIDIA]
 	if len(nv) != 2 {
 		t.Fatalf("nvidia builds = %d, want 2", len(nv))
 	}
@@ -338,7 +359,7 @@ func TestGenerateSeries(t *testing.T) {
 		t.Errorf("mig in series = %q, want not-run", nv[0].Results["mig-config-applied"])
 	}
 	// operator-health flipped fail->pass across the two builds => 100% flaky.
-	if s.Health["a1nvidia"].FlakePct != 100 {
+	if s.Health[srcNVIDIA].FlakePct != 100 {
 		t.Errorf("nvidia flakePct = %d, want 100", s.Health["a1nvidia"].FlakePct)
 	}
 }
@@ -400,7 +421,7 @@ func TestAggregateResilience(t *testing.T) {
 
 func TestGenerateErrors(t *testing.T) {
 	t.Run("missing input dir", func(t *testing.T) {
-		if _, err := Generate(Options{InputDir: filepath.Join(t.TempDir(), "nope"), OutputDir: t.TempDir()}); err == nil {
+		if _, err := Generate(context.Background(), Options{InputDir: filepath.Join(t.TempDir(), "nope"), OutputDir: t.TempDir()}); err == nil {
 			t.Fatal("expected error for missing input dir")
 		}
 	})
@@ -411,14 +432,14 @@ func TestGenerateErrors(t *testing.T) {
 		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Generate(Options{InputDir: fixtureGCS, OutputDir: t.TempDir(), AllowlistPath: p}); err == nil {
+		if _, err := Generate(context.Background(), Options{InputDir: fixtureGCS, OutputDir: t.TempDir(), AllowlistPath: p}); err == nil {
 			t.Fatal("expected over-broad allowlist rejection")
 		}
 	})
 	t.Run("empty input yields an empty but valid index", func(t *testing.T) {
 		in := t.TempDir()
 		out := t.TempDir()
-		res, err := Generate(Options{InputDir: in, OutputDir: out})
+		res, err := Generate(context.Background(), Options{InputDir: in, OutputDir: out})
 		if err != nil {
 			t.Fatalf("Generate empty: %v", err)
 		}

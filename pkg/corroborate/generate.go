@@ -15,6 +15,7 @@
 package corroborate
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	stderrors "errors"
@@ -127,7 +128,13 @@ type recipeAgg struct {
 // Generate reads the corroboration evidence under opts.InputDir, computes the
 // consensus model, and writes the deterministic dashboard (index.json,
 // series/<recipe>.json, index.html) under opts.OutputDir.
-func Generate(opts Options) (GenerateResult, error) {
+//
+// The directory walk, per-run reads, and output writes are unbounded in the size
+// of the evidence tree, so they observe ctx: a canceled or deadline-exceeded ctx
+// stops the walk, the per-run collect loop, and the series-emit loop and returns
+// ErrCodeTimeout. Pure in-memory aggregation/build between those phases is not a
+// cancellation point.
+func Generate(ctx context.Context, opts Options) (GenerateResult, error) {
 	var allowlist *Allowlist
 	if opts.AllowlistPath != "" {
 		al, err := LoadAllowlist(opts.AllowlistPath)
@@ -137,7 +144,7 @@ func Generate(opts Options) (GenerateResult, error) {
 		allowlist = al
 	}
 
-	runs, err := collectRuns(opts.InputDir, allowlist)
+	runs, err := collectRuns(ctx, opts.InputDir, allowlist)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -146,10 +153,19 @@ func Generate(opts Options) (GenerateResult, error) {
 
 	index, seriesByRecipe, summary := build(recipes)
 
-	if err := emit(opts.OutputDir, index, seriesByRecipe); err != nil {
+	if err := emit(ctx, opts.OutputDir, index, seriesByRecipe); err != nil {
 		return GenerateResult{}, err
 	}
 	return summary, nil
+}
+
+// canceledErr wraps a context error as a coded ErrCodeTimeout, or returns nil if
+// ctx is still live. Used at the loop/walk cancellation points in Generate.
+func canceledErr(ctx context.Context, what string) error {
+	if err := ctx.Err(); err != nil {
+		return errors.Wrap(errors.ErrCodeTimeout, what+" canceled", err)
+	}
+	return nil
 }
 
 // phaseNames is validator.PhaseOrder rendered as strings (the ctrf/<phase>.json
@@ -164,7 +180,7 @@ var phaseNames = func() []string {
 
 // collectRuns walks inputDir for every meta.json and parses each run with its
 // sibling ctrf/<phase>.json reports.
-func collectRuns(inputDir string, allowlist *Allowlist) ([]*signerRun, error) {
+func collectRuns(ctx context.Context, inputDir string, allowlist *Allowlist) ([]*signerRun, error) {
 	info, statErr := os.Stat(inputDir)
 	switch {
 	case os.IsNotExist(statErr):
@@ -182,12 +198,18 @@ func collectRuns(inputDir string, allowlist *Allowlist) ([]*signerRun, error) {
 		if werr != nil {
 			return werr
 		}
+		if err := ctx.Err(); err != nil {
+			return err // honor cancellation mid-walk; classified below
+		}
 		if !d.IsDir() && d.Name() == "meta.json" {
 			metaPaths = append(metaPaths, path)
 		}
 		return nil
 	})
 	if walkErr != nil {
+		if stderrors.Is(walkErr, context.Canceled) || stderrors.Is(walkErr, context.DeadlineExceeded) {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "walk input dir canceled", walkErr)
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "walk input dir", walkErr)
 	}
 	// Deterministic processing order.
@@ -195,6 +217,9 @@ func collectRuns(inputDir string, allowlist *Allowlist) ([]*signerRun, error) {
 
 	runs := make([]*signerRun, 0, len(metaPaths))
 	for _, mp := range metaPaths {
+		if err := canceledErr(ctx, "collect runs"); err != nil {
+			return nil, err
+		}
 		run, err := loadRun(mp, allowlist)
 		if err != nil {
 			if stderrors.Is(err, errSkipRun) {
@@ -292,7 +317,7 @@ func aggregate(runs []*signerRun) map[string]*recipeAgg {
 			Tab:       run.meta.Coordinate.Tab,
 		}
 		key := co.Path()
-		signerID := run.meta.Signer.IDHash
+		signerID := canonicalSourceID(run.meta.Signer)
 
 		if agg := recipes[key]; agg != nil {
 			agg.bySigner[signerID] = append(agg.bySigner[signerID], run)
@@ -383,16 +408,15 @@ func build(recipes map[string]*recipeAgg) (Index, map[string]Series, GenerateRes
 // buildRecipe computes one recipe's grid (Tab) and time-series (Series), and
 // registers its grid signers into the shared sources map.
 func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
-	// Pre-reduce by the VERIFIED (issuer, identity), not the contributor-
-	// controlled IDHash that keys agg.bySigner: one verified signer that submitted
-	// runs under two IDHashes must render as ONE source with one latest result,
-	// not two. (ComputeConsensus already de-dups the count via signerIdentityKey;
-	// this aligns the grid/series display with that count.) Each verified identity
-	// gets a canonical display IDHash — its newest run's — so the public keys
-	// (Latest.Src, Sources, Series) stay IDHashes. Distinct identities never share
-	// an IDHash (it is sha256(issuer\nidentity)), so the canonical IDs do not
-	// collide across signers.
-	runsByID := make(map[string][]*signerRun, len(agg.bySigner)) // canonical display IDHash -> all of that identity's runs
+	// Pre-reduce by the VERIFIED (issuer, identity): one verified signer that
+	// submitted runs under two IDHashes must render as ONE source with one latest
+	// result, not two. (ComputeConsensus already de-dups the count via
+	// signerIdentityKey; this aligns the grid/series display with that count.)
+	// Each verified identity gets a canonicalSourceID — derived locally from the
+	// verified pair, never the contributor-controlled IDHash — as its public
+	// display key (Latest.Src, Sources, Series). Distinct identities cannot
+	// collide on a canonical ID, so no signer can be overwritten/dropped.
+	runsByID := make(map[string][]*signerRun, len(agg.bySigner)) // canonicalSourceID -> all of that identity's runs
 	runCount := 0
 	{
 		byIdentity := make(map[string][]*signerRun, len(agg.bySigner))
@@ -404,7 +428,7 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 		}
 		for _, rs := range byIdentity {
 			sortRunsNewestFirst(rs)
-			runsByID[rs[0].meta.Signer.IDHash] = rs
+			runsByID[canonicalSourceID(rs[0].meta.Signer)] = rs
 			runCount += len(rs)
 		}
 	}
@@ -440,7 +464,8 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 			// contributor-controlled field; keying consensus on it would let one
 			// verified identity submitted under two IDHashes count as two
 			// distinct allowlisted signers and manufacture a CONFIRMED. The
-			// display keys (Latest.Src, Sources, Series) stay the IDHash.
+			// display keys (Latest.Src, Sources, Series) use canonicalSourceID,
+			// also derived from the verified pair (see id above).
 			signerResults = append(signerResults, SignerResult{SignerID: signerIdentityKey(run.meta.Signer), Allowlisted: run.allowlisted, Result: res})
 			if res != ResultPass && res != ResultFail {
 				continue
@@ -524,7 +549,7 @@ func sortRunsNewestFirst(rs []*signerRun) {
 // registerSource records a signer's display record in the shared sources map
 // (first write wins; all of a signer's runs carry the same identity/class).
 func registerSource(sources map[string]Source, run *signerRun) {
-	id := run.meta.Signer.IDHash
+	id := canonicalSourceID(run.meta.Signer)
 	if _, ok := sources[id]; ok {
 		return
 	}
@@ -537,7 +562,7 @@ func registerSource(sources map[string]Source, run *signerRun) {
 }
 
 // buildSeries assembles the per-recipe time-series for the grid signers.
-// runsByID maps each signer's canonical display IDHash to all of that verified
+// runsByID maps each signer's canonicalSourceID to all of that verified
 // identity's runs (newest-first), pre-reduced in buildRecipe so a signer that
 // submitted under two IDHashes contributes one column series, not two.
 func buildSeries(agg *recipeAgg, gridSigners map[string]struct{}, rowKeys []rowKey, runsByID map[string][]*signerRun) Series {
@@ -755,7 +780,7 @@ func criteriaValues(present map[string]map[string]struct{}) map[string][]string 
 }
 
 // emit writes index.html and the data tree deterministically.
-func emit(outputDir string, index Index, seriesByRecipe map[string]Series) error {
+func emit(ctx context.Context, outputDir string, index Index, seriesByRecipe map[string]Series) error {
 	dataDir := filepath.Join(outputDir, "data")
 	seriesDir := filepath.Join(dataDir, "series")
 	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
@@ -766,6 +791,9 @@ func emit(outputDir string, index Index, seriesByRecipe map[string]Series) error
 		return err
 	}
 	for recipeName, series := range seriesByRecipe {
+		if err := canceledErr(ctx, "emit series"); err != nil {
+			return err
+		}
 		if err := writeJSON(filepath.Join(seriesDir, recipeName+".json"), series); err != nil {
 			return err
 		}

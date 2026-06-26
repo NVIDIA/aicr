@@ -32,22 +32,38 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/NVIDIA/aicr/pkg/corroborate"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func main() {
-	os.Exit(parseAndRun(os.Args[1:], os.Stderr))
+	os.Exit(realMain())
+}
+
+// realMain runs the CLI and returns the process exit code. It is split from main
+// so the signal-context teardown (defer stop()) runs before os.Exit, which would
+// otherwise skip deferred functions.
+func realMain() int {
+	// Cancel an in-flight generation on Ctrl-C / SIGTERM rather than imposing an
+	// arbitrary deadline: the run time scales with the (operator-supplied)
+	// evidence-tree size, so signal cancellation is the right bound for a batch
+	// CLI over local input.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return parseAndRun(ctx, os.Args[1:], os.Stderr)
 }
 
 // parseAndRun parses args and runs the generator, returning a process exit
 // code: 0 on success, 1 on a generation error, 2 on a flag-parse error.
-func parseAndRun(args []string, stderr io.Writer) int {
+func parseAndRun(ctx context.Context, args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("corroborate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -62,14 +78,14 @@ func parseAndRun(args []string, stderr io.Writer) int {
 		return 2
 	}
 
-	if err := run(inDir, outDir, allowlist); err != nil {
+	if err := run(ctx, inDir, outDir, allowlist); err != nil {
 		fmt.Fprintln(stderr, "corroborate:", err)
 		return 1
 	}
 	return 0
 }
 
-func run(inDir, outDir, allowlist string) error {
+func run(ctx context.Context, inDir, outDir, allowlist string) error {
 	if inDir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "missing required -in <evidence-dir>")
 	}
@@ -79,7 +95,7 @@ func run(inDir, outDir, allowlist string) error {
 		// a direct-caller error.
 		return errors.New(errors.ErrCodeInvalidRequest, "missing required -out <output-dir>")
 	}
-	res, err := corroborate.Generate(corroborate.Options{
+	res, err := corroborate.Generate(ctx, corroborate.Options{
 		InputDir:      inDir,
 		OutputDir:     outDir,
 		AllowlistPath: allowlist,

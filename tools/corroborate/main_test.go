@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -25,20 +26,20 @@ import (
 var fixtureGCS = filepath.Join("..", "..", "pkg", "corroborate", "testdata", "gcs")
 
 func TestRunMissingInput(t *testing.T) {
-	if err := run("", t.TempDir(), ""); err == nil {
+	if err := run(context.Background(), "", t.TempDir(), ""); err == nil {
 		t.Fatal("expected error when -in is empty")
 	}
 }
 
 func TestRunBadInput(t *testing.T) {
-	if err := run(filepath.Join(t.TempDir(), "nope"), t.TempDir(), ""); err == nil {
+	if err := run(context.Background(), filepath.Join(t.TempDir(), "nope"), t.TempDir(), ""); err == nil {
 		t.Fatal("expected error for nonexistent input dir")
 	}
 }
 
 func TestRunHappyPath(t *testing.T) {
 	out := t.TempDir()
-	if err := run(fixtureGCS, out, ""); err != nil {
+	if err := run(context.Background(), fixtureGCS, out, ""); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	for _, rel := range []string{"index.html", filepath.Join("data", "index.json")} {
@@ -73,7 +74,7 @@ func TestParseAndRun(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseAndRun(tt.args, io.Discard); got != tt.want {
+			if got := parseAndRun(context.Background(), tt.args, io.Discard); got != tt.want {
 				t.Errorf("parseAndRun(%v) = %d, want %d", tt.args, got, tt.want)
 			}
 		})
