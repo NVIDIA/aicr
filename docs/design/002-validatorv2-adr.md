@@ -67,7 +67,7 @@ A versioned, declarative YAML catalog embedded in `recipes/catalog.yaml`
 defines all validators:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1
+apiVersion: aicr.run/v1
 kind: ValidatorCatalog
 metadata:
   name: aicr-validators

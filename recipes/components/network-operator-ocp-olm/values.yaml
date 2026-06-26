@@ -12,15 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-attestations:
-  - attestedAt: 2026-06-23T19:40:07Z
-    bundle:
-      digest: sha256:33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317
-      oci: ghcr.io/yuanchen8911/aicr-evidence:h100-gke-cos-training-ee1657fedd59
-      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
-    signer:
-      identity: yuanchen97@gmail.com
-      issuer: https://github.com/login/oauth
-      rekorLogIndex: 1931193974
-recipe: h100-gke-cos-training
-schemaVersion: 1.0.0
+# Network Operator OCP OLM values
+# Controls the OLM Subscription that installs the Network Operator on OpenShift.
+
+namespace: nvidia-network-operator
+subscription:
+  name: nvidia-network-operator-certified
+  channel: v24.7
+  source: certified-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+operatorGroup:
+  name: network-operator-group
+  targetNamespaces: []

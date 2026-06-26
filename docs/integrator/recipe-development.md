@@ -404,7 +404,7 @@ go test -v ./pkg/recipe/... -run TestConstraintPathsUseValidMeasurementTypes
 **Example:**
 ```yaml
 # recipes/overlays/gb200-eks-ubuntu-training.yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: gb200-eks-ubuntu-training
@@ -655,7 +655,7 @@ cannot independently re-run — most non-H100 GPUs, non-EKS services,
 and specialty fabrics fall into this bucket. The recipe-evidence CI
 gate posts a sticky Markdown comment on every PR touching
 `recipes/**` and fails closed when a touched recipe has no matching
-`recipes/evidence/<recipe>.yaml` pointer.
+per-source pointer under `recipes/evidence/<recipe>/<src>/`.
 
 Non-material edits (comments, formatting, `displayName`,
 `description`, key-order) produce the same material-slice digest and

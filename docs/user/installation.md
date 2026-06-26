@@ -25,13 +25,13 @@ brew install aicr
 Install the latest version using the install script:
 
 ```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://get.aicr.run | bash -s --
 ```
 
 To install to a custom directory instead of the default `/usr/local/bin`:
 
 ```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/bin
+curl -sfL https://get.aicr.run | bash -s -- -d ~/bin
 ```
 
 Optional: if you hit GitHub API rate limits, set `GITHUB_TOKEN` before running the install command. No special repository scope is required for public releases.
@@ -101,7 +101,7 @@ Tab completion for commands and flags is installed automatically by both the Hom
 **Opt out** (install script only): set `AICR_NO_COMPLETIONS=1` before running the script:
 
 ```shell
-AICR_NO_COMPLETIONS=1 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+AICR_NO_COMPLETIONS=1 curl -sfL https://get.aicr.run | bash -s --
 ```
 
 **Manual setup** (build from source or `go install`):

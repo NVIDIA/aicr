@@ -12,15 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-attestations:
-  - attestedAt: 2026-06-23T18:24:27Z
-    bundle:
-      digest: sha256:8274b6a1da24aa9782dc12162bf6a38265c30a852585ca64cfad5718efbbdec3
-      oci: ghcr.io/yuanchen8911/aicr-evidence:gb200-eks-ubuntu-training-a3fe1a7e7bcb
-      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
-    signer:
-      identity: yuanchen97@gmail.com
-      issuer: https://github.com/login/oauth
-      rekorLogIndex: 1930094136
-recipe: gb200-eks-ubuntu-training
-schemaVersion: 1.0.0
+# GPU Operator OCP OLM values
+# Controls the OLM Subscription that installs the GPU Operator on OpenShift.
+
+namespace: gpu-operator
+subscription:
+  name: gpu-operator-certified
+  channel: v25.10
+  source: certified-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic
+operatorGroup:
+  name: gpu-operator-group
+  targetNamespaces:
+    # Setting gpu-operator and not nvidia-gpu-operator since the validator assumes this name
+    - gpu-operator

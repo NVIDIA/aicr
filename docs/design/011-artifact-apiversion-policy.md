@@ -1,5 +1,14 @@
 # ADR-011: Artifact apiVersion Policy and Compatibility Gate
 
+> **Amended by [ADR-013](013-aicr-run-domain-migration.md).** This ADR
+> established the single-sourced, enforced `apiVersion` contract while the
+> domain was `aicr.nvidia.com` and the version was `v1alpha1`. ADR-013 later
+> migrated the domain to `aicr.run` and bumped the version to `v1alpha2`
+> (build spec `v1beta2`) as a **hard break** — the legacy value is rejected,
+> not dual-accepted. The current canonical value is `header.GroupVersion` =
+> `aicr.run/v1alpha2`. The general evolution policy and compatibility gate
+> below remain in force; only the concrete domain/version values changed.
+
 ## Problem
 
 `aicr validate` consumes three artifacts that may have been produced by
@@ -11,7 +20,7 @@ modes followed:
   `aicr` version could be loaded structurally with no signal, surfacing later
   as a confusing validation failure with no obvious cause.
 - **No meaningful version contract.** Every artifact carries an `apiVersion`
-  (`aicr.nvidia.com/v1alpha1`), but the string was:
+  (then `aicr.nvidia.com/v1alpha1`), but the string was:
   - **frozen since repo init** — never bumped, with breaking schema changes
     shipped *within* `v1alpha1`;
   - **redefined as ~5 independent string literals** (`pkg/snapshotter`,
@@ -30,10 +39,12 @@ This ADR establishes the durable, schema-level gate.
 
 ## Non-Goals
 
-- **Bumping to `v1alpha2` now.** No breaking schema change is being made, so
-  the version stays `v1alpha1`. Bumping with no schema change would orphan
-  every existing artifact for zero benefit. The bump happens the next time the
-  schema changes incompatibly.
+- **Bumping the version segment now.** *(At the time of this ADR.)* No breaking
+  schema change was being made, so the version stayed `v1alpha1`; bumping with
+  no schema change would have orphaned every existing artifact for zero benefit.
+  This non-goal was later overridden by [ADR-013](013-aicr-run-domain-migration.md):
+  the `aicr.run` domain rename is itself a breaking change, so it carried a
+  signal-only bump to `v1alpha2` to make the cut explicit.
 - **Gating non-artifact `apiVersion`s.** The validator catalog
   (`validator.nvidia.com/...`), provenance predicate, and Zarf/Hauler mirror
   formats are separate schemas with their own domains/versions and are out of
@@ -51,9 +62,10 @@ This ADR establishes the durable, schema-level gate.
 
 `pkg/header` is the canonical home for the artifact group/version:
 
-- `header.APIGroup` = `aicr.nvidia.com`
-- `header.APIVersionV1Alpha1` = `v1alpha1`
-- `header.GroupVersion` = `aicr.nvidia.com/v1alpha1`
+- `header.Domain` = `aicr.run` (single source of truth; see ADR-013)
+- `header.APIGroup` = `header.Domain` = `aicr.run`
+- `header.APIVersionV1Alpha2` = `v1alpha2`
+- `header.GroupVersion` = `aicr.run/v1alpha2`
 
 All package-local constants alias `header.GroupVersion` rather than redeclaring
 the literal: `snapshotter.FullAPIVersion`, `recipe.RecipeAPIVersion`,
@@ -95,13 +107,21 @@ When the schema is bumped (e.g. to `v1alpha2`), add the new value to
 window accepts both. Retire the old value only after the deprecation window
 closes. Add a regression test asserting an out-of-window version is rejected.
 
+**Exception — the `aicr.run` domain migration (ADR-013) was a hard break.**
+Because it was a pre-v1, simultaneous domain-and-version change with all
+fixtures regenerated in lockstep, the dual-accept window this policy normally
+allows was intentionally *not* used: the legacy `aicr.nvidia.com/v1alpha1` value
+is rejected outright rather than accepted alongside `aicr.run/v1alpha2`. See
+ADR-013 for the rationale.
+
 ## Consequences
 
 - An artifact stamped with an unsupported `apiVersion` now fails fast at load
   with a clear, actionable error instead of failing obscurely downstream.
 - The `apiVersion` literal exists exactly once; future bumps are a one-line
   change plus a transition-window entry.
-- No behavior change for current artifacts: everything in the wild is
-  `v1alpha1` (accepted) or has an empty `apiVersion` (tolerated).
+- Current artifacts are `aicr.run/v1alpha2` (accepted) or carry an empty
+  `apiVersion` (tolerated). Per ADR-013's hard break, legacy
+  `aicr.nvidia.com/v1alpha1` artifacts are rejected and must be regenerated.
 - The gate is intentionally not a security control; the unsigned header can
   still be edited. Authenticated provenance remains the supply-chain workstream.

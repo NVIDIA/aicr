@@ -213,7 +213,7 @@ func TestMake_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -290,7 +290,7 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -365,7 +365,7 @@ func TestMake_DisabledDependencyPruned(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -407,7 +407,7 @@ func TestMake_UndeclaredDependencyErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -498,7 +498,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			}
 
 			recipeResult := &recipe.RecipeResult{
-				APIVersion: "aicr.nvidia.com/v1alpha1",
+				APIVersion: "aicr.run/v1alpha2",
 				Kind:       "Recipe",
 				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 				ComponentRefs: []recipe.ComponentRef{
@@ -553,7 +553,7 @@ func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -606,7 +606,7 @@ func TestMake_WithValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -657,7 +657,7 @@ func TestMake_WithTypedValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -715,7 +715,7 @@ func TestMake_TypedOverrideWinsOverSet(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -760,7 +760,7 @@ func TestMake_WithNodeSelectors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -802,7 +802,7 @@ func TestMake_WithTolerations(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -836,7 +836,7 @@ func TestMake_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -863,7 +863,7 @@ func TestMake_DefaultOutputDir(t *testing.T) {
 	ctx := context.Background()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -906,7 +906,7 @@ func TestMake_ArgoCD(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -982,7 +982,7 @@ func TestMake_Helmfile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -1271,7 +1271,7 @@ func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -1769,7 +1769,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 	const nodeSelectorPath = "scheduling.nodeSelector"
 
 	tmpDir := t.TempDir()
-	registryYAML := "apiVersion: aicr.nvidia.com/v1alpha1\n" +
+	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: " + uniqueComponent + "\n" +
@@ -1868,7 +1868,7 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 	//      in the base, so our marker passes through into the emitted bundle).
 	tmpData := t.TempDir()
 
-	registryYAML := []byte("apiVersion: aicr.nvidia.com/v1alpha1\n" +
+	registryYAML := []byte("apiVersion: aicr.run/v1alpha2\n" +
 		"kind: ComponentRegistry\n" +
 		"components: []\n")
 	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
@@ -2414,7 +2414,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 
 	t.Run("layered provider with --data", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		minimalRegistry := "apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"
+		minimalRegistry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
 		if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(minimalRegistry), 0600); writeErr != nil {
 			t.Fatalf("write registry.yaml: %v", writeErr)
 		}
@@ -2449,7 +2449,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 // Running Make() twice with the same input should produce identical output.
 func TestMake_Reproducible(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -2558,7 +2558,7 @@ func TestMake_DynamicValuesUnknownComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -2591,7 +2591,7 @@ func TestMake_DynamicValuesValidComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -2631,7 +2631,7 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -2700,7 +2700,7 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
@@ -2714,6 +2714,215 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	if !strings.Contains(err.Error(), "argocd-helm") {
 		t.Errorf("error should suggest argocd-helm, got: %v", err)
 	}
+}
+
+// TestMake_OCP builds a real OCP inference recipe via BuildFromCriteria,
+// bundles it with --readiness-hooks, and verifies:
+//   - Numbered folder layout: 3 OLM + 3 readiness + 3 CR = 9 directories
+//   - Rendered manifest content: Subscription, OperatorGroup, ClusterPolicy, etc.
+//   - Readiness gate folders with correct gate image
+//   - Deployment ordering: OLM < readiness < CR for each operator
+func TestMake_OCP(t *testing.T) {
+	b := recipe.NewBuilder()
+	criteria := &recipe.Criteria{
+		Service: recipe.CriteriaServiceOCP,
+		Intent:  recipe.CriteriaIntentInference,
+	}
+	result, err := b.BuildFromCriteria(context.Background(), criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+
+	const testVersion = "v0.99.0"
+	cfg := config.NewConfig(
+		config.WithReadinessHooks(true),
+		config.WithVersion(testVersion),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	outDir := t.TempDir()
+	_, err = bundler.Make(context.Background(), result, outDir)
+	if err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+
+	// Collect numbered directories and their sequence numbers.
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	dirByName := map[string]int{} // name (without prefix) -> sequence number
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if len(n) < 4 || n[3] != '-' {
+			continue
+		}
+		var seq int
+		if _, scanErr := fmt.Sscanf(n[:3], "%d", &seq); scanErr != nil {
+			continue
+		}
+		dirByName[n[4:]] = seq
+	}
+
+	// Assert OLM components exist.
+	olmComponents := []string{"nfd-ocp-olm", "gpu-operator-ocp-olm", "network-operator-ocp-olm"}
+	for _, c := range olmComponents {
+		if _, ok := dirByName[c]; !ok {
+			t.Errorf("missing OLM component directory: %s", c)
+		}
+	}
+
+	// Assert CR components exist.
+	crComponents := []string{"nfd-ocp", "gpu-operator-ocp", "network-operator-ocp"}
+	for _, c := range crComponents {
+		if _, ok := dirByName[c]; !ok {
+			t.Errorf("missing CR component directory: %s", c)
+		}
+	}
+
+	// Assert readiness gate directories exist (one per OLM component).
+	for _, olm := range olmComponents {
+		rdnsName := olm + "-readiness"
+		if _, ok := dirByName[rdnsName]; !ok {
+			t.Errorf("missing readiness directory: %s", rdnsName)
+		}
+	}
+
+	// Assert ordering: OLM < readiness < CR for each operator pair.
+	operators := []struct {
+		olm string
+		cr  string
+	}{
+		{"nfd-ocp-olm", "nfd-ocp"},
+		{"gpu-operator-ocp-olm", "gpu-operator-ocp"},
+		{"network-operator-ocp-olm", "network-operator-ocp"},
+	}
+	for _, op := range operators {
+		olmSeq, olmOK := dirByName[op.olm]
+		rdnsSeq, rdnsOK := dirByName[op.olm+"-readiness"]
+		crSeq, crOK := dirByName[op.cr]
+		if !olmOK || !rdnsOK || !crOK {
+			continue // already reported above
+		}
+		if olmSeq >= rdnsSeq {
+			t.Errorf("%s (seq %d) must precede %s-readiness (seq %d)", op.olm, olmSeq, op.olm, rdnsSeq)
+		}
+		if rdnsSeq >= crSeq {
+			t.Errorf("%s-readiness (seq %d) must precede %s (seq %d)", op.olm, rdnsSeq, op.cr, crSeq)
+		}
+	}
+
+	// Assert rendered manifest content — OLM folders must contain Subscription and OperatorGroup.
+	for _, olm := range olmComponents {
+		dir := findNumberedDir(t, outDir, olm)
+		if dir == "" {
+			continue
+		}
+		templates := readTemplateFiles(t, dir)
+		assertKindInTemplates(t, olm, templates, "Subscription")
+		assertKindInTemplates(t, olm, templates, "OperatorGroup")
+	}
+
+	// Assert CR manifest content.
+	crKinds := map[string]string{
+		"gpu-operator-ocp":     "ClusterPolicy",
+		"nfd-ocp":              "NodeFeatureDiscovery",
+		"network-operator-ocp": "NicClusterPolicy",
+	}
+	for comp, kind := range crKinds {
+		dir := findNumberedDir(t, outDir, comp)
+		if dir == "" {
+			continue
+		}
+		templates := readTemplateFiles(t, dir)
+		assertKindInTemplates(t, comp, templates, kind)
+	}
+
+	// Assert readiness gate content — each readiness folder must contain the
+	// gate image reference.
+	wantImage := "ghcr.io/nvidia/aicr-gate:" + testVersion
+	for _, olm := range olmComponents {
+		rdnsDir := findNumberedDir(t, outDir, olm+"-readiness")
+		if rdnsDir == "" {
+			continue
+		}
+		templates := readTemplateFiles(t, rdnsDir)
+		found := false
+		for _, content := range templates {
+			if strings.Contains(content, wantImage) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s-readiness: gate image %q not found in templates", olm, wantImage)
+		}
+	}
+}
+
+// findNumberedDir returns the full path to the numbered directory matching the
+// given suffix name, or "" (with a test error) if not found.
+func findNumberedDir(t *testing.T, outDir, name string) string {
+	t.Helper()
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Errorf("ReadDir %s: %v", outDir, err)
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), "-"+name) {
+			return filepath.Join(outDir, e.Name())
+		}
+	}
+	t.Errorf("numbered directory for %q not found", name)
+	return ""
+}
+
+// readTemplateFiles reads all YAML files under dir/templates/ and returns a
+// map of filename to content.
+func readTemplateFiles(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	templatesDir := filepath.Join(dir, "templates")
+	entries, err := os.ReadDir(templatesDir)
+	if err != nil {
+		t.Errorf("ReadDir %s: %v", templatesDir, err)
+		return nil
+	}
+	result := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(templatesDir, e.Name()))
+		if readErr != nil {
+			t.Errorf("ReadFile %s: %v", e.Name(), readErr)
+			continue
+		}
+		result[e.Name()] = string(data)
+	}
+	return result
+}
+
+// assertKindInTemplates checks that at least one template file contains the
+// given Kubernetes kind.
+func assertKindInTemplates(t *testing.T, component string, templates map[string]string, kind string) {
+	t.Helper()
+	needle := "kind: " + kind
+	for _, content := range templates {
+		if strings.Contains(content, needle) {
+			return
+		}
+	}
+	t.Errorf("%s: kind %q not found in any template file", component, kind)
 }
 
 // computeTestChecksum computes SHA256 hash for test comparison.
@@ -2736,7 +2945,7 @@ func TestMake_PreservesInnerErrorCode(t *testing.T) {
 
 	// "../evil" triggers deployer.IsSafePathComponent → ErrCodeInvalidRequest
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "../evil", Version: "v1.0.0", Type: "helm", Source: "https://example.com"},
@@ -2771,7 +2980,7 @@ func TestMake_PreservesTimeoutFromExtractValues(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -2811,7 +3020,7 @@ func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
 	//   - Overrides only             → cert-manager (inline only)
 	//   - ValuesFile + Overrides     → network-operator (hybrid merge)
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{

@@ -18,7 +18,7 @@
 # --os ubuntu --platform kubeflow` produces a valid recipe with correct criteria,
 # kubeflow-specific components, and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 criteria:
   service: aks
   accelerator: h100

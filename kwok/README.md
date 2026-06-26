@@ -109,7 +109,7 @@ A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` d
 
 ```yaml
 kind: recipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: your-recipe-name
 spec:
@@ -160,6 +160,8 @@ GPU pods need toleration `kwok.x-k8s.io/node=fake:NoSchedule` and selector `nvid
 ## Limitations
 
 KWOK validates scheduling, not runtime: node selectors, tolerations, resource requests, scheduling decisions, and Helm chart generation are checked. Container execution, GPU functionality, and network connectivity are NOT. For runtime testing, use Tilt (`make dev-env`) or a real cluster.
+
+**OCP recipes are excluded** from KWOK testing. OCP requires the full OpenShift operator ecosystem (OLM and operator controllers) which cannot run in a plain Kind cluster. OCP bundle structure is validated by Chainsaw tests instead.
 
 ## Resources
 

@@ -242,7 +242,7 @@ func TestDiffCmd_FailOnDriftReturnsConflict(t *testing.T) {
 func writeSnapshotWithVersion(t *testing.T, path, version string) {
 	t.Helper()
 	content := `kind: Snapshot
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata: {}
 measurements:
   - type: K8s
@@ -355,7 +355,7 @@ func writeMinimalSnapshot(t *testing.T, dir, name string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	content := `kind: Snapshot
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata: {}
 measurements: []
 `

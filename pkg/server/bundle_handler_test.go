@@ -60,7 +60,7 @@ func TestBundleHandler_EmptyComponentRefs(t *testing.T) {
 	t.Parallel()
 	h := newTestBundleHandler(t)
 
-	body := `{"apiVersion": "aicr.nvidia.com/v1alpha1", "kind": "Recipe", "componentRefs": []}`
+	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "Recipe", "componentRefs": []}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

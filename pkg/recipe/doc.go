@@ -25,7 +25,7 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, any
 //	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, talos, any
@@ -68,6 +68,7 @@
 //   - CriteriaServiceKind: kind (local clusters)
 //   - CriteriaServiceLKE: Linode LKE
 //   - CriteriaServiceBCM: NVIDIA Base Command Manager
+//   - CriteriaServiceOCP: Red Hat OpenShift Container Platform
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
@@ -179,7 +180,7 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, bcm, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, any (default: any)
 //   - accelerator: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
@@ -196,7 +197,7 @@
 //
 //	type RecipeCriteria struct {
 //	    Kind       string    // Must be "RecipeCriteria"
-//	    APIVersion string    // Must be "aicr.nvidia.com/v1alpha1"
+//	    APIVersion string    // Must be "aicr.run/v1alpha2"
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
 //	    }
@@ -206,7 +207,7 @@
 // Example criteria file (criteria.yaml):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -277,7 +278,7 @@
 //
 // Base structure (recipes/overlays/base.yaml):
 //
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	kind: Base
 //	metadata:
 //	  name: base
@@ -289,7 +290,7 @@
 //
 // Overlay structure (recipes/overlays/*.yaml):
 //
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	kind: Overlay
 //	metadata:
 //	  name: h100-training

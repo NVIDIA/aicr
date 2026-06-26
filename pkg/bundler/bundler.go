@@ -43,6 +43,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/netutil"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -2017,7 +2018,7 @@ func renderGKECriticalPriorityQuota(namespace string, pods int) ([]byte, error) 
 // diff that forces helm upgrade (and every other deployer) to re-roll
 // the DaemonSet — clearing the kubelet plugin's stale NVML handle that
 // would otherwise pin to the pre-migration driver state.
-const draChartVersionAnnotation = "aicr.nvidia.com/gpu-operator-chart-version"
+const draChartVersionAnnotation = header.Domain + "/gpu-operator-chart-version"
 
 // draComponentName / gpuOperatorComponentName are the registry-level
 // component names this injection couples together. Both must be

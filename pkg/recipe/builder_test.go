@@ -400,14 +400,14 @@ func buildIsolationProvider(t *testing.T, overlayName string) DataProvider {
 	registryYAML := []byte(`components: []
 `)
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
   componentRefs: []
 `)
 	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: %[1]s
 spec:

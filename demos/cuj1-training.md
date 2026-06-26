@@ -258,7 +258,7 @@ across the workflow:
 ```shell
 cat > aicr-config.yaml <<'EOF'
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gke-h100-training
 spec:

@@ -14,11 +14,32 @@
 
 # Kube Prometheus Stack Health Check
 #
-# Validates that the kube-prometheus-stack operator is running and healthy in
-# the monitoring namespace. Checks that the kube-prometheus-stack-operator
-# deployment has at least one available replica and that no prometheus stack
-# pods (selected by label) are stuck in Pending, Failed, or Unknown phases.
-# Label selectors are used because monitoring is a shared namespace.
+# Validates that the kube-prometheus-stack operator, its managed CRs, and
+# associated workloads are running and healthy in the monitoring namespace:
+#
+# 1. The kube-prometheus-operator Deployment has at least one available replica.
+# 2. The Prometheus CR (kube-prometheus-prometheus) reports Available=True.
+#    This explicitly catches operator-level reconcile stalls (e.g., webhook
+#    rejections) where a target StatefulSet might never be created at all.
+# 3. The Alertmanager CR (kube-prometheus-alertmanager) reports Available=True.
+# 4. The Prometheus StatefulSet (prometheus-kube-prometheus-prometheus) has
+#    reached full rollout: readyReplicas >= replicas, with a replicas > 0
+#    vacuous-pass guard so a missing StatefulSet does not silently pass.
+# 5. The Alertmanager StatefulSet (alertmanager-kube-prometheus-alertmanager)
+#    reaches the same full-rollout threshold.
+# 6. No stack operator pods (label-scoped to app.kubernetes.io/name:
+#    kube-prometheus-stack) are stuck in Pending, Failed, Unknown, or a
+#    known-bad container-waiting reason (CrashLoopBackOff, ImagePullBackOff,
+#    ErrImagePull, CreateContainerConfigError).
+#
+# StatefulSet and CR names are derived from fullnameOverride=kube-prometheus
+# in recipes/components/kube-prometheus-stack/values.yaml. The prometheus-
+# operator creates StatefulSets named <workload>-<cr-name>, and the chart
+# renders CR names as <fullname>-<workload>. Names verified against
+# tests/chainsaw/ai-conformance/common/assert-monitoring.yaml and
+# tests/chainsaw/ai-conformance/kind-common/assert-monitoring.yaml
+# (both live-cluster-validated). Label selectors are used in the pod-health
+# step because monitoring is a shared namespace.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -40,17 +61,47 @@ spec:
                 namespace: monitoring
               status:
                 (availableReplicas > `0`): true
-    - name: validate-prometheus-server-ready
+    - name: validate-prometheus-cr-available
       try:
-        # The operator-only check above passes as soon as the prometheus-operator
-        # Deployment is up -- BEFORE the operator has created and started the
-        # Prometheus server StatefulSet. Gate on the server itself being Ready so
-        # the deployment phase does not hand a not-yet-serving Prometheus to the
-        # conformance metric checks (ai-service-metrics / pod-autoscaling), which
-        # query Prometheus and the prometheus-adapter metrics APIs. The StatefulSet
-        # name derives from the chart fullnameOverride (kube-prometheus) + the
-        # Prometheus CR: prometheus-kube-prometheus-prometheus (matches the
-        # prometheus-kube-prometheus-prometheus-0 pod).
+        # Assert the Prometheus CR has been reconciled by the operator.
+        # The prometheus-operator sets an Available condition on the CR once
+        # it has successfully reconciled the CR into a running StatefulSet.
+        # CR name kube-prometheus-prometheus derives from the chart's
+        # fullnameOverride=kube-prometheus + the chart's -prometheus suffix.
+        - assert:
+            resource:
+              apiVersion: monitoring.coreos.com/v1
+              kind: Prometheus
+              metadata:
+                name: kube-prometheus-prometheus
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available']):
+                  - status: "True"
+    - name: validate-alertmanager-cr-available
+      try:
+        # Assert the Alertmanager CR has been reconciled by the operator.
+        # CR name kube-prometheus-alertmanager derives from the chart's
+        # fullnameOverride=kube-prometheus + the chart's -alertmanager suffix.
+        - assert:
+            resource:
+              apiVersion: monitoring.coreos.com/v1
+              kind: Alertmanager
+              metadata:
+                name: kube-prometheus-alertmanager
+                namespace: monitoring
+              status:
+                (conditions[?type == 'Available']):
+                  - status: "True"
+    - name: validate-prometheus-statefulset-ready
+      try:
+        # Assert the Prometheus StatefulSet created by the operator has
+        # reached full rollout. readyReplicas >= replicas ensures all pods
+        # are ready, not just some. The replicas > 0 guard prevents a
+        # vacuous pass when the StatefulSet is missing or has 0 replicas.
+        # StatefulSet name prometheus-kube-prometheus-prometheus is
+        # <workload>-<cr-name> per prometheus-operator convention, verified
+        # from tests/chainsaw/ai-conformance/common/assert-monitoring.yaml.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -59,7 +110,25 @@ spec:
                 name: prometheus-kube-prometheus-prometheus
                 namespace: monitoring
               status:
-                (readyReplicas > `0`): true
+                (replicas > `0`): true
+                (readyReplicas >= replicas): true
+    - name: validate-alertmanager-statefulset-ready
+      try:
+        # Assert the Alertmanager StatefulSet has reached full rollout.
+        # Same pattern as Prometheus above. StatefulSet name
+        # alertmanager-kube-prometheus-alertmanager is <workload>-<cr-name>
+        # per prometheus-operator convention, verified from
+        # tests/chainsaw/ai-conformance/common/assert-monitoring.yaml.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: StatefulSet
+              metadata:
+                name: alertmanager-kube-prometheus-alertmanager
+                namespace: monitoring
+              status:
+                (replicas > `0`): true
+                (readyReplicas >= replicas): true
     - name: validate-all-pods-healthy
       try:
         # Assert no prometheus stack pods are in unhealthy phases

@@ -31,14 +31,14 @@ func catalogStore(t *testing.T) *MetadataStore {
 
 	files := map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
 		"overlays/eks-training.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: eks-training
 spec:
@@ -48,7 +48,7 @@ spec:
   componentRefs: []
 `),
 		"overlays/h100-eks-training.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: h100-eks-training
 spec:
@@ -60,7 +60,7 @@ spec:
   componentRefs: []
 `),
 		"overlays/h100-eks-ubuntu-training.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: h100-eks-ubuntu-training
 spec:
@@ -73,7 +73,7 @@ spec:
   componentRefs: []
 `),
 		"overlays/gb200-eks-ubuntu-training.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-eks-ubuntu-training
 spec:

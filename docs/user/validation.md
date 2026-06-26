@@ -48,8 +48,20 @@ ones) that match the target fabric:
 | Check | Transport | When it's selected |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
+
+The `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
+(e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
+validate` environment to run the NET test over NCCL's built-in IB/verbs
+transport across `roce.networking.k8s.aws` DRA devices instead. The value is
+scoped to the `-net` check only; unset (or `efa`) leaves every existing recipe
+on the EFA path unchanged, and any other value is rejected. The RoCE runtime
+image installs `openssh-server` at startup, so the GPU nodes need apt egress;
+on an air-gapped cluster the RoCE NET test cannot bootstrap. This env override is
+interim — snapshot-based fabric auto-detection (and removing the runtime
+package install once a CUDA-13 image ships sshd) is tracked in
+[NVIDIA/aicr#1413](https://github.com/NVIDIA/aicr/issues/1413).
 
 GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 `-nvls` together rather than the auto-detect variant, because those nodes
@@ -394,13 +406,16 @@ CTRF reports omit per-test stdout/message. The signed predicate records the
 applied policy in a `redaction` block, and the bundle self-verifies exactly
 like a full one. Pass `--full` to publish the raw payloads instead.
 
-Commit `pointer.yaml` to `recipes/evidence/<recipe>.yaml`; the bundle
-itself lives in OCI. Then self-verify before opening the PR — the same
-verifier runs against the committed pointer in the CI gate, so exit 0
+Commit `pointer.yaml` to its per-source path
+`recipes/evidence/<recipe>/<src>/<digest>.yaml` — the emit output prints
+the exact `copyTo` path, and `<src>` is the slug derived from your signer
+identity (see [Artifact Verification](artifact-verification.md#per-source-pointer-layout-and-the-signer-allowlist)).
+The bundle itself lives in OCI. Then self-verify before opening the PR — the
+same verifier runs against the committed pointer in the CI gate, so exit 0
 locally means the gate will pass:
 
 ```bash
-aicr evidence verify recipes/evidence/<recipe>.yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 ```
 
 **Flag reference:**

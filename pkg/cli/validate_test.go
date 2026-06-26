@@ -183,42 +183,49 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 	}{
 		{
 			name:        "RecipeMetadata without criteria returns clear error",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  "has no criteria",
 		},
 		{
 			name:        "RecipeMetadata with criteria auto-hydrates",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "has no criteria",
 		},
 		{
 			name:        "RecipeMixin kind is rejected",
-			yamlContent: "kind: RecipeMixin\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  `kind "RecipeMixin"`,
 		},
 		{
 			name:        "unknown kind is rejected",
-			yamlContent: "kind: SomethingElse\napiVersion: aicr.nvidia.com/v1alpha1\n",
+			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1alpha2\n",
 			wantErr:     true,
 			errContain:  `kind "SomethingElse"`,
 		},
 		{
 			name:        "RecipeResult kind passes kind check",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
 		},
 		{
 			name:        "empty kind passes kind check",
-			yamlContent: "apiVersion: aicr.nvidia.com/v1alpha1\n",
+			yamlContent: "apiVersion: aicr.run/v1alpha2\n",
 			wantErr:     true,
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
+		},
+		{
+			name:        "legacy apiVersion is rejected",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\n",
+			wantErr:     true,
+			errContain:  "apiVersion",
+			errAbsent:   "--no-cluster requires --snapshot",
 		},
 	}
 

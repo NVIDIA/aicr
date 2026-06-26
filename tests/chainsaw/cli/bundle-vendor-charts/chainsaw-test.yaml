@@ -164,7 +164,7 @@ spec:
               yq -o=json "${WORK}/out/provenance.yaml" | python3 -c '
               import json, sys
               doc = json.load(sys.stdin)
-              assert doc["apiVersion"] == "aicr.nvidia.com/v1alpha1", doc["apiVersion"]
+              assert doc["apiVersion"] == "aicr.run/v1alpha2", doc["apiVersion"]
               assert doc["kind"] == "BundleProvenance", doc["kind"]
               charts = doc["vendoredCharts"]
               assert len(charts) >= 1, "no vendored charts recorded"

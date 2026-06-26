@@ -183,7 +183,7 @@ Drive `aicr snapshot` from an `AICRConfig` document so the snapshot inputs versi
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gke-h100-training
 spec:
@@ -284,7 +284,7 @@ data:
 
 **Snapshot Structure:**
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: Snapshot
 metadata:
   created: "2025-12-31T10:30:00Z"
@@ -345,7 +345,7 @@ The config file uses a Kubernetes-style envelope:
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
@@ -386,7 +386,7 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke, bcm |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, any |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, talos |
@@ -470,7 +470,7 @@ aicr recipe -s system.yaml -i inference -o recipe.yaml --format yaml
 
 **Output structure:**
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: Recipe
 metadata:
   version: v1.0.0
@@ -856,10 +856,10 @@ Validation can be run in different phases to validate different aspects of the d
 | `all` | Runs all phases sequentially; results collected regardless of failures | Complete end-to-end validation |
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
-
+>
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
-
-> **apiVersion gate:** Snapshots and recipes also carry a schema `apiVersion` (currently `aicr.nvidia.com/v1alpha1`). Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
+>
+> **apiVersion gate:** Snapshots and recipes also carry a schema `apiVersion` (currently `aicr.run/v1alpha2`). Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 
@@ -961,7 +961,8 @@ aicr validate \
   --recipe recipe.yaml --snapshot snapshot.yaml \
   --emit-attestation ./out \
   --push ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
-# After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
+# After this, copy ./out/pointer.yaml to the per-source path printed in the
+# 'copyTo' hint: recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml
 # NOTE: keyless --push signing publishes the signer's identity (email + issuer)
 # to the public Rekor log. On a TTY, aicr pauses for confirmation first (--yes skips it).
 
@@ -992,7 +993,7 @@ through the precedence chain described on `--identity-token`.
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: prod-validate
 spec:
@@ -1263,7 +1264,7 @@ When both `spec.recipe.output.path` and `spec.bundle.input.recipe` are set, they
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   bundle:
     input:
@@ -1625,7 +1626,7 @@ my-bundle/
 **`provenance.yaml`** sits at the bundle root and lists one entry per vendored chart, using the same K8s-style `apiVersion`/`kind` shape as the rest of AICR's persisted formats:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
@@ -2455,7 +2456,7 @@ aicr mirror list [flags]
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a previously generated recipe. Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (`cm://namespace/name`). |
-| `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`). Alternative to `--recipe`. |
+| `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`, `ocp`). Alternative to `--recipe`. |
 | `--accelerator` | | string | | GPU accelerator (e.g., `h100`, `gb200`). Alternative to `--recipe`. |
 | `--intent` | | string | | Workload intent (`training` or `inference`). Alternative to `--recipe`. |
 | `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |
@@ -2591,7 +2592,7 @@ aicr evidence digest -r recipes/overlays/h100-eks-ubuntu-training.yaml
 
 # CI drift gate: compare the digest pinned in a signed evidence bundle
 # against the recipe currently on the PR branch.
-signed=$(aicr evidence verify recipes/evidence/<slug>.yaml --format json \
+signed=$(aicr evidence verify recipes/evidence/<slug>/<src>/<digest>.yaml --format json \
          | jq -r .predicate.recipe.digest)
 current=$(aicr evidence digest -r recipes/overlays/<file>.yaml)
 [[ "$signed" == "$current" ]] || echo "evidence is stale"
@@ -2707,7 +2708,7 @@ aicr evidence verify <input> [flags]
 
 The positional argument is auto-detected as one of:
 
-* `recipes/evidence/<recipe>.yaml` — **pointer file (preferred)**. The verifier pulls **by digest** — `registry/repo@<bundle.digest>`, with the registry/repo taken from `bundle.oci` and the digest as the pin — so it fetches the exact attested bytes even if the `bundle.oci` tag has since been moved to a different artifact. This is the input to use in nearly all cases.
+* `recipes/evidence/<recipe>/<src>/<digest>.yaml` — **pointer file (preferred)**. The verifier pulls **by digest** — `registry/repo@<bundle.digest>`, with the registry/repo taken from `bundle.oci` and the digest as the pin — so it fetches the exact attested bytes even if the `bundle.oci` tag has since been moved to a different artifact. This is the input to use in nearly all cases.
 * `ghcr.io/<owner>/aicr-evidence@sha256:...` or `oci://...@sha256:...` — a **digest-pinned** OCI reference. A tag-only ref (such as the `bundle.oci` value copied from a pointer, e.g. `...aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`) is refused by default because tags are registry-rewritable; see `--allow-unpinned-tag`.
 * `./out/summary-bundle/` (or a parent containing it) — unpacked directory.
 
@@ -2742,8 +2743,8 @@ The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the lib
 
 **Examples:**
 ```shell
-# Verify the pointer that a contributor committed alongside their recipe change.
-aicr evidence verify recipes/evidence/h100-eks-ubuntu-training.yaml
+# Verify a pointer that a contributor committed alongside their recipe change.
+aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4...yaml
 
 # Verify a pushed OCI bundle directly (no repo checkout required).
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -2752,12 +2753,12 @@ aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
 aicr evidence verify ./out/summary-bundle
 
 # Pin the expected OIDC signer.
-aicr evidence verify recipes/evidence/<recipe>.yaml \
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/.*$'
 
 # CI pipelines: JSON output.
-aicr evidence verify recipes/evidence/<recipe>.yaml -o result.json -t json
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml -o result.json -t json
 ```
 
 See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md) for a full producer-and-consumer walkthrough.
@@ -3152,7 +3153,7 @@ mkdir -p my-data/components/my-operator
 2. **Create registry.yaml with custom component:**
 ```yaml
 # my-data/registry.yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: my-operator
@@ -3176,7 +3177,7 @@ image:
 ```yaml
 # my-data/overlays/my-custom-overlay.yaml
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: my-custom-overlay
 spec:

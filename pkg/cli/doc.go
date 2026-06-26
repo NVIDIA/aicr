@@ -54,7 +54,7 @@
 // Config file format (YAML or JSON):
 //
 //	kind: AICRConfig
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: my-deployment
 //	spec:

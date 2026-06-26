@@ -32,8 +32,8 @@
 #
 # Required env:
 #   AICR_BIN    Path to the aicr binary
-#   RUN_ID      Per-run correlation suffix appended to the evidence push
-#               target (e.g. ${{ github.run_id }} in CI, or `local-$(date +%s)`)
+#   RUN_ID      Per-run correlation tag (`run-<id>`) applied to the evidence
+#               push target (e.g. ${{ github.run_id }} in CI, or `local-$(date +%s)`)
 #
 # Working files are written to $PWD: snapshot.yaml, recipe.yaml, bundle/,
 # dry-run.json, report.json, evidence/, evidence-result.json, train-logs/.
@@ -71,13 +71,19 @@ HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
 # prometheus-adapter APIService aggregation. Fails closed if exceeded.
 READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1200}" # 20 min
 
-# Per-run unique OCI repo suffix. The committed config carries the stable
-# prefix only; we append `-${RUN_ID}` once, idempotently, so re-running a
-# phase from the same workspace does not double-append.
+# Per-run OCI tag. The committed config carries the stable per-recipe repo
+# only; we apply a `:run-${RUN_ID}` tag idempotently, stripping any existing
+# `:run-…` tag first so re-running a phase from the same workspace (or with a
+# changed RUN_ID) does not double-append. The repo stays stable across runs so
+# `oras repo tags` lists run history; each run is addressable by tag and pinned
+# immutably by digest. An explicit tag also suppresses the aicr
+# `<recipe-slug>-<fingerprint>` tag derivation, which would re-duplicate the
+# coordinate dims the repo path already carries.
 inject_push_target() {
-  local current expected
+  local current repo expected
   current="$(yq '.spec.validate.evidence.attestation.push' "${config}")"
-  expected="${current%-"${RUN_ID}"}-${RUN_ID}"
+  repo="${current%%:run-*}"
+  expected="${repo}:run-${RUN_ID}"
   if [[ "${current}" != "${expected}" ]]; then
     yq -i ".spec.validate.evidence.attestation.push = \"${expected}\"" "${config}"
   fi
