@@ -124,8 +124,8 @@ get_recipes() {
         name=$(basename "$overlay" .yaml)
         service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null)
 
-        # Only include recipes with a service (eks, gke, etc.)
-        if [[ -n "$service" && "$service" != "null" && "$service" != "any" ]]; then
+        # Skip non-testable overlays (no service, or OCP — needs OpenShift operators)
+        if [[ -n "$service" && "$service" != "null" && "$service" != "any" && "$service" != "ocp" ]]; then
             echo "$name"
         fi
     done | sort
