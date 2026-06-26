@@ -1,0 +1,1842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Defense-in-depth: the dashboard renders contributor-supplied data. Data is
+     HTML-escaped at every interpolation; this CSP additionally blocks remote/
+     object/base-tag loads so an injection cannot exfiltrate or pivot. The page's
+     own inline <style>/<script> require 'unsafe-inline'; it loads no remote code
+     and fetches only same-origin JSON. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'">
+<title>AICR Recipe Validation — Corroboration (TestGrid · data-driven)</title>
+<style>
+  :root{
+    /* ---- dark console palette ---- */
+    --bg:#0b0f14;
+    --bg-2:#0d1117;
+    --panel:#11161f;
+    --panel-2:#151c28;
+    --row:#0f141d;
+    --row-alt:#0c1018;
+    --line:#1c2532;
+    --line-hi:#2a3647;
+    --ink:#cdd6e4;
+    --ink-soft:#93a0b4;
+    --ink-faint:#697585;
+    --ink-strong:#eef3fb;
+
+    /* NVIDIA accent */
+    --green:#76b900;
+    --green-dim:#5c9200;
+
+    /* ---- consensus state colors (vivid on dark) ---- */
+    --confirmed:#3ddc84;
+    --single:#36c5d6;
+    --contested:#ffae34;
+    --failing:#ff4d5e;
+    --untested:#5a6678;
+
+    /* ---- result / tile colors (TestGrid-style) ---- */
+    --pass:#3ddc84;
+    --pass-tile:#1f8a4c;
+    --fail:#ff4d5e;
+    --fail-tile:#b8313f;
+    --notrun:#54606f;
+    --notrun-tile:#2a3340;
+    --reported:#c08bff;
+
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --shadow-lg:0 18px 60px rgba(0,0,0,.55);
+
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 82% -10%, rgba(118,185,0,.07), transparent 60%),
+      radial-gradient(900px 520px at -8% -4%, rgba(54,197,214,.05), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:13.5px;
+    line-height:1.45;
+    height:100vh;
+    display:flex;flex-direction:column;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:var(--mono)}
+  a{color:var(--single);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .hidden{display:none !important}
+
+  /* ============ TOP BAR ============ */
+  header.topbar{
+    flex:none;z-index:60;
+    background:linear-gradient(180deg,rgba(13,17,23,.98),rgba(13,17,23,.9));
+    border-bottom:1px solid var(--line-hi);
+    backdrop-filter:blur(8px) saturate(140%);
+    padding:9px 18px;
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  }
+  .brand{display:flex;align-items:center;gap:11px;min-width:0;cursor:pointer}
+  .brand:hover .title{color:#fff}
+  .brand:focus-visible{outline:2px solid var(--green);outline-offset:3px;border-radius:6px}
+  .logo{
+    width:26px;height:26px;border-radius:6px;flex:none;
+    background:linear-gradient(135deg,var(--green),var(--green-dim));
+    display:flex;align-items:center;justify-content:center;
+    color:#06120a;font-weight:800;font-size:12px;letter-spacing:-.5px;
+    box-shadow:0 0 14px 1px rgba(118,185,0,.45);
+  }
+  .title-wrap{display:flex;flex-direction:column;min-width:0}
+  .title{font-size:14.5px;font-weight:700;color:var(--ink-strong);letter-spacing:.1px;white-space:nowrap}
+  .title small{color:var(--ink-faint);font-weight:400}
+  .spacer{flex:1 1 auto}
+
+  /* ============ CRITERIA SELECTOR BAR (recipe-selection axes) ============ */
+  .criteria-bar{
+    flex:none;z-index:55;
+    background:var(--bg-2);border-bottom:1px solid var(--line-hi);
+    padding:7px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  }
+  .criteria-bar .cb-title{
+    font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.9px;color:var(--ink-faint);
+    display:flex;align-items:center;gap:7px;
+  }
+  .criteria-bar .cb-title b{color:var(--green);font-weight:700}
+  .criteria-bar .cb-cmd{font-family:var(--mono);font-size:9px;color:var(--ink-faint);opacity:.7}
+  .crit{display:flex;flex-direction:column;gap:3px}
+  .crit label{font-size:8.5px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint)}
+  .crit select{
+    background:var(--panel-2);color:var(--ink-strong);border:1px solid var(--line-hi);border-radius:5px;
+    padding:4px 22px 4px 9px;font-family:var(--mono);font-size:11px;min-width:104px;cursor:pointer;appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%2376b900' stroke-width='1.6' stroke-linecap='round'/></svg>");
+    background-repeat:no-repeat;background-position:right 7px center;
+  }
+  .crit select.set{border-color:var(--green-dim);color:var(--green)}
+  .crit select:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 2px rgba(118,185,0,.2)}
+
+  /* ============ APP SHELL: sidebar + main ============ */
+  .shell{display:flex;align-items:stretch;flex:1;min-height:0}
+
+  /* ============ LEFT NAV TREE ============ */
+  aside.sidebar{
+    flex:none;width:262px;background:var(--bg-2);border-right:1px solid var(--line-hi);
+    align-self:stretch;overflow-y:auto;
+    padding:12px 0 26px;
+  }
+  .side-title{
+    font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:1px;
+    color:var(--ink-faint);padding:4px 16px 9px;display:flex;align-items:center;gap:8px;
+  }
+  .side-title b{color:var(--green)}
+  .tree-group{margin-bottom:2px}
+  .tree-node{
+    display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;
+    font-family:var(--mono);transition:background .1s,color .1s;
+  }
+  .tree-node:hover{background:rgba(255,255,255,.03)}
+  .tree-node .tw{flex:none;width:12px;text-align:center;color:var(--ink-faint);font-size:9px;transition:transform .12s}
+  .tree-node.collapsed .tw{transform:rotate(-90deg)}
+  .tree-node .badge-mini{margin-left:auto;font-size:8.5px;color:var(--ink-faint);font-weight:500}
+
+  .tg-group{padding:7px 14px 7px 12px;font-size:12px;font-weight:700;color:var(--ink-strong);letter-spacing:.4px;text-transform:uppercase}
+  .tg-group .csp{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;
+    background:rgba(118,185,0,.1);color:var(--green);font-size:8px;font-weight:800;flex:none}
+  .tg-group.empty{color:var(--ink-faint)}
+  .tg-group.empty .csp{background:rgba(90,102,120,.12);color:var(--ink-faint)}
+
+  .tg-dash{padding:5px 14px 5px 26px;font-size:11.5px;color:var(--ink-soft);font-weight:600}
+  .tg-dash .tw{color:var(--ink-faint)}
+
+  .tg-tab{
+    padding:4px 14px 4px 44px;font-size:11px;color:var(--ink-soft);
+    display:flex;align-items:center;gap:8px;cursor:pointer;border-left:2px solid transparent;
+  }
+  .tg-tab:hover{background:rgba(255,255,255,.035);color:var(--ink-strong)}
+  .tg-tab.active{background:rgba(118,185,0,.08);border-left-color:var(--green);color:var(--ink-strong)}
+  .tg-tab .tabdot{flex:none;width:8px;height:8px;border-radius:2px}
+  .tg-tab .tablbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tg-empty-note{padding:4px 14px 8px 28px;font-size:10px;color:var(--ink-faint);font-style:italic;font-family:var(--mono)}
+
+  .tree-children.hidden{display:none}
+
+  /* ============ FACETS / CONTROLS ============ */
+  .facets{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+  .facet{display:flex;flex-direction:column;gap:3px}
+  .facet label{font-size:9px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint)}
+  .facet select,.facet input[type=text]{
+    background:var(--panel-2);color:var(--ink);border:1px solid var(--line-hi);border-radius:5px;
+    padding:5px 9px;font-family:var(--mono);font-size:11.5px;min-width:118px;
+  }
+  .facet select{padding-right:24px;cursor:pointer;appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23697585' stroke-width='1.6' stroke-linecap='round'/></svg>");
+    background-repeat:no-repeat;background-position:right 8px center;}
+  .facet select:focus,.facet input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 2px rgba(118,185,0,.2)}
+  .btn{
+    background:var(--panel-2);color:var(--ink-soft);border:1px solid var(--line-hi);border-radius:5px;
+    padding:6px 11px;font-size:11.5px;font-family:var(--mono);cursor:pointer;transition:all .12s;white-space:nowrap;
+  }
+  .btn:hover{border-color:var(--green);color:var(--ink-strong)}
+  .btn.active{border-color:var(--green);color:var(--green);background:rgba(118,185,0,.08)}
+  .toggle-group{display:inline-flex;border:1px solid var(--line-hi);border-radius:5px;overflow:hidden}
+  .toggle-group button{
+    background:var(--panel-2);color:var(--ink-soft);border:none;border-right:1px solid var(--line-hi);
+    padding:6px 10px;font-size:11px;font-family:var(--mono);cursor:pointer;transition:all .12s;
+  }
+  .toggle-group button:last-child{border-right:none}
+  .toggle-group button.active{background:rgba(118,185,0,.12);color:var(--green)}
+  .ctl-label{font-size:9px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint);margin-bottom:3px;display:block}
+
+  /* ============ LAYOUT ============ */
+  main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  .view{animation:fade .22s ease;flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 18px 18px}
+  #landing-host{flex:1;min-height:0;overflow:auto}
+  #catalog-host{flex:1;min-height:0;display:flex}
+  @keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+
+  .section-title{
+    font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:1.1px;
+    color:var(--ink-faint);margin:2px 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  }
+  .section-title b{color:var(--green);font-weight:700}
+  .section-sub{font-size:12px;color:var(--ink-soft);margin:-4px 0 14px;max-width:820px;line-height:1.5}
+
+  /* ============ BREADCRUMB ============ */
+  .breadcrumb{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .breadcrumb .crumb{
+    font-family:var(--mono);font-size:12px;color:var(--ink-soft);
+    background:var(--panel-2);border:1px solid var(--line);padding:3px 9px;border-radius:6px;
+  }
+  .breadcrumb a.crumb{cursor:pointer;transition:all .12s}
+  .breadcrumb a.crumb:hover{border-color:var(--green-dim);color:var(--green);text-decoration:none;background:rgba(118,185,0,.07)}
+  .breadcrumb .crumb.cur{color:var(--ink-strong);border-color:var(--line-hi)}
+  .breadcrumb .sep{color:var(--ink-faint)}
+  .back-btn{
+    font-family:var(--mono);font-size:12px;color:var(--ink-soft);background:var(--panel-2);
+    border:1px solid var(--line-hi);border-radius:6px;padding:5px 11px;cursor:pointer;transition:all .12s;
+  }
+  .back-btn:hover{border-color:var(--green);color:var(--green)}
+
+  /* per-tab status badge */
+  .tab-status{
+    display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;font-weight:700;
+    padding:4px 11px;border-radius:6px;border:1px solid;letter-spacing:.3px;
+  }
+  .tab-status .ic{font-size:11px}
+  .tab-status .sub{font-weight:500;opacity:.85;font-size:10px}
+
+  /* ============ CONSENSUS BADGE / CHIP ============ */
+  .pbadge{
+    display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:600;
+    padding:4px 9px;border-radius:5px;border:1px solid;letter-spacing:.2px;white-space:nowrap;
+  }
+  .pbadge .ic{font-size:11px;line-height:1}
+  .pbadge .cnt{opacity:.82;font-weight:500}
+  .st-confirmed{color:var(--confirmed);border-color:rgba(61,220,132,.42);background:rgba(61,220,132,.08)}
+  .st-single{color:var(--single);border-color:rgba(54,197,214,.42);background:rgba(54,197,214,.08)}
+  .st-contested{color:var(--contested);border-color:rgba(255,174,52,.62);background:rgba(255,174,52,.13);
+    box-shadow:0 0 14px rgba(255,174,52,.26),0 0 2px rgba(255,174,52,.4) inset;font-weight:700}
+  .st-failing{color:var(--failing);border-color:rgba(255,77,94,.5);background:rgba(255,77,94,.1)}
+  .st-untested{color:var(--untested);border-color:var(--line-hi);
+    background:repeating-linear-gradient(45deg,rgba(90,102,120,.07),rgba(90,102,120,.07) 4px,transparent 4px,transparent 8px)}
+  .reported-flag{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;font-weight:600;
+    color:var(--reported);border:1px dashed rgba(192,139,255,.5);border-radius:4px;padding:2px 6px;letter-spacing:.3px;white-space:nowrap}
+
+  /* ============ CATALOG TABLE ============ */
+  .catalog-wrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:auto;flex:1;min-height:0}
+  table.catalog{width:100%;border-collapse:separate;border-spacing:0}
+  /* sticky header: opaque bg + high z-index + solid bottom border so it never
+     overlaps the first data row; body cells sit on a lower stacking layer. */
+  table.catalog thead th{
+    position:sticky;top:0;z-index:25;background:var(--bg-2);
+    text-align:left;font-size:9.5px;font-family:var(--mono);text-transform:uppercase;letter-spacing:1px;
+    color:var(--ink-faint);padding:10px 13px;border-bottom:2px solid var(--line-hi);
+    box-shadow:0 1px 0 var(--line-hi);
+  }
+  table.catalog tbody td{position:relative;z-index:1}
+  table.catalog tbody tr{cursor:pointer;transition:background .12s}
+  table.catalog tbody tr:nth-child(odd){background:var(--row-alt)}
+  table.catalog tbody tr:nth-child(even){background:var(--row)}
+  table.catalog tbody tr:hover{background:#16203160;box-shadow:inset 3px 0 0 var(--green)}
+  table.catalog tbody tr:focus{outline:none;background:#1a2438;box-shadow:inset 3px 0 0 var(--green)}
+  table.catalog tbody tr.dimmed{opacity:.26}
+  table.catalog td{padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:middle}
+  table.catalog tbody tr:last-child td{border-bottom:none}
+  .recipe-name{font-family:var(--mono);font-size:13px;color:var(--ink-strong);font-weight:600}
+  .recipe-coord{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:3px}
+  .recipe-coord .seg{color:var(--single)}
+  .recipe-coord .dim{color:var(--ink-faint)}
+  /* dashboard section header row — one labeled block per accelerator-os dashboard */
+  table.catalog tr.dash-sec td{
+    position:sticky;top:36px;z-index:20;
+    background:linear-gradient(180deg,#141d2c,#0f141d);
+    border-top:1px solid var(--line-hi);border-bottom:1px solid var(--line-hi);
+    padding:7px 13px;
+  }
+  .dash-sec-inner{display:flex;align-items:center;gap:11px}
+  .dash-sec-inner .dname{font-family:var(--mono);font-size:12.5px;font-weight:700;color:var(--ink-strong);letter-spacing:.3px}
+  .dash-sec-inner .dtag{font-family:var(--mono);font-size:8.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--green);
+    border:1px solid var(--green-dim);background:rgba(118,185,0,.08);border-radius:4px;padding:1px 6px}
+  .dash-sec-inner .dmeta{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .catalog tr.dash-sec.dimmed{opacity:.34}
+
+  /* ============ PER-RECIPE MATRIX (sources-as-columns) ============ */
+  .matrix-shell{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column}
+  .matrix-scroll{overflow:auto;flex:1;min-height:0}
+  table.matrix{border-collapse:separate;border-spacing:0;width:100%;min-width:max-content;font-family:var(--mono)}
+
+  /* class group-header row */
+  table.matrix .grouprow th{
+    position:sticky;top:0;z-index:38;background:var(--bg-2);
+    border-bottom:1px solid var(--line);padding:0;height:26px;
+  }
+  .clshead{
+    display:flex;align-items:center;justify-content:center;gap:6px;height:26px;
+    font-size:9.5px;text-transform:uppercase;letter-spacing:.8px;font-weight:700;
+    border-left:1px solid var(--line);
+  }
+  .clshead.first-party{color:#9fe6c0;background:rgba(61,220,132,.06)}
+  .clshead.community{color:#bfa6ff;background:rgba(192,139,255,.06)}
+  .clshead.partner{color:#9fd9ff;background:rgba(54,197,214,.06)}
+  .clshead .cnt{color:var(--ink-faint);font-weight:500}
+
+  /* column header row (source ids) */
+  table.matrix .colrow th{
+    position:sticky;top:26px;z-index:36;background:var(--bg-2);
+    border-bottom:2px solid var(--line-hi);padding:4px 6px;vertical-align:bottom;
+    font-size:9.5px;font-weight:600;color:var(--ink-soft);text-align:center;white-space:nowrap;
+    border-left:1px solid var(--line);cursor:pointer;box-shadow:0 1px 0 var(--line-hi);
+  }
+  table.matrix .colrow th:hover{background:#16202f}
+  table.matrix .colrow th .src-head{display:flex;flex-direction:column;align-items:center;gap:4px}
+  table.matrix .colrow th .src-lbl{font-size:10px;color:var(--ink-strong);max-width:66px;overflow:hidden;text-overflow:ellipsis}
+  table.matrix .colrow th .src-tag{font-size:8px;color:var(--ink-faint);letter-spacing:.4px;display:inline-flex;align-items:center;gap:4px}
+  table.matrix .colrow th .src-open{font-size:8px;color:var(--single);opacity:.7}
+  table.matrix .colrow th .rep-mark{color:var(--reported);font-weight:700}
+
+  /* sticky corner: test-name + consensus headers (top-left, both axes) */
+  th.corner-test{
+    position:sticky;left:0;top:0;z-index:46;background:var(--bg-2);
+    border-bottom:2px solid var(--line-hi);text-align:left;padding:7px 13px;
+    font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:var(--ink-strong);font-weight:700;
+    min-width:236px;box-shadow:0 1px 0 var(--line-hi);
+  }
+  th.corner-cons{
+    position:sticky;left:236px;top:0;z-index:46;background:var(--bg-2);
+    border-bottom:2px solid var(--line-hi);border-left:1px solid var(--line);text-align:left;padding:7px 12px;
+    font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:var(--ink-strong);font-weight:700;min-width:158px;
+    box-shadow:0 1px 0 var(--line-hi);
+  }
+  th.corner-test, th.corner-cons{vertical-align:bottom}
+
+  /* phase section header row — flush-left, spans full grid, sticky-left only.
+     The scroll pane (.matrix-scroll) is the sticky container, so the column
+     header sticks to top:0 of the pane; this phase header just pins to the
+     left edge (no magic vertical offset). Opaque bg + z between header and cells. */
+  tr.phase-sec th{
+    position:sticky;left:0;z-index:30;
+    background:#0f141d;
+    border-top:1px solid var(--line-hi);border-bottom:1px solid var(--line-hi);
+    box-shadow:0 1px 0 var(--line);
+    padding:0;
+  }
+  .phase-sec-inner{display:flex;align-items:center;gap:11px;padding:8px 13px;text-align:left;cursor:pointer;
+    background:linear-gradient(180deg,#141d2c,#0f141d)}
+  .phase-sec-inner .ptw{font-size:9px;color:var(--ink-faint);width:11px;transition:transform .12s}
+  .phase-sec-inner.collapsed .ptw{transform:rotate(-90deg)}
+  .phase-sec-inner .pname{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--green);font-weight:700}
+  .phase-sec-inner .pmeta{font-size:10px;color:var(--ink-faint)}
+
+  /* test data rows */
+  tr.trow{transition:background .1s}
+  tr.trow:nth-child(odd){background:var(--row-alt)}
+  tr.trow:hover{background:#16203160}
+  tr.trow:hover td.cell-test{box-shadow:inset 3px 0 0 var(--green)}
+  tr.trow.dimmed{opacity:.28}
+  tr.trow.filtered{display:none}
+  td.cell-test{
+    position:sticky;left:0;z-index:18;background:var(--row);
+    border-bottom:1px solid var(--line);padding:7px 13px;
+    font-size:12px;color:var(--ink-strong);white-space:nowrap;cursor:pointer;
+  }
+  tr.trow:nth-child(odd) td.cell-test{background:var(--row-alt)}
+  td.cell-cons{
+    position:sticky;left:236px;z-index:18;background:var(--row);
+    border-bottom:1px solid var(--line);border-left:1px solid var(--line);
+    padding:6px 12px;cursor:pointer;
+  }
+  tr.trow:nth-child(odd) td.cell-cons{background:var(--row-alt)}
+  .cons-cell{display:inline-flex;align-items:center;gap:6px;width:100%}
+
+  /* solid TestGrid-style source tiles */
+  td.cell-src{
+    border-bottom:1px solid var(--line);border-left:1px solid var(--line);
+    padding:0;position:relative;cursor:pointer;
+  }
+  td.cell-src.dimcell{opacity:.22}
+  .tile{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    border-radius:0;
+    font-family:var(--mono);font-size:0;font-weight:700;line-height:1;
+    transition:box-shadow .08s;
+  }
+  td.cell-src:hover .tile{box-shadow:inset 0 0 0 2px var(--green)}
+  .tile.t-pass{background:var(--pass-tile);color:#cdfbe0}
+  .tile.t-fail{background:var(--fail-tile);color:#ffd9dd}
+  .tile.t-notrun{background:var(--notrun-tile);color:var(--ink-faint)}
+  .tile.t-empty{
+    background:repeating-linear-gradient(45deg,rgba(84,96,111,.12),rgba(84,96,111,.12) 4px,transparent 4px,transparent 8px);
+    color:var(--ink-faint);
+  }
+  /* reported source columns: hatched outline on tiles + dashed cell sep */
+  td.cell-src.reported-col{border-left:1px dashed rgba(192,139,255,.45)}
+  td.cell-src.reported-col .tile{outline:1px dashed rgba(192,139,255,.55);outline-offset:-2px}
+  table.matrix .colrow th.reported-col{border-left:1px dashed rgba(192,139,255,.45)}
+  /* tile letters are kept in the DOM for screen readers but hidden visually
+     (.tile font-size:0) so cells read as solid TestGrid-style color only */
+
+  /* ============ TIME-SERIES (builds over time) ============ */
+  .ts-shell{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column}
+  .ts-head{flex:none}
+  .ts-head{padding:13px 16px;border-bottom:1px solid var(--line-hi);background:var(--bg-2);
+    display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+  .ts-head .ts-src{display:flex;align-items:center;gap:10px;min-width:0}
+  .ts-head .ts-src .src-shape{width:22px;height:22px;flex:none}
+  .ts-head .ts-title{font-size:14px;color:var(--ink-strong);font-weight:700}
+  .ts-head .ts-id{font-size:10px;color:var(--ink-faint);word-break:break-all;margin-top:2px}
+  .ts-health{margin-left:auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .ts-stat{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .ts-stat .v{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink-strong)}
+  .ts-stat .v.flaky{color:var(--contested)}
+  .ts-stat .k{font-family:var(--mono);font-size:8.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint)}
+  .ts-scroll{overflow:auto;flex:1;min-height:0}
+  table.tsgrid{border-collapse:separate;border-spacing:0;font-family:var(--mono);min-width:max-content}
+  table.tsgrid th.ts-corner{
+    position:sticky;left:0;top:0;z-index:16;background:var(--bg-2);text-align:left;
+    border-bottom:1px solid var(--line-hi);padding:7px 13px;min-width:236px;vertical-align:bottom;
+    font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:var(--ink-faint);
+  }
+  table.tsgrid th.ts-build{
+    position:sticky;top:0;z-index:12;background:var(--bg-2);border-bottom:1px solid var(--line-hi);border-left:1px solid var(--line);
+    padding:6px 6px;vertical-align:bottom;text-align:center;white-space:nowrap;
+  }
+  table.tsgrid th.ts-build.newest{background:#13202d;box-shadow:inset 0 -2px 0 var(--green)}
+  .bh-id{font-size:10px;font-weight:700;color:var(--ink-strong)}
+  .bh-ver{font-size:8.5px;color:var(--single)}
+  .bh-k8s{font-size:8.5px;color:var(--ink-faint)}
+  .bh-when{font-size:8px;color:var(--ink-faint);margin-top:2px}
+  .bh-newest{font-size:7.5px;color:var(--green);letter-spacing:.5px;text-transform:uppercase;margin-top:3px}
+  table.tsgrid tr.ts-phase th{
+    position:sticky;left:0;z-index:10;background:linear-gradient(180deg,#141d2c,#0f141d);
+    border-top:1px solid var(--line-hi);border-bottom:1px solid var(--line-hi);
+    padding:6px 13px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:1.3px;color:var(--green);font-weight:700;
+  }
+  table.tsgrid td.ts-name{
+    position:sticky;left:0;z-index:8;background:var(--row);border-bottom:1px solid var(--line);
+    padding:5px 13px;font-size:11.5px;color:var(--ink-strong);white-space:nowrap;
+  }
+  table.tsgrid td.ts-name.ts-name-norun{color:var(--ink-faint)}
+  .norun-tag{display:block;font-size:8px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.4px;margin-top:1px;opacity:.85}
+  table.tsgrid tr.ts-row:nth-child(odd) td.ts-name{background:var(--row-alt)}
+  table.tsgrid tr.ts-row:nth-child(odd){background:var(--row-alt)}
+  table.tsgrid tr.ts-row:hover{background:#16203160}
+  table.tsgrid td.ts-cell{border-bottom:1px solid var(--line);border-left:1px solid var(--line);padding:0;position:relative}
+
+  /* ============ LANDING / CROSS-GROUP SUMMARY ============ */
+  .landing-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+  .land-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 15px;cursor:pointer;transition:border-color .12s,transform .08s}
+  .land-card:hover{border-color:var(--green-dim);transform:translateY(-1px)}
+  .land-card.empty{cursor:default;opacity:.7;border-style:dashed}
+  .land-card .lc-top{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+  .land-card .lc-csp{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;
+    background:rgba(118,185,0,.1);color:var(--green);font-size:10px;font-weight:800;flex:none}
+  .land-card.empty .lc-csp{background:rgba(90,102,120,.12);color:var(--ink-faint)}
+  .land-card .lc-name{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink-strong);text-transform:uppercase;letter-spacing:.5px}
+  .land-card .lc-sub{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);margin-top:2px}
+  .land-card .lc-bars{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+  .land-card .lc-row{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;color:var(--ink-soft)}
+  .land-card .lc-dot{width:9px;height:9px;border-radius:2px;flex:none}
+  .land-card .lc-empty-note{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);font-style:italic}
+
+  /* ============ EMPTY GROUP STATE ============ */
+  .empty-group{background:var(--panel);border:1px dashed var(--line-hi);border-radius:12px;padding:54px 30px;text-align:center}
+  .empty-group .eg-icon{width:54px;height:54px;margin:0 auto 16px;border-radius:12px;
+    border:1px dashed var(--line-hi);display:flex;align-items:center;justify-content:center;
+    color:var(--ink-faint);font-size:24px;background:rgba(255,255,255,.015)}
+  .empty-group h3{margin:0 0 6px;font-size:15px;color:var(--ink-strong);font-family:var(--mono);font-weight:700;letter-spacing:.3px}
+  .empty-group p{margin:0 auto;max-width:430px;color:var(--ink-soft);font-size:12.5px;line-height:1.55}
+  .empty-group .eg-tag{display:inline-block;margin-top:14px;font-family:var(--mono);font-size:10.5px;color:var(--green);
+    border:1px solid var(--green-dim);background:rgba(118,185,0,.08);border-radius:5px;padding:3px 10px;letter-spacing:.4px}
+
+  /* ============ TOOLTIP ============ */
+  .tooltip{
+    position:fixed;z-index:200;pointer-events:none;opacity:0;transition:opacity .1s;
+    background:#05080d;border:1px solid var(--line-hi);border-radius:7px;padding:9px 11px;
+    font-family:var(--mono);font-size:10.5px;color:var(--ink);max-width:360px;line-height:1.55;
+    box-shadow:0 10px 30px rgba(0,0,0,.7);
+  }
+  .tooltip.show{opacity:1}
+  .tooltip .tt-id{color:var(--green);font-weight:700;margin-bottom:3px;word-break:break-all}
+  .tooltip .tt-row{display:flex;gap:8px}
+  .tooltip .tt-k{color:var(--ink-faint);min-width:64px}
+  .tt-pass{color:var(--pass)}.tt-fail{color:var(--fail)}.tt-notrun{color:var(--notrun)}.tt-reported{color:var(--reported)}
+  .tooltip a.tt-ev{color:var(--single);pointer-events:auto}
+
+  /* ============ FOOTER ============ */
+  footer{
+    margin:26px 0 0;padding:14px 18px 36px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;color:var(--ink-faint);line-height:1.65;
+  }
+  footer code{color:var(--ink-soft);background:rgba(255,255,255,.04);padding:1px 5px;border-radius:4px}
+  footer b{color:var(--contested)}
+
+  /* ============ DATA-FETCH STATES (renderer variant) ============ */
+  .loading-note{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint);padding:30px 6px}
+  .error-banner{background:rgba(255,77,94,.08);border:1px solid rgba(255,77,94,.42);border-radius:9px;
+    padding:16px 18px;color:var(--ink);font-size:13px;line-height:1.6;max-width:680px}
+  .error-banner b{color:var(--failing)}
+  .error-banner .mono{color:var(--ink-strong)}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand" id="brand-home" role="button" tabindex="0" title="Back to overview">
+    <div class="logo">AI</div>
+    <div class="title-wrap">
+      <div class="title">AICR Recipe Validation <small>— Corroboration · TestGrid</small></div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="facets">
+    <div class="facet">
+      <label for="f-k8s">k8s version</label>
+      <select id="f-k8s"><option value="">all</option></select>
+    </div>
+    <div class="facet">
+      <label for="f-aicr">aicr version</label>
+      <select id="f-aicr"><option value="">all</option></select>
+    </div>
+    <div class="facet">
+      <label for="f-class">source class</label>
+      <select id="f-class">
+        <option value="">all</option>
+        <option value="first-party">first-party (1P)</option>
+        <option value="community">community</option>
+        <option value="partner">partner</option>
+      </select>
+    </div>
+    <button class="btn" id="f-reset" title="reset facets">reset</button>
+  </div>
+</header>
+
+<!-- ============ CRITERIA SELECTOR BAR ============ -->
+<div class="criteria-bar" id="criteria-bar">
+  <span class="cb-title">▸ <b>criteria</b> selector</span>
+  <div class="crit"><label for="c-service">service</label><select id="c-service"></select></div>
+  <div class="crit"><label for="c-accelerator">accelerator</label><select id="c-accelerator"></select></div>
+  <div class="crit"><label for="c-os">os</label><select id="c-os"></select></div>
+  <div class="crit"><label for="c-intent">intent</label><select id="c-intent"></select></div>
+  <div class="crit"><label for="c-platform">platform</label><select id="c-platform"></select></div>
+  <button class="btn" id="c-reset" title="clear criteria">clear</button>
+</div>
+
+<div class="shell">
+  <!-- ============ LEFT NAV TREE ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="side-title"><span>▦</span> Dashboard <b>groups</b></div>
+    <div id="tree-host"></div>
+  </aside>
+
+  <main>
+    <!-- LANDING / OVERVIEW (default on load) -->
+    <section class="view" id="view-landing">
+      <div class="breadcrumb"><span class="crumb cur">overview</span></div>
+      <div class="section-title">AICR corroboration <b>across CSPs</b></div>
+      <div class="section-sub">Pick a <span class="mono">group → dashboard → tab</span> in the left tree to drill in:
+        <b style="color:var(--green)">group</b> = cloud service (eks/gke/aks/oke/lke),
+        <b style="color:var(--green)">dashboard</b> = <span class="mono">accelerator-os</span>,
+        <b style="color:var(--green)">tab</b> = <span class="mono">intent[-platform]</span>. Selecting a tab opens its
+        cross-source corroboration grid; clicking a source column there opens that source's builds-over-time time-series.</div>
+      <div id="landing-crit-note" class="mono" style="font-size:11px;color:var(--green);margin:-6px 0 12px"></div>
+      <div id="landing-host"></div>
+    </section>
+
+    <!-- GROUP CATALOG VIEW -->
+    <section class="view hidden" id="view-catalog">
+      <div class="breadcrumb" id="catalog-crumb"></div>
+      <div class="section-title">Dashboard group <b id="cat-group-name">eks</b> · recipes × phases</div>
+      <div class="section-sub">Each row is a recipe coordinate <span class="mono">accelerator-os / intent[-platform]</span>; each cell is the
+        phase consensus rolled up across all sources (CONTESTED &gt; FAILING &gt; UNTESTED &gt; SINGLE &gt; CONFIRMED). Select a row — or a tab in the left tree — to open its corroboration matrix.</div>
+      <div id="catalog-host"></div>
+    </section>
+
+    <!-- PER-RECIPE MATRIX VIEW -->
+    <section class="view hidden" id="view-grid">
+      <div class="breadcrumb" id="grid-crumb"></div>
+      <div class="section-title" style="margin-bottom:12px">
+        <button class="back-btn" id="back-btn">← back to group</button>
+        <span id="grid-recipe-name" class="mono" style="color:var(--ink-strong);font-weight:600;text-transform:none;letter-spacing:0"></span>
+        <span id="grid-status"></span>
+      </div>
+      <div class="controls-row" id="controls-row" style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+        <div class="facet">
+          <label for="row-filter">filter tests</label>
+          <input type="text" id="row-filter" placeholder="substring…" autocomplete="off">
+        </div>
+        <button class="btn" id="only-nonpass" title="show only non-passing rows">only non-passing</button>
+        <div class="facet">
+          <label for="sort-sel">sort</label>
+          <select id="sort-sel">
+            <option value="phase">phase order</option>
+            <option value="severity">consensus severity</option>
+            <option value="alpha">alphabetical</option>
+          </select>
+        </div>
+      </div>
+      <div class="matrix-shell">
+        <div class="matrix-scroll" id="matrix-host"></div>
+      </div>
+    </section>
+
+    <!-- SOURCE TIME-SERIES VIEW (builds over time) -->
+    <section class="view hidden" id="view-ts">
+      <div class="breadcrumb" id="ts-crumb"></div>
+      <div class="section-title" style="margin-bottom:12px">
+        <button class="back-btn" id="ts-back-btn">← back to corroboration</button>
+      </div>
+      <div class="ts-shell">
+        <div class="ts-head" id="ts-head"></div>
+        <div class="ts-scroll" id="ts-host"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer>
+  Disagreement (CONTESTED) is surfaced, never averaged. Each source's full <b>per-source time-series</b> (builds over time) is available by drilling its column.
+</footer>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   PURE RENDERER — reads its data from data/index.json (+ lazy
+   data/series/<recipe>.json on a source drilldown). NO embedded
+   dataset, NO synthesis. Emitted verbatim by the `corroborate`
+   generator (pkg/corroborate, tools/corroborate); this page just
+   renders the aicr-corroboration/v1 JSON the generator materializes.
+   See docs/design/013-interim-evidence-dashboard.md (GP4).
+   ============================================================ */
+
+const PHASES = ["deployment","performance","conformance"];
+const CLASS_ORDER = ["first-party","community","partner"];
+const CLASS_SHORT = { "first-party":"1P", "community":"COMM", "partner":"PTNR" };
+const CLASS_TITLE = { "first-party":"First-party (1P)", "community":"Community (COMM)", "partner":"Partner (PTNR)" };
+
+// esc HTML-escapes a value before it is interpolated into innerHTML. The data
+// model is built from contributor-supplied evidence (CTRF test names, signer
+// identities/labels, run ids, evidence refs, versions), so every such value
+// MUST pass through esc to prevent stored XSS in the published dashboard.
+function esc(v){
+  return String(v == null ? "" : v).replace(/[&<>"']/g, c => (
+    { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]
+  ));
+}
+const PLATFORM_NONE = "(none)";
+const N_BUILDS_DEFAULT = 10;
+
+const STATE_META = {
+  CONFIRMED:{ cls:"st-confirmed", ic:"✓",  label:"CONFIRMED" },
+  SINGLE:   { cls:"st-single",    ic:"1×", label:"SINGLE" },
+  CONTESTED:{ cls:"st-contested", ic:"⚠",  label:"CONTESTED" },
+  FAILING:  { cls:"st-failing",   ic:"✗",  label:"FAILING" },
+  UNTESTED: { cls:"st-untested",  ic:"–",  label:"UNTESTED" },
+};
+const STATE_COLOR = {
+  CONFIRMED:"var(--confirmed)", SINGLE:"var(--single)", CONTESTED:"var(--contested)",
+  FAILING:"var(--failing)", UNTESTED:"var(--untested)",
+};
+const PHASE_PRIORITY = ["CONTESTED","FAILING","UNTESTED","SINGLE","CONFIRMED"];
+
+/* ------------------------------------------------------------
+   In-memory model, built from data/index.json on boot.
+     SOURCES[src]   = { id, class, label, allowlisted }
+     SRC_META[src]  = { aicrVer, k8sVer, when }   (latest run, per source — best-effort)
+     DATA.recipes[] = { coord, name, tests:[{ phase, name, runs:[[src,res]…],
+                                              _consensus, _reported, _runMeta:{src:{build,aicrVer,k8sVer,when}} }] }
+     TREE           = [{ name, dashboards:[{ ao, tabs:[{ tab, idx }] }], count }]
+     CRITERIA_VALUES= { service:[…], … }
+   ------------------------------------------------------------ */
+let SOURCES = {};
+let SRC_META = {};
+let DATA = { recipes: [] };
+let TREE = [];
+let CRITERIA_VALUES = {};
+let RECIPE_BY_NAME = {};
+let COORD_TO_IDX = {};       // "group/dashboard/tab" -> DATA.recipes index (hash routing)
+
+let currentGroup = null;
+let currentRecipeIdx = null;
+let currentTsSrc = null;
+
+/* ============================================================
+   PURE VIEW HELPERS (carried over from the mock unchanged)
+   ============================================================ */
+function distinctRuns(runs){
+  const order = [];
+  const map = new Map();
+  for (const [src,res] of runs){
+    if (!map.has(src)) order.push(src);
+    map.set(src, res);
+  }
+  return order.map(src => ({ src, res: map.get(src) }));
+}
+function coordParts(c){
+  return {
+    service: c.service,
+    ao: `${c.accelerator}-${c.os}`,
+    ip: c.platform ? `${c.intent}-${c.platform}` : c.intent,
+  };
+}
+function shapeSVG(cls, color, hollow, size){
+  size = size || 17;
+  const stroke = hollow ? color : "rgba(0,0,0,.55)";
+  const sw = hollow ? 1.7 : 0.8;
+  const fill = hollow ? "none" : color;
+  let inner;
+  if (cls === "first-party"){
+    inner = `<polygon points="8.5,1.2 15,4.9 15,12.1 8.5,15.8 2,12.1 2,4.9"`;
+  } else if (cls === "partner"){
+    inner = `<polygon points="8.5,1.7 15.3,15 1.7,15"`;
+  } else {
+    inner = `<polygon points="8.5,1.2 15.8,8.5 8.5,15.8 1.2,8.5"`;
+  }
+  inner += ` fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+  return `<svg viewBox="0 0 17 17" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${inner}</svg>`;
+}
+function tileEl(res){
+  const span = document.createElement("span");
+  if (res === "pass"){ span.className = "tile t-pass"; span.textContent = "P"; }
+  else if (res === "fail"){ span.className = "tile t-fail"; span.textContent = "F"; }
+  else if (res === "not-run" || res === "skipped"){ span.className = "tile t-notrun"; span.textContent = "N"; }
+  else { span.className = "tile t-empty"; span.textContent = "·"; }
+  return span;
+}
+function badgeEl(state, pass, fail, reported){
+  const m = STATE_META[state];
+  const wrap = document.createElement("span");
+  wrap.style.cssText = "display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap";
+  const chip = document.createElement("span");
+  chip.className = "pbadge " + m.cls;
+  let cnt = "";
+  if (state === "CONTESTED")      cnt = `${pass}✓${fail}✗`;
+  else if (state === "FAILING")   cnt = `×${fail}`;
+  else if (state === "UNTESTED")  cnt = "";
+  else                            cnt = `×${pass}`;
+  chip.innerHTML = `<span class="ic">${m.ic}</span>${m.label}` + (cnt ? `<span class="cnt">${cnt}</span>` : "");
+  wrap.appendChild(chip);
+  if (reported > 0){
+    const r = document.createElement("span");
+    r.className = "reported-flag";
+    r.title = `${reported} reported (unknown) signer${reported>1?"s":""} — shown, never counted toward consensus`;
+    r.innerHTML = `<span style="font-size:10px">❖</span>+${reported}`;
+    wrap.appendChild(r);
+  }
+  return wrap;
+}
+
+/* ------------------------------------------------------------
+   Consensus is BAKED in the JSON (computeConsensus from the mock).
+   The renderer reads test._consensus / test._reported and derives the
+   pass/fail tallies for the badge chip from the runs[] — pure display,
+   no re-synthesis.
+   ------------------------------------------------------------ */
+function consensusOf(test){
+  let passAllow = 0, failAllow = 0;
+  distinctRuns(test.runs).forEach(({src,res}) => {
+    const meta = SOURCES[src];
+    if (!meta || !meta.allowlisted) return;       // reported excluded from tallies
+    if (res === "pass") passAllow++;
+    else if (res === "fail") failAllow++;
+  });
+  return { state: test._consensus, passAllow, failAllow, reported: test._reported };
+}
+function rollupPhase(tests){
+  let chosen = null, anyTest = false, pass = 0, fail = 0, reported = 0;
+  for (const t of tests){
+    anyTest = true;
+    const c = consensusOf(t);
+    pass += c.passAllow; fail += c.failAllow; reported += c.reported;
+    if (chosen === null || PHASE_PRIORITY.indexOf(c.state) < PHASE_PRIORITY.indexOf(chosen)) chosen = c.state;
+  }
+  if (!anyTest) chosen = "UNTESTED";
+  return { state: chosen, pass, fail, reported, total: pass + fail };
+}
+function rollupRecipe(recipe){
+  let chosen = null, reported = 0, contested = 0, failing = 0, confirmed = 0, single = 0, untested = 0;
+  recipe.tests.forEach(t => {
+    const c = consensusOf(t);
+    reported += c.reported;
+    if (c.state === "CONTESTED") contested++;
+    else if (c.state === "FAILING") failing++;
+    else if (c.state === "CONFIRMED") confirmed++;
+    else if (c.state === "SINGLE") single++;
+    else untested++;
+    if (chosen === null || PHASE_PRIORITY.indexOf(c.state) < PHASE_PRIORITY.indexOf(chosen)) chosen = c.state;
+  });
+  if (chosen === null) chosen = "UNTESTED";
+  return { state: chosen, contested, failing, confirmed, single, untested, reported };
+}
+
+// per-tab status badge (recipe-wide rollup)
+function tabStatusEl(recipe){
+  const r = rollupRecipe(recipe);
+  const m = STATE_META[r.state];
+  const el = document.createElement("span");
+  el.className = "tab-status " + m.cls;
+  const parts = [];
+  if (r.contested) parts.push(`${r.contested}⚠`);
+  if (r.failing) parts.push(`${r.failing}✗`);
+  if (r.confirmed) parts.push(`${r.confirmed}✓`);
+  if (r.single) parts.push(`${r.single}·1×`);
+  if (r.untested) parts.push(`${r.untested}–`);
+  el.innerHTML = `<span class="ic">${m.ic}</span>${m.label}<span class="sub">${parts.join("  ")}</span>`;
+  return el;
+}
+
+/* ============================================================
+   FACET STATE (in-grid run-metadata facets — read from JSON model)
+   ============================================================ */
+const facets = { k8s:"", aicr:"", cls:"" };
+const anyFacet = () => facets.k8s || facets.aicr || facets.cls;
+
+function runMatchesFacets(src){
+  const meta = SRC_META[src], cls = SOURCES[src];
+  if (facets.k8s && (!meta || meta.k8sVer !== facets.k8s)) return false;
+  if (facets.aicr && (!meta || meta.aicrVer !== facets.aicr)) return false;
+  if (facets.cls && (!cls || cls.class !== facets.cls)) return false;
+  return true;
+}
+function testMatchesFacets(test){
+  if (!anyFacet()) return true;
+  return distinctRuns(test.runs).some(r => runMatchesFacets(r.src));
+}
+function recipeMatchesFacets(recipe){
+  if (!anyFacet()) return true;
+  return recipe.tests.some(testMatchesFacets);
+}
+
+/* ============================================================
+   CRITERIA SELECTOR (recipe-selection axes; from JSON)
+   ============================================================ */
+const criteria = { service:"", accelerator:"", os:"", intent:"", platform:"" };
+const anyCriteria = () => criteria.service || criteria.accelerator || criteria.os || criteria.intent || criteria.platform;
+
+function recipeMatchesCriteria(recipe){
+  const c = recipe.coord;
+  if (criteria.service && c.service !== criteria.service) return false;
+  if (criteria.accelerator && c.accelerator !== criteria.accelerator) return false;
+  if (criteria.os && c.os !== criteria.os) return false;
+  if (criteria.intent && c.intent !== criteria.intent) return false;
+  if (criteria.platform){
+    const p = (c.platform === null || c.platform === "" || c.platform === undefined) ? PLATFORM_NONE : c.platform;
+    if (p !== criteria.platform) return false;
+  }
+  return true;
+}
+function groupMatchesCriteria(g){
+  return g.dashboards.some(d => d.tabs.some(t => recipeMatchesCriteria(DATA.recipes[t.idx])));
+}
+function dashMatchesCriteria(g, d){
+  return d.tabs.some(t => recipeMatchesCriteria(DATA.recipes[t.idx]));
+}
+
+/* ============================================================
+   LEFT NAV TREE
+   ============================================================ */
+const collapsedGroups = new Set();
+const collapsedDashes = new Set();
+
+function renderTree(){
+  const host = document.getElementById("tree-host");
+  host.innerHTML = "";
+  TREE.forEach(g => {
+    if (anyCriteria() && g.count > 0 && !groupMatchesCriteria(g)) return;
+    const groupWrap = document.createElement("div");
+    groupWrap.className = "tree-group";
+
+    const visTabs = anyCriteria()
+      ? g.dashboards.reduce((n,d)=> n + d.tabs.filter(t=>recipeMatchesCriteria(DATA.recipes[t.idx])).length, 0)
+      : g.count;
+
+    const gHead = document.createElement("div");
+    const empty = g.count === 0;
+    gHead.className = "tree-node tg-group" + (empty ? " empty" : "") + (collapsedGroups.has(g.name) ? " collapsed" : "");
+    gHead.innerHTML =
+      `<span class="tw">▾</span><span class="csp">${esc(g.name.slice(0,3).toUpperCase())}</span>` +
+      `<span>${esc(g.name)}</span><span class="badge-mini">${visTabs} tab${visTabs===1?"":"s"}</span>`;
+    gHead.addEventListener("click", () => {
+      const wasCollapsed = collapsedGroups.has(g.name);
+      if (wasCollapsed) collapsedGroups.delete(g.name); else collapsedGroups.add(g.name);
+      if (wasCollapsed && g.count > 0) showGroupCatalog(g.name);
+      else renderTree();
+    });
+    groupWrap.appendChild(gHead);
+
+    const children = document.createElement("div");
+    children.className = "tree-children" + (collapsedGroups.has(g.name) ? " hidden" : "");
+
+    if (empty){
+      const note = document.createElement("div");
+      note.className = "tg-empty-note";
+      note.textContent = "no results yet — awaiting first attestation";
+      children.appendChild(note);
+    } else {
+      g.dashboards.forEach(d => {
+        if (anyCriteria() && !dashMatchesCriteria(g, d)) return;
+        const dKey = `${g.name}/${d.ao}`;
+        const visTabs = anyCriteria() ? d.tabs.filter(t=>recipeMatchesCriteria(DATA.recipes[t.idx])).length : d.tabs.length;
+        const dHead = document.createElement("div");
+        dHead.className = "tree-node tg-dash" + (collapsedDashes.has(dKey) ? " collapsed" : "");
+        dHead.innerHTML = `<span class="tw">▾</span><span>${esc(d.ao)}</span><span class="badge-mini">${visTabs}</span>`;
+        dHead.addEventListener("click", () => {
+          if (collapsedDashes.has(dKey)) collapsedDashes.delete(dKey); else collapsedDashes.add(dKey);
+          renderTree();
+        });
+        children.appendChild(dHead);
+
+        const dChildren = document.createElement("div");
+        dChildren.className = "tree-children" + (collapsedDashes.has(dKey) ? " hidden" : "");
+        d.tabs.forEach(t => {
+          const recipe = DATA.recipes[t.idx];
+          if (anyCriteria() && !recipeMatchesCriteria(recipe)) return;
+          const roll = rollupRecipe(recipe);
+          const tab = document.createElement("div");
+          const isActive = (currentRecipeIdx === t.idx) &&
+            !document.getElementById("view-grid").classList.contains("hidden");
+          tab.className = "tg-tab" + (isActive ? " active" : "");
+          tab.innerHTML =
+            `<span class="tabdot" style="background:${STATE_COLOR[roll.state]}"></span>` +
+            `<span class="tablbl">${esc(t.tab)}</span>`;
+          tab.title = `${recipe.name} — ${roll.state}`;
+          tab.addEventListener("click", () => { currentGroup = g.name; openGrid(t.idx); });
+          dChildren.appendChild(tab);
+        });
+        children.appendChild(dChildren);
+      });
+    }
+    groupWrap.appendChild(children);
+    host.appendChild(groupWrap);
+  });
+}
+
+/* ============================================================
+   VIEW SWITCHING
+   ============================================================ */
+function hideAllViews(){
+  ["view-landing","view-catalog","view-grid","view-ts"].forEach(id =>
+    document.getElementById(id).classList.add("hidden"));
+}
+
+/* ============================================================
+   HASH ROUTING — resolvable URLs (#/group/dashboard/tab[/signer]).
+   The path after #/ is the recipe's Coordinate.Path() (group/dashboard/tab); the
+   fragment scheme is owned by this renderer (the consumer), per ADR-012. So a
+   catalog / consensus grid / per-signer drilldown is bookmarkable, shareable,
+   and works with the browser back/forward buttons. The hash is never sent to
+   the server, so deep links resolve on any static host (GitHub Pages, etc.).
+
+   The four view functions set the hash on entry (via setHash, guarded so the
+   resulting hashchange does not re-render); route() reads the hash back to a
+   view on boot, on back/forward, and when the URL is edited by hand.
+   ============================================================ */
+const ROUTE_LANDING = "#/";
+let _navGuard = false; // true while WE are setting the hash (skip that hashchange)
+
+// coordPath is a recipe's stable "group/dashboard/tab" (== Coordinate.Path()).
+function coordPath(recipe){ const cp = coordParts(recipe.coord); return `${cp.service}/${cp.ao}/${cp.ip}`; }
+
+// hashSegs builds a "#/a/b/c" hash from decoded path segments, encoding each.
+function hashSegs(...segs){ return "#/" + segs.filter(s => s != null && s !== "").map(encodeURIComponent).join("/"); }
+
+// setHash points the URL at h without re-rendering (the caller already did).
+// A no-op when the hash is effectively unchanged (treats "", "#", "#/" as landing).
+function setHash(h){
+  const cur = location.hash;
+  if (cur === h) return;
+  if (h === ROUTE_LANDING && (cur === "" || cur === "#")) return;
+  _navGuard = true;
+  location.hash = h;
+}
+
+// route renders the view named by the current hash.
+function route(){
+  const seg = (location.hash || "").replace(/^#\/?/, "").split("/").filter(Boolean)
+    .map(s => { try { return decodeURIComponent(s); } catch (e) { return s; } });
+  if (seg.length === 0){ showLanding(); return; }
+  if (seg.length < 3){ // 1-2 segments => group catalog
+    if (TREE.find(g => g.name === seg[0])) showGroupCatalog(seg[0]);
+    else showLanding();
+    return;
+  }
+  const idx = COORD_TO_IDX[seg.slice(0, 3).join("/")]; // group/dashboard/tab
+  if (idx === undefined){ showLanding(); return; }      // unknown coordinate
+  if (seg.length === 3){ openGrid(idx); return; }
+  openTimeSeries(DATA.recipes[idx], seg[3]);            // 4th segment = signer
+}
+
+window.addEventListener("hashchange", () => {
+  if (_navGuard){ _navGuard = false; return; } // our own change, already rendered
+  route();
+});
+
+function showLanding(){
+  setHash(ROUTE_LANDING);
+  if (typeof restoreCriteriaSelects === "function") restoreCriteriaSelects();
+  hideAllViews();
+  document.getElementById("view-landing").classList.remove("hidden");
+  renderLanding();
+  renderTree();
+  window.scrollTo({ top:0, behavior:"auto" });
+}
+function showGroupCatalog(name){
+  if (typeof restoreCriteriaSelects === "function") restoreCriteriaSelects();
+  currentGroup = name;
+  setHash(hashSegs(name));
+  hideAllViews();
+  document.getElementById("view-catalog").classList.remove("hidden");
+  renderCatalog();
+  renderTree();
+  window.scrollTo({ top:0, behavior:"auto" });
+}
+
+/* ============================================================
+   RENDER: LANDING / CROSS-GROUP SUMMARY
+   ============================================================ */
+function renderLanding(){
+  const host = document.getElementById("landing-host");
+  host.innerHTML = "";
+  const note = document.getElementById("landing-crit-note");
+  if (note) note.textContent = anyCriteria()
+    ? "Criteria active — groups & counts below reflect only recipes matching the selection."
+    : "";
+  const grid = document.createElement("div");
+  grid.className = "landing-grid";
+  TREE.forEach(g => {
+    if (anyCriteria() && g.count > 0 && !groupMatchesCriteria(g)) return;
+    const card = document.createElement("div");
+    const empty = g.count === 0;
+    card.className = "land-card" + (empty ? " empty" : "");
+    const tally = { CONFIRMED:0, SINGLE:0, CONTESTED:0, FAILING:0, UNTESTED:0 };
+    let dashCount = 0, tabCount = 0;
+    g.dashboards.forEach(d => {
+      const tabs = anyCriteria() ? d.tabs.filter(t=>recipeMatchesCriteria(DATA.recipes[t.idx])) : d.tabs;
+      if (tabs.length === 0) return;
+      dashCount++;
+      tabs.forEach(t => { tabCount++; tally[rollupRecipe(DATA.recipes[t.idx]).state]++; });
+    });
+    let bars = "";
+    if (empty){
+      bars = `<div class="lc-empty-note">awaiting first attestation</div>`;
+    } else {
+      const order = ["CONTESTED","FAILING","CONFIRMED","SINGLE","UNTESTED"];
+      bars = order.filter(s => tally[s] > 0).map(s =>
+        `<div class="lc-row"><span class="lc-dot" style="background:${STATE_COLOR[s]}"></span>` +
+        `${STATE_META[s].label} <span style="margin-left:auto;color:var(--ink-strong)">${tally[s]}</span></div>`).join("");
+    }
+    card.innerHTML =
+      `<div class="lc-top"><span class="lc-csp">${esc(g.name.toUpperCase())}</span>` +
+      `<div><div class="lc-name">${esc(g.name)}</div>` +
+      `<div class="lc-sub">${dashCount} dashboard${dashCount===1?"":"s"} · ${tabCount} tab${tabCount===1?"":"s"}</div></div></div>` +
+      `<div class="lc-bars">${bars}</div>`;
+    if (!empty) card.addEventListener("click", () => {
+      collapsedGroups.delete(g.name);
+      showGroupCatalog(g.name);
+    });
+    grid.appendChild(card);
+  });
+  host.appendChild(grid);
+}
+
+/* ============================================================
+   RENDER: GROUP CATALOG (grouped by dashboard)
+   ============================================================ */
+function renderCatalog(){
+  document.getElementById("cat-group-name").textContent = currentGroup;
+
+  const bc = document.getElementById("catalog-crumb");
+  bc.innerHTML = `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span><span class="crumb cur">${esc(currentGroup)}</span>`;
+  bc.querySelectorAll("[data-home]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); showLanding(); }));
+
+  const host = document.getElementById("catalog-host");
+  host.innerHTML = "";
+
+  const group = TREE.find(g => g.name === currentGroup);
+  const dashes = (group ? group.dashboards : [])
+    .map(d => ({ ao: d.ao, tabs: d.tabs.filter(t => recipeMatchesCriteria(DATA.recipes[t.idx])) }))
+    .filter(d => d.tabs.length > 0);
+
+  if (dashes.length === 0){
+    const eg = document.createElement("div");
+    eg.className = "empty-group";
+    const why = anyCriteria()
+      ? `No <span class="mono">${esc(currentGroup)}</span> recipes match the current criteria selection.`
+      : `This dashboard group has no published validation evidence.`;
+    eg.innerHTML = `
+      <div class="eg-icon">▦</div>
+      <h3>No matching recipes for <span style="color:var(--green)">${esc(currentGroup)}</span></h3>
+      <p>${why} Adjust the criteria selector, or once a signer attests an
+         <span class="mono">${esc(currentGroup)}</span> recipe its corroboration matrix will appear here.</p>
+      <div class="eg-tag">${anyCriteria() ? "filtered by criteria" : "awaiting first attestation"}</div>`;
+    host.appendChild(eg);
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "catalog-wrap";
+  const table = document.createElement("table");
+  table.className = "catalog";
+  table.innerHTML = `
+    <thead><tr>
+      <th style="width:40%">Dashboard / tab</th>
+      <th>Deployment</th><th>Performance</th><th>Conformance</th>
+    </tr></thead><tbody></tbody>`;
+  const tbody = table.querySelector("tbody");
+
+  dashes.forEach(d => {
+    const secTr = document.createElement("tr");
+    secTr.className = "dash-sec";
+    const secTd = document.createElement("td");
+    secTd.setAttribute("colspan","4");
+    secTd.innerHTML =
+      `<div class="dash-sec-inner"><span class="dname">${esc(d.ao)}</span>` +
+      `<span class="dtag">dashboard</span>` +
+      `<span class="dmeta">${d.tabs.length} tab${d.tabs.length===1?"":"s"} · ${esc(currentGroup)}</span></div>`;
+    secTr.appendChild(secTd);
+    tbody.appendChild(secTr);
+
+    d.tabs.forEach(t => {
+      const idx = t.idx;
+      const recipe = DATA.recipes[idx];
+      const tr = document.createElement("tr");
+      tr.tabIndex = 0;
+      tr.setAttribute("role","button");
+      if (!recipeMatchesFacets(recipe)) tr.classList.add("dimmed");
+
+      const cp = coordParts(recipe.coord);
+      const tdName = document.createElement("td");
+      tdName.innerHTML =
+        `<div class="recipe-name">${esc(cp.ip)}</div>` +
+        `<div class="recipe-coord"><span class="dim">tab ·</span> <span class="seg">${esc(recipe.name)}</span></div>`;
+      tr.appendChild(tdName);
+
+      PHASES.forEach(ph => {
+        const td = document.createElement("td");
+        const tests = recipe.tests.filter(t2 => t2.phase === ph);
+        if (tests.length === 0){
+          td.appendChild(badgeEl(recipe._phaseRollup[ph] || "UNTESTED", 0, 0, 0));
+        } else {
+          // State from the baked Go rollup (single source of truth); pass/fail/
+          // reported are display tallies derived from the rows.
+          const r = rollupPhase(tests);
+          td.appendChild(badgeEl(recipe._phaseRollup[ph] || r.state, r.pass, r.fail, r.reported));
+        }
+        tr.appendChild(td);
+      });
+
+      const open = () => openGrid(idx);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", e => { if (e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } });
+      tbody.appendChild(tr);
+    });
+  });
+
+  wrap.appendChild(table);
+  host.appendChild(wrap);
+}
+
+/* ============================================================
+   GRID CONTROLS state
+   ============================================================ */
+const gridCtl = { filter:"", onlyNonPass:false, sort:"phase" };
+const NONPASS_STATES = new Set(["CONTESTED","FAILING","UNTESTED"]);
+const collapsedPhases = new Set();
+
+function sourceColumns(recipe){
+  const seen = new Set();
+  const byClass = { "first-party":[], "community":[], "partner":[] };
+  recipe.tests.forEach(t => {
+    distinctRuns(t.runs).forEach(({src}) => {
+      if (seen.has(src)) return;
+      seen.add(src);
+      const cls = SOURCES[src] ? SOURCES[src].class : "community";
+      byClass[cls].push(src);
+    });
+  });
+  const cols = [];
+  CLASS_ORDER.forEach(cls => byClass[cls].forEach(src => cols.push({ src, cls })));
+  return { cols, byClass };
+}
+function resultFor(test, src){
+  const dr = distinctRuns(test.runs);
+  const hit = dr.find(r => r.src === src);
+  return hit ? hit.res : null;
+}
+function sortTests(tests){
+  const arr = tests.slice();
+  if (gridCtl.sort === "alpha"){
+    arr.sort((a,b) => a.name.localeCompare(b.name));
+  } else if (gridCtl.sort === "severity"){
+    arr.sort((a,b) => {
+      const sa = PHASE_PRIORITY.indexOf(consensusOf(a).state);
+      const sb = PHASE_PRIORITY.indexOf(consensusOf(b).state);
+      if (sa !== sb) return sa - sb;
+      return a.name.localeCompare(b.name);
+    });
+  }
+  return arr;
+}
+
+/* ============================================================
+   RENDER: PER-RECIPE MATRIX (tests × sources, solid tiles)
+   ============================================================ */
+function openGrid(idx){
+  currentRecipeIdx = idx;
+  const recipe = DATA.recipes[idx];
+  const cp = coordParts(recipe.coord);
+  currentGroup = cp.service;
+  setHash(hashSegs(cp.service, cp.ao, cp.ip));
+  reflectCriteriaForCoord(recipe.coord);
+
+  const bc = document.getElementById("grid-crumb");
+  bc.innerHTML =
+    `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-back="1">${esc(cp.service)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-back="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
+    `<span class="crumb cur">${esc(cp.ip)}</span>`;
+  bc.querySelectorAll("[data-back]").forEach(a => {
+    a.addEventListener("click", e => { e.preventDefault(); backToCatalog(); });
+  });
+  bc.querySelectorAll("[data-home]").forEach(a => {
+    a.addEventListener("click", e => { e.preventDefault(); showLanding(); });
+  });
+
+  document.getElementById("grid-recipe-name").textContent = recipe.name;
+  const statusHost = document.getElementById("grid-status");
+  statusHost.innerHTML = "";
+  statusHost.appendChild(tabStatusEl(recipe));
+
+  renderMatrix(recipe);
+
+  hideAllViews();
+  document.getElementById("view-grid").classList.remove("hidden");
+  renderTree();
+  window.scrollTo({ top:0, behavior:"auto" });
+}
+
+function renderMatrix(recipe){
+  const { cols, byClass } = sourceColumns(recipe);
+
+  const host = document.getElementById("matrix-host");
+  host.innerHTML = "";
+  const table = document.createElement("table");
+  table.className = "matrix";
+
+  const totalCols = 2 + cols.length;
+
+  const thead = document.createElement("thead");
+  const groupRow = document.createElement("tr");
+  groupRow.className = "grouprow";
+
+  const cornerTest = document.createElement("th");
+  cornerTest.className = "corner-test";
+  cornerTest.setAttribute("rowspan","2");
+  cornerTest.textContent = "Test";
+  groupRow.appendChild(cornerTest);
+
+  const cornerCons = document.createElement("th");
+  cornerCons.className = "corner-cons";
+  cornerCons.setAttribute("rowspan","2");
+  cornerCons.textContent = "Consensus";
+  groupRow.appendChild(cornerCons);
+
+  CLASS_ORDER.forEach(cls => {
+    const n = byClass[cls].length;
+    if (n === 0) return;
+    const th = document.createElement("th");
+    th.setAttribute("colspan", String(n));
+    const inner = document.createElement("div");
+    inner.className = "clshead " + cls;
+    inner.innerHTML = `${CLASS_TITLE[cls]} <span class="cnt">×${n}</span>`;
+    th.appendChild(inner);
+    groupRow.appendChild(th);
+  });
+  thead.appendChild(groupRow);
+
+  const colRow = document.createElement("tr");
+  colRow.className = "colrow";
+  cols.forEach(({src, cls}) => {
+    const th = document.createElement("th");
+    const meta = SOURCES[src];
+    const reported = meta && !meta.allowlisted;
+    if (reported) th.classList.add("reported-col");
+    if (anyFacet() && !runMatchesFacets(src)) th.style.opacity = ".3";
+    const head = document.createElement("div");
+    head.className = "src-head";
+    head.innerHTML =
+      `<span class="src-lbl">${esc(meta ? meta.label : src)}</span>` +
+      `<span class="src-tag">${esc(CLASS_SHORT[cls] || cls)}${reported ? ` <span class="rep-mark">❖ reported</span>` : ""}</span>` +
+      `<span class="src-open" title="open builds-over-time time-series">⤢</span>`;
+    th.appendChild(head);
+    th.title = (meta ? meta.label : src) + " — click to open builds-over-time time-series";
+    th.addEventListener("click", () => openTimeSeries(recipe, src));
+    colRow.appendChild(th);
+  });
+  thead.appendChild(colRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  PHASES.forEach(ph => {
+    let tests = recipe.tests.filter(t => t.phase === ph);
+    if (tests.length === 0) return;
+    tests = sortTests(tests);
+
+    const rollState = recipe._phaseRollup[ph] || rollupPhase(tests).state; // baked Go state
+    const phaseKey = `${recipe.name}/${ph}`;
+    const collapsed = collapsedPhases.has(phaseKey);
+
+    const secTr = document.createElement("tr");
+    secTr.className = "phase-sec";
+    const secTh = document.createElement("th");
+    secTh.setAttribute("colspan", String(totalCols));
+    const inner = document.createElement("div");
+    inner.className = "phase-sec-inner" + (collapsed ? " collapsed" : "");
+    inner.innerHTML =
+      `<span class="ptw">▾</span><span class="pname">${ph}</span>` +
+      `<span class="pmeta">${tests.length} test${tests.length>1?"s":""} · rollup ${rollState}</span>`;
+    inner.addEventListener("click", () => {
+      if (collapsedPhases.has(phaseKey)) collapsedPhases.delete(phaseKey); else collapsedPhases.add(phaseKey);
+      renderMatrix(recipe);
+    });
+    secTh.appendChild(inner);
+    secTr.appendChild(secTh);
+    tbody.appendChild(secTr);
+
+    if (collapsed) return;
+
+    tests.forEach(test => {
+      const c = consensusOf(test);
+      const tr = document.createElement("tr");
+      tr.className = "trow";
+      if (!testMatchesFacets(test)) tr.classList.add("dimmed");
+      const f = gridCtl.filter.trim().toLowerCase();
+      if (f && !test.name.toLowerCase().includes(f)) tr.classList.add("filtered");
+      if (gridCtl.onlyNonPass && !NONPASS_STATES.has(c.state)) tr.classList.add("filtered");
+
+      const tdTest = document.createElement("td");
+      tdTest.className = "cell-test";
+      tdTest.tabIndex = 0;
+      tdTest.setAttribute("role","button");
+      tdTest.textContent = test.name;
+      tr.appendChild(tdTest);
+
+      const tdCons = document.createElement("td");
+      tdCons.className = "cell-cons";
+      const consWrap = document.createElement("span");
+      consWrap.className = "cons-cell";
+      consWrap.appendChild(badgeEl(c.state, c.passAllow, c.failAllow, c.reported));
+      tdCons.appendChild(consWrap);
+      tr.appendChild(tdCons);
+
+      cols.forEach(({src}) => {
+        const td = document.createElement("td");
+        td.className = "cell-src";
+        const meta = SOURCES[src];
+        const reported = meta && !meta.allowlisted;
+        if (reported) td.classList.add("reported-col");
+        const dimmed = anyFacet() && !runMatchesFacets(src);
+        const res = resultFor(test, src);
+        td.appendChild(tileEl(res === null ? "empty" : res));
+        // tooltip metadata comes from the baked per-run LATEST build info in the JSON
+        const rm = (test._runMeta && test._runMeta[src]) || {};
+        td.dataset.tip = JSON.stringify({
+          id: meta ? meta.id : src, label: meta ? meta.label : src, cls: meta ? meta.class : "—",
+          allow: meta ? meta.allowlisted : false, res: res === null ? "not-run-here" : res,
+          aicr: rm.aicrVer || "—", k8s: rm.k8sVer || "—", when: rm.when || "—",
+          build: rm.build || "—", buildWhen: rm.when || "—", evidenceRef: rm.evidenceRef || "",
+        });
+        if (dimmed) td.classList.add("dimcell");
+        td.addEventListener("click", () => openTimeSeries(recipe, src, test.name));
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+  });
+  table.appendChild(tbody);
+  host.appendChild(table);
+}
+
+function backToCatalog(){
+  setHash(hashSegs(currentGroup));
+  restoreCriteriaSelects();
+  hideAllViews();
+  document.getElementById("view-catalog").classList.remove("hidden");
+  renderCatalog();
+  renderTree();
+  window.scrollTo({ top:0, behavior:"auto" });
+}
+
+/* ============================================================
+   LAZY SERIES FETCH + cache (per recipe)
+   ============================================================ */
+const seriesCache = new Map(); // recipeName -> series json
+
+async function fetchSeries(recipeName){
+  if (seriesCache.has(recipeName)) return seriesCache.get(recipeName);
+  const res = await fetch(`data/series/${recipeName}.json`);
+  if (!res.ok) throw new Error(`series fetch failed: ${recipeName} (${res.status})`);
+  const json = await res.json();
+  seriesCache.set(recipeName, json);
+  return json;
+}
+
+/* ============================================================
+   RENDER: SOURCE TIME-SERIES (builds over time) — lazy JSON
+   ============================================================ */
+async function openTimeSeries(recipe, src, focusTest){
+  currentRecipeIdx = DATA.recipes.indexOf(recipe);
+  currentTsSrc = src;
+  const cp = coordParts(recipe.coord);
+  setHash(hashSegs(cp.service, cp.ao, cp.ip, src));
+  const meta = SOURCES[src];
+  const reported = meta && !meta.allowlisted;
+
+  const bc = document.getElementById("ts-crumb");
+  bc.innerHTML =
+    `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-back="1">${esc(cp.service)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-back="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-grid="1">${esc(cp.ip)}</a><span class="sep">›</span>` +
+    `<span class="crumb cur">${esc(src)}</span>`;
+  bc.querySelectorAll("[data-home]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); showLanding(); }));
+  bc.querySelectorAll("[data-back]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); backToCatalog(); }));
+  bc.querySelectorAll("[data-grid]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); openGrid(currentRecipeIdx); }));
+
+  const headHost = document.getElementById("ts-head");
+  const host = document.getElementById("ts-host");
+
+  // switch to the TS view immediately with a loading state, then fetch the series.
+  hideAllViews();
+  document.getElementById("view-ts").classList.remove("hidden");
+  headHost.innerHTML = `<div class="ts-src"><div class="ts-title">${meta ? esc(meta.label) : esc(src)}</div></div>`;
+  host.innerHTML = `<div class="loading-note">loading build history for <span class="mono">${esc(recipe.name)}</span> …</div>`;
+  window.scrollTo({ top:0, behavior:"auto" });
+
+  let series;
+  try {
+    series = await fetchSeries(recipe.name);
+  } catch (err) {
+    host.innerHTML = `<div class="error-banner">Could not load <span class="mono">data/series/${esc(recipe.name)}.json</span> — ${esc(err.message)}.<br>Serve over HTTP (see README): <span class="mono">python3 -m http.server</span>.</div>`;
+    return;
+  }
+  if (currentTsSrc !== src || currentRecipeIdx !== DATA.recipes.indexOf(recipe)) return; // navigated away
+
+  const cols = (series.builds && series.builds[src]) || [];
+  const health = (series.health && series.health[src]) || { flakePct:0, lastPassBuild:null, builds:cols.length };
+  const nBuilds = cols.length || N_BUILDS_DEFAULT;
+
+  headHost.innerHTML = "";
+  const left = document.createElement("div");
+  left.className = "ts-src";
+  left.innerHTML =
+    `<span class="src-shape">${shapeSVG(meta?meta.class:"community", reported?"var(--reported)":"var(--ink-soft)", reported, 22)}</span>` +
+    `<div><div class="ts-title">${esc(meta ? meta.label : src)} ${reported ? `<span class="reported-flag">❖ reported</span>` : ""}</div>` +
+    `<div class="ts-id">${esc(meta ? meta.id : src)}</div>` +
+    `<div class="ts-id" style="color:var(--single)">${esc(recipe.name)} · ${esc(cp.ip)}</div></div>`;
+  headHost.appendChild(left);
+
+  const right = document.createElement("div");
+  right.className = "ts-health";
+  right.innerHTML =
+    `<div class="ts-stat"><span class="v ${health.flakePct>=10?"flaky":""}">${health.flakePct}%</span><span class="k">flakiness</span></div>` +
+    `<div class="ts-stat"><span class="v">${health.lastPassBuild ? esc(health.lastPassBuild) : "—"}</span><span class="k">last all-pass build</span></div>` +
+    `<div class="ts-stat"><span class="v">${health.builds}</span><span class="k">builds shown</span></div>`;
+  headHost.appendChild(right);
+
+  // body grid — recipe's FULL union test list × builds (results default not-run)
+  const tests = recipe.tests;
+  host.innerHTML = "";
+  const table = document.createElement("table");
+  table.className = "tsgrid";
+
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  const corner = document.createElement("th");
+  corner.className = "ts-corner";
+  corner.textContent = "Test  ·  builds →";
+  hr.appendChild(corner);
+  for (let b = 0; b < nBuilds; b++){
+    const bm = cols[b] || {};
+    const th = document.createElement("th");
+    th.className = "ts-build" + (b === 0 ? " newest" : "");
+    th.innerHTML =
+      `<div class="bh-id">${esc(bm.id || "")}</div>` +
+      `<div class="bh-ver">${esc(bm.aicrVer || "")}</div>` +
+      `<div class="bh-k8s">k8s ${esc(bm.k8sVer || "")}</div>` +
+      `<div class="bh-when">${esc(bm.when || "")}</div>` +
+      (b === 0 ? `<div class="bh-newest">newest</div>` : ``);
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  PHASES.forEach(ph => {
+    const phaseTests = tests.filter(t => t.phase === ph);
+    if (phaseTests.length === 0) return;
+    const secTr = document.createElement("tr");
+    secTr.className = "ts-phase";
+    const secTh = document.createElement("th");
+    secTh.setAttribute("colspan", String(1 + nBuilds));
+    secTh.textContent = ph;
+    secTr.appendChild(secTh);
+    tbody.appendChild(secTr);
+
+    phaseTests.forEach(test => {
+      const tr = document.createElement("tr");
+      tr.className = "ts-row";
+      if (focusTest && test.name === focusTest) tr.style.boxShadow = "inset 3px 0 0 var(--green)";
+      const td0 = document.createElement("td");
+      td0.className = "ts-name";
+      const neverRan = resultFor(test, src) === null;
+      if (neverRan){
+        td0.classList.add("ts-name-norun");
+        td0.innerHTML = `${esc(test.name)}<span class="norun-tag">not reported by this source</span>`;
+      } else {
+        td0.textContent = test.name;
+      }
+      tr.appendChild(td0);
+      for (let b = 0; b < nBuilds; b++){
+        const bm = cols[b] || { results:{} };
+        const res = (bm.results && bm.results[test.name]) || "not-run";
+        const td = document.createElement("td");
+        td.className = "ts-cell";
+        td.appendChild(tileEl(res));
+        td.dataset.tipBuild = JSON.stringify({
+          test: test.name, build: bm.id || "—", res, aicr: bm.aicrVer || "—", k8s: bm.k8sVer || "—", when: bm.when || "—",
+          label: meta ? meta.label : src, ev: bm.evidenceRef || "",
+        });
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    });
+  });
+  table.appendChild(tbody);
+  host.appendChild(table);
+
+  if (focusTest){
+    const row = [...host.querySelectorAll(".ts-row")].find(r => r.querySelector(".ts-name").textContent === focusTest);
+    if (row) row.scrollIntoView({ block:"center", behavior:"auto" });
+  }
+}
+
+/* ============================================================
+   TOOLTIP (delegated; matrix cells + build cells)
+   ============================================================ */
+const tooltip = document.getElementById("tooltip");
+function tipResultClass(res){ return res==="pass"?"tt-pass":res==="fail"?"tt-fail":"tt-notrun"; }
+
+document.body.addEventListener("mouseover", e => {
+  const cell = e.target.closest("[data-tip]");
+  const bcell = e.target.closest("[data-tip-build]");
+  if (cell && cell.dataset.tip){
+    const d = JSON.parse(cell.dataset.tip);
+    const repLine = d.allow ? "" :
+      `<div class="tt-row"><span class="tt-k">flag</span><span class="tt-reported">❖ reported · not allowlisted</span></div>`;
+    tooltip.innerHTML =
+      `<div class="tt-id">${esc(d.label)}</div>` +
+      `<div class="tt-row"><span class="tt-k">signer</span><span style="word-break:break-all">${esc(d.id)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">class</span><span>${esc(d.cls)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">aicr</span><span>${esc(d.aicr)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">k8s</span><span>${esc(d.k8s)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">latest build</span><span>${esc(d.build)} · ${esc(d.buildWhen)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">run time</span><span>${esc(d.when)}</span></div>` +
+      repLine +
+      (d.evidenceRef ? `<div class="tt-row"><span class="tt-k">evidence</span><span class="mono" style="word-break:break-all;font-size:10px">${esc(d.evidenceRef)}</span></div>` : "") +
+      `<div class="tt-row" style="margin-top:4px"><a href="#" class="tt-ev">open time-series ↗</a></div>`;
+    tooltip.classList.add("show");
+  } else if (bcell && bcell.dataset.tipBuild){
+    const d = JSON.parse(bcell.dataset.tipBuild);
+    tooltip.innerHTML =
+      `<div class="tt-id">${esc(d.build)} — ${esc(d.label)}</div>` +
+      `<div class="tt-row"><span class="tt-k">test</span><span>${esc(d.test)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">aicr</span><span>${esc(d.aicr)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">k8s</span><span>${esc(d.k8s)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">when</span><span>${esc(d.when)}</span></div>` +
+      (d.ev ? `<div class="tt-row"><span class="tt-k">evidence</span><span class="mono" style="word-break:break-all;font-size:10px">${esc(d.ev)}</span></div>` : "");
+    tooltip.classList.add("show");
+  }
+});
+document.body.addEventListener("mousemove", e => {
+  if (!tooltip.classList.contains("show")) return;
+  let x = e.clientX + 14, y = e.clientY + 14;
+  const w = tooltip.offsetWidth, h = tooltip.offsetHeight;
+  if (x + w > window.innerWidth - 8) x = e.clientX - w - 14;
+  if (y + h > window.innerHeight - 8) y = e.clientY - h - 14;
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+});
+document.body.addEventListener("mouseout", e => {
+  if (e.target.closest("[data-tip],[data-tip-build]")) tooltip.classList.remove("show");
+});
+document.body.addEventListener("click", e => { if (e.target.closest("a.tt-ev")) e.preventDefault(); });
+
+/* ============================================================
+   FACET WIRING
+   ============================================================ */
+function rerenderActive(){
+  if (!document.getElementById("view-landing").classList.contains("hidden")){
+    renderLanding();
+  } else if (!document.getElementById("view-catalog").classList.contains("hidden")){
+    renderCatalog();
+  } else if (!document.getElementById("view-grid").classList.contains("hidden") && currentRecipeIdx !== null){
+    renderMatrix(DATA.recipes[currentRecipeIdx]);
+  } else if (!document.getElementById("view-ts").classList.contains("hidden") && currentRecipeIdx !== null && currentTsSrc){
+    openTimeSeries(DATA.recipes[currentRecipeIdx], currentTsSrc);
+  }
+}
+function applyFacets(){
+  facets.k8s = document.getElementById("f-k8s").value;
+  facets.aicr = document.getElementById("f-aicr").value;
+  facets.cls = document.getElementById("f-class").value;
+  rerenderActive();
+}
+document.getElementById("f-k8s").addEventListener("change", applyFacets);
+document.getElementById("f-aicr").addEventListener("change", applyFacets);
+document.getElementById("f-class").addEventListener("change", applyFacets);
+document.getElementById("f-reset").addEventListener("click", () => {
+  document.getElementById("f-k8s").value = "";
+  document.getElementById("f-aicr").value = "";
+  document.getElementById("f-class").value = "";
+  applyFacets();
+});
+
+/* ============================================================
+   CRITERIA SELECTOR WIRING
+   ============================================================ */
+const CRIT_AXES = ["service","accelerator","os","intent","platform"];
+function syncCriteriaSelectStyles(){
+  CRIT_AXES.forEach(axis => {
+    const sel = document.getElementById("c-" + axis);
+    sel.classList.toggle("set", !!criteria[axis]);
+  });
+}
+function applyCriteria(){
+  CRIT_AXES.forEach(axis => { criteria[axis] = document.getElementById("c-" + axis).value; });
+  syncCriteriaSelectStyles();
+  if (criteria.service){
+    const g = TREE.find(x => x.name === criteria.service);
+    if (g && groupMatchesCriteria(g)){ showGroupCatalog(criteria.service); return; }
+  }
+  showLanding();
+}
+CRIT_AXES.forEach(axis => {
+  document.getElementById("c-" + axis).addEventListener("change", applyCriteria);
+});
+document.getElementById("c-reset").addEventListener("click", () => {
+  CRIT_AXES.forEach(axis => { document.getElementById("c-" + axis).value = ""; });
+  applyCriteria();
+});
+function reflectCriteriaForCoord(coord){
+  const map = { service:coord.service, accelerator:coord.accelerator, os:coord.os, intent:coord.intent,
+                platform: coord.platform === null ? PLATFORM_NONE : coord.platform };
+  CRIT_AXES.forEach(axis => {
+    const sel = document.getElementById("c-" + axis);
+    sel.value = map[axis];
+    sel.classList.add("set");
+  });
+}
+function restoreCriteriaSelects(){
+  CRIT_AXES.forEach(axis => { document.getElementById("c-" + axis).value = criteria[axis]; });
+  syncCriteriaSelectStyles();
+}
+
+/* ============================================================
+   GRID CONTROLS WIRING (filter, only-nonpass, sort)
+   ============================================================ */
+function rerenderGridIfActive(){
+  if (currentRecipeIdx !== null && !document.getElementById("view-grid").classList.contains("hidden"))
+    renderMatrix(DATA.recipes[currentRecipeIdx]);
+}
+document.getElementById("row-filter").addEventListener("input", e => {
+  gridCtl.filter = e.target.value;
+  rerenderGridIfActive();
+});
+document.getElementById("only-nonpass").addEventListener("click", () => {
+  gridCtl.onlyNonPass = !gridCtl.onlyNonPass;
+  document.getElementById("only-nonpass").classList.toggle("active", gridCtl.onlyNonPass);
+  rerenderGridIfActive();
+});
+document.getElementById("sort-sel").addEventListener("change", e => {
+  gridCtl.sort = e.target.value;
+  rerenderGridIfActive();
+});
+
+/* ============================================================
+   GLOBAL WIRING
+   ============================================================ */
+document.getElementById("back-btn").addEventListener("click", backToCatalog);
+document.getElementById("ts-back-btn").addEventListener("click", () => {
+  if (currentRecipeIdx !== null) openGrid(currentRecipeIdx); else backToCatalog();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape"){
+    if (!document.getElementById("view-ts").classList.contains("hidden")){
+      if (currentRecipeIdx !== null) openGrid(currentRecipeIdx);
+    } else if (!document.getElementById("view-grid").classList.contains("hidden")){
+      backToCatalog();
+    } else if (!document.getElementById("view-catalog").classList.contains("hidden")){
+      showLanding();
+    }
+  }
+});
+
+/* ============================================================
+   MODEL BUILDER + BOOT (fetch data/index.json)
+   ============================================================ */
+const SERVICE_ORDER = ["eks","gke","aks","oke","lke"];
+
+function buildModelFromIndex(index){
+  // sources
+  SOURCES = {};
+  SRC_META = {};
+  for (const id of Object.keys(index.sources)){
+    const s = index.sources[id];
+    SOURCES[id] = { id: s.signerId, class: s.class, label: s.label, allowlisted: s.allowlisted };
+  }
+  CRITERIA_VALUES = index.criteria;
+
+  // recipes (flatten groups→dashboards→tabs into DATA.recipes, building runs/_runMeta)
+  DATA = { recipes: [] };
+  RECIPE_BY_NAME = {};
+  const tabOf = {}; // recipe -> { service, ao }
+  index.groups.forEach(g => {
+    g.dashboards.forEach(d => {
+      d.tabs.forEach(tab => {
+        const tests = tab.tests.map(t => {
+          // v1 schema: per-row latest-per-signer lives in `signers`.
+          const sig = t.signers || [];
+          const runs = sig.map(r => [r.src, r.result]);
+          const runMeta = {};
+          sig.forEach(r => { runMeta[r.src] = { build: r.build, aicrVer: r.aicrVer, k8sVer: r.k8sVer, when: r.when, evidenceRef: r.evidenceRef }; });
+          return { phase: t.phase, name: t.name, runs, _consensus: t.consensus, _reported: t.reported, _runMeta: runMeta };
+        });
+        const idx = DATA.recipes.length;
+        // Tab.phaseRollup is computed and frozen in Go (Contract 4 single source
+        // of truth); the page consumes it rather than re-deriving the state.
+        DATA.recipes.push({ coord: tab.coord, name: tab.recipe, tests, _phaseRollup: tab.phaseRollup || {} });
+        RECIPE_BY_NAME[tab.recipe] = idx;
+        tabOf[tab.recipe] = { service: g.service, ao: `${d.accelerator}-${d.os}` };
+      });
+    });
+  });
+
+  // hash-routing lookup: stable coordinate path -> recipe index
+  COORD_TO_IDX = {};
+  DATA.recipes.forEach((r, i) => { COORD_TO_IDX[coordPath(r)] = i; });
+
+  // per-source latest run metadata (best-effort: first run seen for each source)
+  DATA.recipes.forEach(r => r.tests.forEach(t => {
+    Object.keys(t._runMeta).forEach(src => {
+      if (!SRC_META[src]) SRC_META[src] = { aicrVer: t._runMeta[src].aicrVer, k8sVer: t._runMeta[src].k8sVer, when: t._runMeta[src].when };
+    });
+  }));
+
+  // TREE (groups → dashboards → tabs) preserving index order
+  TREE = index.groups.map(g => {
+    const dashboards = g.dashboards.map(d => ({
+      ao: `${d.accelerator}-${d.os}`,
+      tabs: d.tabs.map(tab => ({ tab: coordParts(tab.coord).ip, idx: RECIPE_BY_NAME[tab.recipe] })),
+    }));
+    let count = 0; dashboards.forEach(d => count += d.tabs.length);
+    return { name: g.service, dashboards, count };
+  });
+  // Only groups present in index.json (i.e. with real evidence) are shown — no
+  // empty "awaiting first attestation" placeholders. Order present groups by the
+  // CSP-priority SERVICE_ORDER, with any others appended.
+  TREE.sort((a,b) => {
+    const ia = SERVICE_ORDER.indexOf(a.name), ib = SERVICE_ORDER.indexOf(b.name);
+    return (ia<0?99:ia) - (ib<0?99:ib);
+  });
+  currentGroup = TREE.length ? TREE[0].name : null;
+
+  // build the in-grid facet dropdowns from the sources' run metadata
+  const k8sSet = new Set(), aicrSet = new Set();
+  for (const k in SRC_META){ k8sSet.add(SRC_META[k].k8sVer); aicrSet.add(SRC_META[k].aicrVer); }
+  const k8sSel = document.getElementById("f-k8s");
+  const aicrSel = document.getElementById("f-aicr");
+  [...k8sSet].sort().forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; k8sSel.appendChild(o); });
+  [...aicrSet].sort().reverse().forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; aicrSel.appendChild(o); });
+
+  // criteria dropdowns from index.criteria (already in real-enum order)
+  Object.keys(CRITERIA_VALUES).forEach(axis => {
+    const sel = document.getElementById("c-" + axis);
+    const all = document.createElement("option"); all.value=""; all.textContent="All"; sel.appendChild(all);
+    CRITERIA_VALUES[axis].forEach(v => { const o=document.createElement("option"); o.value=v; o.textContent=v; sel.appendChild(o); });
+  });
+
+  // default: everything collapsed in the tree
+  TREE.forEach(g => { collapsedGroups.add(g.name); g.dashboards.forEach(d => collapsedDashes.add(`${g.name}/${d.ao}`)); });
+}
+
+function showError(msg){
+  const host = document.getElementById("landing-host");
+  hideAllViews();
+  document.getElementById("view-landing").classList.remove("hidden");
+  host.innerHTML = `<div class="error-banner">${msg}</div>`;
+}
+
+async function boot(){
+  document.getElementById("landing-host").innerHTML = `<div class="loading-note">loading <span class="mono">data/index.json</span> …</div>`;
+  let index;
+  try {
+    const res = await fetch("data/index.json");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    index = await res.json();
+  } catch (err) {
+    showError(
+      `<b>Could not load <span class="mono">data/index.json</span></b> (${err.message}).<br><br>` +
+      `A page that <span class="mono">fetch()</span>es sibling files can't read them over <span class="mono">file://</span> ` +
+      `(browser security). Serve it over HTTP instead:<br>` +
+      `<span class="mono">python3 -m http.server 8000</span> from this directory → open <span class="mono">http://localhost:8000/</span>.`
+    );
+    return;
+  }
+  buildModelFromIndex(index);
+  route(); // resolve the initial view from the URL hash (deep-link support)
+}
+
+// brand / header logo -> overview (landing)
+{
+  const _home = document.getElementById("brand-home");
+  if (_home){
+    _home.addEventListener("click", () => showLanding());
+    _home.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); showLanding(); } });
+  }
+}
+
+boot();
+
+</script>
+</body>
+</html>

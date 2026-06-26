@@ -1,0 +1,32 @@
+{
+  "reportFormat": "CTRF",
+  "specVersion": "0.0.1",
+  "timestamp": "2026-06-19T03:00:00Z",
+  "generatedBy": "aicr validate",
+  "results": {
+    "tool": {
+      "name": "aicr",
+      "version": "v0.13.0"
+    },
+    "summary": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "pending": 0,
+      "other": 0,
+      "start": 1781838000000,
+      "stop": 1781838300000
+    },
+    "tests": [
+      {
+        "name": "operator-health",
+        "status": "passed",
+        "duration": 1000,
+        "suite": [
+          "deployment"
+        ]
+      }
+    ]
+  }
+}

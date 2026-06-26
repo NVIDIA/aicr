@@ -1,0 +1,21 @@
+---
+# Contract 2 fixture — recipes/evidence/allowlist.yaml
+# Entries pin a fully-anchored issuer+identity pair. identity is an exact string
+# or a tightly-bounded regex with NO wildcard org/repo. Classes are disjoint and
+# no two entries overlap. A CI lint (GP1) rejects violations.
+schemaVersion: "1.0.0"
+
+firstParty:
+  - issuer: https://token.actions.githubusercontent.com
+    # exact org/repo; only the ref varies, bounded to this repo's workflows
+    identity: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/main$'
+
+community:
+  - issuer: https://token.actions.githubusercontent.com
+    identity: https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main
+  - issuer: https://gitlab.com
+    identity: https://gitlab.com/hydra-ml/evidence
+
+partner:
+  - issuer: https://oidc.coreweave-lab.example
+    identity: https://oidc.coreweave-lab.example/attest
