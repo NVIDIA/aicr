@@ -1,0 +1,194 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GP2 — Evidence ingest (#1402).
+#
+# Verifies published, signed evidence bundles and writes the source-keyed
+# evidence tree the GP4 corroborate generator consumes, then uploads that
+# tree to the corroboration GCS bucket. Two triggers converge on the same
+# verify -> synthesize -> upload pipeline:
+#
+#   1. push to main touching recipes/evidence/** — community/partner
+#      pointers added/refreshed in-tree.
+#   2. workflow_call / workflow_dispatch with a bundle_ref — first-party
+#      UAT runs ingest directly, by bundle ref, with no repo commit.
+#
+# Fork safety, per hippo:reviewer-cicd norms: verification runs in a job
+# that holds NO bucket-write credentials; the credentialed publish job
+# runs only on the canonical repo (never a fork) in a separate job. It
+# reuses the eidosx WIF provider + service account from uat-gcp.yaml and
+# writes to the existing aicr-testgrid-staging bucket under a results/
+# prefix. GP3 will swap in a dedicated objectCreator-only SA.
+
+name: "Evidence: Ingest"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'recipes/evidence/**'
+  workflow_dispatch:
+    inputs:
+      bundle_ref:
+        description: 'OCI ref of a signed evidence bundle to ingest (registry/repo@sha256:...)'
+        required: true
+        type: string
+      recipe:
+        description: 'Recipe name (optional; informational)'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      bundle_ref:
+        description: 'OCI ref of a signed evidence bundle to ingest (registry/repo@sha256:...)'
+        required: true
+        type: string
+      recipe:
+        description: 'Recipe name (optional; informational)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Registry/repo prefixes a bundle ref must fall under before it is
+  # pulled. Overridable via the EVIDENCE_TRUSTED_REGISTRIES repo var.
+  TRUSTED_REGISTRIES: ${{ vars.EVIDENCE_TRUSTED_REGISTRIES || 'ghcr.io/nvidia' }}
+  # Allowed OIDC issuer for first-party (UAT) bundles.
+  FIRST_PARTY_ISSUER: 'https://token.actions.githubusercontent.com'
+  # Identity regexp pinning first-party UAT signatures to the NVIDIA/aicr
+  # UAT workflows. Fully anchored so the verifier's signer match is exact
+  # (matches what uat-aws.yaml / uat-gcp.yaml pin in their own verify step).
+  FIRST_PARTY_IDENTITY: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/.+$'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Job 1: verify + synthesize. Holds NO GCS credentials. Its only output
+  # is the local source-keyed tree, uploaded as an artifact.
+  # ---------------------------------------------------------------------
+  verify:
+    name: Verify and synthesize
+    # Never runs on a fork (push to main on a fork would still lack the
+    # bundles; the publish job is the real credential gate).
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 2  # push diff needs the previous commit
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Build evidence-project
+        env:
+          GOFLAGS: -mod=vendor
+        run: go build -o ./bin/evidence-project ./tools/evidence-project
+
+      - name: Authenticate to GHCR
+        uses: ./.github/actions/ghcr-login
+
+      - name: Ingest
+        env:
+          INGEST: ${{ github.workspace }}/bin/evidence-project
+          BUNDLE_REF: ${{ inputs.bundle_ref }}
+          # First-party runId. On a workflow_call from UAT, github.run_id
+          # is the SAME run that pushed the bundle (the run_id embedded in
+          # the OCI artifact name), so the tree entry is unique and traces
+          # back to both. Used only in the single-bundle (BUNDLE_REF) path;
+          # the push path derives a per-pointer runId from attestedAt.
+          FIRST_PARTY_RUN_ID: run-${{ github.run_id }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          OUT_DIR: ${{ github.workspace }}/out
+        run: .github/scripts/evidence-ingest.sh
+
+      - name: Upload evidence tree
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: evidence-tree
+          path: ${{ github.workspace }}/out
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Job 2: publish to GCS. Separate job that holds the GCP credentials —
+  # the verify job above holds none. Reuses the WIF provider + service
+  # account from uat-gcp.yaml (eidosx project) and writes to the existing
+  # aicr-testgrid-staging bucket under its own results/ prefix, which does
+  # not collide with the bucket's other top-level paths (config, grid/,
+  # groups/, queue/, summary/, tabs/).
+  #
+  # GP3 hardening: swap GCP_WIF_SERVICE_ACCOUNT for a dedicated
+  # objectCreator-only identity scoped to gs://aicr-testgrid-staging/results
+  # rather than the shared github-actions@eidosx SA.
+  # ---------------------------------------------------------------------
+  publish:
+    name: Publish to GCS
+    needs: verify
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write  # WIF only; no bucket creds in the verify job
+    env:
+      GCP_WIF_PROVIDER: "projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
+      GCP_WIF_SERVICE_ACCOUNT: "github-actions@eidosx.iam.gserviceaccount.com"
+      BUCKET: "aicr-testgrid-staging"
+    steps:
+      - name: Download evidence tree
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: evidence-tree
+          path: out
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
+
+      - name: Sync source-keyed tree to GCS
+        run: |
+          if [ ! -d out/results ]; then
+            echo "no results to publish"
+            exit 0
+          fi
+          # rsync (no --delete): create-only across sources; a re-ingest
+          # of the same run replaces in place, and other sources/runs (and
+          # the bucket's other top-level prefixes) are never touched.
+          gcloud storage rsync -r out/results "gs://${BUCKET}/results"

@@ -52,6 +52,10 @@ jobs:
       actions: read
       id-token: write
       packages: write
+    outputs:
+      # Digest-pinned OCI ref of the signed evidence bundle, consumed by
+      # the ingest-evidence job below. Empty when no bundle was produced.
+      bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
     env:
       GCP_PROJECT_ID: "eidosx"
       GCP_REGION: "us-central1"
@@ -253,6 +257,14 @@ jobs:
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-gcp\.yaml@refs/heads/.+$'
         run: ./tests/uat/gcp/run verify "${TEST_CONFIG}"
 
+      # Export the digest-pinned bundle ref for the ingest-evidence job.
+      # Reads the pointer the conformance step wrote; emits empty (job
+      # skips) when no bundle/digest is present.
+      - name: Export evidence bundle ref
+        id: evidence_ref
+        if: steps.conformance.outcome == 'success'
+        uses: ./.github/actions/export-evidence-ref
+
       # Artifacts + summary run BEFORE teardown so a slow or failing
       # `Destroy Cluster` (which can take 10+ min) does not delay or
       # consume the job-timeout budget needed to persist evidence.
@@ -377,3 +389,20 @@ jobs:
             echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
             exit 1
           fi
+
+  # Ingest the signed UAT evidence bundle into the corroboration bucket.
+  # Runs as its own job (separate runner) only when the run produced a
+  # bundle; the reusable workflow verifies signer + issuer + identity +
+  # registry in a credential-free step before publishing to GCS.
+  ingest-evidence:
+    name: Ingest UAT evidence
+    needs: uat-gcp
+    if: needs.uat-gcp.outputs.bundle_ref != ''
+    permissions:
+      contents: read
+      id-token: write  # WIF for the publish job
+      packages: read   # GHCR pull for the verify job
+    uses: ./.github/workflows/evidence-ingest.yaml
+    with:
+      bundle_ref: ${{ needs.uat-gcp.outputs.bundle_ref }}
+      recipe: gke-h100-training
