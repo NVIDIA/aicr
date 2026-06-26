@@ -203,7 +203,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
-      defaultVersion: v0.17.0
+      defaultVersion: v0.17.1
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:
