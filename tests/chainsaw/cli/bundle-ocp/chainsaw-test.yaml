@@ -1,0 +1,144 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-ocp
+spec:
+  description: |
+    Validates that aicr recipe + bundle CLI commands produce correct output
+    for OCP (OpenShift Container Platform) recipes. Verifies:
+      - Numbered folder layout (six OCP components)
+      - Rendered manifest content (Subscription, OperatorGroup, CRs)
+      - Readiness gate folders emitted with --readiness-hooks
+    No cluster needed -- purely CLI output validation.
+    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/cli/bundle-ocp
+  timeouts:
+    exec: 60s
+  steps:
+    - name: generate-recipe
+      description: Generate an OCP inference recipe.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-ocp"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe \
+                --service ocp \
+                --intent inference \
+                --output "${WORK}/recipe.yaml"
+
+    - name: assert-recipe
+      description: Verify recipe has correct criteria and OCP components.
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/chainsaw-bundle-ocp/recipe.yaml \
+                --file ./assert-recipe.yaml \
+                --no-color --timeout 5s
+
+    - name: generate-bundle
+      description: Generate a Helm bundle with readiness hooks.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-ocp"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/bundle" \
+                --readiness-hooks
+
+    - name: assert-folder-structure
+      description: Verify bundle scaffold files exist and at least one component folder is emitted.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-ocp"
+              test -f "${WORK}/bundle/deploy.sh"
+              test -f "${WORK}/bundle/README.md"
+              test -f "${WORK}/bundle/recipe.yaml"
+              ls "${WORK}"/bundle/[0-9][0-9][0-9]-*/ >/dev/null 2>&1 \
+                || { echo "no numbered component folders found" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: assert-rendered-manifests
+      description: Verify bundle contains at least one OLM component with Subscription and OperatorGroup.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-ocp"
+              ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-*-olm/ >/dev/null 2>&1 \
+                || { echo "no OLM component folders found" >&2; exit 1; }
+              for kind in Subscription OperatorGroup; do
+                found=false
+                for f in "${WORK}"/bundle/*/templates/*.yaml; do
+                  [ -f "$f" ] || continue
+                  grep -q "kind: ${kind}" "$f" 2>/dev/null && { found=true; break; }
+                done
+                [ "${found}" = "true" ] \
+                  || { echo "kind ${kind} not found in bundle" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: assert-olm-has-readiness-gate
+      description: Verify every OLM folder has a readiness gate folder immediately after it.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-ocp"
+              for olm_dir in "${WORK}"/bundle/[0-9][0-9][0-9]-*-olm/; do
+                [ -d "${olm_dir}" ] || continue
+                basename "${olm_dir}" | grep -q "\-readiness/$" && continue
+                olm_name=$(basename "${olm_dir}" | sed 's/^[0-9]*-//')
+                olm_seq=$(basename "${olm_dir}" | grep -o '^[0-9]*')
+                rdns_dir=$(ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-${olm_name}-readiness 2>/dev/null | head -1)
+                [ -n "${rdns_dir}" ] \
+                  || { echo "readiness folder for ${olm_name} not found" >&2; exit 1; }
+                rdns_seq=$(basename "${rdns_dir}" | grep -o '^[0-9]*')
+                [ "${olm_seq}" -lt "${rdns_seq}" ] \
+                  || { echo "${olm_name} (${olm_seq}) must precede its readiness gate (${rdns_seq})" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+
+    - name: assert-cr-follows-readiness-gate
+      description: Verify every CR folder follows its corresponding readiness gate.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-ocp"
+              for rdns_dir in "${WORK}"/bundle/[0-9][0-9][0-9]-*-readiness/; do
+                [ -d "${rdns_dir}" ] || continue
+                rdns_seq=$(basename "${rdns_dir}" | grep -o '^[0-9]*')
+                cr_name=$(basename "${rdns_dir}" | sed 's/^[0-9]*-//; s/-readiness$//' | sed 's/-olm$//')
+                cr_dir=$(ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-${cr_name} 2>/dev/null | head -1)
+                [ -n "${cr_dir}" ] \
+                  || { echo "CR folder for ${cr_name} not found" >&2; exit 1; }
+                cr_seq=$(basename "${cr_dir}" | grep -o '^[0-9]*')
+                [ "${rdns_seq}" -lt "${cr_seq}" ] \
+                  || { echo "readiness gate (${rdns_seq}) must precede CR ${cr_name} (${cr_seq})" >&2; exit 1; }
+              done
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-ocp
