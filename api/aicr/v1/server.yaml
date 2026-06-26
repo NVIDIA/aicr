@@ -1379,6 +1379,7 @@ components:
         apiVersion:
           type: string
           description: API version of the recipe format
+          enum: [aicr.run/v1alpha2]
           example: aicr.run/v1alpha2
         kind:
           type: string

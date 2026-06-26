@@ -56,7 +56,7 @@ appears. Because the rename is itself a breaking change to the artifact
 contract, the version segment is bumped in the same cut so consumers can
 distinguish migrated artifacts from legacy ones at a glance:
 
-```
+```text
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1   ──▶   apiVersion: aicr.run/v1alpha2
 ```

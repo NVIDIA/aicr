@@ -183,9 +183,10 @@ func TestBuildSpec_Validate(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		spec    BuildSpec
-		wantErr bool
+		name            string
+		spec            BuildSpec
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name: "valid with recipe",
@@ -221,7 +222,8 @@ func TestBuildSpec_Validate(t *testing.T) {
 					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
 				},
 			},
-			wantErr: true,
+			wantErr:         true,
+			wantErrContains: "apiVersion",
 		},
 		{
 			name: "stale version of current group rejected",
@@ -233,7 +235,8 @@ func TestBuildSpec_Validate(t *testing.T) {
 					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
 				},
 			},
-			wantErr: true,
+			wantErr:         true,
+			wantErrContains: "apiVersion",
 		},
 		{
 			name: "wrong kind",
@@ -279,6 +282,11 @@ func TestBuildSpec_Validate(t *testing.T) {
 			err := tt.spec.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErrContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.wantErrContains)
+				}
 			}
 		})
 	}
@@ -410,7 +418,7 @@ func TestLoadSpec_OversizeFile(t *testing.T) {
 	// Build a payload larger than MaxSpecFileBytes. Use valid YAML so the
 	// size check is what trips, not the parser.
 	var b strings.Builder
-	b.WriteString("apiVersion: aicr.run/v1beta2\nkind: AICRRuntime\nspec:\n  registry:\n    host: r\n    repository: r\n  comment: \"")
+	b.WriteString("apiVersion: " + ExpectedAPIVersion + "\nkind: AICRRuntime\nspec:\n  registry:\n    host: r\n    repository: r\n  comment: \"")
 	pad := strings.Repeat("x", defaults.MaxSpecFileBytes+16)
 	b.WriteString(pad)
 	b.WriteString("\"\n")
@@ -440,7 +448,7 @@ func TestLoadSpec_UnknownField(t *testing.T) {
 	path := filepath.Join(dir, "typo.yaml")
 
 	// "regestry" instead of "registry" — KnownFields(true) must reject it.
-	content := `apiVersion: aicr.run/v1beta2
+	content := "apiVersion: " + ExpectedAPIVersion + `
 kind: AICRRuntime
 spec:
   regestry:

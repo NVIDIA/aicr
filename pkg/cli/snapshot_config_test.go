@@ -440,6 +440,31 @@ spec:
 	}
 }
 
+// TestSnapshotCmd_InvalidConfig_LegacyAPIVersion confirms a legacy
+// aicr.nvidia.com apiVersion is rejected fail-closed at config-load time.
+// After the aicr.run hard-break migration, only aicr.run/v1alpha2 is valid.
+func TestSnapshotCmd_InvalidConfig_LegacyAPIVersion(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	cfg := `kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	err := runSnapshotCmdExpectErr(t, []string{"--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected error for legacy apiVersion, got nil")
+	}
+	if !strings.Contains(err.Error(), "apiVersion") {
+		t.Errorf("error %q must reference the unsupported apiVersion", err.Error())
+	}
+}
+
 // TestSnapshotCmd_RequireGPURuntimeClass_StillMutuallyExclusive verifies
 // the existing mutual-exclusion check survives the config-merge layer.
 // The conflict should be detected regardless of whether the values come

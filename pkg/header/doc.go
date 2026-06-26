@@ -91,7 +91,7 @@
 //
 // Init writes the timestamp using RFC3339 format in UTC:
 //
-//	h.Init(header.KindRecipe, "v1", "v1.0.0")
+//	h.Init(header.KindRecipe, header.GroupVersion, "v1.0.0")
 //	// h.Metadata["timestamp"] == "2025-12-30T10:30:00Z"
 //
 // # Validation

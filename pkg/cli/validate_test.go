@@ -220,6 +220,13 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
 		},
+		{
+			name:        "legacy apiVersion is rejected",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\n",
+			wantErr:     true,
+			errContain:  "apiVersion",
+			errAbsent:   "--no-cluster requires --snapshot",
+		},
 	}
 
 	for _, tt := range tests {
