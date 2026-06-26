@@ -52,6 +52,23 @@ const (
 
 	requireScopedInferenceGatewayEnv = "AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY"
 
+	// NCCLAllReduceBWNetCheckName is the catalog name of the NCCL all-reduce NET
+	// check. Used to scope AICR_NCCL_FABRIC forwarding to that validator only.
+	// Exported (like InferencePerfCheckName / InferenceGatewayCheckName) so the
+	// catalog package can lock the embedded entry name against it — a rename
+	// would otherwise silently no-op RoCE forwarding with no test failing.
+	NCCLAllReduceBWNetCheckName = "nccl-all-reduce-bw-net"
+
+	// ncclFabricEnv selects the NET fabric (efa default | roce). Forwarded to
+	// the NET check pod so the in-Job validator can observe it. This is the
+	// orchestrator (forwarding) end; the validator-pod (reading) end defines the
+	// same literal as ncclFabricEnv in
+	// validators/performance/nccl_all_reduce_bw_constraint.go — keep the two in
+	// sync. The split mirrors the other forwarded validator envs (HF_TOKEN,
+	// AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY, AICR_INFERENCE_PERF_NO_CLEANUP): the
+	// pod binary is a separate package that does not import this one.
+	ncclFabricEnv = "AICR_NCCL_FABRIC"
+
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
 	// for post-mortem inspection. Forwarded only to the inference-perf pod.
@@ -155,6 +172,14 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: requireScopedInferenceGatewayEnv, Value: v})
 	}
 
+	// Forward the NCCL fabric selector to the nccl-all-reduce-bw-net check pod.
+	// The NET test runs inside the Job, so it can't observe the CLI environment
+	// unless forwarded here. Unset (default) leaves the check on EFA; scoped to
+	// the NET check so unrelated validator pods don't carry it.
+	if v, ok := os.LookupEnv(ncclFabricEnv); ok && v != "" && entry.Name == NCCLAllReduceBWNetCheckName {
+		env = append(env, corev1.EnvVar{Name: ncclFabricEnv, Value: v})
+	}
+
 	// Forward the inference-perf no-cleanup debug toggle into that validator pod.
 	// Cleanup runs inside the Job, so it can't see the CLI process environment
 	// unless the orchestrator carries the value across. Scoped to the
@@ -175,7 +200,7 @@ func buildEnv(
 	// forwarded value (k8s takes the last duplicate), breaking that trust
 	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv {
+		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclFabricEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})
