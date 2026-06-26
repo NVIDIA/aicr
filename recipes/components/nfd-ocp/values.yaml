@@ -1,0 +1,54 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Node Feature Discovery OCP CR values
+#
+# Structure mirrors nfd/values.yaml where fields overlap for side-by-side
+# comparison. The template maps these into the NodeFeatureDiscovery CR spec.
+
+name: nfd-instance
+namespace: openshift-nfd
+
+instance: ''
+
+operand:
+  servicePort: 12000
+
+prunerOnDelete: false
+
+# Maps to nfd/values.yaml topologyUpdater.enable
+topologyUpdater: false
+
+workerConfig:
+  configData: |
+    core:
+      sleepInterval: 60s
+    sources:
+      pci:
+        deviceClassWhitelist:
+          - "02"
+          - "03"
+          - "0200"
+          - "0207"
+          - "12"
+        deviceLabelFields:
+          - "vendor"
+
+# --- Fields present in nfd/values.yaml but NOT in NodeFeatureDiscovery CR ---
+# enableNodeFeatureApi: Helm chart setting; OCP operator enables this by default.
+# master.enable: OCP operator always deploys the master controller.
+# worker.enable: OCP operator always deploys the worker DaemonSet.
+# topologyUpdater.createCRDs: OCP operator manages CRDs via OLM.
+# topologyUpdater.kubeletStateDir: OCP operator configures this internally.
+# gc.enable: OCP operator manages garbage collection internally.

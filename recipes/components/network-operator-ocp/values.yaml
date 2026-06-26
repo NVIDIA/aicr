@@ -1,0 +1,75 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Network Operator OCP NicClusterPolicy values
+#
+# Structure mirrors network-operator/values.yaml where fields overlap for
+# side-by-side comparison. The template maps these into the NicClusterPolicy CR spec.
+# Reference: https://docs.nvidia.com/networking/display/kubernetes25100/openshift/deployment-guide-openshift.html
+
+name: nic-cluster-policy
+
+ofedDriver:
+  image: doca-driver
+  repository: nvcr.io/nvidia/mellanox
+  version: doca3.3.0-26.01-1.0.0.0-0
+  upgradePolicy:
+    autoUpgrade: true
+    drain:
+      deleteEmptyDir: true
+      enable: true
+      force: true
+      timeoutSeconds: 300
+    maxParallelUpgrades: 1
+  startupProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 20
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 30
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 30
+
+rdmaSharedDevicePlugin:
+  image: k8s-rdma-shared-dev-plugin
+  repository: nvcr.io/nvidia/mellanox
+  version: network-operator-v26.1.0
+  config: |
+    {
+      "configList": [{
+        "resourceName": "rdma_shared_devices",
+        "rdmaHcaMax": 1000,
+        "selectors": {
+          "vendors": ["15b3"],
+          "drivers": ["mlx5_core"]
+        }
+      }]
+    }
+
+nvIpam:
+  image: nvidia-k8s-ipam
+  repository: nvcr.io/nvidia/mellanox
+  version: network-operator-v26.1.0
+  enableWebhook: false
+
+# --- Fields present in network-operator/values.yaml but NOT in NicClusterPolicy CR ---
+# operator.fullnameOverride: Helm chart setting, not a CR field.
+# operator.tolerations: Helm chart setting for the operator Deployment, not CR.
+# deployCR: Helm chart toggle for whether to create the CR; OCP creates it explicitly.
+# nfd.enabled: OCP deploys NFD via the nfd-ocp component, not as a sub-chart.
+# nfd.deployNodeFeatureRules: Helm chart setting, not a CR field.
+# sriovNetworkOperator.enabled: OCP manages SR-IOV separately via its own operator.
+# secondaryNetwork.deploy: Helm chart setting, not a CR field.
+# nicClusterPolicy.enabled: Helm chart toggle; OCP creates the CR explicitly.

@@ -118,7 +118,7 @@ Generate an optimized configuration recipe based on environment parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `kind`, `lke`, `bcm`, `any` |
+| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `any` |
 | `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |

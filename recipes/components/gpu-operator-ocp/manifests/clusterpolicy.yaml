@@ -1,0 +1,62 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- $v := index .Values "gpu-operator-ocp" }}
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ $v.name }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  operator:
+    defaultRuntime: {{ $v.operator.defaultRuntime }}
+  driver:
+    enabled: {{ $v.driver.enabled }}
+    kernelModuleType: {{ $v.driver.kernelModuleType | default "auto" }}
+    rdma:
+      enabled: {{ $v.driver.rdma.enabled }}
+      useHostMofed: {{ $v.driver.rdma.useHostMofed }}
+  cdi:
+    enabled: {{ $v.cdi.enabled }}
+    default: {{ $v.cdi.default }}
+  dcgm:
+    enabled: {{ $v.dcgm.enabled }}
+  gfd:
+    enabled: {{ $v.gfd.enabled }}
+  dcgmExporter:
+    enabled: {{ $v.dcgmExporter.enabled }}
+    config:
+      name: {{ $v.dcgmExporter.config.name }}
+    serviceMonitor:
+      enabled: {{ $v.dcgmExporter.serviceMonitor.enabled }}
+  devicePlugin:
+    enabled: {{ $v.devicePlugin.enabled }}
+  toolkit:
+    enabled: {{ $v.toolkit.enabled }}
+    installDir: {{ $v.toolkit.installDir }}
+    env: {{ $v.toolkit.env | toYaml | nindent 6 }}
+  migManager:
+    enabled: {{ $v.migManager.enabled }}
+  gdrcopy:
+    enabled: {{ $v.gdrcopy.enabled }}
+  sandboxWorkloads:
+    enabled: {{ $v.sandboxWorkloads.enabled }}
+  nodeStatusExporter:
+    enabled: {{ $v.nodeStatusExporter.enabled }}
+  daemonsets: {{ $v.daemonsets | toYaml | nindent 4 }}

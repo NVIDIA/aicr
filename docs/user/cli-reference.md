@@ -386,7 +386,7 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke, bcm |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, talos |
@@ -856,9 +856,9 @@ Validation can be run in different phases to validate different aspects of the d
 | `all` | Runs all phases sequentially; results collected regardless of failures | Complete end-to-end validation |
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
-
+>
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
-
+>
 > **apiVersion gate:** Snapshots and recipes also carry a schema `apiVersion` (currently `aicr.nvidia.com/v1alpha1`). Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
@@ -2455,7 +2455,7 @@ aicr mirror list [flags]
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--recipe` | `-r` | string | | Path/URI to a previously generated recipe. Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (`cm://namespace/name`). |
-| `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`). Alternative to `--recipe`. |
+| `--service` | | string | | Cloud service (e.g., `eks`, `gke`, `aks`, `ocp`). Alternative to `--recipe`. |
 | `--accelerator` | | string | | GPU accelerator (e.g., `h100`, `gb200`). Alternative to `--recipe`. |
 | `--intent` | | string | | Workload intent (`training` or `inference`). Alternative to `--recipe`. |
 | `--os` | | string | | Operating system (e.g., `ubuntu`). Alternative to `--recipe`. |

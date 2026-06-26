@@ -148,5 +148,14 @@ func helmFuncMap() template.FuncMap {
 		"trimSuffix": func(suffix, s string) string {
 			return strings.TrimSuffix(s, suffix)
 		},
+		"quote": func(vals ...any) string {
+			out := make([]string, 0, len(vals))
+			for _, v := range vals {
+				if v != nil {
+					out = append(out, fmt.Sprintf("%q", fmt.Sprintf("%v", v)))
+				}
+			}
+			return strings.Join(out, " ")
+		},
 	}
 }

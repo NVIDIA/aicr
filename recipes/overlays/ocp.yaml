@@ -1,0 +1,145 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: ocp
+
+spec:
+  criteria:
+    service: ocp
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.29"
+
+  componentRefs:
+    # OCP uses OLM-managed operators via in-tree Helm charts.
+    # Each operator has two phases:
+    #   *-ocp-olm — OLM installer (Namespace, OperatorGroup, Subscription)
+    #   *-ocp     — operator CR (ClusterPolicy, NodeFeatureDiscovery, etc.)
+
+    # NFD via OLM
+    - name: nfd-ocp-olm
+      type: Helm
+      valuesFile: components/nfd-ocp-olm/values.yaml
+      manifestFiles:
+        - components/nfd-ocp-olm/manifests/operatorgroup.yaml
+        - components/nfd-ocp-olm/manifests/subscription.yaml
+
+    - name: nfd-ocp
+      type: Helm
+      valuesFile: components/nfd-ocp/values.yaml
+      manifestFiles:
+        - components/nfd-ocp/manifests/nodefeaturediscovery.yaml
+      dependencyRefs:
+        - nfd-ocp-olm
+
+    # GPU Operator via OLM
+    - name: gpu-operator-ocp-olm
+      type: Helm
+      valuesFile: components/gpu-operator-ocp-olm/values.yaml
+      manifestFiles:
+        - components/gpu-operator-ocp-olm/manifests/operatorgroup.yaml
+        - components/gpu-operator-ocp-olm/manifests/subscription.yaml
+      dependencyRefs:
+        - nfd-ocp
+
+    - name: gpu-operator-ocp
+      type: Helm
+      valuesFile: components/gpu-operator-ocp/values.yaml
+      manifestFiles:
+        - components/gpu-operator-ocp/manifests/dcgm-exporter-configmap.yaml
+        - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
+      dependencyRefs:
+        - gpu-operator-ocp-olm
+
+    # Network Operator via OLM for RDMA/InfiniBand networking
+    - name: network-operator-ocp-olm
+      type: Helm
+      valuesFile: components/network-operator-ocp-olm/values.yaml
+      manifestFiles:
+        - components/network-operator-ocp-olm/manifests/operatorgroup.yaml
+        - components/network-operator-ocp-olm/manifests/subscription.yaml
+      dependencyRefs:
+        - nfd-ocp
+
+    - name: network-operator-ocp
+      type: Helm
+      valuesFile: components/network-operator-ocp/values.yaml
+      manifestFiles:
+        - components/network-operator-ocp/manifests/nicclusterpolicy.yaml
+      dependencyRefs:
+        - network-operator-ocp-olm
+
+    # nvsentinel — upstream Helm chart, no OLM variant needed
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        enabled: false
+
+    # Disable base components not needed on OCP
+    - name: nfd
+      type: Helm
+      overrides:
+        enabled: false
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        enabled: false
+    - name: cert-manager
+      type: Helm
+      overrides:
+        enabled: false
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        enabled: false
+    - name: prometheus-operator-crds
+      type: Helm
+      overrides:
+        enabled: false
+    - name: prometheus-adapter
+      type: Helm
+      overrides:
+        enabled: false
+    - name: k8s-ephemeral-storage-metrics
+      type: Helm
+      overrides:
+        enabled: false
+    - name: nodewright-operator
+      type: Helm
+      overrides:
+        enabled: false
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        enabled: false
+    - name: kai-scheduler
+      type: Helm
+      overrides:
+        enabled: false
+
+  validation:
+    # TODO: gpu-operator-version is excluded because OLM exposes image
+    # digests, not semver tags.
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - check-nvidia-smi
+    conformance:
+      checks:
+        - gpu-operator-health

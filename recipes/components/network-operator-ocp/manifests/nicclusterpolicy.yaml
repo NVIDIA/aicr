@@ -1,0 +1,44 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- $v := index .Values "network-operator-ocp" }}
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: {{ $v.name }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  ofedDriver:
+    image: {{ $v.ofedDriver.image }}
+    repository: {{ $v.ofedDriver.repository }}
+    version: {{ $v.ofedDriver.version }}
+    upgradePolicy: {{ $v.ofedDriver.upgradePolicy | toYaml | nindent 6 }}
+    startupProbe: {{ $v.ofedDriver.startupProbe | toYaml | nindent 6 }}
+    livenessProbe: {{ $v.ofedDriver.livenessProbe | toYaml | nindent 6 }}
+    readinessProbe: {{ $v.ofedDriver.readinessProbe | toYaml | nindent 6 }}
+  rdmaSharedDevicePlugin:
+    image: {{ $v.rdmaSharedDevicePlugin.image }}
+    repository: {{ $v.rdmaSharedDevicePlugin.repository }}
+    version: {{ $v.rdmaSharedDevicePlugin.version }}
+    config: {{ $v.rdmaSharedDevicePlugin.config | quote }}
+  nvIpam:
+    image: {{ $v.nvIpam.image }}
+    repository: {{ $v.nvIpam.repository }}
+    version: {{ $v.nvIpam.version }}
+    enableWebhook: {{ $v.nvIpam.enableWebhook }}

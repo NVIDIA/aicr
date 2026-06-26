@@ -112,7 +112,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
             default: any
         - name: accelerator
           in: query
@@ -479,7 +479,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
             default: any
         - name: accelerator
           in: query
@@ -1257,7 +1257,7 @@ components:
         service:
           type: string
           description: Kubernetes service type
-          enum: [eks, gke, aks, oke, kind, lke, bcm, any]
+          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
           example: eks
         accelerator:
           type: string

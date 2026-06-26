@@ -1,0 +1,39 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GPU Operator OCP CR Health Check
+#
+# Validates that the ClusterPolicy CR applied by the gpu-operator-ocp
+# component has reconciled to state=ready. This is the deepest signal
+# that the full GPU stack (driver, toolkit, device-plugin DaemonSets,
+# validators) is healthy. The operator Deployment itself is validated
+# by the gpu-operator-ocp-olm health check.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gpu-operator-ocp-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-cluster-policy-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: nvidia.com/v1
+              kind: ClusterPolicy
+              metadata:
+                name: cluster-policy
+              status:
+                state: ready

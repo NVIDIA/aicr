@@ -717,3 +717,69 @@ components:
         tolerationPaths:
           - controllerManager.tolerations
           - audit.tolerations
+
+  # ── OCP (OpenShift Container Platform) components ──────────────────────
+  #
+  # OLM installer and CR charts for OCP operators.
+  # All use defaultRepository: "" (manifest-only, in-tree templates).
+  # Ordering is enforced via dependencyRefs in overlays.
+
+  - name: gpu-operator-ocp-olm
+    displayName: GPU Operator OCP (OLM)
+    valueOverrideKeys:
+      - gpuoperatorocpolm
+    healthCheck:
+      assertFile: checks/gpu-operator-ocp-olm/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gpu-operator
+
+  - name: gpu-operator-ocp
+    displayName: GPU Operator OCP (CR)
+    valueOverrideKeys:
+      - gpuoperatorocp
+    healthCheck:
+      assertFile: checks/gpu-operator-ocp/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gpu-operator
+
+  - name: network-operator-ocp-olm
+    displayName: Network Operator OCP (OLM)
+    valueOverrideKeys:
+      - networkoperatorocpolm
+    healthCheck:
+      assertFile: checks/network-operator-ocp-olm/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
+
+  - name: network-operator-ocp
+    displayName: Network Operator OCP (CR)
+    valueOverrideKeys:
+      - networkoperatorocp
+    healthCheck:
+      assertFile: checks/network-operator-ocp/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
+
+  - name: nfd-ocp-olm
+    displayName: Node Feature Discovery OCP (OLM)
+    valueOverrideKeys:
+      - nfdocpolm
+    healthCheck:
+      assertFile: checks/nfd-ocp-olm/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: openshift-nfd
+
+  - name: nfd-ocp
+    displayName: Node Feature Discovery OCP (CR)
+    healthCheck:
+      assertFile: checks/nfd-ocp/health-check.yaml
+    valueOverrideKeys:
+      - nfdocp
+    helm:
+      defaultRepository: ""
+      defaultNamespace: openshift-nfd
