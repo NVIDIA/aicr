@@ -36,6 +36,7 @@
     --contested:#ffae34;
     --failing:#ff4d5e;
     --untested:#5a6678;
+    --partial:#a78bfa;
 
     /* ---- result / tile colors (TestGrid-style) ---- */
     --pass:#3ddc84;
@@ -243,6 +244,7 @@
   .st-failing{color:var(--failing);border-color:rgba(255,77,94,.5);background:rgba(255,77,94,.1)}
   .st-untested{color:var(--untested);border-color:var(--line-hi);
     background:repeating-linear-gradient(45deg,rgba(90,102,120,.07),rgba(90,102,120,.07) 4px,transparent 4px,transparent 8px)}
+  .st-partial{color:var(--partial);border-color:rgba(167,139,250,.42);background:rgba(167,139,250,.08)}
   .reported-flag{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;font-weight:600;
     color:var(--reported);border:1px dashed rgba(192,139,255,.5);border-radius:4px;padding:2px 6px;letter-spacing:.3px;white-space:nowrap}
 
@@ -658,10 +660,14 @@ const STATE_META = {
   CONTESTED:{ cls:"st-contested", ic:"⚠",  label:"CONTESTED" },
   FAILING:  { cls:"st-failing",   ic:"✗",  label:"FAILING" },
   UNTESTED: { cls:"st-untested",  ic:"–",  label:"UNTESTED" },
+  // PARTIAL is an overview-only recipe rollup: corroborated on the phases that
+  // ran, but not all phases are covered (e.g. a runner without the hardware for
+  // performance). Never a per-row or per-phase state — see rollupRecipe.
+  PARTIAL:  { cls:"st-partial",   ic:"◐",  label:"PARTIAL" },
 };
 const STATE_COLOR = {
   CONFIRMED:"var(--confirmed)", SINGLE:"var(--single)", CONTESTED:"var(--contested)",
-  FAILING:"var(--failing)", UNTESTED:"var(--untested)",
+  FAILING:"var(--failing)", UNTESTED:"var(--untested)", PARTIAL:"var(--partial)",
 };
 const PHASE_PRIORITY = ["CONTESTED","FAILING","UNTESTED","SINGLE","CONFIRMED"];
 
@@ -792,6 +798,13 @@ function rollupRecipe(recipe){
     if (chosen === null || PHASE_PRIORITY.indexOf(c.state) < PHASE_PRIORITY.indexOf(chosen)) chosen = c.state;
   });
   if (chosen === null) chosen = "UNTESTED";
+  // Overview rollup only: a recipe corroborated on some phases but missing
+  // others (e.g. a contributor without the hardware to run performance) would
+  // otherwise be dragged to UNTESTED by its not-run rows, hiding the coverage
+  // it does have. Surface that as PARTIAL instead. Real problems still win:
+  // CONTESTED/FAILING are higher priority, so chosen is only UNTESTED here when
+  // nothing failed — and we promote to PARTIAL only when some row is positive.
+  if (chosen === "UNTESTED" && (confirmed > 0 || single > 0)) chosen = "PARTIAL";
   return { state: chosen, contested, failing, confirmed, single, untested, reported };
 }
 
@@ -1034,7 +1047,7 @@ function renderLanding(){
     const card = document.createElement("div");
     const empty = g.count === 0;
     card.className = "land-card" + (empty ? " empty" : "");
-    const tally = { CONFIRMED:0, SINGLE:0, CONTESTED:0, FAILING:0, UNTESTED:0 };
+    const tally = { CONFIRMED:0, SINGLE:0, CONTESTED:0, FAILING:0, PARTIAL:0, UNTESTED:0 };
     let dashCount = 0, tabCount = 0;
     g.dashboards.forEach(d => {
       const tabs = anyCriteria() ? d.tabs.filter(t=>recipeMatchesCriteria(DATA.recipes[t.idx])) : d.tabs;
@@ -1046,7 +1059,7 @@ function renderLanding(){
     if (empty){
       bars = `<div class="lc-empty-note">awaiting first attestation</div>`;
     } else {
-      const order = ["CONTESTED","FAILING","CONFIRMED","SINGLE","UNTESTED"];
+      const order = ["CONTESTED","FAILING","CONFIRMED","SINGLE","PARTIAL","UNTESTED"];
       bars = order.filter(s => tally[s] > 0).map(s =>
         `<div class="lc-row"><span class="lc-dot" style="background:${STATE_COLOR[s]}"></span>` +
         `${STATE_META[s].label} <span style="margin-left:auto;color:var(--ink-strong)">${tally[s]}</span></div>`).join("");
