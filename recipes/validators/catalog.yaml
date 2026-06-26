@@ -231,7 +231,7 @@ validators:
     env: []
   - name: nccl-all-reduce-bw-net
     phase: performance
-    description: "Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS)"
+    description: "Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via AICR_NCCL_FABRIC=roce)"
     image: ghcr.io/nvidia/aicr-validators/performance:latest
     timeout: 30m
     args: ["nccl-all-reduce-bw-net"]
