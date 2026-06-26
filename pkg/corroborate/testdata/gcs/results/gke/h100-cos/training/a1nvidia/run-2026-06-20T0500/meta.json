@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "aicr-corroboration-meta/v1",
+  "coordinate": {
+    "group": "gke",
+    "dashboard": "h100-cos",
+    "tab": "training"
+  },
+  "recipe": "h100-gke-cos-training",
+  "signer": {
+    "idHash": "a1nvidia",
+    "identity": "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "class": "first-party",
+    "allowlisted": true
+  },
+  "runId": "run-2026-06-20T0500",
+  "aicrVersion": "v1.0.0",
+  "k8sVersion": "1.33",
+  "k8sConstraint": ">= 1.32.4",
+  "bundleDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "evidenceRef": "ghcr.io/nvidia/aicr-evidence/h100-gke-cos-training@sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "rekorLogIndex": 84213709,
+  "attestedAt": "2026-06-20T05:00:00Z"
+}
