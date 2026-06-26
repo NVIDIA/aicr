@@ -169,6 +169,12 @@ func TestLabelFor(t *testing.T) {
 			want: "oidc.coreweave-lab.example",
 		},
 		{
+			name: "non-code-host deep path is not mislabeled as org/repo",
+			meta: RunMeta{Signer: RunMetaSigner{Class: string(ClassPartner),
+				Identity: "https://oidc.partner.example/tenant/project/attest"}},
+			want: "oidc.partner.example",
+		},
+		{
 			name: "falls back to idHash when identity is empty",
 			meta: RunMeta{Signer: RunMetaSigner{Class: string(ClassCommunity), IDHash: "deadbeef"}},
 			want: "deadbeef",

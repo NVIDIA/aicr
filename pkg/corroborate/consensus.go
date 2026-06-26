@@ -83,8 +83,11 @@ func BucketStatus(status string) Result {
 // SignerID) before calling ComputeConsensus; the consensus is computed over the
 // set's cardinality, never the raw run count.
 type SignerResult struct {
-	// SignerID is the verified-signer identity hash (the distinct-signer
-	// counting key). Two SignerResults with the same SignerID are a caller bug.
+	// SignerID is the distinct-signer counting key: the verified (issuer,
+	// identity) pair (see signerIdentityKey), never a contributor-controlled
+	// IDHash. Duplicate SignerIDs are collapsed by the defensive de-dup below
+	// (the anti-sybil guarantee that one identity is one signer); callers should
+	// still pre-reduce to latest-per-signer.
 	SignerID string
 
 	// Allowlisted reports whether this signer's verified identity is on the

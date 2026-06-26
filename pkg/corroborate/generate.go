@@ -17,6 +17,7 @@ package corroborate
 import (
 	_ "embed"
 	"encoding/json"
+	stderrors "errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,6 +29,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
+
+// errSkipRun is a loadRun sentinel: the run is malformed in a way that warrants
+// dropping it (already logged) rather than aborting the whole dashboard —
+// mirroring aggregate's per-run skips. It is a plain error (not a coded
+// *StructuredError) so stderrors.Is matches it by identity.
+var errSkipRun = stderrors.New("corroborate: skip run")
 
 // recipeTab pairs a recipe's coordinate with its built grid Tab, for assembling
 // the sorted catalog tree.
@@ -182,6 +189,9 @@ func collectRuns(inputDir string, allowlist *Allowlist) ([]*signerRun, error) {
 	for _, mp := range metaPaths {
 		run, err := loadRun(mp, allowlist)
 		if err != nil {
+			if stderrors.Is(err, errSkipRun) {
+				continue // run was skipped (already logged); see loadRun
+			}
 			return nil, err
 		}
 		runs = append(runs, run)
@@ -217,7 +227,12 @@ func loadRun(metaPath string, allowlist *Allowlist) (*signerRun, error) {
 	for _, phase := range phaseNames {
 		phasePath := filepath.Join(ctrfDir, phase+".json")
 		if _, statErr := os.Stat(phasePath); statErr != nil {
-			continue // a phase a run did not produce is simply absent
+			if os.IsNotExist(statErr) {
+				continue // a phase a run did not produce is simply absent
+			}
+			// A permission/I/O error is not "absent" — surface it rather than
+			// silently dropping a phase that may actually exist.
+			return nil, errors.Wrap(errors.ErrCodeInternal, "stat "+phasePath, statErr)
 		}
 		report, err := readCTRF(phasePath)
 		if err != nil {
@@ -230,7 +245,16 @@ func loadRun(metaPath string, allowlist *Allowlist) (*signerRun, error) {
 		statuses[phase] = byName
 	}
 
-	at, _ := time.Parse(time.RFC3339, meta.AttestedAt) // zero time on parse error sorts oldest
+	// A run we cannot temporally order must not contribute: silently treating a
+	// bad timestamp as the zero time would sort it oldest and let a stale run
+	// masquerade as current (or hide a genuinely newer result). Skip it (loud),
+	// consistent with aggregate's "one bad run never aborts the dashboard".
+	at, parseErr := time.Parse(time.RFC3339, meta.AttestedAt)
+	if parseErr != nil {
+		slog.Warn("skipping run: unparseable attestedAt",
+			"path", metaPath, "attestedAt", meta.AttestedAt, "signer", meta.Signer.Identity)
+		return nil, errSkipRun
+	}
 
 	return &signerRun{
 		meta:        *meta,
@@ -381,7 +405,13 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 			if status, ok := run.statuses[rk.phase][rk.name]; ok {
 				res = BucketStatus(status)
 			}
-			signerResults = append(signerResults, SignerResult{SignerID: id, Allowlisted: run.allowlisted, Result: res})
+			// Anti-sybil: the consensus distinct-signer key is the VERIFIED
+			// (issuer, identity), not meta.json's IDHash. The IDHash is a
+			// contributor-controlled field; keying consensus on it would let one
+			// verified identity submitted under two IDHashes count as two
+			// distinct allowlisted signers and manufacture a CONFIRMED. The
+			// display keys (Latest.Src, Sources, Series) stay the IDHash.
+			signerResults = append(signerResults, SignerResult{SignerID: signerIdentityKey(run.meta.Signer), Allowlisted: run.allowlisted, Result: res})
 			if res != ResultPass && res != ResultFail {
 				continue
 			}

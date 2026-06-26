@@ -25,7 +25,7 @@ go run ./tools/corroborate -in <evidence-dir> -out <output-dir> [-allowlist <all
 
 ### Output layout
 
-```
+```text
 <out>/
   index.html              # self-contained renderer (fetches the data below)
   data/

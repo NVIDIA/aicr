@@ -1436,7 +1436,7 @@ async function openTimeSeries(recipe, src, focusTest){
   // switch to the TS view immediately with a loading state, then fetch the series.
   hideAllViews();
   document.getElementById("view-ts").classList.remove("hidden");
-  headHost.innerHTML = `<div class="ts-src"><div class="ts-title">${meta ? meta.label : src}</div></div>`;
+  headHost.innerHTML = `<div class="ts-src"><div class="ts-title">${meta ? esc(meta.label) : esc(src)}</div></div>`;
   host.innerHTML = `<div class="loading-note">loading build history for <span class="mono">${esc(recipe.name)}</span> …</div>`;
   window.scrollTo({ top:0, behavior:"auto" });
 
@@ -1467,7 +1467,7 @@ async function openTimeSeries(recipe, src, focusTest){
   right.className = "ts-health";
   right.innerHTML =
     `<div class="ts-stat"><span class="v ${health.flakePct>=10?"flaky":""}">${health.flakePct}%</span><span class="k">flakiness</span></div>` +
-    `<div class="ts-stat"><span class="v">${health.lastPassBuild ? health.lastPassBuild : "—"}</span><span class="k">last all-pass build</span></div>` +
+    `<div class="ts-stat"><span class="v">${health.lastPassBuild ? esc(health.lastPassBuild) : "—"}</span><span class="k">last all-pass build</span></div>` +
     `<div class="ts-stat"><span class="v">${health.builds}</span><span class="k">builds shown</span></div>`;
   headHost.appendChild(right);
 

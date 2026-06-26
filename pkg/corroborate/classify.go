@@ -45,6 +45,13 @@ const (
 // hand-curated, PR-reviewed file; anything larger is malformed or hostile.
 const maxAllowlistBytes = 1 << 20 // 1 MiB
 
+// SupportedAllowlistSchemaVersion is the allowlist schema (GP1-owned, Contract
+// 2) this classifier understands. The loader fails closed on any other value:
+// a future GP1 schema bump may carry semantics these classification rules do
+// not enforce, so GP4 must be updated rather than silently classifying under
+// stale assumptions.
+const SupportedAllowlistSchemaVersion = "1.0.0"
+
 // AllowlistEntry pins one verified signer: an exact issuer and an identity that
 // is either an exact string or a tightly-bounded regex (recognized by a leading
 // "^"). Over-broad identities are rejected by Allowlist.Validate.
@@ -97,6 +104,13 @@ func LoadAllowlist(path string) (*Allowlist, error) {
 	var al Allowlist
 	if err := yaml.Unmarshal(data, &al); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "parse allowlist "+path, err)
+	}
+	// Fail closed on an unsupported schema before any classification: an
+	// unrecognized version may change the trust semantics this loader enforces.
+	if al.SchemaVersion != SupportedAllowlistSchemaVersion {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("allowlist %s schemaVersion %q is unsupported (want %q)",
+				path, al.SchemaVersion, SupportedAllowlistSchemaVersion))
 	}
 	if err := al.Validate(); err != nil {
 		return nil, err

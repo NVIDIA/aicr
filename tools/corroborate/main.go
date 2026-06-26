@@ -73,6 +73,12 @@ func run(inDir, outDir, allowlist string) error {
 	if inDir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "missing required -in <evidence-dir>")
 	}
+	if outDir == "" {
+		// Guard against writing index.html + data/ into the current working
+		// directory; the CLI flag defaults to a path, so an empty value here is
+		// a direct-caller error.
+		return errors.New(errors.ErrCodeInvalidRequest, "missing required -out <output-dir>")
+	}
 	res, err := corroborate.Generate(corroborate.Options{
 		InputDir:      inDir,
 		OutputDir:     outDir,

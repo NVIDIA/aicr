@@ -119,7 +119,8 @@ func splitTab(tab string) (intent, platform string, err error) {
 
 // labelFor derives a stable, human-readable source label from a run's verified
 // signer. First-party signers get a fixed label; others are named by their
-// "<org>/<repo>" when the identity is a code-host URL, else by host.
+// "<org>/<repo>" when the identity is a recognized code-host URL, else by host
+// (falling back to the IDHash when the identity yields no host).
 func labelFor(m RunMeta, class Class) string {
 	if class == ClassFirstParty {
 		return "NVIDIA UAT"
@@ -135,13 +136,39 @@ func labelFor(m RunMeta, class Class) string {
 		}
 	}
 	switch {
-	case len(segs) >= 3:
+	case len(segs) >= 3 && isCodeHost(segs[0]):
+		// Only code-host subjects carry a meaningful <org>/<repo>. A non-code
+		// OIDC subject (e.g. a partner attestation endpoint with a deep path)
+		// would otherwise be mislabeled as "<path[1]>/<path[2]>".
 		return segs[1] + "/" + segs[2]
 	case len(segs) >= 1:
 		return segs[0]
 	default:
 		return m.Signer.IDHash
 	}
+}
+
+// isCodeHost reports whether host is a recognized code-hosting platform whose
+// identity URL path is "<org>/<repo>/...". Matches the hosts the allowlist's
+// signer identities are drawn from.
+func isCodeHost(host string) bool {
+	switch host {
+	case "github.com", "gitlab.com":
+		return true
+	default:
+		return false
+	}
+}
+
+// signerIdentityKey is the anti-sybil distinct-signer key for consensus: the
+// verified (issuer, identity) pair, NOT meta.json's contributor-controlled
+// IDHash. Keying consensus on the IDHash would let one verified identity
+// submitted under two IDHashes count as two distinct allowlisted signers and
+// fabricate a CONFIRMED. The "\n" separator cannot occur in a URL, so distinct
+// pairs never collide. This key is internal to consensus and is never
+// serialized; display still uses the IDHash.
+func signerIdentityKey(s RunMetaSigner) string {
+	return s.Issuer + "\n" + s.Identity
 }
 
 // formatWhen renders an RFC3339 AttestedAt as "YYYY-MM-DD HH:MM UTC" for the

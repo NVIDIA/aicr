@@ -46,6 +46,15 @@ func TestRunHappyPath(t *testing.T) {
 			t.Errorf("expected %s: %v", rel, err)
 		}
 	}
+	// The per-recipe drilldown series are part of the emit contract; a fixture
+	// with recipes must produce at least one series/<recipe>.json.
+	series, err := filepath.Glob(filepath.Join(out, "data", "series", "*.json"))
+	if err != nil {
+		t.Fatalf("glob series: %v", err)
+	}
+	if len(series) == 0 {
+		t.Error("expected at least one data/series/*.json artifact, got none")
+	}
 }
 
 func TestParseAndRun(t *testing.T) {

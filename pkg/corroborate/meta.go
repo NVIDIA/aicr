@@ -70,10 +70,33 @@ type RunMetaSigner struct {
 // instead of allocating them (os.ReadFile would OOM on an attacker-influenced
 // path such as a /proc symlink or a network mount). Shared by the meta/CTRF
 // readers and the allowlist loader.
+//
+// It refuses to follow symlinks and to read non-regular files (FIFOs, devices,
+// sockets): a hostile input tree could otherwise point a meta.json at /proc or
+// /dev to read unintended content or block on a pipe. It also preserves the
+// open/stat error classification (not-found vs permission/other) so callers can
+// tell a missing run apart from an I/O failure.
 func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // path is operator-supplied (input tree / allowlist)
+	fi, err := os.Lstat(path)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, "open "+path, err)
+		if os.IsNotExist(err) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound, "stat "+path, err)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "stat "+path, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, path+" is a symlink (refusing to follow)")
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, path+" is not a regular file")
+	}
+
+	f, err := os.Open(path) //nolint:gosec // path validated above (regular file, not a symlink); operator-supplied input tree / allowlist
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound, "open "+path, err)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "open "+path, err)
 	}
 	defer func() { _ = f.Close() }()
 

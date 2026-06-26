@@ -195,6 +195,17 @@ func TestLoadAllowlist(t *testing.T) {
 			t.Fatal("expected parse error")
 		}
 	})
+	t.Run("unsupported schemaVersion is rejected at load", func(t *testing.T) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "future.yaml")
+		body := "schemaVersion: \"9.9.9\"\ncommunity:\n  - issuer: " + ghIssuer + "\n    identity: https://github.com/acme/attest\n"
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadAllowlist(p); err == nil {
+			t.Fatal("expected unsupported-schemaVersion rejection at load")
+		}
+	})
 	t.Run("over-broad file is rejected at load", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "broad.yaml")

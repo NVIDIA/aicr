@@ -17,6 +17,7 @@ package corroborate
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,8 +163,9 @@ func TestGenerateEndToEnd(t *testing.T) {
 	if got := findRow(t, idx, recipeB, "deployment", "driver-ready").Consensus; got != string(StateSingle) {
 		t.Errorf("recipeB driver-ready = %q, want SINGLE", got)
 	}
-	if tab := findTab(t, idx, recipeB); tab.Coord["platform"] != "" {
-		t.Errorf("recipeB platform = %q, want empty (bare intent)", tab.Coord["platform"])
+	tabB := findTab(t, idx, recipeB)
+	if plat, ok := tabB.Coord["platform"]; !ok || plat != "" {
+		t.Errorf("recipeB platform = %q (present=%v), want empty (bare intent)", plat, ok)
 	}
 
 	// Criteria facets: present values, with (none) for the bare-intent recipe.
@@ -194,11 +196,89 @@ func TestGenerateTrustsMetaClassWithoutAllowlist(t *testing.T) {
 	// free flag — GP2 wrote them). The fixtures carry the same classes, so the
 	// result matches the allowlist path.
 	_, idx := generateInto(t, "")
-	if s := idx.Sources["c3rogue"]; s.Allowlisted {
-		t.Errorf("rogue allowlisted via meta = %v, want false", s.Allowlisted)
+	rogue, ok := idx.Sources["c3rogue"]
+	if !ok {
+		t.Fatal("rogue source missing from index")
 	}
-	if s := idx.Sources["a1nvidia"]; s.Class != "first-party" {
-		t.Errorf("nvidia class via meta = %q, want first-party", s.Class)
+	if rogue.Allowlisted {
+		t.Errorf("rogue allowlisted via meta = %v, want false", rogue.Allowlisted)
+	}
+	nvidia, ok := idx.Sources["a1nvidia"]
+	if !ok {
+		t.Fatal("nvidia source missing from index")
+	}
+	if nvidia.Class != "first-party" {
+		t.Errorf("nvidia class via meta = %q, want first-party", nvidia.Class)
+	}
+}
+
+func TestGenerateSkipsUnparseableAttestedAt(t *testing.T) {
+	// A run whose attestedAt cannot be parsed is dropped (loud), not silently
+	// sorted as the zero time — so it never contributes to consensus.
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", "s1", "run-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"schemaVersion":"aicr-corroboration-meta/v1",` +
+		`"coordinate":{"group":"eks","dashboard":"h100-ubuntu","tab":"training"},` +
+		`"recipe":"h100-eks-ubuntu-training",` +
+		`"signer":{"idHash":"s1","identity":"https://github.com/x/y/.github/workflows/a.yaml@refs/heads/main",` +
+		`"issuer":"https://token.actions.githubusercontent.com","class":"community","allowlisted":false},` +
+		`"runId":"run-1","attestedAt":"not-a-timestamp"}`
+	if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Generate(Options{InputDir: dir, OutputDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Runs != 0 || res.Recipes != 0 {
+		t.Errorf("summary = %+v, want 0 runs / 0 recipes (bad-timestamp run skipped)", res)
+	}
+}
+
+func TestGenerateConsensusKeyedByVerifiedIdentityNotIDHash(t *testing.T) {
+	// Anti-sybil: one verified (issuer, identity) submitted under two different
+	// IDHashes must count as ONE distinct allowlisted signer (SINGLE), never two
+	// (CONFIRMED). Guards against re-keying consensus on the contributor-
+	// controlled meta.json IDHash.
+	const issuer = "https://token.actions.githubusercontent.com"
+	const identity = "https://github.com/acme/attest/.github/workflows/a.yaml@refs/heads/main"
+	dir := t.TempDir()
+	writeRun := func(idHash, runID string) {
+		t.Helper()
+		runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", idHash, runID)
+		if err := os.MkdirAll(filepath.Join(runDir, "ctrf"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		meta := fmt.Sprintf(`{"schemaVersion":"aicr-corroboration-meta/v1",`+
+			`"coordinate":{"group":"eks","dashboard":"h100-ubuntu","tab":"training"},`+
+			`"recipe":"h100-eks-ubuntu-training",`+
+			`"signer":{"idHash":%q,"identity":%q,"issuer":%q,"class":"community","allowlisted":true},`+
+			`"runId":%q,"attestedAt":"2026-06-20T03:14:07Z"}`, idHash, identity, issuer, runID)
+		if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctrf := `{"reportFormat":"CTRF","results":{"tool":{"name":"aicr"},"summary":{},` +
+			`"tests":[{"name":"operator-health","status":"passed"}]}}`
+		if err := os.WriteFile(filepath.Join(runDir, "ctrf", "deployment.json"), []byte(ctrf), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Same verified identity, two different idHashes, both passing the row.
+	writeRun("sybilA", "run-a")
+	writeRun("sybilB", "run-b")
+
+	out := t.TempDir()
+	if _, err := Generate(Options{InputDir: dir, OutputDir: out}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	idx := readIndex(t, filepath.Join(out, "data", "index.json"))
+	row := findRow(t, idx, "h100-eks-ubuntu-training", "deployment", "operator-health")
+	if row.Consensus != string(StateSingle) {
+		t.Errorf("consensus = %q, want SINGLE (one identity under two idHashes is one signer, not CONFIRMED)", row.Consensus)
 	}
 }
 
@@ -327,7 +407,7 @@ func TestGenerateErrors(t *testing.T) {
 	t.Run("over-broad allowlist rejected", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "broad.yaml")
-		body := "community:\n  - issuer: " + ghIssuer + "\n    identity: '^https://github\\.com/.+/.+/x$'\n"
+		body := "schemaVersion: \"1.0.0\"\ncommunity:\n  - issuer: " + ghIssuer + "\n    identity: '^https://github\\.com/.+/.+/x$'\n"
 		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
