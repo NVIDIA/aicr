@@ -18,6 +18,7 @@ area/ci:
           - '.github/**'
           - 'tools/coverage/**'
           - 'tools/evidence-project/**'
+          - 'tools/corroborate/**'
 
 area/recipes:
   - changed-files:
