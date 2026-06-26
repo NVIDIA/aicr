@@ -92,6 +92,12 @@ jobs:
     permissions:
       contents: read
       packages: read
+    outputs:
+      # 'true' only when the ingest actually produced a tree. The push
+      # trigger legitimately ingests nothing (allowlist-only change, a
+      # deleted pointer, no changed pointers); publish keys off this so it
+      # does not run and fail on a missing artifact.
+      produced: ${{ steps.detect.outputs.produced }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -136,8 +142,20 @@ jobs:
           OUT_DIR: ${{ github.workspace }}/out
         run: .github/scripts/evidence-ingest.sh
 
+      - name: Detect produced tree
+        id: detect
+        run: |
+          set -euo pipefail
+          if [ -d "${{ github.workspace }}/out/results" ] \
+            && [ -n "$(find "${{ github.workspace }}/out/results" -type f -print -quit)" ]; then
+            echo "produced=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "produced=false" >> "$GITHUB_OUTPUT"
+            echo "no evidence tree produced — publish will be skipped"
+          fi
+
       - name: Upload evidence tree
-        if: ${{ always() }}
+        if: ${{ steps.detect.outputs.produced == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: evidence-tree
@@ -160,7 +178,9 @@ jobs:
   publish:
     name: Publish to GCS
     needs: verify
-    if: github.repository == 'nvidia/aicr'
+    # Only when verify actually produced a tree — an empty push-mode ingest
+    # uploads no artifact, and download-artifact would otherwise fail hard.
+    if: github.repository == 'nvidia/aicr' && needs.verify.outputs.produced == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
