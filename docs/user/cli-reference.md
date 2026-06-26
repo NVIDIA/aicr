@@ -961,7 +961,8 @@ aicr validate \
   --recipe recipe.yaml --snapshot snapshot.yaml \
   --emit-attestation ./out \
   --push ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
-# After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
+# After this, copy ./out/pointer.yaml to the per-source path printed in the
+# 'copyTo' hint: recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml
 # NOTE: keyless --push signing publishes the signer's identity (email + issuer)
 # to the public Rekor log. On a TTY, aicr pauses for confirmation first (--yes skips it).
 
@@ -2591,7 +2592,7 @@ aicr evidence digest -r recipes/overlays/h100-eks-ubuntu-training.yaml
 
 # CI drift gate: compare the digest pinned in a signed evidence bundle
 # against the recipe currently on the PR branch.
-signed=$(aicr evidence verify recipes/evidence/<slug>.yaml --format json \
+signed=$(aicr evidence verify recipes/evidence/<slug>/<src>/<digest>.yaml --format json \
          | jq -r .predicate.recipe.digest)
 current=$(aicr evidence digest -r recipes/overlays/<file>.yaml)
 [[ "$signed" == "$current" ]] || echo "evidence is stale"
@@ -2707,7 +2708,7 @@ aicr evidence verify <input> [flags]
 
 The positional argument is auto-detected as one of:
 
-* `recipes/evidence/<recipe>.yaml` — **pointer file (preferred)**. The verifier pulls **by digest** — `registry/repo@<bundle.digest>`, with the registry/repo taken from `bundle.oci` and the digest as the pin — so it fetches the exact attested bytes even if the `bundle.oci` tag has since been moved to a different artifact. This is the input to use in nearly all cases.
+* `recipes/evidence/<recipe>/<src>/<digest>.yaml` — **pointer file (preferred)**. The verifier pulls **by digest** — `registry/repo@<bundle.digest>`, with the registry/repo taken from `bundle.oci` and the digest as the pin — so it fetches the exact attested bytes even if the `bundle.oci` tag has since been moved to a different artifact. This is the input to use in nearly all cases.
 * `ghcr.io/<owner>/aicr-evidence@sha256:...` or `oci://...@sha256:...` — a **digest-pinned** OCI reference. A tag-only ref (such as the `bundle.oci` value copied from a pointer, e.g. `...aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`) is refused by default because tags are registry-rewritable; see `--allow-unpinned-tag`.
 * `./out/summary-bundle/` (or a parent containing it) — unpacked directory.
 
@@ -2742,8 +2743,8 @@ The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the lib
 
 **Examples:**
 ```shell
-# Verify the pointer that a contributor committed alongside their recipe change.
-aicr evidence verify recipes/evidence/h100-eks-ubuntu-training.yaml
+# Verify a pointer that a contributor committed alongside their recipe change.
+aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4...yaml
 
 # Verify a pushed OCI bundle directly (no repo checkout required).
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -2752,12 +2753,12 @@ aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
 aicr evidence verify ./out/summary-bundle
 
 # Pin the expected OIDC signer.
-aicr evidence verify recipes/evidence/<recipe>.yaml \
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/.*$'
 
 # CI pipelines: JSON output.
-aicr evidence verify recipes/evidence/<recipe>.yaml -o result.json -t json
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml -o result.json -t json
 ```
 
 See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidence.md) for a full producer-and-consumer walkthrough.

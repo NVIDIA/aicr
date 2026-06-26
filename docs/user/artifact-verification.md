@@ -215,8 +215,8 @@ The positional argument is auto-detected. Prefer the committed **pointer file**,
 which pins the bundle by digest:
 
 ```shell
-# Verify the pointer a contributor committed alongside a recipe change (preferred).
-aicr evidence verify recipes/evidence/h100-eks-ubuntu-training.yaml
+# Verify a pointer a contributor committed alongside a recipe change (preferred).
+aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4...yaml
 
 # Verify a pushed OCI bundle directly, pinned by digest.
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -228,10 +228,70 @@ aicr evidence verify ./out/summary-bundle
 To require a specific signer, pin the OIDC issuer and identity:
 
 ```shell
-aicr evidence verify recipes/evidence/<recipe>.yaml \
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
   --expected-identity-regexp '^https://github\.com/myorg/.*$'
 ```
+
+## Per-Source Pointer Layout and the Signer Allowlist
+
+Committed evidence pointers are **per-source** so two parties can attest to the
+same recipe without overwriting each other. The on-disk layout is add-only and
+immutable (ADR-007; issue [#1347](https://github.com/NVIDIA/aicr/issues/1347)):
+
+```
+recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml   # one immutable pointer per run
+recipes/evidence/allowlist.yaml                            # maintained signer allowlist
+```
+
+Each file is a single-attestation V1 pointer — the same schema that
+`aicr evidence verify` already consumes. The `<src>` segment is a stable slug
+derived from the **verified** signer OIDC identity — the first 32 hex characters
+(128 bits) of `sha256(issuer + "\n" + identity)`. Because the slug is computed from the
+signer rather than chosen freely, the path is **not squattable**: the
+`Evidence Pointer Contract` CI job recomputes the slug from each pointer's own
+signer and rejects any file that does not live under the directory its signer
+hashes to. Consumers discover a recipe's evidence by glob —
+`recipes/evidence/<recipe>/*/*.yaml` — and aggregate across sources; nothing is
+ever modified in place.
+
+The **allowlist** (`recipes/evidence/allowlist.yaml`) is the trust root. It
+pins, per class — `first-party`, `community`, `partner` — the signers that may
+contribute corroborating evidence. Community and partner entries are keyed by
+the one-way `source` slug only — the cleartext identity (e.g. a personal
+email) is **never** stored in the repo; an optional non-PII `label` (e.g. a
+GitHub handle) is for display, and may be omitted to stay fully pseudonymous.
+First-party entries pin a tightly-bounded anchored `identityPattern` whose
+issuer/org/repo/workflow segment is literal (a wildcard is permitted only in
+the ref) — these are CI workflow URLs, not personal identities. The classes
+are disjoint and no two entries overlap, so a verified signer classifies
+exactly one way. A verified signer that is **not** listed is admitted as
+*reported* only — it never counts toward corroboration.
+
+(Keyless Sigstore still records the signer identity in the public Rekor
+transparency log; keeping it out of the allowlist only avoids committing it to
+this repository. The loader rejects a stray `identity:` field, so cleartext
+cannot be reintroduced by accident.)
+
+First-party AICR CI (the UAT workflows) signs with the GitHub Actions OIDC
+issuer and **ingests evidence directly** — it does not commit a per-run pointer,
+which would churn `main` nightly. Committed per-source pointers are therefore
+the community/partner channel.
+
+### Contributing evidence (community / partner)
+
+1. Run `aicr validate --emit-attestation` and push the signed bundle to a
+   registry you control. The command prints a `copyTo` hint with the exact
+   per-source destination path.
+2. Open a PR that adds **your own** pointer file under
+   `recipes/evidence/<recipe>/<src>/` — alongside, never replacing, any
+   other party's — plus a slug entry (`source:` + `issuer:`, optional
+   `label:`) for your signer in the correct class of
+   `recipes/evidence/allowlist.yaml`. The `<src>` slug is printed in the
+   `copyTo` hint; use that same value as `source:`.
+3. Maintainer review (enforced by `CODEOWNERS`) is the trust gate; the
+   `Evidence Pointer Contract` job verifies the path-ownership and allowlist
+   invariants before merge.
 
 A tag-only OCI reference is refused by default because tags are
 registry-rewritable; pass the pointer file (which carries the digest) or a
@@ -248,7 +308,7 @@ Both verifiers emit machine-readable JSON for pipeline gating.
 aicr verify ./my-bundle --format json
 
 # Evidence verification as JSON to a file.
-aicr evidence verify recipes/evidence/<recipe>.yaml --format json -o result.json
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json
 ```
 
 `aicr evidence verify` exits `0` when every check passes and `2` when the
@@ -261,7 +321,7 @@ non-zero exit would otherwise propagate through the pipeline and abort the scrip
 before the `case` runs. The `|| true` keeps that exit from tripping `set -e`:
 
 ```shell
-aicr evidence verify recipes/evidence/<recipe>.yaml --format json -o result.json || true
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json -o result.json || true
 case "$(jq '.exit' result.json)" in
   0) echo "evidence valid" ;;
   1) echo "validator phases failed" ;;

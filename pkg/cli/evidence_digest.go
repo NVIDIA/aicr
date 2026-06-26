@@ -43,7 +43,7 @@ digest stored in predicate.recipe.digest by ` + "`aicr validate --emit-attestati
 Useful for CI gates that need to detect drift between a checked-in
 evidence pointer and the current recipe on the PR branch:
 
-  signed=$(aicr evidence verify recipes/evidence/<slug>.yaml --format json |
+  signed=$(aicr evidence verify recipes/evidence/<slug>/<source>/<digest>.yaml --format json |
            jq -r .predicate.recipe.digest)
   current=$(aicr evidence digest -r recipes/overlays/<file>.yaml)
   [[ "$signed" == "$current" ]] || echo "evidence is stale"

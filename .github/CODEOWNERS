@@ -21,6 +21,18 @@
 # Data
 recipes/** @nvidia/aicr-maintainer
 
+# Recipe evidence (per-source pointer contract, #1347 / #1401).
+# Maintainer review is the trust gate for every committed pointer: a
+# community/partner contributor opens a PR adding their own pointer under
+# recipes/evidence/<recipe>/<source>/ (and an allowlist entry). The
+# evidence-pointer-contract CI job enforces that a pointer can only live
+# under the <source>/ directory its own verified signer hashes to, so the
+# path is not squattable; CODEOWNERS ensures a human maintainer signs off.
+# The allowlist is the trust root and is called out explicitly so a change
+# to it never rides in on a broader recipes/ approval.
+recipes/evidence/** @nvidia/aicr-maintainer
+recipes/evidence/allowlist.yaml @nvidia/aicr-maintainer
+
 # Recipe health (ADR-009): the area/recipes owners triage the weekly refresh
 pkg/health/** @nvidia/aicr-maintainer
 tools/health/** @nvidia/aicr-maintainer

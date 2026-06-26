@@ -536,7 +536,7 @@ func validateCmdFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name: "emit-attestation",
 			Usage: `Directory to write a recipe-evidence v1 attestation bundle (signed when --push is set).
-	Produces summary-bundle/, optionally logs-bundle/, and pointer.yaml suitable for copying to recipes/evidence/<recipe>.yaml.
+	Produces summary-bundle/, optionally logs-bundle/, and pointer.yaml suitable for copying to recipes/evidence/<recipe>/<source>/<digest>.yaml (see the emit 'copyTo' hint).
 	The bundle is minimized by default (sensitive snapshot fields and CTRF logs removed); use --full to ship raw payloads.
 	See ADR-007 (docs/design/007-recipe-evidence.md).`,
 			Category: catEvidence,
