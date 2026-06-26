@@ -86,7 +86,7 @@ builds:
 
   - id: aicrd
     binary: aicrd
-    mod_timestamp: &build-timestamp '{{ .CommitTimestamp }}'
+    mod_timestamp: *build-timestamp
     dir: cmd/aicrd
     env:
       - CGO_ENABLED=0
