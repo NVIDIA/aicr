@@ -156,7 +156,7 @@ Trust is established through evidence, not assertions. Every released artifact c
    - DEVELOPMENT.md for developer workflow changes
    - Code comments and godoc for API changes
 
-3. **Commit with required provenance:** External contributors sign off with `-s`; NVIDIA organization members use cryptographic signing (`-S`). See [Developer Certificate of Origin](#developer-certificate-of-origin) for details.
+3. **Sign and sign off every commit:** all contributors use `git commit -s -S` — `-s` adds the DCO sign-off, `-S` cryptographically signs the commit. See [Developer Certificate of Origin](#developer-certificate-of-origin) for one-time setup and what it certifies.
 
 ### Creating the Pull Request
 
@@ -178,9 +178,9 @@ Trust is established through evidence, not assertions. Every released artifact c
    - Test coverage and quality
    - Documentation completeness
 
-3. **Address Feedback** by pushing new commits (signed per [Developer Certificate of Origin](#developer-certificate-of-origin)):
+3. **Address Feedback** by pushing new commits (signed and signed off, same as every commit):
    ```bash
-   git commit -m "address review: improve error handling"
+   git commit -s -S -m "address review: improve error handling"
    git push origin your-branch
    ```
 
@@ -233,44 +233,50 @@ git push origin --delete your-branch
 
 ## Developer Certificate of Origin
 
-Contributions must satisfy Developer Certificate of Origin (DCO) policy. External contributors (non-NVIDIA organization members) must include a DCO sign-off on each commit. NVIDIA organization members are exempt from DCO bot sign-off checks and should use cryptographic signing (`-S`).
-
-### How to Sign Off (External Contributors)
-
-Add the `-s` flag to your commit:
+Every commit — from every contributor — must be both **signed off** and **cryptographically signed**:
 
 ```bash
-git commit -s -m "Your commit message"
+git commit -s -S -m "Your commit message"
 ```
 
-This adds a "Signed-off-by" line:
+- `-s` (lowercase) adds a `Signed-off-by` line, certifying the [Developer Certificate of Origin 1.1](#what-youre-certifying) below.
+- `-S` (uppercase) attaches a GPG or SSH signature, proving the commit came from you.
+
+The two are independent — use both, every time. A branch ruleset enforces **Require signed commits** on every branch, so a push containing an unsigned (`-S`-less) commit is rejected before review. The `Signed-off-by` line looks like:
 
 ```
 Signed-off-by: Jane Developer <jane@example.com>
 ```
 
-### Configure Git for Automatic Sign-off
+### One-Time Setup
 
 ```bash
+# Identity used in the Signed-off-by line (must match your signing key)
 git config user.name "Your Name"
 git config user.email "your.email@example.com"
+
+# Sign every commit by default, so you only need -s going forward
+git config commit.gpgsign true
 ```
 
-### Amending Commits
+You also need a signing key registered with GitHub. Follow GitHub's guide to
+[generate a GPG or SSH signing key and add it to your account](https://docs.github.com/en/authentication/managing-commit-signature-verification),
+then point git at it (`git config user.signingkey <key>`).
 
-If you forget to sign off:
+### Forgot to Sign or Sign Off?
+
+Fix the most recent commit and re-push:
 
 ```bash
-git commit --amend --signoff
+git commit --amend -s -S --no-edit
 git push --force-with-lease origin your-branch
 ```
 
-### NVIDIA Org Members and Automation
-
-NVIDIA organization members are exempt from DCO bot sign-off checks (`.github/dco.yml`). Use cryptographic commit signing:
+For an entire branch, re-sign every commit at once:
 
 ```bash
-git commit -S -m "Your commit message"
+git rebase --exec 'git commit --amend -s -S --no-edit' origin/main
+git push --force-with-lease origin your-branch
 ```
 
 ### What You're Certifying

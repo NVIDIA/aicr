@@ -93,9 +93,8 @@ workspace paths. Use local file paths only when explicitly requested.
 ## Git Configuration
 
 - Commit to `main` branch (not `master`)
-- Do use `-S` to cryptographically sign the commit
-- Do NOT add `Co-Authored-By` lines (organization policy)
-- Do not sign-off commits (no `-s` flag); cryptographic signing (`-S`) satisfies DCO for AI-authored commits
+- Sign every commit with both `-S` (cryptographic signature) and `-s` (DCO sign-off), authored as the human (the configured `git config user.name`/`user.email`), not the agent
+- Do NOT add `Co-Authored-By` lines or any agent attribution (e.g. Claude Code, Codex) — organization policy
 
 ## Key Packages
 
