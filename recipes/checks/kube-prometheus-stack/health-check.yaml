@@ -14,7 +14,7 @@
 
 # Kube Prometheus Stack Health Check
 #
-# Validates that the kube-prometheus-stack operator, its managed CRs, and 
+# Validates that the kube-prometheus-stack operator, its managed CRs, and
 # associated workloads are running and healthy in the monitoring namespace:
 #
 # 1. The kube-prometheus-operator Deployment has at least one available replica.
