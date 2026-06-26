@@ -303,6 +303,30 @@ func TestGenerateContextCanceled(t *testing.T) {
 	}
 }
 
+func TestGenerateReplacesStaleOutput(t *testing.T) {
+	// emit swaps in a freshly staged tree, so a series file left by a prior run
+	// (whose recipe set has since changed) must not survive into the new output.
+	out := t.TempDir()
+	stale := filepath.Join(out, "data", "series", "retired-recipe.json")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Generate(context.Background(), Options{
+		InputDir: fixtureGCS, OutputDir: out, AllowlistPath: filepath.Join("testdata", "allowlist.yaml"),
+	}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale series file survived rerun (stat err=%v); emit must replace the tree", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "data", "index.json")); err != nil {
+		t.Errorf("index.json missing after emit: %v", err)
+	}
+}
+
 func TestGenerateDeterministic(t *testing.T) {
 	// Same inputs -> byte-identical index.json + series + index.html, proving
 	// no clock/random/UUID on the emit path (timestamps come from the predicate).

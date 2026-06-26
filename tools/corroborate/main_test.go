@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // fixtureGCS is the package's evidence fixture tree, reached from tools/corroborate.
@@ -69,7 +71,7 @@ func TestParseAndRun(t *testing.T) {
 			"-in", fixtureGCS, "-out", t.TempDir(),
 			"-allowlist", filepath.Join("..", "..", "pkg", "corroborate", "testdata", "allowlist.yaml"),
 		}, 0},
-		{"missing -in is a run error", []string{"-out", t.TempDir()}, 1},
+		{"missing -in is an invalid-input run error", []string{"-out", t.TempDir()}, errors.ExitInvalidInput},
 		{"unknown flag is a parse error", []string{"-nope"}, 2},
 	}
 	for _, tt := range tests {

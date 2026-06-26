@@ -80,7 +80,10 @@ func parseAndRun(ctx context.Context, args []string, stderr io.Writer) int {
 
 	if err := run(ctx, inDir, outDir, allowlist); err != nil {
 		fmt.Fprintln(stderr, "corroborate:", err)
-		return 1
+		// Preserve the coded pkg/errors exit-code contract so callers can
+		// distinguish INVALID_REQUEST (2) from TIMEOUT (5), etc., rather than
+		// collapsing every failure into a generic 1.
+		return errors.ExitCodeFromError(err)
 	}
 	return 0
 }

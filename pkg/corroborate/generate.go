@@ -780,14 +780,43 @@ func criteriaValues(present map[string]map[string]struct{}) map[string][]string 
 }
 
 // emit writes index.html and the data tree deterministically.
+//
+// It stages the entire dashboard in a temporary sibling directory and swaps it
+// into place only once every file is written. Writing in place would (a) leave a
+// partial or stale dashboard if a write fails or ctx is canceled mid-emit, and
+// (b) retain orphaned series/<recipe>.json files from a previous run whose recipe
+// set has since changed. The staging dir is a sibling of outputDir so the final
+// rename stays within one filesystem.
 func emit(ctx context.Context, outputDir string, index Index, seriesByRecipe map[string]Series) error {
-	dataDir := filepath.Join(outputDir, "data")
-	seriesDir := filepath.Join(dataDir, "series")
-	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "mkdir output", err)
+	parent := filepath.Dir(outputDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "mkdir output parent", err)
+	}
+	staging, err := os.MkdirTemp(parent, ".corroborate-emit-*")
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "create staging dir", err)
+	}
+	// Clean the staging tree up on any early return; cleared once the swap lands.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	// MkdirTemp creates 0o700; the published tree is world-readable by design.
+	if err := os.Chmod(staging, 0o755); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "chmod staging dir", err)
 	}
 
-	if err := writeJSON(filepath.Join(dataDir, "index.json"), index); err != nil {
+	seriesDir := filepath.Join(staging, "data", "series")
+	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "mkdir staging tree", err)
+	}
+
+	if err := canceledErr(ctx, "emit index"); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(staging, "data", "index.json"), index); err != nil {
 		return err
 	}
 	for recipeName, series := range seriesByRecipe {
@@ -798,10 +827,24 @@ func emit(ctx context.Context, outputDir string, index Index, seriesByRecipe map
 			return err
 		}
 	}
-	htmlPath := filepath.Join(outputDir, "index.html")
+	if err := canceledErr(ctx, "emit renderer"); err != nil {
+		return err
+	}
+	htmlPath := filepath.Join(staging, "index.html")
 	if err := os.WriteFile(htmlPath, rendererHTML, 0o644); err != nil { //nolint:gosec // a static renderer asset is world-readable by design
 		return errors.Wrap(errors.ErrCodeInternal, "write "+htmlPath, err)
 	}
+
+	// Swap the staged tree into place. Rename cannot overwrite a non-empty
+	// directory, so remove the previous output first; a failure between the two
+	// leaves no dashboard, which is preferable to a half-updated one.
+	if err := os.RemoveAll(outputDir); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "remove previous output", err)
+	}
+	if err := os.Rename(staging, outputDir); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "swap output into place", err)
+	}
+	committed = true
 	return nil
 }
 
