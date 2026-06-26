@@ -109,7 +109,7 @@ A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` d
 
 ```yaml
 kind: recipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: your-recipe-name
 spec:

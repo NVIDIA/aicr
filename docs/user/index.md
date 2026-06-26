@@ -35,7 +35,7 @@ brew tap NVIDIA/aicr
 brew install aicr
 
 # Or use the install script
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://get.aicr.run | bash -s --
 
 # Generate a recipe for your environment
 aicr recipe --service eks --accelerator h100 --intent training -o recipe.yaml

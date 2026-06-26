@@ -38,7 +38,7 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "RecipeResult loads directly",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\ncriteria:\n  service: eks\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n",
 			wantErr:     false,
 			checkResult: func(t *testing.T, rec *RecipeResult) {
 				t.Helper()
@@ -49,7 +49,7 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "RecipeMetadata with criteria auto-hydrates",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     false,
 			checkResult: func(t *testing.T, rec *RecipeResult) {
 				t.Helper()
@@ -63,25 +63,25 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "RecipeMetadata without criteria errors",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  "has no criteria",
 		},
 		{
 			name:        "RecipeMixin kind rejected",
-			yamlContent: "kind: RecipeMixin\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec: {}\n",
+			yamlContent: "kind: RecipeMixin\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec: {}\n",
 			wantErr:     true,
 			errContain:  `kind "RecipeMixin"`,
 		},
 		{
 			name:        "unknown kind rejected",
-			yamlContent: "kind: SomethingElse\napiVersion: aicr.nvidia.com/v1alpha1\n",
+			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1alpha2\n",
 			wantErr:     true,
 			errContain:  `kind "SomethingElse"`,
 		},
 		{
 			name:        "empty kind allowed",
-			yamlContent: "apiVersion: aicr.nvidia.com/v1alpha1\ncriteria:\n  service: eks\n",
+			yamlContent: "apiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n",
 			wantErr:     false,
 			checkResult: func(t *testing.T, rec *RecipeResult) {
 				t.Helper()
@@ -92,15 +92,15 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "unsupported apiVersion rejected",
-			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha2\ncriteria:\n  service: eks\n",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\ncriteria:\n  service: eks\n",
 			wantErr:     true,
-			errContain:  `apiVersion "aicr.nvidia.com/v1alpha2"`,
+			errContain:  `apiVersion "aicr.nvidia.com/v1alpha1"`,
 		},
 		{
 			name:        "unsupported apiVersion on RecipeMetadata overlay rejected",
-			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     true,
-			errContain:  `apiVersion "aicr.nvidia.com/v1alpha2"`,
+			errContain:  `apiVersion "aicr.nvidia.com/v1alpha1"`,
 		},
 		{
 			name:        "empty apiVersion allowed for backward compat",

@@ -77,7 +77,7 @@ resolver injects into any `ComponentRef` that leaves the field unset.
 Top-level schema (`ComponentRegistry`):
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: <component-id>
@@ -121,7 +121,7 @@ that selects it for matching queries. Overlays live in
 
 ```yaml
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
@@ -203,7 +203,7 @@ every leaf. **Mixins** are composable fragments referenced via
 ```yaml
 # recipes/mixins/os-ubuntu.yaml
 kind: RecipeMixin
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: os-ubuntu
 spec:

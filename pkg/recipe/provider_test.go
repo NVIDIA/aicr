@@ -28,7 +28,7 @@ import (
 )
 
 // testEmptyRegistryContent is a minimal registry.yaml for testing.
-const testEmptyRegistryContent = `apiVersion: aicr.nvidia.com/v1alpha1
+const testEmptyRegistryContent = `apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components: []
 `
@@ -83,7 +83,7 @@ func TestLayeredDataProvider_MergesRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a registry with a custom component
-	registryContent := `apiVersion: aicr.nvidia.com/v1alpha1
+	registryContent := `apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: custom-component
@@ -137,7 +137,7 @@ func TestLayeredDataProvider_OverridesFile(t *testing.T) {
 	}
 
 	// Create a custom base.yaml that will override embedded (now in overlays/)
-	baseContent := `apiVersion: aicr.nvidia.com/v1alpha1
+	baseContent := `apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: custom-base
@@ -190,7 +190,7 @@ func TestLayeredDataProvider_AddsNewFile(t *testing.T) {
 		t.Fatalf("failed to create overlays dir: %v", err)
 	}
 
-	overlayContent := `apiVersion: aicr.nvidia.com/v1alpha1
+	overlayContent := `apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: custom-overlay
@@ -428,7 +428,7 @@ func TestLayeredDataProvider_IntegrationWithRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a registry with an additional custom component
-	registryContent := `apiVersion: aicr.nvidia.com/v1alpha1
+	registryContent := `apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: custom-operator
@@ -557,7 +557,7 @@ func TestLayeredDataProvider_WalkDir(t *testing.T) {
 		t.Fatalf("failed to create overlays dir: %v", err)
 	}
 
-	customOverlay := `apiVersion: aicr.nvidia.com/v1alpha1
+	customOverlay := `apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: walk-test-overlay
@@ -648,7 +648,7 @@ func TestLayeredDataProvider_WalkDirWithOverride(t *testing.T) {
 	}
 
 	// Create an overlay file with unique content
-	externalOverlay := `apiVersion: aicr.nvidia.com/v1alpha1
+	externalOverlay := `apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: external-only-overlay
@@ -734,7 +734,7 @@ func TestLayeredDataProvider_SourceForRegistry(t *testing.T) {
 func TestLayeredDataProvider_CachedRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	registryContent := `apiVersion: aicr.nvidia.com/v1alpha1
+	registryContent := `apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: cache-test-component
@@ -820,7 +820,7 @@ func TestLayeredDataProvider_InvalidExternalRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create invalid YAML registry
-	invalidRegistry := `apiVersion: aicr.nvidia.com/v1alpha1
+	invalidRegistry := `apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: [invalid yaml structure
@@ -982,7 +982,7 @@ func TestLayeredDataProvider_ExternalDir(t *testing.T) {
 }
 
 // testExternalCatalogContent is a minimal catalog.yaml for testing.
-const testExternalCatalogContent = `apiVersion: aicr.nvidia.com/v1
+const testExternalCatalogContent = `apiVersion: aicr.run/v1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators
@@ -1059,7 +1059,7 @@ func TestLayeredDataProvider_MergesCatalog(t *testing.T) {
 // override embedded validators with the same name.
 func TestLayeredDataProvider_CatalogOverrideByName(t *testing.T) {
 	// Override operator-health with a custom image and timeout
-	overrideCatalog := `apiVersion: aicr.nvidia.com/v1
+	overrideCatalog := `apiVersion: aicr.run/v1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators
@@ -1198,7 +1198,7 @@ func TestLayeredDataProvider_CachedCatalog(t *testing.T) {
 
 // TestLayeredDataProvider_InvalidExternalCatalog tests error handling for invalid catalog YAML.
 func TestLayeredDataProvider_InvalidExternalCatalog(t *testing.T) {
-	invalidCatalog := `apiVersion: aicr.nvidia.com/v1
+	invalidCatalog := `apiVersion: aicr.run/v1
 kind: ValidatorCatalog
 validators:
   - name: [invalid yaml structure
@@ -1223,7 +1223,7 @@ validators:
 // order is preserved and new external validators are appended.
 func TestLayeredDataProvider_CatalogMergePreservesOrder(t *testing.T) {
 	// Add a new validator and override an existing one
-	externalCatalog := `apiVersion: aicr.nvidia.com/v1
+	externalCatalog := `apiVersion: aicr.run/v1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators

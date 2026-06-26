@@ -147,7 +147,7 @@ func TestSnapshotCmd_AllConfigSectionsResolve(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -221,7 +221,7 @@ func TestSnapshotCmd_ConfigOnly_NoCLIFlags(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -262,7 +262,7 @@ func TestSnapshotCmd_FlagOverridesEverySection(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -338,7 +338,7 @@ func TestSnapshotCmd_ConfigEmptyTolerationsOptOut(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -369,7 +369,7 @@ func TestSnapshotCmd_InvalidConfig_BadTimeout(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -395,7 +395,7 @@ func TestSnapshotCmd_InvalidConfig_BadFormat(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -421,7 +421,7 @@ func TestSnapshotCmd_InvalidConfig_UnknownField(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     bogusKey: oops
@@ -448,7 +448,7 @@ func TestSnapshotCmd_RequireGPURuntimeClass_StillMutuallyExclusive(t *testing.T)
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -477,7 +477,7 @@ func TestSnapshotCmd_ConfigBadResourcesRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -584,7 +584,7 @@ func TestSnapshotCmd_ConfigPrivilegedFalseHonored(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -616,7 +616,7 @@ func TestSnapshotCmd_NoConfigPrivilegedDefaultsTrue(t *testing.T) {
 // testSnapshotConfig is a canned config used by the HTTP source test;
 // declared at package scope so other tests can reuse it if needed.
 var testSnapshotConfig = `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:

@@ -212,6 +212,30 @@ func TestBuildSpec_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "legacy apiVersion rejected",
+			spec: BuildSpec{
+				APIVersion: "aicr.nvidia.com/v1beta1",
+				Kind:       ExpectedKind,
+				Spec: BuildSpecConfig{
+					Recipe:   "/data/recipes/eks-training.yaml",
+					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "stale version of current group rejected",
+			spec: BuildSpec{
+				APIVersion: "aicr.run/v1beta1",
+				Kind:       ExpectedKind,
+				Spec: BuildSpecConfig{
+					Recipe:   "/data/recipes/eks-training.yaml",
+					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "wrong kind",
 			spec: BuildSpec{
 				APIVersion: ExpectedAPIVersion,
@@ -386,7 +410,7 @@ func TestLoadSpec_OversizeFile(t *testing.T) {
 	// Build a payload larger than MaxSpecFileBytes. Use valid YAML so the
 	// size check is what trips, not the parser.
 	var b strings.Builder
-	b.WriteString("apiVersion: aicr.nvidia.com/v1beta1\nkind: AICRRuntime\nspec:\n  registry:\n    host: r\n    repository: r\n  comment: \"")
+	b.WriteString("apiVersion: aicr.run/v1beta2\nkind: AICRRuntime\nspec:\n  registry:\n    host: r\n    repository: r\n  comment: \"")
 	pad := strings.Repeat("x", defaults.MaxSpecFileBytes+16)
 	b.WriteString(pad)
 	b.WriteString("\"\n")
@@ -416,7 +440,7 @@ func TestLoadSpec_UnknownField(t *testing.T) {
 	path := filepath.Join(dir, "typo.yaml")
 
 	// "regestry" instead of "registry" — KnownFields(true) must reject it.
-	content := `apiVersion: aicr.nvidia.com/v1beta1
+	content := `apiVersion: aicr.run/v1beta2
 kind: AICRRuntime
 spec:
   regestry:

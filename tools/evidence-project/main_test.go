@@ -90,7 +90,7 @@ attestations:
     bundle:
       digest: sha256:8274b6a1da24aa9782dc12162bf6a38265c30a852585ca64cfad5718efbbdec3
       oci: ghcr.io/nvidia/aicr-evidence:h100-eks-ubuntu-training-abc
-      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+      predicateType: https://aicr.run/recipe-evidence/v1
     signer:
       identity: ci@example.com
       issuer: https://token.actions.githubusercontent.com

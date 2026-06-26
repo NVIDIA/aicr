@@ -31,7 +31,7 @@ runs:
         cat > "$PREDICATE" <<-EOF
         {
           "buildDefinition": {
-            "buildType": "https://aicr.nvidia.com/binary/v1",
+            "buildType": "https://aicr.run/binary/v1",
             "externalParameters": {
               "repository": "${{ github.repository }}",
               "ref": "${{ github.ref }}"

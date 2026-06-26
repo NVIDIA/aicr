@@ -17,7 +17,7 @@ attestations:
     bundle:
       digest: sha256:33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317
       oci: ghcr.io/yuanchen8911/aicr-evidence:h100-gke-cos-training-ee1657fedd59
-      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+      predicateType: https://aicr.run/recipe-evidence/v1
     signer:
       identity: yuanchen97@gmail.com
       issuer: https://github.com/login/oauth

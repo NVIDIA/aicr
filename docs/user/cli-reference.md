@@ -183,7 +183,7 @@ Drive `aicr snapshot` from an `AICRConfig` document so the snapshot inputs versi
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gke-h100-training
 spec:
@@ -284,7 +284,7 @@ data:
 
 **Snapshot Structure:**
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: Snapshot
 metadata:
   created: "2025-12-31T10:30:00Z"
@@ -345,7 +345,7 @@ The config file uses a Kubernetes-style envelope:
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
@@ -470,7 +470,7 @@ aicr recipe -s system.yaml -i inference -o recipe.yaml --format yaml
 
 **Output structure:**
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: Recipe
 metadata:
   version: v1.0.0
@@ -859,7 +859,7 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** Snapshots and recipes also carry a schema `apiVersion` (currently `aicr.nvidia.com/v1alpha1`). Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
+> **apiVersion gate:** Snapshots and recipes also carry a schema `apiVersion` (currently `aicr.run/v1alpha2`). Loading an artifact stamped with an `apiVersion` this build does not support fails fast with an `invalid apiVersion` error; regenerate or recapture the artifact with a matching `aicr` version. An empty `apiVersion` (older artifacts that predate the field) is still accepted. See [ADR-011](../design/011-artifact-apiversion-policy.md) for the evolution policy.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 
@@ -993,7 +993,7 @@ through the precedence chain described on `--identity-token`.
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: prod-validate
 spec:
@@ -1264,7 +1264,7 @@ When both `spec.recipe.output.path` and `spec.bundle.input.recipe` are set, they
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   bundle:
     input:
@@ -1626,7 +1626,7 @@ my-bundle/
 **`provenance.yaml`** sits at the bundle root and lists one entry per vendored chart, using the same K8s-style `apiVersion`/`kind` shape as the rest of AICR's persisted formats:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
@@ -3153,7 +3153,7 @@ mkdir -p my-data/components/my-operator
 2. **Create registry.yaml with custom component:**
 ```yaml
 # my-data/registry.yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: my-operator
@@ -3177,7 +3177,7 @@ image:
 ```yaml
 # my-data/overlays/my-custom-overlay.yaml
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: my-custom-overlay
 spec:

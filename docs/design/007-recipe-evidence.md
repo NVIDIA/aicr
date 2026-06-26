@@ -187,7 +187,7 @@ surface item 1 below for the full schema).
 
 1. **Bundle format + pointer + `aicr validate --emit-attestation`.** Single
    in-toto Statement per recipe run, predicate type
-   `https://aicr.nvidia.com/recipe-evidence/v1`, DSSE-wrapped, signed
+   `https://aicr.run/recipe-evidence/v1`, DSSE-wrapped, signed
    with cosign keyless OIDC. Summary bundle is an OCI artifact;
    optional logs bundle as a separate OCI artifact,
    contributor-controlled. The pointer file (schema 1.0, in-tree at
@@ -213,7 +213,7 @@ surface item 1 below for the full schema).
    between `bundle` and `validate`:
 
    ```yaml
-   apiVersion: aicr.nvidia.com/v1alpha1
+   apiVersion: aicr.run/v1alpha2
    kind: AICRConfig
    metadata:
      name: my-recipe
@@ -526,7 +526,7 @@ arrive when demand justifies — see "Future direction."
 ### Predicate body
 
 ```yaml
-# https://aicr.nvidia.com/recipe-evidence/v1
+# https://aicr.run/recipe-evidence/v1
 schemaVersion: 1.0.0
 materialSliceVersion: 1
 attestedAt: 2026-05-08T10:23:11Z
@@ -685,7 +685,7 @@ attestations:
   - bundle:
       oci: ghcr.io/<owner>/aicr-evidence:<digest>
       digest: sha256:abc123...
-      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+      predicateType: https://aicr.run/recipe-evidence/v1
     signer:                 # optional; absent for unsigned bundles
       identity: <oidc-subject>
       issuer: <oidc-issuer-url>
@@ -1129,7 +1129,7 @@ commitments the demand event has not yet justified.
    handles the OCI upload, cosign attest, and pointer population in one
    command. Updates `pkg/bundler/attestation` with the new predicate
    type. Pulls the BOM from the existing #739 pipeline. Extends
-   `pkg/config.AICRConfig` (apiVersion `aicr.nvidia.com/v1alpha1`,
+   `pkg/config.AICRConfig` (apiVersion `aicr.run/v1alpha2`,
    additive) with a `ValidateSpec` sibling of `RecipeSpec`/`BundleSpec`,
    reusing `AttestationSpec` and `RegistrySpec` so cosign and OCI
    surfaces stay consistent across `bundle` and `validate`.

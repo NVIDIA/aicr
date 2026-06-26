@@ -36,7 +36,7 @@ spec:
 
               cat > "${WORK}/config.yaml" << 'EOF'
               kind: AICRConfig
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               metadata:
                 name: test-config
               spec:
@@ -49,7 +49,7 @@ spec:
               EOF
 
               cat > "${WORK}/config.json" << 'EOF'
-              {"kind":"AICRConfig","apiVersion":"aicr.nvidia.com/v1alpha1","metadata":{"name":"test"},"spec":{"recipe":{"criteria":{"service":"gke","accelerator":"a100","os":"ubuntu","intent":"inference"}}}}
+              {"kind":"AICRConfig","apiVersion":"aicr.run/v1alpha2","metadata":{"name":"test"},"spec":{"recipe":{"criteria":{"service":"gke","accelerator":"a100","os":"ubuntu","intent":"inference"}}}}
               EOF
 
               echo 'kind: wrongKind' > "${WORK}/invalid-kind.yaml"
@@ -65,7 +65,7 @@ spec:
 
               cat > "${WORK}/invalid-enum.yaml" << 'EOF'
               kind: AICRConfig
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               spec:
                 recipe:
                   criteria:
@@ -74,7 +74,7 @@ spec:
 
               cat > "${WORK}/partial.yaml" << 'EOF'
               kind: AICRConfig
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               spec:
                 recipe:
                   criteria:

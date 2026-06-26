@@ -55,7 +55,7 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	dir := t.TempDir()
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -75,7 +75,7 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	bundle, err := Build(context.Background(), BuildOptions{
 		OutputDir:    dir,
 		Recipe:       rec,
-		RecipeYAML:   []byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: RecipeResult\n"),
+		RecipeYAML:   []byte("apiVersion: aicr.run/v1alpha2\nkind: RecipeResult\n"),
 		Snapshot:     snap,
 		SnapshotYAML: []byte("measurements: []\n"),
 		BOM:          BOMInputs{Body: bom, CycloneDXVersion: "1.6"},

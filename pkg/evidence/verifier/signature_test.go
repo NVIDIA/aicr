@@ -124,7 +124,7 @@ func (e errPlain) Error() string { return e.msg }
 func TestParseStatement(t *testing.T) {
 	good := []byte(`{
   "subject": [{"digest": {"sha256": "abc123"}}],
-  "predicateType": "https://aicr.nvidia.com/recipe-evidence/v1",
+  "predicateType": "https://aicr.run/recipe-evidence/v1",
   "predicate": {"schemaVersion": "1.0.0", "aicrVersion": "v0.13.0"}
 }`)
 	hex, pred, err := parseStatement(good)
@@ -144,8 +144,8 @@ func TestParseStatement_Rejects(t *testing.T) {
 		name string
 		in   string
 	}{
-		{"no subject", `{"predicateType": "https://aicr.nvidia.com/recipe-evidence/v1", "predicate": {}}`},
-		{"empty digest", `{"subject": [{"digest": {}}], "predicateType": "https://aicr.nvidia.com/recipe-evidence/v1", "predicate": {}}`},
+		{"no subject", `{"predicateType": "https://aicr.run/recipe-evidence/v1", "predicate": {}}`},
+		{"empty digest", `{"subject": [{"digest": {}}], "predicateType": "https://aicr.run/recipe-evidence/v1", "predicate": {}}`},
 		{"wrong predicateType", `{"subject": [{"digest": {"sha256": "abc"}}], "predicateType": "wrong", "predicate": {}}`},
 		{"invalid JSON", `not json`},
 	}
