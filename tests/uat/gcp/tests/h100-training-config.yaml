@@ -19,9 +19,11 @@
 # `../cluster-config.yaml`. Scheduling fields match that cluster's node
 # labels/taints.
 #
-# `spec.validate.evidence.attestation.push` carries the stable repo prefix
-# only; `../run` appends `-${RUN_ID}` at runtime so each UAT execution
-# publishes evidence to a uniquely traceable OCI repo.
+# `spec.validate.evidence.attestation.push` carries the stable per-recipe
+# repo only; `../run` appends a `:run-${RUN_ID}` tag at runtime so each UAT
+# execution publishes a uniquely traceable, digest-addressed point under one
+# stable repo (`oras repo tags` lists run history). Consumers pin immutably
+# via `@sha256:…`.
 kind: AICRConfig
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
@@ -89,6 +91,7 @@ spec:
     evidence:
       attestation:
         # Setting `out` enables emit. The push target below is the stable
-        # repo prefix; ../run appends `-${RUN_ID}` for per-run isolation.
+        # per-recipe repo; ../run appends a `:run-${RUN_ID}` tag for per-run
+        # isolation. Consumers pin immutably via the artifact digest.
         out: ./evidence
-        push: ghcr.io/nvidia/aicr-uat-gke-h100-training
+        push: ghcr.io/nvidia/aicr-evidence/h100-gke-cos-training-kubeflow

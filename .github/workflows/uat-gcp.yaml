@@ -258,7 +258,7 @@ jobs:
       # consume the job-timeout budget needed to persist evidence.
       #
       # The signed evidence bundle itself is pushed to OCI by the
-      # conformance step (ghcr.io/nvidia/aicr-uat-gke-h100-training-${{
+      # conformance step (ghcr.io/nvidia/aicr-evidence/h100-gke-cos-training-kubeflow:run-${{
       # github.run_id }}) and is the source of truth; here we attach the
       # lightweight pointer so a reviewer can locate that bundle directly
       # from the Actions UI for up to a year. Failure-debug artifacts are
@@ -311,7 +311,7 @@ jobs:
             echo "| Verify | ${{ steps.verify.outcome }} |"
             if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then
               echo ""
-              echo "**Evidence (OCI):** \`ghcr.io/nvidia/aicr-uat-gke-h100-training-${{ github.run_id }}\`"
+              echo "**Evidence (OCI):** \`ghcr.io/nvidia/aicr-evidence/h100-gke-cos-training-kubeflow:run-${{ github.run_id }}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
