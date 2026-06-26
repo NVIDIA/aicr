@@ -1,0 +1,66 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Export evidence bundle ref'
+description: >-
+  Reads a recipe-evidence pointer and emits the digest-pinned OCI ref of
+  the signed bundle (registry/repo@sha256:...) for the evidence-ingest
+  workflow. Output is empty when the pointer carries no bundle/digest.
+
+inputs:
+  pointer:
+    description: 'Path to the evidence pointer YAML.'
+    required: false
+    default: 'evidence/pointer.yaml'
+
+outputs:
+  ref:
+    description: 'Digest-pinned OCI ref, or empty if no bundle was produced.'
+    value: ${{ steps.derive.outputs.ref }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: derive
+      shell: bash
+      env:
+        POINTER: ${{ inputs.pointer }}
+      run: |
+        set -euo pipefail
+        oci=$(yq eval '.attestations[0].bundle.oci // ""' "$POINTER")
+        digest=$(yq eval '.attestations[0].bundle.digest // ""' "$POINTER")
+        # A pointer with neither field carries no bundle — skip ingest.
+        # A pointer with one field but not the other is malformed: fail
+        # loudly rather than silently skipping, so a dropped digest can
+        # never let an unpinned/tag-only ref slip through as "no bundle".
+        if [[ -z "$oci" && -z "$digest" ]]; then
+          echo "no bundle in ${POINTER} — ingest will be skipped"
+          exit 0
+        fi
+        if [[ -z "$oci" ]]; then
+          echo "::error::${POINTER} has bundle.digest but no bundle.oci — malformed pointer"
+          exit 1
+        fi
+        if [[ -z "$digest" ]]; then
+          echo "::error::${POINTER} has bundle.oci but no bundle.digest — refusing to emit an unpinned ref"
+          exit 1
+        fi
+        if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          echo "::error::${POINTER} bundle.digest is not a sha256:<64-hex> digest: ${digest}"
+          exit 1
+        fi
+        repo="${oci%@*}"                                       # drop @digest if present
+        case "${repo##*/}" in *:*) repo="${repo%:*}";; esac     # drop :tag (registry-port safe)
+        echo "ref=${repo}@${digest}" >> "$GITHUB_OUTPUT"
+        echo "evidence bundle ref: ${repo}@${digest}"

@@ -80,6 +80,8 @@ navigation:
         path: contributor/collector.md
       - page: Validators
         path: contributor/validator.md
+      - page: Evidence Ingest
+        path: contributor/evidence-ingest.md
       - page: Inference-Perf Fluctuation (investigation)
         path: contributor/inference-perf-fluctuation.md
       - page: CLI
