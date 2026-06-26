@@ -62,16 +62,16 @@ testing_tools:
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.2.2'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.5.5'
+  helmfile: 'v1.6.0'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: '51c4f090b6570177f2b7f77ca6d43f99667618021e1a907dc552f74610009e5a'
-    linux_arm64: 'e1ed3dbc25eb6e2bdaf64b960cffbd0539073a09044a90c67ac8740b67d017e5'
-    darwin_amd64: 'c917459d0f473b38f1926adeb9b83b1293734d99f5f5cfa40b09248782b3bd38'
-    darwin_arm64: 'f2312b8271c56ea58e3c72180577ea33bf4d2218cfbe7aeb5f246b578636d103'
+    linux_amd64: '44c617bc12b5f7f1ca1da5333ccbd3865b314c132168b4ce1127f47e756008dc'
+    linux_arm64: '9f29b29ff017af7dc6feca632f9a683a6c8c5a0dc5a96dd1a2df3f1016c14823'
+    darwin_amd64: '6a1b197e43262de2ab2c08ff532764693345bc522d7b2eedc7bf8bfd2fe08780'
+    darwin_arm64: '49bb9f88bf264f0c004213971cd308925676f6e5200bb940498f5acbc06107fc'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
-  kwok: 'v0.7.0'
+  kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
   chainsaw: 'v0.2.15'
   # chainsaw_checksums are refreshed automatically by tools/update-chainsaw-checksums
@@ -85,7 +85,7 @@ testing_tools:
   yq: 'v4.53.3'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
-  awscli: '1.45.34'
+  awscli: '1.45.36'
   # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
   # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
   # to boot without a paid license token. Pinned (never :latest) for reproducibility.
@@ -128,7 +128,7 @@ testing_tools:
   # renovate: datasource=docker depName=gitea/gitea depType=testing_tools
   gitea_image: 'gitea/gitea:1.26.4-rootless'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
-  hauler: 'v1.4.3'
+  hauler: 'v2.0.0'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
   zarf: 'v0.79.0'
 # Quality Thresholds
