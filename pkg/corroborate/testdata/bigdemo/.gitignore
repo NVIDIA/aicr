@@ -1,0 +1,3 @@
+# gen.py is a stdlib-only demo generator run by hand; never commit its bytecode.
+__pycache__/
+*.pyc

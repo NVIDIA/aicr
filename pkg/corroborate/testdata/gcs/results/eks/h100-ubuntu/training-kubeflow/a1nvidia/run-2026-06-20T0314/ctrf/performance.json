@@ -1,0 +1,32 @@
+{
+  "reportFormat": "CTRF",
+  "specVersion": "0.0.1",
+  "timestamp": "2026-06-20T03:14:07Z",
+  "generatedBy": "aicr validate",
+  "results": {
+    "tool": {
+      "name": "aicr",
+      "version": "v1.0.0"
+    },
+    "summary": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "pending": 0,
+      "other": 0,
+      "start": 1781925247000,
+      "stop": 1781925547000
+    },
+    "tests": [
+      {
+        "name": "nccl-allreduce-bw",
+        "status": "passed",
+        "duration": 1000,
+        "suite": [
+          "performance"
+        ]
+      }
+    ]
+  }
+}
