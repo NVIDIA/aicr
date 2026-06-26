@@ -414,6 +414,16 @@ docs: ## Serves Go documentation on http://localhost:6060
 	(command -v godoc >/dev/null 2>&1 && godoc -http=:6060 || \
 	(echo "Installing pkgsite..." && go install golang.org/x/pkgsite/cmd/pkgsite@latest && pkgsite -http=:6060))
 
+.PHONY: testgrid-publish
+testgrid-publish: ## Build testgrid-publish binary to ./dist/testgrid-publish
+	@mkdir -p ./dist
+	GOFLAGS="-mod=vendor" go build -o ./dist/testgrid-publish ./tools/testgrid-publish
+
+.PHONY: testgrid-publish-dryrun
+testgrid-publish-dryrun: testgrid-publish ## Dry-run testgrid-publish against BUNDLE_DIR (usage: make testgrid-publish-dryrun BUNDLE_DIR=<path>)
+	@[ -n "$(BUNDLE_DIR)" ] || (echo "usage: make testgrid-publish-dryrun BUNDLE_DIR=<path>"; exit 1)
+	./dist/testgrid-publish --bundle-dir "$(BUNDLE_DIR)" --bucket aicr-testgrid-staging --source-class uat --dry-run
+
 .PHONY: build
 build: ## Builds binaries for the current OS and architecture
 	@set -e; \
