@@ -23,7 +23,7 @@ import (
 // TestInjectDRAChartVersionAnnotation_PositiveCase pins the happy
 // path: both gpu-operator and nvidia-dra-driver-gpu enabled in the
 // filtered recipe, gpu-operator version present → the
-// aicr.nvidia.com/gpu-operator-chart-version annotation is written on
+// aicr.run/gpu-operator-chart-version annotation is written on
 // both the controller and kubeletPlugin pod templates with the
 // resolved chart version.
 func TestInjectDRAChartVersionAnnotation_PositiveCase(t *testing.T) {

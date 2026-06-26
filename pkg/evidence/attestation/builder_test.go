@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -55,7 +56,7 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	dir := t.TempDir()
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: header.GroupVersion,
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -75,7 +76,7 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	bundle, err := Build(context.Background(), BuildOptions{
 		OutputDir:    dir,
 		Recipe:       rec,
-		RecipeYAML:   []byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: RecipeResult\n"),
+		RecipeYAML:   []byte("apiVersion: " + header.GroupVersion + "\nkind: RecipeResult\n"),
 		Snapshot:     snap,
 		SnapshotYAML: []byte("measurements: []\n"),
 		BOM:          BOMInputs{Body: bom, CycloneDXVersion: "1.6"},

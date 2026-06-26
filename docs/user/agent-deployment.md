@@ -47,7 +47,7 @@ metadata:
     app.kubernetes.io/version: <aicr-version>
 data:
   snapshot.yaml: |  # Complete snapshot YAML
-    apiVersion: aicr.nvidia.com/v1alpha1
+    apiVersion: aicr.run/v1alpha2
     kind: Snapshot
     measurements: [...]
   format: yaml

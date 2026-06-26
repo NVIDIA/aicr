@@ -103,7 +103,7 @@
 //
 // Snapshots contain a header and measurements:
 //
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	kind: Snapshot
 //	metadata:
 //	  version: v1.0.0

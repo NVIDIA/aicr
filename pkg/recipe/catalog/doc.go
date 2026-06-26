@@ -17,7 +17,7 @@
 // pkg/bundler/attestation and pkg/bundler/verifier primitives so catalog
 // attestations are structurally identical to bundle attestations — same
 // Sigstore bundle format, same SLSA predicate, different buildType URI
-// (https://aicr.nvidia.com/recipe-catalog/v1).
+// (https://aicr.run/recipe-catalog/v1).
 //
 // Sign computes a deterministic SHA-256 over the merged catalog content,
 // builds an in-toto statement, and delegates to an attestation.Attester

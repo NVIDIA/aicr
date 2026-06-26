@@ -147,7 +147,7 @@ func TestSnapshotCmd_AllConfigSectionsResolve(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -221,7 +221,7 @@ func TestSnapshotCmd_ConfigOnly_NoCLIFlags(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -262,7 +262,7 @@ func TestSnapshotCmd_FlagOverridesEverySection(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -338,7 +338,7 @@ func TestSnapshotCmd_ConfigEmptyTolerationsOptOut(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -369,7 +369,7 @@ func TestSnapshotCmd_InvalidConfig_BadTimeout(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -395,7 +395,7 @@ func TestSnapshotCmd_InvalidConfig_BadFormat(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -421,7 +421,7 @@ func TestSnapshotCmd_InvalidConfig_UnknownField(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     bogusKey: oops
@@ -440,6 +440,31 @@ spec:
 	}
 }
 
+// TestSnapshotCmd_InvalidConfig_LegacyAPIVersion confirms a legacy
+// aicr.nvidia.com apiVersion is rejected fail-closed at config-load time.
+// After the aicr.run hard-break migration, only aicr.run/v1alpha2 is valid.
+func TestSnapshotCmd_InvalidConfig_LegacyAPIVersion(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	cfg := `kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	err := runSnapshotCmdExpectErr(t, []string{"--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected error for legacy apiVersion, got nil")
+	}
+	if !strings.Contains(err.Error(), "apiVersion") {
+		t.Errorf("error %q must reference the unsupported apiVersion", err.Error())
+	}
+}
+
 // TestSnapshotCmd_RequireGPURuntimeClass_StillMutuallyExclusive verifies
 // the existing mutual-exclusion check survives the config-merge layer.
 // The conflict should be detected regardless of whether the values come
@@ -448,7 +473,7 @@ func TestSnapshotCmd_RequireGPURuntimeClass_StillMutuallyExclusive(t *testing.T)
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -477,7 +502,7 @@ func TestSnapshotCmd_ConfigBadResourcesRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -584,7 +609,7 @@ func TestSnapshotCmd_ConfigPrivilegedFalseHonored(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:
@@ -616,7 +641,7 @@ func TestSnapshotCmd_NoConfigPrivilegedDefaultsTrue(t *testing.T) {
 // testSnapshotConfig is a canned config used by the HTTP source test;
 // declared at package scope so other tests can reuse it if needed.
 var testSnapshotConfig = `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:

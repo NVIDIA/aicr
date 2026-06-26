@@ -33,7 +33,7 @@
 # stable repo (`oras repo tags` lists run history). Consumers pin immutably
 # via `@sha256:…`.
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: eks-h100-training-uat
 

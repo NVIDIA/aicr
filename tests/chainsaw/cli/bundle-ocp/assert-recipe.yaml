@@ -15,7 +15,7 @@
 # Assert the generated OCP training recipe has the expected criteria and
 # all six OCP components (three OLM installers + three operator CRs).
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 criteria:
   service: ocp
   intent: inference

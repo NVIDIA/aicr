@@ -33,7 +33,7 @@ func TestVerify_MinimalBundleSelfVerifies(t *testing.T) {
 	dir := t.TempDir()
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,

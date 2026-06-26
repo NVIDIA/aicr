@@ -37,7 +37,7 @@
 # Node scheduling paths define WHERE CLI flags like --system-node-selector are applied.
 # The actual values come from CLI flags, not from this file.
 #
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 
 components:

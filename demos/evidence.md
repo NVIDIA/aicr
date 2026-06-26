@@ -126,7 +126,7 @@ attestations:
 - bundle:
     oci: ghcr.io/<owner>/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e  # human-readable locator
     digest: sha256:f0c1...                                                    # canonical pin — verify uses this
-    predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+    predicateType: https://aicr.run/recipe-evidence/v1
   signer:
     identity: https://github.com/<owner>/<repo>/.github/workflows/validate.yaml@refs/heads/main
     issuer: https://token.actions.githubusercontent.com

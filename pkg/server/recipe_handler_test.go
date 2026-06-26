@@ -66,7 +66,7 @@ func TestHandleRecipes_Success(t *testing.T) {
 			name:        "POST h100 training JSON",
 			method:      http.MethodPost,
 			target:      "/v1/recipe",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"accelerator":"h100","intent":"training"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"accelerator":"h100","intent":"training"}}`,
 			contentType: "application/json",
 		},
 	}

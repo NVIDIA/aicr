@@ -30,7 +30,7 @@
 # See docs/contributor/recipe.md#criteria-wildcard-overlays for details.
 
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: h100-any
 

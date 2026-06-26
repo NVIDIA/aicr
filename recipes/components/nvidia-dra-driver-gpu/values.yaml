@@ -71,7 +71,7 @@ resources:
   gpus:
     enabled: true
 
-# The aicr.nvidia.com/gpu-operator-chart-version annotation that forces
+# The aicr.run/gpu-operator-chart-version annotation that forces
 # a DaemonSet re-roll on every gpu-operator chart bump (stale-NVML
 # mitigation; see PR #965 for the underlying class of bug) is no longer
 # hand-maintained here. As of #973 it is injected by the bundler from

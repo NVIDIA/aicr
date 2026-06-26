@@ -127,10 +127,10 @@ func TestDeployJobLabels(t *testing.T) {
 		"app.kubernetes.io/name":       "aicr",
 		"app.kubernetes.io/component":  "validation",
 		"app.kubernetes.io/managed-by": "aicr",
-		"aicr.nvidia.com/job-type":     "validation",
-		"aicr.nvidia.com/run-id":       "run1",
-		"aicr.nvidia.com/validator":    "gpu-operator-health",
-		"aicr.nvidia.com/phase":        "deployment",
+		"aicr.run/job-type":            "validation",
+		"aicr.run/run-id":              "run1",
+		"aicr.run/validator":           "gpu-operator-health",
+		"aicr.run/phase":               "deployment",
 	}
 	for k, want := range expectedLabels {
 		got := job.Labels[k]
@@ -141,8 +141,8 @@ func TestDeployJobLabels(t *testing.T) {
 
 	// Pod template labels
 	podLabels := job.Spec.Template.Labels
-	if podLabels["aicr.nvidia.com/validator"] != "gpu-operator-health" {
-		t.Errorf("Pod label validator = %q, want %q", podLabels["aicr.nvidia.com/validator"], "gpu-operator-health")
+	if podLabels["aicr.run/validator"] != "gpu-operator-health" {
+		t.Errorf("Pod label validator = %q, want %q", podLabels["aicr.run/validator"], "gpu-operator-health")
 	}
 }
 

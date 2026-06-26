@@ -1076,7 +1076,7 @@ func TestBundleGolden_ManifestOnly(t *testing.T) {
 	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.nvidia.com/v1alpha1",
+			APIVersion: "aicr.run/v1alpha2",
 			Metadata: struct {
 				Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 				AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
@@ -1159,7 +1159,7 @@ func TestBundleGolden_KaiSchedulerPresent(t *testing.T) {
 	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.nvidia.com/v1alpha1",
+			APIVersion: "aicr.run/v1alpha2",
 			Metadata: struct {
 				Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 				AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
@@ -1260,7 +1260,7 @@ func readFile(t *testing.T, path string) string {
 func singleComponentRecipe(name, namespace, chart, version, source string) *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Metadata: struct {
 			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
@@ -1277,7 +1277,7 @@ func singleComponentRecipe(name, namespace, chart, version, source string) *reci
 func createTestRecipeResult() *recipe.RecipeResult {
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Metadata: struct {
 			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`

@@ -23,16 +23,17 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/google/uuid"
 )
 
 // SLSA and in-toto constants.
 const (
 	SLSAProvenanceType = "https://slsa.dev/provenance/v1"
-	BundleBuildType    = "https://aicr.nvidia.com/bundle/v1"
+	BundleBuildType    = "https://" + header.Domain + "/bundle/v1"
 
 	// CatalogBuildType is the SLSA buildType for recipe-catalog attestations.
-	CatalogBuildType = "https://aicr.nvidia.com/recipe-catalog/v1"
+	CatalogBuildType = "https://" + header.Domain + "/recipe-catalog/v1"
 )
 
 // StatementMetadata provides build context for the SLSA predicate.
@@ -70,13 +71,16 @@ type StatementMetadata struct {
 	Deterministic bool
 
 	// BuildType overrides the SLSA buildDefinition.buildType URI.
-	// Empty falls back to BundleBuildType ("https://aicr.nvidia.com/bundle/v1").
+	// Empty falls back to BundleBuildType ("https://aicr.run/bundle/v1").
 	BuildType string
 }
 
 // aicrBundleNamespace is the UUIDv5 namespace for deterministic
-// invocationId derivation. Stable across releases.
-var aicrBundleNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://aicr.nvidia.com/bundle/v1"))
+// invocationId derivation, seeded from BundleBuildType so it tracks the
+// AICR domain. Deterministic IDs are stable for a given domain/inputs, but
+// the namespace ROTATED at the aicr.run migration: IDs minted before vs.
+// after differ for identical inputs.
+var aicrBundleNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte(BundleBuildType))
 
 // BuildStatement constructs an in-toto Statement v1 with a SLSA Build Provenance v1
 // predicate. Returns the statement as serialized JSON.

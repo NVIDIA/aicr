@@ -100,7 +100,7 @@ func TestVerify_PendingOnlyWhenExitZero(t *testing.T) {
 			// while the signature step still skips as unsigned.
 			tamper: func(t *testing.T, summaryDir string) {
 				if err := os.WriteFile(filepath.Join(summaryDir, "recipe.yaml"),
-					[]byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: RecipeResult\nmaterialEdit: 1\n"), 0o600); err != nil {
+					[]byte("apiVersion: aicr.run/v1alpha2\nkind: RecipeResult\nmaterialEdit: 1\n"), 0o600); err != nil {
 					t.Fatalf("write recipe: %v", err)
 				}
 			},
@@ -137,7 +137,7 @@ func TestVerify_TamperedFileFails(t *testing.T) {
 	summary := summaryDirOf(t, bundleDir)
 
 	recipePath := filepath.Join(summary, "recipe.yaml")
-	if err := os.WriteFile(recipePath, []byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: RecipeResult\nmaterialEdit: 1\n"), 0o600); err != nil {
+	if err := os.WriteFile(recipePath, []byte("apiVersion: aicr.run/v1alpha2\nkind: RecipeResult\nmaterialEdit: 1\n"), 0o600); err != nil {
 		t.Fatalf("write recipe: %v", err)
 	}
 

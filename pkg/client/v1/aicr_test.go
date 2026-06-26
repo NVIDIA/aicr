@@ -647,7 +647,7 @@ func TestClient_ConcurrentResolveScopesToOwnSource(t *testing.T) {
 	// is intentionally not in the embedded registry).
 	overlayYAML := func(marker string) string {
 		return `kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: facade-test-marker-` + marker + `
 spec:
@@ -1126,7 +1126,7 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 // decoupled from OS-mixin constraints while still exercising real
 // embedded resolution (base + h100-any + eks + eks-training).
 const leafOverlayYAML = `kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: aicr-loadrecipe-test
 spec:
@@ -1194,7 +1194,7 @@ func TestLoadRecipe_BareResultNoCriteria(t *testing.T) {
 	t.Parallel()
 
 	const bareResult = `kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: test
 componentRefs: []
@@ -1448,14 +1448,14 @@ func writeExternalCriterionData(t *testing.T, service string) string {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-		[]byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	overlayDir := filepath.Join(dir, "overlays")
 	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
 		t.Fatalf("setup: mkdir overlays: %v", err)
 	}
-	overlay := "apiVersion: aicr.nvidia.com/v1alpha1\n" +
+	overlay := "apiVersion: aicr.run/v1alpha2\n" +
 		"kind: RecipeMetadata\n" +
 		"metadata:\n  name: " + service + "-h100-training\n" +
 		"spec:\n  base: base\n  criteria:\n" +

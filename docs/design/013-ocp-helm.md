@@ -191,7 +191,7 @@ applicable to the platform:
 ```yaml
 # recipes/overlays/ocp.yaml
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: ocp
 spec:

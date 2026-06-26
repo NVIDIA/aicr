@@ -100,7 +100,7 @@ func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
 }
 
 const testRecipeConfig = `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: cfg-test
 spec:
@@ -163,7 +163,7 @@ func TestRecipeCmd_ConfigFlag_MissingFile(t *testing.T) {
 }
 
 const testBundleConfig = `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   bundle:
     input:
@@ -297,7 +297,7 @@ func TestBundleCmd_ConfigFlag_RecipeFromConfig(t *testing.T) {
 
 func TestBundleCmd_ConfigFlag_RecipeMissingFromConfigAndCLI(t *testing.T) {
 	cfgPath := writeYAML(t, "config.yaml", `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   bundle:
     deployment:

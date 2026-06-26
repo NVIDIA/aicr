@@ -63,7 +63,7 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks&intent=traini
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
   -d 'kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: my-config
 spec:
@@ -161,7 +161,7 @@ The request body must be a `RecipeCriteria` resource:
 
 ```yaml
 kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: my-criteria
 spec:
@@ -180,7 +180,7 @@ spec:
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
   -d 'kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: training-config
 spec:
@@ -193,7 +193,7 @@ curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
   -d '{
     "kind": "RecipeCriteria",
-    "apiVersion": "aicr.nvidia.com/v1alpha1",
+    "apiVersion": "aicr.run/v1alpha2",
     "metadata": {"name": "training-config"},
     "spec": {
       "service": "eks",
@@ -210,7 +210,7 @@ curl -X POST "http://localhost:8080/v1/recipe" \
 # Pretty print response
 curl -s -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100"}}' \
+  -d '{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100"}}' \
   | jq '.'
 ```
 
@@ -222,7 +222,7 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 
 ```json
 {
-  "apiVersion": "aicr.nvidia.com/v1alpha1",
+  "apiVersion": "aicr.run/v1alpha2",
   "kind": "Recipe",
   "metadata": {
     "version": "v1.0.0",
@@ -402,7 +402,7 @@ curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
 curl -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" \
   -d '{
-    "apiVersion": "aicr.nvidia.com/v1alpha1",
+    "apiVersion": "aicr.run/v1alpha2",
     "kind": "Recipe",
     "componentRefs": [
       {"name": "gpu-operator", "version": "v26.3.2", "type": "helm"},
@@ -415,7 +415,7 @@ curl -X POST "http://localhost:8080/v1/bundle" \
 curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-operator" \
   -H "Content-Type: application/json" \
   -d '{
-    "apiVersion": "aicr.nvidia.com/v1alpha1",
+    "apiVersion": "aicr.run/v1alpha2",
     "kind": "Recipe",
     "componentRefs": [
       {"name": "gpu-operator", "version": "v26.3.2", "type": "helm"},

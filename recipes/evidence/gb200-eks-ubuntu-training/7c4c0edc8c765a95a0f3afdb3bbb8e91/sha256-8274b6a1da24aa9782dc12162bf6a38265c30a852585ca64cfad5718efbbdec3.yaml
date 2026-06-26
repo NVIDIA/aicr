@@ -17,7 +17,7 @@ attestations:
     bundle:
       digest: sha256:8274b6a1da24aa9782dc12162bf6a38265c30a852585ca64cfad5718efbbdec3
       oci: ghcr.io/yuanchen8911/aicr-evidence:gb200-eks-ubuntu-training-a3fe1a7e7bcb
-      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+      predicateType: https://aicr.run/recipe-evidence/v1
     signer:
       identity: yuanchen97@gmail.com
       issuer: https://github.com/login/oauth

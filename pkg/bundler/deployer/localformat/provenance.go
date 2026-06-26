@@ -47,6 +47,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 // ProvenanceFileName is the on-disk filename at the bundle root. Exported
@@ -57,8 +58,10 @@ const ProvenanceFileName = "provenance.yaml"
 // AICR's K8s-style convention. Bump the apiVersion when a downstream
 // consumer would need to branch on shape (v1alpha1 → v1beta1 → v1).
 // Additive fields do not require a bump.
+// The current v1alpha2 segment tracks header.GroupVersion and reflects the
+// aicr.run domain-migration version bump (signal-only, no shape change).
 const (
-	ProvenanceAPIVersion = "aicr.nvidia.com/v1alpha1"
+	ProvenanceAPIVersion = header.GroupVersion
 	ProvenanceKind       = "BundleProvenance"
 )
 

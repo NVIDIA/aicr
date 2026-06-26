@@ -197,7 +197,7 @@
 //
 //	type RecipeCriteria struct {
 //	    Kind       string    // Must be "RecipeCriteria"
-//	    APIVersion string    // Must be "aicr.nvidia.com/v1alpha1"
+//	    APIVersion string    // Must be "aicr.run/v1alpha2"
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
 //	    }
@@ -207,7 +207,7 @@
 // Example criteria file (criteria.yaml):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -278,7 +278,7 @@
 //
 // Base structure (recipes/overlays/base.yaml):
 //
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	kind: Base
 //	metadata:
 //	  name: base
@@ -290,7 +290,7 @@
 //
 // Overlay structure (recipes/overlays/*.yaml):
 //
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	kind: Overlay
 //	metadata:
 //	  name: h100-training

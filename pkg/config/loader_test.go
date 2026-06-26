@@ -27,7 +27,7 @@ import (
 )
 
 const validYAML = `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-eks-training
 spec:
@@ -55,7 +55,7 @@ spec:
 
 const validJSON = `{
   "kind": "AICRConfig",
-  "apiVersion": "aicr.nvidia.com/v1alpha1",
+  "apiVersion": "aicr.run/v1alpha2",
   "metadata": {"name": "test"},
   "spec": {
     "recipe": {
@@ -184,7 +184,7 @@ func TestLoad_CanceledContext(t *testing.T) {
 
 func TestLoad_RejectsUnknownYAMLField(t *testing.T) {
 	bad := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   recipe:
     criteria:
@@ -202,7 +202,7 @@ spec:
 }
 
 func TestLoad_RejectsUnknownJSONField(t *testing.T) {
-	bad := `{"kind":"AICRConfig","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"recipe":{"criteria":{"service":"eks","bogusFieldThatDoesNotExist":"oops"}}}}`
+	bad := `{"kind":"AICRConfig","apiVersion":"aicr.run/v1alpha2","spec":{"recipe":{"criteria":{"service":"eks","bogusFieldThatDoesNotExist":"oops"}}}}`
 	path := writeTempFile(t, "config.json", bad)
 	_, err := config.Load(context.Background(), path)
 	if err == nil {
@@ -218,7 +218,7 @@ func TestLoad_RejectsUnknownJSONField(t *testing.T) {
 // decode error rather than silently dropping the field.
 func TestLoad_RejectsUnknownSnapshotField(t *testing.T) {
 	bad := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   snapshot:
     output:

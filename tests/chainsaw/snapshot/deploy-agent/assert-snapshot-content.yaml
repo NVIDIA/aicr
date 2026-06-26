@@ -33,7 +33,7 @@
 # so the smi collector runs but cannot parse GPU details. The subtype
 # names alone verify that every collector ran.
 kind: Snapshot
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   source-node: aicr-worker
   version: dev

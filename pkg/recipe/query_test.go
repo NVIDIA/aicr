@@ -195,7 +195,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("basic result", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.nvidia.com/v1alpha1",
+			APIVersion: "aicr.run/v1alpha2",
 			Criteria: &Criteria{
 				Service:     "eks",
 				Accelerator: "h100",
@@ -253,7 +253,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("excluded overlays include reasons", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:            "RecipeResult",
-			APIVersion:      "aicr.nvidia.com/v1alpha1",
+			APIVersion:      "aicr.run/v1alpha2",
 			DeploymentOrder: []string{},
 		}
 		result.Metadata.ExcludedOverlays = []ExcludedOverlay{
@@ -288,7 +288,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("nil criteria", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.nvidia.com/v1alpha1",
+			APIVersion: "aicr.run/v1alpha2",
 		}
 
 		hydrated, err := HydrateResult(result)
@@ -303,7 +303,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("constraints with optional fields", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.nvidia.com/v1alpha1",
+			APIVersion: "aicr.run/v1alpha2",
 			Constraints: []Constraint{
 				{Name: "k8s", Value: ">= 1.30"},
 				{Name: "gpu-mem", Value: ">= 80", Severity: "error", Remediation: "upgrade GPU", Unit: "GB"},
@@ -344,7 +344,7 @@ func TestHydrateResult(t *testing.T) {
 	t.Run("component optional fields", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: "aicr.nvidia.com/v1alpha1",
+			APIVersion: "aicr.run/v1alpha2",
 			ComponentRefs: []ComponentRef{
 				{
 					Name:           "kustomize-app",

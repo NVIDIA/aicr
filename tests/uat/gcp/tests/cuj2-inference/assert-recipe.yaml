@@ -19,7 +19,7 @@
 # inference-specific components (agentgateway, DRA driver, KAI scheduler, Dynamo),
 # and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 criteria:
   service: gke
   accelerator: h100

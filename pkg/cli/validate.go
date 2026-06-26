@@ -39,6 +39,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
@@ -364,7 +365,7 @@ func runValidation(
 		slog.Info("cleanup disabled - Jobs and RBAC kept for debugging",
 			"namespace", cfg.validationNamespace,
 			"runID", runID)
-		slog.Info("to inspect Job logs: kubectl logs -l aicr.nvidia.com/job -n " + cfg.validationNamespace)
+		slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + runID + " -n " + cfg.validationNamespace)
 		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
 		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
 	}

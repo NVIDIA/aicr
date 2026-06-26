@@ -19,7 +19,7 @@
 // artifact that ties an AICR recipe to an `aicr validate` run on real
 // hardware. The signed payload is an in-toto Statement carrying a
 // custom predicate (predicateType
-// https://aicr.nvidia.com/recipe-evidence/v1); the supporting files
+// https://aicr.run/recipe-evidence/v1); the supporting files
 // (recipe, snapshot, BOM, CTRF, manifest) ship alongside in an OCI
 // artifact for reviewer convenience and offline verification.
 //

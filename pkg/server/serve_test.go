@@ -157,19 +157,19 @@ func TestRecipeEndpointPOST(t *testing.T) {
 	}{
 		{
 			name:        "valid JSON body",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "valid YAML body",
-			body:        "kind: RecipeCriteria\napiVersion: aicr.nvidia.com/v1alpha1\nspec:\n  service: gke\n  accelerator: a100",
+			body:        "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: gke\n  accelerator: a100",
 			contentType: "application/x-yaml",
 			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "valid JSON body with platform",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},

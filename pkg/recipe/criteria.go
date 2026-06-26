@@ -792,7 +792,7 @@ const RecipeCriteriaAPIVersion = RecipeAPIVersion
 // Example:
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -804,7 +804,7 @@ type RecipeCriteria struct {
 	// Kind is always "RecipeCriteria".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.nvidia.com/v1alpha1").
+	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -902,7 +902,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec, reg *CriteriaRegistry) (*Cr
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -937,7 +937,7 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -1020,7 +1020,7 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *Crite
 //
 //	{
 //	  "kind": "RecipeCriteria",
-//	  "apiVersion": "aicr.nvidia.com/v1alpha1",
+//	  "apiVersion": "aicr.run/v1alpha2",
 //	  "metadata": {"name": "my-criteria"},
 //	  "spec": {"service": "eks", "accelerator": "h100"}
 //	}

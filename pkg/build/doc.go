@@ -14,7 +14,7 @@
 
 // Package build defines the BuildSpec schema and the load / validate /
 // write-back primitives used by the build pipeline. A BuildSpec is the
-// Kubernetes-style document (apiVersion aicr.nvidia.com/v1beta1, kind
+// Kubernetes-style document (apiVersion aicr.run/v1beta2, kind
 // AICRRuntime) the runtime controller consumes: spec.* captures inputs
 // (recipe, version, target, registry) and status.images is populated with
 // the per-image registry/repository/tag/digest after a build.

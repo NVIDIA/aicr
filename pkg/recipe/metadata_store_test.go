@@ -1459,7 +1459,7 @@ func TestMalformedMixinRejected(t *testing.T) {
 		{
 			name: "mixin with forbidden base field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: bad-mixin
 spec:
@@ -1472,7 +1472,7 @@ spec:
 		{
 			name: "mixin with forbidden criteria field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: bad-mixin
 spec:
@@ -1486,7 +1486,7 @@ spec:
 		{
 			name: "mixin with forbidden validation field",
 			content: `kind: RecipeMixin
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: bad-mixin
 spec:
@@ -1698,7 +1698,7 @@ func buildProviderWithOverlays(t *testing.T, overlayFileName string) DataProvide
 	}
 
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
@@ -1706,7 +1706,7 @@ spec:
 `)
 
 	overlayYAML := fmt.Appendf(nil, `kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: %s
 spec:

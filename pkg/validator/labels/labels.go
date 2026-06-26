@@ -15,6 +15,8 @@
 // Package labels provides shared label constants for validation resources.
 package labels
 
+import "github.com/NVIDIA/aicr/pkg/header"
+
 // Standard Kubernetes label keys.
 const (
 	Name      = "app.kubernetes.io/name"
@@ -22,13 +24,13 @@ const (
 	ManagedBy = "app.kubernetes.io/managed-by"
 )
 
-// AICR-specific label keys.
+// AICR-specific label keys, keyed on the canonical AICR API domain.
 const (
-	JobType    = "aicr.nvidia.com/job-type"
-	RunID      = "aicr.nvidia.com/run-id"
-	Validator  = "aicr.nvidia.com/validator"
-	Phase      = "aicr.nvidia.com/phase"
-	ReportType = "aicr.nvidia.com/report-type"
+	JobType    = header.Domain + "/job-type"
+	RunID      = header.Domain + "/run-id"
+	Validator  = header.Domain + "/validator"
+	Phase      = header.Domain + "/phase"
+	ReportType = header.Domain + "/report-type"
 )
 
 // Common label values.
