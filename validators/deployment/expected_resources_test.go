@@ -62,7 +62,6 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 
 	ctx := newDeploymentTestContext(t,
 		[]runtime.Object{
-			activeNamespace("gpu-operator"),
 			activeNamespace("skyhook"),
 			activeNamespace("nvidia-dra-driver"),
 			activeNamespace("app-ns"),
@@ -70,11 +69,9 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 			readyDaemonSet("nvidia-dra-driver", testDefaultDRADSName, 2),
 		},
 		[]runtime.Object{
-			clusterPolicyWithState(clusterPolicyReadyState),
 			nodewrightWithStatus("tuning", nodewrightCompleteState),
 		},
 		[]recipe.ComponentRef{
-			{Name: gpuOperatorComponent, Namespace: "gpu-operator"},
 			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 			{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 			{
@@ -98,17 +95,14 @@ func TestCheckExpectedResources_FailsWhenNodewrightIncomplete(t *testing.T) {
 
 	ctx := newDeploymentTestContext(t,
 		[]runtime.Object{
-			activeNamespace("gpu-operator"),
 			activeNamespace("skyhook"),
 			activeNamespace("nvidia-dra-driver"),
 			readyDaemonSet("nvidia-dra-driver", testDefaultDRADSName, 1),
 		},
 		[]runtime.Object{
-			clusterPolicyWithState(clusterPolicyReadyState),
 			nodewrightWithStatus("tuning", "waiting"),
 		},
 		[]recipe.ComponentRef{
-			{Name: gpuOperatorComponent, Namespace: "gpu-operator"},
 			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 			{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 		},
@@ -247,39 +241,22 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 	}
 }
 
-// Issue #607 acceptance (by symmetry): the gpu-operator readiness check must
-// skip gracefully when the ClusterPolicy CRD is not registered, so a recipe
-// can declare gpu-operator before the operator's CRDs are installed.
-func TestCheckExpectedResources_SkipsClusterPolicyWhenCRDNotRegistered(t *testing.T) {
-	t.Parallel()
-
-	ctx := newDeploymentTestContextWithUnregistered(t,
-		[]runtime.Object{activeNamespace("gpu-operator")},
-		nil,
-		[]schema.GroupVersionResource{clusterPolicyGVR},
-		[]recipe.ComponentRef{{Name: gpuOperatorComponent, Namespace: "gpu-operator"}},
-	)
-
-	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil when ClusterPolicy CRD is not registered", err)
-		return
-	}
-}
-
 // Fail-closed test: when the discovery API itself returns a non-NotFound
 // error (e.g., 403 from RBAC, 5xx from an overloaded API server, network
-// timeout), the ClusterPolicy check must NOT treat that as "CRD not
+// timeout), a Go-resident readiness check must NOT treat that as "CRD not
 // registered" and skip. Anything other than IsNotFound means we cannot
-// prove readiness, so the check must surface a failure.
+// prove readiness, so the check must surface a failure. Exercised here via
+// the Nodewright discovery gate, which shares the fail-closed pattern with
+// the other GPU readiness signals.
 func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContextWithDiscovery(t,
-		[]runtime.Object{activeNamespace("gpu-operator")},
+		[]runtime.Object{activeNamespace("skyhook")},
 		nil,
 		nil,
 		nil,
-		[]recipe.ComponentRef{{Name: gpuOperatorComponent, Namespace: "gpu-operator"}},
+		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
 	clientset, ok := ctx.Clientset.(*k8sfake.Clientset)
@@ -297,7 +274,7 @@ func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *tes
 	// of exercising the fail-closed branch.
 	clientset.PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(
-			schema.GroupResource{Group: "nvidia.com", Resource: "apiresources"},
+			schema.GroupResource{Group: "skyhook.nvidia.com", Resource: "apiresources"},
 			"",
 			stderrors.New("forbidden: user cannot list apiresources"))
 	})
@@ -313,33 +290,6 @@ func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *tes
 	}
 	if strings.Contains(err.Error(), "not registered, skipping") {
 		t.Fatalf("discovery failure must not be treated as CRD-not-registered skip, got: %v", err)
-		return
-	}
-}
-
-// Disambiguation test: when the ClusterPolicy CRD *is* registered on the
-// cluster but the cluster-policy CR itself is absent, the check must fail
-// rather than skip. That state means gpu-operator is installed but has no
-// singleton to reconcile — a real misconfiguration the user should see, not
-// silently treat as "not applicable".
-func TestCheckExpectedResources_FailsWhenClusterPolicyCRMissing(t *testing.T) {
-	t.Parallel()
-
-	ctx := newDeploymentTestContextWithDiscovery(t,
-		[]runtime.Object{activeNamespace("gpu-operator")},
-		nil,
-		[]schema.GroupVersion{clusterPolicyGVR.GroupVersion()},
-		nil,
-		[]recipe.ComponentRef{{Name: gpuOperatorComponent, Namespace: "gpu-operator"}},
-	)
-
-	err := checkExpectedResources(ctx)
-	if err == nil {
-		t.Fatal("expected error when ClusterPolicy CR is missing but CRD is registered")
-		return
-	}
-	if !strings.Contains(err.Error(), "failed to get ClusterPolicy cluster-policy") {
-		t.Fatalf("expected ClusterPolicy-missing failure, got: %v", err)
 		return
 	}
 }
@@ -401,32 +351,6 @@ func TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "no Nodewright CR names could be extracted") {
 		t.Fatalf("expected 'no Nodewright CR names could be extracted' failure, got: %v", err)
-		return
-	}
-}
-
-func TestCheckExpectedResources_FailsWhenClusterPolicyMissingState(t *testing.T) {
-	t.Parallel()
-
-	ctx := newDeploymentTestContext(t,
-		[]runtime.Object{
-			activeNamespace("gpu-operator"),
-		},
-		[]runtime.Object{
-			clusterPolicyWithoutState(),
-		},
-		[]recipe.ComponentRef{
-			{Name: gpuOperatorComponent, Namespace: "gpu-operator"},
-		},
-	)
-
-	err := checkExpectedResources(ctx)
-	if err == nil {
-		t.Fatal("expected error when ClusterPolicy status.state is missing")
-		return
-	}
-	if !strings.Contains(err.Error(), "ClusterPolicy status.state not found") {
-		t.Fatalf("expected ClusterPolicy readiness failure, got: %v", err)
 		return
 	}
 }
@@ -813,7 +737,7 @@ func newDeploymentTestContextWithUnregistered(
 // newDeploymentTestContextWithDiscovery is the fully-explicit variant: callers
 // pass the exact list of GroupVersions the fake discovery service should
 // advertise. Needed by the "CRD present but CR missing" test, where we need
-// nvidia.com/v1 to appear in discovery without any ClusterPolicy object.
+// the Nodewright GroupVersion to appear in discovery without any Skyhook object.
 func newDeploymentTestContextWithDiscovery(
 	t *testing.T,
 	kubeObjects, dynamicObjects []runtime.Object,
@@ -912,8 +836,6 @@ func newFakeDynamicClient(objects []runtime.Object, unregistered ...schema.Group
 
 func gvrForTestObject(gvk schema.GroupVersionKind) schema.GroupVersionResource {
 	switch {
-	case gvk.Group == clusterPolicyGVR.Group && gvk.Version == clusterPolicyGVR.Version && gvk.Kind == "ClusterPolicy":
-		return clusterPolicyGVR
 	case gvk.Group == nodewrightGVR.Group && gvk.Version == nodewrightGVR.Version && gvk.Kind == "Skyhook":
 		return nodewrightGVR
 	default:
@@ -943,8 +865,7 @@ func (f *fakeDynamicClient) Resource(resource schema.GroupVersionResource) dynam
 // (which real k8s answers with a 404 "server could not find the requested
 // resource", not a silently empty list).
 var clusterScopedGVRs = map[schema.GroupVersionResource]bool{
-	clusterPolicyGVR: true,
-	nodewrightGVR:    true,
+	nodewrightGVR: true,
 }
 
 type fakeResourceClient struct {
@@ -1132,21 +1053,6 @@ func unreadyDaemonSet(namespace, name string, desired, ready int32) *appsv1.Daem
 	}
 }
 
-func clusterPolicyWithState(state string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "nvidia.com/v1",
-			"kind":       "ClusterPolicy",
-			"metadata": map[string]interface{}{
-				"name": clusterPolicyName,
-			},
-			"status": map[string]interface{}{
-				"state": state,
-			},
-		},
-	}
-}
-
 // nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,
 // so metadata.namespace is intentionally not set.
 func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
@@ -1163,19 +1069,6 @@ func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 			"status": map[string]interface{}{
 				"status": status,
 			},
-		},
-	}
-}
-
-func clusterPolicyWithoutState() *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "nvidia.com/v1",
-			"kind":       "ClusterPolicy",
-			"metadata": map[string]interface{}{
-				"name": clusterPolicyName,
-			},
-			"status": map[string]interface{}{},
 		},
 	}
 }

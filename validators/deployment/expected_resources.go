@@ -40,10 +40,8 @@ import (
 )
 
 const (
-	gpuOperatorComponent              = "gpu-operator"
 	nodewrightCustomizationsComponent = "nodewright-customizations"
 	draDriverComponent                = "nvidia-dra-driver-gpu"
-	clusterPolicyName                 = "cluster-policy"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -54,18 +52,12 @@ const (
 	// installed the chart.
 	draKubeletPluginSuffix = "-kubelet-plugin"
 
-	clusterPolicyReadyState = "ready"
 	nodewrightCompleteState = "complete"
 )
 
-var (
-	clusterPolicyGVR = schema.GroupVersionResource{
-		Group: "nvidia.com", Version: "v1", Resource: "clusterpolicies",
-	}
-	nodewrightGVR = schema.GroupVersionResource{
-		Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
-	}
-)
+var nodewrightGVR = schema.GroupVersionResource{
+	Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
+}
 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
@@ -246,20 +238,24 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 	return failures
 }
 
-// verifyGPUReadinessSignals runs the three Go-resident deep checks
-// introduced by issue #611. Returns the human-readable failure strings
-// plus the first *errors.StructuredError encountered across all three
-// helpers so the caller can propagate the original error code (e.g.,
-// ErrCodeInternal from a discovery/RBAC failure) instead of flattening
-// it into the generic ErrCodeNotFound summary — per PR #1235 review.
+// verifyGPUReadinessSignals runs the Go-resident deep checks introduced by
+// issue #611. Returns the human-readable failure strings plus the first
+// *errors.StructuredError encountered across the helpers so the caller can
+// propagate the original error code (e.g., ErrCodeInternal from a
+// discovery/RBAC failure) instead of flattening it into the generic
+// ErrCodeNotFound summary — per PR #1235 review.
 //
 // Migration disposition (per #1220 plan):
 //
-//   - clusterPolicyReady: candidate for migration to registry-declared
-//     Chainsaw YAML in recipes/checks/gpu-operator/health-check.yaml.
-//     Deferred to follow-up because the existing expected_resources_test.go
-//     suite mocks ClusterPolicy state extensively, and the migration must
-//     prove assertion equivalence rather than just code equivalence.
+//   - clusterPolicyReady: MIGRATED. The ClusterPolicy state=ready assertion
+//     now lives in registry-declared Chainsaw YAML
+//     (recipes/checks/gpu-operator/health-check.yaml, step
+//     validate-cluster-policy-ready). The Chainsaw assert polls until the
+//     operator finishes reconciling; the old Go verifyClusterPolicyReady
+//     sampled status.state exactly once with no retry and flaked the whole
+//     deployment gate when it ran before the nvidia-operator-validator init
+//     containers (driver, toolkit, cuda, plugin) completed. It was removed
+//     once the Chainsaw assertion proved equivalent.
 //   - verifyNodewrightReady (formerly skyhookReady): stays in Go. Names
 //     are derived from the recipe's own ManifestFiles at validate-time
 //     (see expectedNodewrightNames), not from a stable label, so static
@@ -288,10 +284,6 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 
 	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
 		capture(verifyNodewrightReady(ctx, ref))
-	}
-
-	if _, ok := findEnabledComponent(refs, gpuOperatorComponent); ok {
-		capture(verifyClusterPolicyReady(ctx))
 	}
 
 	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
@@ -336,10 +328,10 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 				ref.Name, ref.ManifestFiles))
 	}
 
-	// Discovery-gate the CRD before attempting Get by name. Matches the
-	// verifyClusterPolicyReady pattern: CRD not registered → skip per #607;
-	// any other discovery error (RBAC, 5xx, timeout) → fail closed so a
-	// transient discovery failure cannot mask readiness.
+	// Discovery-gate the CRD before attempting Get by name: CRD not
+	// registered → skip per #607; any other discovery error (RBAC, 5xx,
+	// timeout) → fail closed so a transient discovery failure cannot mask
+	// readiness.
 	gv := nodewrightGVR.GroupVersion().String()
 	_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
 	switch {
@@ -462,66 +454,6 @@ func extractNodewrightNamesFromManifest(content []byte) []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-func verifyClusterPolicyReady(ctx *validators.Context) error {
-	// Use discovery to distinguish two cases the dynamic-client Get conflates:
-	//   1. CRD not registered ("CustomResourceDefinition clusterpolicies
-	//      does not exist") — the recipe declares gpu-operator but the
-	//      operator chart is not installed yet. Skip per #607.
-	//   2. CRD registered but the cluster-policy CR is absent — gpu-operator
-	//      is installed but its singleton CR was never created or has been
-	//      manually deleted. The operator cannot reconcile the GPU stack in
-	//      that state, so this is a real misconfiguration — fail.
-	// A bare Get() that returns IsNotFound cannot tell these apart. Explicit
-	// discovery lookup does.
-	//
-	// Critically, only skip on IsNotFound from discovery. Anything else
-	// (403 from RBAC, 5xx from an overloaded API server, network timeout) is
-	// a real signal that we cannot prove readiness, and silently passing would
-	// hide a broken cluster. Fail closed on those.
-	gv := clusterPolicyGVR.GroupVersion().String()
-	_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
-	switch {
-	case discErr == nil:
-		// fall through to the CR check
-	case apierrors.IsNotFound(discErr):
-		fmt.Printf("  ClusterPolicy: %s not registered, skipping\n", gv)
-		return nil
-	default:
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
-	}
-
-	dynClient, err := getDynamicClient(ctx)
-	if err != nil {
-		return err
-	}
-
-	verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
-	clusterPolicy, err := dynClient.Resource(clusterPolicyGVR).Get(verifyCtx, clusterPolicyName, metav1.GetOptions{})
-	cancel()
-	if err != nil {
-		// CRD is registered (we just checked). Any Get error here — including
-		// IsNotFound on the CR itself — signals that gpu-operator is installed
-		// but not reconciled. Surface it rather than silently skipping.
-		return errors.Wrap(errors.ErrCodeNotFound,
-			"failed to get ClusterPolicy cluster-policy (gpu-operator installed but CR missing?)", err)
-	}
-
-	state, found, stateErr := unstructured.NestedString(clusterPolicy.Object, "status", "state")
-	if stateErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to read ClusterPolicy status.state", stateErr)
-	}
-	if !found {
-		return errors.New(errors.ErrCodeInternal, "ClusterPolicy status.state not found")
-	}
-	if state != clusterPolicyReadyState {
-		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("ClusterPolicy state=%s (want %s)", state, clusterPolicyReadyState))
-	}
-
-	fmt.Printf("  ClusterPolicy %s: %s\n", clusterPolicyName, clusterPolicyReadyState)
-	return nil
 }
 
 // verifyDRAKubeletPluginReady locates the kubelet-plugin DaemonSet by
