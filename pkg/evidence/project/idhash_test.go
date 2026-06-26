@@ -25,11 +25,20 @@ func TestSignerIDHash(t *testing.T) {
 		identity = "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"
 	)
 
-	hexRe := regexp.MustCompile(`^[0-9a-f]{12}$`)
+	hexRe := regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 	got := SignerIDHash(issuer, identity)
 	if !hexRe.MatchString(got) {
-		t.Fatalf("idHash = %q, want 12 lowercase hex chars", got)
+		t.Fatalf("idHash = %q, want 32 lowercase hex chars", got)
+	}
+
+	// Golden value: pins the persisted GP2-producer/GP4-consumer contract
+	// against any change to idHashLen, the separator, or the encoding. If
+	// this fails, the on-disk tree layout changed and both the bucket tree
+	// and the consumer need a coordinated migration.
+	const wantGolden = "a2f01812594e54d1a14278576fda2ed0"
+	if got != wantGolden {
+		t.Errorf("idHash = %q, want golden %q (algorithm changed?)", got, wantGolden)
 	}
 
 	// Determinism: same inputs -> same hash.

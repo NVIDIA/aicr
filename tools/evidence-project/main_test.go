@@ -159,6 +159,25 @@ func TestRun_NoTrustedRegistryRejected(t *testing.T) {
 	}
 }
 
+// TestRun_AllowUnpinnedStillGatesPinnedRef confirms --allow-unpinned-tag
+// only relaxes the unpinned-tag restriction: a digest-pinned oci:// ref
+// whose registry is not on the trusted allowlist is still rejected before
+// any pull, even with the flag set.
+func TestRun_AllowUnpinnedStillGatesPinnedRef(t *testing.T) {
+	o := options{
+		in:            "oci://quay.io/stranger/aicr-evidence@sha256:abc",
+		out:           t.TempDir(),
+		issuer:        "https://token.actions.githubusercontent.com",
+		identityRE:    "^https://github.com/NVIDIA/aicr/",
+		trusted:       "ghcr.io/nvidia",
+		allowUnpinned: true,
+	}
+	var buf bytes.Buffer
+	if err := run(context.Background(), o, &buf); err == nil {
+		t.Error("run() with pinned untrusted ref + allow-unpinned = nil error, want rejection")
+	}
+}
+
 // TestRun_UnsignedBundleRejected drives a directory input all the way
 // through materialize + verify: a bundle with the marker files but no
 // signature fails verification, and run() refuses to ingest it. This is

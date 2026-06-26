@@ -53,11 +53,17 @@ const (
 // interim first-party heuristic (see Classify).
 const firstPartyIssuer = "https://token.actions.githubusercontent.com"
 
-// firstPartyIdentity matches a SubjectAlternativeName rooted at the
-// canonical AICR repository's workflows. Anchored at the start so a
-// look-alike host cannot satisfy it. Used only by the interim heuristic
-// when no allowlist file is present.
-var firstPartyIdentity = regexp.MustCompile(`^https://github\.com/NVIDIA/aicr/`)
+// firstPartyIdentity matches the SubjectAlternativeName of AICR's own UAT
+// workflows (uat-aws.yaml / uat-gcp.yaml on a branch ref) — the only
+// identity the interim heuristic may admit as first-party. Fully anchored
+// (^…$) so neither a look-alike host nor an arbitrary other path/ref under
+// NVIDIA/aicr (e.g. a fork-PR workflow or a non-UAT workflow) can satisfy
+// it. Mirrors FIRST_PARTY_IDENTITY in evidence-ingest.yaml and the
+// documented firstParty allowlist entry that replaces this heuristic once
+// recipes/evidence/allowlist.yaml ships. Used only when no allowlist file
+// is present.
+var firstPartyIdentity = regexp.MustCompile(
+	`^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/.+$`)
 
 // AllowlistEntry pins one verified signer: an exact issuer and an
 // identity that is either an exact string or a tightly-bounded regex
@@ -141,9 +147,9 @@ func (a *Allowlist) Validate() error {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("allowlist %s entry has empty identity", ce.class))
 		}
-		if reason, broad := overBroadIdentity(ce.entry.Identity); broad {
+		if reason, unsafe := unsafeIdentityConstruct(ce.entry.Identity); unsafe {
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("allowlist %s entry identity %q is over-broad: %s",
+				fmt.Sprintf("allowlist %s entry identity %q is unsafe: %s",
 					ce.class, ce.entry.Identity, reason))
 		}
 		if _, err := compileIdentity(ce.entry.Identity); err != nil {
@@ -214,12 +220,19 @@ func compileIdentity(pattern string) (identityMatcher, error) {
 	}, nil
 }
 
-// overBroadIdentity reports whether an identity pattern is over-broad. An
-// exact (non-regex) identity is inherently specific. A regex is
-// over-broad when it contains unbounded repetition (*, +, or {n,})
-// anywhere in its AST — that is what lets one entry match many distinct
-// orgs/repos and manufacture a confirmed source.
-func overBroadIdentity(pattern string) (reason string, broad bool) {
+// unsafeIdentityConstruct reports whether a regex identity pattern uses a
+// construct that makes it either over-broad or impossible to overlap-check
+// soundly. An exact (non-regex) identity is always safe. For a regex, only
+// literals, concatenation, capture groups, alternation, and the ^/$ anchors
+// are permitted. That keeps every accepted pattern finitely enumerable down
+// its first alternation branch — the precondition for the single-sample
+// cross-test in overlaps() (via representativeIdentity) to be exact rather
+// than a heuristic that can miss intersecting entries. Any repetition
+// (*, +, ?, {n,m}), character class, or '.' is rejected: repetition can
+// span an org/repo segment and manufacture a confirmed source, while a
+// character class or '.' lets two distinct entries intersect on an input
+// that representativeIdentity never samples.
+func unsafeIdentityConstruct(pattern string) (reason string, unsafe bool) {
 	if !strings.HasPrefix(pattern, "^") {
 		return "", false
 	}
@@ -227,29 +240,38 @@ func overBroadIdentity(pattern string) (reason string, broad bool) {
 	if err != nil {
 		return "", false // a malformed regex is rejected by compileIdentity
 	}
-	if q := unboundedRepetition(re); q != "" {
-		return "contains unbounded repetition " + q + " that can span an org/repo segment", true
-	}
-	return "", false
+	return walkIdentityAST(re)
 }
 
-// unboundedRepetition returns a token for the first unbounded repetition
-// in the regex AST, or "" if none.
-func unboundedRepetition(re *syntax.Regexp) string {
-	switch {
-	case re.Op == syntax.OpStar:
-		return "*"
-	case re.Op == syntax.OpPlus:
-		return "+"
-	case re.Op == syntax.OpRepeat && re.Max == -1:
-		return "{n,}"
-	}
-	for _, sub := range re.Sub {
-		if q := unboundedRepetition(sub); q != "" {
-			return q
+// walkIdentityAST returns a human-readable reason for the first unsafe node
+// in a parsed identity regex, or ("", false) when every node is supported.
+func walkIdentityAST(re *syntax.Regexp) (reason string, unsafe bool) {
+	switch re.Op {
+	case syntax.OpStar:
+		return "contains unbounded repetition '*' that can span an org/repo segment", true
+	case syntax.OpPlus:
+		return "contains unbounded repetition '+' that can span an org/repo segment", true
+	case syntax.OpRepeat:
+		return "contains repetition '{n,m}' that can span an org/repo segment", true
+	case syntax.OpQuest:
+		return "contains optional '?' which the overlap check cannot sample", true
+	case syntax.OpCharClass, syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		return "contains a character class or '.' which the overlap check cannot sample", true
+	case syntax.OpNoMatch, syntax.OpWordBoundary, syntax.OpNoWordBoundary:
+		return "contains an unsupported regex construct", true
+	case syntax.OpEmptyMatch, syntax.OpLiteral, syntax.OpConcat,
+		syntax.OpAlternate, syntax.OpCapture,
+		syntax.OpBeginText, syntax.OpEndText,
+		syntax.OpBeginLine, syntax.OpEndLine:
+		for _, sub := range re.Sub {
+			if r, u := walkIdentityAST(sub); u {
+				return r, u
+			}
 		}
+		return "", false
+	default:
+		return "contains an unsupported regex construct", true
 	}
-	return ""
 }
 
 // overlaps reports whether two entries could both match one verified

@@ -183,17 +183,28 @@ func Synthesize(ctx context.Context, in In) (*Result, error) {
 	// filepath.IsLocal. The tree lives under <OutRoot>/results.
 	runDir := filepath.Join(in.OutRoot, resultsDir, coord.Group, coord.Dashboard, coord.Tab, idHash, runID)
 
-	// Idempotent replace: clear any prior content for this exact run so
-	// a re-ingest of the same bundle yields byte-identical output and
-	// never accumulates duplicates.
-	if err = os.RemoveAll(runDir); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "clear run dir", err)
+	// Atomic idempotent replace: stage the full tree in a sibling temp
+	// directory, then swap it in with a single rename. Clearing runDir up
+	// front (as a naive replace would) destroys the last good result
+	// before its replacement exists, so a cancellation or I/O failure
+	// mid-write would leave nothing behind. Staging + rename keeps the
+	// previous result intact until the new tree is complete.
+	parent := filepath.Dir(runDir)
+	if err = os.MkdirAll(parent, 0o755); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "create run parent dir", err)
 	}
-	if err = os.MkdirAll(runDir, 0o755); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "create run dir", err)
+	staging, err := os.MkdirTemp(parent, ".staging-"+idHash+"-")
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "create staging dir", err)
+	}
+	// Removed on any early return below; a no-op once the rename has
+	// consumed it, so a successful run leaves no staging dir behind.
+	defer func() { _ = os.RemoveAll(staging) }()
+	if err = os.Chmod(staging, 0o755); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "chmod staging dir", err)
 	}
 
-	phases, err := copyCTRFReports(ctx, in.BundleDir, runDir)
+	phases, err := copyCTRFReports(ctx, in.BundleDir, staging)
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +213,18 @@ func Synthesize(ctx context.Context, in In) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(runDir, MetaFilename), metaBytes, 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(staging, MetaFilename), metaBytes, 0o600); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "write meta.json", err)
+	}
+
+	// Swap in the completed tree. The prior run dir is removed first
+	// (os.Rename refuses a non-empty destination); this is the only
+	// non-atomic step and holds no long-running I/O.
+	if err = os.RemoveAll(runDir); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "clear prior run dir", err)
+	}
+	if err = os.Rename(staging, runDir); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "swap in run dir", err)
 	}
 
 	return &Result{RunDir: runDir, Coordinate: coord, IDHash: idHash, Phases: phases}, nil
@@ -214,6 +235,9 @@ func Synthesize(ctx context.Context, in In) (*Result, error) {
 // a hostile or corrupt bundle.
 func readRecipeView(bundleDir string) (*recipeView, error) {
 	path := filepath.Join(bundleDir, attestation.RecipeFilename)
+	if err := confineToBundle(bundleDir, path); err != nil {
+		return nil, err
+	}
 	data, err := readBoundedFile(path, "bundle recipe.yaml", defaults.EvidenceMaxOutputBytes)
 	if err != nil {
 		return nil, err
@@ -253,6 +277,29 @@ func readBoundedFile(path, label string, max int64) ([]byte, error) {
 	return data, nil
 }
 
+// confineToBundle resolves path (following any symlinks in it or its
+// parents) and fails closed unless it stays inside bundleDir. A summary
+// bundle is signed content, but its packed tar can still embed symlinks;
+// this guard confines every bundle-local read so a crafted entry cannot
+// redirect a read or copy to a host file outside the verified bundle. The
+// path must exist — callers probe for absence (os.Lstat) beforehand where
+// a missing file is legitimate.
+func confineToBundle(bundleDir, path string) error {
+	realRoot, err := filepath.EvalSymlinks(bundleDir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "resolve bundle dir", err)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "resolve bundle file "+path, err)
+	}
+	rel, err := filepath.Rel(realRoot, realPath)
+	if err != nil || !filepath.IsLocal(rel) {
+		return errors.New(errors.ErrCodeInvalidRequest, "bundle file escapes bundle dir: "+path)
+	}
+	return nil
+}
+
 // copyCTRFReports copies each present ctrf/<phase>.json from the bundle
 // into the run directory, in canonical phase order. A phase the run did
 // not produce is simply absent — it is skipped, never stubbed. Returns
@@ -266,11 +313,22 @@ func copyCTRFReports(ctx context.Context, bundleDir, runDir string) ([]string, e
 		}
 		name := string(phase) + ".json"
 		src := filepath.Join(bundleDir, "ctrf", name)
-		info, statErr := os.Stat(src)
-		if statErr != nil {
-			if os.IsNotExist(statErr) {
+		// Existence probe without following the final-component symlink: a
+		// phase the run did not produce is simply absent and skipped.
+		if _, lerr := os.Lstat(src); lerr != nil {
+			if os.IsNotExist(lerr) {
 				continue
 			}
+			return nil, errors.Wrap(errors.ErrCodeInternal, "stat ctrf "+name, lerr)
+		}
+		// Confine the read to the bundle before resolving its type, so a
+		// symlinked report (or symlinked ctrf dir) cannot redirect the copy
+		// to a host file outside the verified bundle.
+		if err := confineToBundle(bundleDir, src); err != nil {
+			return nil, err
+		}
+		info, statErr := os.Stat(src)
+		if statErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal, "stat ctrf "+name, statErr)
 		}
 		if info.IsDir() {

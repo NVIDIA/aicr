@@ -307,6 +307,27 @@ func TestSynthesize_Rejects(t *testing.T) {
 	}
 }
 
+// TestSynthesize_RejectsSymlinkEscape confirms a bundle whose recipe.yaml
+// is a symlink resolving outside the bundle directory is refused: signed
+// content can still pack symlinks, and a bundle-local read must never
+// follow one to a host file.
+func TestSynthesize_RejectsSymlinkEscape(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "secret.yaml")
+	if err := os.WriteFile(outside, []byte(sampleRecipeYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bundle := t.TempDir()
+	link := filepath.Join(bundle, attestation.RecipeFilename)
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	in := baseInput(t)
+	in.BundleDir = bundle
+	if _, err := Synthesize(context.Background(), in); err == nil {
+		t.Error("Synthesize with escaping recipe.yaml symlink = nil error, want rejection")
+	}
+}
+
 func TestSynthesize_CanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

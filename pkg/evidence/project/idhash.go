@@ -20,10 +20,13 @@ import (
 )
 
 // idHashLen is the number of hex characters retained from the signer
-// digest. Twelve hex chars (48 bits) keeps the on-disk path segment
-// short while leaving collision probability negligible for the handful
-// of distinct evidence signers a recipe ever accumulates.
-const idHashLen = 12
+// digest. Thirty-two hex chars (128 bits) keeps the on-disk path segment
+// compact while staying collision-resistant even against an adversary who
+// grinds candidate identities: a 48-bit truncation needs only ~2^24
+// attempts (seconds of compute) to manufacture a collision and land a
+// hostile signer's runs inside a victim's subtree, whereas 128 bits puts
+// both birthday (2^64) and second-preimage work out of reach.
+const idHashLen = 32
 
 // idHashSeparator joins the issuer and identity before hashing. A byte
 // that cannot appear inside a URL-shaped OIDC issuer or SubjectAlternativeName
@@ -38,7 +41,7 @@ const idHashSeparator = "\n"
 // hash to the same value across every recipe and every run, and two
 // different signers must not collide.
 //
-// The derivation is the first idHashLen hex characters of
+// The derivation is the first idHashLen (32) hex characters of
 // sha256(issuer + "\n" + identity). It is intentionally simple and
 // dependency-free so both sides can reproduce it byte-for-byte; do not
 // change the algorithm without coordinating a migration of the GCS

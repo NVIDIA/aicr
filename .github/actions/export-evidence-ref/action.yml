@@ -40,9 +40,25 @@ runs:
         set -euo pipefail
         oci=$(yq eval '.attestations[0].bundle.oci // ""' "$POINTER")
         digest=$(yq eval '.attestations[0].bundle.digest // ""' "$POINTER")
-        if [[ -z "$oci" || -z "$digest" ]]; then
-          echo "no bundle ref/digest in ${POINTER} — ingest will be skipped"
+        # A pointer with neither field carries no bundle — skip ingest.
+        # A pointer with one field but not the other is malformed: fail
+        # loudly rather than silently skipping, so a dropped digest can
+        # never let an unpinned/tag-only ref slip through as "no bundle".
+        if [[ -z "$oci" && -z "$digest" ]]; then
+          echo "no bundle in ${POINTER} — ingest will be skipped"
           exit 0
+        fi
+        if [[ -z "$oci" ]]; then
+          echo "::error::${POINTER} has bundle.digest but no bundle.oci — malformed pointer"
+          exit 1
+        fi
+        if [[ -z "$digest" ]]; then
+          echo "::error::${POINTER} has bundle.oci but no bundle.digest — refusing to emit an unpinned ref"
+          exit 1
+        fi
+        if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          echo "::error::${POINTER} bundle.digest is not a sha256:<64-hex> digest: ${digest}"
+          exit 1
         fi
         repo="${oci%@*}"                                       # drop @digest if present
         case "${repo##*/}" in *:*) repo="${repo%:*}";; esac     # drop :tag (registry-port safe)

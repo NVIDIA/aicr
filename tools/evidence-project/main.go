@@ -38,8 +38,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/project"
@@ -72,14 +75,27 @@ func main() {
 	flag.StringVar(&o.runID, "run-id", "", "override the run identifier (default: derived from attestedAt)")
 	flag.StringVar(&o.evidenceRef, "evidence-ref", "", "override the evidenceRef recorded in meta.json")
 	flag.StringVar(&o.bundleRef, "bundle", "", "OCI ref to pull when a pointer carries no bundle.oci")
-	flag.BoolVar(&o.allowUnpinned, "allow-unpinned-tag", false, "accept a tag-only OCI ref and skip the trusted-registry gate (debug only)")
+	flag.BoolVar(&o.allowUnpinned, "allow-unpinned-tag", false, "accept a tag-only OCI ref; skips the trusted-registry gate for unpinned refs only — digest-pinned refs are still gated (debug only)")
 	flag.BoolVar(&o.plainHTTP, "plain-http", false, "use HTTP for registry traffic (local-registry tests only)")
 	flag.Parse()
 
-	if err := run(context.Background(), o, os.Stdout); err != nil {
+	if err := runMain(o); err != nil {
 		fmt.Fprintln(os.Stderr, "evidence-project:", err)
 		os.Exit(1)
 	}
+}
+
+// runMain owns the signal-aware, deadline-bounded root context so its
+// cleanup defers run before main's os.Exit. A SIGINT/SIGTERM (CI
+// cancellation) or the overall timeout cancels the in-flight registry pull
+// and verification rather than letting the CLI hang; all downstream I/O
+// inherits this context.
+func runMain(o options) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, defaults.EvidenceIngestTimeout)
+	defer cancel()
+	return run(ctx, o, os.Stdout)
 }
 
 func run(ctx context.Context, o options, stdout io.Writer) error {
@@ -114,9 +130,18 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if ref != "" && !o.allowUnpinned {
-		if err = checkTrustedRegistry(ref, parseTrusted(o.trusted)); err != nil {
-			return err
+	// Enforce the trusted-registry allowlist before any network pull.
+	// --allow-unpinned-tag is a debug escape hatch for the unpinned-tag
+	// restriction only: it must never relax the registry gate for a
+	// digest-pinned ref, or a pinned ref from an arbitrary registry could
+	// be pulled unchecked. A genuinely unpinned (tag-only) ref still skips
+	// the gate under the flag (local-registry tests).
+	if ref != "" {
+		pinned := strings.Contains(ref, "@")
+		if pinned || !o.allowUnpinned {
+			if err = checkTrustedRegistry(ref, parseTrusted(o.trusted)); err != nil {
+				return err
+			}
 		}
 	}
 

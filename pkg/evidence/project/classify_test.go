@@ -154,6 +154,8 @@ func TestLoadAllowlist_Errors(t *testing.T) {
 		{"empty issuer", "firstParty:\n  - issuer: \"\"\n    identity: x\n"},
 		{"empty identity", "community:\n  - issuer: a\n    identity: \"\"\n"},
 		{"over-broad unbounded regex", "partner:\n  - issuer: a\n    identity: '^https://github\\.com/.+/attest$'\n"},
+		{"unsampleable char class", "partner:\n  - issuer: a\n    identity: '^https://github\\.com/acme[0-9]/attest$'\n"},
+		{"unsampleable optional", "partner:\n  - issuer: a\n    identity: '^https://github\\.com/acmes?/attest$'\n"},
 		{"bad regexp", "partner:\n  - issuer: a\n    identity: \"^(\"\n"},
 		{"overlapping classes", "firstParty:\n  - issuer: a\n    identity: x\ncommunity:\n  - issuer: a\n    identity: x\n"},
 		{"not yaml", "::: not yaml :::\n\t- x\n"},

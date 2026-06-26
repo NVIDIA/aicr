@@ -97,7 +97,7 @@ produce is simply absent — never stubbed.
 distinct values of. It is
 
 ```
-idHash = first 12 hex chars of sha256(issuer + "\n" + identity)
+idHash = first 32 hex chars (128 bits) of sha256(issuer + "\n" + identity)
 ```
 
 defined once in `project.SignerIDHash`. The same verified signer hashes

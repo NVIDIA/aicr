@@ -97,7 +97,11 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-          fetch-depth: 2  # push diff needs the previous commit
+          # Full history: the push diff compares github.event.before..HEAD,
+          # and a single push can span more than one commit (before is then
+          # older than HEAD~1). A shallow fetch-depth: 2 would miss the base
+          # and the diff would silently match nothing.
+          fetch-depth: 0
 
       - name: Load versions
         id: versions
@@ -184,11 +188,23 @@ jobs:
 
       - name: Sync source-keyed tree to GCS
         run: |
+          set -euo pipefail
           if [ ! -d out/results ]; then
             echo "no results to publish"
             exit 0
           fi
-          # rsync (no --delete): create-only across sources; a re-ingest
-          # of the same run replaces in place, and other sources/runs (and
-          # the bucket's other top-level prefixes) are never touched.
-          gcloud storage rsync -r out/results "gs://${BUCKET}/results"
+          # Each leaf run directory (the one holding meta.json) is replaced
+          # in place with a delete-aware rsync scoped to that run's prefix,
+          # so a re-ingest of the same run drops stale ctrf/*.json from a
+          # prior, larger run instead of leaving them behind. The delete is
+          # confined to the single run prefix, so other sources, other runs,
+          # and the bucket's other top-level prefixes are never touched.
+          find out/results -type f -name meta.json -print0 \
+            | while IFS= read -r -d '' meta; do
+              run_dir="$(dirname "${meta}")"
+              rel="${run_dir#out/results/}"
+              echo "syncing run ${rel}"
+              gcloud storage rsync -r \
+                --delete-unmatched-destination-objects \
+                "${run_dir}" "gs://${BUCKET}/results/${rel}"
+            done
