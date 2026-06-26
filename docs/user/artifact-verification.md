@@ -216,7 +216,7 @@ which pins the bundle by digest:
 
 ```shell
 # Verify a pointer a contributor committed alongside a recipe change (preferred).
-aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c76/sha256-33d4...yaml
+aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4...yaml
 
 # Verify a pushed OCI bundle directly, pinned by digest.
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -246,8 +246,8 @@ recipes/evidence/allowlist.yaml                            # maintained signer a
 
 Each file is a single-attestation V1 pointer — the same schema that
 `aicr evidence verify` already consumes. The `<src>` segment is a stable slug
-derived from the **verified** signer OIDC identity — the first 12 hex characters of
-`sha256(issuer + "\n" + identity)`. Because the slug is computed from the
+derived from the **verified** signer OIDC identity — the first 32 hex characters
+(128 bits) of `sha256(issuer + "\n" + identity)`. Because the slug is computed from the
 signer rather than chosen freely, the path is **not squattable**: the
 `Evidence Pointer Contract` CI job recomputes the slug from each pointer's own
 signer and rejects any file that does not live under the directory its signer

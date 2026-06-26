@@ -80,7 +80,10 @@ func (p TreeProblem) String() string { return p.Path + ": " + p.Message }
 func CheckEvidenceTree(root, allowlistPath string) ([]TreeProblem, error) {
 	al, err := allowlist.Load(allowlistPath)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to load signer allowlist", err)
+		// allowlist.Load already returns coded errors (NotFound for a missing
+		// file, InvalidRequest for a malformed one); preserve them rather than
+		// flattening every failure to InvalidRequest.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to load signer allowlist")
 	}
 
 	recipeDirs, err := os.ReadDir(root)

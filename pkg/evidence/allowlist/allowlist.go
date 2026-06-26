@@ -198,6 +198,27 @@ func validateEntry(e Entry, class Class) (*regexp.Regexp, error) {
 			"allowlist entry "+e.id()+" must set exactly one of source or identityPattern")
 	}
 
+	// Anchor each class to its key kind: community/partner contributors commit
+	// pointers and are keyed by the one-way source slug (no cleartext PII in
+	// the repo); first-party CI ingests directly and is pinned by a bounded
+	// identityPattern. A first-party `source` or a community/partner
+	// `identityPattern` would commit cleartext identity to the wrong tier and
+	// break the per-source privacy contract, so reject it at load time.
+	switch class {
+	case ClassFirstParty:
+		if e.IdentityPattern == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"allowlist entry "+e.id()+" in "+string(class)+
+					" must use identityPattern, not source")
+		}
+	case ClassCommunity, ClassPartner:
+		if e.Source == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"allowlist entry "+e.id()+" in "+string(class)+
+					" must use source, not identityPattern")
+		}
+	}
+
 	if e.Source != "" {
 		return nil, validateSlugEntry(e)
 	}
@@ -343,7 +364,11 @@ func (a *Allowlist) Classify(issuer, identity string) (Class, *Entry, bool) {
 	}
 	if slug, slugErr := attestation.SourceSlug(issuer, identity); slugErr == nil {
 		for i := range all {
-			if all[i].entry.Source == slug {
+			// Match both the slug and the issuer. The slug derives from
+			// (issuer, identity), but a slug-only match would let a different
+			// issuer that engineered a colliding slug inherit the entry — so
+			// re-anchor on the entry's pinned issuer here as well.
+			if all[i].entry.Source == slug && all[i].entry.Issuer == issuer {
 				e := all[i].entry
 				return all[i].class, &e, true
 			}

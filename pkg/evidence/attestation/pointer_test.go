@@ -100,8 +100,8 @@ func TestPointerCopyToHint(t *testing.T) {
 			},
 		}},
 	}
-	// 7c4c0edc8c76 is SourceSlug(issuer, identity) for this signer.
-	want := "recipes/evidence/h100-gke-cos-training/7c4c0edc8c76/sha256-33d4cf36.yaml"
+	// 7c4c0edc8c765a95a0f3afdb3bbb8e91 is SourceSlug(issuer, identity) for this signer.
+	want := "recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4cf36.yaml"
 	if got := PointerCopyToHint(signed); got != want {
 		t.Errorf("signed hint = %q, want %q", got, want)
 	}

@@ -714,13 +714,13 @@ needed for multi-source and stays deferred.
 Pointers are committed **per source** so two parties can attest to the same
 recipe without overwriting each other:
 
-```
+```text
 recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml   # immutable, add-only
 recipes/evidence/allowlist.yaml                            # maintained signer allowlist
 ```
 
-`<src>` is `attestation.SourceSlug(issuer, identity)` — the first 12 hex
-characters of `sha256(issuer + "\n" + identity)` of the **verified** signer.
+`<src>` is `attestation.SourceSlug(issuer, identity)` — the first 32 hex
+characters (128 bits) of `sha256(issuer + "\n" + identity)` of the **verified** signer.
 Deriving the slug from the signer (rather than a free-form label) is what
 makes the path non-squattable: the `evidence-pointer-contract` CI job
 (`tools/evidence-pointercheck`, backed by `verifier.CheckEvidenceTree`)

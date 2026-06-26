@@ -14,7 +14,7 @@
 # counts toward corroboration.
 #
 # Privacy: community/partner entries are keyed by the one-way `source` slug
-# (first 12 hex of sha256(issuer + "\n" + identity) of the verified signer);
+# (first 32 hex of sha256(issuer + "\n" + identity) of the verified signer);
 # the cleartext identity (e.g. a personal email) is deliberately NOT stored,
 # so it is never committed to the repo. An optional `label` carries a non-PII
 # display string (e.g. a GitHub handle) — omit it to stay fully pseudonymous.
@@ -54,7 +54,7 @@ firstParty:
 # the slug below.
 community:
   - issuer: https://github.com/login/oauth
-    source: 7c4c0edc8c76
+    source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []

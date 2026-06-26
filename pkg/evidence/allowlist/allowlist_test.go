@@ -53,7 +53,7 @@ func TestLoad_RejectsCleartextIdentity(t *testing.T) {
 community:
   - issuer: https://github.com/login/oauth
     identity: someone@example.com
-    source: 7c4c0edc8c76
+    source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
 `
 	p := filepath.Join(t.TempDir(), "allowlist.yaml")
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
@@ -78,7 +78,7 @@ func TestClassify(t *testing.T) {
 		wantOK    bool
 	}{
 		{
-			// Slug 7c4c0edc8c76 = SourceSlug(issuer, identity) for this signer.
+			// Slug 7c4c0edc8c765a95a0f3afdb3bbb8e91 = SourceSlug(issuer, identity) for this signer.
 			name:      "community by slug",
 			issuer:    "https://github.com/login/oauth",
 			identity:  "yuanchen97@gmail.com",
@@ -136,13 +136,13 @@ func TestValidate_Rejects(t *testing.T) {
 		{
 			name: "entry missing issuer",
 			al: Allowlist{SchemaVersion: SchemaVersion, Community: []Entry{
-				{Source: "7c4c0edc8c76"},
+				{Source: "7c4c0edc8c765a95a0f3afdb3bbb8e91"},
 			}},
 		},
 		{
 			name: "both source and pattern set",
 			al: Allowlist{SchemaVersion: SchemaVersion, Community: []Entry{
-				{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c76", IdentityPattern: "^x@y$"},
+				{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c765a95a0f3afdb3bbb8e91", IdentityPattern: "^x@y$"},
 			}},
 		},
 		{
@@ -160,7 +160,19 @@ func TestValidate_Rejects(t *testing.T) {
 		{
 			name: "malformed slug (non-hex)",
 			al: Allowlist{SchemaVersion: SchemaVersion, Community: []Entry{
-				{Issuer: "https://github.com/login/oauth", Source: "zzzzzzzzzzzz"},
+				{Issuer: "https://github.com/login/oauth", Source: "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+			}},
+		},
+		{
+			name: "community entry uses identityPattern (cleartext PII in wrong tier)",
+			al: Allowlist{SchemaVersion: SchemaVersion, Community: []Entry{
+				{Issuer: "https://github.com/login/oauth", IdentityPattern: "^x@y$"},
+			}},
+		},
+		{
+			name: "first-party entry uses source (must pin a bounded pattern)",
+			al: Allowlist{SchemaVersion: SchemaVersion, FirstParty: []Entry{
+				{Issuer: ghActions, Source: "7c4c0edc8c765a95a0f3afdb3bbb8e91"},
 			}},
 		},
 		{
@@ -187,15 +199,15 @@ func TestValidate_Rejects(t *testing.T) {
 		{
 			name: "duplicate source across classes",
 			al: Allowlist{SchemaVersion: SchemaVersion,
-				Community: []Entry{{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c76"}},
-				Partner:   []Entry{{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c76"}},
+				Community: []Entry{{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c765a95a0f3afdb3bbb8e91"}},
+				Partner:   []Entry{{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c765a95a0f3afdb3bbb8e91"}},
 			},
 		},
 		{
 			name: "duplicate label",
 			al: Allowlist{SchemaVersion: SchemaVersion, Community: []Entry{
-				{Label: "dup", Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c76"},
-				{Label: "dup", Issuer: "https://github.com/login/oauth", Source: "aaaaaaaaaaaa"},
+				{Label: "dup", Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c765a95a0f3afdb3bbb8e91"},
+				{Label: "dup", Issuer: "https://github.com/login/oauth", Source: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			}},
 		},
 		{
@@ -228,7 +240,7 @@ func TestValidate_Accepts(t *testing.T) {
 				IdentityPattern: `^https://github\.com/NVIDIA/aicr/\.github/workflows/x\.yaml@refs/heads/.+$`},
 		},
 		Community: []Entry{
-			{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c76"}, // no label
+			{Issuer: "https://github.com/login/oauth", Source: "7c4c0edc8c765a95a0f3afdb3bbb8e91"}, // no label
 		},
 	}
 	if err := al.Validate(); err != nil {

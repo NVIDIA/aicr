@@ -160,7 +160,7 @@ func TestCheckEvidenceTree_RejectsUnsigned(t *testing.T) {
 	body := "schemaVersion: 1.0.0\nrecipe: " + testRecipe + "\n" +
 		"attestations:\n  - bundle:\n      oci: ghcr.io/x/e:v1\n      digest: sha256:abc\n" +
 		"      predicateType: " + attestation.PredicateTypeV1 + "\n    attestedAt: 2026-06-23T18:24:27Z\n"
-	writePointer(t, root, testRecipe, "7c4c0edc8c76", "sha256-abc.yaml", body)
+	writePointer(t, root, testRecipe, "7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-abc.yaml", body)
 
 	problems, err := CheckEvidenceTree(root, repoAllowlist)
 	if err != nil {

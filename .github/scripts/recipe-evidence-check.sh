@@ -407,8 +407,8 @@ if [[ "$protected_count" -gt 0 ]]; then
     echo
     echo "Recipes with committed evidence (\`recipes/evidence/<slug>/<source>/<digest>.yaml\`) that this PR affects: **${protected_count}**"
     echo
-    echo "| Recipe | Source | Verify | Digest match |"
-    echo "|---|---|---|---|"
+    echo "| Recipe | Source | Pointer | Verify | Digest match |"
+    echo "|---|---|---|---|---|"
   } >> "$REPORT_OUT"
 fi
 
@@ -433,7 +433,7 @@ while IFS= read -r slug; do
   # to surface, not a file to verify.
   if [[ "${#pointers[@]}" -eq 0 ]]; then
     if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then rows_truncated=$((rows_truncated + 1)); continue; fi
-    echo "| \`$(md_escape "$slug")\` | — | :warning: evidence pointer removed | — |" >> "$REPORT_OUT"
+    echo "| \`$(md_escape "$slug")\` | — | — | :warning: evidence pointer removed | — |" >> "$REPORT_OUT"
     warnings=$((warnings + 1))
     rows_written=$((rows_written + 1))
     continue
@@ -448,7 +448,7 @@ while IFS= read -r slug; do
       rows_truncated=$((rows_truncated + 1)); rm -f "$digest_err"; continue
     fi
     echo "::warning::digest failed for $(log_sanitize "$overlay"): $(log_sanitize "$(head -c 500 "$digest_err")")"
-    echo "| \`$(md_escape "$slug")\` | — | — | :warning: could not compute current digest |" >> "$REPORT_OUT"
+    echo "| \`$(md_escape "$slug")\` | — | — | — | :warning: could not compute current digest |" >> "$REPORT_OUT"
     warnings=$((warnings + 1))
     rows_written=$((rows_written + 1))
     rm -f "$digest_err"
@@ -459,6 +459,11 @@ while IFS= read -r slug; do
   for pointer in "${pointers[@]}"; do
     if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then rows_truncated=$((rows_truncated + 1)); continue; fi
     source=$(basename "$(dirname "$pointer")")
+    # Pointer identifier = bundle-digest filename (the immutable <bundle-digest>
+    # leaf), so two pointers committed under the same source remain
+    # distinguishable. Strip the .yaml suffix; the basename is already the
+    # signed digest a reviewer needs to trace a stale/invalid row to its file.
+    pointer_id=$(basename "$pointer" .yaml)
 
     verify_json=$(mktemp)
     verify_err=$(mktemp)
@@ -558,13 +563,13 @@ while IFS= read -r slug; do
       fi
     fi
 
-    echo "| \`$(md_escape "$slug")\` | \`$(md_escape "$source")\` | ${verify_cell} | ${digest_cell} |" >> "$REPORT_OUT"
+    echo "| \`$(md_escape "$slug")\` | \`$(md_escape "$source")\` | \`$(md_escape "$pointer_id")\` | ${verify_cell} | ${digest_cell} |" >> "$REPORT_OUT"
     rows_written=$((rows_written + 1))
   done
 done < <(echo "$protected" | jq -r '.[]')
 
 if [[ "$rows_truncated" -gt 0 ]]; then
-  echo "| _… +${rows_truncated} more (truncated; raise MAX_ROWS or split the PR)_ | | | |" >> "$REPORT_OUT"
+  echo "| _… +${rows_truncated} more (truncated; raise MAX_ROWS or split the PR)_ | | | | |" >> "$REPORT_OUT"
 fi
 
 # Other affected recipes (no committed evidence). Surfaced as a collapsed

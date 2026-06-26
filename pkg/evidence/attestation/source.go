@@ -21,11 +21,15 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// SourceSlugLength is the number of hex characters in a source slug. 12
-// hex chars = 48 bits of the sha256 digest, ample to keep distinct signer
-// identities from colliding while staying short enough for a readable
-// directory name.
-const SourceSlugLength = 12
+// SourceSlugLength is the number of hex characters in a source slug. 32
+// hex chars = 128 bits of the sha256 digest. The slug is an authorization
+// key — allowlist.Classify grants slug entries by this value and
+// verifier.checkPointerFile uses it for path ownership — so it must be wide
+// enough that a deliberate second-preimage collision (a different signer
+// engineering an identity that hashes into another party's source directory)
+// is infeasible. 128 bits clears that bar; a shorter slug (the original 48)
+// did not. It is still short enough for a workable directory name.
+const SourceSlugLength = 32
 
 // SourceSlug derives the stable per-source directory slug from a verified
 // signer's OIDC issuer + identity. It is the first SourceSlugLength hex
