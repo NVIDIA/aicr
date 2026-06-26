@@ -1815,7 +1815,7 @@ async function boot(){
     index = await res.json();
   } catch (err) {
     showError(
-      `<b>Could not load <span class="mono">data/index.json</span></b> (${err.message}).<br><br>` +
+      `<b>Could not load <span class="mono">data/index.json</span></b> (${esc(err.message)}).<br><br>` +
       `A page that <span class="mono">fetch()</span>es sibling files can't read them over <span class="mono">file://</span> ` +
       `(browser security). Serve it over HTTP instead:<br>` +
       `<span class="mono">python3 -m http.server 8000</span> from this directory → open <span class="mono">http://localhost:8000/</span>.`
