@@ -232,14 +232,49 @@ func collectRuns(ctx context.Context, inputDir string, allowlist *Allowlist) ([]
 	return runs, nil
 }
 
+// compatibleMetaSchema reports whether a meta.json schemaVersion is safe to parse
+// under the current rules. An empty version is tolerated (GP2 may omit it); a
+// non-empty version is compatible only when it shares RunMetaSchemaVersion's
+// major (so a backward-compatible future minor still loads, but a new major does
+// not). See the gate in loadRun for the fail-closed rationale.
+func compatibleMetaSchema(got string) bool {
+	if got == "" {
+		return true
+	}
+	return schemaMajor(got) == schemaMajor(RunMetaSchemaVersion)
+}
+
+// schemaMajor returns the "<family>/v<major>" portion of a meta schemaVersion,
+// stripping any ".<minor>[...]" suffix. A value with no minor suffix is returned
+// unchanged.
+func schemaMajor(v string) string {
+	if i := strings.IndexByte(v, '.'); i >= 0 {
+		return v[:i]
+	}
+	return v
+}
+
 // loadRun parses one run directory (the dir containing metaPath).
 func loadRun(metaPath string, allowlist *Allowlist) (*signerRun, error) {
 	meta, err := readRunMeta(metaPath)
 	if err != nil {
 		return nil, err
 	}
+	// Schema gate, fail-closed on an incompatible major — symmetric with
+	// LoadAllowlist (classify.go), which rejects an unsupported allowlist
+	// schemaVersion because a future schema may change the trust semantics. A
+	// meta/v2 that repurposes a field (e.g. signer/allowlisted) must not be parsed
+	// under v1 assumptions, so a different major is skipped (errSkipRun) rather
+	// than aborting the whole dashboard. An empty version is tolerated by design
+	// (GP2 may omit it); a same-major future minor still loads, with a warning.
+	if !compatibleMetaSchema(meta.SchemaVersion) {
+		slog.Warn("skipping run: incompatible meta.json schema major version",
+			"path", metaPath, "got", meta.SchemaVersion, "want", RunMetaSchemaVersion,
+			"signer", meta.Signer.Identity)
+		return nil, errSkipRun
+	}
 	if meta.SchemaVersion != "" && meta.SchemaVersion != RunMetaSchemaVersion {
-		slog.Warn("unexpected meta.json schema version",
+		slog.Warn("meta.json schema version differs within the supported major; parsing under current rules",
 			"path", metaPath, "got", meta.SchemaVersion, "want", RunMetaSchemaVersion)
 	}
 

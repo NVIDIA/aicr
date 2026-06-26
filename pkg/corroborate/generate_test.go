@@ -388,6 +388,55 @@ func TestGenerateSeries(t *testing.T) {
 	}
 }
 
+func TestCompatibleMetaSchema(t *testing.T) {
+	tests := []struct {
+		name string
+		got  string
+		want bool
+	}{
+		{"empty tolerated", "", true},
+		{"exact match", "aicr-corroboration-meta/v1", true},
+		{"same major future minor", "aicr-corroboration-meta/v1.2", true},
+		{"incompatible major", "aicr-corroboration-meta/v2", false},
+		{"unrelated value", "something-else/v1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compatibleMetaSchema(tt.got); got != tt.want {
+				t.Errorf("compatibleMetaSchema(%q) = %v, want %v", tt.got, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerateSkipsIncompatibleSchemaMajor(t *testing.T) {
+	// A meta.json declaring a different schema major is dropped fail-closed: a
+	// future major may repurpose fields this parser would misread, so it must not
+	// be classified under current assumptions (symmetric with LoadAllowlist).
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "results", "eks", "h100-ubuntu", "training", "s1", "run-1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"schemaVersion":"aicr-corroboration-meta/v2",` +
+		`"coordinate":{"group":"eks","dashboard":"h100-ubuntu","tab":"training"},` +
+		`"recipe":"h100-eks-ubuntu-training",` +
+		`"signer":{"idHash":"s1","identity":"https://github.com/x/y/.github/workflows/a.yaml@refs/heads/main",` +
+		`"issuer":"https://token.actions.githubusercontent.com","class":"community","allowlisted":false},` +
+		`"runId":"run-1","attestedAt":"2026-06-20T03:14:07Z"}`
+	if err := os.WriteFile(filepath.Join(runDir, "meta.json"), []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Generate(context.Background(), Options{InputDir: dir, OutputDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Runs != 0 || res.Recipes != 0 {
+		t.Errorf("summary = %+v, want 0 runs / 0 recipes (incompatible-major run skipped)", res)
+	}
+}
+
 func TestSafeRecipeSlug(t *testing.T) {
 	tests := []struct {
 		slug string
