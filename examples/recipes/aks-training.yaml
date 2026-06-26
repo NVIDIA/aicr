@@ -145,7 +145,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.0
+    version: v0.17.1
     valuesFile: components/nodewright-operator/values.yaml
 deploymentOrder:
   - cert-manager
