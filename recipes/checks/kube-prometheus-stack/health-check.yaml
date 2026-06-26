@@ -14,19 +14,20 @@
 
 # Kube Prometheus Stack Health Check
 #
-# Validates that the kube-prometheus-stack operator and the workloads it
-# manages are running and healthy in the monitoring namespace:
+# Validates that the kube-prometheus-stack operator, its managed CRs, and 
+# associated workloads are running and healthy in the monitoring namespace:
 #
 # 1. The kube-prometheus-operator Deployment has at least one available replica.
-# 2. The Prometheus CR (kube-prometheus-prometheus) reports Available=True,
-#    confirming the operator has reconciled the CR into a running StatefulSet.
+# 2. The Prometheus CR (kube-prometheus-prometheus) reports Available=True.
+#    This explicitly catches operator-level reconcile stalls (e.g., webhook
+#    rejections) where a target StatefulSet might never be created at all.
 # 3. The Alertmanager CR (kube-prometheus-alertmanager) reports Available=True.
 # 4. The Prometheus StatefulSet (prometheus-kube-prometheus-prometheus) has
 #    reached full rollout: readyReplicas >= replicas, with a replicas > 0
 #    vacuous-pass guard so a missing StatefulSet does not silently pass.
 # 5. The Alertmanager StatefulSet (alertmanager-kube-prometheus-alertmanager)
 #    reaches the same full-rollout threshold.
-# 6. No operator pods (label-scoped to app.kubernetes.io/name:
+# 6. No stack operator pods (label-scoped to app.kubernetes.io/name:
 #    kube-prometheus-stack) are stuck in Pending, Failed, Unknown, or a
 #    known-bad container-waiting reason (CrashLoopBackOff, ImagePullBackOff,
 #    ErrImagePull, CreateContainerConfigError).
