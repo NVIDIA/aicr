@@ -1,0 +1,237 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL All-Reduce NET TrainingRuntime — AWS ConnectX RoCE fabric.
+#
+# Fabric-keyed (AICR_NCCL_FABRIC=roce), accelerator-agnostic: any EKS RoCE node
+# (ConnectX VFs surfaced as roce.networking.k8s.aws DRA devices, e.g. the DGXC
+# GB300 p6e-gb300r clusters) rather than a per-accelerator template. The RoCE
+# DRA claim (nccl-roce-rct) is applied separately by applyNCCLResources.
+#
+# Differences from the EFA NET runtime:
+#   - Image: nvcr.io/nvidia/pytorch (CUDA 13, sm_103-capable; ships nccl-tests
+#     _mpi binaries + NCCL built with IB/verbs). The EFA hpc-cloud image is
+#     CUDA 12 and EFA-only — wrong fabric and wrong CUDA for Blackwell Ultra.
+#   - Transport: NCCL built-in IB/verbs over the ConnectX RoCE devices
+#     (NCCL_IB_HCA=rocep, the AWS RoCE kernel naming), NCCL_NET_PLUGIN=none to
+#     bypass the bundled aws-ofi-nccl (EFA/Libfabric) plugin, no FI_PROVIDER.
+#   - Resource: RoCE DRA claim (resourceClaims -> nccl-roce-rct) instead of the
+#     vpc.amazonaws.com/efa extended resource.
+#   - MPI bootstrap: HPC-X UCC/HCOLL disabled and PML forced to ob1 over TCP —
+#     UCC team-create and the UCX PML segfault during MPI_Init on this image;
+#     MPI is only the launcher/bootstrap, NCCL carries the collective data.
+#
+# Verified end-to-end on aicr-gb300 (8 GPUs, 2x p6e-gb300r): NCCL IB over 8
+# rocep* RoCE devices (GPUDirect RDMA), ~387 GB/s peak busbw. See NVIDIA/aicr#1413.
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: launcher
+        replicas: 1
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  command:
+                  - /usr/local/mpi/bin/mpirun
+                  args:
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - --mca
+                  - plm_rsh_args
+                  # ConnectionAttempts is generous because the worker pods install
+                  # openssh-server at runtime (the CUDA-13 pytorch image ships no
+                  # sshd) before starting it — the launcher must keep retrying the
+                  # rsh connection until that apt-get + sshd startup completes.
+                  # Requires the GPU nodes to have apt egress; on an air-gapped /
+                  # no-egress cluster the worker install never finishes and this
+                  # validator fails (tracked for removal once a CUDA-13 image ships
+                  # sshd — see NVIDIA/aicr#1413).
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=60
+                  # HPC-X UCC/HCOLL collective components segfault in MPI_Init
+                  # team-create on this image; disable them (NCCL does the
+                  # collectives — MPI is only launcher/bootstrap).
+                  - --mca
+                  - coll
+                  - ^ucc,hcoll
+                  # UCX PML segfaults here too; force ob1 PML over TCP.
+                  - --mca
+                  - pml
+                  - ob1
+                  - --mca
+                  - btl
+                  - tcp,self
+                  - --mca
+                  - btl_tcp_if_include
+                  - eth0
+                  - --mca
+                  - oob_tcp_if_include
+                  - eth0
+                  - -x
+                  - LD_LIBRARY_PATH
+                  # INFO so the "NCCL INFO Using network IB" banner appears for
+                  # verifyTransportFromLogs (any non-Socket NET plugin passes).
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  # Use NCCL's built-in IB/verbs transport over the ConnectX RoCE
+                  # devices; disable the bundled aws-ofi-nccl (EFA) plugin.
+                  - -x
+                  - NCCL_NET_PLUGIN=none
+                  - -x
+                  - NCCL_IB_HCA=rocep
+                  # Force the NET fabric: disable the NVL72 NVLink paths (NVLS /
+                  # multi-node NVLink) so traffic crosses RoCE.
+                  - -x
+                  - NCCL_NVLS_ENABLE=0
+                  - -x
+                  - NCCL_MNNVL_ENABLE=0
+                  - -x
+                  - NCCL_IGNORE_DISABLED_P2P=1
+                  - /usr/local/bin/${TEST_TYPE}_mpi
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 512Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                # Only stage the SSH keys into the shared ssh-config volume.
+                # openssh-server is installed by the main container (init and
+                # main containers don't share a root filesystem, so installing
+                # it here would be wasted) — sshd and /var/run/sshd are set up
+                # there. Mirrors the launcher's key-only init container.
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command: ["sh", "-c"]
+                  args:
+                  - |
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    claims:
+                    - name: roce
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                resourceClaims:
+                - name: roce
+                  resourceClaimTemplateName: nccl-roce-rct
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher

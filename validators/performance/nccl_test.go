@@ -596,12 +596,52 @@ func TestCommonGKEAccelerator(t *testing.T) {
 	}
 }
 
+func TestNCCLFabric(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		setEnv  bool
+		want    ncclFabricType
+		wantErr bool
+	}{
+		{name: "unset defaults to efa", setEnv: false, want: fabricEFA},
+		{name: "empty defaults to efa", env: "", setEnv: true, want: fabricEFA},
+		{name: "efa", env: "efa", setEnv: true, want: fabricEFA},
+		{name: "roce", env: "roce", setEnv: true, want: fabricRoCE},
+		{name: "case-insensitive roce", env: "RoCE", setEnv: true, want: fabricRoCE},
+		{name: "whitespace trimmed", env: "  roce  ", setEnv: true, want: fabricRoCE},
+		{name: "typo rejected", env: "roc", setEnv: true, wantErr: true},
+		{name: "unknown value rejected", env: "infiniband", setEnv: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setEnv {
+				t.Setenv(ncclFabricEnv, tt.env)
+			} else {
+				// t.Setenv requires a value; clear explicitly to assert the unset path.
+				t.Setenv(ncclFabricEnv, "")
+				if err := os.Unsetenv(ncclFabricEnv); err != nil {
+					t.Fatalf("unsetenv: %v", err)
+				}
+			}
+			got, err := ncclFabric()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ncclFabric() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ncclFabric() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTemplatePath(t *testing.T) {
 	tests := []struct {
 		name        string
 		accelerator recipe.CriteriaAcceleratorType
 		service     recipe.CriteriaServiceType
 		variant     ncclVariant
+		fabric      ncclFabricType
 		filename    string
 		expected    string
 	}{
@@ -612,6 +652,27 @@ func TestTemplatePath(t *testing.T) {
 			variant:     variantDefault,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "h100", "eks", "runtime.yaml"),
+		},
+		{
+			// RoCE NET is fabric-keyed and accelerator-agnostic: the path drops
+			// the accelerator dir for testdata/roce/{service}/. The next two
+			// cases assert two *different* accelerators resolve to the same path.
+			name:        "eks gb200 net roce -> shared roce path",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceEKS,
+			variant:     variantNET,
+			fabric:      fabricRoCE,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "roce", "eks", "runtime-net.yaml"),
+		},
+		{
+			name:        "eks h100 net roce -> same shared roce path (accelerator-agnostic)",
+			accelerator: recipe.CriteriaAcceleratorH100,
+			service:     recipe.CriteriaServiceEKS,
+			variant:     variantNET,
+			fabric:      fabricRoCE,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "roce", "eks", "runtime-net.yaml"),
 		},
 		{
 			name:        "eks h200 runtime default",
@@ -680,7 +741,7 @@ func TestTemplatePath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := templatePath(tt.accelerator, tt.service, tt.variant, tt.filename)
+			got := templatePath(tt.accelerator, tt.service, tt.variant, tt.fabric, tt.filename)
 			if got != tt.expected {
 				t.Errorf("templatePath() = %q, want %q", got, tt.expected)
 			}
@@ -909,6 +970,7 @@ func TestSupportedNCCLCombinationsHaveRuntimeTemplates(t *testing.T) {
 		"MAX_MESSAGE_SIZE":      maxMessageSize,
 		"EFA_RESOURCE_LIMITS":   buildEFAResourceLine(1, efaIndent),
 		"EFA_RESOURCE_REQUESTS": buildEFAResourceLine(1, efaIndent),
+		"ROCE_DEVICE_COUNT":     "8",
 		"GKE_NETWORK_INTERFACES": buildGKENetworkInterfacesAnnotation([]string{
 			"gpu-nic-0",
 			"gpu-nic-1",
@@ -927,13 +989,33 @@ func TestSupportedNCCLCombinationsHaveRuntimeTemplates(t *testing.T) {
 			for _, accelerator := range accelerators {
 				name := strings.Join([]string{string(variant), string(service), string(accelerator)}, "/")
 				t.Run(name, func(t *testing.T) {
-					path := templatePath(accelerator, service, variant, "runtime.yaml")
+					path := templatePath(accelerator, service, variant, fabricEFA, "runtime.yaml")
 					if _, err := parseYAMLTemplate(path, data); err != nil {
 						t.Fatalf("supported NCCL combination has no parseable runtime template %s: %v", path, err)
 					}
 				})
 			}
 		}
+	}
+
+	// RoCE NET templates are accelerator-agnostic and keyed by fabric, so they
+	// aren't covered by the accelerator-keyed loop above. Parse both the runtime
+	// and the standalone RoCE ResourceClaimTemplate explicitly to catch a
+	// malformed testdata/roce/{service}/{runtime-net,roce-claim}.yaml — the
+	// claim is applied separately by applyNCCLResources, so it would otherwise
+	// only be exercised on a live cluster.
+	for service := range roceNETSupportedServices {
+		name := strings.Join([]string{string(variantNET), string(service), string(fabricRoCE)}, "/")
+		t.Run(name, func(t *testing.T) {
+			runtimePath := templatePath(recipe.CriteriaAcceleratorH100, service, variantNET, fabricRoCE, "runtime.yaml")
+			if _, err := parseYAMLTemplate(runtimePath, data); err != nil {
+				t.Fatalf("supported RoCE NET combination has no parseable runtime template %s: %v", runtimePath, err)
+			}
+			claimPath := filepath.Join("testdata", string(fabricRoCE), string(service), "roce-claim.yaml")
+			if _, err := parseYAMLTemplate(claimPath, data); err != nil {
+				t.Fatalf("supported RoCE NET combination has no parseable claim template %s: %v", claimPath, err)
+			}
+		})
 	}
 }
 

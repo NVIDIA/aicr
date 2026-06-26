@@ -16,6 +16,7 @@ package v1
 
 import (
 	stderrors "errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -518,6 +519,107 @@ func TestBuildJobPlan_ForwardsInferencePerfNoCleanupEnv(t *testing.T) {
 		}
 		if got := values(entry); len(got) != 0 {
 			t.Errorf("%s env = %v, want none (catalog must not enable no-cleanup without shell env)", inferencePerfNoCleanupEnv, got)
+		}
+	})
+}
+
+// TestBuildJobPlan_ForwardsNCCLFabricEnv verifies the NET fabric selector is
+// carried from the CLI process into the nccl-all-reduce-bw-net validator Job
+// (where ncclFabric() reads it), only that validator, and that a catalog-pinned
+// value can never shadow or substitute for the forwarded one. Unlike the
+// no-cleanup toggle, the value is forwarded verbatim (the validator validates it).
+func TestBuildJobPlan_ForwardsNCCLFabricEnv(t *testing.T) {
+	build := func(entry ValidatorEntry) map[string]string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		m := make(map[string]string)
+		for _, e := range plan.Env {
+			m[e.Name] = e.Value
+		}
+		return m
+	}
+
+	netEntry := ValidatorEntry{Name: NCCLAllReduceBWNetCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+
+	t.Run("forwarded verbatim to nccl-all-reduce-bw-net", func(t *testing.T) {
+		t.Setenv(ncclFabricEnv, "roce")
+		if got := build(netEntry)[ncclFabricEnv]; got != "roce" {
+			t.Errorf("%s env = %q, want roce", ncclFabricEnv, got)
+		}
+	})
+	t.Run("empty value omitted", func(t *testing.T) {
+		t.Setenv(ncclFabricEnv, "")
+		if _, present := build(netEntry)[ncclFabricEnv]; present {
+			t.Errorf("%s should not be in Job env when empty", ncclFabricEnv)
+		}
+	})
+	t.Run("unset omitted", func(t *testing.T) {
+		// Exercise the LookupEnv ok=false branch (os.Unsetenv), distinct from the
+		// empty-string ok=true case above. t.Setenv registers cleanup so the
+		// unset is restored after the test.
+		t.Setenv(ncclFabricEnv, "")
+		if err := os.Unsetenv(ncclFabricEnv); err != nil {
+			t.Fatalf("unsetenv: %v", err)
+		}
+		if _, present := build(netEntry)[ncclFabricEnv]; present {
+			t.Errorf("%s should not be in Job env when unset", ncclFabricEnv)
+		}
+	})
+	t.Run("not forwarded to other validators", func(t *testing.T) {
+		t.Setenv(ncclFabricEnv, "roce")
+		other := ValidatorEntry{Name: InferencePerfCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+		if _, present := build(other)[ncclFabricEnv]; present {
+			t.Errorf("%s must not be forwarded to a non-NET validator", ncclFabricEnv)
+		}
+	})
+	t.Run("env-name literal locked", func(t *testing.T) {
+		// Pin the orchestrator (forwarding) end of the env name. The validator-pod
+		// (reading) end defines the same literal independently in
+		// validators/performance/nccl_all_reduce_bw_constraint.go; a fat-finger in
+		// either redeclaration would silently no-op RoCE forwarding. Both ends
+		// pin to this canonical string so a typo fails its own package's test.
+		if ncclFabricEnv != "AICR_NCCL_FABRIC" {
+			t.Errorf("ncclFabricEnv = %q, want AICR_NCCL_FABRIC (keep in sync with the pod-side const)", ncclFabricEnv)
+		}
+	})
+
+	// values collects every occurrence of the env var (not just the last) so we
+	// can assert the catalog value is dropped, not merely shadowed.
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == ncclFabricEnv {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+
+	t.Run("catalog value cannot override forwarded value", func(t *testing.T) {
+		t.Setenv(ncclFabricEnv, "roce")
+		entry := ValidatorEntry{
+			Name: NCCLAllReduceBWNetCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute,
+			Env: []EnvVar{{Name: ncclFabricEnv, Value: "efa"}},
+		}
+		if got := values(entry); len(got) != 1 || got[0] != "roce" {
+			t.Errorf("%s env = %v, want exactly [roce] (catalog value must be dropped)", ncclFabricEnv, got)
+		}
+	})
+
+	t.Run("catalog value alone cannot select fabric", func(t *testing.T) {
+		t.Setenv(ncclFabricEnv, "")
+		entry := ValidatorEntry{
+			Name: NCCLAllReduceBWNetCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute,
+			Env: []EnvVar{{Name: ncclFabricEnv, Value: "roce"}},
+		}
+		if got := values(entry); len(got) != 0 {
+			t.Errorf("%s env = %v, want none (catalog must not select fabric without shell env)", ncclFabricEnv, got)
 		}
 	})
 }
