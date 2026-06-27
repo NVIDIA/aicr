@@ -135,6 +135,14 @@ jobs:
           fi
           rm -rf _site_check
 
+      # Reassert the custom domain on every publish. With the GitHub Actions
+      # source the domain set in repo settings is authoritative, but a deploy
+      # whose artifact omits CNAME can silently clear it; writing the file makes
+      # the domain self-healing. Placed AFTER the determinism diff so the extra
+      # file never trips the byte-identical gate above.
+      - name: Assert custom domain
+        run: echo 'validation.aicr.run' > _site/CNAME
+
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
 
