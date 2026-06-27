@@ -808,7 +808,7 @@ func TestLoadCriteriaFromFile(t *testing.T) {
 			name:     "valid YAML file with full structure",
 			filename: "criteria.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: eks-h100-training
 spec:
@@ -831,7 +831,7 @@ spec:
 		{
 			name:     "valid JSON file with full structure",
 			filename: "criteria.json",
-			content:  `{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","metadata":{"name":"gke-a100"},"spec":{"service":"gke","accelerator":"a100","intent":"inference"}}`,
+			content:  `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","metadata":{"name":"gke-a100"},"spec":{"service":"gke","accelerator":"a100","intent":"inference"}}`,
 			want: &Criteria{
 				Service:     CriteriaServiceGKE,
 				Accelerator: CriteriaAcceleratorA100,
@@ -846,7 +846,7 @@ spec:
 			name:     "partial fields - only spec.service",
 			filename: "partial.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: aks-only
 spec:
@@ -871,7 +871,7 @@ spec:
 			name:     "empty spec defaults to any",
 			filename: "empty_spec.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: empty
 spec: {}`,
@@ -904,7 +904,7 @@ spec: {}`,
 			name:     "invalid kind",
 			filename: "invalid_kind.yaml",
 			content: `kind: wrongKind
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   service: eks`,
 			wantErr: true,
@@ -922,7 +922,7 @@ spec:
 			name:     "invalid service type",
 			filename: "invalid_service.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   service: invalid`,
 			wantErr: true,
@@ -931,7 +931,7 @@ spec:
 			name:     "invalid accelerator type",
 			filename: "invalid_accelerator.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   accelerator: v100`,
 			wantErr: true,
@@ -940,7 +940,7 @@ spec:
 			name:     "invalid intent type",
 			filename: "invalid_intent.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   intent: serving`,
 			wantErr: true,
@@ -949,7 +949,7 @@ spec:
 			name:     "invalid OS type",
 			filename: "invalid_os.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   os: windows`,
 			wantErr: true,
@@ -958,7 +958,7 @@ spec:
 			name:     "negative nodes count",
 			filename: "negative_nodes.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   nodes: -5`,
 			wantErr: true,
@@ -967,7 +967,7 @@ spec:
 			name:     "valid YAML file with platform",
 			filename: "criteria_with_platform.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: eks-h100-training-kubeflow
 spec:
@@ -992,7 +992,7 @@ spec:
 			name:     "invalid platform type",
 			filename: "invalid_platform.yaml",
 			content: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   platform: invalid-platform`,
 			wantErr: true,
@@ -1051,7 +1051,7 @@ func TestLoadCriteriaFromFileWithContext(t *testing.T) {
 	t.Run("local file", func(t *testing.T) {
 		// Create a temporary file with criteria
 		content := `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: test-criteria
 spec:
@@ -1128,7 +1128,7 @@ func TestParseCriteriaFromBody(t *testing.T) {
 	}{
 		{
 			name:        "JSON body with full structure",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","metadata":{"name":"test"},"spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","metadata":{"name":"test"},"spec":{"service":"eks","accelerator":"h100","intent":"training"}}`,
 			contentType: "application/json",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1143,7 +1143,7 @@ func TestParseCriteriaFromBody(t *testing.T) {
 		{
 			name: "YAML body with application/x-yaml",
 			body: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: test
 spec:
@@ -1164,7 +1164,7 @@ spec:
 		{
 			name: "YAML body with text/yaml",
 			body: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   service: aks
   nodes: 8`,
@@ -1195,7 +1195,7 @@ spec:
 		},
 		{
 			name:        "content type with charset",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"service":"eks"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks"}}`,
 			contentType: "application/json; charset=utf-8",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1260,7 +1260,7 @@ spec:
 		},
 		{
 			name:        "JSON body with platform kubeflow",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
@@ -1275,7 +1275,7 @@ spec:
 		{
 			name: "YAML body with platform",
 			body: `kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   service: eks
   accelerator: h100

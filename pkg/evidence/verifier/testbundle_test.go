@@ -49,7 +49,7 @@ func buildBundle(t *testing.T, withPhaseFailure bool) string {
 
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -72,7 +72,7 @@ func buildBundle(t *testing.T, withPhaseFailure bool) string {
 	_, err := attestation.Build(context.Background(), attestation.BuildOptions{
 		OutputDir:    dir,
 		Recipe:       rec,
-		RecipeYAML:   []byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: RecipeResult\n"),
+		RecipeYAML:   []byte("apiVersion: aicr.run/v1alpha2\nkind: RecipeResult\n"),
 		Snapshot:     &snapshotter.Snapshot{},
 		SnapshotYAML: []byte("measurements: []\n"),
 		BOM:          attestation.BOMInputs{Body: bom, CycloneDXVersion: "1.6"},

@@ -213,7 +213,7 @@ func TestMake_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -290,7 +290,7 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -365,7 +365,7 @@ func TestMake_DisabledDependencyPruned(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -407,7 +407,7 @@ func TestMake_UndeclaredDependencyErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -498,7 +498,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			}
 
 			recipeResult := &recipe.RecipeResult{
-				APIVersion: "aicr.nvidia.com/v1alpha1",
+				APIVersion: "aicr.run/v1alpha2",
 				Kind:       "Recipe",
 				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 				ComponentRefs: []recipe.ComponentRef{
@@ -553,7 +553,7 @@ func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -606,7 +606,7 @@ func TestMake_WithValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -657,7 +657,7 @@ func TestMake_WithTypedValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -715,7 +715,7 @@ func TestMake_TypedOverrideWinsOverSet(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -760,7 +760,7 @@ func TestMake_WithNodeSelectors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -802,7 +802,7 @@ func TestMake_WithTolerations(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -836,7 +836,7 @@ func TestMake_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -863,7 +863,7 @@ func TestMake_DefaultOutputDir(t *testing.T) {
 	ctx := context.Background()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -906,7 +906,7 @@ func TestMake_ArgoCD(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -982,7 +982,7 @@ func TestMake_Helmfile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -1271,7 +1271,7 @@ func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -1769,7 +1769,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 	const nodeSelectorPath = "scheduling.nodeSelector"
 
 	tmpDir := t.TempDir()
-	registryYAML := "apiVersion: aicr.nvidia.com/v1alpha1\n" +
+	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: " + uniqueComponent + "\n" +
@@ -1868,7 +1868,7 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 	//      in the base, so our marker passes through into the emitted bundle).
 	tmpData := t.TempDir()
 
-	registryYAML := []byte("apiVersion: aicr.nvidia.com/v1alpha1\n" +
+	registryYAML := []byte("apiVersion: aicr.run/v1alpha2\n" +
 		"kind: ComponentRegistry\n" +
 		"components: []\n")
 	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
@@ -2414,7 +2414,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 
 	t.Run("layered provider with --data", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		minimalRegistry := "apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"
+		minimalRegistry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
 		if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(minimalRegistry), 0600); writeErr != nil {
 			t.Fatalf("write registry.yaml: %v", writeErr)
 		}
@@ -2449,7 +2449,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 // Running Make() twice with the same input should produce identical output.
 func TestMake_Reproducible(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -2558,7 +2558,7 @@ func TestMake_DynamicValuesUnknownComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -2591,7 +2591,7 @@ func TestMake_DynamicValuesValidComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -2631,7 +2631,7 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -2700,7 +2700,7 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
@@ -2945,7 +2945,7 @@ func TestMake_PreservesInnerErrorCode(t *testing.T) {
 
 	// "../evil" triggers deployer.IsSafePathComponent → ErrCodeInvalidRequest
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "../evil", Version: "v1.0.0", Type: "helm", Source: "https://example.com"},
@@ -2980,7 +2980,7 @@ func TestMake_PreservesTimeoutFromExtractValues(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -3020,7 +3020,7 @@ func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
 	//   - Overrides only             → cert-manager (inline only)
 	//   - ValuesFile + Overrides     → network-operator (hybrid merge)
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{

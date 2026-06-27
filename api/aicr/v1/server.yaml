@@ -184,7 +184,7 @@ paths:
                 basic:
                   summary: Basic recipe request
                   value:
-                    apiVersion: aicr.nvidia.com/v1alpha1
+                    apiVersion: aicr.run/v1alpha2
                     kind: Recipe
                     metadata:
                       version: v1.0.0
@@ -321,7 +321,7 @@ paths:
                 summary: Minimal criteria (single field)
                 value:
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: eks-minimal
                   spec:
@@ -330,7 +330,7 @@ paths:
                 summary: Full criteria specification
                 value:
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: gb200-eks-ubuntu-training
                   spec:
@@ -347,7 +347,7 @@ paths:
                 summary: Minimal criteria (single field)
                 value: |
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: eks-minimal
                   spec:
@@ -356,7 +356,7 @@ paths:
                 summary: Full criteria specification
                 value: |
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: gb200-eks-ubuntu-training
                   spec:
@@ -935,7 +935,7 @@ paths:
               simpleRecipe:
                 summary: Simple recipe with GPU operator
                 value:
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   kind: Recipe
                   componentRefs:
                     - name: gpu-operator
@@ -945,7 +945,7 @@ paths:
               fullRecipe:
                 summary: Full recipe with metadata
                 value:
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   kind: Recipe
                   metadata:
                     version: v1.0.0
@@ -1237,8 +1237,8 @@ components:
         apiVersion:
           type: string
           description: API version
-          enum: [aicr.nvidia.com/v1alpha1]
-          example: aicr.nvidia.com/v1alpha1
+          enum: [aicr.run/v1alpha2]
+          example: aicr.run/v1alpha2
         metadata:
           type: object
           description: Resource metadata
@@ -1379,7 +1379,8 @@ components:
         apiVersion:
           type: string
           description: API version of the recipe format
-          example: aicr.nvidia.com/v1alpha1
+          enum: [aicr.run/v1alpha2]
+          example: aicr.run/v1alpha2
         kind:
           type: string
           description: Resource type

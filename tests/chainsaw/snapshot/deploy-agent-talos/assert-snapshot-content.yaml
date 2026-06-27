@@ -45,7 +45,7 @@
 #                                 NFD-detected hardware). We pin the
 #                                 subtype names, not the values.
 kind: Snapshot
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 measurements:
   (length(@)): 5
   (sort([*].type)): [GPU, K8s, NodeTopology, OS, SystemD]

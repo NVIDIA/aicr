@@ -8,7 +8,7 @@ Set environment variable `AUTO_MODE=true` to avoid having to approve each tool i
 
 ```bash
 # Handy alias for installing/upgrading aicr to ~/.local/bin
-alias aicrup='curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/.local/bin'
+alias aicrup='curl -sfL https://get.aicr.run | bash -s -- -d ~/.local/bin'
 ```
 
 ```bash

@@ -51,9 +51,16 @@ func TestLoadFromFile(t *testing.T) {
 		},
 		{
 			name:        "unsupported apiVersion rejected",
-			yamlContent: "kind: Snapshot\napiVersion: aicr.nvidia.com/v1alpha2\nmeasurements: []\n",
+			yamlContent: "kind: Snapshot\napiVersion: aicr.nvidia.com/v1alpha1\nmeasurements: []\n",
 			wantErr:     true,
-			errContain:  `apiVersion "aicr.nvidia.com/v1alpha2"`,
+			errContain:  `apiVersion "aicr.nvidia.com/v1alpha1"`,
+			wantCode:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name:        "split apiVersion rejected",
+			yamlContent: "kind: Snapshot\napiVersion: aicr.run/v1alpha1\nmeasurements: []\n",
+			wantErr:     true,
+			errContain:  `apiVersion "aicr.run/v1alpha1"`,
 			wantCode:    errors.ErrCodeInvalidRequest,
 		},
 	}

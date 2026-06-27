@@ -26,17 +26,23 @@ import (
 //
 // Evolution policy (see docs/design/011-artifact-apiversion-policy.md):
 // schema changes within a version must be additive-only; a breaking change
-// requires a new version segment, after which both the old and new value are
-// accepted during a transition window before the old one is retired.
+// requires a new version segment. This is a hard break: the old value is NOT
+// accepted alongside the new one — there is no transition window. Artifacts
+// stamped with a prior group/version must be regenerated.
 const (
-	// APIGroup is the API group for AICR artifacts.
-	APIGroup = "aicr.nvidia.com"
+	// Domain is the single source of truth for the AICR API domain. Every
+	// role (apiVersion group, K8s label/annotation keys, attestation and
+	// provenance URI hosts, UUIDv5 namespace seed) derives from this value.
+	Domain = "aicr.run"
 
-	// APIVersionV1Alpha1 is the current artifact API version segment.
-	APIVersionV1Alpha1 = "v1alpha1"
+	// APIGroup is the API group for AICR artifacts.
+	APIGroup = Domain
+
+	// APIVersionV1Alpha2 is the current artifact API version segment.
+	APIVersionV1Alpha2 = "v1alpha2"
 
 	// GroupVersion is the canonical "group/version" string for AICR artifacts.
-	GroupVersion = APIGroup + "/" + APIVersionV1Alpha1
+	GroupVersion = APIGroup + "/" + APIVersionV1Alpha2
 )
 
 // IsSupportedAPIVersion reports whether v is an artifact apiVersion this binary
@@ -44,9 +50,9 @@ const (
 // that tolerate a missing apiVersion for backward compatibility with older
 // artifacts must special-case "" before calling this.
 //
-// When the artifact schema is bumped, add the new value to the set below
-// (keeping the prior value) for the transition window, then remove the old
-// value once the deprecation window closes.
+// Bumping the artifact schema is a hard break: replace GroupVersion with the
+// new value rather than accepting both. The prior value is rejected — artifacts
+// stamped with an older group/version must be regenerated, not migrated.
 func IsSupportedAPIVersion(v string) bool {
 	switch v {
 	case GroupVersion:
