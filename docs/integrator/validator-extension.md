@@ -49,7 +49,7 @@ docker push my-registry.example.com/my-validator:v1.0.0
 Create `my-data/validators/catalog.yaml`:
 
 ```yaml
-apiVersion: aicr.run/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators
@@ -147,7 +147,7 @@ To replace an embedded validator with a custom implementation, use the same `nam
 
 ```yaml
 # my-data/validators/catalog.yaml
-apiVersion: aicr.run/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators

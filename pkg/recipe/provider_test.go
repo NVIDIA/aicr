@@ -982,7 +982,7 @@ func TestLayeredDataProvider_ExternalDir(t *testing.T) {
 }
 
 // testExternalCatalogContent is a minimal catalog.yaml for testing.
-const testExternalCatalogContent = `apiVersion: aicr.run/v1
+const testExternalCatalogContent = `apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators
@@ -1059,7 +1059,7 @@ func TestLayeredDataProvider_MergesCatalog(t *testing.T) {
 // override embedded validators with the same name.
 func TestLayeredDataProvider_CatalogOverrideByName(t *testing.T) {
 	// Override operator-health with a custom image and timeout
-	overrideCatalog := `apiVersion: aicr.run/v1
+	overrideCatalog := `apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators
@@ -1198,7 +1198,7 @@ func TestLayeredDataProvider_CachedCatalog(t *testing.T) {
 
 // TestLayeredDataProvider_InvalidExternalCatalog tests error handling for invalid catalog YAML.
 func TestLayeredDataProvider_InvalidExternalCatalog(t *testing.T) {
-	invalidCatalog := `apiVersion: aicr.run/v1
+	invalidCatalog := `apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 validators:
   - name: [invalid yaml structure
@@ -1223,7 +1223,7 @@ validators:
 // order is preserved and new external validators are appended.
 func TestLayeredDataProvider_CatalogMergePreservesOrder(t *testing.T) {
 	// Add a new validator and override an existing one
-	externalCatalog := `apiVersion: aicr.run/v1
+	externalCatalog := `apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: custom-validators
