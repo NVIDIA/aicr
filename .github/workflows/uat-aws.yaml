@@ -173,6 +173,30 @@ jobs:
           install_helmfile: 'true'
           helmfile_version: '${{ steps.versions.outputs.helmfile }}'
           helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+          install_ko: 'true'
+          ko_version: ${{ steps.versions.outputs.ko }}
+
+      # The snapshot agent runs in-cluster as its own image, separate from the
+      # locally-built aicr binary that drives the UAT phases. Left at the
+      # default (ghcr.io/nvidia/aicr:latest), it would be the last *released*
+      # build — so any artifact-schema change in the PR under test (e.g. an
+      # apiVersion bump) produces a snapshot the freshly-built binary rejects.
+      # Build the agent from the PR source and point AICR_IMAGE at it so the
+      # snapshot is stamped by the code under test, not a stale release. Single
+      # arch: the GPU worker (p5.48xlarge) is amd64. Lives in the aicr-validators
+      # namespace (not the release ghcr.io/nvidia/aicr repo); cleaned up below.
+      - name: Build and push snapshot-agent image
+        if: inputs.skip_tests != true
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr \
+            --bare \
+            --platform=linux/amd64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${VALIDATOR_TAG}"
 
       # Config — v0.4.23+ of the EKS actuator derives the cluster name from
       # .deployment.id (same as GKE); the previous yq write to .cluster.name
@@ -225,6 +249,9 @@ jobs:
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
+          # Snapshot agent = PR-built image (see "Build and push snapshot-agent
+          # image"), not the stale released default. Honored by `aicr snapshot`.
+          AICR_IMAGE: ghcr.io/nvidia/aicr-validators/agent:${{ env.VALIDATOR_TAG }}
         run: ./tests/uat/aws/run prep "${TEST_CONFIG}"
 
       - name: UAT - install (helmfile apply)
@@ -362,8 +389,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete UAT-tagged validator images to avoid GHCR clutter
-          for phase in deployment performance conformance; do
+          # Delete UAT-tagged validator + snapshot-agent images to avoid GHCR clutter
+          for phase in deployment performance conformance agent; do
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
