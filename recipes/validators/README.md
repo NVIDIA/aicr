@@ -5,7 +5,7 @@ The validator catalog (`catalog.yaml`) defines which validation checks are avail
 ## Catalog Structure
 
 ```yaml
-apiVersion: aicr.run/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: aicr-validators
