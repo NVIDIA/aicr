@@ -78,13 +78,12 @@ func TestClassify(t *testing.T) {
 		wantOK    bool
 	}{
 		{
-			// Community is empty (the demo signer's evidence was removed in the
-			// #1499 follow-up), so a community-issuer signer is admitted as
-			// "reported" only, not classified.
-			name:     "community-issuer signer admitted as reported (no community entries)",
-			issuer:   "https://github.com/login/oauth",
-			identity: "community-signer@example.com",
-			wantOK:   false,
+			// Slug 7c4c0edc8c765a95a0f3afdb3bbb8e91 = SourceSlug(issuer, identity) for this signer.
+			name:      "community by slug",
+			issuer:    "https://github.com/login/oauth",
+			identity:  "yuanchen97@gmail.com",
+			wantClass: ClassCommunity,
+			wantOK:    true,
 		},
 		{
 			name:      "first-party pattern on main",

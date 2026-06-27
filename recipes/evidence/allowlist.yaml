@@ -51,10 +51,10 @@ firstParty:
 
 # Community: individual external contributors, keyed by source slug only.
 # Each commits pointers under recipes/evidence/<recipe>/<src>/ where <src> is
-# the slug below. None onboarded yet — the prior entry anchored the
-# demo evidence removed in this PR (see #1499 follow-up); re-add alongside
-# regenerated, signed pointers.
-community: []
+# the slug below.
+community:
+  - issuer: https://github.com/login/oauth
+    source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []
