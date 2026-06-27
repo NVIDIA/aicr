@@ -3107,3 +3107,58 @@ func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
 		})
 	}
 }
+
+func TestDynamicPathSetFor(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations", "daemonsets.nodeSelector"},
+			"nfd":         {"worker.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	got := b.dynamicPathSetFor("gpu-operator", nil)
+	wantPaths := []string{"daemonsets.tolerations", "daemonsets.nodeSelector"}
+	for _, p := range wantPaths {
+		if _, ok := got[p]; !ok {
+			t.Errorf("dynamicPathSetFor(gpu-operator) missing %q", p)
+		}
+	}
+	if _, ok := got["worker.tolerations"]; ok {
+		t.Errorf("dynamicPathSetFor(gpu-operator) should not contain nfd path worker.tolerations")
+	}
+	if got2 := b.dynamicPathSetFor("cert-manager", nil); got2 != nil {
+		t.Errorf("expected nil for component with no dynamic paths, got %v", got2)
+	}
+}
+
+func TestDynamicTolerationPathExcludedFromBakeIn(t *testing.T) {
+	tol := corev1.Toleration{Key: "reserved-by", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{tol}),
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values := map[string]any{}
+	policy := b.computeSchedulingPathPolicy(
+		&recipe.ComponentRef{Name: "gpu-operator"},
+		nil,
+		nil,
+	)
+	if dynPaths := b.dynamicPathSetFor("gpu-operator", nil); len(dynPaths) > 0 {
+		for path := range dynPaths {
+			policy.optOut[path] = struct{}{}
+		}
+	}
+	b.applyNodeSchedulingOverrides("gpu-operator", values, nil, policy)
+	if val, ok := component.GetValueByPath(values, "daemonsets.tolerations"); ok {
+		t.Errorf("daemonsets.tolerations should not be baked in when declared dynamic, got: %v", val)
+	}
+}
