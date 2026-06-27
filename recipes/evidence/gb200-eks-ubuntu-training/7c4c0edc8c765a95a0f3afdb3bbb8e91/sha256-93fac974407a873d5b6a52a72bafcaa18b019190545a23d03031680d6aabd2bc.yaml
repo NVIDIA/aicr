@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-06-27T14:40:14Z
+    bundle:
+      digest: sha256:93fac974407a873d5b6a52a72bafcaa18b019190545a23d03031680d6aabd2bc
+      oci: ghcr.io/nvidia/aicr-evidence:gb200-eks-ubuntu-training-788a1bf8955a
+      predicateType: https://aicr.run/recipe-evidence/v1
+    signer:
+      identity: yuanchen97@gmail.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 1982171931
+recipe: gb200-eks-ubuntu-training
+schemaVersion: 1.0.0
