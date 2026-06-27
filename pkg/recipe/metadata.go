@@ -281,7 +281,7 @@ type RecipeMetadataHeader struct {
 	// Kind is always "RecipeMetadata".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.nvidia.com/v1alpha1").
+	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.

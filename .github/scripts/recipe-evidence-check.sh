@@ -9,9 +9,10 @@
 #
 # A recipe is "affected" when the PR touches its overlay, an ancestor
 # overlay in its base chain, a referenced component values file, a
-# *changed* registry component it transitively references, or its own
-# evidence pointer (recipes/evidence/<slug>.yaml) — so a pointer-only
-# "refresh evidence" PR is verified rather than silently skipped.
+# *changed* registry component it transitively references, or any of its
+# per-source evidence pointers (recipes/evidence/<slug>/<source>/<digest>.yaml)
+# — so a pointer-only "refresh evidence" PR is verified rather than silently
+# skipped.
 #
 # The report separates "protected" recipes — those with a committed
 # pointer in recipes/evidence/, the set the gate actively verifies — from
@@ -41,10 +42,16 @@
 #   .github/scripts/recipe-evidence-check.sh
 #
 # Known limitations (tracked as follow-ups):
-#   * Pointer file name is computed as `basename overlay .yaml`, while
-#     `aicr validate --emit-attestation` writes pointers named after
-#     the criteria-derived slug (RecipeNameFor). Overlays not following
-#     the canonical naming will be reported as missing-pointer.
+#   * The recipe directory slug is computed as `basename overlay .yaml`,
+#     while `aicr validate --emit-attestation` derives it from criteria
+#     (RecipeNameFor). Overlays not following the canonical naming will be
+#     reported as missing-pointer. (The per-source <source>/<digest> levels
+#     below the slug are discovered by glob, so any number of contributors'
+#     pointers are verified.)
+#   * Discovery walks `spec.base` ancestors but not `spec.mixins`, and
+#     promote-all only matches recipes/registry.yaml or recipes/
+#     overlays/base.yaml. Mixin/check/component edits outside literal
+#     valuesFile refs are not promoted. Parity with kwok-recipes.
 #   * `aicr evidence verify` fetches OCI artifacts from PR-controlled
 #     URLs; an allow-list of trusted registries is a follow-up.
 
@@ -254,14 +261,14 @@ for overlay in recipes/overlays/*.yaml; do
     done <<<"$values_files"
   fi
 
-  # Rule 4: the recipe's own evidence pointer was added or modified.
-  # Refreshing evidence (`cp ./out/pointer.yaml recipes/evidence/<slug>.yaml`)
-  # touches no overlay or values file, so without this rule a pointer-only
-  # PR — the canonical "refresh evidence" workflow — would slip through
-  # unverified. `grep -qxF` matches the whole line, so a sibling like
-  # `recipes/evidence/${name}.yaml.bak` doesn't trigger it.
+  # Rule 4: a per-source evidence pointer for the recipe was added or
+  # modified. Pointers live at recipes/evidence/<slug>/<source>/<digest>.yaml
+  # (#1347 Option A), so any changed file under recipes/evidence/<slug>/
+  # counts. Without this rule a pointer-only "refresh evidence" PR would
+  # slip through unverified. Recipe slugs are [a-z0-9-], so the prefix is a
+  # safe literal anchor.
   if [[ "$include" == "false" ]]; then
-    if printf '%s\n' "$changed_files" | grep -qxF "recipes/evidence/${name}.yaml"; then
+    if printf '%s\n' "$changed_files" | grep -qE "^recipes/evidence/${name}/.+\.yaml$"; then
       include=true
     fi
   fi
@@ -293,22 +300,28 @@ done
 count=$(echo "$affected" | jq 'length')
 echo "Affected leaf overlays: ${count}"
 
-# Partition affected recipes into "protected" (a committed pointer exists
-# in recipes/evidence/) and "other" (affected but no evidence yet). The
-# gate actively verifies the protected set; the others are surfaced as a
-# best-effort summary, not per-recipe warnings (#1432).
+# Partition affected recipes into "protected" (at least one committed
+# pointer exists under recipes/evidence/<slug>/) and "other" (affected but
+# no evidence yet). The gate actively verifies the protected set; the others
+# are surfaced as a best-effort summary, not per-recipe warnings (#1432).
 #
 # A pointer present in BASE or HEAD counts as protected: a PR that *deletes*
-# a pointer leaves no file at HEAD, but removing evidence from a previously
-# protected recipe is a de-protection we must surface — not silently demote
-# it to "no evidence yet". The protected loop renders such a recipe as
-# "evidence pointer removed" rather than verifying it.
+# every per-source pointer leaves nothing under the slug at HEAD, but
+# removing evidence from a previously protected recipe is a de-protection we
+# must surface — not silently demote it to "no evidence yet". The protected
+# loop renders such a recipe as "evidence pointer removed" rather than
+# verifying it. Per-source pointers live at
+# recipes/evidence/<slug>/<source>/<digest>.yaml, so presence is a directory
+# (glob/tree) question, not a single-file one.
 protected="[]"
 others="[]"
 while IFS= read -r slug; do
   [[ -z "$slug" ]] && continue
-  if [[ -f "recipes/evidence/${slug}.yaml" ]] \
-     || git cat-file -e "${BASE_SHA}:recipes/evidence/${slug}.yaml" 2>/dev/null; then
+  shopt -s nullglob
+  head_ptrs=( "recipes/evidence/${slug}"/*/*.yaml )
+  shopt -u nullglob
+  if [[ "${#head_ptrs[@]}" -gt 0 ]] \
+     || git ls-tree -r --name-only "${BASE_SHA}" -- "recipes/evidence/${slug}/" 2>/dev/null | grep -q .; then
     protected=$(echo "$protected" | jq -c --arg r "$slug" '. + [$r]')
   else
     others=$(echo "$others" | jq -c --arg r "$slug" '. + [$r]')
@@ -322,21 +335,26 @@ echo "Protected (have pointers): ${protected_count}; other affected (no evidence
 # so a pointer added/modified for a slug with no matching leaf overlay
 # (a typo'd slug, or evidence for a retired recipe) never gets checked —
 # it would pass the gate unverified, defeating its purpose. Diff the
-# changed evidence pointers against the overlay set to surface those.
+# changed per-source pointers against the overlay set to surface those.
 # Only pointers present on disk at HEAD count: a *deleted* pointer is
 # absent here and is not an orphan (if its recipe still exists it is
-# already flagged via Rule 4 and reported as missing-pointer). This
-# shares the gate's basename==slug assumption (see header note 1).
+# already flagged via Rule 4 and reported as missing-pointer). The nested
+# glob recipes/evidence/<slug>/<source>/<file>.yaml naturally excludes the
+# top-level allowlist.yaml, which is not a pointer.
 orphans="[]"
+seen_orphans=" "
 while IFS= read -r pf; do
   if [[ -z "$pf" ]]; then continue; fi
   case "$pf" in
-    recipes/evidence/*.yaml) ;;
+    recipes/evidence/*/*/*.yaml) ;;
     *) continue ;;
   esac
-  pslug=$(basename "$pf" .yaml)
-  if [[ -f "$pf" && ! -f "recipes/overlays/${pslug}.yaml" ]]; then
+  # recipes/evidence/<slug>/<source>/<file>.yaml — the recipe slug is field 3.
+  pslug=$(echo "$pf" | cut -d/ -f3)
+  # De-dup: many per-source pointers can share one slug; report it once.
+  if [[ -f "$pf" && ! -f "recipes/overlays/${pslug}.yaml" && "$seen_orphans" != *" ${pslug} "* ]]; then
     orphans=$(echo "$orphans" | jq -c --arg s "$pslug" '. + [$s]')
+    seen_orphans="${seen_orphans}${pslug} "
   fi
 done < <(printf '%s\n' "$changed_files")
 orphan_count=$(echo "$orphans" | jq 'length')
@@ -377,14 +395,20 @@ fi
 rows_written=0
 rows_truncated=0
 
+# Wall-clock cap on aicr invocations so a hung / tarpit OCI registry
+# behind a PR-controlled pointer URL can't burn the whole job budget.
+# `timeout` exits 124 on timeout; the existing verify-exit default
+# branch catches that without a code change.
+: "${AICR_TIMEOUT:=30s}"
+
 if [[ "$protected_count" -gt 0 ]]; then
   {
     echo "### Protected recipes"
     echo
-    echo "Recipes with committed evidence (\`recipes/evidence/<slug>.yaml\`) that this PR affects: **${protected_count}**"
+    echo "Recipes with committed evidence (\`recipes/evidence/<slug>/<source>/<digest>.yaml\`) that this PR affects: **${protected_count}**"
     echo
-    echo "| Recipe | Verify | Digest match |"
-    echo "|---|---|---|"
+    echo "| Recipe | Source | Pointer | Verify | Digest match |"
+    echo "|---|---|---|---|---|"
   } >> "$REPORT_OUT"
 fi
 
@@ -392,35 +416,39 @@ fi
 # metachars don't word-split or glob-expand.
 while IFS= read -r slug; do
   if [[ -z "$slug" ]]; then continue; fi
-  if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then
-    rows_truncated=$((rows_truncated + 1))
-    continue
-  fi
 
   overlay="recipes/overlays/${slug}.yaml"
-  pointer="recipes/evidence/${slug}.yaml"
 
-  # Protected via a BASE pointer that this PR deletes (absent at HEAD).
+  # Discover the recipe's per-source pointers (#1347 Option A):
+  # recipes/evidence/<slug>/<source>/<bundle-digest>.yaml. Each is an
+  # immutable single-attestation pointer; verify them all and emit one row
+  # per source. nullglob so a recipe whose pointers were all deleted by this
+  # PR yields an empty array.
+  shopt -s nullglob
+  pointers=( "recipes/evidence/${slug}"/*/*.yaml )
+  shopt -u nullglob
+
+  # Protected via BASE pointers that this PR deletes (none left at HEAD).
   # Removing evidence from a previously protected recipe is a de-protection
   # to surface, not a file to verify.
-  if [[ ! -f "$pointer" ]]; then
-    echo "| \`$(md_escape "$slug")\` | :warning: evidence pointer removed | — |" >> "$REPORT_OUT"
+  if [[ "${#pointers[@]}" -eq 0 ]]; then
+    if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then rows_truncated=$((rows_truncated + 1)); continue; fi
+    echo "| \`$(md_escape "$slug")\` | — | — | :warning: evidence pointer removed | — |" >> "$REPORT_OUT"
     warnings=$((warnings + 1))
     rows_written=$((rows_written + 1))
     continue
   fi
 
-  # Wall-clock cap on aicr invocations so a hung / tarpit OCI registry
-  # behind a PR-controlled pointer URL can't burn the whole job budget.
-  # `timeout` exits 124 on timeout; the existing verify-exit default
-  # branch catches that without a code change.
-  : "${AICR_TIMEOUT:=30s}"
-
+  # Compute the recipe's current canonical digest once; every per-source row
+  # compares its signed digest against this.
   digest_err=$(mktemp)
   current_digest=""
   if ! current_digest=$(timeout "$AICR_TIMEOUT" "$AICR" evidence digest -r "$overlay" 2>"$digest_err"); then
+    if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then
+      rows_truncated=$((rows_truncated + 1)); rm -f "$digest_err"; continue
+    fi
     echo "::warning::digest failed for $(log_sanitize "$overlay"): $(log_sanitize "$(head -c 500 "$digest_err")")"
-    echo "| \`$(md_escape "$slug")\` | — | :warning: could not compute current digest |" >> "$REPORT_OUT"
+    echo "| \`$(md_escape "$slug")\` | — | — | — | :warning: could not compute current digest |" >> "$REPORT_OUT"
     warnings=$((warnings + 1))
     rows_written=$((rows_written + 1))
     rm -f "$digest_err"
@@ -428,110 +456,120 @@ while IFS= read -r slug; do
   fi
   rm -f "$digest_err"
 
-  verify_json=$(mktemp)
-  verify_err=$(mktemp)
-  set +e
-  timeout "$AICR_TIMEOUT" "$AICR" evidence verify "$pointer" --format json >"$verify_json" 2>"$verify_err"
-  verify_exit=$?
-  set -e
-  if [[ "$verify_exit" -ne 0 && -s "$verify_err" ]]; then
-    # Echo the full stderr into the job log (not just the table) so a
-    # maintainer can see the underlying cause beyond the classified row.
-    echo "::warning::verify exit ${verify_exit} for $(log_sanitize "$pointer"): $(log_sanitize "$(head -c 1000 "$verify_err")")"
-  fi
-  rm -f "$verify_err"
+  for pointer in "${pointers[@]}"; do
+    if [[ "$rows_written" -ge "$MAX_ROWS" ]]; then rows_truncated=$((rows_truncated + 1)); continue; fi
+    source=$(basename "$(dirname "$pointer")")
+    # Pointer identifier = bundle-digest filename (the immutable <bundle-digest>
+    # leaf), so two pointers committed under the same source remain
+    # distinguishable. Strip the .yaml suffix; the basename is already the
+    # signed digest a reviewer needs to trace a stale/invalid row to its file.
+    pointer_id=$(basename "$pointer" .yaml)
 
-  # Pull structured fields surfaced by `aicr evidence verify --format json`
-  # (see pkg/evidence/verifier): VerifyResult.Exit (0 valid, 1 valid with
-  # recorded phase failures, 2 invalid), the predicate digest, the
-  # pending-signature flag, and — on Exit 2 — the classified failureCause
-  # {class, httpStatus, hint}. We branch on the JSON `.exit`, not the OS exit
-  # code, because aicr collapses both Exit 1 (ErrCodeConflict) and Exit 2
-  # (ErrCodeInvalidRequest) to OS exit 2 (see pkg/errors/exitcode.go).
-  result_exit=""
-  signed_digest=""
-  pending="false"
-  cause_class=""
-  cause_status=""
-  cause_hint=""
-  if [[ -s "$verify_json" ]]; then
-    result_exit=$(jq -r '.exit // empty' "$verify_json" 2>/dev/null || true)
-    signed_digest=$(jq -r '.predicate.recipe.digest // empty' "$verify_json" 2>/dev/null || true)
-    pending=$(jq -r '.pending // false' "$verify_json" 2>/dev/null || echo false)
-    cause_class=$(jq -r '.failureCause.class // empty' "$verify_json" 2>/dev/null || true)
-    cause_status=$(jq -r '.failureCause.httpStatus // empty' "$verify_json" 2>/dev/null || true)
-    cause_hint=$(jq -r '.failureCause.hint // empty' "$verify_json" 2>/dev/null || true)
-  fi
-  rm -f "$verify_json"
+    verify_json=$(mktemp)
+    verify_err=$(mktemp)
+    set +e
+    timeout "$AICR_TIMEOUT" "$AICR" evidence verify "$pointer" --format json >"$verify_json" 2>"$verify_err"
+    verify_exit=$?
+    set -e
+    if [[ "$verify_exit" -ne 0 && -s "$verify_err" ]]; then
+      # Echo the full stderr into the job log (not just the table) so a
+      # maintainer can see the underlying cause beyond the classified row.
+      echo "::warning::verify exit ${verify_exit} for $(log_sanitize "$pointer"): $(log_sanitize "$(head -c 1000 "$verify_err")")"
+    fi
+    rm -f "$verify_err"
 
-  # verify_ok tracks whether the bundle itself verified (exit 0/1). When it
-  # did not, the verify cell already owns the single warning for this row, so
-  # the digest section must not add a second one (a broken bundle is one
-  # problem, not two).
-  verify_ok=true
-  if [[ -z "$result_exit" ]]; then
-    # No parseable VerifyResult — verify errored before producing output
-    # (bad input / early failure) or `timeout` killed it (exit 124).
-    verify_cell=":x: verify error (exit ${verify_exit})"
-    verify_ok=false
-    warnings=$((warnings + 1))
-  else
-    case "$result_exit" in
-      0)
-        if [[ "$pending" == "true" ]]; then
-          verify_cell=":hourglass: pending signature"
-        else
-          verify_cell=":white_check_mark: passed"
-        fi
-        ;;
-      1)
-        # Valid bundle whose recorded validator results show phase failures
-        # — informational, not a gate warning.
-        verify_cell=":warning: phase failures recorded (informational)"
-        ;;
-      2)
-        # Render the classified, actionable cause instead of a bare
-        # "invalid" (#1437): e.g. "invalid — registry-forbidden (HTTP 403):
-        # make the fork's aicr-evidence package public".
-        verify_cell=":x: invalid"
-        if [[ -n "$cause_class" ]]; then
-          verify_cell="${verify_cell} — ${cause_class}"
-          [[ -n "$cause_status" ]] && verify_cell="${verify_cell} (HTTP ${cause_status})"
-          [[ -n "$cause_hint" ]] && verify_cell="${verify_cell}: $(md_escape "$cause_hint")"
-        fi
-        verify_ok=false
-        warnings=$((warnings + 1))
-        ;;
-      *)
-        verify_cell=":x: verify error (result exit ${result_exit})"
-        verify_ok=false
-        warnings=$((warnings + 1))
-        ;;
-    esac
-  fi
+    # Pull structured fields surfaced by `aicr evidence verify --format json`
+    # (see pkg/evidence/verifier): VerifyResult.Exit (0 valid, 1 valid with
+    # recorded phase failures, 2 invalid), the predicate digest, the
+    # pending-signature flag, and — on Exit 2 — the classified failureCause
+    # {class, httpStatus, hint}. We branch on the JSON `.exit`, not the OS exit
+    # code, because aicr collapses both Exit 1 (ErrCodeConflict) and Exit 2
+    # (ErrCodeInvalidRequest) to OS exit 2 (see pkg/errors/exitcode.go).
+    result_exit=""
+    signed_digest=""
+    pending="false"
+    cause_class=""
+    cause_status=""
+    cause_hint=""
+    if [[ -s "$verify_json" ]]; then
+      result_exit=$(jq -r '.exit // empty' "$verify_json" 2>/dev/null || true)
+      signed_digest=$(jq -r '.predicate.recipe.digest // empty' "$verify_json" 2>/dev/null || true)
+      pending=$(jq -r '.pending // false' "$verify_json" 2>/dev/null || echo false)
+      cause_class=$(jq -r '.failureCause.class // empty' "$verify_json" 2>/dev/null || true)
+      cause_status=$(jq -r '.failureCause.httpStatus // empty' "$verify_json" 2>/dev/null || true)
+      cause_hint=$(jq -r '.failureCause.hint // empty' "$verify_json" 2>/dev/null || true)
+    fi
+    rm -f "$verify_json"
 
-  if [[ -n "$signed_digest" ]]; then
-    if [[ "$signed_digest" == "$current_digest" ]]; then
-      digest_cell=":white_check_mark: matches"
+    # verify_ok tracks whether the bundle itself verified (exit 0/1). When it
+    # did not, the verify cell already owns the single warning for this row, so
+    # the digest section must not add a second one (a broken bundle is one
+    # problem, not two).
+    verify_ok=true
+    if [[ -z "$result_exit" ]]; then
+      # No parseable VerifyResult — verify errored before producing output
+      # (bad input / early failure) or `timeout` killed it (exit 124).
+      verify_cell=":x: verify error (exit ${verify_exit})"
+      verify_ok=false
+      warnings=$((warnings + 1))
     else
-      digest_cell=":warning: stale (\`${signed_digest:0:12}…\` vs current \`${current_digest:0:12}…\`)"
-      warnings=$((warnings + 1))
+      case "$result_exit" in
+        0)
+          if [[ "$pending" == "true" ]]; then
+            verify_cell=":hourglass: pending signature"
+          else
+            verify_cell=":white_check_mark: passed"
+          fi
+          ;;
+        1)
+          # Valid bundle whose recorded validator results show phase failures
+          # — informational, not a gate warning.
+          verify_cell=":warning: phase failures recorded (informational)"
+          ;;
+        2)
+          # Render the classified, actionable cause instead of a bare
+          # "invalid" (#1437): e.g. "invalid — registry-forbidden (HTTP 403):
+          # make the fork's aicr-evidence package public".
+          verify_cell=":x: invalid"
+          if [[ -n "$cause_class" ]]; then
+            verify_cell="${verify_cell} — ${cause_class}"
+            [[ -n "$cause_status" ]] && verify_cell="${verify_cell} (HTTP ${cause_status})"
+            [[ -n "$cause_hint" ]] && verify_cell="${verify_cell}: $(md_escape "$cause_hint")"
+          fi
+          verify_ok=false
+          warnings=$((warnings + 1))
+          ;;
+        *)
+          verify_cell=":x: verify error (result exit ${result_exit})"
+          verify_ok=false
+          warnings=$((warnings + 1))
+          ;;
+      esac
     fi
-  else
-    digest_cell=":warning: skipped (no signed digest)"
-    # Only a warning when the bundle otherwise verified — a failed verify
-    # already counted its single warning above.
-    if [[ "$verify_ok" == "true" ]]; then
-      warnings=$((warnings + 1))
-    fi
-  fi
 
-  echo "| \`$(md_escape "$slug")\` | ${verify_cell} | ${digest_cell} |" >> "$REPORT_OUT"
-  rows_written=$((rows_written + 1))
+    if [[ -n "$signed_digest" ]]; then
+      if [[ "$signed_digest" == "$current_digest" ]]; then
+        digest_cell=":white_check_mark: matches"
+      else
+        digest_cell=":warning: stale (\`${signed_digest:0:12}…\` vs current \`${current_digest:0:12}…\`)"
+        warnings=$((warnings + 1))
+      fi
+    else
+      digest_cell=":warning: skipped (no signed digest)"
+      # Only a warning when the bundle otherwise verified — a failed verify
+      # already counted its single warning above.
+      if [[ "$verify_ok" == "true" ]]; then
+        warnings=$((warnings + 1))
+      fi
+    fi
+
+    echo "| \`$(md_escape "$slug")\` | \`$(md_escape "$source")\` | \`$(md_escape "$pointer_id")\` | ${verify_cell} | ${digest_cell} |" >> "$REPORT_OUT"
+    rows_written=$((rows_written + 1))
+  done
 done < <(echo "$protected" | jq -r '.[]')
 
 if [[ "$rows_truncated" -gt 0 ]]; then
-  echo "| _… +${rows_truncated} more (truncated; raise MAX_ROWS or split the PR)_ | | |" >> "$REPORT_OUT"
+  echo "| _… +${rows_truncated} more (truncated; raise MAX_ROWS or split the PR)_ | | | | |" >> "$REPORT_OUT"
 fi
 
 # Other affected recipes (no committed evidence). Surfaced as a collapsed
@@ -576,17 +614,17 @@ if [[ "$orphan_count" -gt 0 ]]; then
     echo "### Orphan evidence pointers"
     echo
     echo "Added or modified, but with **no matching leaf overlay** (\`recipes/overlays/<slug>.yaml\`)."
-    echo "This gate keys evidence to a recipe by filename, so an orphan pointer is never verified —"
-    echo "usually a typo'd slug or evidence left behind for a retired recipe. Rename it to match the"
-    echo "overlay, or remove it."
+    echo "This gate keys evidence to a recipe by its directory slug, so an orphan pointer is never"
+    echo "verified — usually a typo'd slug or evidence left behind for a retired recipe. Move it under"
+    echo "the directory of an existing recipe, or remove it."
     echo
-    echo "| Pointer | Issue |"
+    echo "| Recipe slug | Issue |"
     echo "|---|---|"
   } >> "$REPORT_OUT"
   while IFS= read -r oslug; do
     if [[ -z "$oslug" ]]; then continue; fi
     oslug_md=$(md_escape "$oslug")
-    echo "| \`recipes/evidence/${oslug_md}.yaml\` | :warning: no \`recipes/overlays/${oslug_md}.yaml\` |" >> "$REPORT_OUT"
+    echo "| \`recipes/evidence/${oslug_md}/\` | :warning: no \`recipes/overlays/${oslug_md}.yaml\` |" >> "$REPORT_OUT"
     warnings=$((warnings + 1))
   done < <(echo "$orphans" | jq -r '.[]')
 fi
@@ -605,7 +643,8 @@ fi
     echo "  -s snapshot.yaml \\"
     echo "  --emit-attestation ./out \\"
     echo "  --push ghcr.io/<your-fork>/aicr-evidence"
-    echo "cp ./out/pointer.yaml recipes/evidence/<slug>.yaml"
+    echo "# Copy to the per-source path printed in the emit 'copyTo' hint:"
+    echo "#   recipes/evidence/<slug>/<source>/<bundle-digest>.yaml"
     echo '```'
     echo
   fi

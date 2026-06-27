@@ -316,6 +316,13 @@ const (
 	// EvidenceBundlePushTimeout: multi-blob ORAS upload; 2 minutes covers
 	// typical p99 against ghcr / Quay.
 	EvidenceBundlePushTimeout = 2 * time.Minute
+
+	// EvidenceIngestTimeout is the overall deadline for the evidence-project
+	// ingest CLI: materialize (ORAS pull) + verify + synthesize for a single
+	// bundle. Comfortably above the sum of the per-operation pull/verify
+	// budgets so a hung pull is cut off well before the workflow's own
+	// 20-minute job timeout.
+	EvidenceIngestTimeout = 15 * time.Minute
 )
 
 // Chainsaw assertion configuration for component health checks.

@@ -33,4 +33,4 @@ metadata:
     # privileged namespaces in the cluster came from this tool.
     app.kubernetes.io/managed-by: aicr
     app.kubernetes.io/component: nvsentinel
-    aicr.nvidia.com/os: talos
+    aicr.run/os: talos

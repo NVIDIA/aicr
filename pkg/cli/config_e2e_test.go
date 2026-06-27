@@ -199,7 +199,7 @@ func TestBundleCmd_AllConfigSectionsResolve(t *testing.T) {
 	}
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   bundle:
     input:
@@ -292,7 +292,7 @@ func TestBundleCmd_FlagOverridesEverySection(t *testing.T) {
 	}
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   bundle:
     input:
@@ -378,7 +378,7 @@ func TestRecipeCmd_ConfigFillsMissingFromConfig(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	cfg := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   recipe:
     criteria:
@@ -412,7 +412,7 @@ func TestRecipeCmd_ConfigBadEnumRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	bad := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   recipe:
     criteria:
@@ -437,7 +437,7 @@ func TestBundleCmd_ConfigBadDeployerRejected(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")
 	bad := `kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 spec:
   bundle:
     deployment:
@@ -468,7 +468,7 @@ func TestE2E_RecipeAndBundleShareConfig(t *testing.T) {
 	cfgPath := filepath.Join(tmp, "config.yaml")
 
 	cfg := fmt.Sprintf(`kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: e2e-shared
 spec:

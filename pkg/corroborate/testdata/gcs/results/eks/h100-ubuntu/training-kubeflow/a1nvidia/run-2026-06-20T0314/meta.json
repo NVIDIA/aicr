@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "aicr-corroboration-meta/v1",
+  "coordinate": {
+    "group": "eks",
+    "dashboard": "h100-ubuntu",
+    "tab": "training-kubeflow"
+  },
+  "recipe": "h100-eks-ubuntu-training-kubeflow",
+  "signer": {
+    "idHash": "a1nvidia",
+    "identity": "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "class": "first-party",
+    "allowlisted": true
+  },
+  "runId": "run-2026-06-20T0314",
+  "aicrVersion": "v1.0.0",
+  "k8sVersion": "1.33",
+  "k8sConstraint": ">= 1.32.4",
+  "bundleDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "evidenceRef": "ghcr.io/nvidia/aicr-evidence/h100-eks-ubuntu-training-kubeflow@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "rekorLogIndex": 84213709,
+  "attestedAt": "2026-06-20T03:14:07Z"
+}

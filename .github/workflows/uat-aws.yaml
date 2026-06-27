@@ -52,6 +52,10 @@ jobs:
       actions: read
       id-token: write
       packages: write
+    outputs:
+      # Digest-pinned OCI ref of the signed evidence bundle, consumed by
+      # the ingest-evidence job below. Empty when no bundle was produced.
+      bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
     env:
       AWS_ACCOUNT_ID: "615299774277"
       AWS_REGION: "us-east-1"
@@ -169,6 +173,30 @@ jobs:
           install_helmfile: 'true'
           helmfile_version: '${{ steps.versions.outputs.helmfile }}'
           helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+          install_ko: 'true'
+          ko_version: ${{ steps.versions.outputs.ko }}
+
+      # The snapshot agent runs in-cluster as its own image, separate from the
+      # locally-built aicr binary that drives the UAT phases. Left at the
+      # default (ghcr.io/nvidia/aicr:latest), it would be the last *released*
+      # build — so any artifact-schema change in the PR under test (e.g. an
+      # apiVersion bump) produces a snapshot the freshly-built binary rejects.
+      # Build the agent from the PR source and point AICR_IMAGE at it so the
+      # snapshot is stamped by the code under test, not a stale release. Single
+      # arch: the GPU worker (p5.48xlarge) is amd64. Lives in the aicr-validators
+      # namespace (not the release ghcr.io/nvidia/aicr repo); cleaned up below.
+      - name: Build and push snapshot-agent image
+        if: inputs.skip_tests != true
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr \
+            --bare \
+            --platform=linux/amd64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${VALIDATOR_TAG}"
 
       # Config — v0.4.23+ of the EKS actuator derives the cluster name from
       # .deployment.id (same as GKE); the previous yq write to .cluster.name
@@ -221,6 +249,9 @@ jobs:
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
+          # Snapshot agent = PR-built image (see "Build and push snapshot-agent
+          # image"), not the stale released default. Honored by `aicr snapshot`.
+          AICR_IMAGE: ghcr.io/nvidia/aicr-validators/agent:${{ env.VALIDATOR_TAG }}
         run: ./tests/uat/aws/run prep "${TEST_CONFIG}"
 
       - name: UAT - install (helmfile apply)
@@ -283,6 +314,14 @@ jobs:
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
         run: ./tests/uat/aws/run verify "${TEST_CONFIG}"
 
+      # Export the digest-pinned bundle ref for the ingest-evidence job.
+      # Reads the pointer the conformance step wrote; emits empty (job
+      # skips) when no bundle/digest is present.
+      - name: Export evidence bundle ref
+        id: evidence_ref
+        if: steps.conformance.outcome == 'success'
+        uses: ./.github/actions/export-evidence-ref
+
       # Artifacts + summary run BEFORE teardown so a slow or failing
       # `Destroy Cluster` (which can take 10+ min) does not delay or
       # consume the job-timeout budget needed to persist evidence.
@@ -338,9 +377,9 @@ jobs:
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
-            if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then
+            if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
-              echo "**Evidence (OCI):** \`ghcr.io/nvidia/aicr-evidence/h100-eks-ubuntu-training-kubeflow:run-${{ github.run_id }}\`"
+              echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -350,8 +389,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete UAT-tagged validator images to avoid GHCR clutter
-          for phase in deployment performance conformance; do
+          # Delete UAT-tagged validator + snapshot-agent images to avoid GHCR clutter
+          for phase in deployment performance conformance agent; do
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
@@ -422,3 +461,20 @@ jobs:
             echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
             exit 1
           fi
+
+  # Ingest the signed UAT evidence bundle into the corroboration bucket.
+  # Runs as its own job (separate runner) only when the run produced a
+  # bundle; the reusable workflow verifies signer + issuer + identity +
+  # registry in a credential-free step before publishing to GCS.
+  ingest-evidence:
+    name: Ingest UAT evidence
+    needs: uat-aws
+    if: needs.uat-aws.outputs.bundle_ref != ''
+    permissions:
+      contents: read
+      id-token: write  # WIF for the publish job
+      packages: read   # GHCR pull for the verify job
+    uses: ./.github/workflows/evidence-ingest.yaml
+    with:
+      bundle_ref: ${{ needs.uat-aws.outputs.bundle_ref }}
+      recipe: eks-h100-training

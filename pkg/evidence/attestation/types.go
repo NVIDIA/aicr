@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 // Public stability constants. These match the V1 schema documented in
@@ -25,7 +26,7 @@ import (
 // stability boundary.
 const (
 	// PredicateTypeV1 is the in-toto predicateType URI for recipe evidence.
-	PredicateTypeV1 = "https://aicr.nvidia.com/recipe-evidence/v1"
+	PredicateTypeV1 = "https://" + header.Domain + "/recipe-evidence/v1"
 
 	// PredicateSchemaVersion is the recipe-evidence predicate schema version.
 	PredicateSchemaVersion = "1.0.0"

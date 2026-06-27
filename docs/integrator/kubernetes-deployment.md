@@ -250,7 +250,7 @@ metadata:
 data:
   overlays/base.yaml: |
     # Your custom base recipe
-    apiVersion: aicr.nvidia.com/v1alpha1
+    apiVersion: aicr.run/v1alpha2
     kind: RecipeMetadata
     # ... (see recipes/overlays/base.yaml for schema)
 ```

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "aicr-corroboration-meta/v1",
+  "coordinate": {
+    "group": "eks",
+    "dashboard": "h100-ubuntu",
+    "tab": "training-kubeflow"
+  },
+  "recipe": "h100-eks-ubuntu-training-kubeflow",
+  "signer": {
+    "idHash": "c3rogue",
+    "identity": "https://github.com/rogue-org/rogue-repo/.github/workflows/x.yaml@refs/heads/main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "class": "community",
+    "allowlisted": false
+  },
+  "runId": "run-2026-06-19T0300",
+  "aicrVersion": "v0.13.0",
+  "k8sVersion": "1.30",
+  "k8sConstraint": ">= 1.32.4",
+  "bundleDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "evidenceRef": "ghcr.io/nvidia/aicr-evidence/h100-eks-ubuntu-training-kubeflow@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "rekorLogIndex": 84213709,
+  "attestedAt": "2026-06-19T03:00:00Z"
+}

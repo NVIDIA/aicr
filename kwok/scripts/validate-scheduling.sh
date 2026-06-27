@@ -794,8 +794,8 @@ generate_bundle() {
             if ! bundle_output=$("$AICR_BIN" bundle \
                 --recipe "${WORK_DIR}/recipe.yaml" \
                 --output "${WORK_DIR}/bundle" \
-                --system-node-selector "aicr.nvidia.com/node-type=system" \
-                --accelerated-node-selector "aicr.nvidia.com/node-type=accelerated" \
+                --system-node-selector "aicr.run/node-type=system" \
+                --accelerated-node-selector "aicr.run/node-type=accelerated" \
                 --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
                 --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
                 --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
@@ -923,8 +923,8 @@ generate_bundle() {
                 --output "$OCI_REF" \
                 --repo "$in_cluster_repo" \
                 --plain-http \
-                --system-node-selector "aicr.nvidia.com/node-type=system" \
-                --accelerated-node-selector "aicr.nvidia.com/node-type=accelerated" \
+                --system-node-selector "aicr.run/node-type=system" \
+                --accelerated-node-selector "aicr.run/node-type=accelerated" \
                 --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
                 --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
                 --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
@@ -989,8 +989,8 @@ generate_bundle() {
                 --deployer flux \
                 --output "$OCI_REF" \
                 --plain-http \
-                --system-node-selector "aicr.nvidia.com/node-type=system" \
-                --accelerated-node-selector "aicr.nvidia.com/node-type=accelerated" \
+                --system-node-selector "aicr.run/node-type=system" \
+                --accelerated-node-selector "aicr.run/node-type=accelerated" \
                 --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
                 --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
                 --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
@@ -1041,8 +1041,8 @@ generate_bundle() {
                 --deployer flux \
                 --output "${WORK_DIR}/bundle" \
                 --repo "$GIT_IN_CLUSTER_URL" \
-                --system-node-selector "aicr.nvidia.com/node-type=system" \
-                --accelerated-node-selector "aicr.nvidia.com/node-type=accelerated" \
+                --system-node-selector "aicr.run/node-type=system" \
+                --accelerated-node-selector "aicr.run/node-type=accelerated" \
                 --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
                 --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
                 --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
@@ -1107,8 +1107,8 @@ generate_bundle() {
                 --deployer argocd \
                 --output "${WORK_DIR}/bundle" \
                 --repo "$GIT_IN_CLUSTER_URL" \
-                --system-node-selector "aicr.nvidia.com/node-type=system" \
-                --accelerated-node-selector "aicr.nvidia.com/node-type=accelerated" \
+                --system-node-selector "aicr.run/node-type=system" \
+                --accelerated-node-selector "aicr.run/node-type=accelerated" \
                 --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
                 --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
                 --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \

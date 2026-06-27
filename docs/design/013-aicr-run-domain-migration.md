@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. Confirms the migration tracked by the epic in
+Accepted. Confirms the migration tracked by the epic in
 [#1486](https://github.com/NVIDIA/aicr/issues/1486) and its sub-issues.
 
 ## Problem
@@ -25,10 +25,9 @@ Tying the artifact contract to `nvidia.com` has two costs:
 Changing the group is a **breaking change**: any persisted artifact pinning the
 old `apiVersion` would otherwise be rejected by the compatibility gate from
 [ADR-011](011-artifact-apiversion-policy.md). Per that ADR's evolution rule,
-breaking changes belong to a controlled transition. Doing this **before v1**,
-while we are still on `v1alpha1`/`v1beta1`, is the cheapest possible moment —
-there is no stable contract to honor yet, and the dual-accept machinery from
-ADR-011 already exists to soften the cut.
+breaking changes belong to a version bump. Doing this **before v1**, while we
+are still on `v1alpha1`/`v1beta1`, is the cheapest possible moment — there is no
+stable contract to honor yet.
 
 The domain `aicr.run` is owned and controlled by the project maintainers, so
 the `https://aicr.run/...` predicate and build-type URIs can resolve to real
@@ -37,9 +36,6 @@ forms benefit from.
 
 ## Non-Goals
 
-- **Bumping the version segment.** No schema change is being made; the version
-  stays `v1alpha1` (artifacts) / `v1beta1` (build spec). Only the domain host
-  changes. This is orthogonal to the ADR-011 evolution rule.
 - **Reshaping attestation URI paths.** The path segments (`/bundle/v1`,
   `/recipe-evidence/v1`, `/recipe-catalog/v1`) are unchanged; only the host
   moves. A path or schema redesign is out of scope.
@@ -53,15 +49,29 @@ forms benefit from.
 
 ## Decision
 
-### 1. Adopt `aicr.run` as the artifact API domain
+### 1. Adopt `aicr.run` as the artifact API domain and bump the version segment
 
 The reverse-DNS host changes from `aicr.nvidia.com` to `aicr.run` everywhere it
-appears. Version segments and URI paths are untouched:
+appears. Because the rename is itself a breaking change to the artifact
+contract, the version segment is bumped in the same cut so consumers can
+distinguish migrated artifacts from legacy ones at a glance:
 
-```
+```text
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1   ──▶   apiVersion: aicr.run/v1alpha1
+apiVersion: aicr.nvidia.com/v1alpha1   ──▶   apiVersion: aicr.run/v1alpha2
 ```
+
+Both version tracks advance together:
+
+- **Artifact track** (Recipe / Snapshot / Config / RecipeResult):
+  `v1alpha1` → `v1alpha2`.
+- **Build-spec track** (`AICRRuntime`): `v1beta1` → `v1beta2`.
+
+The bump is **signal-only** — no artifact schema or field changes accompany it.
+Its sole purpose is to make the breaking rename explicit. URI paths
+(`/bundle/v1`, `/recipe-evidence/v1`, `/recipe-catalog/v1`,
+`/binary/v1`) are independent of the artifact version and are **not** bumped;
+only their host moves.
 
 ### 2. Single source of truth for the domain
 
@@ -81,19 +91,28 @@ through `header.Domain` so a future change is a one-line edit. This extends the
 single-source-of-truth principle ADR-011 established for the artifact group to
 the other four roles below.
 
-### 3. Transition window (reuse ADR-011 §3–§4)
+### 3. Hard break — no transition window
 
-The cut uses the dual-accept mechanism ADR-011 already specifies for a version
-bump, applied to the domain:
+Unlike a routine version bump, this cut is a **hard break with no dual-accept
+window**:
 
-- `header.IsSupportedAPIVersion` accepts **both** `aicr.nvidia.com/v1alpha1`
-  and `aicr.run/v1alpha1` (and the `v1beta1` build-spec equivalents) for one
-  release.
-- Artifact loaders accept either group on **read** and emit a single
-  deprecation `slog.Warn` when the old group is seen.
+- `header.IsSupportedAPIVersion` accepts **only** the new artifact value
+  `aicr.run/v1alpha2` (build-spec validation lives in `pkg/build.Validate`,
+  which accepts only `aicr.run/v1beta2`). The legacy `aicr.nvidia.com/*`
+  groups — and any never-published intermediate such as `aicr.run/v1alpha1` —
+  are rejected.
+- Artifact loaders fail closed on a legacy `apiVersion` with an actionable
+  error (`unsupported apiVersion "…"; regenerate with aicr.run/v1alpha2`)
+  rather than tolerating it.
 - Writers always emit the new `aicr.run` group.
-- The old group is retired only after the deprecation window closes, with a
-  regression test asserting an out-of-window version is rejected.
+
+A soft, dual-accept window was considered (the mechanism from ADR-011 §3–§4
+exists) and **rejected** for this migration: the simultaneous domain *and*
+version change makes the break unambiguous, the project is pre-v1 alpha with no
+compatibility promise, every internal fixture is regenerated in the same change
+so nothing internal reads a legacy artifact, and the only external consumers are
+demo-only and handled offline. A fail-closed error is clearer than silently
+tolerating stale input, and it avoids carrying deprecated code paths forward.
 
 ### 4. Roles affected and their blast radius
 
@@ -102,11 +121,11 @@ they differ in risk:
 
 | Role | Examples | Risk |
 |------|----------|------|
-| Artifact API group | `header.APIGroup`, `pkg/build/spec.go` (`v1beta1`), `localformat/provenance.go` | Low — read fresh each run, already centralized |
-| K8s label keys | `pkg/validator/labels` `aicr.nvidia.com/{job-type,run-id,…}` | Low — validation Jobs are created and torn down per run |
+| Artifact API group + version | `header.APIGroup`/`GroupVersion`, `pkg/build/spec.go` (`v1beta2`), `localformat/provenance.go` | Low — read fresh each run, centralized |
+| K8s label keys | `pkg/validator/labels` `aicr.run/{job-type,run-id,…}` | Low — validation Jobs are created and torn down per run |
 | Annotations | `bundler.go` `/gpu-operator-chart-version`, `validate.go` `/job` | Low — regenerated per bundle |
-| Attestation predicate / build-type URIs | `https://aicr.nvidia.com/{bundle,recipe-evidence,recipe-catalog}/v1` | **High** — embedded in signed, published attestations |
-| UUIDv5 namespace seed | `aicrBundleNamespace` derived from `https://aicr.nvidia.com/bundle/v1` | **High** — deterministic bundle IDs change |
+| Attestation predicate / build-type URIs | `https://aicr.run/{bundle,recipe-evidence,recipe-catalog}/v1` | **High** — embedded in signed, published attestations |
+| UUIDv5 namespace seed | `aicrBundleNamespace` derived from `https://aicr.run/bundle/v1` | **High** — deterministic bundle IDs change |
 
 ## Consequences
 
@@ -116,11 +135,16 @@ they differ in risk:
   domain.
 - The domain literal exists exactly once (`header.Domain`); any future change is
   a one-line edit plus regenerated fixtures.
-- Done pre-v1 with a transition window, the break is soft: old snapshots,
-  recipes, and configs still load for one release.
+- The version bump makes the break self-evident: a consumer that sees
+  `aicr.run/v1alpha2` knows it is a migrated artifact without inspecting
+  anything else.
 
 ### Negative
 
+- **Legacy artifacts must be regenerated.** With no transition window, any
+  persisted snapshot, recipe, or config stamped `aicr.nvidia.com/v1alpha1`
+  fails to load and must be regenerated. This is acceptable pre-v1 and is
+  surfaced through an actionable error.
 - **Deterministic bundle IDs reset.** The `aicrBundleNamespace` UUIDv5 seed
   moves to `https://aicr.run/bundle/v1`, so deterministic-mode bundle IDs
   change. This is a one-time, documented reset, not ongoing churn.
@@ -133,19 +157,21 @@ they differ in risk:
 ### Neutral / Future direction
 
 - ADR-011 remains the governing policy for `apiVersion` evolution; this ADR
-  only changes the host value it single-sources. ADR-011's prose references to
-  `aicr.nvidia.com` are updated as part of the docs sub-issue.
-- The transition window closes in a later release; retiring the old group is a
-  one-line removal plus a rejection test.
+  applies that policy's version-bump rule and changes the host value it
+  single-sources. ADR-011's prose references to `aicr.nvidia.com` are updated as
+  part of the docs sub-issue.
+- Because this is a hard break, there is no deprecated group to retire later.
 
 ## Adoption plan
 
-Tracked under epic [#1486](https://github.com/NVIDIA/aicr/issues/1486):
+Tracked under epic [#1486](https://github.com/NVIDIA/aicr/issues/1486),
+delivered as a single atomic PR:
 
 1. Centralize the domain into `header.Domain` (refactor only, value unchanged).
-2. Flip the value to `aicr.run`; regenerate non-signed artifacts (apiVersion,
-   labels/annotations, OpenAPI, fixtures).
-3. Add the dual-accept transition window.
+2. Flip the value to `aicr.run` and bump the version segments
+   (`v1alpha2` / `v1beta2`); fail closed on legacy `apiVersion` on read.
+3. Regenerate non-signed artifacts (apiVersion, labels/annotations, OpenAPI,
+   fixtures).
 4. Migrate attestation/provenance URI hosts; regenerate signed artifacts and
    document the UUIDv5 namespace reset.
 5. Update docs and this ADR series.

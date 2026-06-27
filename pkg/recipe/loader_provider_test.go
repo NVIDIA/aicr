@@ -26,7 +26,7 @@ import (
 func newTestLayeredProvider(t *testing.T) *LayeredDataProvider {
 	t.Helper()
 	tmp := t.TempDir()
-	registry := `apiVersion: aicr.nvidia.com/v1alpha1
+	registry := `apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components: []
 `
@@ -49,7 +49,7 @@ func writeOverlayFile(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "overlay.yaml")
-	overlay := `apiVersion: aicr.nvidia.com/v1alpha1
+	overlay := `apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: provider-bound-overlay
@@ -94,7 +94,7 @@ func TestLoadFromFileWithProvider(t *testing.T) {
 		layered := newTestLayeredProvider(t)
 		dir := t.TempDir()
 		path := filepath.Join(dir, "recipe.yaml")
-		content := "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\ncriteria:\n  service: eks\n"
+		content := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n"
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write recipe: %v", err)
 		}
@@ -111,7 +111,7 @@ func TestLoadFromFileWithProvider(t *testing.T) {
 	t.Run("nil provider behaves like LoadFromFile", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "recipe.yaml")
-		content := "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\ncriteria:\n  service: eks\n"
+		content := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\ncriteria:\n  service: eks\n"
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write recipe: %v", err)
 		}

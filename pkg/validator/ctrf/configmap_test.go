@@ -81,14 +81,14 @@ func TestWriteAndReadCTRFConfigMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigMap not found: %v", err)
 	}
-	if cm.Labels["aicr.nvidia.com/run-id"] != runID {
-		t.Errorf("label run-id = %q, want %q", cm.Labels["aicr.nvidia.com/run-id"], runID)
+	if cm.Labels["aicr.run/run-id"] != runID {
+		t.Errorf("label run-id = %q, want %q", cm.Labels["aicr.run/run-id"], runID)
 	}
-	if cm.Labels["aicr.nvidia.com/phase"] != phase {
-		t.Errorf("label phase = %q, want %q", cm.Labels["aicr.nvidia.com/phase"], phase)
+	if cm.Labels["aicr.run/phase"] != phase {
+		t.Errorf("label phase = %q, want %q", cm.Labels["aicr.run/phase"], phase)
 	}
-	if cm.Labels["aicr.nvidia.com/report-type"] != "ctrf" {
-		t.Errorf("label report-type = %q, want %q", cm.Labels["aicr.nvidia.com/report-type"], "ctrf")
+	if cm.Labels["aicr.run/report-type"] != "ctrf" {
+		t.Errorf("label report-type = %q, want %q", cm.Labels["aicr.run/report-type"], "ctrf")
 	}
 
 	// Read back

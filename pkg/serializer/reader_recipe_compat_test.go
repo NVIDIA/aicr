@@ -61,7 +61,7 @@ func assertLegacyRecipeLoads(t *testing.T, path string) {
 
 func TestFromFile_LegacyRecipeExcludedOverlaysYAML(t *testing.T) {
 	path := writeLegacyRecipeFile(t, "recipe-legacy*.yaml", `kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   excludedOverlays:
     - h100-eks-ubuntu-training
@@ -75,7 +75,7 @@ deploymentOrder: []
 func TestFromFile_LegacyRecipeExcludedOverlaysJSON(t *testing.T) {
 	path := writeLegacyRecipeFile(t, "recipe-legacy*.json", `{
   "kind": "RecipeResult",
-  "apiVersion": "aicr.nvidia.com/v1alpha1",
+  "apiVersion": "aicr.run/v1alpha2",
   "metadata": {
     "excludedOverlays": [
       "h100-eks-ubuntu-training"

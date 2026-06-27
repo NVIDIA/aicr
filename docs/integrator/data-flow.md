@@ -47,7 +47,7 @@ Each stage transforms input data into a different format:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Snapshot (aicr.nvidia.com/v1alpha1)                      │
+│ Snapshot (aicr.run/v1alpha2)                      │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   created: timestamp                                    │
@@ -91,7 +91,7 @@ metadata:
 data:
   snapshot.yaml: |
     # Complete snapshot YAML stored as ConfigMap data
-    apiVersion: aicr.nvidia.com/v1alpha1
+    apiVersion: aicr.run/v1alpha2
     kind: Snapshot
     measurements: [...]
 ```
@@ -215,7 +215,7 @@ For the resolver internals (specificity scoring, deep-merge semantics) see
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Recipe (aicr.nvidia.com/v1alpha1)                        │
+│ Recipe (aicr.run/v1alpha2)                        │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   version: recipe format version                        │
