@@ -216,7 +216,7 @@ which pins the bundle by digest:
 
 ```shell
 # Verify a pointer a contributor committed alongside a recipe change (preferred).
-aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4...yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 
 # Verify a pushed OCI bundle directly, pinned by digest.
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...

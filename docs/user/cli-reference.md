@@ -2744,7 +2744,7 @@ The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the lib
 **Examples:**
 ```shell
 # Verify a pointer that a contributor committed alongside their recipe change.
-aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4...yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 
 # Verify a pushed OCI bundle directly (no repo checkout required).
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
