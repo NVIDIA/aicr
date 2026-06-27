@@ -647,6 +647,17 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// are intentionally excluded — see authoritativeSchedulingPaths godoc.
 		policy := b.computeSchedulingPathPolicy(&ref, provider, setOverrides)
 
+		// Paths declared via --dynamic must not have scheduling values baked in.
+		// Merging them into optOut causes applyNodeSchedulingOverrides to skip
+		// injection for those paths; the path will be absent from values entirely
+		// so operators can supply the toleration at install time without
+		// rebuilding the bundle. See #1371.
+		if dynPaths := b.dynamicPathSetFor(ref.Name, provider); len(dynPaths) > 0 {
+			for path := range dynPaths {
+				policy.optOut[path] = struct{}{}
+			}
+		}
+
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
 		b.applyNodeSchedulingOverrides(ref.Name, values, provider, policy)
 
@@ -1163,6 +1174,46 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 // warnMissingStorageClassForPVCs emits a bundle note when a rendered component creates
 // a PVC but leaves storageClassName unset, causing Kubernetes to rely on the
 // target cluster's default StorageClass.
+// dynamicPathSetFor returns the set of value paths declared as dynamic for
+// componentName. Dynamic paths are excluded from scheduling injection so that
+// the path stays absent from values entirely rather than carrying a baked-in
+// value, letting operators supply tolerations at install time without
+// rebuilding the bundle. See #1371.
+func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe.DataProvider) map[string]struct{} {
+	if b.Config == nil || !b.Config.HasDynamicValues() {
+		return nil
+	}
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		slog.Debug("dynamicPathSetFor: failed to load registry, dynamic opt-out disabled",
+			"component", componentName,
+			"error", err,
+		)
+		return nil
+	}
+	raw := b.Config.DynamicValues()
+	pathSet := make(map[string]struct{})
+	for key, paths := range raw {
+		comp := registry.GetByOverrideKey(key)
+		if comp == nil {
+			slog.Warn("dynamicPathSetFor: unresolved --dynamic override key, toleration will be baked in",
+				"key", key,
+				"component", componentName,
+			)
+			continue
+		}
+		if comp.Name != componentName {
+			continue
+		}
+		for _, p := range paths {
+			pathSet[p] = struct{}{}
+		}
+	}
+	if len(pathSet) == 0 {
+		return nil
+	}
+	return pathSet
+}
 func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
 	if b.Config == nil {
 		return nil
