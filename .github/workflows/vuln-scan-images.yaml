@@ -180,6 +180,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      # packages: write — pushes the per-arch aicr-gate image to GHCR so the
+      # manifest + scan jobs can pull it (mirrors build-docker/build-ko).
       packages: write
     strategy:
       fail-fast: false

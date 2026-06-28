@@ -205,8 +205,12 @@ if ! $KEEP_CRDS; then
             matches=$(echo "$all_crds" | grep -F "$pat" || true)
             for crd in $matches; do
                 # --request-timeout bounds the API call so a wedged apiserver
-                # cannot park this step indefinitely.
-                kubectl delete "$crd" --ignore-not-found --wait=false --request-timeout=30s || true
+                # cannot park this step indefinitely. Don't swallow failures:
+                # a timed-out delete leaves a stale CRD that breaks reinstall,
+                # so warn (but keep going — cleanup is best-effort).
+                if ! kubectl delete "$crd" --ignore-not-found --wait=false --request-timeout=30s; then
+                    msg "WARNING: failed to delete $crd (timeout or apiserver error); it may persist — rerun cleanup or remove manually"
+                fi
             done
         done
     fi

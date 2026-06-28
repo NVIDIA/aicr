@@ -61,6 +61,7 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
+      - 'vendor/**'
 
 # Least privilege at the workflow level; id-token is granted only to the job
 # that needs it (below).

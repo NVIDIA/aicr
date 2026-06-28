@@ -52,6 +52,7 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
+      - 'vendor/**'
       - '.github/workflows/recipe-evidence.yaml'
       - '.github/scripts/recipe-evidence-check.sh'
 

@@ -46,6 +46,7 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
+      - 'vendor/**'
       - 'tests/chainsaw/signing/bundle-attestation-private-sigstore/**'
       - '.github/workflows/sigstore-scaffolding-e2e.yaml'
       - '.github/actions/load-versions/**'
