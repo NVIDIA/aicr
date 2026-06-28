@@ -474,6 +474,7 @@ jobs:
           vex: .openvex.json
 
       - name: Extract severity counts and IDs
+        if: always()
         shell: bash
         env:
           IMAGE: ${{ matrix.image }}
@@ -493,7 +494,7 @@ jobs:
           # the product PURL without re-parsing Grype internals.
           echo "${IMAGE}" > "bom-scan-results/${SHORT_NAME}.ref"
 
-          if [[ ! -f "${JSON_FILE}" ]]; then
+          if [[ -z "${JSON_FILE}" || ! -f "${JSON_FILE}" ]]; then
             echo "${SHORT_NAME}: scan output missing" > "${OUT}"
             exit 0
           fi
@@ -511,7 +512,7 @@ jobs:
             [ .matches[]
               | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
               | (.artifact.name + " " + .vulnerability.id
-                 + ( (.relatedVulnerabilities // [] | map(.id) | join(","))
+                  ( (.relatedVulnerabilities // [] | map(.id) | join(","))
                      | if . == "" then "" else " (" + . + ")" end )) ]
             | join(", ")' "${JSON_OUT}")
 
@@ -524,6 +525,7 @@ jobs:
           cat "${OUT}"
 
       - name: Upload BOM scan result
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: bom-scan-${{ strategy.job-index }}
