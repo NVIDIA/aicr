@@ -191,6 +191,15 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 		return last, nil
 	}
 
+	// Caller cancellation is an external abort, not a readiness failure.
+	// pollCtx derives from ctx.Ctx, so pollCtx.Err() is also set when the parent
+	// is canceled — check the parent explicitly first and propagate it as a
+	// transient timeout rather than reporting the deployment as not-available.
+	if ctx.Ctx.Err() != nil {
+		return last, errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("waiting for deployment %s/%s canceled", namespace, name), ctx.Ctx.Err())
+	}
+
 	expected := int32(1)
 	var avail int32
 	if last != nil {
@@ -199,9 +208,9 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 			expected = *last.Spec.Replicas
 		}
 	}
-	// A deadline means the deployment never became available in time; surface
-	// the same NotFound-shaped not-available message the caller wraps. A
-	// non-deadline error is a genuine API failure — propagate it.
+	// Our own bound elapsed (parent still live): the deployment never became
+	// available in time. Surface the NotFound-shaped not-available message the
+	// caller wraps. A non-deadline error is a genuine API failure — propagate it.
 	if pollCtx.Err() != nil {
 		if last == nil {
 			return nil, errors.New(errors.ErrCodeNotFound,

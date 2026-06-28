@@ -102,6 +102,27 @@ func TestWaitForDeploymentAvailable_NeverReady(t *testing.T) {
 	}
 }
 
+// TestWaitForDeploymentAvailable_ParentCanceled ensures an external abort
+// (parent context canceled) is propagated as a transient timeout, not
+// misclassified as a deployment readiness failure.
+func TestWaitForDeploymentAvailable_ParentCanceled(t *testing.T) {
+	t.Parallel()
+	client := k8sfake.NewClientset(deployWithAvailable("admission", 0))
+	parent, cancel := context.WithCancel(context.Background())
+	cancel() // external abort before the wait runs
+	vctx := &validators.Context{Ctx: parent, Clientset: client}
+
+	// Generous bound so any failure must come from the parent cancellation,
+	// not our own deadline.
+	_, err := waitForDeploymentAvailable(vctx, "kai-scheduler", "admission", 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error on canceled parent context")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("expected ErrCodeTimeout for cancellation, got %v", err)
+	}
+}
+
 // TestWaitForDeploymentAvailable_NotFound surfaces a missing deployment as
 // NotFound after the bound (not a generic internal error).
 func TestWaitForDeploymentAvailable_NotFound(t *testing.T) {
