@@ -34,11 +34,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
@@ -231,41 +229,16 @@ type validationConfig struct {
 	evidence *recipeEvidenceConfig
 }
 
-// validateDataProvider builds the recipe.DataProvider matching the source
-// the validate Action handed to aicr.NewClient. It is constructed
-// separately (rather than reaching into the Client) so it can be threaded
-// into evidence emission, whose catalog.Load takes a DataProvider directly.
-// It mirrors the Client's own buildDataProvider so the evidence catalog
-// resolves against exactly the source the validator run used:
-//
-//   - empty dataDir → embedded provider only.
-//   - non-empty dataDir → the external dir layered over the embedded data.
-func validateDataProvider(dataDir string) (recipe.DataProvider, error) {
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
-	if dataDir == "" {
-		return embedded, nil
-	}
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-		ExternalDir: dataDir,
-	})
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize external data", err)
-	}
-	return layered, nil
-}
-
 // runValidation runs validation using the container-per-validator engine.
 //
-// The validator run is now driven through the aicr.Client facade
-// (ValidateState), which owns the per-command DataProvider and threads it
-// into the validator catalog load. The evidence path still needs the raw
-// pkg/recipe.RecipeResult (via rec.Resolved()) and the same DataProvider
-// (dataProvider) so the attestation catalog resolves against the command's
-// source rather than the package global.
+// The validator run is driven through the aicr.Client facade (ValidateState),
+// which owns the per-command DataProvider. Report merging and recipe-evidence
+// emission also go through the facade (Client.MergeReports /
+// Client.EmitRecipeEvidence), so the catalog resolves against the Client's
+// source and no internal validator types are reconstructed CLI-side.
 func runValidation(
 	ctx context.Context,
 	client *aicr.Client,
-	dataProvider recipe.DataProvider,
 	rec *aicr.RecipeResult,
 	snap *snapshotter.Snapshot,
 	cfg validationConfig,
@@ -323,12 +296,10 @@ func runValidation(
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
 	}
 
-	// Extract CTRF reports from phase results and merge into a single report.
-	reports := make([]*ctrf.Report, 0, len(results))
-	for _, pr := range results {
-		reports = append(reports, pr.Report)
-	}
-	combined := ctrf.MergeReports("aicr", version, reports)
+	// Merge the per-phase CTRF reports into a single combined report via the
+	// facade, so a library/server caller of ValidateState produces the same
+	// combined document without reimplementing the merge.
+	combined := client.MergeReports(results)
 
 	// Serialize combined report; thread kubeconfig so ConfigMap writes
 	// target the same cluster used for snapshot/recipe reads.
@@ -383,27 +354,12 @@ func runValidation(
 	}
 
 	// Emit even on failure: failed runs document hardware-specific limits.
-	// emitRecipeEvidence needs the full pkg/recipe.RecipeResult (via
-	// Resolved()) for the predicate/BOM, and the command's DataProvider so
-	// the validator catalog used for evidence resolves against the same
-	// source as the run rather than the package global.
+	// The facade (Client.EmitRecipeEvidence) owns the facade→internal
+	// PhaseResult conversion, catalog load (against this Client's data
+	// source), and attestation.Emit; the CLI shim only adds the interactive
+	// signing-disclosure prompt.
 	if cfg.evidence != nil {
-		// emitRecipeEvidence takes []*validator.PhaseResult for downstream
-		// attestation.Emit. Convert each facade PhaseResult; Report is
-		// preserved as a typed pointer.
-		internalResults := make([]*validator.PhaseResult, len(results))
-		for i, pr := range results {
-			if pr == nil {
-				continue
-			}
-			internalResults[i] = &validator.PhaseResult{
-				Phase:    validator.Phase(pr.Phase),
-				Status:   pr.Status,
-				Report:   pr.Report,
-				Duration: pr.Duration,
-			}
-		}
-		if err := emitRecipeEvidence(ctx, dataProvider, rec.Resolved(), snap, internalResults, cfg.evidence); err != nil {
+		if err := emitRecipeEvidence(ctx, client, rec, snap, results, cfg.evidence); err != nil {
 			return err
 		}
 	}
@@ -736,26 +692,6 @@ Run validation without failing on check errors (informational mode):
 			}
 			defer func() { _ = client.Close() }()
 
-			// dataDir is the resolved external-data root. Mirror the same
-			// resolution recipeClientFromCmd performs internally so the
-			// evidence-side provider points at the same directory as the
-			// Client's recipe source.
-			dataDir := cmd.String("data")
-			if dataDir == "" {
-				dataDir = cfg.Recipe().DataDir()
-			}
-
-			// Second provider, separate from the Client's: this one is handed to
-			// evidence emission so conformance/SLSA evidence resolves files
-			// against the command's data source (the resolved --data dir), not
-			// the package global. The Client owns its own provider for recipe
-			// resolution and validation; evidence emission lives outside the
-			// Client surface and needs its own handle to the same directory.
-			dataProvider, err := validateDataProvider(dataDir)
-			if err != nil {
-				return err
-			}
-
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
 			rec, err := client.LoadRecipe(ctx, recipeFilePath, kubeconfig)
@@ -814,7 +750,7 @@ Run validation without failing on check errors (informational mode):
 
 			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
 
-			return runValidation(ctx, client, dataProvider, rec, snap, validationConfig{
+			return runValidation(ctx, client, rec, snap, validationConfig{
 				phases:                phases,
 				kubeconfig:            kubeconfig,
 				output:                cmd.String("output"),
