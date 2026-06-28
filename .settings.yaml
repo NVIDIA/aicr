@@ -21,7 +21,7 @@ build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
   goreleaser: 'v2.16.0'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
-  ko: 'v0.18.1'
+  ko: 'v0.19.0'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
   crane: 'v0.21.7'
   # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
@@ -45,7 +45,7 @@ security_tools:
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.1'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.45.1'
+  syft: 'v1.46.0'
 
 # E2E Testing Tools
 testing_tools:
