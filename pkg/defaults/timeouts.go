@@ -47,6 +47,23 @@ const (
 	TopologyListPageSize = int64(500)
 )
 
+// Network topology collector constants. Network discovery delegates to the
+// k8s-launch-kit library, which boots a NIC-configuration daemon and pod-exec
+// probes each east-west PF — both bounded above by l8k's own internal
+// timeouts. CollectorNetworkTimeout caps the worst case as a defense in depth
+// so a hung pod exec can't outlive the snapshot.
+const (
+	// CollectorNetworkTimeout is the upper bound for the network collector.
+	// Longer than the topology timeout because l8k discovery includes
+	// DaemonSet rollout + per-node pod-exec probes.
+	CollectorNetworkTimeout = 10 * time.Minute
+
+	// MaxClusterConfigBytes caps the size of an --cluster-config YAML file
+	// the collector will read into memory. Used as the io.LimitReader bound
+	// per the project rule against unbounded os.ReadFile.
+	MaxClusterConfigBytes = int64(1 << 20) // 1 MiB
+)
+
 // Handler timeouts for HTTP request processing.
 const (
 	// RecipeHandlerTimeout is the timeout for recipe generation requests.
@@ -299,6 +316,13 @@ const (
 	// EvidenceBundlePushTimeout: multi-blob ORAS upload; 2 minutes covers
 	// typical p99 against ghcr / Quay.
 	EvidenceBundlePushTimeout = 2 * time.Minute
+
+	// EvidenceIngestTimeout is the overall deadline for the evidence-project
+	// ingest CLI: materialize (ORAS pull) + verify + synthesize for a single
+	// bundle. Comfortably above the sum of the per-operation pull/verify
+	// budgets so a hung pull is cut off well before the workflow's own
+	// 20-minute job timeout.
+	EvidenceIngestTimeout = 15 * time.Minute
 )
 
 // Chainsaw assertion configuration for component health checks.
@@ -454,6 +478,14 @@ const (
 
 	// HPAPollInterval is the interval for polling HPA status during behavioral tests.
 	HPAPollInterval = 10 * time.Second
+
+	// MetricsAPIWarmupTimeout bounds the retry while the aggregated metrics APIs
+	// (custom/external.metrics.k8s.io) warm up: prometheus-adapter registers its
+	// APIServices before its first Prometheus relist populates metric data, so a
+	// single-shot GET right after the deployment phase can race that window. Kept
+	// short so the pod-autoscaling metric-API steps plus the HPA behavioral test
+	// stay within the validator's catalog timeout.
+	MetricsAPIWarmupTimeout = 60 * time.Second
 )
 
 // Karpenter behavioral test timeouts for conformance validation.
@@ -683,6 +715,13 @@ const (
 	// bounding an attacker-influenced --key path (symlink to /proc, NFS mount,
 	// FUSE filesystem) before the bytes are read into memory.
 	MaxPublicKeyPEMBytes int64 = 64 * 1024 // 64 KiB
+
+	// MaxTrustedRootBytes caps the size of a user-supplied Sigstore
+	// trusted_root.json passed to `aicr verify --trust-root`. A real trusted
+	// root is a few KB; 1 MiB is generous headroom while bounding an
+	// attacker-influenced path (a /proc symlink, an NFS mount) so it cannot
+	// OOM the process the way os.ReadFile would.
+	MaxTrustedRootBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
 	// MaxExternalDataFileBytes caps the size of recipe/registry data files
 	// read from the external data directory by LayeredDataProvider. This is

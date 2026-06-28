@@ -223,7 +223,7 @@ test_api_recipe() {
     -X POST "${aicrd_URL}/v1/recipe" \
     -H "Content-Type: application/x-yaml" \
     -d 'kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: h100-training
 spec:
@@ -447,22 +447,22 @@ test_snapshot() {
   local snapshot_data
   snapshot_data=$(kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" -o jsonpath='{.data.snapshot\.yaml}' 2>/dev/null)
 
-  # Extract and display GPU info from snapshot
-  local gpu_name gpu_count gpu_mem driver_ver cuda_ver
-  gpu_name=$(echo "$snapshot_data" | grep "gpu-product:" | head -1 | sed 's/.*gpu-product: //' || echo "unknown")
-  gpu_count=$(echo "$snapshot_data" | grep "gpu-count:" | head -1 | sed 's/.*gpu-count: //' || echo "0")
-  gpu_mem=$(echo "$snapshot_data" | grep "gpu-memory:" | head -1 | sed 's/.*gpu-memory: //' || echo "unknown")
-  driver_ver=$(echo "$snapshot_data" | grep "driver-version:" | head -1 | sed 's/.*driver-version: //' || echo "unknown")
-  cuda_ver=$(echo "$snapshot_data" | grep "cuda-version:" | head -1 | sed 's/.*cuda-version: //' || echo "unknown")
+  # Extract and display GPU info from the driver-free "hardware" subtype
+  # (the SMI subtype was removed; model is the PCI-derived accelerator SKU).
+  # Scope extraction to the GPU "hardware" subtype so a "model" key elsewhere in
+  # the snapshot can't be misread as the GPU SKU.
+  local gpu_name gpu_count driver_loaded
+  gpu_name=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data.model // "unknown"' - | head -1)
+  gpu_count=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["gpu-count"] // 0' - | head -1)
+  driver_loaded=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["driver-loaded"] // "unknown"' - | head -1)
 
   if [ -n "$gpu_name" ] && [ "$gpu_name" != "unknown" ]; then
-    detail "GPU: ${gpu_name}"
+    detail "GPU SKU: ${gpu_name}"
     detail "Count: ${gpu_count}"
-    detail "Memory: ${gpu_mem}"
-    detail "Driver: ${driver_ver}, CUDA: ${cuda_ver}"
+    detail "Driver loaded: ${driver_loaded}"
     pass "snapshot/gpu-data"
   else
-    warn "No GPU data in snapshot (may be expected without fake-gpu-operator)"
+    warn "No GPU SKU in snapshot (may be expected without fake-gpu-operator or for an unrecognized SKU)"
     pass "snapshot/gpu-data"
   fi
 }
@@ -804,7 +804,7 @@ test_validate_deployment_checks() {
   local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -857,7 +857,7 @@ RECIPE
   local recipe_file_fail="${validate_dir}/recipe-with-failing-constraint.yaml"
   cat > "$recipe_file_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -907,7 +907,7 @@ RECIPE
   local recipe_er_fail="${validate_dir}/recipe-expected-resources-fail.yaml"
   cat > "$recipe_er_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -985,7 +985,7 @@ RECIPE
       local recipe_manual="${validate_dir}/recipe-manual-pass.yaml"
       cat > "$recipe_manual" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -1033,7 +1033,7 @@ RECIPE
       local recipe_merge="${validate_dir}/recipe-manual-merge.yaml"
       cat > "$recipe_merge" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -1110,7 +1110,7 @@ RECIPE
   local recipe_chainsaw="${validate_dir}/recipe-chainsaw.yaml"
   cat > "$recipe_chainsaw" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -1163,7 +1163,7 @@ RECIPE
   local recipe_chainsaw_fail="${validate_dir}/recipe-chainsaw-fail.yaml"
   cat > "$recipe_chainsaw_fail" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -1248,7 +1248,7 @@ test_validate_job_deployment() {
   local recipe_file="${validate_dir}/recipe.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
@@ -1326,7 +1326,7 @@ RECIPE
           warn "  - $job_name"
           # Show logs for failed job
           local pod_name
-          pod_name=$(kubectl get pods -n aicr-validation -l "aicr.nvidia.com/job=$job_name" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          pod_name=$(kubectl get pods -n aicr-validation -l "batch.kubernetes.io/job-name=$job_name" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
           if [ -n "$pod_name" ]; then
             detail "Last 10 lines of logs:"
             kubectl logs -n aicr-validation "$pod_name" --tail=10 2>&1 | sed 's/^/    /' || true

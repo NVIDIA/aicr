@@ -44,8 +44,10 @@ func CheckAcceleratorMetrics(ctx *validators.Context) error {
 func checkAcceleratorMetricsWithURL(ctx *validators.Context, url string) error {
 	body, err := httpGet(ctx.Ctx, url)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable,
-			"DCGM exporter metrics endpoint unreachable", err)
+		// Preserve a deterministic code (e.g. oversize response → InvalidRequest)
+		// instead of relabeling every failure as a reachability problem.
+		return errors.PropagateOrWrap(err, errors.ErrCodeUnavailable,
+			"DCGM exporter metrics endpoint unreachable")
 	}
 
 	metricsText := string(body)

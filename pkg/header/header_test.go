@@ -19,8 +19,44 @@ import (
 	"time"
 )
 
-// Test API version constant - matches aicr.nvidia.com/v1alpha1 used by snapshotter and recipe packages
-const testAPIVersion = "aicr.nvidia.com/v1alpha1"
+// Test API version constant - matches aicr.run/v1alpha2 used by snapshotter and recipe packages
+const testAPIVersion = "aicr.run/v1alpha2"
+
+func TestGroupVersion(t *testing.T) {
+	t.Parallel()
+
+	if GroupVersion != testAPIVersion {
+		t.Errorf("GroupVersion = %q, want %q", GroupVersion, testAPIVersion)
+	}
+	if want := APIGroup + "/" + APIVersionV1Alpha2; GroupVersion != want {
+		t.Errorf("GroupVersion = %q, want %q", GroupVersion, want)
+	}
+}
+
+func TestIsSupportedAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"current", "aicr.run/v1alpha2", true},
+		{"old group+version rejected", "aicr.nvidia.com/v1alpha1", false},
+		{"old group new version rejected", "aicr.nvidia.com/v1alpha2", false},
+		{"new group old version rejected", "aicr.run/v1alpha1", false},
+		{"empty rejected", "", false},
+		{"garbage rejected", "v1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsSupportedAPIVersion(tt.in); got != tt.want {
+				t.Errorf("IsSupportedAPIVersion(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestKind_String(t *testing.T) {
 	t.Parallel()

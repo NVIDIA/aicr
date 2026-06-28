@@ -25,13 +25,13 @@ brew install aicr
 Install the latest version using the install script:
 
 ```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://get.aicr.run | bash -s --
 ```
 
 To install to a custom directory instead of the default `/usr/local/bin`:
 
 ```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/bin
+curl -sfL https://get.aicr.run | bash -s -- -d ~/bin
 ```
 
 Optional: if you hit GitHub API rate limits, set `GITHUB_TOKEN` before running the install command. No special repository scope is required for public releases.
@@ -101,7 +101,7 @@ Tab completion for commands and flags is installed automatically by both the Hom
 **Opt out** (install script only): set `AICR_NO_COMPLETIONS=1` before running the script:
 
 ```shell
-AICR_NO_COMPLETIONS=1 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+AICR_NO_COMPLETIONS=1 curl -sfL https://get.aicr.run | bash -s --
 ```
 
 **Manual setup** (build from source or `go install`):
@@ -177,14 +177,13 @@ sudo chmod +x /usr/local/bin/aicr
 
 ### GPU Detection Issues
 
-Snapshot GPU measurements require `nvidia-smi` in PATH:
-
-```shell
-# Verify NVIDIA drivers
-nvidia-smi
-
-# If missing, install NVIDIA drivers for your platform
-```
+Snapshot GPU detection is driver-free: it enumerates PCI devices via sysfs
+(NFD) and resolves the accelerator SKU from the device ID — no `nvidia-smi` or
+NVIDIA driver required. The GPU Operator's `nvidia.com/gpu.product` node label
+is **not** required to collect GPU data; when present (read in-cluster via the
+node topology), it improves SKU accuracy and powers the "GPU placement
+mismatch" warning. If a snapshot reports no GPU on a node you expect to have
+one, confirm the agent landed on the GPU node (it needs host `/sys` access).
 
 ## Uninstall
 

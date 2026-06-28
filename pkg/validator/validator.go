@@ -104,21 +104,24 @@ func (v *Validator) prepareCluster(
 	snap *snapshotter.Snapshot,
 ) (*clusterState, error) {
 
+	// Use PropagateOrWrap so a coded inner error (e.g. an invalid kubeconfig
+	// classified as a deterministic config error) survives instead of being
+	// blanket-relabeled ErrCodeInternal, which would mask it as retryable.
 	clientset, _, err := k8sclient.GetKubeClient()
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to create kubernetes client")
 	}
 
 	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
+		return nil, errors.PropagateOrWrap(nsErr, errors.ErrCodeInternal, "failed to ensure validation namespace")
 	}
 
 	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace, v.RunID); rbacErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
+		return nil, errors.PropagateOrWrap(rbacErr, errors.ErrCodeInternal, "failed to ensure RBAC")
 	}
 
 	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, validationInput); cmErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
+		return nil, errors.PropagateOrWrap(cmErr, errors.ErrCodeInternal, "failed to create data ConfigMaps")
 	}
 
 	factory := informers.NewSharedInformerFactoryWithOptions(

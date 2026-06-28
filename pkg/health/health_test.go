@@ -480,14 +480,14 @@ func TestComputeEmptyCatalog(t *testing.T) {
 func TestComputeGradesDeterministicDefectAsFail(t *testing.T) {
 	provider := newInMemoryProvider(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
 		"overlays/broken-leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: broken-leaf
 spec:
@@ -496,7 +496,7 @@ spec:
   componentRefs:
     - name: broken-comp
 `),
-		"registry.yaml": []byte(`apiVersion: aicr.nvidia.com/v1alpha1
+		"registry.yaml": []byte(`apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: broken-comp
@@ -547,14 +547,14 @@ components:
 func TestComputeChartPinnedFailThroughBuilder(t *testing.T) {
 	provider := newInMemoryProvider(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
 		"overlays/unpinned-leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: unpinned-leaf
 spec:
@@ -563,7 +563,7 @@ spec:
   componentRefs:
     - name: unpinned-helm
 `),
-		"registry.yaml": []byte(`apiVersion: aicr.nvidia.com/v1alpha1
+		"registry.yaml": []byte(`apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: unpinned-helm
@@ -615,14 +615,14 @@ components:
 func TestComputeConstraintsWellformedFailThroughBuilder(t *testing.T) {
 	provider := newInMemoryProvider(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
 		"overlays/malformed-constraint-leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: malformed-constraint-leaf
 spec:
@@ -633,7 +633,7 @@ spec:
     - name: not-a-valid-path
       value: ">= 1.0"
 `),
-		"registry.yaml": []byte(`apiVersion: aicr.nvidia.com/v1alpha1
+		"registry.yaml": []byte(`apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components: []
 `),
@@ -676,14 +676,14 @@ components: []
 func TestComputeAllDimensionsCoexistAndRollUpClean(t *testing.T) {
 	provider := newInMemoryProvider(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
   componentRefs: []
 `),
 		"overlays/clean-leaf.yaml": []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: clean-leaf
 spec:
@@ -699,7 +699,7 @@ spec:
       checks:
         - operator-health
 `),
-		"registry.yaml": []byte(`apiVersion: aicr.nvidia.com/v1alpha1
+		"registry.yaml": []byte(`apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: pinned-helm

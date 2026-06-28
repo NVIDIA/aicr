@@ -40,12 +40,22 @@ jobs:
   uat-aws:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Covers the uncapped non-UAT steps (build, validator image push, EKS
+    # provisioning, evidence upload) + the UAT phase steps (prep 15 + install 45
+    # + validate 40 + train 25 + verify 5 = 130) + the always()-run Destroy
+    # Cluster teardown. The teardown MUST fit in this budget: a job-level timeout
+    # cancels pending always() steps, so an undersized cap would skip teardown
+    # and leak the GPU node / capacity reservation.
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read
       id-token: write
       packages: write
+    outputs:
+      # Digest-pinned OCI ref of the signed evidence bundle, consumed by
+      # the ingest-evidence job below. Empty when no bundle was produced.
+      bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
     env:
       AWS_ACCOUNT_ID: "615299774277"
       AWS_REGION: "us-east-1"
@@ -63,7 +73,7 @@ jobs:
     steps:
       # Checkout
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -74,7 +84,7 @@ jobs:
 
       # Build from source
       - name: Setup Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -163,6 +173,30 @@ jobs:
           install_helmfile: 'true'
           helmfile_version: '${{ steps.versions.outputs.helmfile }}'
           helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+          install_ko: 'true'
+          ko_version: ${{ steps.versions.outputs.ko }}
+
+      # The snapshot agent runs in-cluster as its own image, separate from the
+      # locally-built aicr binary that drives the UAT phases. Left at the
+      # default (ghcr.io/nvidia/aicr:latest), it would be the last *released*
+      # build — so any artifact-schema change in the PR under test (e.g. an
+      # apiVersion bump) produces a snapshot the freshly-built binary rejects.
+      # Build the agent from the PR source and point AICR_IMAGE at it so the
+      # snapshot is stamped by the code under test, not a stale release. Single
+      # arch: the GPU worker (p5.48xlarge) is amd64. Lives in the aicr-validators
+      # namespace (not the release ghcr.io/nvidia/aicr repo); cleaned up below.
+      - name: Build and push snapshot-agent image
+        if: inputs.skip_tests != true
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr \
+            --bare \
+            --platform=linux/amd64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${VALIDATOR_TAG}"
 
       # Config — v0.4.23+ of the EKS actuator derives the cluster name from
       # .deployment.id (same as GKE); the previous yq write to .cluster.name
@@ -215,22 +249,39 @@ jobs:
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
+          # Snapshot agent = PR-built image (see "Build and push snapshot-agent
+          # image"), not the stale released default. Honored by `aicr snapshot`.
+          AICR_IMAGE: ghcr.io/nvidia/aicr-validators/agent:${{ env.VALIDATOR_TAG }}
         run: ./tests/uat/aws/run prep "${TEST_CONFIG}"
 
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
-        timeout-minutes: 25
+        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS) + the post-install
+        # readiness gate, which runs `aicr validate --phase deployment` until it
+        # passes (up to READINESS_TIMEOUT_SECONDS, 20m, spanning a nodewright
+        # reboot). Must exceed one helmfile attempt + the gate so the gate's own
+        # fail-closed path runs before GitHub Actions kills the step.
+        timeout-minutes: 45
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run install "${TEST_CONFIG}"
 
-      - name: UAT - conformance (validate + emit signed evidence)
+      # Runs ALL validate phases (deployment + conformance + performance), not
+      # just conformance. The deployment phase polls component health checks
+      # until the GPU stack converges — the readiness barrier the helmfile
+      # bundle lacks (the helm deploy.sh `kubectl wait`s instead). Step id stays
+      # `conformance` so the train/verify gating below is unaffected.
+      - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
         if: steps.install.outcome == 'success'
-        timeout-minutes: 20
+        # Larger budget than conformance-only: the deployment phase waits out
+        # cold-start GPU bring-up (driver install/migration). (The performance
+        # phase's NCCL benchmark skips on single-GPU-node clusters like this
+        # one, so it is not the long pole here.)
+        timeout-minutes: 40
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -263,12 +314,20 @@ jobs:
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
         run: ./tests/uat/aws/run verify "${TEST_CONFIG}"
 
+      # Export the digest-pinned bundle ref for the ingest-evidence job.
+      # Reads the pointer the conformance step wrote; emits empty (job
+      # skips) when no bundle/digest is present.
+      - name: Export evidence bundle ref
+        id: evidence_ref
+        if: steps.conformance.outcome == 'success'
+        uses: ./.github/actions/export-evidence-ref
+
       # Artifacts + summary run BEFORE teardown so a slow or failing
       # `Destroy Cluster` (which can take 10+ min) does not delay or
       # consume the job-timeout budget needed to persist evidence.
       #
       # The signed evidence bundle itself is pushed to OCI by the
-      # conformance step (ghcr.io/nvidia/aicr-uat-eks-h100-training-${{
+      # conformance step (ghcr.io/nvidia/aicr-evidence/h100-eks-ubuntu-training-kubeflow:run-${{
       # github.run_id }}) and is the source of truth; here we attach the
       # lightweight pointer so a reviewer can locate that bundle directly
       # from the Actions UI. Org policy clamps retention at 90d.
@@ -315,12 +374,12 @@ jobs:
             echo "| Connection | ${{ steps.client.outcome }} |"
             echo "| Prep | ${{ steps.prep.outcome }} |"
             echo "| Install | ${{ steps.install.outcome }} |"
-            echo "| Conformance | ${{ steps.conformance.outcome }} |"
+            echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
-            if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then
+            if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
-              echo "**Evidence (OCI):** \`ghcr.io/nvidia/aicr-uat-eks-h100-training-${{ github.run_id }}\`"
+              echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -330,8 +389,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete UAT-tagged validator images to avoid GHCR clutter
-          for phase in deployment performance conformance; do
+          # Delete UAT-tagged validator + snapshot-agent images to avoid GHCR clutter
+          for phase in deployment performance conformance agent; do
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
@@ -340,6 +399,23 @@ jobs:
                 "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
             fi
           done
+
+      # Re-assume the role immediately before teardown. The `Configure AWS
+      # credentials` step at the top of the job mints a 1-hour session (the
+      # action's default with no role-duration-seconds), but the UAT phases
+      # (prep + install + conformance + train + verify) can run the full job
+      # timeout before teardown, so by the time `Destroy Cluster` runs the
+      # original session token has expired. Passing that stale token into the
+      # actuator made every retry fail with ExpiredToken and leaked the GPU
+      # node. The `id-token: write` permission is granted for the whole job,
+      # so configure-aws-credentials can mint a fresh session here.
+      - name: Refresh AWS credentials for teardown
+        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Teardown
 
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
@@ -385,3 +461,20 @@ jobs:
             echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
             exit 1
           fi
+
+  # Ingest the signed UAT evidence bundle into the corroboration bucket.
+  # Runs as its own job (separate runner) only when the run produced a
+  # bundle; the reusable workflow verifies signer + issuer + identity +
+  # registry in a credential-free step before publishing to GCS.
+  ingest-evidence:
+    name: Ingest UAT evidence
+    needs: uat-aws
+    if: needs.uat-aws.outputs.bundle_ref != ''
+    permissions:
+      contents: read
+      id-token: write  # WIF for the publish job
+      packages: read   # GHCR pull for the verify job
+    uses: ./.github/workflows/evidence-ingest.yaml
+    with:
+      bundle_ref: ${{ needs.uat-aws.outputs.bundle_ref }}
+      recipe: eks-h100-training

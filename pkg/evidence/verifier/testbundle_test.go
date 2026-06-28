@@ -32,11 +32,24 @@ import (
 // bundle root (which contains summary-bundle/).
 func buildTestBundle(t *testing.T) string {
 	t.Helper()
+	return buildBundle(t, false)
+}
+
+// buildTestBundleFailedPhase is like buildTestBundle but records a failed
+// deployment phase, so the predicate's phase summary has Failed > 0 and
+// Verify reports the informational exit-1 (valid bundle, phase failures).
+func buildTestBundleFailedPhase(t *testing.T) string {
+	t.Helper()
+	return buildBundle(t, true)
+}
+
+func buildBundle(t *testing.T, withPhaseFailure bool) string {
+	t.Helper()
 	dir := t.TempDir()
 
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Criteria: &recipe.Criteria{
 			Service:     recipe.CriteriaServiceEKS,
 			Accelerator: recipe.CriteriaAcceleratorH100,
@@ -46,15 +59,20 @@ func buildTestBundle(t *testing.T) string {
 	}
 	bom := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"a"},{"name":"b"}]}`)
 	report := &ctrf.Report{}
+	status := "passed"
 	report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 1, Failed: 0, Skipped: 0}
+	if withPhaseFailure {
+		status = "failed"
+		report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 0, Failed: 1, Skipped: 0}
+	}
 	phaseResults := []*validator.PhaseResult{
-		{Phase: validator.PhaseDeployment, Status: "passed", Report: report, Duration: time.Second},
+		{Phase: validator.PhaseDeployment, Status: status, Report: report, Duration: time.Second},
 	}
 
 	_, err := attestation.Build(context.Background(), attestation.BuildOptions{
 		OutputDir:    dir,
 		Recipe:       rec,
-		RecipeYAML:   []byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: RecipeResult\n"),
+		RecipeYAML:   []byte("apiVersion: aicr.run/v1alpha2\nkind: RecipeResult\n"),
 		Snapshot:     &snapshotter.Snapshot{},
 		SnapshotYAML: []byte("measurements: []\n"),
 		BOM:          attestation.BOMInputs{Body: bom, CycloneDXVersion: "1.6"},

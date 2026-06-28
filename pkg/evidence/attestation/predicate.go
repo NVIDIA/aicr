@@ -39,6 +39,9 @@ type PredicateInputs struct {
 	Phases                  map[Phase]PhaseSummary
 	BOM                     BOMRef
 	Manifest                ManifestRef
+
+	// Redaction is nil for full bundles and set for minimal bundles.
+	Redaction *RedactionInfo
 }
 
 // BuildPredicate constructs the v1 predicate body from inputs. The
@@ -71,6 +74,7 @@ func BuildPredicate(in PredicateInputs) *Predicate {
 		Phases:                  phases,
 		BOM:                     in.BOM,
 		Manifest:                in.Manifest,
+		Redaction:               in.Redaction,
 	}
 }
 

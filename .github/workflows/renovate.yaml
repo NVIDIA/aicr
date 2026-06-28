@@ -73,7 +73,7 @@ jobs:
       # Renovate uses its own RENOVATE_TOKEN env passed into the container,
       # so the host-side git config never needs the credential.
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -105,7 +105,7 @@ jobs:
       # Keep this digest in lockstep with RENOVATE_VALIDATOR_IMAGE in
       # the Makefile.
       - name: Run Renovate
-        uses: renovatebot/github-action@8217b3fc286df088d7c27f3255fe8414463bc0fd  # v46.1.15
+        uses: renovatebot/github-action@6d859fc95779be83a0335ca704879b47e5d79641  # v46.1.16
         with:
           renovate-version: '43@sha256:00185c0d63462acec8331cc9a94dcd74a763f2765fca0edcc3ff568af1dc8104'
         env:

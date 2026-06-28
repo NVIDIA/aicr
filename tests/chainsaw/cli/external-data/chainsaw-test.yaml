@@ -37,7 +37,7 @@ spec:
               rm -rf "${WORK}" && mkdir -p "${WORK}/empty" "${WORK}/valid" "${WORK}/with-overlay/overlays"
 
               cat > "${WORK}/valid/registry.yaml" << 'EOF'
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               kind: ComponentRegistry
               components:
                 - name: custom-operator
@@ -48,12 +48,12 @@ spec:
                     defaultVersion: v1.0.0
               EOF
 
-              echo 'apiVersion: aicr.nvidia.com/v1alpha1
+              echo 'apiVersion: aicr.run/v1alpha2
               kind: ComponentRegistry
               components: []' > "${WORK}/with-overlay/registry.yaml"
 
               cat > "${WORK}/with-overlay/overlays/custom.yaml" << 'EOF'
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               kind: RecipeMetadata
               metadata:
                 name: custom-overlay

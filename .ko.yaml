@@ -12,4 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-defaultBaseImage: nvcr.io/nvidia/cuda:13.2.1-runtime-ubuntu24.04
+# No defaultBaseImage: the aicr CLI/agent is a pure-Go binary that discovers
+# the GPU SKU driver-free via NFD/PCI, so it no longer needs nvidia-smi or the
+# CUDA base (and its recurring CVE surface). With no override, ko uses its
+# default static, distroless base image (cgr.dev/chainguard/static).

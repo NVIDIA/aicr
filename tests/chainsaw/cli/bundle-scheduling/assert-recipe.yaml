@@ -17,7 +17,7 @@
 # Validates that aicr recipe --service eks --accelerator h100 produces
 # a valid recipe with the correct criteria and components.
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 criteria:
   service: eks
   accelerator: h100

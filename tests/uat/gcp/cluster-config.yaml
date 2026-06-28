@@ -41,12 +41,21 @@ cluster:
 
 network:
   gke:
+    subnets:
+      nodes:
+        - name: system-subnet
+          cidr: "10.0.0.0/22"
+        - name: worker-subnet
+          cidr: "10.0.128.0/17"
     gpuNets:
       count: 8
       mtu: 8244
       cidrBase: "192.168.0.0/16"
       gvnicCidr: "192.168.128.0/20"
     firewallRules:
+      # Allows all intra-VPC TCP/UDP/ICMP from 10.0.0.0/8, which covers node
+      # subnets and the GKE pod secondary ranges. NATS (4222) is already
+      # permitted by this rule, so no dedicated allow-nats rule is needed.
       - name: nccl-internal
         direction: INGRESS
         priority: 900

@@ -69,6 +69,13 @@ const (
 )
 
 // Type represents the category of a measurement (e.g., Kubernetes, GPU, OS, SystemD).
+//
+// Cardinality: most Types appear at most once per snapshot — one K8s measurement,
+// one GPU measurement, etc. TypeNetworkTopology is the planned multi-instance
+// exception (one Measurement per discovered hardware group); today we emit at
+// most one to keep the existing find-first-by-Type consumers (constraints,
+// recipe validation, diff indexing, fingerprint) working unchanged. Lifting
+// that limit is a deliberate future step.
 type Type string
 
 // String returns the string representation of the measurement Type.
@@ -77,11 +84,12 @@ func (mt Type) String() string {
 }
 
 const (
-	TypeK8s          Type = "K8s"
-	TypeGPU          Type = "GPU"
-	TypeOS           Type = "OS"
-	TypeSystemD      Type = "SystemD"
-	TypeNodeTopology Type = "NodeTopology"
+	TypeK8s             Type = "K8s"
+	TypeGPU             Type = "GPU"
+	TypeOS              Type = "OS"
+	TypeSystemD         Type = "SystemD"
+	TypeNodeTopology    Type = "NodeTopology"
+	TypeNetworkTopology Type = "NetworkTopology"
 )
 
 // Types is the list of all supported measurement types.
@@ -91,6 +99,7 @@ var Types = []Type{
 	TypeOS,
 	TypeSystemD,
 	TypeNodeTopology,
+	TypeNetworkTopology,
 }
 
 // ParseType parses a string into a measurement Type.
@@ -114,10 +123,24 @@ type Measurement struct {
 // Subtype represents a specific subcategory of measurement with associated data.
 // Data contains the actual measurements as key-value pairs.
 // Context provides additional metadata about the measurement environment.
+// Items holds an ordered list of structured records (used when a subtype carries
+// a homogeneous array such as a list of PFs); each entry follows the same
+// scalar-only Reading discipline as Data. Data and Items are independent and
+// may both be populated.
 type Subtype struct {
 	Name    string             `json:"subtype,omitempty" yaml:"subtype,omitempty"`
-	Data    map[string]Reading `json:"data" yaml:"data"`
+	Data    map[string]Reading `json:"data,omitempty"    yaml:"data,omitempty"`
 	Context map[string]string  `json:"context,omitempty" yaml:"context,omitempty"`
+	Items   []ItemEntry        `json:"items,omitempty"   yaml:"items,omitempty"`
+}
+
+// ItemEntry is one element of a Subtype.Items list. It mirrors Subtype's
+// scalar-value contract: Data holds Reading scalars; Context holds string-typed
+// descriptive metadata. ItemEntry intentionally does NOT support nested Items
+// — the scalar-only Reading model is preserved.
+type ItemEntry struct {
+	Context map[string]string  `json:"context,omitempty" yaml:"context,omitempty"`
+	Data    map[string]Reading `json:"data,omitempty"    yaml:"data,omitempty"`
 }
 
 // UnmarshalJSON custom unmarshaler for Subtype to handle Reading interface
@@ -127,6 +150,7 @@ func (st *Subtype) UnmarshalJSON(data []byte) error {
 		Name    string            `json:"subtype"`
 		Data    map[string]any    `json:"data"`
 		Context map[string]string `json:"context"`
+		Items   []ItemEntry       `json:"items"`
 	}
 
 	if err := json.Unmarshal(data, &tmp); err != nil {
@@ -135,6 +159,7 @@ func (st *Subtype) UnmarshalJSON(data []byte) error {
 
 	st.Name = tmp.Name
 	st.Context = tmp.Context
+	st.Items = tmp.Items
 	st.Data = make(map[string]Reading)
 
 	// Convert each value to a Reading using ToReading
@@ -152,6 +177,7 @@ func (st *Subtype) UnmarshalYAML(node *yaml.Node) error {
 		Name    string            `yaml:"subtype"`
 		Data    map[string]any    `yaml:"data"`
 		Context map[string]string `yaml:"context"`
+		Items   []ItemEntry       `yaml:"items"`
 	}
 
 	if err := node.Decode(&tmp); err != nil {
@@ -160,11 +186,56 @@ func (st *Subtype) UnmarshalYAML(node *yaml.Node) error {
 
 	st.Name = tmp.Name
 	st.Context = tmp.Context
+	st.Items = tmp.Items
 	st.Data = make(map[string]Reading)
 
 	// Convert each value to a Reading using ToReading
 	for k, v := range tmp.Data {
 		st.Data[k] = ToReading(v)
+	}
+
+	return nil
+}
+
+// UnmarshalJSON custom unmarshaler for ItemEntry to handle Reading interface
+// inside Data, mirroring Subtype's behavior.
+func (ie *ItemEntry) UnmarshalJSON(data []byte) error {
+	var tmp struct {
+		Context map[string]string `json:"context"`
+		Data    map[string]any    `json:"data"`
+	}
+
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to unmarshal item entry JSON", err)
+	}
+
+	ie.Context = tmp.Context
+	ie.Data = make(map[string]Reading)
+
+	for k, v := range tmp.Data {
+		ie.Data[k] = ToReading(v)
+	}
+
+	return nil
+}
+
+// UnmarshalYAML custom unmarshaler for ItemEntry to handle Reading interface
+// inside Data, mirroring Subtype's behavior.
+func (ie *ItemEntry) UnmarshalYAML(node *yaml.Node) error {
+	var tmp struct {
+		Context map[string]string `yaml:"context"`
+		Data    map[string]any    `yaml:"data"`
+	}
+
+	if err := node.Decode(&tmp); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "failed to decode item entry YAML", err)
+	}
+
+	ie.Context = tmp.Context
+	ie.Data = make(map[string]Reading)
+
+	for k, v := range tmp.Data {
+		ie.Data[k] = ToReading(v)
 	}
 
 	return nil
@@ -373,10 +444,19 @@ func copyReadings(src map[string]Reading) map[string]Reading {
 	return dst
 }
 
-// Validate checks if the subtype is properly formed.
+// Validate checks if the subtype is properly formed. A Subtype must have a
+// non-empty Name and carry at least one Data entry or one Items entry; Items
+// alone is sufficient for subtypes whose payload is a list of structured
+// records (e.g. a `pfs` subtype holding per-PF entries). The non-empty-Name
+// invariant honors the OpenAPI `required: [subtype]` schema — the `omitempty`
+// JSON/YAML tag elides the field on the wire only when it is intentionally
+// being left out, never on a Validate'd value.
 func (st *Subtype) Validate() error {
-	if len(st.Data) == 0 {
-		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "subtype data cannot be empty")
+	if st.Name == "" {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "subtype name cannot be empty")
+	}
+	if len(st.Data) == 0 && len(st.Items) == 0 {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "subtype must have at least one data entry or one item entry")
 	}
 	return nil
 }

@@ -65,7 +65,7 @@ Even if your directory only adds overlays (no new components), AICR requires a
 `registry.yaml` at the root. The minimal stub is:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components: []
 ```
@@ -84,7 +84,7 @@ a valid CLI / API input.** No code change, no rebuild.
 Example overlay for an internal NCP:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: ncp-internal-h100-training
@@ -123,7 +123,7 @@ field on a `RecipeMetadata`'s `spec.criteria`.
 `registry.yaml` declares the component's identity and source:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: my-internal-operator

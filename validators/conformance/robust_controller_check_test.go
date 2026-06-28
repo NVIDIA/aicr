@@ -57,6 +57,19 @@ func TestRecipeHasComponent(t *testing.T) {
 			want:      true,
 		},
 		{
+			name: "component disabled",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{
+						Name:      "kubeflow-trainer",
+						Overrides: map[string]any{"enabled": false},
+					},
+				},
+			},
+			component: "kubeflow-trainer",
+			want:      false,
+		},
+		{
 			name: "component not present",
 			recipe: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
@@ -132,6 +145,20 @@ func TestCheckRobustControllerRouting(t *testing.T) {
 			expectSkip: false,
 			// Will fail because fake clientset has no deployments, but proves routing works
 			expectContains: "Kubeflow Trainer controller not found",
+		},
+		{
+			name: "recipe with disabled kubeflow-trainer skips",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{
+						Name:      "kubeflow-trainer",
+						Overrides: map[string]any{"enabled": false},
+					},
+					{Name: "gpu-operator"},
+				},
+			},
+			expectSkip:     true,
+			expectContains: "no supported AI operator",
 		},
 		{
 			name: "recipe with dynamo-platform routes to dynamo check",

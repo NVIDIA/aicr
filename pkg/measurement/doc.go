@@ -13,14 +13,29 @@
 // limitations under the License.
 
 // Package measurement provides types and utilities for collecting, comparing, and filtering
-// system measurements from various sources (Kubernetes, GPU, OS, SystemD).
+// system measurements from various sources (Kubernetes, GPU, OS, SystemD, NodeTopology,
+// NetworkTopology).
+//
+// # Public API contract
+//
+// This package is part of aicr's cross-repo public API. External producers
+// (e.g. k8s-launch-kit) import these types directly to emit Measurements that
+// aicr Snapshots can consume. The Go type definitions AND the schema
+// conventions (which Subtype names mean what, which fields belong in Data vs
+// Context, the NetworkTopology layout) are part of the contract — see
+// docs/integrator/measurement-api.md. Breaking changes require a
+// pseudo-version bump that downstream consumers pin against.
 //
 // # Core Types
 //
 // The package defines a hierarchical structure for measurements:
-//   - Type: Enum identifying the measurement source (K8s, GPU, OS, SystemD)
+//   - Type: Enum identifying the measurement source (K8s, GPU, OS, SystemD,
+//     NodeTopology, NetworkTopology)
 //   - Measurement: Contains a Type and a slice of Subtypes
-//   - Subtype: Named collection of key-value data (e.g., "cluster", "node")
+//   - Subtype: Named collection of key-value data (e.g., "cluster", "node");
+//     may also carry an ordered Items list of structured records
+//   - ItemEntry: One element of a Subtype.Items list. Data holds Reading
+//     scalars; Context holds string metadata. Mirrors Subtype's payload contract.
 //   - Reading: Interface for type-safe scalar values (int, float64, string, bool, etc.)
 //
 // # Creating Measurements

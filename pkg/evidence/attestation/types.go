@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 // Public stability constants. These match the V1 schema documented in
@@ -25,7 +26,7 @@ import (
 // stability boundary.
 const (
 	// PredicateTypeV1 is the in-toto predicateType URI for recipe evidence.
-	PredicateTypeV1 = "https://aicr.nvidia.com/recipe-evidence/v1"
+	PredicateTypeV1 = "https://" + header.Domain + "/recipe-evidence/v1"
 
 	// PredicateSchemaVersion is the recipe-evidence predicate schema version.
 	PredicateSchemaVersion = "1.0.0"
@@ -97,6 +98,14 @@ const (
 // regardless of execution-order changes.
 var AllPhases = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
 
+// CTRFRelPath returns the bundle-relative, forward-slash path of the per-phase
+// CTRF report file (e.g. "ctrf/deployment.json"). It matches both the manifest
+// entry path and the on-disk layout the builder writes, so verifiers can map a
+// Phase back to its committed report.
+func CTRFRelPath(p Phase) string {
+	return ctrfDirName + "/" + string(p) + ".json"
+}
+
 // Predicate is the body of the signed in-toto Statement. It serializes
 // to JSON for the on-the-wire predicate and to YAML for human-readable
 // embedding in spec docs.
@@ -116,6 +125,25 @@ type Predicate struct {
 	Phases                  map[Phase]PhaseSummary  `json:"phases" yaml:"phases"`
 	BOM                     BOMRef                  `json:"bom" yaml:"bom"`
 	Manifest                ManifestRef             `json:"manifest" yaml:"manifest"`
+
+	// Redaction records the policy that scrubbed the bundle's backing
+	// content (snapshot allowlist, CTRF stdout/message omission). It is
+	// nil — and omitted from the serialized predicate — for full
+	// (unredacted) bundles, so a `--full` predicate is byte-identical to
+	// pre-feature output. Present, it tells a verifier exactly what was
+	// removed; the cryptographic binding is unaffected either way because
+	// the digests cover whatever bytes actually shipped.
+	Redaction *RedactionInfo `json:"redaction,omitempty" yaml:"redaction,omitempty"`
+}
+
+// RedactionInfo is the provenance of the minimal-bundle redaction recorded
+// in the signed predicate. Policy/Version identify the rule set; Applied
+// lists the sorted rule identifiers that ran (e.g.
+// "snapshot.measurements.allowlist", "ctrf.tests.omit:stdout").
+type RedactionInfo struct {
+	Policy  string   `json:"policy" yaml:"policy"`
+	Version string   `json:"version" yaml:"version"`
+	Applied []string `json:"applied" yaml:"applied"`
 }
 
 // RecipeRef records the recipe the predicate attests to. Carried in

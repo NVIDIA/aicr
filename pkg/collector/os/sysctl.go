@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -45,13 +46,19 @@ func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, er
 	parser := file.NewParser()
 
 	err := filepath.WalkDir(sysctlRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to walk directory %s", path), err)
-		}
-
-		// Check if context is canceled
+		// Check if context is canceled — fail loud so a timed-out walk is never
+		// reported as a (partial) success.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return errors.Wrap(errors.ErrCodeTimeout, "sysctl collection cancelled", ctxErr)
+		}
+
+		// A per-entry walk error (e.g. a restricted directory under /proc/sys)
+		// must skip only that entry, not abort the whole subtype. Aborting here
+		// would zero out all sysctl data because one path was unreadable.
+		if err != nil {
+			slog.Debug("skipping unreadable sysctl path",
+				slog.String("path", path), slog.String("error", err.Error()))
+			return nil
 		}
 
 		// Skip symlinks to prevent directory traversal attacks
@@ -97,7 +104,9 @@ func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, er
 		return nil
 	})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect sysctl parameters", err)
+		// Preserve a structured code from the callback (e.g. ErrCodeTimeout on
+		// cancellation) instead of flattening every walk error to Internal.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to collect sysctl parameters")
 	}
 
 	res := &measurement.Subtype{

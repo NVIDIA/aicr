@@ -18,6 +18,7 @@ This section is for users who:
 | [End-to-End Tutorial](tutorial.md) | Learning path: install → recipe → bundle → deploy → validate, start to finish |
 | [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
 | [Generating Bundles](bundling.md) | Task-oriented how-to: deployers, value overrides, node scheduling, offline/vendored charts, readiness gates |
+| [Artifact Verification](artifact-verification.md) | Verify bundles and recipe-evidence: trust levels, public-trust, KMS/PEM keys, offline, and CI gating |
 | [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
 | [Validation](validation.md) | Task-oriented walkthrough: validate a cluster against a recipe, both training and inference performance phases |
@@ -34,7 +35,7 @@ brew tap NVIDIA/aicr
 brew install aicr
 
 # Or use the install script
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://get.aicr.run | bash -s --
 
 # Generate a recipe for your environment
 aicr recipe --service eks --accelerator h100 --intent training -o recipe.yaml

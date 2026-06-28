@@ -84,7 +84,7 @@ func TestValidateReadinessTestYAML(t *testing.T) {
 
 func TestCollectComponentReadiness(t *testing.T) {
 	tmpData := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), []byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), []byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile registry.yaml: %v", err)
 	}
 	compDir := filepath.Join(tmpData, "components", "gpu-operator")
@@ -151,7 +151,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 
 	t.Run("malformed test rejected", func(t *testing.T) {
 		badDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(badDir, "registry.yaml"), []byte("apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(badDir, "registry.yaml"), []byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("WriteFile registry.yaml: %v", err)
 		}
 		badComp := filepath.Join(badDir, "components", "gpu-operator")

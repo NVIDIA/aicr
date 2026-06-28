@@ -146,6 +146,11 @@ Override snapshot-detected criteria:
 				return err
 			}
 
+			// Mode banner: recipe generation reads inputs (criteria, embedded
+			// data, an optional snapshot) and never deploys to or modifies a
+			// live cluster, so make that explicit up front (issue #1383).
+			slog.Info("generating recipe offline — reads inputs only; does not deploy to or modify any cluster")
+
 			// Build a per-command Client bound to the resolved data source
 			// (--data / spec.recipe.data, else embedded). The Client owns its
 			// own DataProvider and per-provider criteria registry, replacing
@@ -227,9 +232,15 @@ Override snapshot-detected criteria:
 				return errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
 			}
 
+			componentNames := make([]string, len(resolved.ComponentRefs))
+			for i, ref := range resolved.ComponentRefs {
+				componentNames[i] = ref.Name
+			}
+
 			slog.Info("recipe generation completed",
 				"output", output,
 				"components", len(resolved.ComponentRefs),
+				"componentNames", strings.Join(componentNames, ", "),
 				"overlays", len(resolved.Metadata.AppliedOverlays))
 
 			return nil

@@ -88,7 +88,7 @@ cost-to-defer is high:
 
 - **OCI transport + in-tree pointer file.** Bundle bytes live in OCI
   (`ghcr.io/<owner>/aicr-evidence:<digest>`); the pointer file at
-  `recipes/evidence/<recipe>.yaml` binds the repo to the bundle by
+  `recipes/evidence/<recipe>/<src>/<digest>.yaml` binds the repo to the bundle by
   content hash. Discoverability and audit trail (`git log` on the
   pointer) are worth the small added complexity over PR-attached
   tarballs. **GHCR is shown as the example throughout this ADR; any
@@ -168,7 +168,7 @@ and introduces kind-scoped flag names for the new attestation kind:
 | Kind | Production flags on `aicr validate` |
 |---|---|
 | `cncf-conformance` | `--evidence-dir <path>` (existing), `--cncf-submission`, `--feature <name>` |
-| `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--push <oci-ref>`; `--include-logs` and `--push-logs` are deferred (log capture not implemented in V1) |
+| `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--push <oci-ref>`, `--full` (opt out of default minimization); `--include-logs` and `--push-logs` are deferred (log capture not implemented in V1) |
 
 Both kinds may run from a single `aicr validate` invocation (each
 flag set produces its own output tree) — they are independent
@@ -187,11 +187,11 @@ surface item 1 below for the full schema).
 
 1. **Bundle format + pointer + `aicr validate --emit-attestation`.** Single
    in-toto Statement per recipe run, predicate type
-   `https://aicr.nvidia.com/recipe-evidence/v1`, DSSE-wrapped, signed
+   `https://aicr.run/recipe-evidence/v1`, DSSE-wrapped, signed
    with cosign keyless OIDC. Summary bundle is an OCI artifact;
    optional logs bundle as a separate OCI artifact,
    contributor-controlled. The pointer file (schema 1.0, in-tree at
-   `recipes/evidence/<recipe>.yaml`) is a *side effect* of
+   `recipes/evidence/<recipe>/<src>/<digest>.yaml`) is a *side effect* of
    `--emit-attestation`, not a separate command — generation, OCI push,
    signing, and pointer population happen in one invocation.
 
@@ -213,7 +213,7 @@ surface item 1 below for the full schema).
    between `bundle` and `validate`:
 
    ```yaml
-   apiVersion: aicr.nvidia.com/v1alpha1
+   apiVersion: aicr.run/v1alpha2
    kind: AICRConfig
    metadata:
      name: my-recipe
@@ -271,7 +271,7 @@ surface item 1 below for the full schema).
    aicr validate --recipe r.yaml --snapshot s.yaml --emit-attestation ./out
    # writes:
    #   ./out/summary-bundle/   (recipe, snapshot, BOM, CTRF, manifest, attestation)
-   #   ./out/pointer.yaml      (ready to copy to recipes/evidence/<recipe>.yaml)
+   #   ./out/pointer.yaml      (ready to copy to recipes/evidence/<recipe>/<src>/<digest>.yaml)
    # logs-bundle/ output is deferred — log capture is not implemented in V1.
    ```
 
@@ -288,7 +288,7 @@ surface item 1 below for the full schema).
 
    The pointer is bundle-derived; mismatches between pointer and
    bundle are integrity-chain failures. Contributors copy
-   `./out/pointer.yaml` to `recipes/evidence/<recipe>.yaml` and commit.
+   `./out/pointer.yaml` to `recipes/evidence/<recipe>/<src>/<digest>.yaml` and commit.
 
 2. **`aicr evidence` CLI family.** A typed verb group that consumes
    the evidence kinds enumerated above (see "Evidence taxonomy") with
@@ -307,7 +307,7 @@ surface item 1 below for the full schema).
      aicr evidence verify <input>
 
      # where <input> is auto-detected as:
-     #   recipes/evidence/<recipe>.yaml      → pointer file
+     #   recipes/evidence/<recipe>/<src>/<digest>.yaml      → pointer file
      #   ghcr.io/.../aicr-evidence:<digest>  → OCI reference
      #   ./out/summary-bundle/               → unpacked directory
      ```
@@ -367,7 +367,7 @@ surface item 1 below for the full schema).
    material-slice digest expires, advisory-revocation notifications
    when a deployed image is flagged post-merge (deferred — see the
    advisory-feed row in the deferred-features table), and
-   signer-identity disputes ("who signed `recipes/evidence/<recipe>.yaml`?
+   signer-identity disputes ("who signed `recipes/evidence/<recipe>/<src>/<digest>.yaml`?
    are they still the right routing target?"). Without a recipe-level
    contact, every such event has to be triaged through `git log`
    heuristics — which is exactly what the backfill PR does *once*, and
@@ -375,6 +375,41 @@ surface item 1 below for the full schema).
    schedule-independent of A/B/C (it can land first if convenient,
    since the field is additive metadata) but its motivation is the
    evidence lifecycle this ADR establishes.
+
+### Gate report structure (implemented)
+
+The CI gate (`.github/scripts/recipe-evidence-check.sh`) renders its
+warning-only Markdown comment around two ideas that keep it low-noise on
+broad-impact PRs:
+
+- **Protected vs. other affected.** A recipe is *protected* — implicitly —
+  iff it has a committed pointer at `recipes/evidence/<slug>.yaml`. The
+  protected set is what the gate actively verifies (pointer present →
+  verify → digest compare) and renders as a status table. Recipes that are
+  affected but carry no pointer are best-effort: evidence is
+  hardware-gated and most recipes have none yet, so they are collapsed
+  into a single `<details>` count rather than shown as alarming "missing"
+  rows. Adding a pointer is the only action that moves a recipe into the
+  protected set — there is no separate list to maintain, and it converges
+  with the recipes validated on real hardware.
+
+- **Component-scoped registry cascade.** A change to
+  `recipes/registry.yaml` does not promote every leaf recipe. The gate
+  diffs the registry at the component-*entry* level and marks a recipe
+  affected only if its resolved component set — walked across the base
+  chain and `spec.mixins` — intersects the changed entries, so an
+  `aws-efa`-only edit flags only recipes that reference `aws-efa`. A change
+  to `recipes/overlays/base.yaml` is still treated as broad (it sits at the
+  root of nearly every base chain). The recomputed digest remains the
+  ground truth: a protected recipe whose digest still matches its pointer
+  is reported as a match, never as drift, regardless of promotion.
+
+- **Classified verify failures.** When `aicr evidence verify` fails, the
+  gate surfaces the structured `failureCause` from its `--format json`
+  output (registry 401/403 → "make the fork's aicr-evidence package
+  public", 404, signature, integrity, schema) in the verify column and
+  echoes the full error into the job log — so a contributor can self-serve
+  the fix instead of seeing a bare "invalid".
 
 ### Material-slice canonicalization (proposed)
 
@@ -455,14 +490,20 @@ oci://ghcr.io/<owner>/aicr-evidence:<digest>
 └── (OCI artifact whose layers contain:)
     ├── attestation.intoto.jsonl    # DSSE-wrapped, cosign keyless signed
     ├── recipe.yaml                 # post-resolution canonical YAML
-    ├── snapshot.yaml               # cluster snapshot at validate-time
+    ├── snapshot.yaml               # cluster snapshot at validate-time (minimized by default)
     ├── bom.cdx.json                # CycloneDX BOM (per #739)
-    ├── ctrf/
+    ├── ctrf/                       # per-test stdout/message omitted by default
     │   ├── deployment.json
     │   ├── performance.json
     │   └── conformance.json
     └── manifest.json               # file inventory + per-file sha256
 ```
+
+The bundle is **minimized by default** (see "Minimal-by-default redaction"
+below): `snapshot.yaml` ships an allowlisted subset of fields and the
+`ctrf/*.json` reports omit per-test `stdout`/`message`. `--full` ships the
+raw payloads. Either way the manifest binds whatever bytes shipped, so the
+bundle self-verifies.
 
 Optional logs bundle (contributor-controlled; absent when not published):
 
@@ -485,7 +526,7 @@ arrive when demand justifies — see "Future direction."
 ### Predicate body
 
 ```yaml
-# https://aicr.nvidia.com/recipe-evidence/v1
+# https://aicr.run/recipe-evidence/v1
 schemaVersion: 1.0.0
 materialSliceVersion: 1
 attestedAt: 2026-05-08T10:23:11Z
@@ -523,6 +564,15 @@ bom:
 manifest:
   digest: sha256:...
   fileCount: 9
+# Present only for minimal (default) bundles; omitted entirely with --full.
+redaction:
+  policy: minimal
+  version: v1
+  applied:
+    - ctrf.tests.omit:message
+    - ctrf.tests.omit:stdout
+    - snapshot.header.allowlist
+    - snapshot.measurements.allowlist
 chainManifest:
   leaf:
     path: recipes/overlays/h100-eks-ubuntu-training.yaml
@@ -573,17 +623,69 @@ hashes the manifest enumerates. Without this field, only the material
 digest would be bound — adversaries could swap any other file
 undetected. The verifier's inventory check is what closes the chain.
 
+### Minimal-by-default redaction
+
+An evidence bundle's trust signal is digest-based: the signed predicate
+commits to artifacts by hash and carries the derived fingerprint,
+criteria-match, and per-phase counts. The bundled `snapshot.yaml` and CTRF
+`stdout`/`message` are the *backing content* those digests point at — not the
+signal itself. As collectors grow they accumulate operational detail that is
+sensitive to publish (node names, cloud provider instance IDs, the full node
+label/taint set, kernel/sysctl tuning, loaded modules, systemd service config,
+raw container stdout). The bundle is therefore **minimized by default**, with
+`--full` as the opt-out for operators who want to publish everything.
+
+The minimal policy (`policy: minimal`, `version: v1`) applies two transforms:
+
+- **Snapshot — fail-closed allowlist, enforced at type, subtype, AND key
+  level.** Only enumerated types, subtypes, and data keys survive; a new type,
+  subtype, or key a future collector adds is dropped until explicitly
+  allowlisted (no subtype is keep-all). v1 keeps key-constrained
+  `K8s.server` (version, platform, goVersion) and `K8s.node` (provider,
+  kubelet/runtime/OS versions — *not* `source-node`, `provider-id`,
+  `container-runtime-id`), `GPU.hardware` (present/count/model/driver-loaded/
+  detection-source), `OS.release` (standard distro-identity keys only — the
+  collector ships all of `/etc/os-release`, so non-standard keys are dropped),
+  and `NodeTopology.summary` (counts). It drops `OS.{grub,sysctl,kmod}`, the
+  entire `SystemD` measurement, and `NodeTopology.{label,taint}`. The snapshot
+  header metadata is likewise allowlisted to `{timestamp, version}`, so
+  `source-node` (and any future key) is dropped by default.
+- **CTRF — log omission.** Per-test `stdout` and `message` are removed; the
+  pass/fail signal (name, status, duration, suite, summary counts) is kept.
+
+**The fingerprint is computed from the raw (unredacted) snapshot, not the
+shipped one.** `fingerprint.FromMeasurements` reads several fields the
+allowlist drops (e.g. `NodeTopology.label`), so deriving the predicate's
+`fingerprint`/`criteriaMatch` from the full snapshot keeps the conformance
+signal identical whether or not the shipped bytes were minimized. The verifier
+trusts the fingerprint via the signature; it does not recompute it from
+`snapshot.yaml`. The recorded `redaction` block makes the divergence explicit:
+an auditor can see exactly which rules ran. Because the predicate digests
+(recipe, CTRF, BOM, manifest) all cover the bytes that actually shipped, a
+minimal bundle self-verifies with `aicr evidence verify` — predicate parse,
+manifest inventory, and signature all validate.
+
+The redaction is deterministic (same input → same bytes) and pure
+(`pkg/evidence/redact` never mutates its inputs, so the `--full` path and the
+fingerprint-from-raw computation keep the originals). A `--full` bundle omits
+the `redaction` field entirely and is byte-identical to pre-feature output.
+
+This extends the same reasoning ADR-007 already applied to logs (split into an
+opt-in artifact because they are large and frequently sensitive) to the
+snapshot and CTRF payloads that still ship in the summary bundle.
+
 ### Pointer schema (1.0) (proposed)
 
 ```yaml
-# recipes/evidence/<recipe>.yaml — schema 1.0, single-attestation list
+# recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml
+# — schema 1.0, single-attestation list (see "Per-source pointer layout")
 schemaVersion: 1.0.0
 recipe: h100-eks-ubuntu-training
 attestations:
   - bundle:
       oci: ghcr.io/<owner>/aicr-evidence:<digest>
       digest: sha256:abc123...
-      predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+      predicateType: https://aicr.run/recipe-evidence/v1
     signer:                 # optional; absent for unsigned bundles
       identity: <oidc-subject>
       issuer: <oidc-issuer-url>
@@ -601,11 +703,42 @@ Statement object). Duplicating those fields in the pointer would
 create two sources of truth, and reviewers would have no good answer
 for which one to trust on mismatch.
 
-`attestations` is a **list** from day one (length 1 in V1). When
-multi-instance arrives, additional entries append; the schema 2.0
-bump introduces a `role:` field and pointer rotation. V1 readers
-treat absent `role:` as `primary`. This avoids a breaking schema
-transition for multi-instance.
+`attestations` is a **list** from day one (length 1 in V1). Each
+committed file stays single-attestation; multi-source is expressed by the
+per-source layout below rather than by growing the list. The schema 2.0
+bump (a `role:` field, multi-attestation files) remains reserved but is not
+needed for multi-source and stays deferred.
+
+#### Per-source pointer layout (#1347 Option A, implemented in #1401)
+
+Pointers are committed **per source** so two parties can attest to the same
+recipe without overwriting each other:
+
+```text
+recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml   # immutable, add-only
+recipes/evidence/allowlist.yaml                            # maintained signer allowlist
+```
+
+`<src>` is `attestation.SourceSlug(issuer, identity)` — the first 32 hex
+characters (128 bits) of `sha256(issuer + "\n" + identity)` of the **verified** signer.
+Deriving the slug from the signer (rather than a free-form label) is what
+makes the path non-squattable: the `evidence-pointer-contract` CI job
+(`tools/evidence-pointercheck`, backed by `verifier.CheckEvidenceTree`)
+recomputes the slug from each committed pointer's own signer and rejects any
+file that does not live under the directory its signer hashes to, that is
+unsigned, or whose signer is not allowlisted as community/partner. Consumers
+discover a recipe's evidence by glob (`verifier.DiscoverPointers`,
+`<recipe>/*/*.yaml`) and aggregate across sources; nothing is modified in
+place.
+
+The **allowlist** is the trust root, validated by `pkg/evidence/allowlist` to
+be disjoint, non-overlapping, and free of over-broad patterns. Community and
+partner entries are keyed by the one-way `source` slug only (no cleartext
+identity is committed; an optional non-PII `label` is for display); first-party
+entries pin a tightly-bounded `identityPattern` (a CI workflow URL, not
+personal PII) and ingest directly with no committed per-run pointer. Committed
+pointers are the community/partner channel. A verified signer absent from the
+allowlist is *reported* only — never corroborating.
 
 The pointer is bundle-derived; `aicr validate --emit-attestation`
 regenerates it from the OCI artifact (or the locally-emitted bundle
@@ -615,7 +748,7 @@ authoritative; the pointer points at it.
 
 ### Verifier steps (proposed)
 
-`aicr evidence verify recipes/evidence/<recipe>.yaml` (or any
+`aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml` (or any
 auto-detected input form — OCI ref or unpacked directory):
 
 1. **Schema-validate** the pointer file.
@@ -700,7 +833,7 @@ Exit codes (proposed):
 
 The CI gate explicitly checks for pointer file presence: a PR that
 touches `recipes/overlays/<recipe>.yaml` without producing a fresh
-`recipes/evidence/<recipe>.yaml` (whether new or updated to the
+`recipes/evidence/<recipe>/<src>/<digest>.yaml` (whether new or updated to the
 new recipe state) fails with a clear "no evidence bundle present"
 message, satisfying #751 acceptance criterion 1.
 
@@ -758,7 +891,7 @@ see `## Future direction`.
   CTRF, or BOM after sign-time is detectable; the verifier's inventory
   check enforces it.
 - **OCI-native transport with audit trail.** `git log
-  recipes/evidence/<recipe>.yaml` shows every signing event;
+  recipes/evidence/<recipe>/<src>/<digest>.yaml` shows every signing event;
   content-addressed pulls catch registry compromise.
 - **BOM in every bundle.** Ties the recipe to the exact image set
   deployed, satisfying #739's audit requirement and giving downstream
@@ -996,7 +1129,7 @@ commitments the demand event has not yet justified.
    handles the OCI upload, cosign attest, and pointer population in one
    command. Updates `pkg/bundler/attestation` with the new predicate
    type. Pulls the BOM from the existing #739 pipeline. Extends
-   `pkg/config.AICRConfig` (apiVersion `aicr.nvidia.com/v1alpha1`,
+   `pkg/config.AICRConfig` (apiVersion `aicr.run/v1alpha2`,
    additive) with a `ValidateSpec` sibling of `RecipeSpec`/`BundleSpec`,
    reusing `AttestationSpec` and `RegistrySpec` so cosign and OCI
    surfaces stay consistent across `bundle` and `validate`.

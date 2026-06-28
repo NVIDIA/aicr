@@ -394,7 +394,8 @@ Mirror the BOM precedent precisely:
 
 - `make recipe-health-docs` runs `go run ./tools/health -deterministic
   -no-title` and splices the matrix into `docs/user/recipe-health.md` between
-  `<!-- BEGIN AICR-HEALTH -->` / `<!-- END AICR-HEALTH -->`. `make
+  `{/* BEGIN AICR-HEALTH */}` / `{/* END AICR-HEALTH */}` (MDX comment syntax,
+  since the page is published through Fern, which parses docs as MDX). `make
   recipe-health-check` is the advisory staleness check (paralleling
   `bom-check`), **not** wired into `make qualify`. (The targets are named
   `recipe-health-*`, not the shorter `health-*` this ADR originally proposed,

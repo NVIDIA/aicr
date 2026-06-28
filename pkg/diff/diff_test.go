@@ -29,7 +29,7 @@ func makeSnapshot(measurements ...*measurement.Measurement) *snapshotter.Snapsho
 	snap := snapshotter.NewSnapshot()
 	snap.Header = header.Header{
 		Kind:       header.KindSnapshot,
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: header.GroupVersion,
 		Metadata:   map[string]string{},
 	}
 	snap.Measurements = measurements

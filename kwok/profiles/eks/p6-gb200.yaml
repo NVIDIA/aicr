@@ -19,7 +19,7 @@
 # - 288 ARM vCPUs (Grace CPU), 3072 GiB memory
 # - NVLink 5.0 interconnect
 
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: KWOKNodeProfile
 metadata:
   name: p6-gb200

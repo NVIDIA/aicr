@@ -29,11 +29,12 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 const (
 	// ExpectedAPIVersion is the required apiVersion for build spec files.
-	ExpectedAPIVersion = "aicr.nvidia.com/v1beta1"
+	ExpectedAPIVersion = header.Domain + "/v1beta2"
 	// ExpectedKind is the required kind for build spec files.
 	ExpectedKind = "AICRRuntime"
 )

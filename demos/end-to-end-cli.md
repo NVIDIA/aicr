@@ -33,7 +33,7 @@ From criteria file:
 ```shell
 cat > "${TMPDIR:-/tmp}/criteria.yaml" << 'EOF'
 kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: h100-eks-training-kubeflow
 spec:
@@ -75,7 +75,7 @@ Recipe from API (POST with criteria body):
 curl -s -X POST "https://aicr-demo.dgxc.io/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
   -d 'kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-training
 spec:

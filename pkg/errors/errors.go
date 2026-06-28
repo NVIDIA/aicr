@@ -15,6 +15,7 @@
 package errors
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 )
@@ -123,6 +124,21 @@ func WrapWithContext(code ErrorCode, message string, cause error, context map[st
 		Cause:   cause,
 		Context: context,
 	}
+}
+
+// IsTransient reports whether err represents a transient (retryable) failure:
+// a context cancellation/deadline, or a StructuredError carrying
+// ErrCodeTimeout anywhere in its Unwrap chain. Deterministic codes
+// (Internal, InvalidRequest, NotFound, ...) are NOT transient — callers that
+// bucket errors as retryable-vs-fail should treat anything this returns false
+// for as deterministic and fail closed. Returns false for nil.
+func IsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	return stderrors.Is(err, context.DeadlineExceeded) ||
+		stderrors.Is(err, context.Canceled) ||
+		stderrors.Is(err, New(ErrCodeTimeout, ""))
 }
 
 // PropagateOrWrap returns err as-is when it already carries a *StructuredError

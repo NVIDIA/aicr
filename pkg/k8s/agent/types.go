@@ -48,6 +48,24 @@ type Config struct {
 	MaxNodesPerEntry   int    // Max node names per topology entry (0 = unlimited)
 	OS                 string // Recipe OS criteria value. When set to oskind.Talos, systemd hostPath mounts are skipped and the in-pod agent uses the Talos service backend.
 
+	// ClusterConfigPath, when set, forwards to the in-pod network
+	// collector via AICR_CLUSTER_CONFIG_PATH so it ingests an existing
+	// l8k cluster-config.yaml. The path must resolve inside the pod —
+	// today's Job mode does NOT auto-mount the caller's host file, so
+	// the snapshotter's deployAndWaitForResult rejects a Job-mode call
+	// with ClusterConfigPath set (returns ErrCodeInvalidRequest).
+	// ConfigMap-backed mounting is tracked as a follow-up; until then
+	// file ingestion is local-mode-only (developer runs the CLI with
+	// AICR_AGENT_MODE=true), and Job mode is best used with
+	// DiscoverNetwork for live cluster discovery.
+	ClusterConfigPath string
+
+	// DiscoverNetwork, when true, forwards via AICR_DISCOVER_NETWORK to
+	// enable the in-pod network collector's live l8k discovery path.
+	// Discovery is NOT read-only — it patches NicClusterPolicy and writes
+	// nvidia.kubernetes-launch-kit.* node labels.
+	DiscoverNetwork bool
+
 	// Requests overrides the per-resource container requests on the agent pod.
 	// When nil, the privileged/restricted defaults in job.go are used. Keys
 	// must match standard Kubernetes resource names (cpu, memory,

@@ -21,7 +21,7 @@
 # See docs/integrator/talos-integration.md for details.
 
 kind: RecipeMixin
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: os-talos
 spec:

@@ -62,6 +62,9 @@ Require a minimum CLI version (bare version defaults to >= semantics):
   aicr verify ./my-bundle --cli-version-constraint ">= 0.8.0"
   aicr verify ./my-bundle --cli-version-constraint "== 0.8.0"
 
+Verify a privately-signed bundle against an org trusted root:
+  aicr verify ./my-bundle --trust-root ./trusted_root.json
+
 Output as JSON:
   aicr verify ./my-bundle --format json
 `,
@@ -91,6 +94,10 @@ Output as JSON:
 			&cli.StringFlag{
 				Name:  "key",
 				Usage: "Verify a key-signed bundle attestation against a KMS key URI (awskms:// | gcpkms:// | azurekms://) or a local PEM public-key file. The counterpart to `bundle --signing-key`. Coexists with --certificate-identity-regexp (which pins the separate binary attestation).",
+			},
+			&cli.StringFlag{
+				Name:  "trust-root",
+				Usage: "Verify the bundle attestation against a private Sigstore trusted root (a trusted_root.json from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with --key and --certificate-identity-regexp. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`.",
 			},
 			withCompletions(&cli.StringFlag{
 				Name:  flagFormat,
@@ -131,11 +138,15 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 		verifyOpts.CertificateIdentityRegexp = identityRegexp
 	}
 	verifyOpts.Key = cmd.String("key")
+	verifyOpts.TrustRoot = cmd.String("trust-root")
 
 	// Run verification
 	result, err := verifier.Verify(ctx, absDir, verifyOpts)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "bundle verification failed", err)
+		// Preserve a coded error from Verify (e.g. ErrCodeInvalidRequest for a
+		// bad --trust-root file, ErrCodeNotFound for a missing bundle dir) so
+		// the user sees the real classification instead of a blanket Internal.
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "bundle verification failed")
 	}
 
 	// Check policy requirements

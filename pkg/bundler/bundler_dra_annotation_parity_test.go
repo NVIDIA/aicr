@@ -32,7 +32,7 @@ import (
 // generated-artifact acceptance test the issue calls out. It bundles
 // the same recipe through two deployer code paths — the default Helm
 // deployer AND the helmfile (GitOps-style) deployer — and asserts the
-// bundler-derived aicr.nvidia.com/gpu-operator-chart-version
+// bundler-derived aicr.run/gpu-operator-chart-version
 // annotation lands in the rendered nvidia-dra-driver-gpu values.yaml
 // at the structurally correct `controller.podAnnotations` and
 // `kubeletPlugin.podAnnotations` paths for BOTH outputs.
@@ -48,7 +48,7 @@ import (
 func TestMake_DRAChartVersionAnnotation_GeneratedArtifactParity(t *testing.T) {
 	const (
 		gpuOpVersion       = "v26.4.0"
-		expectedAnnotation = "aicr.nvidia.com/gpu-operator-chart-version"
+		expectedAnnotation = "aicr.run/gpu-operator-chart-version"
 	)
 
 	deployers := []struct {
@@ -81,7 +81,7 @@ func TestMake_DRAChartVersionAnnotation_GeneratedArtifactParity(t *testing.T) {
 			}
 
 			rr := &recipe.RecipeResult{
-				APIVersion: "aicr.nvidia.com/v1alpha1",
+				APIVersion: "aicr.run/v1alpha2",
 				Kind:       "Recipe",
 				Criteria: &recipe.Criteria{
 					Service:     "eks",
@@ -151,7 +151,7 @@ func TestMake_DRAChartVersionAnnotation_GeneratedArtifactParity(t *testing.T) {
 func TestMake_DRAChartVersionAnnotation_AllDeployersCarryAnnotation(t *testing.T) {
 	const (
 		gpuOpVersion       = "v26.4.0"
-		expectedAnnotation = "aicr.nvidia.com/gpu-operator-chart-version"
+		expectedAnnotation = "aicr.run/gpu-operator-chart-version"
 	)
 
 	deployers := []struct {
@@ -177,7 +177,7 @@ func TestMake_DRAChartVersionAnnotation_AllDeployersCarryAnnotation(t *testing.T
 			}
 
 			rr := &recipe.RecipeResult{
-				APIVersion: "aicr.nvidia.com/v1alpha1",
+				APIVersion: "aicr.run/v1alpha2",
 				Kind:       "Recipe",
 				Criteria: &recipe.Criteria{
 					Service:     "eks",
@@ -268,7 +268,7 @@ func TestMake_DRAChartVersionAnnotation_DisabledRecipeUnaffected(t *testing.T) {
 	}
 
 	rr := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -302,7 +302,7 @@ func TestMake_DRAChartVersionAnnotation_DisabledRecipeUnaffected(t *testing.T) {
 	// gpu-operator's own values.yaml must NOT carry the DRA annotation
 	// — guards against an injection bug that wrote into the wrong key.
 	gpuValues := readBundleValues(t, tmpDir, "001-gpu-operator/values.yaml")
-	if strings.Contains(string(gpuValues), "aicr.nvidia.com/gpu-operator-chart-version") {
+	if strings.Contains(string(gpuValues), "aicr.run/gpu-operator-chart-version") {
 		t.Errorf("gpu-operator values unexpectedly contain the DRA chart-version annotation:\n%s",
 			string(gpuValues))
 	}

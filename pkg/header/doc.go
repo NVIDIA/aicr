@@ -23,7 +23,7 @@
 //
 //	type Header struct {
 //	    Kind       Kind              `json:"kind,omitempty" yaml:"kind,omitempty"`             // Resource type (Snapshot, Recipe, RecipeResult)
-//	    APIVersion string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"` // API version (e.g., "v1")
+//	    APIVersion string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"` // API version (e.g., "aicr.run/v1alpha2")
 //	    Metadata   map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`     // Free-form string metadata (timestamp, version, etc.)
 //	}
 //
@@ -35,21 +35,21 @@
 // Initialize a header for a recipe via Init:
 //
 //	var h header.Header
-//	h.Init(header.KindRecipe, "v1", "v1.0.0")
+//	h.Init(header.KindRecipe, header.GroupVersion, "v1.0.0")
 //	// h.Metadata == map[string]string{"timestamp": "...", "version": "v1.0.0"}
 //
 // For reproducible-build callers (SLSA, signed artifacts) inject a fixed
 // timestamp via InitWithTime instead of Init:
 //
 //	var h header.Header
-//	h.InitWithTime(header.KindSnapshot, "v1", "v1.0.0", buildTime)
+//	h.InitWithTime(header.KindSnapshot, header.GroupVersion, "v1.0.0", buildTime)
 //
 // # Serialization
 //
 // Headers serialize consistently to JSON and YAML:
 //
 //	{
-//	  "apiVersion": "v1",
+//	  "apiVersion": "aicr.run/v1alpha2",
 //	  "kind": "Recipe",
 //	  "metadata": {
 //	    "timestamp": "2025-12-30T10:30:00Z",
@@ -59,14 +59,16 @@
 //
 // # API Versioning
 //
-// The APIVersion field enables evolution of data formats:
-//   - v1: Current stable API
-//   - Future versions can add fields with backward compatibility
+// The APIVersion field enables evolution of data formats. The current group and
+// version is GroupVersion ("aicr.run/v1alpha2"); APIGroup derives from Domain.
+// Per ADR-013 the move from the legacy aicr.nvidia.com/v1alpha1 group was a hard
+// break — the old value is rejected, not migrated.
 //
-// Tools should check APIVersion before parsing:
+// Callers should gate on IsSupportedAPIVersion rather than comparing literals,
+// so the single source of truth in this package stays authoritative:
 //
-//	if header.APIVersion != "v1" {
-//	    return fmt.Errorf("unsupported API version: %s", header.APIVersion)
+//	if h.APIVersion != "" && !header.IsSupportedAPIVersion(h.APIVersion) {
+//	    return fmt.Errorf("unsupported apiVersion %q; expected %s", h.APIVersion, header.GroupVersion)
 //	}
 //
 // # Kind Field
@@ -89,7 +91,7 @@
 //
 // Init writes the timestamp using RFC3339 format in UTC:
 //
-//	h.Init(header.KindRecipe, "v1", "v1.0.0")
+//	h.Init(header.KindRecipe, header.GroupVersion, "v1.0.0")
 //	// h.Metadata["timestamp"] == "2025-12-30T10:30:00Z"
 //
 // # Validation

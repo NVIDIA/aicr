@@ -24,6 +24,8 @@ navigation:
         path: user/installation.md
       - page: CLI Reference
         path: user/cli-reference.md
+      - page: Artifact Verification
+        path: user/artifact-verification.md
       - page: API Reference
         path: user/api-reference.md
       - page: Agent Deployment
@@ -34,6 +36,8 @@ navigation:
         path: user/component-catalog.md
       - page: Recipe Health
         path: user/recipe-health.md
+      - page: TestGrid
+        path: user/testgrid.md
       - page: Validation
         path: user/validation.md
       - page: Coverage Matrix
@@ -76,6 +80,8 @@ navigation:
         path: contributor/collector.md
       - page: Validators
         path: contributor/validator.md
+      - page: Evidence Ingest
+        path: contributor/evidence-ingest.md
       - page: Inference-Perf Fluctuation (investigation)
         path: contributor/inference-perf-fluctuation.md
       - page: CLI
@@ -88,3 +94,5 @@ navigation:
         path: contributor/skills.md
       - page: Maintaining AICR
         path: contributor/maintaining.md
+      - page: Publishing Recipe Evidence
+        path: contributor/evidence-publishing.md

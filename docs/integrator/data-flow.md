@@ -40,15 +40,14 @@ Each stage transforms input data into a different format:
 - **policy**: GPU Operator ClusterPolicy custom resource
 
 **GPU Hardware:**
-- Source: `nvidia-smi` command-line tool
-- Data: Driver version, CUDA version, MIG settings, device info
-- Format: Parsed XML/text output
+- Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
+- Data: GPU presence, count, kernel-module state, and the accelerator SKU resolved from the PCI device ID
 
 ### Snapshot Data Structure
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Snapshot (aicr.nvidia.com/v1alpha1)                      │
+│ Snapshot (aicr.run/v1alpha2)                      │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   created: timestamp                                    │
@@ -68,7 +67,7 @@ Each stage transforms input data into a different format:
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
 │   ├─ GPU                                                │
-│   │   └─ subtypes: [smi, driver, device]                │
+│   │   └─ subtypes: [hardware]                           │
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
 │   └─ NodeTopology                                       │
@@ -92,7 +91,7 @@ metadata:
 data:
   snapshot.yaml: |
     # Complete snapshot YAML stored as ConfigMap data
-    apiVersion: aicr.nvidia.com/v1alpha1
+    apiVersion: aicr.run/v1alpha2
     kind: Snapshot
     measurements: [...]
 ```
@@ -188,7 +187,7 @@ K8s/config/*                → intent hints
 OS/release/ID               → os (family)
 OS/release/VERSION_ID       → osv (version)
 OS/grub/BOOT_IMAGE          → kernel (version)
-GPU/smi/model               → accelerator (type)
+GPU/hardware/model          → accelerator (type)
 ```
 
 ### Recipe Generation
@@ -216,7 +215,7 @@ For the resolver internals (specificity scoring, deep-merge semantics) see
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Recipe (aicr.nvidia.com/v1alpha1)                        │
+│ Recipe (aicr.run/v1alpha2)                        │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   version: recipe format version                        │

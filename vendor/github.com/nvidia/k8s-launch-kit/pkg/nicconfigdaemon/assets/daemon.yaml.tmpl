@@ -1,0 +1,192 @@
+# Copyright 2026 NVIDIA CORPORATION & AFFILIATES
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: k8s-launch-kit
+    app.kubernetes.io/component: discover
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .SAName }}
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: k8s-launch-kit
+---
+# Empty stand-in for the ConfigMap normally shipped by the
+# nic-configuration-operator Helm chart. The daemon's
+# helper.InitNicFwMapFromConfigMap performs a Get on this name at startup
+# and exits if it errors; an empty Data map is enough to let init succeed
+# (NicFirmwareMap stays empty, which is fine — discovery doesn't drive
+# firmware upgrades).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nic-configuration-operator-supported-nic-firmware
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: k8s-launch-kit
+data: {}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .ClusterRoleName }}
+  labels:
+    app.kubernetes.io/managed-by: k8s-launch-kit
+rules:
+- apiGroups:
+  - configuration.net.nvidia.com
+  resources:
+  - nicdevices
+  - nicdevices/status
+  - nicconfigurationtemplates
+  - nicfirmwaretemplates
+  - nicfirmwaresources
+  - nicinterfacenametemplates
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - maintenance.nvidia.com
+  resources:
+  - nodemaintenances
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .ClusterRoleBindingName }}
+  labels:
+    app.kubernetes.io/managed-by: k8s-launch-kit
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .ClusterRoleName }}
+subjects:
+- kind: ServiceAccount
+  name: {{ .SAName }}
+  namespace: {{ .Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .DaemonSetName }}
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/name: nic-configuration-daemon
+    app.kubernetes.io/managed-by: k8s-launch-kit
+spec:
+  selector:
+    matchLabels:
+      control-plane: nic-configuration-daemon
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: nic-configuration-daemon
+      labels:
+        control-plane: nic-configuration-daemon
+        app.kubernetes.io/name: nic-configuration-daemon
+        app.kubernetes.io/managed-by: k8s-launch-kit
+    spec:
+      hostPID: true
+      priorityClassName: system-node-critical
+      serviceAccountName: {{ .SAName }}
+      terminationGracePeriodSeconds: 10
+      # No nodeSelector: discovery runs on every node. The NFD label
+      # feature.node.kubernetes.io/pci-15b3.present may not exist yet at
+      # discover time (NFD not installed), so the daemon must not be pinned to
+      # it. The discovery flow probes each pod's sysfs for an NVIDIA NIC
+      # (PCI vendor 0x15b3) to decide which nodes to wait on instead.
+      # Tolerate every taint so the daemon also lands on control-plane (and
+      # other tainted) nodes — on small/single-node clusters the control-plane
+      # node may carry the data-plane NICs. This is a short-lived, privileged
+      # discovery daemon that is torn down afterwards.
+      tolerations:
+        - operator: Exists
+{{- if .ImagePullSecrets }}
+      imagePullSecrets:
+{{- range .ImagePullSecrets }}
+        - name: {{ . }}
+{{- end }}
+{{- end }}
+      containers:
+        - name: nic-configuration-daemon
+          image: {{ .Image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LOG_LEVEL
+              value: {{ .LogLevel }}
+          volumeMounts:
+            - name: sys
+              mountPath: /sys
+              readOnly: false
+      volumes:
+        - name: sys
+          hostPath:
+            path: /sys
