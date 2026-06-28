@@ -36,15 +36,16 @@ curl -sfL https://get.aicr.run | bash -s --
 aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
-# Inspect any hydrated value (e.g., the resolved GPU driver version)
-aicr query --service eks --accelerator h100 --os ubuntu --intent training --platform kubeflow \
-  --selector components.gpu-operator.values.driver.version
-
 # Render it into deployment-ready bundles (helm, argocd, flux, or helmfile)
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe
 aicr validate --recipe recipe.yaml
+
+# Select hydrated config value (e.g., the resolved GPU driver version)
+aicr query --service eks --accelerator h100 --os ubuntu \
+  --intent training --platform kubeflow \
+  --selector components.gpu-operator.values.driver.version
 ```
 
 The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, or simple Helm commands for `helm`.
