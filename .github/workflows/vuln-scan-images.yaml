@@ -514,7 +514,7 @@ jobs:
             [ .matches[]
               | select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
               | (.artifact.name + " " + .vulnerability.id
-                  ( (.relatedVulnerabilities // [] | map(.id) | join(","))
+                 + ( (.relatedVulnerabilities // [] | map(.id) | join(","))
                      | if . == "" then "" else " (" + . + ")" end )) ]
             | join(", ")' "${JSON_OUT}")
 
