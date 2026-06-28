@@ -41,8 +41,12 @@ on:
     paths: &trigger_paths
       - 'pkg/bundler/attestation/**'
       - 'pkg/bundler/verifier/**'
-      - 'pkg/cli/bundle.go'
+      - 'pkg/trust/**'
+      - 'pkg/cli/**'
       - 'cmd/aicr/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/**'
       - 'tests/chainsaw/signing/bundle-attestation-private-sigstore/**'
       - '.github/workflows/sigstore-scaffolding-e2e.yaml'
       - '.github/actions/load-versions/**'

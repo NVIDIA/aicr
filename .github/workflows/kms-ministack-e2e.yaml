@@ -52,6 +52,8 @@ on:
       - '.settings.yaml'
       - '.goreleaser.yaml'
       - 'pkg/bundler/**'
+      # The keyless/trust-root verification path imports pkg/trust directly.
+      - 'pkg/trust/**'
       # The `bundle --signing-key`, `verify --key`, and identity-regexp plumbing
       # under test lives in pkg/cli; cmd/aicr is the thin entrypoint. go.mod/sum
       # cover dependency bumps (e.g. sigstore) that change the signing path.
@@ -59,6 +61,7 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
+      - 'vendor/**'
 
 # Least privilege at the workflow level; id-token is granted only to the job
 # that needs it (below).

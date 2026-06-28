@@ -18,12 +18,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -467,6 +470,43 @@ func TestNewFileReader(t *testing.T) {
 			t.Errorf("Expected table format error, got: %v", err)
 		}
 	})
+}
+
+// TestNewFileReader_RejectsOversizeFile verifies the size cap is enforced at
+// read time: a file larger than MaxSpecFileBytes is rejected rather than
+// silently truncated or accepted with trailing excess.
+func TestNewFileReader_RejectsOversizeFile(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "oversize*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	// A valid first document followed by enough filler to exceed the cap.
+	if _, writeErr := tmpfile.WriteString("name: ok\nvalue: 1\n"); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	pad := strings.Repeat("x", int(defaults.MaxSpecFileBytes)+1024)
+	if _, writeErr := tmpfile.WriteString("# " + pad + "\n"); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	tmpfile.Close()
+
+	reader, err := NewFileReader(FormatYAML, tmpfile.Name())
+	if err == nil {
+		if reader != nil {
+			reader.Close()
+		}
+		t.Fatalf("NewFileReader on oversize file = nil error, want rejection")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum allowed size") {
+		t.Errorf("error = %q, want it to mention the size limit", err.Error())
+	}
+	// Oversize is a deterministic client error: assert the code, not just text,
+	// so a wrong-code regression fails.
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
 }
 
 func TestNewFileReader_ErrorPaths(t *testing.T) {
@@ -1055,8 +1095,10 @@ func TestFromFile_Errors(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for nonexistent file")
 		}
-		if !strings.Contains(err.Error(), "failed to create serializer") {
-			t.Errorf("Expected serializer creation error, got: %v", err)
+		// The reader's NOT_FOUND code is preserved through FromFile (not
+		// flattened to INTERNAL), so callers can map a missing file to a 4xx.
+		if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			t.Errorf("Expected ErrCodeNotFound, got: %v", err)
 		}
 	})
 

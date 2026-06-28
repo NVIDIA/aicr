@@ -895,8 +895,28 @@ func waitForIMEXClaimTemplate(ctx context.Context, dynamicClient dynamic.Interfa
 				"timed out waiting for DRA driver to reconcile ComputeDomain into a ResourceClaimTemplate", waitCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return aicrErrors.New(aicrErrors.ErrCodeInternal,
-					"IMEX ResourceClaimTemplate watch channel closed unexpectedly")
+				if ctxErr := waitCtx.Err(); ctxErr != nil {
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"timed out waiting for DRA driver to reconcile ComputeDomain into a ResourceClaimTemplate", ctxErr)
+				}
+				// Watch closed without cancellation — re-Get before failing a
+				// healthy run, in case the RCT was reconciled during the
+				// closure window (apiserver hiccup, LB drop).
+				_, getErr := rctClient.Get(waitCtx, ncclIMEXClaimTemplateName, metav1.GetOptions{})
+				switch {
+				case getErr == nil:
+					slog.Info("IMEX ResourceClaimTemplate ready", "name", ncclIMEXClaimTemplateName)
+					return nil
+				case apierrors.IsNotFound(getErr):
+					return aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+						"IMEX ResourceClaimTemplate watch channel closed before reconciliation observed")
+				case aicrErrors.IsTransient(getErr):
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"IMEX ResourceClaimTemplate watch closed and re-check timed out", getErr)
+				default:
+					return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+						"IMEX ResourceClaimTemplate watch closed and re-check failed", getErr)
+				}
 			}
 			if event.Type == watch.Added || event.Type == watch.Modified {
 				slog.Info("IMEX ResourceClaimTemplate ready", "name", ncclIMEXClaimTemplateName)
@@ -1202,8 +1222,17 @@ func waitForTrainingRuntime(ctx context.Context, dynamicClient dynamic.Interface
 				"timed out waiting for TrainingRuntime to be visible", waitCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return aicrErrors.New(aicrErrors.ErrCodeInternal,
-					"TrainingRuntime watch channel closed unexpectedly")
+				if ctxErr := waitCtx.Err(); ctxErr != nil {
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"timed out waiting for TrainingRuntime to be visible", ctxErr)
+				}
+				// Watch closed without cancellation — re-Get before failing,
+				// in case the runtime became visible during the closure window.
+				if _, getErr := runtimeClient.Get(waitCtx, ncclTrainingRuntimeName, metav1.GetOptions{}); getErr == nil {
+					return nil
+				}
+				return aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+					"TrainingRuntime watch channel closed before it became visible")
 			}
 			if event.Type == watch.Added || event.Type == watch.Modified {
 				return nil
@@ -1234,7 +1263,20 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timeout waiting for pod", ctx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return nil, aicrErrors.New(aicrErrors.ErrCodeInternal, "pod watch channel closed unexpectedly")
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timeout waiting for pod", ctxErr)
+				}
+				// Watch closed without cancellation — re-List before failing,
+				// in case the pod was created during the closure window.
+				if pods, listErr := clientset.CoreV1().Pods(namespace).List(ctx,
+					metav1.ListOptions{LabelSelector: labelSelector}); listErr == nil {
+					if p := newestRunnablePod(pods.Items); p != nil {
+						slog.Info("Found launcher pod", "name", p.Name)
+						return p, nil
+					}
+				}
+				return nil, aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+					"pod watch channel closed before a matching pod appeared")
 			}
 			pod, ok := event.Object.(*v1.Pod)
 			if !ok {
@@ -1244,6 +1286,26 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 			return pod, nil
 		}
 	}
+}
+
+// newestRunnablePod returns the youngest non-terminating pod from a label
+// selector List, skipping pods being deleted or in a terminal phase
+// (Succeeded/Failed). Used to recover after a watch channel closes without
+// handing back a completed pod from a prior run. Returns nil when no viable
+// pod is present.
+func newestRunnablePod(pods []v1.Pod) *v1.Pod {
+	var best *v1.Pod
+	for i := range pods {
+		p := &pods[i]
+		phase := p.Status.Phase
+		if p.DeletionTimestamp != nil || phase == v1.PodFailed || phase == v1.PodSucceeded {
+			continue
+		}
+		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = p
+		}
+	}
+	return best
 }
 
 // parseBandwidthFromLogs extracts the bus bandwidth value from NCCL test logs.

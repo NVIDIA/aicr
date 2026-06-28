@@ -279,7 +279,11 @@ func applyRelease(cfg *config.LaunchKitConfig, release string) error {
 	cfg.NetworkOperator.OperatorRepository = rel.NetworkOperator.OperatorRepository
 	cfg.NetworkOperator.HelmRepoURL = rel.NetworkOperator.HelmRepoURL
 	if cfg.DOCADriver == nil {
-		cfg.DOCADriver = &config.DOCADriverConfig{}
+		cfg.DOCADriver = &config.DOCADriverConfig{
+			UnloadStorageModules:        true,
+			UnloadThirdPartyRDMAModules: true,
+			SkipPreflightChecks:         false,
+		}
 	}
 	cfg.DOCADriver.Version = rel.DOCADriver.Version
 	return nil

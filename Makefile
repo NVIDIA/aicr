@@ -710,8 +710,8 @@ kwok-cluster: ## Creates KWOK cluster for GPU simulation (control-plane only)
 	fi
 	ctlptl apply -f $(CTLPTL_KWOK_CONFIG_FILE)
 	@echo "Installing KWOK controller..."
-	kubectl apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/kwok.yaml"
-	kubectl apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/stage-fast.yaml"
+	curl -fsSL --connect-timeout 10 --max-time 60 "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/kwok.yaml" | kubectl apply --request-timeout=30s -f -
+	curl -fsSL --connect-timeout 10 --max-time 60 "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/stage-fast.yaml" | kubectl apply --request-timeout=30s -f -
 	@echo "Waiting for KWOK controller to be ready..."
 	kubectl wait --for=condition=Available deployment/kwok-controller -n kube-system --timeout=120s
 	@echo "Tainting control-plane to force workloads to KWOK nodes..."

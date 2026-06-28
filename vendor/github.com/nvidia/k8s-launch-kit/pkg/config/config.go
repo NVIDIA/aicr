@@ -253,6 +253,12 @@ type NicConfigurationOperatorConfig struct {
 	DeployNicInterfaceNameTemplate bool   `yaml:"deployNicInterfaceNameTemplate"`
 	RdmaPrefix                     string `yaml:"rdmaPrefix"`   // e.g., "rdma_r%rail_id%"
 	NetdevPrefix                   string `yaml:"netdevPrefix"` // e.g., "eth_r%rail_id%"
+	// UpdateFW gates the firmware-update path of the NIC Configuration
+	// Operator. Today it only controls whether the `nicFirmwareStorage` PVC
+	// block is emitted in NicClusterPolicy (needed for the operator to stage
+	// firmware images before flashing). When false (default), the storage
+	// block is omitted so no PVC / StorageClass dependency is introduced.
+	UpdateFW bool `yaml:"updateFW,omitempty"`
 }
 
 type HostdevConfig struct {

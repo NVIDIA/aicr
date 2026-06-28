@@ -72,6 +72,15 @@ jobs:
               - '.github/scripts/gpu-chainsaw-health.sh'
               - '.github/scripts/gpu-debug-diagnostics.sh'
               - 'pkg/bundler/deployer/helm/**'
+              # `aicr validate` (conformance) + recipe bundling are built from
+              # these Go sources; a regression must trigger the GPU conformance run.
+              - 'pkg/validator/**'
+              - 'pkg/recipe/**'
+              - 'pkg/cli/**'
+              - 'cmd/aicr/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'vendor/**'
               - 'tests/chainsaw/chainsaw-config.yaml'
               - 'tests/chainsaw/ai-conformance/common/**'
               - 'tests/chainsaw/ai-conformance/kind-common/**'

@@ -121,9 +121,15 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		record(r, stepInventory, StepFailed, invErr.Error(), mismatches)
 		setFailureCause(r, stepInventory, invErr)
 		r.Exit = ExitInvalid
+	} else if phaseRows, phaseErr := CheckPhaseDigests(mat, pred); phaseErr != nil {
+		// Manifest chain is intact, but the predicate's per-phase CTRFDigest
+		// claim disagrees with the committed report — fail closed.
+		record(r, stepInventory, StepFailed, phaseErr.Error(), phaseRows)
+		setFailureCause(r, stepInventory, phaseErr)
+		r.Exit = ExitInvalid
 	} else {
 		record(r, stepInventory, StepPassed,
-			"manifest digest matches predicate; all bundle files verified", nil)
+			"manifest digest matches predicate; all bundle files and phase report digests verified", nil)
 	}
 
 	// Surface recorded phase failures as the informational exit-1 signal.

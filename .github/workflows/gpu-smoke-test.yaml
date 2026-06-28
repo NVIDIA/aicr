@@ -61,8 +61,16 @@ jobs:
               - 'pkg/collector/**'
               - 'pkg/snapshotter/**'
               - '.github/actions/gpu-snapshot-validate/**'
-              - 'pkg/validator/job/**'
-              - 'pkg/validator/catalog/**'
+              # `aicr snapshot`/`validate` run here; constraint evaluation lives
+              # across pkg/validator (not just job/ + catalog/) and the CLI/entrypoint.
+              - 'pkg/validator/**'
+              - 'pkg/cli/**'
+              - 'cmd/aicr/**'
+              # Vendored deps build into the binary, so a dependency-only sync
+              # must still trigger this gate.
+              - 'go.mod'
+              - 'go.sum'
+              - 'vendor/**'
               - 'pkg/defaults/timeouts.go'
               - 'validators/conformance/**'
 

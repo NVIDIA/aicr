@@ -45,12 +45,18 @@ const ChecksumFileName = "checksums.txt"
 // or the checksums file cannot be written.
 func GenerateChecksums(ctx context.Context, bundleDir string, files []string) error {
 	if err := ctx.Err(); err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable, "context canceled before checksum generation", err)
+		return errors.Wrap(errors.ErrCodeTimeout, "context canceled before checksum generation", err)
 	}
 
 	checksums := make([]string, 0, len(files))
 
 	for _, file := range files {
+		// Re-check cancellation each iteration: hashing many/large files can
+		// outlive the deadline checked above.
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "context canceled during checksum generation", err)
+		}
+
 		digest, err := SHA256Raw(file)
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to compute checksum for %s", file), err)
@@ -63,6 +69,12 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 		}
 
 		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(digest), relPath))
+	}
+
+	// A cancellation between the last hash and the write would otherwise still
+	// produce checksums.txt and report success — close that false-pass window.
+	if err := ctx.Err(); err != nil {
+		return errors.Wrap(errors.ErrCodeTimeout, "context canceled before writing checksums", err)
 	}
 
 	checksumPath, joinErr := deployer.SafeJoin(bundleDir, ChecksumFileName)

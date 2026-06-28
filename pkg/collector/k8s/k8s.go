@@ -81,35 +81,42 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		versions = collectSafe("server", func() (map[string]measurement.Reading, error) {
+		var err error
+		versions, err = collectSafe("server", func() (map[string]measurement.Reading, error) {
 			return k.collectServer(gctx)
 		})
-		return nil
+		return err
 	})
 
 	g.Go(func() error {
-		images = collectSafe(SubtypeImage, func() (map[string]measurement.Reading, error) {
+		var err error
+		images, err = collectSafe(SubtypeImage, func() (map[string]measurement.Reading, error) {
 			return k.collectContainerImages(gctx)
 		})
-		return nil
+		return err
 	})
 
 	g.Go(func() error {
-		policies = collectSafe("policy", func() (map[string]measurement.Reading, error) {
+		var err error
+		policies, err = collectSafe("policy", func() (map[string]measurement.Reading, error) {
 			return k.collectClusterPolicies(gctx)
 		})
-		return nil
+		return err
 	})
 
 	g.Go(func() error {
-		node = collectSafe("node", func() (map[string]measurement.Reading, error) {
+		var err error
+		node, err = collectSafe("node", func() (map[string]measurement.Reading, error) {
 			return k.collectNode(gctx)
 		})
-		return nil
+		return err
 	})
 
-	// All goroutines return nil; Wait cannot fail. Kept for goroutine join.
-	_ = g.Wait()
+	// A timeout/cancellation surfaces here; deterministic sub-collector failures
+	// are swallowed inside collectSafe so the snapshot continues on partial failure.
+	if err := g.Wait(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "K8s collection cancelled", err)
+	}
 
 	res := measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtypeBuilder(
@@ -126,16 +133,22 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 }
 
 // collectSafe calls a sub-collector function and returns its result.
-// On error, it logs a warning and returns an empty map so the snapshot continues.
-func collectSafe(name string, fn func() (map[string]measurement.Reading, error)) map[string]measurement.Reading {
+// A deterministic failure is logged and swallowed (empty map, nil error) so the
+// snapshot continues on partial failure. A timeout/cancellation is returned so
+// the caller can fail loud instead of reporting an empty-but-"successful"
+// measurement that is byte-identical to a healthy collection.
+func collectSafe(name string, fn func() (map[string]measurement.Reading, error)) (map[string]measurement.Reading, error) {
 	data, err := fn()
 	if err != nil {
+		if errors.IsTransient(err) {
+			return nil, err
+		}
 		slog.Warn("failed to collect "+name+" - skipping",
 			slog.String("collector", name),
 			slog.String("error", err.Error()))
-		return make(map[string]measurement.Reading)
+		return make(map[string]measurement.Reading), nil
 	}
-	return data
+	return data, nil
 }
 
 // emptyK8sMeasurement returns a K8s measurement with all subtypes empty.

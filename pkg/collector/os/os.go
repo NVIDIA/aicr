@@ -59,8 +59,19 @@ func (c *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	subtypes := make([]measurement.Subtype, 0, len(collectors))
 
 	for _, sc := range collectors {
+		// Fail loud on cancellation/timeout: a deadline that fires mid-collection
+		// must not be reported as a (partial) successful OS measurement.
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "OS collection cancelled", err)
+		}
+
 		result, err := sc.fn(ctx)
 		if err != nil {
+			// A sub-collector that itself timed out indicates the parent deadline
+			// has expired — surface it rather than masking it as a skipped subtype.
+			if errors.IsTransient(err) {
+				return nil, errors.Wrap(errors.ErrCodeTimeout, "OS collection timed out in "+sc.name, err)
+			}
 			slog.Warn("failed to collect "+sc.name+" - skipping",
 				slog.String("collector", sc.name),
 				slog.String("error", err.Error()))

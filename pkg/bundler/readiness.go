@@ -48,11 +48,19 @@ const readinessManifestKey = "readiness.yaml"
 // the bundler version so a bundle pins the gate image to the AICR release that
 // produced it; an empty/"dev" version resolves to the locally-built dev tag
 // used by the Phase 1 Kind smoke test.
+//
+// The gate image is published ONLY on release tags (on-tag.yaml). Goreleaser
+// snapshot builds stamp the binary with a `<version>-next` string (see
+// .goreleaser.yaml snapshot.version_template) for which no image exists in
+// ghcr, so those — like empty/"dev" — must fall back to the :dev tag rather
+// than fabricating an unpublished `aicr-gate:vX.Y.Z-next` ref that would
+// ImagePullBackOff. Mirrors the snapshot guard in pkg/cli and validator/catalog.
 func (b *DefaultBundler) gateImage() string {
 	tag := b.Config.Version()
-	if tag == "" || tag == "dev" {
-		tag = "dev" // preserve Phase-1 kind-smoke :dev
-	} else if !strings.HasPrefix(tag, "v") {
+	switch {
+	case tag == "" || tag == "dev" || strings.Contains(tag, "-next"):
+		tag = "dev" // preserve Phase-1 kind-smoke :dev; snapshots have no published image
+	case !strings.HasPrefix(tag, "v"):
 		tag = "v" + tag // release contract: 0.13.0 -> v0.13.0
 	}
 	return defaultGateImageRepo + ":" + tag

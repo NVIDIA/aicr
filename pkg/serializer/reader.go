@@ -15,6 +15,7 @@
 package serializer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -162,8 +163,9 @@ func NewFileReader(format Format, filePath string) (*Reader, error) {
 }
 
 // NewFileReaderWithContext is the context-aware variant of NewFileReader.
-// The context only affects the URL-download path; local file opens are fast
-// and synchronous so do not consult ctx.
+// The context bounds both the URL-download path and the local read: the local
+// content is read fully (up to MaxSpecFileBytes) so the size cap is enforced
+// and a hung filesystem cannot outlive the deadline.
 func NewFileReaderWithContext(ctx context.Context, format Format, filePath string) (*Reader, error) {
 	if format.IsUnknown() {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unknown format: %s", format))
@@ -207,16 +209,64 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open file", err)
 	}
 
-	// Bound the read against MaxSpecFileBytes so an attacker-influenced
-	// file path (e.g., a multi-GB local file passed via --recipe) cannot
-	// OOM the process by streaming unbounded bytes into the decoder.
-	// The limit matches the body cap used elsewhere for spec-like inputs.
-	limited := io.LimitReader(file, defaults.MaxSpecFileBytes+1)
+	// Honor cancellation/timeout on the local read path too — a hung filesystem
+	// (network mount, FUSE, /proc anomaly) must not stall past the deadline.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		_ = file.Close()
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", ctxErr)
+	}
+
+	// Read the bounded content fully so the size limit is actually enforced.
+	// A LimitReader alone only caps how much the decoder *can* read; a valid
+	// first document followed by trailing excess (or a single oversize value)
+	// would otherwise be silently accepted. Reading up to MaxSpecFileBytes+1
+	// lets us reject anything over the cap, matching the body cap used
+	// elsewhere for spec-like inputs while bounding memory for an
+	// attacker-influenced path (e.g. a multi-GB local file passed via --recipe).
+	// The read runs under ctx so a hung filesystem (NFS/FUSE/procfs) cannot
+	// block past the deadline.
+	data, readErr := readAllBounded(ctx, file, defaults.MaxSpecFileBytes+1)
+	if readErr != nil {
+		_ = file.Close()
+		if errors.IsTransient(readErr) {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", readErr)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file", readErr)
+	}
+	if int64(len(data)) > defaults.MaxSpecFileBytes {
+		_ = file.Close()
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("file exceeds maximum allowed size of %d bytes", defaults.MaxSpecFileBytes))
+	}
+
 	return &Reader{
 		format: format,
-		input:  limited,
+		input:  bytes.NewReader(data),
 		closer: file,
 	}, nil
+}
+
+// readAllBounded reads up to limit bytes from r, returning early if ctx is
+// canceled or its deadline fires. The read runs in a goroutine so a hung
+// filesystem read (network mount, FUSE, /proc anomaly) cannot outlive the
+// deadline: on cancellation the caller is unblocked and the goroutine ends
+// when the underlying Read eventually returns. Returns ctx.Err() on timeout.
+func readAllBounded(ctx context.Context, r io.Reader, limit int64) ([]byte, error) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1) // buffered so the goroutine never leaks on send
+	go func() {
+		data, err := io.ReadAll(io.LimitReader(r, limit))
+		ch <- result{data: data, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		return res.data, res.err
+	}
 }
 
 // newFileReaderAuto creates a new Reader with automatic format detection.
@@ -415,7 +465,9 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 	ser, err := NewFileReaderWithContext(ctx, fileFormat, path)
 	if err != nil {
 		slog.Error("failed to create file reader", "error", err, "path", path, "format", fileFormat)
-		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to create serializer for %q", path), err)
+		// Preserve the reader's structured code (NotFound / InvalidRequest /
+		// Timeout) instead of flattening every failure to Internal.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf("failed to create serializer for %q", path))
 	}
 
 	if ser == nil {
