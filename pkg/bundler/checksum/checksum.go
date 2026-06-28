@@ -45,7 +45,7 @@ const ChecksumFileName = "checksums.txt"
 // or the checksums file cannot be written.
 func GenerateChecksums(ctx context.Context, bundleDir string, files []string) error {
 	if err := ctx.Err(); err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable, "context canceled before checksum generation", err)
+		return errors.Wrap(errors.ErrCodeTimeout, "context canceled before checksum generation", err)
 	}
 
 	checksums := make([]string, 0, len(files))
