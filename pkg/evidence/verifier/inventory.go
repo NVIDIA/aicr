@@ -119,6 +119,58 @@ func CheckInventory(ctx context.Context, mat *MaterializedBundle, expectedManife
 	return nil, nil
 }
 
+// CheckPhaseDigests verifies that each phase summary's CTRFDigest recorded in
+// the (signed) predicate matches the sha256 of the corresponding on-disk
+// ctrf/<phase>.json file.
+//
+// CheckInventory already binds every bundle file (including the CTRF reports)
+// to predicate.Manifest.Digest, but the predicate's per-phase CTRFDigest is an
+// independent claim that nothing else cross-checks. Without this step a
+// predicate could carry a CTRFDigest that disagrees with the committed report
+// and still pass verification. Fails closed on any mismatch or unreadable
+// phase file. Returns per-phase mismatch rows and a summarizing error; both
+// nil on success.
+func CheckPhaseDigests(mat *MaterializedBundle, pred *attestation.Predicate) ([]KV, error) {
+	if mat == nil || mat.BundleDir == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "materialized bundle is required")
+	}
+	if pred == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate is required")
+	}
+
+	var mismatches []KV
+	for _, p := range attestation.AllPhases {
+		ps, ok := pred.Phases[p]
+		if !ok {
+			continue
+		}
+		if ps.CTRFDigest == "" {
+			mismatches = append(mismatches, KV{Key: string(p),
+				Value: "predicate phase summary has no ctrfDigest"})
+			continue
+		}
+		rel := attestation.CTRFRelPath(p)
+		body, err := readBoundedFile(
+			filepath.Join(mat.BundleDir, filepath.FromSlash(rel)),
+			rel, defaults.MaxAttestationFileBytes)
+		if err != nil {
+			mismatches = append(mismatches, KV{Key: rel, Value: err.Error()})
+			continue
+		}
+		got := attestation.HashBytesSHA256(body)
+		if got != ps.CTRFDigest {
+			mismatches = append(mismatches, KV{Key: rel,
+				Value: "ctrfDigest mismatch (got " + got + ", want " + ps.CTRFDigest + ")"})
+		}
+	}
+
+	if len(mismatches) > 0 {
+		return mismatches, errors.New(errors.ErrCodeInvalidRequest,
+			"phase report digest check failed for "+strconv.Itoa(len(mismatches))+" phase(s)")
+	}
+	return nil, nil
+}
+
 func hashFile(bundleDir, rel string, expectedSize int64) (string, error) {
 	// Reject non-local manifest paths before touching the filesystem.
 	// A hostile manifest with rel="../../../etc/passwd" would otherwise
