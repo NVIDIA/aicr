@@ -265,7 +265,9 @@ func waitForTrainerCRDsEstablished(ctx context.Context, dynamicClient dynamic.In
 	for _, crd := range crds {
 		slog.Info("Waiting for Trainer CRD to be established", "crd", crd)
 		if err := waitForCRDEstablished(waitCtx, dynamicClient, crd); err != nil {
-			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, fmt.Sprintf("CRD %s not established", crd), err)
+			// Preserve the structured code from the re-check path (Unavailable /
+			// Internal) instead of collapsing every failure to Timeout.
+			return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeTimeout, fmt.Sprintf("CRD %s not established", crd))
 		}
 	}
 	return nil
@@ -347,6 +349,8 @@ func waitForCRDEstablished(ctx context.Context, dynamicClient dynamic.Interface,
 					return aicrErrors.New(aicrErrors.ErrCodeUnavailable, "CRD watch channel closed before it was established")
 				case k8serrors.IsNotFound(getErr):
 					return aicrErrors.New(aicrErrors.ErrCodeUnavailable, "CRD watch channel closed before it was established")
+				case aicrErrors.IsTransient(getErr):
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "CRD watch closed and re-check timed out", getErr)
 				default:
 					return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRD watch closed and re-check failed", getErr)
 				}

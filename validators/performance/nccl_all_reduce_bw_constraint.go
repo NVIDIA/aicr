@@ -910,6 +910,9 @@ func waitForIMEXClaimTemplate(ctx context.Context, dynamicClient dynamic.Interfa
 				case apierrors.IsNotFound(getErr):
 					return aicrErrors.New(aicrErrors.ErrCodeUnavailable,
 						"IMEX ResourceClaimTemplate watch channel closed before reconciliation observed")
+				case aicrErrors.IsTransient(getErr):
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"IMEX ResourceClaimTemplate watch closed and re-check timed out", getErr)
 				default:
 					return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 						"IMEX ResourceClaimTemplate watch closed and re-check failed", getErr)

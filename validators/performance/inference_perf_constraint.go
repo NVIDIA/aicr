@@ -1253,6 +1253,10 @@ func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWork
 				case apierrors.IsNotFound(getErr):
 					return errors.New(errors.ErrCodeUnavailable,
 						"DynamoGraphDeployment watch channel closed before ready state observed")
+				case errors.IsTransient(getErr):
+					// The re-check itself raced the deadline — keep it transient.
+					return errors.Wrap(errors.ErrCodeTimeout,
+						"DynamoGraphDeployment watch closed and re-check timed out", getErr)
 				default:
 					// A real re-check failure (RBAC, apiserver) is deterministic —
 					// surface it instead of masking it as "closed before observed".

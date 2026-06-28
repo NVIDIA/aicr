@@ -71,6 +71,12 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(digest), relPath))
 	}
 
+	// A cancellation between the last hash and the write would otherwise still
+	// produce checksums.txt and report success — close that false-pass window.
+	if err := ctx.Err(); err != nil {
+		return errors.Wrap(errors.ErrCodeTimeout, "context canceled before writing checksums", err)
+	}
+
 	checksumPath, joinErr := deployer.SafeJoin(bundleDir, ChecksumFileName)
 	if joinErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "unsafe checksum path", joinErr)

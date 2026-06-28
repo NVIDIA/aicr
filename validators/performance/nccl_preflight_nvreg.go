@@ -287,6 +287,9 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 				case apierrors.IsNotFound(getErr):
 					return "", aicrErrors.New(aicrErrors.ErrCodeUnavailable,
 						"preflight pod watch channel closed and pod not found on re-check")
+				case aicrErrors.IsTransient(getErr):
+					return "", aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"preflight pod watch closed and re-check timed out", getErr)
 				default:
 					return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 						"preflight pod watch closed and re-check failed", getErr)
