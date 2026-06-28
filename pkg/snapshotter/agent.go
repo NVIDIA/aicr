@@ -265,6 +265,12 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 				"(repeat the flag per key=value), or pass --require-gpu to schedule onto " +
 				"a node advertising the nvidia.com/gpu resource)"
 		}
+		// A wait that exceeded the deadline (pending pod, image pull, no schedulable
+		// node) is transient and retryable — classify it as ErrCodeTimeout rather
+		// than masking it as a deterministic ErrCodeInternal failure.
+		if errors.IsTransient(waitErr) {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, msg, waitErr)
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, msg, waitErr)
 	}
 
@@ -566,9 +572,14 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	// Write snapshot to final destination
 	switch {
 	case finalOutput == "" || finalOutput == "-" || finalOutput == serializer.StdoutURI:
-		// Output snapshot data to stdout for consumption by caller
-		os.Stdout.Write(snapshotData)
-		os.Stdout.Write([]byte("\n"))
+		// Output snapshot data to stdout for consumption by caller. A short write
+		// or broken pipe must surface, not silently drop the snapshot.
+		if _, err := os.Stdout.Write(snapshotData); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
+		}
+		if _, err := os.Stdout.Write([]byte("\n")); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
+		}
 	case strings.HasPrefix(finalOutput, serializer.ConfigMapURIScheme):
 		// Already in ConfigMap (written by Job)
 		slog.Info("snapshot saved to ConfigMap", slog.String("uri", finalOutput))
