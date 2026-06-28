@@ -223,7 +223,7 @@ func populateFromK8s(fp *Fingerprint, m *measurement.Measurement) {
 	}
 	if st := m.GetSubtype(subtypeK8sNode); st != nil {
 		if v, err := st.GetString(keyK8sNodeProvider); err == nil && v != "" {
-			fp.Service = Dimension{Value: v, Source: sourceServiceProvider}
+			fp.Service = Dimension{Value: normalizeProviderID(v), Source: sourceServiceProvider}
 		}
 	}
 }
@@ -318,6 +318,18 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 	}
 	value, _ := parseLabelEncoding(raw)
 	return value, false
+}
+
+// normalizeProviderID maps a raw Kubernetes spec.providerID (or an already-
+// normalized name stored by the collector) to the service type string used in
+// recipe criteria. OKE nodes emit a bare OCID ("ocid1.instance.oc1...") with
+// no scheme prefix; other providers use "<scheme>://..." which the collector
+// already normalizes, but we handle both here for resilience.
+func normalizeProviderID(v string) string {
+	if strings.HasPrefix(v, "ocid1.") {
+		return "oke"
+	}
+	return v
 }
 
 // normalizeOSID maps an /etc/os-release ID value to the
