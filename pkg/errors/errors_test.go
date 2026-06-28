@@ -15,9 +15,36 @@
 package errors
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
+
+func TestIsTransient(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"context deadline", context.DeadlineExceeded, true},
+		{"context canceled", context.Canceled, true},
+		{"timeout code", New(ErrCodeTimeout, "slow"), true},
+		{"wrapped timeout code", Wrap(ErrCodeTimeout, "outer", New(ErrCodeTimeout, "inner")), true},
+		{"wrapped context deadline", fmt.Errorf("outer: %w", context.DeadlineExceeded), true},
+		{"internal is deterministic", New(ErrCodeInternal, "boom"), false},
+		{"invalid request is deterministic", New(ErrCodeInvalidRequest, "bad"), false},
+		{"plain error is deterministic", errors.New("plain"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsTransient(tt.err); got != tt.want {
+				t.Errorf("IsTransient(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestNew(t *testing.T) {
 	t.Parallel()
