@@ -481,11 +481,13 @@ jobs:
         run: |
           set -euo pipefail
           JSON_FILE="${{ steps.scan.outputs.json }}"
-          # Derive a filesystem-safe short name from the image reference:
-          # strip registry prefix, then tag and digest suffixes.
-          SHORT_NAME="${IMAGE##*/}"
-          SHORT_NAME="${SHORT_NAME%%:*}"
-          SHORT_NAME="${SHORT_NAME%%@*}"
+          # Derive a unique filesystem-safe name; artifact downloads merge all
+          # matrix outputs into one directory, so basenames alone can collide.
+          BASE_NAME="${IMAGE##*/}"
+          BASE_NAME="${BASE_NAME%%:*}"
+          BASE_NAME="${BASE_NAME%%@*}"
+          REF_HASH="$(printf '%s' "${IMAGE}" | sha256sum | cut -c1-12)"
+          SHORT_NAME="${BASE_NAME}-${REF_HASH}"
           mkdir -p bom-scan-results
           OUT="bom-scan-results/${SHORT_NAME}.txt"
           JSON_OUT="bom-scan-results/${SHORT_NAME}.json"
@@ -517,7 +519,7 @@ jobs:
             | join(", ")' "${JSON_OUT}")
 
           {
-            echo "${SHORT_NAME}: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low, ${NEGLIGIBLE} negligible (${VEX_APPLIED} VEX-suppressed)"
+           echo "${IMAGE}: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low, ${NEGLIGIBLE} negligible (${VEX_APPLIED} VEX-suppressed)"
             if [[ "${CRITICAL}" -gt 0 || "${HIGH}" -gt 0 ]]; then
               echo "  HIGH+: ${HIGH_IDS}"
             fi
