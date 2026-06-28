@@ -221,9 +221,12 @@ def main() -> int:
     scan_pairs = collect_scan_pairs(results_dir)
 
     if not scan_pairs:
-        print("No scan result pairs found in bom-scan-results/; nothing to draft.")
+        print(
+            "Error: no scan result pairs found in bom-scan-results/ after scan-bom ran.",
+            file=sys.stderr,
+        )
         _write_output("new_count", "0")
-        return 0
+        return 1
 
     new_stmts = build_new_statements(scan_pairs, existing_keys)
     count = len(new_stmts)
