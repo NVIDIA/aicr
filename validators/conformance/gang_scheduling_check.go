@@ -118,8 +118,11 @@ func CheckGangScheduling(ctx *validators.Context) error {
 	for _, name := range kaiSchedulerDeployments {
 		deploy, err := waitForDeploymentAvailable(ctx, "kai-scheduler", name, defaults.K8sPodReadyTimeout)
 		if err != nil {
-			return errors.Wrap(errors.ErrCodeNotFound,
-				fmt.Sprintf("KAI scheduler component %s check failed", name), err)
+			// Preserve the helper's code (NotFound for missing, Internal for
+			// not-available/API failure, Timeout for cancellation) instead of
+			// flattening every failure to NotFound.
+			return errors.PropagateOrWrap(err, errors.ErrCodeNotFound,
+				fmt.Sprintf("KAI scheduler component %s check failed", name))
 		}
 		expected := int32(1)
 		if deploy.Spec.Replicas != nil {
