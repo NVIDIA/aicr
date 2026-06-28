@@ -697,7 +697,7 @@ jobs:
           # Append the medium digest line when upstream medium findings exist.
           BOM_MEDIUM_LINE=""
           if [[ "${BOM_TOTAL_MEDIUM}" -gt 0 ]]; then
-            BOM_MEDIUM_LINE="\\nBOM medium total: ${BOM_TOTAL_MEDIUM} (upstream; VEX draft PR opened for triage)"
+            BOM_MEDIUM_LINE="\\nBOM medium total: ${BOM_TOTAL_MEDIUM} (upstream; VEX draft job opens a PR only for newly uncovered findings)"
           fi
 
           # Only notify when critical or high vulnerabilities are found
