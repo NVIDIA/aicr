@@ -43,6 +43,15 @@ on:
     paths:
       - 'recipes/**'
       - '!**.md'
+      # The aicr binary that bundles recipes and runs `evidence verify` is
+      # built from Go source; a regression there must trigger this gate.
+      - 'pkg/recipe/**'
+      - 'pkg/bundler/**'
+      - 'pkg/evidence/**'
+      - 'pkg/cli/**'
+      - 'cmd/aicr/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/recipe-evidence.yaml'
       - '.github/scripts/recipe-evidence-check.sh'
 

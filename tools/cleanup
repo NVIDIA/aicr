@@ -199,12 +199,14 @@ if ! $KEEP_CRDS; then
             echo "  match CRDs against pattern: ${pat}"
         done
     else
-        all_crds="$(kubectl get crd -o name 2>/dev/null || true)"
+        all_crds="$(kubectl get crd -o name --request-timeout=30s 2>/dev/null || true)"
         for pat in "${AICR_CRD_PATTERNS[@]}"; do
             # shellcheck disable=SC2086
             matches=$(echo "$all_crds" | grep -F "$pat" || true)
             for crd in $matches; do
-                kubectl delete "$crd" --ignore-not-found --wait=false || true
+                # --request-timeout bounds the API call so a wedged apiserver
+                # cannot park this step indefinitely.
+                kubectl delete "$crd" --ignore-not-found --wait=false --request-timeout=30s || true
             done
         done
     fi
