@@ -155,6 +155,30 @@ func fromInternalPhaseResult(p *validator.PhaseResult) *PhaseResult {
 	return out
 }
 
+// toInternalPhaseResults translates facade PhaseResults back into the
+// validator slice for evidence emission. The typed *ctrf.Report is carried
+// through so attestation.Emit receives the full per-phase report. nil/empty
+// input returns nil; nil elements are skipped (the attestation builder
+// iterates rather than indexes, so dropping nils is loss-free).
+func toInternalPhaseResults(in []*PhaseResult) []*validator.PhaseResult {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*validator.PhaseResult, 0, len(in))
+	for _, p := range in {
+		if p == nil {
+			continue
+		}
+		out = append(out, &validator.PhaseResult{
+			Phase:    validator.Phase(p.Phase),
+			Status:   p.Status,
+			Report:   p.Report,
+			Duration: p.Duration,
+		})
+	}
+	return out
+}
+
 // fromInternalPhase is the typed lift from validator.Phase to facade Phase.
 func fromInternalPhase(p validator.Phase) Phase { return Phase(p) }
 
