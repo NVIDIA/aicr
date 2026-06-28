@@ -332,7 +332,16 @@ func waitForCRDEstablished(ctx context.Context, dynamicClient dynamic.Interface,
 			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for CRD to be established", ctx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return aicrErrors.New(aicrErrors.ErrCodeInternal, "CRD watch channel closed unexpectedly")
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for CRD to be established", ctxErr)
+				}
+				// Watch closed without cancellation — re-Get before failing, in
+				// case the CRD was established during the closure window.
+				if recheck, getErr := dynamicClient.Resource(crdGVR).Get(ctx, crdName, metav1.GetOptions{}); getErr == nil && isCRDEstablished(recheck) {
+					slog.Info("CRD established", "crd", crdName)
+					return nil
+				}
+				return aicrErrors.New(aicrErrors.ErrCodeUnavailable, "CRD watch channel closed before it was established")
 			}
 			obj, ok := event.Object.(*unstructured.Unstructured)
 			if !ok {
