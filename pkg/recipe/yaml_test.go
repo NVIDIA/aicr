@@ -930,6 +930,9 @@ func TestAllComponentTypesValid(t *testing.T) {
 			}
 
 			for _, comp := range metadata.Spec.ComponentRefs {
+				if !comp.IsEnabled() {
+					continue // disabled components don't need a type (provided externally)
+				}
 				if comp.Type == "" {
 					t.Errorf("componentRef %q missing type field", comp.Name)
 					continue

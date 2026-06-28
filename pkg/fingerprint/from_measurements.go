@@ -335,6 +335,8 @@ func normalizeOSID(id string) string {
 		return oskind.COS
 	case oskind.AmazonLinux, "amzn", "amazon", "al2", "al2023":
 		return oskind.AmazonLinux
+	case oskind.OracleLinux:
+		return oskind.OracleLinux
 	case oskind.Talos:
 		return oskind.Talos
 	default:

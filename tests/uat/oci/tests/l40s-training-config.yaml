@@ -14,18 +14,20 @@
 
 # AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
 #
-# Drives the GKE H100 training UAT — codifies the workflow demonstrated in
-# `demos/cuj1-training.md` (GKE config-driven section) against the cluster provisioned by
-# `../cluster-config.yaml`. Scheduling fields match that cluster's node
-# labels/taints.
+# Drives the OKE L40S training UAT against the cluster provisioned by
+# ../cluster-config.yaml (BM.GPU.L40S.4, us-chicago-1).
+#
+# The skyhook runtime taint (`skyhook.nvidia.com=runtime-required:NoSchedule`)
+# is applied by the OKE node pool configuration. The snapshot agent and
+# validator jobs need a toleration so they can land on GPU nodes.
 #
 # `spec.validate.evidence.attestation.push` carries the stable repo prefix
 # only; `../run` appends `-${RUN_ID}` at runtime so each UAT execution
 # publishes evidence to a uniquely traceable OCI repo.
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  name: gke-h100-training-uat
+  name: oke-l40s-training-uat
 
 spec:
   snapshot:
@@ -34,18 +36,17 @@ spec:
     agent:
       namespace: aicr-validation
       nodeSelector:
-        nodeGroup: gpu-worker
+        node.dgxc.nvidia.com/has-gpu: "true"
       tolerations:
-        - dedicated=gpu-workload:NoSchedule
+        - skyhook.nvidia.com=runtime-required:NoSchedule
         - nvidia.com/gpu=present:NoSchedule
 
   recipe:
     criteria:
-      service: gke
-      accelerator: h100
-      os: cos
+      service: oke
+      accelerator: l40s
+      os: ol
       intent: training
-      platform: kubeflow
     output:
       path: recipe.yaml
 
@@ -58,25 +59,17 @@ spec:
       deployer: helmfile
     scheduling:
       acceleratedNodeSelector:
-        nodeGroup: gpu-worker
+        nodeGroup: customer-gpu
       acceleratedNodeTolerations:
-        - dedicated=gpu-workload:NoSchedule
+        - skyhook.nvidia.com=runtime-required:NoSchedule
         - nvidia.com/gpu=present:NoSchedule
       systemNodeSelector:
-        nodeGroup: system-worker
-      # GKE pd-ssd-backed default; matches the UAT GPU node disk type.
-      storageClass: premium-rwo
+        nodeGroup: system-pool
+      # OCI block volumes backed by the OCI CSI driver.
+      storageClass: oci-bv
 
   validate:
     execution:
-      # The deployment phase is the readiness barrier (gpu-operator ClusterPolicy
-      # reaches state=ready, the DRA kubelet-plugin DaemonSet rolls out, nodewright
-      # node tuning completes). failFast stops the run if that phase fails, so the
-      # conformance/performance phases are not evaluated against a not-yet-converged
-      # cluster — which previously surfaced as misleading accelerator-metrics /
-      # ai-service-metrics / pod-autoscaling failures. The `../run` readiness gate
-      # gives the operator-driven stack time to converge before validate, so on a
-      # healthy cluster the deployment phase passes and all phases still run.
       failFast: true
     input:
       recipe: recipe.yaml
@@ -84,11 +77,11 @@ spec:
     agent:
       namespace: aicr-validation
       tolerations:
-        - dedicated=gpu-workload:NoSchedule
+        - skyhook.nvidia.com=runtime-required:NoSchedule
         - nvidia.com/gpu=present:NoSchedule
     evidence:
       attestation:
         # Setting `out` enables emit. The push target below is the stable
         # repo prefix; ../run appends `-${RUN_ID}` for per-run isolation.
         out: ./evidence
-        push: ghcr.io/nvidia/aicr-uat-gke-h100-training
+        push: ghcr.io/nvidia/aicr-uat-oke-l40s-training

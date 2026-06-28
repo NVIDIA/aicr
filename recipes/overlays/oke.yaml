@@ -23,6 +23,7 @@ spec:
 
   criteria:
     service: oke
+    os: ol
 
   # OKE-specific constraints
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
@@ -34,6 +35,12 @@ spec:
   componentRefs:
     # No CSI driver component needed.
     # OCI Block Volume CSI driver is a built-in OKE addon (enabled by default).
+
+    # OKE pre-installs cert-manager as a managed addon; disable the AICR-managed
+    # instance to avoid installing a conflicting second copy.
+    - name: cert-manager
+      overrides:
+        enabled: false
 
     # OKE-specific GPU Operator overrides
     # OKE pre-installs NVIDIA drivers and container toolkit on GPU shapes

@@ -67,15 +67,17 @@ func TestFromMeasurements_PCIBackfill(t *testing.T) {
 	})
 
 	t.Run("unsupported SKU populates GPUModel + unknown-sku note, never the matching Accelerator value", func(t *testing.T) {
-		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("l40s")})
+		// a10 is a known PCI SKU (device_ids.go) but is not a recipe-supported
+		// accelerator enum, so it exercises the unsupported-SKU path.
+		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("a10")})
 		if got.Accelerator.Value != "" {
-			t.Errorf("Accelerator.Value = %q, want empty (l40s is not a recipe-supported enum)", got.Accelerator.Value)
+			t.Errorf("Accelerator.Value = %q, want empty (a10 is not a recipe-supported enum)", got.Accelerator.Value)
 		}
 		if got.Accelerator.Note != noteUnknownSKU || got.Accelerator.Source != sourceAcceleratorPCI {
 			t.Errorf("Accelerator = %+v, want unknown-sku note from PCI (GPU present but unsupported)", got.Accelerator)
 		}
-		if got.GPUModel.Value != "l40s" || got.GPUModel.Source != sourceAcceleratorPCI {
-			t.Errorf("GPUModel = %+v, want value l40s from PCI", got.GPUModel)
+		if got.GPUModel.Value != "a10" || got.GPUModel.Source != sourceAcceleratorPCI {
+			t.Errorf("GPUModel = %+v, want value a10 from PCI", got.GPUModel)
 		}
 	})
 
@@ -374,6 +376,7 @@ func TestFromMeasurements_OSDetection(t *testing.T) {
 		{"amzn AL2023", "amzn", "2023", "amazonlinux", "2023"},
 		{"al2 alias", "al2", "2", "amazonlinux", "2"},
 		{"talos", "talos", "1.7.6", "talos", "1.7.6"},
+		{"oracle linux", "ol", "8.10", "ol", "8.10"},
 		{"unknown ID drops both value and version", "freebsd", "13", "", ""},
 		{"both empty", "", "", "", ""},
 	}

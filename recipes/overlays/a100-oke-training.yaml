@@ -23,6 +23,7 @@ spec:
 
   criteria:
     service: oke
+    os: ol
     accelerator: a100
     intent: training
 

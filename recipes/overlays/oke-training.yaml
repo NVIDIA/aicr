@@ -23,6 +23,7 @@ spec:
 
   criteria:
     service: oke
+    os: ol
     intent: training
 
   # Training specific constraints for OKE workloads

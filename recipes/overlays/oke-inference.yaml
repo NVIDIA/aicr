@@ -23,6 +23,7 @@ spec:
 
   criteria:
     service: oke
+    os: ol
     intent: inference
 
   # Inference gateway components via mixin

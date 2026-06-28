@@ -23,6 +23,7 @@ spec:
 
   criteria:
     service: oke
+    os: ol
     accelerator: gb200
     intent: inference
 

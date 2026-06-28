@@ -100,6 +100,7 @@ Key fields from `GPU.smi`:
 | `h200` | h200 (discrete H200 GPU) |
 | `a100` | a100 |
 | `l40` | l40 |
+| `l40s` | l40s |
 | `rtx pro 6000` | rtx-pro-6000 |
 
 ### Step 4: Extract OS Info
