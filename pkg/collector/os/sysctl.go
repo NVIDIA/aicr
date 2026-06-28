@@ -104,7 +104,9 @@ func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, er
 		return nil
 	})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect sysctl parameters", err)
+		// Preserve a structured code from the callback (e.g. ErrCodeTimeout on
+		// cancellation) instead of flattening every walk error to Internal.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to collect sysctl parameters")
 	}
 
 	res := &measurement.Subtype{

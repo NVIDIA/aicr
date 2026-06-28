@@ -276,13 +276,21 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 				}
 				// Watch closed without cancellation — re-Get before failing, in
 				// case the pod reached a terminal phase during the closure window.
-				if current, getErr := podsClient.Get(waitCtx, name, metav1.GetOptions{}); getErr == nil {
+				current, getErr := podsClient.Get(waitCtx, name, metav1.GetOptions{})
+				switch {
+				case getErr == nil:
 					if p := current.Status.Phase; p == corev1.PodSucceeded || p == corev1.PodFailed {
 						return p, nil
 					}
+					return "", aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+						"preflight pod watch channel closed before pod terminated")
+				case apierrors.IsNotFound(getErr):
+					return "", aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+						"preflight pod watch channel closed and pod not found on re-check")
+				default:
+					return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+						"preflight pod watch closed and re-check failed", getErr)
 				}
-				return "", aicrErrors.New(aicrErrors.ErrCodeUnavailable,
-					"preflight pod watch channel closed before pod terminated")
 			}
 			if event.Type == watch.Deleted {
 				return "", aicrErrors.New(aicrErrors.ErrCodeInternal,

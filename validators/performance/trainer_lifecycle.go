@@ -337,11 +337,19 @@ func waitForCRDEstablished(ctx context.Context, dynamicClient dynamic.Interface,
 				}
 				// Watch closed without cancellation — re-Get before failing, in
 				// case the CRD was established during the closure window.
-				if recheck, getErr := dynamicClient.Resource(crdGVR).Get(ctx, crdName, metav1.GetOptions{}); getErr == nil && isCRDEstablished(recheck) {
-					slog.Info("CRD established", "crd", crdName)
-					return nil
+				recheck, getErr := dynamicClient.Resource(crdGVR).Get(ctx, crdName, metav1.GetOptions{})
+				switch {
+				case getErr == nil:
+					if isCRDEstablished(recheck) {
+						slog.Info("CRD established", "crd", crdName)
+						return nil
+					}
+					return aicrErrors.New(aicrErrors.ErrCodeUnavailable, "CRD watch channel closed before it was established")
+				case k8serrors.IsNotFound(getErr):
+					return aicrErrors.New(aicrErrors.ErrCodeUnavailable, "CRD watch channel closed before it was established")
+				default:
+					return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRD watch closed and re-check failed", getErr)
 				}
-				return aicrErrors.New(aicrErrors.ErrCodeUnavailable, "CRD watch channel closed before it was established")
 			}
 			obj, ok := event.Object.(*unstructured.Unstructured)
 			if !ok {

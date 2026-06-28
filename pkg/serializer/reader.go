@@ -213,7 +213,7 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 	// (network mount, FUSE, /proc anomaly) must not stall past the deadline.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		_ = file.Close()
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "file read cancelled", ctxErr)
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", ctxErr)
 	}
 
 	// Read the bounded content fully so the size limit is actually enforced.
@@ -223,9 +223,14 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 	// lets us reject anything over the cap, matching the body cap used
 	// elsewhere for spec-like inputs while bounding memory for an
 	// attacker-influenced path (e.g. a multi-GB local file passed via --recipe).
-	data, readErr := io.ReadAll(io.LimitReader(file, defaults.MaxSpecFileBytes+1))
+	// The read runs under ctx so a hung filesystem (NFS/FUSE/procfs) cannot
+	// block past the deadline.
+	data, readErr := readAllBounded(ctx, file, defaults.MaxSpecFileBytes+1)
 	if readErr != nil {
 		_ = file.Close()
+		if errors.IsTransient(readErr) {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "file read canceled", readErr)
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file", readErr)
 	}
 	if int64(len(data)) > defaults.MaxSpecFileBytes {
@@ -239,6 +244,29 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 		input:  bytes.NewReader(data),
 		closer: file,
 	}, nil
+}
+
+// readAllBounded reads up to limit bytes from r, returning early if ctx is
+// canceled or its deadline fires. The read runs in a goroutine so a hung
+// filesystem read (network mount, FUSE, /proc anomaly) cannot outlive the
+// deadline: on cancellation the caller is unblocked and the goroutine ends
+// when the underlying Read eventually returns. Returns ctx.Err() on timeout.
+func readAllBounded(ctx context.Context, r io.Reader, limit int64) ([]byte, error) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1) // buffered so the goroutine never leaks on send
+	go func() {
+		data, err := io.ReadAll(io.LimitReader(r, limit))
+		ch <- result{data: data, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		return res.data, res.err
+	}
 }
 
 // newFileReaderAuto creates a new Reader with automatic format detection.
@@ -437,7 +465,9 @@ func FromFileWithKubeconfigContext[T any](ctx context.Context, path, kubeconfig 
 	ser, err := NewFileReaderWithContext(ctx, fileFormat, path)
 	if err != nil {
 		slog.Error("failed to create file reader", "error", err, "path", path, "format", fileFormat)
-		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to create serializer for %q", path), err)
+		// Preserve the reader's structured code (NotFound / InvalidRequest /
+		// Timeout) instead of flattening every failure to Internal.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, fmt.Sprintf("failed to create serializer for %q", path))
 	}
 
 	if ser == nil {

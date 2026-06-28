@@ -902,12 +902,18 @@ func waitForIMEXClaimTemplate(ctx context.Context, dynamicClient dynamic.Interfa
 				// Watch closed without cancellation — re-Get before failing a
 				// healthy run, in case the RCT was reconciled during the
 				// closure window (apiserver hiccup, LB drop).
-				if _, getErr := rctClient.Get(waitCtx, ncclIMEXClaimTemplateName, metav1.GetOptions{}); getErr == nil {
+				_, getErr := rctClient.Get(waitCtx, ncclIMEXClaimTemplateName, metav1.GetOptions{})
+				switch {
+				case getErr == nil:
 					slog.Info("IMEX ResourceClaimTemplate ready", "name", ncclIMEXClaimTemplateName)
 					return nil
+				case apierrors.IsNotFound(getErr):
+					return aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+						"IMEX ResourceClaimTemplate watch channel closed before reconciliation observed")
+				default:
+					return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+						"IMEX ResourceClaimTemplate watch closed and re-check failed", getErr)
 				}
-				return aicrErrors.New(aicrErrors.ErrCodeUnavailable,
-					"IMEX ResourceClaimTemplate watch channel closed before reconciliation observed")
 			}
 			if event.Type == watch.Added || event.Type == watch.Modified {
 				slog.Info("IMEX ResourceClaimTemplate ready", "name", ncclIMEXClaimTemplateName)
@@ -1280,14 +1286,16 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 }
 
 // newestRunnablePod returns the youngest non-terminating pod from a label
-// selector List, skipping pods being deleted or already failed. Used to
-// recover after a watch channel closes without finding an orphan pod from a
-// prior run. Returns nil when no viable pod is present.
+// selector List, skipping pods being deleted or in a terminal phase
+// (Succeeded/Failed). Used to recover after a watch channel closes without
+// handing back a completed pod from a prior run. Returns nil when no viable
+// pod is present.
 func newestRunnablePod(pods []v1.Pod) *v1.Pod {
 	var best *v1.Pod
 	for i := range pods {
 		p := &pods[i]
-		if p.DeletionTimestamp != nil || p.Status.Phase == v1.PodFailed {
+		phase := p.Status.Phase
+		if p.DeletionTimestamp != nil || phase == v1.PodFailed || phase == v1.PodSucceeded {
 			continue
 		}
 		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {

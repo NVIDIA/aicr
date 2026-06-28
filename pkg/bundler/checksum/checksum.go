@@ -51,6 +51,12 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 	checksums := make([]string, 0, len(files))
 
 	for _, file := range files {
+		// Re-check cancellation each iteration: hashing many/large files can
+		// outlive the deadline checked above.
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "context canceled during checksum generation", err)
+		}
+
 		digest, err := SHA256Raw(file)
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to compute checksum for %s", file), err)

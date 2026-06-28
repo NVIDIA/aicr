@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -499,6 +501,11 @@ func TestNewFileReader_RejectsOversizeFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds maximum allowed size") {
 		t.Errorf("error = %q, want it to mention the size limit", err.Error())
+	}
+	// Oversize is a deterministic client error: assert the code, not just text,
+	// so a wrong-code regression fails.
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
 }
 
@@ -1088,8 +1095,10 @@ func TestFromFile_Errors(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error for nonexistent file")
 		}
-		if !strings.Contains(err.Error(), "failed to create serializer") {
-			t.Errorf("Expected serializer creation error, got: %v", err)
+		// The reader's NOT_FOUND code is preserved through FromFile (not
+		// flattened to INTERNAL), so callers can map a missing file to a 4xx.
+		if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			t.Errorf("Expected ErrCodeNotFound, got: %v", err)
 		}
 	})
 

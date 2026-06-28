@@ -138,10 +138,19 @@ func CheckPhaseDigests(mat *MaterializedBundle, pred *attestation.Predicate) ([]
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate is required")
 	}
 
-	var mismatches []KV
+	allowed := make(map[attestation.Phase]struct{}, len(attestation.AllPhases))
 	for _, p := range attestation.AllPhases {
-		ps, ok := pred.Phases[p]
-		if !ok {
+		allowed[p] = struct{}{}
+	}
+
+	var mismatches []KV
+	// Iterate the predicate's own phases so an entry with an unknown/misspelled
+	// key cannot slip through unverified — that would leave a signed CTRFDigest
+	// claim unchecked and defeat the fail-closed guarantee.
+	for p, ps := range pred.Phases {
+		if _, ok := allowed[p]; !ok {
+			mismatches = append(mismatches, KV{Key: string(p),
+				Value: "predicate contains unknown phase"})
 			continue
 		}
 		if ps.CTRFDigest == "" {

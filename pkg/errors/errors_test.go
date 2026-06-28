@@ -36,6 +36,11 @@ func TestIsTransient(t *testing.T) {
 		{"internal is deterministic", New(ErrCodeInternal, "boom"), false},
 		{"invalid request is deterministic", New(ErrCodeInvalidRequest, "bad"), false},
 		{"plain error is deterministic", errors.New("plain"), false},
+		// Mixed-code chains: a deterministic outer code does not hide a transient
+		// cause — the deadline/timeout in the chain still makes it retryable.
+		{"internal wrapping deadline is transient", Wrap(ErrCodeInternal, "io", context.DeadlineExceeded), true},
+		{"internal wrapping timeout code is transient", Wrap(ErrCodeInternal, "io", New(ErrCodeTimeout, "inner")), true},
+		{"timeout wrapping deterministic cause is transient", Wrap(ErrCodeTimeout, "io", New(ErrCodeInternal, "inner")), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

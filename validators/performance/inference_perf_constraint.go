@@ -1242,12 +1242,23 @@ func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWork
 				// failure so an apiserver hiccup doesn't fail a ready deployment.
 				recheck, getErr := ctx.DynamicClient.Resource(dynamoDeploymentGVR).
 					Namespace(config.namespace).Get(waitCtx, inferenceDeploymentName, metav1.GetOptions{})
-				if getErr == nil && isDynamoDeploymentReady(recheck) {
-					slog.Info("DynamoGraphDeployment is ready")
-					return nil
+				switch {
+				case getErr == nil:
+					if isDynamoDeploymentReady(recheck) {
+						slog.Info("DynamoGraphDeployment is ready")
+						return nil
+					}
+					return errors.New(errors.ErrCodeUnavailable,
+						"DynamoGraphDeployment watch channel closed before ready state observed")
+				case apierrors.IsNotFound(getErr):
+					return errors.New(errors.ErrCodeUnavailable,
+						"DynamoGraphDeployment watch channel closed before ready state observed")
+				default:
+					// A real re-check failure (RBAC, apiserver) is deterministic —
+					// surface it instead of masking it as "closed before observed".
+					return errors.Wrap(errors.ErrCodeInternal,
+						"DynamoGraphDeployment watch closed and re-check failed", getErr)
 				}
-				return errors.New(errors.ErrCodeUnavailable,
-					"DynamoGraphDeployment watch channel closed before ready state observed")
 			}
 			obj, ok := event.Object.(*unstructured.Unstructured)
 			if !ok {
