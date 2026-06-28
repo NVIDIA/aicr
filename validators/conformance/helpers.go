@@ -67,7 +67,19 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("HTTP %d from %s", resp.StatusCode, url))
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, defaults.HTTPResponseBodyLimit))
+	// Read up to the cap +1 so an oversized response is rejected with a clear
+	// error rather than silently truncated — a truncated Prometheus/DCGM scrape
+	// would make callers parse partial data or report metrics as "missing".
+	body, err := io.ReadAll(io.LimitReader(resp.Body, defaults.HTTPResponseBodyLimit+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeUnavailable,
+			fmt.Sprintf("failed to read response from %s", url), err)
+	}
+	if int64(len(body)) > defaults.HTTPResponseBodyLimit {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("response from %s exceeds %d byte limit", url, defaults.HTTPResponseBodyLimit))
+	}
+	return body, nil
 }
 
 type conditionObservation struct {

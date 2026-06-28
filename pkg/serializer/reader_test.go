@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"gopkg.in/yaml.v3"
 )
 
@@ -467,6 +468,38 @@ func TestNewFileReader(t *testing.T) {
 			t.Errorf("Expected table format error, got: %v", err)
 		}
 	})
+}
+
+// TestNewFileReader_RejectsOversizeFile verifies the size cap is enforced at
+// read time: a file larger than MaxSpecFileBytes is rejected rather than
+// silently truncated or accepted with trailing excess.
+func TestNewFileReader_RejectsOversizeFile(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "oversize*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	// A valid first document followed by enough filler to exceed the cap.
+	if _, writeErr := tmpfile.WriteString("name: ok\nvalue: 1\n"); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	pad := strings.Repeat("x", int(defaults.MaxSpecFileBytes)+1024)
+	if _, writeErr := tmpfile.WriteString("# " + pad + "\n"); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	tmpfile.Close()
+
+	reader, err := NewFileReader(FormatYAML, tmpfile.Name())
+	if err == nil {
+		if reader != nil {
+			reader.Close()
+		}
+		t.Fatalf("NewFileReader on oversize file = nil error, want rejection")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum allowed size") {
+		t.Errorf("error = %q, want it to mention the size limit", err.Error())
+	}
 }
 
 func TestNewFileReader_ErrorPaths(t *testing.T) {

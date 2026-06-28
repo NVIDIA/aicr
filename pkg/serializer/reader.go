@@ -15,6 +15,7 @@
 package serializer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -162,8 +163,9 @@ func NewFileReader(format Format, filePath string) (*Reader, error) {
 }
 
 // NewFileReaderWithContext is the context-aware variant of NewFileReader.
-// The context only affects the URL-download path; local file opens are fast
-// and synchronous so do not consult ctx.
+// The context bounds both the URL-download path and the local read: the local
+// content is read fully (up to MaxSpecFileBytes) so the size cap is enforced
+// and a hung filesystem cannot outlive the deadline.
 func NewFileReaderWithContext(ctx context.Context, format Format, filePath string) (*Reader, error) {
 	if format.IsUnknown() {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unknown format: %s", format))
@@ -207,14 +209,34 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open file", err)
 	}
 
-	// Bound the read against MaxSpecFileBytes so an attacker-influenced
-	// file path (e.g., a multi-GB local file passed via --recipe) cannot
-	// OOM the process by streaming unbounded bytes into the decoder.
-	// The limit matches the body cap used elsewhere for spec-like inputs.
-	limited := io.LimitReader(file, defaults.MaxSpecFileBytes+1)
+	// Honor cancellation/timeout on the local read path too — a hung filesystem
+	// (network mount, FUSE, /proc anomaly) must not stall past the deadline.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		_ = file.Close()
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "file read cancelled", ctxErr)
+	}
+
+	// Read the bounded content fully so the size limit is actually enforced.
+	// A LimitReader alone only caps how much the decoder *can* read; a valid
+	// first document followed by trailing excess (or a single oversize value)
+	// would otherwise be silently accepted. Reading up to MaxSpecFileBytes+1
+	// lets us reject anything over the cap, matching the body cap used
+	// elsewhere for spec-like inputs while bounding memory for an
+	// attacker-influenced path (e.g. a multi-GB local file passed via --recipe).
+	data, readErr := io.ReadAll(io.LimitReader(file, defaults.MaxSpecFileBytes+1))
+	if readErr != nil {
+		_ = file.Close()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read file", readErr)
+	}
+	if int64(len(data)) > defaults.MaxSpecFileBytes {
+		_ = file.Close()
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("file exceeds maximum allowed size of %d bytes", defaults.MaxSpecFileBytes))
+	}
+
 	return &Reader{
 		format: format,
-		input:  limited,
+		input:  bytes.NewReader(data),
 		closer: file,
 	}, nil
 }
