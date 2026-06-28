@@ -109,13 +109,20 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		return validators.Skip("KAI scheduler not found — cluster may use a different scheduler")
 	}
 
-	// 1. All KAI scheduler deployments available.
+	// 1. All KAI scheduler deployments available. Wait (bounded) for each to
+	// become Available rather than sampling instantaneously: the single-replica
+	// admission webhook can be transiently unavailable (rollout, restart, node
+	// pressure), and a point-in-time 0/1 read would flake the whole conformance
+	// phase. A genuinely-down deployment still fails after the bound.
 	var deploymentsSummary strings.Builder
 	for _, name := range kaiSchedulerDeployments {
-		deploy, err := getDeploymentIfAvailable(ctx, "kai-scheduler", name)
+		deploy, err := waitForDeploymentAvailable(ctx, "kai-scheduler", name, defaults.K8sPodReadyTimeout)
 		if err != nil {
-			return errors.Wrap(errors.ErrCodeNotFound,
-				fmt.Sprintf("KAI scheduler component %s check failed", name), err)
+			// Preserve the helper's code (NotFound for missing, Internal for
+			// not-available/API failure, Timeout for cancellation) instead of
+			// flattening every failure to NotFound.
+			return errors.PropagateOrWrap(err, errors.ErrCodeNotFound,
+				fmt.Sprintf("KAI scheduler component %s check failed", name))
 		}
 		expected := int32(1)
 		if deploy.Spec.Replicas != nil {

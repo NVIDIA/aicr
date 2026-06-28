@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -153,6 +154,74 @@ func getDeploymentIfAvailable(ctx *validators.Context, namespace, name string) (
 				namespace, name, deploy.Status.AvailableReplicas, expected))
 	}
 	return deploy, nil
+}
+
+// waitForDeploymentAvailable polls until the named Deployment reports at least
+// one available replica, or the timeout elapses. Returns the last-observed
+// Deployment so callers can capture diagnostics.
+//
+// Use this instead of getDeploymentIfAvailable for components that can be
+// transiently unavailable — single-replica webhooks, rolling updates,
+// restarts. An instantaneous check fails closed on a momentary 0/N blip; the
+// bounded wait tolerates the blip but still fails (after the bound) when a
+// deployment is genuinely down. A not-yet-created deployment is treated as
+// "keep waiting" within the bound rather than an immediate NotFound.
+//
+//nolint:unparam // namespace is part of the general helper API (mirrors getDeploymentIfAvailable); the sole caller today happens to use one namespace.
+func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string, timeout time.Duration) (*appsv1.Deployment, error) {
+	pollCtx, cancel := context.WithTimeout(ctx.Ctx, timeout)
+	defer cancel()
+
+	var last *appsv1.Deployment
+	err := wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
+		func(c context.Context) (bool, error) {
+			deploy, getErr := ctx.Clientset.AppsV1().Deployments(namespace).Get(c, name, metav1.GetOptions{})
+			if getErr != nil {
+				if k8serrors.IsNotFound(getErr) {
+					return false, nil // not created yet — keep waiting within the bound
+				}
+				return false, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("failed to get deployment %s/%s", namespace, name), getErr)
+			}
+			last = deploy
+			return deploy.Status.AvailableReplicas >= 1, nil
+		},
+	)
+	if err == nil {
+		return last, nil
+	}
+
+	// Caller cancellation is an external abort, not a readiness failure.
+	// pollCtx derives from ctx.Ctx, so pollCtx.Err() is also set when the parent
+	// is canceled — check the parent explicitly first and propagate it as a
+	// transient timeout rather than reporting the deployment as not-available.
+	if ctx.Ctx.Err() != nil {
+		return last, errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("waiting for deployment %s/%s canceled", namespace, name), ctx.Ctx.Err())
+	}
+
+	expected := int32(1)
+	var avail int32
+	if last != nil {
+		avail = last.Status.AvailableReplicas
+		if last.Spec.Replicas != nil {
+			expected = *last.Spec.Replicas
+		}
+	}
+	// Our own bound elapsed (parent still live): the deployment never became
+	// available in time. Surface the NotFound-shaped not-available message the
+	// caller wraps. A non-deadline error is a genuine API failure — propagate it.
+	if pollCtx.Err() != nil {
+		if last == nil {
+			return nil, errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("deployment %s/%s not found after %s", namespace, name, timeout))
+		}
+		return last, errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("deployment %s/%s not available after %s: %d/%d replicas",
+				namespace, name, timeout, avail, expected))
+	}
+	return last, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+		fmt.Sprintf("failed waiting for deployment %s/%s", namespace, name))
 }
 
 // verifyDaemonSetReady checks that a DaemonSet has at least one ready pod.
