@@ -1,0 +1,103 @@
+machineType: GB300-NVL
+manufacturer: NVIDIA
+gpuType: NVIDIA-GB300
+nicModel: NVIDIA Dual ConnectX-8 SuperNIC C8280Z Mezzanine Board for GB300 systems (ConnectX-8)
+gpuInterconnect: NV18
+numaNodes: 2
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: true
+
+# GB300 NVL: 4 GPUs in a single NVLink domain (all-pairs NV18).
+# nvidia-smi topo -m shows NO PIX between any GPU and any east-west NIC —
+# the platform is root-port-direct, so NODE-fallback classification applies:
+# rail-class NICs (ConnectX-8, deviceID 1023) attach to the lowest-index GPU
+# on their NUMA node with gpuProximity: NODE.
+#
+# Rail layout (one rail per NIC, master PF only — matches l8k discover with
+# --collapse-nic-rails=true, the default):
+#   NUMA 0 (GPU0, GPU1): rail 0 @ 0000:03, rail 1 @ 0002:03 → connectedGPU GPU0
+#   NUMA 1 (GPU2, GPU3): rail 2 @ 0010:03, rail 3 @ 0012:03 → connectedGPU GPU2
+
+pfs:
+  # --- NUMA 0: GPU0, GPU1, CPUs 0-71 ---
+  - deviceID: "1023"
+    rdmaDevice: rdma_p0_r0
+    pciAddress: "0000:03:00.0"
+    networkInterface: nic_p0_r0
+    traffic: east-west
+    rail: 0
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: NODE
+    psid: mt_0000001513
+    partNumber: 900-9X86E-00CX-ST0
+    model: NVIDIA Dual ConnectX-8 SuperNIC C8280Z Mezzanine Board for GB300 systems
+
+  - deviceID: "1023"
+    rdmaDevice: rdma_p0_r1
+    pciAddress: "0002:03:00.0"
+    networkInterface: nic_p0_r1
+    traffic: east-west
+    rail: 1
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: NODE
+    psid: mt_0000001513
+    partNumber: 900-9X86E-00CX-ST0
+    model: NVIDIA Dual ConnectX-8 SuperNIC C8280Z Mezzanine Board for GB300 systems
+
+  # --- NUMA 1: GPU2, GPU3, CPUs 72-143 ---
+  - deviceID: "1023"
+    rdmaDevice: rdma_p0_r2
+    pciAddress: "0010:03:00.0"
+    networkInterface: nic_p0_r2
+    traffic: east-west
+    rail: 2
+    numaNode: 1
+    connectedGPU: GPU2
+    gpuProximity: NODE
+    psid: mt_0000001513
+    partNumber: 900-9X86E-00CX-ST0
+    model: NVIDIA Dual ConnectX-8 SuperNIC C8280Z Mezzanine Board for GB300 systems
+
+  - deviceID: "1023"
+    rdmaDevice: rdma_p0_r3
+    pciAddress: "0012:03:00.0"
+    networkInterface: nic_p0_r3
+    traffic: east-west
+    rail: 3
+    numaNode: 1
+    connectedGPU: GPU2
+    gpuProximity: NODE
+    psid: mt_0000001513
+    partNumber: 900-9X86E-00CX-ST0
+    model: NVIDIA Dual ConnectX-8 SuperNIC C8280Z Mezzanine Board for GB300 systems
+
+  # --- N-S: BlueField-3 DPU (dual-port, both ports listed) ---
+  - deviceID: a2dc
+    rdmaDevice: mlx5_8
+    pciAddress: "0016:03:00.0"
+    networkInterface: ibP22p3s0f0
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000001188
+    partNumber: 900-9D3B6-00CN-PN0
+    model: BlueField-3 B3240 P-Series FHHL DPU for Cold Aisle
+
+  - deviceID: a2dc
+    rdmaDevice: mlx5_9
+    pciAddress: "0016:03:00.1"
+    networkInterface: ibP22p3s0f1
+    traffic: north-south
+    numaNode: 1
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: mt_0000001188
+    partNumber: 900-9D3B6-00CN-PN0
+    model: BlueField-3 B3240 P-Series FHHL DPU for Cold Aisle
