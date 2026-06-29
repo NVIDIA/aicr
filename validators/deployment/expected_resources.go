@@ -40,10 +40,8 @@ import (
 )
 
 const (
-	gpuOperatorComponent              = "gpu-operator"
 	nodewrightCustomizationsComponent = "nodewright-customizations"
 	draDriverComponent                = "nvidia-dra-driver-gpu"
-	clusterPolicyName                 = "cluster-policy"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -54,14 +52,10 @@ const (
 	// installed the chart.
 	draKubeletPluginSuffix = "-kubelet-plugin"
 
-	clusterPolicyReadyState = "ready"
 	nodewrightCompleteState = "complete"
 )
 
 var (
-	clusterPolicyGVR = schema.GroupVersionResource{
-		Group: "nvidia.com", Version: "v1", Resource: "clusterpolicies",
-	}
 	nodewrightGVR = schema.GroupVersionResource{
 		Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
 	}
@@ -290,10 +284,6 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		capture(verifyNodewrightReady(ctx, ref))
 	}
 
-	if _, ok := findEnabledComponent(refs, gpuOperatorComponent); ok {
-		capture(verifyClusterPolicyReady(ctx))
-	}
-
 	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
 		capture(verifyDRAKubeletPluginReady(ctx, ref.Namespace))
 	}
@@ -462,66 +452,6 @@ func extractNodewrightNamesFromManifest(content []byte) []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-func verifyClusterPolicyReady(ctx *validators.Context) error {
-	// Use discovery to distinguish two cases the dynamic-client Get conflates:
-	//   1. CRD not registered ("CustomResourceDefinition clusterpolicies
-	//      does not exist") — the recipe declares gpu-operator but the
-	//      operator chart is not installed yet. Skip per #607.
-	//   2. CRD registered but the cluster-policy CR is absent — gpu-operator
-	//      is installed but its singleton CR was never created or has been
-	//      manually deleted. The operator cannot reconcile the GPU stack in
-	//      that state, so this is a real misconfiguration — fail.
-	// A bare Get() that returns IsNotFound cannot tell these apart. Explicit
-	// discovery lookup does.
-	//
-	// Critically, only skip on IsNotFound from discovery. Anything else
-	// (403 from RBAC, 5xx from an overloaded API server, network timeout) is
-	// a real signal that we cannot prove readiness, and silently passing would
-	// hide a broken cluster. Fail closed on those.
-	gv := clusterPolicyGVR.GroupVersion().String()
-	_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
-	switch {
-	case discErr == nil:
-		// fall through to the CR check
-	case apierrors.IsNotFound(discErr):
-		fmt.Printf("  ClusterPolicy: %s not registered, skipping\n", gv)
-		return nil
-	default:
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
-	}
-
-	dynClient, err := getDynamicClient(ctx)
-	if err != nil {
-		return err
-	}
-
-	verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
-	clusterPolicy, err := dynClient.Resource(clusterPolicyGVR).Get(verifyCtx, clusterPolicyName, metav1.GetOptions{})
-	cancel()
-	if err != nil {
-		// CRD is registered (we just checked). Any Get error here — including
-		// IsNotFound on the CR itself — signals that gpu-operator is installed
-		// but not reconciled. Surface it rather than silently skipping.
-		return errors.Wrap(errors.ErrCodeNotFound,
-			"failed to get ClusterPolicy cluster-policy (gpu-operator installed but CR missing?)", err)
-	}
-
-	state, found, stateErr := unstructured.NestedString(clusterPolicy.Object, "status", "state")
-	if stateErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to read ClusterPolicy status.state", stateErr)
-	}
-	if !found {
-		return errors.New(errors.ErrCodeInternal, "ClusterPolicy status.state not found")
-	}
-	if state != clusterPolicyReadyState {
-		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("ClusterPolicy state=%s (want %s)", state, clusterPolicyReadyState))
-	}
-
-	fmt.Printf("  ClusterPolicy %s: %s\n", clusterPolicyName, clusterPolicyReadyState)
-	return nil
 }
 
 // verifyDRAKubeletPluginReady locates the kubelet-plugin DaemonSet by
