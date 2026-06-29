@@ -221,7 +221,7 @@ type RecipeRequest struct {
 	Intent string
 
 	// OS is the worker-node operating system. Mapped to CriteriaOS.
-	// Supported values: "ubuntu", "rhel", "cos", "amazonlinux".
+	// Supported values: "ubuntu", "rhel", "cos", "amazonlinux", "talos", "ol".
 	// Empty means "unspecified" — recipe resolution will not select
 	// OS-pinned leaf overlays (e.g., h100-eks-ubuntu-training,
 	// h100-gke-cos-training) and will fall back to the OS-agnostic

@@ -25,7 +25,7 @@
 # only; `../run` appends `-${RUN_ID}` at runtime so each UAT execution
 # publishes evidence to a uniquely traceable OCI repo.
 kind: AICRConfig
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: oke-l40s-training-uat
 

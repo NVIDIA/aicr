@@ -18,7 +18,7 @@
 # --os ol` produces a valid recipe with correct criteria, standard GPU stack
 # components, and the L40S-specific overlay chain.
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 criteria:
   service: oke
   accelerator: l40s

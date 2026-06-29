@@ -119,6 +119,8 @@ func parseProvider(providerID string) string {
 		return "gke"
 	case "azure":
 		return "aks"
+	case "oci":
+		return "oke"
 	default:
 		return provider
 	}

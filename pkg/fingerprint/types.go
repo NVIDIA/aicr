@@ -52,7 +52,7 @@ type IntDimension struct {
 
 // OSDimension extends Dimension with the raw OS version string. Value
 // is the criteria-aligned OS kind (ubuntu, rhel, cos, amazonlinux,
-// talos); Version carries the unmodified VERSION_ID from
+// talos, ol); Version carries the unmodified VERSION_ID from
 // /etc/os-release for audit purposes (recipe.Criteria has no version
 // field, so Version does not participate in Match).
 type OSDimension struct {
