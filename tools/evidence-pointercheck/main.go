@@ -36,15 +36,19 @@ import (
 
 func main() {
 	var root, allowlistPath string
+	var allowPending bool
 	flag.StringVar(&root, "root", verifier.EvidenceDirName, "path to the committed evidence root")
 	flag.StringVar(&allowlistPath, "allowlist", "", "path to allowlist.yaml (default: <root>/allowlist.yaml)")
+	flag.BoolVar(&allowPending, "allow-pending", false,
+		"accept a flat <recipe>.yaml unsigned pending pointer (the transient commit-flat state) instead of rejecting it; "+
+			"off by default so the merge gate refuses an unsigned pointer that has not been signed and relocated")
 	flag.Parse()
 
 	if allowlistPath == "" {
 		allowlistPath = filepath.Join(root, verifier.AllowlistFileName)
 	}
 
-	problems, err := verifier.CheckEvidenceTree(root, allowlistPath)
+	problems, err := verifier.CheckEvidenceTree(root, allowlistPath, allowPending)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "evidence-pointercheck: "+err.Error())
 		os.Exit(2)

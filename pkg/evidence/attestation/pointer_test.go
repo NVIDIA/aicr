@@ -15,6 +15,8 @@
 package attestation
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +117,179 @@ func TestPointerCopyToHint(t *testing.T) {
 	if got := PointerCopyToHint(unsigned); strings.HasPrefix(got, "recipes/evidence/") {
 		t.Errorf("unsigned hint should not be a path, got %q", got)
 	}
+}
+
+func TestRelocatePointerToCanonical(t *testing.T) {
+	signed := func() *Pointer {
+		return &Pointer{
+			SchemaVersion: PointerSchemaVersion,
+			Recipe:        "h100-gke-cos-training",
+			Attestations: []PointerAttestation{{
+				Bundle: PointerBundle{
+					OCI:           "ghcr.io/yuanchen8911/aicr-evidence:x",
+					Digest:        "sha256:33d4cf36",
+					PredicateType: PredicateTypeV1,
+				},
+				Signer: &PointerSigner{
+					Identity: "yuanchen97@gmail.com",
+					Issuer:   "https://github.com/login/oauth",
+				},
+			}},
+		}
+	}
+
+	t.Run("moves flat pending pointer to nested canonical path", func(t *testing.T) {
+		root := t.TempDir()
+		flat := filepath.Join(root, "h100-gke-cos-training.yaml")
+		if _, err := WritePointerFile(flat, signed()); err != nil {
+			t.Fatalf("write flat: %v", err)
+		}
+
+		dest, err := RelocatePointerToCanonical(flat, signed())
+		if err != nil {
+			t.Fatalf("RelocatePointerToCanonical: %v", err)
+		}
+		// 7c4c0edc8c765a95a0f3afdb3bbb8e91 is SourceSlug(issuer, identity).
+		want := filepath.Join(root, "h100-gke-cos-training",
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+		if dest != want {
+			t.Errorf("dest = %q, want %q", dest, want)
+		}
+		if _, err := os.Stat(dest); err != nil {
+			t.Errorf("destination not written: %v", err)
+		}
+		if _, err := os.Stat(flat); !os.IsNotExist(err) {
+			t.Errorf("flat source should be gone, stat err = %v", err)
+		}
+	})
+
+	t.Run("is a no-op when already at canonical path", func(t *testing.T) {
+		root := t.TempDir()
+		canonical := filepath.Join(root, "h100-gke-cos-training",
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := WritePointerFile(canonical, signed()); err != nil {
+			t.Fatalf("write canonical: %v", err)
+		}
+		dest, err := RelocatePointerToCanonical(canonical, signed())
+		if err != nil {
+			t.Fatalf("RelocatePointerToCanonical: %v", err)
+		}
+		if dest != canonical {
+			t.Errorf("dest = %q, want unchanged %q", dest, canonical)
+		}
+		if _, err := os.Stat(canonical); err != nil {
+			t.Errorf("canonical file should still exist: %v", err)
+		}
+	})
+
+	t.Run("refuses to clobber an existing canonical pointer", func(t *testing.T) {
+		root := t.TempDir()
+		flat := filepath.Join(root, "h100-gke-cos-training.yaml")
+		if _, err := WritePointerFile(flat, signed()); err != nil {
+			t.Fatalf("write flat: %v", err)
+		}
+		canonical := filepath.Join(root, "h100-gke-cos-training",
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := WritePointerFile(canonical, signed()); err != nil {
+			t.Fatalf("write canonical: %v", err)
+		}
+		if _, err := RelocatePointerToCanonical(flat, signed()); err == nil {
+			t.Error("expected a conflict error when the canonical path already exists")
+		}
+		// The flat source must be left in place on a refusal (no move happened).
+		if _, err := os.Stat(flat); err != nil {
+			t.Errorf("flat source should remain after refusal: %v", err)
+		}
+	})
+
+	t.Run("recovers a partial move where dest is the same inode", func(t *testing.T) {
+		// Simulate a prior run that linked dest but stopped before removing the
+		// flat source (os.Link ok, os.Remove not yet). Retry must finish the
+		// move (remove the stale source, return dest) — not fail with a
+		// spurious clobber conflict.
+		root := t.TempDir()
+		flat := filepath.Join(root, "h100-gke-cos-training.yaml")
+		if _, err := WritePointerFile(flat, signed()); err != nil {
+			t.Fatalf("write flat: %v", err)
+		}
+		canonical := filepath.Join(root, "h100-gke-cos-training",
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(flat, canonical); err != nil {
+			t.Fatalf("simulate prior link: %v", err)
+		}
+		dest, err := RelocatePointerToCanonical(flat, signed())
+		if err != nil {
+			t.Fatalf("expected idempotent recovery, got error: %v", err)
+		}
+		if dest != canonical {
+			t.Errorf("dest = %q, want %q", dest, canonical)
+		}
+		if _, err := os.Stat(flat); !os.IsNotExist(err) {
+			t.Errorf("flat source should be removed after recovery, stat err = %v", err)
+		}
+		if _, err := os.Stat(canonical); err != nil {
+			t.Errorf("canonical should remain after recovery: %v", err)
+		}
+	})
+
+	t.Run("rejects an unsigned pointer", func(t *testing.T) {
+		unsigned := signed()
+		unsigned.Attestations[0].Signer = nil
+		if _, err := RelocatePointerToCanonical(filepath.Join(t.TempDir(), "x.yaml"), unsigned); err == nil {
+			t.Error("expected an error for an unsigned pointer")
+		}
+	})
+
+	t.Run("rejects a pointer with no digest", func(t *testing.T) {
+		noDigest := signed()
+		noDigest.Attestations[0].Bundle.Digest = ""
+		if _, err := RelocatePointerToCanonical(filepath.Join(t.TempDir(), "x.yaml"), noDigest); err == nil {
+			t.Error("expected an error for a pointer with no pushed digest")
+		}
+	})
+
+	t.Run("rejects a digest that is unsafe as a filename", func(t *testing.T) {
+		// defense-in-depth: a digest carrying a separator or ".." must not
+		// reach os.Link as a path leaf (e.g. an OCI-empty pointer that skipped
+		// the sha256: shape check in validatePointer).
+		for _, digest := range []string{"sha256:../../etc/evil", "sha256:a/b", "sha256:.."} {
+			evil := signed()
+			evil.Attestations[0].Bundle.Digest = digest
+			if _, err := RelocatePointerToCanonical(filepath.Join(t.TempDir(), "x.yaml"), evil); err == nil {
+				t.Errorf("digest %q: expected a rejection, got nil", digest)
+			}
+		}
+	})
+
+	t.Run("rejects a recipe with path traversal", func(t *testing.T) {
+		// defense-in-depth: a recipe escaping the evidence tree must never
+		// reach os.Rename, even when called directly (no CI gate in front).
+		for _, recipe := range []string{"../../etc/evil", "/abs/evil", ".."} {
+			evil := signed()
+			evil.Recipe = recipe
+			root := t.TempDir()
+			flat := filepath.Join(root, "x.yaml")
+			if err := os.WriteFile(flat, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := RelocatePointerToCanonical(flat, evil); err == nil {
+				t.Errorf("recipe %q: expected a rejection, got nil", recipe)
+			}
+			// The flat source must be untouched (no move attempted).
+			if _, err := os.Stat(flat); err != nil {
+				t.Errorf("recipe %q: flat source should be untouched: %v", recipe, err)
+			}
+		}
+	})
 }
 
 func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
