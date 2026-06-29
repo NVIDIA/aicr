@@ -16,17 +16,24 @@
 #
 # A contributor publishes an UNSIGNED evidence bundle locally (where the
 # cluster lives, often behind a VPN that blocks Sigstore) and commits the
-# pointer:
+# pointer FLAT — recipes/evidence/<recipe>.yaml — because the nested
+# <source> path segment derives from the signer a `--no-sign` pointer does
+# not yet have:
 #
 #   aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml \
 #     --emit-attestation ./out --push ghcr.io/<owner>/aicr-evidence --no-sign
-#   cp ./out/pointer.yaml recipes/evidence/<slug>.yaml
+#   cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 #
-# They then run THIS workflow from their fork's Actions tab. It discovers
-# every committed pointer with an empty signer block, signs the bundle each
-# one references with the runner's ambient OIDC identity (where Sigstore IS
-# reachable), patches the pointer's signer block in place, and commits it
-# back to the branch. Clean no-op when there is nothing unsigned.
+# They then run THIS workflow from their fork's Actions tab. It scans every
+# flat pointer under recipes/evidence/ except allowlist.yaml and runs
+# `aicr evidence sign --relocate` on each: an unsigned pointer is signed with
+# the runner's ambient OIDC identity (where Sigstore IS reachable) and then
+# relocated; an already-signed flat pointer left by a partial prior run is
+# relocated without re-signing (idempotent). The destination is the canonical
+# per-source path recipes/evidence/<recipe>/<source>/<digest>.yaml (the layout
+# the per-source contract gate requires), and the move is committed back to the
+# branch. Clean no-op when there are no flat pointers. This is the
+# commit-flat -> CI-sign -> CI-relocate-to-nested flow (#1530).
 #
 # Why workflow_dispatch (Option A): no recipe-name or bundle-ref inputs to
 # thread through — the committed pointer is the work item, and it already
@@ -57,10 +64,12 @@
 # there is no pull_request_target / untrusted-ref exposure (it is manual
 # dispatch on the fork's own code).
 #
-# The fork's aicr-evidence registry package must be PUBLIC: the pre-sign
-# pull (and the upstream evidence gate) fetch the bundle, and a private
-# package returns HTTP 403. The signing step fails with a clear message
-# pointing at this when it can't pull.
+# The fork's aicr-evidence registry package must be PUBLIC: the upstream
+# evidence gate fetches the bundle anonymously, and a private package returns
+# HTTP 403. The signing step fails with a clear message pointing at this when
+# it can't pull. The signature ATTACH (a referrer write) is authenticated
+# separately by the ghcr-login step + packages:write below — public visibility
+# alone does not grant write.
 
 name: "Recipe Evidence: Sign"
 
@@ -73,6 +82,10 @@ on:
 permissions:
   contents: write   # commit the patched pointer(s) back to the branch
   id-token: write   # ambient OIDC for keyless Fulcio/Rekor signing
+  # packages:write attaches the Sigstore bundle as an OCI referrer of the
+  # already-pushed artifact (a registry write — making the package public only
+  # enables the anonymous pre-sign pull, not the signature attach).
+  packages: write
 
 concurrency:
   # Serialize per branch; do NOT cancel in progress — a cancel mid-sign
@@ -123,6 +136,13 @@ jobs:
           go mod verify
           go build -o ./bin/aicr ./cmd/aicr
 
+      # `aicr evidence sign` attaches the Sigstore bundle as an OCI referrer —
+      # a registry write — so authenticate first (ORAS reads Docker creds). The
+      # public-package setting only enables the anonymous pre-sign pull. For a
+      # non-GHCR registry, swap this for that registry's login.
+      - name: Authenticate to GHCR
+        uses: ./.github/actions/ghcr-login
+
       - name: Sign unsigned evidence pointers
         id: sign
         env:
@@ -130,21 +150,30 @@ jobs:
         run: .github/scripts/evidence-sign-unsigned.sh
 
       - name: Commit signed pointers
-        # always() so that if one pointer fails to sign, the ones that DID
-        # sign are still committed — otherwise the registry would hold a signed
-        # bundle whose committed pointer stays unsigned. The job still fails
-        # (the sign step exited non-zero), surfacing the failure.
-        if: ${{ always() && steps.sign.outputs.signed != '0' }}
+        # always(), with no signed-count guard: the git-diff check below decides
+        # whether there is anything to commit. This is load-bearing for partial
+        # failure — `aicr evidence sign` patches the signer block into the flat
+        # pointer BEFORE the relocation step, so if relocation then fails the
+        # bundle is already signed in the registry. Committing the signed (but
+        # not-yet-relocated) pointer persists that work, so the next dispatch
+        # takes the idempotent relocate-only path instead of re-signing and
+        # attaching a duplicate referrer. The job still fails (the sign step
+        # exited non-zero), surfacing the failure.
+        if: ${{ always() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- recipes/evidence/; then
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # -A stages the relocation as a delete (flat pointer) + add (nested
+          # pointer) plus any in-place signer patch, so the moved files commit
+          # correctly. Check the STAGED set after `git add` so an untracked
+          # relocated file is still counted as a change.
+          git add -A recipes/evidence/
+          if git diff --cached --quiet -- recipes/evidence/; then
             echo "No pointer changes to commit (nothing to sign)."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add recipes/evidence/
           # -s adds a `Signed-off-by:` (DCO) trailer matching the bot author,
           # so the DCO bot passes on the commit-back. The commit is NOT
           # cryptographically signed (no -S) — it fills in the evidence

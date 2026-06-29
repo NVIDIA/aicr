@@ -67,6 +67,13 @@ const (
 	// disclosure prompt (see confirmKeylessSigningDisclosure). The banner is
 	// still emitted; only the y/N pause is skipped.
 	flagAssumeYes = "yes"
+	// flagRelocate moves the pointer to its canonical per-source path after
+	// `aicr evidence sign` fills in the signer block. It completes the
+	// commit-flat -> CI-sign -> CI-relocate-to-nested flow (#1530): a flat
+	// pending pointer cannot be committed at its nested <source>/ path because
+	// that segment derives from the signer it does not yet have, so the
+	// fork-based CI leg relocates it once it is signed.
+	flagRelocate = "relocate"
 )
 
 // Category labels (urfave/cli flag.Category values, grouping flags in help output).

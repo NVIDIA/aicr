@@ -57,10 +57,18 @@ Keyless OIDC signing uses the same precedence chain as ` + "`aicr evidence publi
 --identity-token > COSIGN_IDENTITY_TOKEN env > GitHub Actions ambient OIDC >
 --oidc-device-flow > interactive browser flow.
 
+With --relocate, the now-signed pointer is moved from its flat pending path
+(` + "`recipes/evidence/<recipe>.yaml`" + `) to its canonical per-source path
+(` + "`recipes/evidence/<recipe>/<source>/<digest>.yaml`" + `) — the layout the
+per-source contract gate requires. A flat pointer is the only committable
+state for an unsigned pointer, since the ` + "`<source>`" + ` segment derives from the
+signer it does not yet have. --relocate is idempotent: an already-signed flat
+pointer is moved without re-signing.
+
 Example:
 
   # In CI (ambient OIDC), after a contributor committed an unsigned pointer:
-  aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml`,
+  aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml --relocate`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:     flagIdentityToken,
@@ -82,6 +90,11 @@ Example:
 			&cli.BoolFlag{
 				Name:     flagInsecureTLS,
 				Usage:    "Skip TLS verification for the registry (pull + referrer attach; self-signed registries).",
+				Category: catEvidence,
+			},
+			&cli.BoolFlag{
+				Name:     flagRelocate,
+				Usage:    "After signing, move the pointer from its flat pending path (recipes/evidence/<recipe>.yaml) to its canonical per-source path recipes/evidence/<recipe>/<source>/<digest>.yaml. Used by the fork-based CI signing leg to complete the commit-flat -> sign -> relocate flow.",
 				Category: catEvidence,
 			},
 			assumeYesFlag(catEvidence),
@@ -107,10 +120,42 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 			"exactly one pointer file is allowed: aicr evidence sign <pointer>")
 	}
 
+	relocate := cmd.Bool(flagRelocate)
+
 	pointer, err := verifier.LoadAndValidatePointer(path)
 	if err != nil {
 		return err
 	}
+
+	// Idempotent recovery: with --relocate, an already-signed flat pointer
+	// (signing succeeded on a prior run but the relocation didn't land) is
+	// moved to its canonical path without re-signing. Without --relocate this
+	// falls through to ValidateSignablePointer, which fails closed on an
+	// already-signed pointer rather than re-signing it. LoadAndValidatePointer
+	// already guarantees exactly one attestation, so [0] is safe.
+	//
+	// This trusts the on-disk signer block without re-materializing or
+	// cryptographically verifying the bundle — the same metadata-only trust the
+	// contract gate applies, and not a new escalation (a contributor can write
+	// the nested path directly). Closing that gap (verify the signature before
+	// honoring a committed signer) is tracked repo-wide in #1535.
+	if relocate && pointer.Attestations[0].Signer != nil {
+		dest, rerr := attestation.RelocatePointerToCanonical(path, pointer)
+		if rerr != nil {
+			return rerr
+		}
+		if dest == path {
+			// RelocatePointerToCanonical no-ops when the pointer is already at
+			// its canonical path; don't claim a move that didn't happen.
+			slog.Info("evidence pointer already signed and at its canonical path; nothing to do",
+				"path", path, "recipe", pointer.Recipe)
+		} else {
+			slog.Info("evidence pointer already signed; relocated to canonical path",
+				"from", path, "to", dest, "recipe", pointer.Recipe)
+		}
+		return nil
+	}
+
 	// Fail fast (before the registry pull) unless the pointer is in the exact
 	// state we sign. The rule lives in pkg/evidence/attestation — SignExisting
 	// enforces it too — so the CLI cannot drift from the domain contract.
@@ -159,6 +204,28 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 		OIDCResolve: oidcResolve,
 	}); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to sign existing evidence bundle")
+	}
+
+	// SignExisting patched the in-memory pointer's signer block, so its
+	// canonical <source> path is now derivable. Relocate it home to satisfy
+	// the per-source contract gate.
+	if relocate {
+		dest, rerr := attestation.RelocatePointerToCanonical(path, pointer)
+		if rerr != nil {
+			// The bundle is already signed in the registry; only the local move
+			// failed. Surface that explicitly: PropagateOrWrap returns the inner
+			// coded error verbatim (no double-wrap), so this operator-critical
+			// context would otherwise be lost. Recovery is to relocate manually
+			// (re-running `aicr evidence sign --relocate` no-ops the already-done
+			// signing and just moves the file), or resolve a canonical-path
+			// conflict — never re-sign.
+			slog.Error("bundle signed but pointer relocation failed; relocate the pointer (no re-sign needed)",
+				"path", path, "recipe", pointer.Recipe, "error", rerr)
+			return errors.PropagateOrWrap(rerr, errors.ErrCodeInternal,
+				"signed the bundle but failed to relocate the pointer to its canonical path")
+		}
+		slog.Info("evidence pointer signed and relocated", "from", path, "to", dest, "recipe", pointer.Recipe)
+		return nil
 	}
 
 	slog.Info("evidence pointer signed", "path", path, "recipe", pointer.Recipe)
