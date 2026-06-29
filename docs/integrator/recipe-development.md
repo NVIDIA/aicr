@@ -773,7 +773,7 @@ Implementation Notes section is fine):
   non-zero exit with a `1` in the JSON output's `exit` field
   (signature valid, recorded phase results show failures), include a
   short justification in the PR description. The maintainer either applies the `evidence/known-failure`
-  label and merges, or requests changes. See
+  label (not yet created — future state) and merges, or requests changes. See
   [Exit-1 Review Process](../contributor/maintaining.md#exit-1-review-process)
   for what counts as an acceptable reason — broadly: optional check
   not applicable to your hardware, performance ceiling limited by
@@ -800,7 +800,7 @@ to a committed pointer.
 - For mechanical changes that touch `recipes/**` but carry no
   recipe semantics (file renames, comment-only changes, license
   header sweeps, self-bootstrapping evidence-pipeline changes), ask
-  a maintainer to apply `evidence/exempt` per the
+  a maintainer to apply `evidence/exempt` (not yet created — future state) per the
   [bypass policy](../contributor/maintaining.md#evidenceexempt-bypass-policy).
   Self-applying that label is not appropriate.
 

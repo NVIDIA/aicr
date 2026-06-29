@@ -70,9 +70,11 @@ Ordering invariants (also documented in source):
 - **Rate limit outside body limit.** A 429 short-circuits before any body-cap setup.
 - **Body limit innermost.** Per-endpoint `http.MaxBytesReader` calls in handlers (recipe = 1 MiB, bundle = 8 MiB) reapply cleanly inside the default cap.
 
-System endpoints — `/`, `/health`, `/ready`, `/metrics` — bypass the
-chain entirely. Only application routes registered via `WithHandler`
-go through it.
+System endpoints — `/health`, `/ready`, `/metrics` — bypass the chain
+entirely. The `/` root route is added to the handlers map by
+`configureRootHandler` (not via `WithHandler`, which installs only
+caller-provided handlers) and is then wrapped by the same middleware loop, so
+it runs the full chain like application routes.
 
 ## Handler Pattern
 

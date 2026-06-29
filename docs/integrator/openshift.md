@@ -152,7 +152,7 @@ ocp-bundle/
 ├── undeploy.sh                             # Cleanup script
 ├── README.md                               # Bundle documentation
 ├── recipe.yaml                             # Recipe used to generate bundle
-├── checksums.txt                           # SHA256 checksums for all files
+├── checksums.txt                           # SHA256 of all listed files (recipe.yaml excluded, #1549)
 │
 │   # ── Per-operator three-folder cycle ──
 │

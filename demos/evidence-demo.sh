@@ -148,8 +148,10 @@ run_expect_fail() {
   "$@" || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s[exit %s — expected failure ✓]%s\n' "$GREEN" "$rc" "$RESET"
+    return 0
   else
     printf '%s[exit 0 — UNEXPECTED: command was supposed to fail]%s\n' "$RED" "$RESET"
+    return 1
   fi
 }
 
@@ -248,7 +250,8 @@ cat <<'EOF'
 EOF
 printf '%s' "$RESET"
 note "The predicate (incl. its baked-in attestedAt) is signed VERBATIM from the"
-note "on-disk bundle, so the result is identical regardless of which host signs."
+note "on-disk bundle, so the signed content + digest are identical regardless of host;"
+note "the signature, cert, signer identity, and signing time differ per run."
 pause "Once you are OFF VPN, press Enter to sign + push"
 run "$AICR" evidence publish "$OUT" --push "$PUSH_REF"
 

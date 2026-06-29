@@ -386,7 +386,7 @@ The request body is the recipe (RecipeResult) directly. No wrapper object needed
 
 #### Components
 
-Bundler names correspond to component names in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). Any component registered there can be passed as a bundler. The registry is the authoritative source — see the [component catalog](component-catalog.md) for the full, current list with detailed descriptions. The table below is illustrative of commonly used components:
+These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). (The `bundlers` query parameter that would select a subset is currently ignored — all run regardless, #1531.) The registry is the authoritative source — see the [component catalog](component-catalog.md) for the full, current list with detailed descriptions. The table below is illustrative of commonly used components:
 
 | Component | Description |
 |-----------|-------------|
@@ -496,19 +496,24 @@ curl -X POST "http://localhost:8080/v1/bundle" \
 
 ```
 bundles.zip
-├── gpu-operator/
-│   ├── values.yaml              # Helm chart values
-│   ├── scripts/
-│   │   ├── install.sh           # Installation script
-│   │   └── uninstall.sh         # Cleanup script
-│   ├── README.md                # Deployment instructions
-│   └── checksums.txt            # SHA256 checksums
-└── network-operator/
+├── deploy.sh                    # root automation script (executable)
+├── README.md                    # root deployment guide
+├── checksums.txt                # SHA256 checksums (always set for /v1/bundle)
+├── recipe.yaml                  # canonical post-resolution recipe (helm deployer)
+├── 001-<component>/             # per-component folder (NNN-prefixed)
+│   ├── install.sh               # component install script
+│   ├── values.yaml              # static Helm values
+│   ├── cluster-values.yaml      # per-cluster dynamic values
+│   └── upstream.env             # CHART/REPO/VERSION (upstream-helm only)
+└── 002-<component>/
+    ├── install.sh
     ├── values.yaml
-    ├── manifests/
-    │   └── nfd-network-rule.yaml   # NodeFeatureRule for Mellanox NICs
-    └── ...
+    └── cluster-values.yaml
 ```
+
+Checksums are root-level only; component folders carry `install.sh` at their
+root (no `scripts/` subdirectory), and no `uninstall.sh`/`undeploy.sh` is
+generated.
 
 ---
 
@@ -598,9 +603,9 @@ curl -s -X POST "http://localhost:8080/v1/bundle" \
 echo "Extracting bundles..."
 unzip -q bundles.zip -d ./deployment
 
-# Verify checksums
+# Verify checksums (checksums.txt is at the bundle root, not per-component)
 echo "Verifying checksums..."
-cd deployment/gpu-operator
+cd deployment
 sha256sum -c checksums.txt
 
 # Step 4: Deploy (example)

@@ -73,8 +73,8 @@ should be upgraded.
 
 | Version | Supported |
 |---------|-----------|
-| `0.15.x` (latest released minor) | ✅ Receives security fixes |
-| `< 0.15` | ❌ End-of-life — upgrade to the latest release |
+| `0.16.x` (latest released minor) | ✅ Receives security fixes |
+| `< 0.16` | ❌ End-of-life — upgrade to the latest release |
 
 Security fixes ship in a new patch or minor release rather than as backports to
 end-of-life versions. When AICR reaches 1.0 this policy will be revised and a
@@ -102,7 +102,7 @@ charts evolve:
 - [`docs/user/container-images.md`](docs/user/container-images.md) — human
   readable summary of every component, chart, and image AICR can deploy.
 - A machine-readable [CycloneDX 1.6][cyclonedx] BOM is produced by `make
-  bom` and published as a release asset. Tooling that consumes SBOMs
+  bom` (generated locally; not currently a published release asset). Tooling that consumes SBOMs
   (Trivy, Grype, Cosign attestation, in-toto) should prefer the JSON; the
   Markdown is its companion.
 
@@ -110,17 +110,18 @@ charts evolve:
 contract:
 
 1. **Chart versions** are pinned for every Helm component, with no
-   exceptions. `recipes/registry.yaml` MUST declare `defaultVersion`;
-   `make bom BOM_STRICT=1` enforces this in CI.
+   exceptions. `recipes/registry.yaml` MUST declare `defaultVersion`. `bom-pinning-check`
+   (a `make lint` dependency) enforces this with `-strict`, with no exceptions.
 2. **Explicit image overrides** that AICR pins in-tree (in
    `recipes/components/<name>/values.yaml` or embedded manifests) carry
-   `@sha256:` digests in addition to tags. Renovate handles digest
-   rotation as upstream rebuilds the same tag.
+   `@sha256:` digests in addition to tags (Renovate handles digest rotation). A
+   small documented exemption map covers refs that cannot take a digest (e.g.
+   CRD schemas); explicit digest pinning is not yet universal.
 3. **Chart-default sub-images** (the ones the upstream chart pulls
    without AICR overriding) ship at whatever the chart resolves at the
-   pinned chart version. Reproducibility for these images is delivered by
-   admission-time digest verification rather than per-sub-image overrides
-   (see the [supply-chain epic][epic-739] for the roadmap).
+   pinned chart version. Reproducibility for these images is *planned* via
+   admission-time digest verification (Stage 3 roadmap, not yet enforced — see
+   the [supply-chain epic][epic-739]), not per-sub-image overrides.
 
 **Upstream attestation coverage.** AICR's own runtime images and the
 [NVSentinel][nvsentinel] images deployed by AICR ship with full
@@ -146,18 +147,20 @@ and how it is signed:
 
 | Guarantee | Artifact | Format / Standard | Signing |
 |-----------|----------|-------------------|---------|
-| Build provenance | Container images | SLSA Build Level 3 (provenance v1) | Sigstore keyless via GitHub Actions OIDC |
+| Build provenance | Container images | SLSA Build Provenance v1 (build level under review — #1536) | Sigstore keyless via GitHub Actions OIDC |
 | Build provenance | CLI binaries | SLSA Build Provenance v1 (Sigstore bundle) | Cosign keyless, logged to public Rekor |
 | Signed SBOM | Container images | SPDX v2.3 JSON attestation | Cosign keyless (Fulcio + Rekor) |
-| Embedded SBOM | CLI binaries | SPDX v2.3 JSON (via GoReleaser) | Released alongside attested binary |
+| Binary SBOM | CLI binaries | SPDX v2.3 JSON (via GoReleaser) | Separate release asset (`*.sbom.json`), not embedded |
 | Bundle attestation | `aicr bundle` output | SLSA Build Provenance v1 | Sigstore keyless OIDC (opt-in `--attest`) |
 | Recipe / bundle validity | `aicr verify` trust levels | `verified` / `attested` / `unverified` / `unknown` | Checksums + Sigstore trusted root |
 
 `aicr verify` reports one of four trust levels for a bundle: `verified`
 (full chain verified, binary identity pinned to NVIDIA CI), `attested`
-(chain verified but binary attestation missing or external data used),
-`unverified` (checksums valid, `--attest` was not used), and `unknown`
-(missing checksums or attestation files).
+(bundle attestation verified but the chain is incomplete — binary attestation
+missing/unverified or external data used; a binary attestation that *fails*
+verification reports `attested` but makes `aicr verify` exit nonzero),
+`unverified` (checksums valid but no attestation files, e.g. `--attest` was
+not used), and `unknown` (missing/invalid checksums, or a bundle attestation that fails verification).
 
 ### Verify an Artifact (Happy Path)
 
@@ -169,11 +172,10 @@ export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | 
 export IMAGE="ghcr.io/nvidia/aicr"
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
 
-# Verify build provenance and SBOM attestations
-gh attestation verify "oci://${IMAGE}@${DIGEST}" --owner nvidia
+# Verify build provenance (the SPDX SBOM uses the Cosign flow in docs/integrator/supply-chain-verification.md)
+gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
 # ✓ Verification succeeded!
 #   • Build provenance (SLSA v1.0)
-#   • SBOM (SPDX)
 ```
 
 Verify a generated deployment bundle, enforcing the highest trust level:

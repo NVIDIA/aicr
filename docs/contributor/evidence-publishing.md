@@ -1,7 +1,8 @@
 # Publishing Recipe Evidence
 
-Recipe evidence is a signed bundle that proves a recipe's validators passed
-on hardware matching its `criteria`. Producing it has two legs:
+Recipe evidence is a signed bundle that records a recipe's validator results
+and binds them to a signer's identity (it attests the recorded result, not that
+a specific cluster existed). Producing it has two legs:
 
 1. **Validate + push (network-light).** Runs where the cluster lives —
    often a corporate VPN. Captures a snapshot, runs the validators, builds
@@ -158,7 +159,8 @@ carry a non-PII handle):
 ```yaml
 # recipes/evidence/allowlist.yaml
 community:
-  - source: <src>          # the <src> directory segment from step 3
+  - issuer: https://token.actions.githubusercontent.com  # required
+    source: <src>          # the <src> directory segment from step 3
     label: <your-gh-handle> # optional, non-PII
 ```
 

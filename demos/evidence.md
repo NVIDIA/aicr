@@ -1,9 +1,12 @@
 # Recipe Evidence Demo
 
-Recipe evidence is a signed, OCI-distributed bundle that proves a particular
-recipe passed `aicr validate` against a specific cluster. Contributors emit
+Recipe evidence is a signed, OCI-distributed, tamper-evident record that binds
+a signer's identity to a recorded `aicr validate` result. The signature attests
+the recorded result — it does not by itself prove who ran the validation or that
+a specific cluster existed (see [ADR-007](../docs/design/007-recipe-evidence.md)). Contributors emit
 the bundle with `aicr validate --emit-attestation`; maintainers verify it
-offline with `aicr evidence verify`. This is the trust handoff for recipes
+with `aicr evidence verify` (which pulls the OCI bundle — registry access
+required; only an already-local bundle directory verifies fully offline). This is the trust handoff for recipes
 on hardware AICR maintainers can't reach — see
 [ADR-007](../docs/design/007-recipe-evidence.md) for the design.
 
@@ -33,7 +36,8 @@ This demo walks through the full producer-and-consumer loop:
   even though the bundle was signed at push-time.
 * For signing: a working OIDC source. GitHub Actions OIDC is detected
   automatically; otherwise the CLI opens a browser for keyless signing.
-* Bootstrap the Sigstore trusted root once on the verifier's machine:
+* Optional: refresh the Sigstore trusted root (verification falls back to the
+  embedded root, so this is only needed for a stale cache):
 
   ```shell
   aicr trust update
@@ -103,9 +107,11 @@ aicr evidence publish ./out --push ghcr.io/<owner>/aicr-evidence
 ```
 
 The bundle is content-addressable and `evidence publish` signs the predicate
-(with its emit-time `attestedAt`) verbatim from disk, so `./out` ends up
-identical to the one-shot output above — including the signed
-`attestation.intoto.jsonl` and a populated `pointer.yaml`.
+(with its emit-time `attestedAt`) verbatim from disk, so the **unsigned** subject/predicate — and therefore the bundle digest — are
+identical regardless of signing host. The Sigstore signature, Fulcio
+certificate, signer identity, and signing time vary per signing run, so the
+signed bundle bytes themselves are not reproducible; only the signed *content*
+is.
 
 ## 2. Commit the pointer
 
@@ -119,7 +125,7 @@ destination as `copyTo` in its output, so copy the pointer there verbatim:
 
 ```shell
 # Path published by `aicr evidence publish` (its copyTo= log line), e.g.:
-DEST=recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-33d4cf36.yaml
+DEST=recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml
 mkdir -p "$(dirname "$DEST")"
 cp ./out/pointer.yaml "$DEST"
 git add "$DEST"
@@ -143,7 +149,11 @@ slug that does not match.
 > that the bundle was actually signed by that identity (the OCI signature
 > verification is a separate, currently warning-only check). So treat the
 > pointer's signer as a *claimed* identity at gate time, not a cryptographically
-> proven one. See [#1535](https://github.com/NVIDIA/aicr/issues/1535).
+> proven one. Cryptographic trust is enforced **after merge, at ingest**
+> (`evidence-ingest.yaml`), which verifies the signature pinned to the claimed
+> signer and cross-checks the certificate before any result is counted — so a
+> lying pointer passes the gate but fails ingest. See
+> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007. (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).)
 
 ### Add the signer to the allowlist
 
@@ -198,7 +208,7 @@ see §4 and `--allow-unpinned-tag`.
 ## 3. Verify from the pointer (maintainer path)
 
 ```shell
-aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-33d4cf36.yaml
+aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml
 ```
 
 The verifier pulls the OCI artifact and runs five checks:
@@ -206,7 +216,7 @@ The verifier pulls the OCI artifact and runs five checks:
 1. **Materialize** the bundle (OCI pull).
 2. **Signature verify** — cosign keyless via sigstore-go; predicate extracted from the verified DSSE payload.
 3. **Predicate parse** — uses the signature-anchored predicate.
-4. **Manifest hash check** — every bundled file recomputed against `manifest.json`, which is bound to `predicate.Manifest.Digest` (now cryptographically anchored).
+4. **Manifest hash check** — every manifest-listed payload file recomputed against `manifest.json`, which is bound to `predicate.Manifest.Digest` (now cryptographically anchored).
 5. **Render** a Markdown summary with signer, fingerprint table, phase counts, and BOM info.
 
 Exit codes:
@@ -237,9 +247,9 @@ aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml --format json
 Pin the expected signer when only one identity should be accepted:
 
 ```shell
-aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-33d4cf36.yaml \
+aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
-  --expected-identity-regexp '^https://github\.com/<owner>/.*$'
+  --expected-identity-regexp '^https://github\.com/<owner>/<repo>/\.github/workflows/validate\.yaml@refs/heads/main$'   # match your pointer's signer.identity exactly
 ```
 
 ## 4. Verify directly from OCI
@@ -282,7 +292,7 @@ tampering. See ADR-007 §"Trust model" for details.
 
 ## 6. Tamper demo
 
-The signed manifest hash pins every file. One example:
+The signed manifest hash pins every manifest-listed payload file. One example:
 
 ```shell
 # Pull the bundle locally and mutate a CTRF result.
@@ -310,7 +320,7 @@ ADR-007 §"Trust model".
 ## 7. PR-comment Markdown
 
 ```shell
-aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-33d4cf36.yaml \
+aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml \
   -o ./evidence-summary.md
 ```
 
@@ -319,7 +329,7 @@ Paste the rendered Markdown into the PR comment for maintainer review.
 ## 8. JSON output (CI path)
 
 ```shell
-aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-33d4cf36.yaml \
+aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/81724194d94a1e926f68c78ae51e8720/sha256-9f8e7d6c5b4a3210fedcba9876543210abcdef0123456789fedcba9876543210.yaml \
   -o evidence-result.json -t json
 
 jq '.exit' evidence-result.json          # 0 / 1 / 2 (library code)

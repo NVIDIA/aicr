@@ -126,34 +126,35 @@ banner "Resolve the latest release tag"
 note "Tags are mutable — we resolve once, then never touch them again."
 if [ -z "$TAG" ]; then
   pause "Press Enter to query the GitHub API for the latest release tag"
-  run bash -c 'curl -fsSL https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r .tag_name'
   TAG="$(curl -fsSL https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r .tag_name)"
+  note "Latest release tag: $TAG"
 fi
 note "Using tag: $TAG"
 
 banner "Tag → immutable digest"
 note "Every following check is anchored to the digest. The tag never appears again."
 pause "Press Enter to resolve the digest"
-run crane digest "$IMAGE:$TAG"
 DIGEST="$(crane digest "$IMAGE:$TAG")"
+note "Resolved digest: $DIGEST"
 IMAGE_DIGEST="$IMAGE@$DIGEST"
 note "Pinned ref: $IMAGE_DIGEST"
 
 # --- verify the image (SLSA provenance) --------------------------------------
 
 banner "Verify the image: SLSA Provenance v1 (via gh)"
-note "gh attestation verify pulls the attestation from GHCR, validates the Sigstore"
+note "Requires GitHub auth: run 'gh auth login' or set GH_TOKEN first."
+note "gh attestation verify fetches the attestation from the GitHub attestations API, validates the Sigstore"
 note "signature against Fulcio's cert chain + Rekor's inclusion proof, and asserts the"
-note "signer identity is a workflow owned by --owner $OWNER."
+note "artifact comes from --repo $OWNER/aicr and was signed by the on-tag.yaml release workflow."
 pause "Press Enter to verify provenance"
-run gh attestation verify "oci://$IMAGE_DIGEST" --owner "$OWNER"
+run gh attestation verify "oci://$IMAGE_DIGEST" --repo "$OWNER/aicr" --signer-workflow "$OWNER/aicr/.github/workflows/on-tag.yaml" --source-ref "refs/tags/$TAG"
 
 banner "Verify the aicrd server image"
 note "Same flow, second subject. Resolve its own digest first — tags can drift independently."
 pause "Press Enter to resolve + verify aicrd"
-run crane digest "$IMAGE_AICRD:$TAG"
 DIGEST_AICRD="$(crane digest "$IMAGE_AICRD:$TAG")"
-run gh attestation verify "oci://$IMAGE_AICRD@$DIGEST_AICRD" --owner "$OWNER"
+note "aicrd digest: $DIGEST_AICRD"
+run gh attestation verify "oci://$IMAGE_AICRD@$DIGEST_AICRD" --repo "$OWNER/aicr" --signer-workflow "$OWNER/aicr/.github/workflows/on-tag.yaml" --source-ref "refs/tags/$TAG"
 
 # --- verify the SBOM attestation ---------------------------------------------
 
@@ -164,7 +165,7 @@ pause "Press Enter to verify the SBOM attestation"
 run cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/.*' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
   "$IMAGE_DIGEST" \
   --output-file "$PREDICATE"
 

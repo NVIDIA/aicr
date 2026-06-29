@@ -2,11 +2,13 @@
 
 Bundle attestation provides cryptographic proof of **who** created a deployment
 bundle and **which AICR CLI** built it. When `aicr bundle --attest` runs, the
-CLI signs the bundle contents using [Sigstore](https://www.sigstore.dev/) and
+CLI signs the bundle's `checksums.txt` (which inventories the deployment
+payload; `recipe.yaml` is currently excluded, #1549, and the attestation files
+are verified separately) using [Sigstore](https://www.sigstore.dev/) and
 generates SLSA Build Provenance v1 metadata. Anyone can later verify the
 bundle with `aicr verify` to confirm:
 
-* It hasn't been tampered with.
+* The files listed in `checksums.txt` haven't been tampered with (recipe.yaml is excluded, #1549).
 * It was created by a trusted identity.
 * It was built by an attested NVIDIA-CI-released AICR CLI.
 
@@ -35,17 +37,18 @@ This walkthrough covers:
   reachable from the signing host. Both are commonly blocked on corporate
   VPNs — if so, sign from a host with public internet egress.
 
-## 1. Trust setup
+## 1. Trust setup (optional)
 
-Bootstrap the Sigstore trusted root (the install script does this automatically,
-and it's idempotent so re-running is safe):
+`aicr verify` falls back to the embedded Sigstore trusted root, so verification
+works offline out of the box. Run this only to refresh a stale cached root:
 
 ```shell
-aicr trust update
+aicr trust update   # optional; idempotent
 ```
 
 This pulls the current Sigstore TUF root used to verify Fulcio cert chains.
-Without it, `aicr verify` reports "trusted root may be stale".
+You only need it if `aicr verify` reports "trusted root may be stale" (the
+embedded root otherwise suffices).
 
 ## 2. Generate a recipe
 
@@ -85,13 +88,14 @@ permissions.
 
 ```text
 my-bundle/
-├── checksums.txt                          # SHA256 of every content file
+├── checksums.txt                          # SHA256 of every listed file (excludes recipe.yaml, #1549)
 ├── recipe.yaml                            # canonical post-resolution recipe
 ├── deploy.sh                              # automation script
 ├── README.md                              # deployment guide
-├── <component>/                           # per-component values + readme
+├── 001-<component>/                       # per-component folder (NNN-prefixed)
+│   ├── install.sh
 │   ├── values.yaml
-│   └── README.md
+│   └── cluster-values.yaml
 └── attestation/
     ├── bundle-attestation.sigstore.json   # SLSA Provenance v1 — signs checksums.txt
     └── aicr-attestation.sigstore.json     # binary SLSA attestation (copied in)
@@ -102,7 +106,9 @@ The two attestations together form the chain that makes `verified` reachable:
 * **`bundle-attestation.sigstore.json`** — Sigstore Bundle (DSSE + Fulcio cert
   + Rekor inclusion proof). Its in-toto subject is the SHA256 of
   `checksums.txt`, so signing this one file transitively pins every content
-  file in the bundle. The signer identity is the creator's OIDC identity.
+  file that `checksums.txt` lists. The signer identity is the creator's OIDC
+  identity. (Caveat: `recipe.yaml` is currently written *after* `checksums.txt`
+  and is not yet covered — tracked in #1549.)
 * **`aicr-attestation.sigstore.json`** — the SLSA Build Provenance attestation
   *of the AICR CLI binary that produced the bundle*, copied in at bundle time.
   Its signer identity is NVIDIA CI (`https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@...`).
@@ -137,7 +143,7 @@ Bundle verification: PASSED
 
 Five gates run, top to bottom:
 
-1. **Checksums** — every content file is hashed and compared against `checksums.txt`.
+1. **Checksums** — every file listed in `checksums.txt` is hashed and compared (recipe.yaml is not yet listed — #1549).
 2. **Bundle signature** — the Sigstore Bundle is verified against the trusted root.
 3. **Bundle predicate** — the in-toto subject is checked against the actual `checksums.txt` digest.
 4. **Binary attestation chain** — `aicr-attestation.sigstore.json` is verified and its subject is checked against the CLI binary digest claimed in the bundle predicate.
@@ -157,9 +163,9 @@ aicr verify ./my-bundle --min-trust-level attested
 | Level | Name | Criteria |
 |-------|------|----------|
 | **4** | `verified` | Checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
-| **3** | `attested` | Chain verified but binary attestation missing or external data used |
+| **3** | `attested` | Bundle attestation verified; binary attestation missing/unverified, or external data used. A *failed* binary attestation also reports attested but exits nonzero (#1550) |
 | **2** | `unverified` | Checksums valid, `--attest` was not used |
-| **1** | `unknown` | Missing or invalid `checksums.txt` |
+| **1** | `unknown` | Missing/invalid `checksums.txt`, or bundle attestation fails verification |
 
 Pick the floor per environment. Production bundles must be `verified`; an
 emergency hotfix bundle built off-CI might only be required to reach
@@ -181,29 +187,32 @@ aicr verify ./my-bundle --cli-version-constraint ">= 1.0.0"
 aicr verify ./my-bundle --cli-version-constraint "== 1.0.0"
 ```
 
-The CLI version is read from the binary attestation's predicate, so this
-constraint is only meaningful when the bundle reaches `verified` — at lower
-trust levels there's nothing to anchor the version claim to.
+The CLI version (`toolVersion`) is read from the *bundle* attestation's
+predicate, so it is available once the bundle reaches `attested` (it does not
+require the binary attestation).
 
 ## 7. JSON output (CI path)
 
 ```shell
-aicr verify ./my-bundle --format json | jq '{ trust_level, verdict, creator, cli_version }'
+aicr verify ./my-bundle --format json | jq '{ trustLevel, bundleCreator, toolVersion }'
 ```
 
 ```json
 {
-  "trust_level": "verified",
-  "verdict": "passed",
-  "creator": "jdoe@company.com",
-  "cli_version": "1.0.0"
+  "trustLevel": "verified",
+  "bundleCreator": "jdoe@company.com",
+  "toolVersion": "1.0.0"
 }
 ```
 
 Branching in a pipeline:
 
 ```shell
-trust=$(aicr verify ./my-bundle --format json | jq -r .trust_level)
+# Capture the JSON and the verify exit code separately: a binary-attestation
+# that *fails* verification still reports trustLevel=attested but exits nonzero.
+if out=$(aicr verify ./my-bundle --format json); then rc=0; else rc=$?; fi
+trust=$(printf '%s' "$out" | jq -r .trustLevel)
+if [ "$rc" -ne 0 ]; then echo "fail — verify exited $rc" ; exit 1 ; fi
 case "$trust" in
   verified) echo "ok — deploying" ;;
   attested) echo "warn — escalating" ; notify-slack ;;
@@ -213,17 +222,20 @@ esac
 
 ## 8. Tamper demo
 
-The signed manifest hash pins every file. Mutating any of them breaks
-verification:
+The signed manifest hash pins every file listed in `checksums.txt`. Mutating
+a listed file breaks verification:
 
 ```shell
-sed -i 's/replicas: 1/replicas: 99/' my-bundle/gpu-operator/values.yaml
+# Component dirs are numbered NNN-<component>/; tamper the first one's values
+# rather than guessing the index, so this works for any generated recipe:
+f=$(ls my-bundle/[0-9]*-*/values.yaml | head -1)
+echo '# tampered' >> "$f"
 aicr verify ./my-bundle
-# Expected:
+# Expected (exact file and digests vary by recipe):
 # ✗ Checksums failed: 1 file mismatch
-#     gpu-operator/values.yaml — sha256 mismatch (got 3f9a…, want 7b21…)
+#     <NNN-component>/values.yaml — sha256 mismatch (got 3f9a…, want 7b21…)
 #   Trust level: unknown
-# Bundle verification: FAILED (exit 2)
+# Bundle verification: FAILED (non-zero exit)
 ```
 
 Editing `checksums.txt` to match the new hash defeats the checksum gate but
@@ -237,12 +249,11 @@ rotates its TUF roots periodically. Run `aicr trust update`.
 
 **"trust level: attested (expected: verified)"** — the bundle reaches
 `attested` but not `verified`. Common causes: the AICR binary used to build
-the bundle was not a release binary (so it carries no binary attestation), or
-the chain pin was relaxed by `--no-pin-identity`. Build with a release binary
-and let identity-pinning default to on.
+the bundle was not a release binary, so it carries no binary attestation.
+Build with a release binary so the chain can reach `verified`.
 
-**Browser doesn't open on a remote shell** — set
-`COSIGN_EXPERIMENTAL=1` and use the device-flow OIDC option, or run the
+**Browser doesn't open on a remote shell** — pass
+`--oidc-device-flow` to use device-flow OIDC, or run the
 bundle step on a workstation with a browser and copy the bundle to the
 remote.
 

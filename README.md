@@ -20,7 +20,7 @@ Every AICR recipe is:
 - **Validated** — Passes automated constraint and compatibility checks before publishing.
 - **Reproducible** — Same inputs produce identical deployments every time.
 
-Every AICR recipe also carries two kinds of cryptographic proof: **where it came from** (provenance — signed by NVIDIA CI, verifiable offline) and **that it actually works on real hardware** (validity — including signed validation results from contributors with cluster access NVIDIA doesn't have). See [SECURITY.md](SECURITY.md) and the [bundle attestation](demos/bundle-attestation.md), [recipe evidence](demos/evidence.md), and [build provenance](demos/provenance.md) demos for the full chain.
+Every AICR recipe also carries two kinds of cryptographic proof: **where it came from** (provenance — signed by NVIDIA CI, verifiable offline) and, **for recipes with published evidence, what their validation recorded** (validity — a signer-bound, tamper-evident attestation that binds an identity to a recorded `aicr validate` result, from contributors with cluster access NVIDIA doesn't have). See [SECURITY.md](SECURITY.md) and the [bundle attestation](demos/bundle-attestation.md), [recipe evidence](demos/evidence.md), and [build provenance](demos/provenance.md) demos for the full chain.
 
 ## Quick Start
 
@@ -63,7 +63,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
 | **Drift Detection** | `aicr diff` compares two snapshots to surface configuration drift between clusters or over time. |
-| **Supply Chain Security** | SLSA Level 3 provenance, signed SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
+| **Supply Chain Security** | SLSA build provenance (level under review, #1536), signed image SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
 
 ## Supported Components
 
