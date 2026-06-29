@@ -224,6 +224,19 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects a digest that is unsafe as a filename", func(t *testing.T) {
+		// defense-in-depth: a digest carrying a separator or ".." must not
+		// reach os.Link as a path leaf (e.g. an OCI-empty pointer that skipped
+		// the sha256: shape check in validatePointer).
+		for _, digest := range []string{"sha256:../../etc/evil", "sha256:a/b", "sha256:.."} {
+			evil := signed()
+			evil.Attestations[0].Bundle.Digest = digest
+			if _, err := RelocatePointerToCanonical(filepath.Join(t.TempDir(), "x.yaml"), evil); err == nil {
+				t.Errorf("digest %q: expected a rejection, got nil", digest)
+			}
+		}
+	})
+
 	t.Run("rejects a recipe with path traversal", func(t *testing.T) {
 		// defense-in-depth: a recipe escaping the evidence tree must never
 		// reach os.Rename, even when called directly (no CI gate in front).

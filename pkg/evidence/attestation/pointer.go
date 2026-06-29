@@ -113,13 +113,13 @@ func canonicalPointerSuffix(p *Pointer) (string, error) {
 	if att.Bundle.Digest == "" {
 		return "", errors.New(errors.ErrCodeInvalidRequest, "pointer has no pushed bundle digest")
 	}
-	// recipe is the only attacker-influenced segment that reaches a filesystem
-	// path in RelocatePointerToCanonical (source is hex; the digest filename is
-	// validated sha256:<hex>). Reject anything that isn't a clean local path so
-	// a recipe like "../../etc" cannot escape the evidence tree on os.Rename —
-	// defense in depth that does not rely on the CI contract gate, which a
-	// direct `aicr evidence sign --relocate <file>` invocation bypasses.
-	// filepath.IsLocal also rejects "" and absolute paths.
+	// recipe and the bundle digest are the attacker-influenced segments that
+	// reach a filesystem path in RelocatePointerToCanonical (source is hex).
+	// Fail closed at this sink so a malicious value can't escape the evidence
+	// tree on the os.Link relocation — defense in depth that does not depend on
+	// the CI contract gate, which a direct `aicr evidence sign --relocate
+	// <file>` invocation bypasses. filepath.IsLocal rejects "", "..", and
+	// absolute paths.
 	if !filepath.IsLocal(p.Recipe) {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
 			"pointer.recipe is not a local path segment: "+p.Recipe)
@@ -128,7 +128,14 @@ func canonicalPointerSuffix(p *Pointer) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The digest becomes a path leaf. validatePointer only enforces the
+	// sha256:<hex> shape when bundle.oci is set, so guard it here too: require a
+	// single, local element (no separator, no "..") before joining.
 	file := strings.ReplaceAll(att.Bundle.Digest, ":", "-") + ".yaml"
+	if file != filepath.Base(file) || !filepath.IsLocal(file) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"pointer bundle digest is not safe as a filename: "+att.Bundle.Digest)
+	}
 	return filepath.Join(p.Recipe, source, file), nil
 }
 

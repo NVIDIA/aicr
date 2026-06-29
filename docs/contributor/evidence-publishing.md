@@ -153,9 +153,11 @@ cp ./out/pointer.yaml recipes/evidence/<recipe>/<src>/<digest>.yaml
 
 The flat commit-then-CI-sign flow above is only for the unsigned case: a
 signed pointer already has the signer the `<src>` segment derives from, so
-it goes straight to its nested path and needs no relocation. The signed
-artifact is content-addressed, so the result is identical regardless of which
-host ran which leg.
+it goes straight to its nested path and needs no relocation. The *bundle* is
+content-addressed, so its bytes (and `bundle.digest`) are identical regardless
+of which host ran which leg — but the committed *pointer path* still depends on
+the signer: `<src>` is derived from your signing identity, so a different
+signer lands the pointer under a different `<src>` directory.
 
 ## See also
 
