@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -1898,5 +1899,198 @@ func TestLoadMetadataStore_ConcurrentSameProviderIsCached(t *testing.T) {
 		if results[i] != results[0] {
 			t.Errorf("result[%d] is not the cached singleton (got %p, want %p)", i, results[i], results[0])
 		}
+	}
+}
+
+// TestGB200OKEFloorNotClobbered is a regression test for the GB200 OKE K8s floor
+// clobber: when oke-ol-training (>= 1.30, accelerator-generic) co-matched
+// gb200-oke-training (>= 1.34) as a sibling leaf, the last-writer-wins constraint
+// merge silently dropped the GB200 DRA floor. Verifies the resolved recipe carries
+// the GB200-specific floor (>= 1.34) regardless of OS supplied.
+func TestGB200OKEFloorNotClobbered(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		criteria     *Criteria
+		wantK8sFloor string
+	}{
+		{
+			name: "gb200 oke training with os ol preserves >= 1.34 floor",
+			criteria: &Criteria{
+				Service:     CriteriaServiceOKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSOracleLinux,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name: "gb200 oke training with os ubuntu preserves >= 1.34 floor",
+			criteria: &Criteria{
+				Service:     CriteriaServiceOKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, tt.criteria)
+			if err != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", err)
+			}
+			var k8sFloor string
+			for _, c := range result.Constraints {
+				if c.Name == testK8sVersionConstant {
+					k8sFloor = c.Value
+					break
+				}
+			}
+			if k8sFloor != tt.wantK8sFloor {
+				t.Errorf("K8s.server.version floor = %q, want %q (possible floor clobber regression)",
+					k8sFloor, tt.wantK8sFloor)
+			}
+		})
+	}
+}
+
+func TestBuildRecipeResult_OSRequired(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	tests := []struct {
+		name        string
+		criteria    *Criteria
+		wantErrCode aicrerrors.ErrorCode
+		wantInMsg   string
+	}{
+		{
+			name:        "gke without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "cos",
+		},
+		{
+			name:     "gke with os cos succeeds",
+			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
+		},
+		{
+			name:        "oke l40s without os returns error (only os-specific overlays exist for l40s-oke)",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "oke l40s with os ol succeeds",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining, OS: CriteriaOSOracleLinux},
+		},
+		{
+			name:        "oke gb200 without os returns error (no os-agnostic oke overlay)",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "eks without os succeeds (has os-agnostic overlays)",
+			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+		},
+		{
+			name:     "unknown service without os does not error",
+			criteria: &Criteria{Service: CriteriaServiceType("xyz"), Accelerator: CriteriaAcceleratorH100},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, tt.criteria)
+			if tt.wantErrCode != "" {
+				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
+				}
+				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
+					t.Errorf("error %q does not contain %q", err, tt.wantInMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Error("expected non-nil result")
+				}
+			}
+		})
+	}
+}
+
+func TestBuildRecipeResultWithEvaluator_OSRequired(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	passAll := func(_ Constraint) ConstraintEvalResult {
+		return ConstraintEvalResult{Passed: true, Actual: "test"}
+	}
+	tests := []struct {
+		name        string
+		criteria    *Criteria
+		wantErrCode aicrerrors.ErrorCode
+		wantInMsg   string
+	}{
+		{
+			name:        "gke without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "cos",
+		},
+		{
+			name:     "gke with os cos succeeds",
+			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
+		},
+		{
+			name:        "oke l40s without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:        "oke gb200 without os returns error (no os-agnostic oke overlay)",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "eks without os succeeds (has os-agnostic overlays)",
+			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResultWithEvaluator(ctx, tt.criteria, passAll)
+			if tt.wantErrCode != "" {
+				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
+				}
+				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
+					t.Errorf("error %q does not contain %q", err, tt.wantInMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Error("expected non-nil result")
+				}
+			}
+		})
 	}
 }

@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
@@ -93,7 +95,7 @@ func TestPointerCopyToHint(t *testing.T) {
 		Attestations: []PointerAttestation{{
 			Bundle: PointerBundle{
 				OCI:           "ghcr.io/yuanchen8911/aicr-evidence:x",
-				Digest:        "sha256:33d4cf36",
+				Digest:        "sha256:33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317",
 				PredicateType: PredicateTypeV1,
 			},
 			Signer: &PointerSigner{
@@ -103,7 +105,7 @@ func TestPointerCopyToHint(t *testing.T) {
 		}},
 	}
 	// 7c4c0edc8c765a95a0f3afdb3bbb8e91 is SourceSlug(issuer, identity) for this signer.
-	want := "recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4cf36.yaml"
+	want := "recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317.yaml"
 	if got := PointerCopyToHint(signed); got != want {
 		t.Errorf("signed hint = %q, want %q", got, want)
 	}
@@ -127,7 +129,7 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 			Attestations: []PointerAttestation{{
 				Bundle: PointerBundle{
 					OCI:           "ghcr.io/yuanchen8911/aicr-evidence:x",
-					Digest:        "sha256:33d4cf36",
+					Digest:        "sha256:33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317",
 					PredicateType: PredicateTypeV1,
 				},
 				Signer: &PointerSigner{
@@ -151,7 +153,7 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		}
 		// 7c4c0edc8c765a95a0f3afdb3bbb8e91 is SourceSlug(issuer, identity).
 		want := filepath.Join(root, "h100-gke-cos-training",
-			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317.yaml")
 		if dest != want {
 			t.Errorf("dest = %q, want %q", dest, want)
 		}
@@ -166,7 +168,7 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 	t.Run("is a no-op when already at canonical path", func(t *testing.T) {
 		root := t.TempDir()
 		canonical := filepath.Join(root, "h100-gke-cos-training",
-			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317.yaml")
 		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
 			t.Fatal(err)
 		}
@@ -185,26 +187,69 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		}
 	})
 
-	t.Run("refuses to clobber an existing canonical pointer", func(t *testing.T) {
+	t.Run("refuses to clobber a canonical pointer with different content", func(t *testing.T) {
 		root := t.TempDir()
 		flat := filepath.Join(root, "h100-gke-cos-training.yaml")
 		if _, err := WritePointerFile(flat, signed()); err != nil {
 			t.Fatalf("write flat: %v", err)
 		}
 		canonical := filepath.Join(root, "h100-gke-cos-training",
-			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317.yaml")
 		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := WritePointerFile(canonical, signed()); err != nil {
+		// A DIFFERENT pointer already occupies the canonical path (same
+		// recipe/source/digest leaf, different bundle.oci → different bytes):
+		// a genuine immutable-pointer conflict, not an idempotent re-placement.
+		other := signed()
+		other.Attestations[0].Bundle.OCI = "ghcr.io/someone-else/aicr-evidence:y"
+		if _, err := WritePointerFile(canonical, other); err != nil {
 			t.Fatalf("write canonical: %v", err)
 		}
-		if _, err := RelocatePointerToCanonical(flat, signed()); err == nil {
-			t.Error("expected a conflict error when the canonical path already exists")
+		// Assert the structured code, not just non-nil, so an INTERNAL
+		// regression can't masquerade as the EEXIST conflict contract.
+		if _, err := RelocatePointerToCanonical(flat, signed()); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+			t.Errorf("expected ErrCodeConflict when the canonical path holds different content, got %v", err)
 		}
 		// The flat source must be left in place on a refusal (no move happened).
 		if _, err := os.Stat(flat); err != nil {
 			t.Errorf("flat source should remain after refusal: %v", err)
+		}
+	})
+
+	t.Run("recovers when dest holds byte-identical content (distinct inode)", func(t *testing.T) {
+		// The committed-both case: a git round trip leaves the flat source and
+		// the nested copy as distinct inodes but byte-equal. Retry must finish
+		// the move (drop the redundant flat source) rather than conflict.
+		root := t.TempDir()
+		flat := filepath.Join(root, "h100-gke-cos-training.yaml")
+		if _, err := WritePointerFile(flat, signed()); err != nil {
+			t.Fatalf("write flat: %v", err)
+		}
+		canonical := filepath.Join(root, "h100-gke-cos-training",
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317.yaml")
+		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		// Write (not link) identical content → same bytes, different inode.
+		if _, err := WritePointerFile(canonical, signed()); err != nil {
+			t.Fatalf("write canonical: %v", err)
+		}
+		if sameInode(flat, canonical) {
+			t.Fatal("precondition: flat and canonical should be distinct inodes")
+		}
+		dest, err := RelocatePointerToCanonical(flat, signed())
+		if err != nil {
+			t.Fatalf("expected idempotent recovery on identical content, got error: %v", err)
+		}
+		if dest != canonical {
+			t.Errorf("dest = %q, want %q", dest, canonical)
+		}
+		if _, err := os.Stat(flat); !os.IsNotExist(err) {
+			t.Errorf("flat source should be removed after recovery, stat err = %v", err)
+		}
+		if _, err := os.Stat(canonical); err != nil {
+			t.Errorf("canonical should remain after recovery: %v", err)
 		}
 	})
 
@@ -219,7 +264,7 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 			t.Fatalf("write flat: %v", err)
 		}
 		canonical := filepath.Join(root, "h100-gke-cos-training",
-			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317.yaml")
 		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
 			t.Fatal(err)
 		}
@@ -257,11 +302,22 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects a digest that is unsafe as a filename", func(t *testing.T) {
-		// defense-in-depth: a digest carrying a separator or ".." must not
-		// reach os.Link as a path leaf (e.g. an OCI-empty pointer that skipped
-		// the sha256: shape check in validatePointer).
-		for _, digest := range []string{"sha256:../../etc/evil", "sha256:a/b", "sha256:.."} {
+	t.Run("rejects a digest that is not a canonical sha256:<64-hex>", func(t *testing.T) {
+		// isHexDigest runs first in canonicalPointerSuffix (before any
+		// filesystem op), so each of these is rejected by the guard, not by an
+		// incidental os.Link failure. Covers: path traversal in the digest,
+		// non-hex characters, and a hex body that isn't exactly 64 chars
+		// (too short / too long).
+		for _, digest := range []string{
+			"sha256:../../etc/evil",
+			"sha256:a/b",
+			"sha256:..",
+			"sha256:nothex" + strings.Repeat("z", 58), // 64 chars, non-hex
+			"sha256:abc",                        // hex but too short
+			"sha256:" + strings.Repeat("a", 63), // 63 hex: too short
+			"sha256:" + strings.Repeat("a", 65), // 65 hex: too long
+			"md5:" + strings.Repeat("a", 64),    // wrong algorithm prefix
+		} {
 			evil := signed()
 			evil.Attestations[0].Bundle.Digest = digest
 			if _, err := RelocatePointerToCanonical(filepath.Join(t.TempDir(), "x.yaml"), evil); err == nil {

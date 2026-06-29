@@ -99,6 +99,7 @@ Key fields from `GPU.smi`:
 | `gh200` | unresolved — Grace Hopper Superchip, not the discrete H200 GPU (check before h200) |
 | `h200` | h200 (discrete H200 GPU) |
 | `a100` | a100 |
+| `l40s` | l40s |
 | `l40` | l40 |
 | `rtx pro 6000` | rtx-pro-6000 |
 
@@ -274,7 +275,7 @@ aicr recipe \
 | Criteria | Extracted From | Valid Values |
 |----------|---------------|--------------|
 | service | K8s.node.provider / K8s.server.version | eks, gke, aks, oke, kind, lke |
-| accelerator | GPU.smi.gpu.model | h100, h200, gb200, b200, a100, l40, rtx-pro-6000 |
-| os | OS.release.ID | ubuntu, rhel, cos, amazonlinux |
+| accelerator | GPU.smi.gpu.model | h100, h200, gb200, b200, a100, l40s, l40, rtx-pro-6000 |
+| os | OS.release.ID | ubuntu, rhel, cos, amazonlinux, talos, ol |
 | intent | User-specified | training, inference |
 | platform | User-specified | dynamo, kubeflow, nim, runai, slurm |

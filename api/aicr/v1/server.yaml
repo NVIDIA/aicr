@@ -120,7 +120,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -128,7 +128,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -141,10 +141,14 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
             default: any
         - name: platform
           in: query
@@ -487,7 +491,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -495,7 +499,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -508,10 +512,14 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
             default: any
         - name: platform
           in: query
@@ -1262,7 +1270,7 @@ components:
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+          enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
           example: h100
         intent:
           type: string
@@ -1272,7 +1280,7 @@ components:
         os:
           type: string
           description: Operating system family
-          enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+          enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
           example: ubuntu
         platform:
           type: string

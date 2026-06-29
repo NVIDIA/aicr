@@ -55,9 +55,11 @@ const (
 	nodewrightCompleteState = "complete"
 )
 
-var nodewrightGVR = schema.GroupVersionResource{
-	Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
-}
+var (
+	nodewrightGVR = schema.GroupVersionResource{
+		Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
+	}
+)
 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
@@ -238,24 +240,20 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 	return failures
 }
 
-// verifyGPUReadinessSignals runs the Go-resident deep checks introduced by
-// issue #611. Returns the human-readable failure strings plus the first
-// *errors.StructuredError encountered across the helpers so the caller can
-// propagate the original error code (e.g., ErrCodeInternal from a
-// discovery/RBAC failure) instead of flattening it into the generic
-// ErrCodeNotFound summary — per PR #1235 review.
+// verifyGPUReadinessSignals runs the two Go-resident deep checks
+// introduced by issue #611. Returns the human-readable failure strings
+// plus the first *errors.StructuredError encountered across all checks
+// so the caller can propagate the original error code (e.g.,
+// ErrCodeInternal from a discovery/RBAC failure) instead of flattening
+// it into the generic ErrCodeNotFound summary — per PR #1235 review.
 //
 // Migration disposition (per #1220 plan):
 //
-//   - clusterPolicyReady: MIGRATED. The ClusterPolicy state=ready assertion
-//     now lives in registry-declared Chainsaw YAML
-//     (recipes/checks/gpu-operator/health-check.yaml, step
-//     validate-cluster-policy-ready). The Chainsaw assert polls until the
-//     operator finishes reconciling; the old Go verifyClusterPolicyReady
-//     sampled status.state exactly once with no retry and flaked the whole
-//     deployment gate when it ran before the nvidia-operator-validator init
-//     containers (driver, toolkit, cuda, plugin) completed. It was removed
-//     once the Chainsaw assertion proved equivalent.
+//   - clusterPolicyReady: removed (#1495). Now sole-sourced by the
+//     Chainsaw `validate-cluster-policy-ready` check in
+//     recipes/checks/gpu-operator/health-check.yaml, which polls the
+//     same ClusterPolicy status.state for ~5m (vs the former one-shot
+//     Go check that caused spurious failures on fresh gpu-operator installs).
 //   - verifyNodewrightReady (formerly skyhookReady): stays in Go. Names
 //     are derived from the recipe's own ManifestFiles at validate-time
 //     (see expectedNodewrightNames), not from a stable label, so static

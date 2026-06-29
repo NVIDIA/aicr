@@ -930,13 +930,16 @@ func TestAllComponentTypesValid(t *testing.T) {
 			}
 
 			for _, comp := range metadata.Spec.ComponentRefs {
-				if comp.Type == "" {
-					t.Errorf("componentRef %q missing type field", comp.Name)
-					continue
-				}
-				if !validTypes[comp.Type] {
+				// Always validate type when it is explicitly set — an explicitly
+				// invalid type on a disabled component is still a mistake.
+				if comp.Type != "" && !validTypes[comp.Type] {
 					t.Errorf("componentRef %q has invalid type %q; valid types: Helm, Kustomize",
 						comp.Name, comp.Type)
+				}
+				// Only require type to be present for enabled components;
+				// disabled (externally-provided) components may omit it.
+				if comp.IsEnabled() && comp.Type == "" {
+					t.Errorf("componentRef %q missing type field", comp.Name)
 				}
 			}
 		})

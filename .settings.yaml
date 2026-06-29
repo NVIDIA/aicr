@@ -61,6 +61,8 @@ testing_tools:
   tilt: '0.37.4'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.2.2'
+  # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
+  helm_diff: 'v3.15.10'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
   helmfile: 'v1.6.0'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums

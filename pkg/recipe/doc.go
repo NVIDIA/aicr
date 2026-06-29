@@ -26,9 +26,9 @@
 //
 //	type Criteria struct {
 //	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, any
-//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any
+//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any
 //	    Intent      CriteriaIntentType      // training, inference, any
-//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, talos, any
+//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
 //	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
 //	    Nodes       int                     // node count (0 = any)
 //	}
@@ -78,6 +78,7 @@
 //   - CriteriaAcceleratorB200: NVIDIA B200
 //   - CriteriaAcceleratorA100: NVIDIA A100
 //   - CriteriaAcceleratorL40: NVIDIA L40
+//   - CriteriaAcceleratorL40S: NVIDIA L40S
 //   - CriteriaAcceleratorRTXPro6000: NVIDIA RTX PRO 6000
 //   - CriteriaAcceleratorAny: Any accelerator (wildcard)
 //
@@ -91,6 +92,7 @@
 //   - CriteriaOSRHEL: Red Hat Enterprise Linux
 //   - CriteriaOSCOS: Container-Optimized OS (GKE)
 //   - CriteriaOSAmazonLinux: Amazon Linux
+//   - CriteriaOSOracleLinux: Oracle Linux (OKE Gen2 GPU image)
 //   - CriteriaOSTalos: Talos Linux
 //   - CriteriaOSAny: Any OS (wildcard)
 //
@@ -181,10 +183,10 @@
 //
 // The HTTP handler accepts these query parameters for GET requests:
 //   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, any (default: any)
-//   - accelerator: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
+//   - accelerator: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
-//   - os: ubuntu, rhel, cos, amazonlinux, talos, any (default: any)
+//   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)
 //   - nodes: integer node count (default: 0 = any)
 //
 // # Criteria Files (CLI and HTTP API - POST)
