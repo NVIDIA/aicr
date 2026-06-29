@@ -15,33 +15,24 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: gb200-oke-inference
+  name: oke-training
 
 spec:
-  # Inherits from oke-inference recipe (OKE + inference settings)
-  base: oke-inference
+  # Inherits from oke recipe (OS-agnostic OKE shared settings)
+  base: oke
 
   criteria:
     service: oke
-    accelerator: gb200
-    intent: inference
+    intent: training
 
-  # Specific constraints for GB200 on OKE inference workloads
+  # Training specific constraints for OKE workloads
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.30"
 
   componentRefs:
+    # Training workloads use the training-optimized GPU Operator values
     - name: gpu-operator
       type: Helm
-      dependencyRefs:
-        - nfd
-        - cert-manager
-        - kube-prometheus-stack
-
-    - name: nfd
-      type: Helm
-      overrides:
-        topologyUpdater:
-          enable: true
+      valuesFile: components/gpu-operator/values-oke-training.yaml

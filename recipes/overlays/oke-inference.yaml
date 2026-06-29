@@ -15,33 +15,23 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: gb200-oke-inference
+  name: oke-inference
 
 spec:
-  # Inherits from oke-inference recipe (OKE + inference settings)
-  base: oke-inference
+  # Inherits from oke recipe (OS-agnostic OKE shared settings)
+  base: oke
 
   criteria:
     service: oke
-    accelerator: gb200
     intent: inference
 
-  # Specific constraints for GB200 on OKE inference workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  # Inference gateway components via mixin
+  mixins:
+    - platform-inference
+
+  # Inference specific constraints for OKE workloads
   constraints:
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.30"
 
-  componentRefs:
-    - name: gpu-operator
-      type: Helm
-      dependencyRefs:
-        - nfd
-        - cert-manager
-        - kube-prometheus-stack
-
-    - name: nfd
-      type: Helm
-      overrides:
-        topologyUpdater:
-          enable: true
+  componentRefs: []

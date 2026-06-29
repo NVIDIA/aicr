@@ -166,10 +166,10 @@ phase_install() {
       echo "helm-diff ${installed_ver} installed; removing to pin ${HELM_DIFF_VERSION}"
       helm plugin remove diff
     fi
-    # --verify=false is required for Helm 4: the git-URL install source does not
-    # support the provenance verification that Helm 4 enforces by default.
-    helm plugin install https://github.com/databus23/helm-diff \
-      --version "${HELM_DIFF_VERSION}" --verify=false
+    # Install from the signed release tarball (helm-diff's recommended Helm 4
+    # method). The git-URL form requires --verify=false under Helm 4; the
+    # tarball form works without it and carries the upstream release signature.
+    helm plugin install "https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/helm-diff-linux-amd64.tgz"
   fi
   echo "::endgroup::"
 

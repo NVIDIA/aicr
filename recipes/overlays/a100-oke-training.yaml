@@ -19,11 +19,10 @@ metadata:
 
 spec:
   # Inherits from oke-training recipe (OKE + training settings)
-  base: oke-ol-training
+  base: oke-training
 
   criteria:
     service: oke
-    os: ol
     accelerator: a100
     intent: training
 

@@ -326,10 +326,10 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 				ref.Name, ref.ManifestFiles))
 	}
 
-	// Discovery-gate the CRD before attempting Get by name. Matches the
-	// verifyClusterPolicyReady pattern: CRD not registered → skip per #607;
-	// any other discovery error (RBAC, 5xx, timeout) → fail closed so a
-	// transient discovery failure cannot mask readiness.
+	// Discovery-gate the CRD before attempting Get by name: CRD not
+	// registered → skip per #607; any other discovery error (RBAC, 5xx,
+	// timeout) → fail closed so a transient discovery failure cannot mask
+	// readiness.
 	gv := nodewrightGVR.GroupVersion().String()
 	_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
 	switch {
