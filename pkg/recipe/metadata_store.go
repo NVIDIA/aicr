@@ -464,6 +464,60 @@ func (s *MetadataStore) resolveInheritanceChain(recipeName string) ([]*RecipeMet
 	return chain, nil
 }
 
+// availableOSForService returns the distinct, sorted OS values required by
+// overlays whose service criterion matches the given service. An empty slice
+// means the service is unknown or all its overlays are OS-agnostic.
+func (s *MetadataStore) availableOSForService(service CriteriaServiceType) []string {
+	seen := make(map[string]struct{})
+	for _, overlay := range s.Overlays {
+		c := overlay.Spec.Criteria
+		if c == nil {
+			continue
+		}
+		if c.Service != service {
+			continue
+		}
+		if c.OS == "" || c.OS == CriteriaOSAny {
+			continue
+		}
+		seen[string(c.OS)] = struct{}{}
+	}
+	result := make([]string, 0, len(seen))
+	for v := range seen {
+		result = append(result, v)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// requireOSIfNeeded returns ErrCodeInvalidRequest when the caller requested a
+// specific service but omitted --os, and all of that service's overlays carry
+// an explicit OS requirement that prevented any service-specific overlay from
+// matching. Generic overlays (service="" or "any") are not counted as
+// service-specific matches.
+func (s *MetadataStore) requireOSIfNeeded(criteria *Criteria, overlays []*RecipeMetadata) error {
+	if criteria.Service == CriteriaServiceAny || criteria.Service == "" {
+		return nil
+	}
+	if criteria.OS != CriteriaOSAny && criteria.OS != "" {
+		return nil
+	}
+	for _, o := range overlays {
+		if o.Spec.Criteria == nil {
+			continue
+		}
+		if o.Spec.Criteria.Service == criteria.Service {
+			return nil // at least one service-specific overlay matched
+		}
+	}
+	if available := s.availableOSForService(criteria.Service); len(available) > 0 {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("service '%s' requires --os; available values: %s",
+				criteria.Service, strings.Join(available, ", ")))
+	}
+	return nil
+}
+
 // FindMatchingOverlays finds all overlays that match the given criteria and
 // returns maximal leaf candidates sorted by specificity (least specific first).
 //
@@ -894,6 +948,11 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 	}
 
 	overlays := s.FindMatchingOverlays(criteria)
+
+	if err := s.requireOSIfNeeded(criteria, overlays); err != nil {
+		return nil, err
+	}
+
 	mergedSpec, appliedOverlays := s.initBaseMergedSpec()
 
 	appliedOverlays, err := s.mergeOverlayChains(overlays, &mergedSpec, appliedOverlays)
@@ -943,6 +1002,10 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 
 	// Find matching overlays and filter by constraint evaluation
 	overlays := s.FindMatchingOverlays(criteria)
+
+	if err := s.requireOSIfNeeded(criteria, overlays); err != nil {
+		return nil, err
+	}
 
 	var filteredOverlays []*RecipeMetadata
 	var excludedOverlays []ExcludedOverlay

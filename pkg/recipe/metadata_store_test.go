@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -1898,5 +1899,110 @@ func TestLoadMetadataStore_ConcurrentSameProviderIsCached(t *testing.T) {
 		if results[i] != results[0] {
 			t.Errorf("result[%d] is not the cached singleton (got %p, want %p)", i, results[i], results[0])
 		}
+	}
+}
+
+func TestBuildRecipeResult_OSRequired(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	tests := []struct {
+		name        string
+		criteria    *Criteria
+		wantErrCode aicrerrors.ErrorCode
+		wantInMsg   string
+	}{
+		{
+			name:        "gke without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "cos",
+		},
+		{
+			name:     "gke with os cos succeeds",
+			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
+		},
+		{
+			name:     "eks without os succeeds (has os-agnostic overlays)",
+			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+		},
+		{
+			name:     "unknown service without os does not error",
+			criteria: &Criteria{Service: CriteriaServiceType("xyz"), Accelerator: CriteriaAcceleratorH100},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, tt.criteria)
+			if tt.wantErrCode != "" {
+				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
+				}
+				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
+					t.Errorf("error %q does not contain %q", err, tt.wantInMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Error("expected non-nil result")
+				}
+			}
+		})
+	}
+}
+
+func TestBuildRecipeResultWithEvaluator_OSRequired(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	passAll := func(_ Constraint) ConstraintEvalResult {
+		return ConstraintEvalResult{Passed: true, Actual: "test"}
+	}
+	tests := []struct {
+		name        string
+		criteria    *Criteria
+		wantErrCode aicrerrors.ErrorCode
+		wantInMsg   string
+	}{
+		{
+			name:        "gke without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "cos",
+		},
+		{
+			name:     "gke with os cos succeeds",
+			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
+		},
+		{
+			name:     "eks without os succeeds (has os-agnostic overlays)",
+			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResultWithEvaluator(ctx, tt.criteria, passAll)
+			if tt.wantErrCode != "" {
+				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
+				}
+				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
+					t.Errorf("error %q does not contain %q", err, tt.wantInMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Error("expected non-nil result")
+				}
+			}
+		})
 	}
 }
