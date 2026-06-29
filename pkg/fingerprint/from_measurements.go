@@ -27,6 +27,7 @@ import (
 // constants because the collector packages keep them unexported and we
 // don't want to import them just for the names.
 const (
+	serviceOKE              = "oke"
 	subtypeK8sServer        = "server"
 	subtypeK8sNode          = "node"
 	subtypeGPUHardware      = "hardware"
@@ -322,16 +323,22 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 
 // normalizeProviderID maps a raw Kubernetes spec.providerID (or an already-
 // normalized name stored by the collector) to the service type string used in
-// recipe criteria. OKE nodes emit a bare OCID ("ocid1.instance.oc1...") with
-// no scheme prefix; the collector's parseProvider maps the "oci://" scheme to
-// "oci" and then to "oke", but snapshots taken before that mapping existed may
-// carry "oci" verbatim. We handle all three forms here for resilience.
+// recipe criteria. OKE nodes can appear in four forms:
+//   - "ocid1.instance.oc1..." — bare OCID (no scheme); what K8s stores natively
+//   - "oci://ocid1.instance.oc1..." — full scheme URL; the collector normalizes
+//     this to "oke" via parseProvider, but hand-crafted snapshots may carry it
+//   - "oci" — bare string stored by the collector before the "oci://" → "oke"
+//     mapping existed
+//   - "oke" — already normalized; pass through
 func normalizeProviderID(v string) string {
 	if strings.HasPrefix(v, "ocid1.") {
-		return "oke"
+		return serviceOKE
+	}
+	if strings.HasPrefix(v, "oci://") {
+		return serviceOKE
 	}
 	if v == "oci" {
-		return "oke"
+		return serviceOKE
 	}
 	return v
 }
