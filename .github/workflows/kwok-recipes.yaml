@@ -23,7 +23,7 @@ on:
       - 'kwok/**'
       - 'tests/chainsaw/kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
-      - '.github/workflows/kwok-tier3-shard.yaml'
+      - '.github/workflows/kwok-test-run.yaml'
       - '.github/actions/kwok-test/**'
       - '!**.md'
   pull_request:
@@ -34,7 +34,7 @@ on:
       - 'kwok/**'
       - 'tests/chainsaw/kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
-      - '.github/workflows/kwok-tier3-shard.yaml'
+      - '.github/workflows/kwok-test-run.yaml'
       - '.github/actions/kwok-test/**'
       - '!**.md'
   schedule:
@@ -66,9 +66,11 @@ jobs:
       tier2: ${{ steps.classify.outputs.tier2 }}
       tier3: ${{ steps.classify.outputs.tier3 }}
       tier3_batches: ${{ steps.classify.outputs.tier3_batches }}
+      tier1_pairs: ${{ steps.classify.outputs.tier1_pairs }}
+      tier2_pairs: ${{ steps.classify.outputs.tier2_pairs }}
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
           # Full checkout needed for diff-aware Tier 2 discovery
@@ -82,13 +84,25 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Deployer list — single source of truth, consumed by all tiers and by
+          # the workflow_dispatch early-exit below. To add or remove a deployer,
+          # change this one line; Tier 1, Tier 2, and Tier 3 all derive from it.
+          readonly DEPLOYERS='["helm","argocd-oci","argocd-helm-oci","argocd-git","flux-oci","flux-git"]'
+
           # --- workflow_dispatch: test exactly the requested recipe ---
           if [[ -n "${DISPATCH_RECIPE}" ]]; then
             single=$(jq -nc '[$r]' --arg r "${DISPATCH_RECIPE}")
-            echo "tier1=${single}"   >> "$GITHUB_OUTPUT"
-            echo "tier2=[]"          >> "$GITHUB_OUTPUT"
-            echo "tier3=[]"          >> "$GITHUB_OUTPUT"
-            echo "tier3_batches=[]"  >> "$GITHUB_OUTPUT"
+            single_pairs=$(jq -cn \
+              --arg r "${DISPATCH_RECIPE}" \
+              --argjson deployers "${DEPLOYERS}" '
+                [ $deployers[] | {recipe: $r, deployer: .} ]
+              ')
+            echo "tier1=${single}"             >> "$GITHUB_OUTPUT"
+            echo "tier2=[]"                    >> "$GITHUB_OUTPUT"
+            echo "tier3=[]"                    >> "$GITHUB_OUTPUT"
+            echo "tier3_batches=[]"            >> "$GITHUB_OUTPUT"
+            echo "tier1_pairs=${single_pairs}" >> "$GITHUB_OUTPUT"
+            echo "tier2_pairs=[]"              >> "$GITHUB_OUTPUT"
             echo "Manual dispatch: ${DISPATCH_RECIPE}"
             exit 0
           fi
@@ -101,8 +115,8 @@ jobs:
             name=$(basename "$overlay" .yaml)
             service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
 
-            # Skip overlays without a concrete service
-            if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+            # Skip non-testable overlays (no service, or OCP — needs OpenShift operators)
+            if [[ -z "$service" || "$service" == "null" || "$service" == "any" || "$service" == "ocp" ]]; then
               continue
             fi
 
@@ -140,8 +154,8 @@ jobs:
               service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
               accel=$(yq eval '.spec.criteria.accelerator // ""' "$overlay" 2>/dev/null || true)
 
-              # Only accelerator-specific overlays belong in Tier 2
-              if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+              # Only accelerator-specific, KWOK-testable overlays belong in Tier 2
+              if [[ -z "$service" || "$service" == "null" || "$service" == "any" || "$service" == "ocp" ]]; then
                 continue
               fi
               if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
@@ -219,16 +233,39 @@ jobs:
           # --- Tier 3: full matrix (all testable overlays) ---
           tier3="$all"
 
+          # Local alias so jq --argjson calls below can use $deployers
+          # (DEPLOYERS is readonly; this assignment is intentional).
+          # shellcheck disable=SC2034
+          deployers="${DEPLOYERS}"
+
+          # --- Pre-build Tier 1 pairs: generic recipes × all deployers ---
+          tier1_pairs=$(jq -cn \
+            --argjson recipes "$tier1" \
+            --argjson deployers "$deployers" '
+              [ $recipes[] as $r | $deployers[] as $d | {recipe: $r, deployer: $d} ]
+            ')
+
+          # Guard: Tier 1 is expected to stay well under 256 (no batching needed).
+          # Warn early if organic growth is approaching the limit.
+          tier1_pair_count=$(echo "$tier1_pairs" | jq 'length')
+          if (( tier1_pair_count > 200 )); then
+            echo "::warning::Tier 1 has ${tier1_pair_count} pairs (>200) — consider adding batching before it reaches 256"
+          fi
+
+          # --- Pre-build Tier 2 pairs: diff-affected recipes, helm-only ---
+          # Coverage-policy decision: Tier 2 uses helm only to keep PR wall-clock
+          # time proportional to the change scope. Full deployer coverage runs in
+          # Tier 3 on every push to main and on the nightly schedule. See ADR-003
+          # §"Tier 2 deployer coverage" for rationale and how to revisit this.
+          tier2_pairs=$(echo "$tier2" | jq -c '[.[] | {recipe: ., deployer: "helm"}]')
+
           # --- Tier 3 batching ---
           # GitHub caps a single job's matrix at 256 configurations. Tier 3
           # crosses every testable recipe with every deployer, so the raw
-          # cross-product (recipes × deployers) outgrew the cap. Split the
+          # cross-product (recipes × deployers) can outgrow the cap. Split the
           # {recipe, deployer} pairs into batches of <= TIER3_BATCH_SIZE; the
-          # caller fans each batch out to kwok-tier3-shard.yaml, keeping every
-          # shard's matrix under the limit. Keep this deployer list in sync
-          # with the test-tier1 matrix above and the input doc in
-          # .github/actions/kwok-test/action.yml.
-          deployers='["helm","argocd-oci","argocd-helm-oci","flux-oci"]'
+          # caller fans each batch out to kwok-test-run.yaml, keeping every
+          # shard's matrix under the limit.
           readonly TIER3_BATCH_SIZE=200  # headroom under GitHub's 256 cap
 
           # Fail closed if the batch size is ever raised past the hard limit —
@@ -250,106 +287,50 @@ jobs:
             ')
 
           # --- Output ---
-          echo "tier1=${tier1}" >> "$GITHUB_OUTPUT"
-          echo "tier2=${tier2}" >> "$GITHUB_OUTPUT"
-          echo "tier3=${tier3}" >> "$GITHUB_OUTPUT"
+          echo "tier1=${tier1}"                 >> "$GITHUB_OUTPUT"
+          echo "tier2=${tier2}"                 >> "$GITHUB_OUTPUT"
+          echo "tier3=${tier3}"                 >> "$GITHUB_OUTPUT"
           echo "tier3_batches=${tier3_batches}" >> "$GITHUB_OUTPUT"
+          echo "tier1_pairs=${tier1_pairs}"     >> "$GITHUB_OUTPUT"
+          echo "tier2_pairs=${tier2_pairs}"     >> "$GITHUB_OUTPUT"
 
+          deployer_count=$(echo "$deployers" | jq 'length')
           tier3_pairs=$(echo "$tier3_batches" | jq '[.[].pairs[]] | length')
           tier3_batch_count=$(echo "$tier3_batches" | jq 'length')
-          echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s)"
-          echo "Tier 2 (diff-aware):   $(echo "$tier2" | jq 'length') recipe(s)"
-          echo "Tier 3 (full matrix):  $(echo "$tier3" | jq 'length') recipe(s) × $(echo "$deployers" | jq 'length') deployer(s) = ${tier3_pairs} pair(s) in ${tier3_batch_count} batch(es)"
+          echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s) × ${deployer_count} deployer(s) = ${tier1_pair_count} pair(s)"
+          echo "Tier 2 (diff-aware):   $(echo "$tier2" | jq 'length') recipe(s) × 1 deployer (helm) = $(echo "$tier2_pairs" | jq 'length') pair(s)"
+          echo "Tier 3 (full matrix):  $(echo "$tier3" | jq 'length') recipe(s) × ${deployer_count} deployer(s) = ${tier3_pairs} pair(s) in ${tier3_batch_count} batch(es)"
 
   # ── Tier 1: PR gate — generic overlays (PR + push, skip on schedule) ──
   test-tier1:
-    name: 'Tier 1: ${{ matrix.recipe }} (${{ matrix.deployer }})'
     needs: discover
     if: >-
       github.event_name != 'schedule' &&
-      needs.discover.outputs.tier1 != '[]' &&
-      needs.discover.outputs.tier1 != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        recipe: ${{ fromJSON(needs.discover.outputs.tier1) }}
-        deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci]
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run KWOK test
-        uses: ./.github/actions/kwok-test
-        with:
-          recipe: ${{ matrix.recipe }}
-          deployer: ${{ matrix.deployer }}
-          go_version: ${{ steps.versions.outputs.go }}
-          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
-          kind_version: ${{ steps.versions.outputs.kind }}
-          helm_version: ${{ steps.versions.outputs.helm }}
-          kwok_version: ${{ steps.versions.outputs.kwok }}
-          kubectl_version: ${{ steps.versions.outputs.kubectl }}
-          yq_version: ${{ steps.versions.outputs.yq }}
-          flux_version: ${{ steps.versions.outputs.flux }}
-          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
-          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
-          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
+      needs.discover.outputs.tier1_pairs != '[]' &&
+      needs.discover.outputs.tier1_pairs != ''
+    uses: ./.github/workflows/kwok-test-run.yaml
+    with:
+      pairs: ${{ needs.discover.outputs.tier1_pairs }}
 
   # ── Tier 2: diff-aware accelerator tests (PR only, conditional) ──
+  # Coverage-policy decision: Tier 2 uses helm only (see ADR-003 §"Tier 2
+  # deployer coverage"). Full deployer coverage runs in Tier 3 on push/nightly.
   test-tier2:
-    name: 'Tier 2: ${{ matrix.recipe }}'
     needs: discover
     if: >-
       github.event_name == 'pull_request' &&
-      needs.discover.outputs.tier2 != '[]' &&
-      needs.discover.outputs.tier2 != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        recipe: ${{ fromJSON(needs.discover.outputs.tier2) }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run KWOK test
-        uses: ./.github/actions/kwok-test
-        with:
-          recipe: ${{ matrix.recipe }}
-          go_version: ${{ steps.versions.outputs.go }}
-          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
-          kind_version: ${{ steps.versions.outputs.kind }}
-          helm_version: ${{ steps.versions.outputs.helm }}
-          kwok_version: ${{ steps.versions.outputs.kwok }}
-          kubectl_version: ${{ steps.versions.outputs.kubectl }}
-          yq_version: ${{ steps.versions.outputs.yq }}
-          flux_version: ${{ steps.versions.outputs.flux }}
-          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
-          chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
-          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
+      needs.discover.outputs.tier2_pairs != '[]' &&
+      needs.discover.outputs.tier2_pairs != ''
+    uses: ./.github/workflows/kwok-test-run.yaml
+    with:
+      pairs: ${{ needs.discover.outputs.tier2_pairs }}
 
   # ── Tier 3: full matrix (push to main + nightly schedule) ──
-  # The recipe × deployer cross-product exceeds GitHub's 256-config matrix cap,
-  # so discover splits it into batches and we fan each batch out to the
-  # kwok-tier3-shard reusable workflow (one shard per batch, each <= 256).
-  # Per ADR-003: the concurrency group is keyed by SHA so successive merges to
-  # main never cancel in-flight Tier 3 runs; the batch id keeps every shard of a
-  # single run in its own group so they all run in parallel.
+  # The recipe × deployer cross-product can exceed GitHub's 256-config cap, so
+  # discover batches the pairs and we fan each batch out to kwok-test-run.yaml
+  # (one shard per batch, each <= 256 pairs). Per ADR-003: concurrency is keyed
+  # by SHA so successive merges never cancel in-flight Tier 3 runs; the batch id
+  # keeps every shard of a single run in its own group so they all run in parallel.
   test-tier3:
     needs: discover
     concurrency:
@@ -363,7 +344,7 @@ jobs:
       fail-fast: false
       matrix:
         batch: ${{ fromJSON(needs.discover.outputs.tier3_batches) }}
-    uses: ./.github/workflows/kwok-tier3-shard.yaml
+    uses: ./.github/workflows/kwok-test-run.yaml
     with:
       pairs: ${{ toJSON(matrix.batch.pairs) }}
 

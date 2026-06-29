@@ -12,18 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Reusable shard for the Tier 3 KWOK full matrix. GitHub caps a single job's
-# matrix at 256 configurations; the caller (kwok-recipes.yaml) splits the full
-# recipe × deployer cross-product into batches of <= 256 pairs and invokes this
-# workflow once per batch, so the per-shard matrix always stays under the cap.
-name: KWOK Tier 3 Shard
+# Reusable KWOK test runner shared by all three tiers (kwok-recipes.yaml).
+# Takes a JSON array of {recipe, deployer} pairs and runs each as a matrix job.
+#
+# Tier 1 passes a flat pairs list (well under 256 → no batching needed).
+# Tier 2 passes a flat pairs list (helm-only for diff-affected recipes).
+# Tier 3 passes one batch at a time from the discover job's tier3_batches output;
+#   the caller (test-tier3 in kwok-recipes.yaml) shards across batches to keep
+#   every shard's matrix under GitHub's 256-configuration cap.
+name: KWOK Test Run
 
 on:
   workflow_call:
     inputs:
       pairs:
-        # Caller batches at TIER3_BATCH_SIZE (kwok-recipes.yaml); must never
-        # exceed GitHub's hard cap of 256 matrix configurations per job.
+        # JSON array of {recipe, deployer} objects. Must never exceed GitHub's
+        # hard cap of 256 matrix configurations per job.
         description: 'JSON array of {recipe, deployer} objects to test (<= 256 entries)'
         required: true
         type: string
@@ -33,7 +37,7 @@ permissions:
 
 jobs:
   test:
-    name: 'Tier 3: ${{ matrix.pair.recipe }} (${{ matrix.pair.deployer }})'
+    name: '${{ matrix.pair.recipe }} (${{ matrix.pair.deployer }})'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
