@@ -464,23 +464,29 @@ func (s *MetadataStore) resolveInheritanceChain(recipeName string) ([]*RecipeMet
 	return chain, nil
 }
 
-// availableOSForService returns the distinct, sorted OS values required by
-// overlays whose service criterion matches the given service. An empty slice
-// means the service is unknown or all its overlays are OS-agnostic.
-func (s *MetadataStore) availableOSForService(service CriteriaServiceType) []string {
+// availableOSForCriteria returns the distinct, sorted OS values from overlays
+// that would match the given criteria if an appropriate OS were supplied.
+// It tests each OS-gated overlay by temporarily setting the query's OS to the
+// overlay's required OS value and running a full Criteria.Matches check, so
+// only overlays that satisfy all other criteria dimensions (accelerator, intent,
+// service, …) contribute. An empty slice means no OS-gated overlays would
+// match, so requiring --os would be unhelpful.
+func (s *MetadataStore) availableOSForCriteria(criteria *Criteria) []string {
 	seen := make(map[string]struct{})
 	for _, overlay := range s.Overlays {
 		c := overlay.Spec.Criteria
 		if c == nil {
 			continue
 		}
-		if c.Service != service {
-			continue
-		}
 		if c.OS == "" || c.OS == CriteriaOSAny {
-			continue
+			continue // not OS-gated
 		}
-		seen[string(c.OS)] = struct{}{}
+		// Would this overlay match if the query carried its required OS?
+		queryCopy := *criteria
+		queryCopy.OS = c.OS
+		if c.Matches(&queryCopy) {
+			seen[string(c.OS)] = struct{}{}
+		}
 	}
 	result := make([]string, 0, len(seen))
 	for v := range seen {
@@ -491,10 +497,11 @@ func (s *MetadataStore) availableOSForService(service CriteriaServiceType) []str
 }
 
 // requireOSIfNeeded returns ErrCodeInvalidRequest when the caller requested a
-// specific service but omitted --os, and all of that service's overlays carry
-// an explicit OS requirement that prevented any service-specific overlay from
-// matching. Generic overlays (service="" or "any") are not counted as
-// service-specific matches.
+// specific service+accelerator combination but omitted --os, and no OS-agnostic
+// overlay exists for that exact combination while OS-gated overlays do. The
+// check matches on both service AND accelerator so that a generic service overlay
+// (e.g. oke.yaml with no accelerator) does not suppress the error for an
+// accelerator-specific request (e.g. --service oke --accelerator l40s).
 func (s *MetadataStore) requireOSIfNeeded(criteria *Criteria, overlays []*RecipeMetadata) error {
 	if criteria.Service == CriteriaServiceAny || criteria.Service == "" {
 		return nil
@@ -502,15 +509,30 @@ func (s *MetadataStore) requireOSIfNeeded(criteria *Criteria, overlays []*Recipe
 	if criteria.OS != CriteriaOSAny && criteria.OS != "" {
 		return nil
 	}
+	accel := criteria.Accelerator
+	if accel == CriteriaAcceleratorAny {
+		accel = ""
+	}
+	// If any matched overlay covers this exact service+accelerator combination,
+	// the caller gets at least the OS-agnostic tier — no error.
 	for _, o := range overlays {
 		if o.Spec.Criteria == nil {
 			continue
 		}
-		if o.Spec.Criteria.Service == criteria.Service {
-			return nil // at least one service-specific overlay matched
+		c := o.Spec.Criteria
+		if c.Service != criteria.Service {
+			continue
 		}
+		overlayAccel := c.Accelerator
+		if overlayAccel == CriteriaAcceleratorAny {
+			overlayAccel = ""
+		}
+		if overlayAccel != accel {
+			continue
+		}
+		return nil // service+accelerator-specific overlay matched — no error
 	}
-	if available := s.availableOSForService(criteria.Service); len(available) > 0 {
+	if available := s.availableOSForCriteria(criteria); len(available) > 0 {
 		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("service '%s' requires --os; available values: %s",
 				criteria.Service, strings.Join(available, ", ")))

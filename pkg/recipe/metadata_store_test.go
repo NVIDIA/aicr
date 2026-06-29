@@ -1925,6 +1925,20 @@ func TestBuildRecipeResult_OSRequired(t *testing.T) {
 			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
 		},
 		{
+			name:        "oke l40s without os returns error (only os-specific overlays exist for l40s-oke)",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "oke l40s with os ol succeeds",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining, OS: CriteriaOSOracleLinux},
+		},
+		{
+			name:     "oke gb200 without os succeeds (os-agnostic overlay exists)",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, Intent: CriteriaIntentTraining},
+		},
+		{
 			name:     "eks without os succeeds (has os-agnostic overlays)",
 			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
 		},
@@ -1979,6 +1993,16 @@ func TestBuildRecipeResultWithEvaluator_OSRequired(t *testing.T) {
 		{
 			name:     "gke with os cos succeeds",
 			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
+		},
+		{
+			name:        "oke l40s without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "oke gb200 without os succeeds",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, Intent: CriteriaIntentTraining},
 		},
 		{
 			name:     "eks without os succeeds (has os-agnostic overlays)",
