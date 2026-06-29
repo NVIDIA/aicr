@@ -60,8 +60,8 @@ aicr --debug snapshot
 # JSON mode: Structured logs
 aicr --log-json snapshot
 
-# Combine with other flags
-aicr --debug --output system.yaml snapshot
+# Combine with other flags (--debug is global; --output is a snapshot flag, so it follows the subcommand)
+aicr --debug snapshot --output system.yaml
 ```
 
 ## Commands
@@ -79,17 +79,17 @@ aicr snapshot [flags]
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (cm://namespace/name), or stdout |
-| `--format` | | string | yaml | Output format: json, yaml, table |
+| `--format` | `-t` | string | yaml | Output format: json, yaml, table |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) that populates `spec.snapshot.*`. CLI flags below always win over the corresponding config field. |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env). Also used when `--output` is a ConfigMap URI so reads and writes target the same cluster. |
 | `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
-| `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
+| `--image` | | string | matches CLI version | Container image for agent Job. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` snapshot builds default to `ghcr.io/nvidia/aicr:latest`. |
 | `--job-name` | | string | aicr | Name for the agent Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
 | `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [Agent Deployment](agent-deployment.md). Pass an explicit selector to override. |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
-| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
+| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves the agent's `aicr-node-reader` ClusterRoleBinding active. By default this grants only read-only access; with `--discover-network` the retained ClusterRole also carries the mutating rules live network discovery needs (CRD/namespace/daemonset create, pod exec, node patch, NicClusterPolicy). |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--require-gpu` | | bool | false | Require GPU resources on the agent pod (mutually exclusive with `--runtime-class`) |
@@ -111,8 +111,9 @@ aicr snapshot [flags]
 - **SystemD Services**: containerd, docker, kubelet configurations
 - **OS Configuration**: grub, kmod, sysctl, release info
 - **Kubernetes**: server version, images, ClusterPolicy
-- **GPU**: driver version, CUDA, MIG settings, hardware info
+- **GPU**: driver-free PCI/NFD hardware detection — GPU presence, GPU count, accelerator model/SKU (resolved from the PCI device ID), nvidia kernel-module loaded state, and detection source. Does not require the NVIDIA driver or `nvidia-smi`, and does not emit driver version, CUDA version, or MIG settings.
 - **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
+- **NetworkTopology**: per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) — emitted only when `--cluster-config` or `--discover-network` is set
 
 **Examples:**
 
@@ -124,7 +125,10 @@ aicr snapshot
 aicr snapshot --output system.json --format json
 
 # Save to Kubernetes ConfigMap (requires cluster access)
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+# The agent Job writes the ConfigMap directly, using the Role created in its
+# deployment namespace (--namespace, default `default`). To write into another
+# namespace, deploy the agent there so it has the matching ConfigMap RBAC:
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 # Debug mode
 aicr --debug snapshot
@@ -235,7 +239,7 @@ The `--template` flag enables custom output formatting using Go templates with [
 .APIVersion     # API version string
 .Metadata       # Map of key-value pairs (timestamp, version, source-node)
 .Measurements   # Array of Measurement objects
-  .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology)
+  .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology)
   .Subtypes     # Array of Subtype objects
     .Name       # Subtype name (e.g., "server", "hardware", "grub")
     .Data       # Map of readings (key -> Reading with .String method)
@@ -287,8 +291,9 @@ data:
 apiVersion: aicr.run/v1alpha2
 kind: Snapshot
 metadata:
-  created: "2025-12-31T10:30:00Z"
-  hostname: gpu-node-1
+  timestamp: "2025-12-31T10:30:00Z"
+  version: v1.0.0
+  source-node: gpu-node-1
 measurements:
   - type: SystemD
     subtypes: [...]
@@ -338,7 +343,7 @@ Generate recipes using an `AICRConfig` document. The same file format also drive
 |------|-------|------|-------------|
 | `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) |
 | `--output` | `-o` | string | Output file (default: stdout) |
-| `--format` | `-f` | string | Format: json, yaml (default: yaml) |
+| `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 
 The config file uses a Kubernetes-style envelope:
@@ -393,7 +398,7 @@ Generate recipes using direct system parameters:
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
-| `--format` | `-f` | string | Format: json, yaml (default: yaml) |
+| `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
 
@@ -433,9 +438,9 @@ Generate recipes from captured snapshots:
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--snapshot` | `-s` | string | Path/URI to snapshot (file path, URL, or cm://namespace/name) |
-| `--intent` | `-i` | string | Workload intent: training, inference |
+| `--intent` | | string | Workload intent: training, inference |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
-| `--format` | | string | Format: json, yaml (default: yaml) |
+| `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
 
 **Snapshot Sources:**
@@ -465,16 +470,16 @@ aicr snapshot -o cm://default/snapshot
 aicr recipe -s cm://default/snapshot -o cm://default/recipe
 
 # With custom output
-aicr recipe -s system.yaml -i inference -o recipe.yaml --format yaml
+aicr recipe -s system.yaml --intent inference -o recipe.yaml --format yaml
 ```
 
 **Output structure:**
+
 ```yaml
 apiVersion: aicr.run/v1alpha2
-kind: Recipe
+kind: RecipeResult
 metadata:
   version: v1.0.0
-  created: "2025-12-31T10:30:00Z"
   appliedOverlays:
     - base
     - eks
@@ -488,12 +493,14 @@ criteria:
 componentRefs:
   - name: gpu-operator
     version: vXX.Y.Z          # illustrative; see Component Catalog for current pins
-    order: 1
-    repository: https://helm.ngc.nvidia.com/nvidia
+    source: https://helm.ngc.nvidia.com/nvidia
+deploymentOrder:
+  - gpu-operator
 constraints:
-  driver:
-    version: "<driver-version>"   # illustrative
-    cudaVersion: "<cuda-version>"
+  - name: driver.version
+    value: "<driver-version>"     # illustrative
+  - name: driver.cudaVersion
+    value: "<cuda-version>"       # illustrative
 ```
 
 ---
@@ -831,7 +838,7 @@ aicr validate [flags]
 | `--full` | | bool | false | Emit the full (unredacted) evidence bundle. By default the bundle is minimized: `snapshot.yaml` is reduced to an allowlisted set of fields (dropping node names, provider instance IDs, the node label/taint set, OS tuning, loaded modules, systemd config) and per-test CTRF `stdout`/`message` are omitted. `--full` ships the raw payloads. The cryptographic verification story holds either way; minimal bundles record the applied policy in `predicate.redaction` and self-verify with `aicr evidence verify`. |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
-| `--no-sign` | | bool | false | Push the evidence bundle **unsigned** (requires `--emit-attestation` and `--push`) and write a `pointer.yaml` with an empty `signer` block. Defers Fulcio/Rekor signing to the fork-based CI workflow, so the network-light push can run where the cluster lives even when Sigstore egress is blocked. No-op unless both `--emit-attestation` and `--push` are set. `aicr evidence verify` reports the resulting pointer as a non-failing **pending signature** state. |
+| `--no-sign` | | bool | false | Push the evidence bundle **unsigned** (requires `--emit-attestation` and `--push`) and write a `pointer.yaml` with an empty `signer` block. No-op unless both `--emit-attestation` and `--push` are set. Commit the flat unsigned pointer; the fork CI signing leg signs it and relocates it to its nested per-source path (or sign locally with `aicr evidence sign --relocate` on a Sigstore-reachable host). The blocking *Evidence Pointer Contract* gate requires the final committed pointer to be **signed and nested** — see [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci). |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -1148,7 +1155,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 
 ### aicr diff
 
-Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology).
+Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology).
 
 **Synopsis:**
 ```shell
@@ -1456,9 +1463,9 @@ aicr bundle -r recipe.yaml \
 #### List and Object Value Overrides
 
 `--set` is scalar-only: it cannot express a list or object value. Pointing it
-at a list field such as `agentgateway.allowedSourceRanges` exits 0 but writes a
-**bare string** at that path, producing a type-invalid manifest — the value may
-be dropped or rejected at apply time. Use `--set-json` (inline) or `--set-file`
+at a list field such as `agentgateway.allowedSourceRanges` writes a **bare
+string** at that path, which the bundler rejects with an invalid-request error
+(it must be a list of CIDR strings). Use `--set-json` (inline) or `--set-file`
 (from a file) for any list or object override.
 
 **Format:** `component:path=<value>` where:
@@ -2621,7 +2628,7 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omit the tag and aicr derives a unique per-recipe one (`<recipe-slug>-<short-fingerprint>`); pass an explicit tag to override. See [`aicr validate --push`](#aicr-validate). |
-| `--no-sign` | | bool | `false` | Push the bundle **unsigned** and write a `pointer.yaml` with an empty `signer` block, instead of signing. Skips all OIDC/Fulcio/Rekor steps (and the identity-disclosure prompt), so it runs even where Sigstore egress is blocked. The bundle's content reference (`bundle.oci`/`bundle.digest`) is still recorded; complete the signing leg later with the fork-based CI workflow. `aicr evidence verify` reports such a pointer as a non-failing **pending signature** state. |
+| `--no-sign` | | bool | `false` | Push the bundle **unsigned** and write a `pointer.yaml` with an empty `signer` block, instead of signing. Skips all OIDC/Fulcio/Rekor steps (and the identity-disclosure prompt), so it runs even where Sigstore egress is blocked. The bundle's content reference (`bundle.oci`/`bundle.digest`) is still recorded. Intended for the two-leg publish flow — commit the flat unsigned pointer and complete the signing leg via the fork CI workflow or [`aicr evidence sign --relocate`](#aicr-evidence-sign), which signs it and relocates it to the nested per-source path the blocking *Evidence Pointer Contract* gate requires. See [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
 | `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
 | `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
@@ -2657,9 +2664,11 @@ aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence
 
 ### aicr evidence sign
 
-Complete the signing leg for a bundle that was already pushed **unsigned** (via `aicr evidence publish --no-sign` or `validate --emit-attestation --push --no-sign`). It reads the committed pointer, pulls the bundle it references (`bundle.oci` + `bundle.digest` — no recipe-name or bundle-ref input needed), signs the predicate with keyless OIDC, attaches the Sigstore Bundle as an OCI referrer of the existing artifact, and patches the pointer's `signer` block in place.
+Complete the signing leg for a bundle that was already pushed **unsigned** (via `aicr evidence publish --no-sign` or `validate --emit-attestation ./out --push <ref> --no-sign`). It reads a **local** pointer file (e.g. `./out/pointer.yaml`), pulls the bundle it references (`bundle.oci` + `bundle.digest` — no recipe-name or bundle-ref input needed), signs the predicate with keyless OIDC, attaches the Sigstore Bundle as an OCI referrer of the existing artifact, and patches the pointer's `signer` block in place.
 
-Signing is the only leg that needs Fulcio/Rekor egress, so this command is designed to run in CI (GitHub Actions ambient OIDC) where Sigstore is reachable, while the push leg runs wherever the cluster lives. The bundle is **not** re-emitted: the predicate is read verbatim from the pulled bundle, so the signature binds the same bytes the unsigned push produced.
+Signing is the only leg that needs Fulcio/Rekor egress, so this command runs wherever Sigstore is reachable (a jump box, CI runner, or hotspot) while the cluster-bound validate/push legs run wherever the cluster lives. The bundle is **not** re-emitted: the predicate is read verbatim from the pulled bundle, so the signature binds the same bytes the unsigned push produced.
+
+The fork CI signing leg runs this with `--relocate` on the committed flat pending pointer — signing it and moving it to the nested per-source path the blocking *Evidence Pointer Contract* gate requires; you can also run it directly on a Sigstore-reachable host. See [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci).
 
 **Synopsis:**
 
@@ -2741,7 +2750,7 @@ The positional argument is auto-detected as one of:
 
 The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the library API. Shell consumers can branch via `jq '.exit'` on `--format json` output.
 
-**Pending signature.** An unsigned bundle whose pointer carries no `signer` (e.g. one published with `--no-sign`, awaiting the signing leg) is **not** a failure: it verifies at exit `0` with `pending: true` in the JSON output and a "pending signature" verdict in the Markdown summary. This lets an in-flight PR commit an unsigned pointer without the gate flagging it as broken.
+**Pending signature.** An unsigned bundle whose pointer carries no `signer` (e.g. one published with `--no-sign`, awaiting the signing leg) is **not** a `verify` failure: it verifies at exit `0` with `pending: true` in the JSON output and a "pending signature" verdict in the Markdown summary. This is a useful local check on a not-yet-signed bundle. The committed flat pending pointer is signed and relocated to its nested per-source path by the fork CI signing leg (`aicr evidence sign --relocate`); the blocking *Evidence Pointer Contract* gate (`pkg/evidence/verifier/discover.go`) requires that final signed, nested pointer. See [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci).
 
 **Failure cause.** On a non-zero exit, the JSON output carries a structured `failureCause` object — `class` (one of `registry-forbidden`, `not-found`, `registry`, `signature`, `integrity`, `schema`, `unknown`), an optional `httpStatus`, and an actionable `hint`. For example, a private fork registry returns `class: registry-forbidden`, `httpStatus: 403` with a hint to make the package public — so the reason is self-serviceable rather than a bare "invalid". The Markdown summary renders the same as **Cause**/**Hint** lines.
 
@@ -2879,7 +2888,9 @@ kubectl logs -n gpu-operator -l app=nvidia-operator-validator
 
 ```shell
 # Step 1: Agent captures snapshot to ConfigMap (using CLI deployment)
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+# --namespace gpu-operator deploys the agent there so it has the ConfigMap RBAC
+# (namespace-scoped Role) to write into the gpu-operator namespace.
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 # The CLI handles agent deployment automatically
 # No manual kubectl steps needed

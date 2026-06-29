@@ -193,8 +193,10 @@ done
 ## Verify (version-locked image tags)
 
 ```shell
-# Check that validator images use the CLI version tag (not :latest)
-VERSION=$(aicr version -s)
+# Check that validator images use the CLI version tag (not :latest).
+# `aicr --version` prints "aicr version <ver> (commit: ..., date: ...)",
+# so field 3 is the bare version the image tag is built from.
+VERSION=$(aicr --version | awk '{print $3}')
 jq -r '.results.tests[] | select(.suite[] == "deployment") | .stdout[]' \
   deployment-report.json 2>/dev/null | grep "deploying.*image=.*:v${VERSION}" || \
   echo "Run deployment test with --debug to verify image tags"

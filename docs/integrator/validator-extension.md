@@ -32,7 +32,7 @@ A validator is any container that follows the exit code contract:
 The container receives:
 
 - Snapshot at `/data/snapshot/snapshot.yaml`
-- Recipe at `/data/recipe/recipe.yaml`
+- Validation input at `/data/validation/validation.yaml`
 - Kubernetes API access via in-cluster ServiceAccount
 
 Evidence output goes to **stdout**. Debug logs go to **stderr**. On failure, write a reason to `/dev/termination-log` (max 4096 bytes).
@@ -185,7 +185,7 @@ fi
 # Check: verify the detected GPU SKU from the snapshot. GPU detection is
 # driver-free — the accelerator SKU is resolved from the PCI device ID and
 # recorded in the "hardware" subtype's "model" key.
-GPU_MODEL=$(yq '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.name == "hardware") | .data.model' "$SNAPSHOT")
+GPU_MODEL=$(yq '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data.model' "$SNAPSHOT")
 
 if [[ -z "$GPU_MODEL" || "$GPU_MODEL" == "null" ]]; then
   echo "GPU SKU not found in snapshot" > /dev/termination-log
@@ -235,7 +235,7 @@ ENTRYPOINT ["/check.sh"]
 ## Image Requirements
 
 - Must run as non-root (validator Jobs use `runAsNonRoot: true`)
-- Must handle the mounted data paths (`/data/snapshot/`, `/data/recipe/`)
+- Must handle the mounted data paths (`/data/snapshot/`, `/data/validation/`)
 - Should respect timeout — the Job has `activeDeadlineSeconds` set from the catalog entry
 - Should write meaningful evidence to stdout for the CTRF report
 - Must use explicit image tags (not `:latest`) for reproducibility in external catalogs

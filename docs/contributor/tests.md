@@ -77,13 +77,17 @@ through `cmd.Root().Writer` so tests can intercept output:
 
 ```go
 buf := &bytes.Buffer{}
-cmd := newRecipeCmd(client)
-cmd.SetOut(buf)
-cmd.SetArgs([]string{"--service", "eks", "--accelerator", "h100"})
-if err := cmd.Execute(); err != nil {
-    t.Fatalf("execute: %v", err)
+cmd := recipeCmd()
+cmd.Writer = buf
+args := []string{"recipe", "--service", "eks", "--accelerator", "h100"}
+if err := cmd.Run(context.Background(), args); err != nil {
+    t.Fatalf("run: %v", err)
 }
 ```
+
+(The CLI is built on `urfave/cli/v3`: a command exposes a `Writer`
+field and is invoked with `cmd.Run(ctx, args)` where `args[0]` is the
+command name — there is no Cobra-style `SetOut`/`SetArgs`/`Execute`.)
 
 Direct `fmt.Println` / `fmt.Printf` to stdout in `pkg/cli` breaks
 this pattern and is a review-blocker.

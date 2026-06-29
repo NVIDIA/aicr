@@ -29,7 +29,7 @@ brew install aicr
 # Or the install script
 curl -sfL https://get.aicr.run | bash -s --
 
-aicr version
+aicr --version
 ```
 
 For manual installation, container images, or building from source, see

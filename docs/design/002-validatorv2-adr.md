@@ -7,6 +7,17 @@
 The migration is complete. The implementation lives in `pkg/validator/` with validator
 containers in `validators/`. The v1 engine has been deleted.
 
+> **Implementation drift (noted 2026-06-29).** Parts of the Decision below
+> describe the original design and no longer match the shipped implementation.
+> The historical text is preserved, but treat the following as current:
+> - **Job input mounts:** validator Jobs mount `/data/validation/validation.yaml`
+>   (env `AICR_VALIDATION_PATH`) and `/data/snapshot/snapshot.yaml` — not a
+>   `/data/recipe/recipe.yaml` recipe ConfigMap (`pkg/validator/v1/job_plan_internal.go`).
+> - **RBAC posture:** validation Jobs are bound to the built-in **`cluster-admin`**
+>   ClusterRole (`pkg/validator/job/rbac.go`), not the minimal-purpose role this
+>   ADR envisioned; see that file's rationale for why this is considered
+>   acceptable for ephemeral, per-run Jobs.
+
 ## Context
 
 AICR validates GPU-accelerated Kubernetes clusters through a multi-phase pipeline

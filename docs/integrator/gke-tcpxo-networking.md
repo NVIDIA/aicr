@@ -117,11 +117,14 @@ Update the `nccl-plugin-gpudirecttcpx-dev` image tag in your workload to match.
 
 ## Running the NCCL Benchmark
 
-`aicr validate --phase performance` is not yet automated for GKE — the test uses
-raw Pods with a TCPXO daemon sidecar, which differs from the EKS TrainJob-based
-approach. Run it manually with either of the two profiles below. Each pod runs a
-`tcpxo-daemon` sidecar (manages the GPUDirect TCPX data path) plus the
-`nccl-test` container.
+The GKE H100 training recipe (`h100-gke-cos-training`) already selects the
+automated `nccl-all-reduce-bw` performance check (floor `>= 250` GB/s), so
+`aicr validate --phase performance` runs the NCCL all-reduce benchmark for you.
+If you want to run the benchmark by hand — for example to debug the GPUDirect
+TCPX data path directly with raw Pods and a TCPXO daemon sidecar, which differs
+from the EKS TrainJob-based approach — use either of the two profiles below.
+Each pod runs a `tcpxo-daemon` sidecar (manages the GPUDirect TCPXO data path)
+plus the `nccl-test` container.
 
 ### Option 1: testdata manifests (matches validator framework)
 

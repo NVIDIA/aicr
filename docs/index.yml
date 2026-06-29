@@ -57,12 +57,24 @@ navigation:
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking
         path: integrator/gke-tcpxo-networking.md
+      - page: OpenShift Deployment
+        path: integrator/openshift.md
+      - page: Talos Integration
+        path: integrator/talos-integration.md
       - page: Recipe Development
         path: integrator/recipe-development.md
       - page: Data Extension
         path: integrator/data-extension.md
       - page: Validator Extension
         path: integrator/validator-extension.md
+      - page: Supply Chain Verification
+        path: integrator/supply-chain-verification.md
+      - page: Go Library Integration
+        path: integrator/go-library.md
+      - page: Public API Surface
+        path: integrator/public-api.md
+      - page: Measurement Schema
+        path: integrator/measurement-api.md
       - section: Components
         contents:
           - page: Nodewright

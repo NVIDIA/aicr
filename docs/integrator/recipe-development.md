@@ -115,7 +115,7 @@ spec:
 
 Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/recipe.md#mixin-composition) for details.
 
-Some platforms declare their full component stack inline per leaf overlay rather than via a platform mixin. This is the case for `--platform slurm` and `--platform dynamo`, where each leaf carries hardware-specific tuning (GPU GRES strings, accelerator resource limits) that the mixin merge path cannot represent cleanly. Other platforms like `--platform kubeflow` and `--platform inference` still use the `platform-kubeflow` / `platform-inference` mixins shown above, since their leaf-specific tuning is minimal.
+Some platforms declare their full component stack inline per leaf overlay rather than via a platform mixin. This is the case for `--platform slurm` and `--platform dynamo`, where each leaf carries hardware-specific tuning (GPU GRES strings, accelerator resource limits) that the mixin merge path cannot represent cleanly. Other shapes like `--platform kubeflow` and `--intent inference` still use the `platform-kubeflow` / `platform-inference` mixins shown above, since their leaf-specific tuning is minimal.
 
 For example, `--platform slurm` leaves inline three `componentRefs`:
 
@@ -570,8 +570,8 @@ aicr --debug recipe --service eks --data ./my-data
 
 **Validation:**
 ```bash
-aicr --debug recipe --service eks --data ./my-data --dry-run
-aicr recipe --service eks --data ./my-data --output /dev/stdout
+aicr --debug recipe --service eks --data ./my-data --output /dev/stdout
+aicr recipe --service eks --data ./my-data --format json | jq '.metadata.appliedOverlays'
 ```
 
 ### Regional registry overrides
@@ -654,16 +654,18 @@ whose `criteria` reach hardware or a service that AICR maintainers
 cannot independently re-run — most non-H100 GPUs, non-EKS services,
 and specialty fabrics fall into this bucket. The recipe-evidence CI
 gate posts a sticky Markdown comment on every PR touching
-`recipes/**` and fails closed when a touched recipe has no matching
-per-source pointer under `recipes/evidence/<recipe>/<src>/`.
+`recipes/**` and flags (warning-only — it does not block merge) any
+touched recipe that has no matching per-source pointer under
+`recipes/evidence/<recipe>/<src>/`.
 
-Non-material edits (comments, formatting, `displayName`,
-`description`, key-order) produce the same material-slice digest and
-do not require a fresh bundle — the existing pointer stays valid.
-The CI gate's canonicalizer collapses these to the same digest, so
-the gate passes without re-attestation. See
+The proposed material-slice canonicalization aims to let non-material
+edits (comments, formatting, `displayName`, `description`, key-order)
+reuse an existing pointer without a fresh bundle. That semantic slice
+is **not yet implemented** — today's verifier hashes the normalized
+full recipe, so the collapse-to-same-digest behavior is target state,
+not current. See
 [ADR-007 § Material-slice canonicalization](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md#material-slice-canonicalization-proposed)
-for the slice definition.
+for the proposed slice definition.
 
 ### Producing the Bundle
 
@@ -688,12 +690,29 @@ aicr validate \
   --emit-attestation ./out \
   --push ghcr.io/<owner>/aicr-evidence
 
-# 3. Commit the pointer. The bundle bytes live in OCI; the repo
-#    only stores the locator.
-mkdir -p recipes/evidence
-cp ./out/pointer.yaml recipes/evidence/<recipe-name>.yaml
-git add recipes/evidence/<recipe-name>.yaml
+# 3. Commit the SIGNED pointer. The bundle bytes live in OCI; the repo
+#    only stores the locator. The blocking Evidence Pointer Contract gate
+#    requires a signed pointer committed under the per-source tree
+#    recipes/evidence/<recipe>/<src>/<digest>.yaml — NOT a flat
+#    recipes/evidence/<recipe>.yaml. <src> is the signer slug
+#    (SourceSlug = first 32 hex of sha256(issuer\nidentity)); <digest> is
+#    the bundle digest with ':' rewritten to '-'. Don't construct it by
+#    hand: step 2 already logged the exact destination as the `copyTo`
+#    field of its "evidence pointer written" line, e.g.
+#      copyTo=recipes/evidence/<recipe>/<src>/sha256-<digest>.yaml
+DEST=recipes/evidence/<recipe>/<src>/sha256-<digest>.yaml   # from the copyTo log line
+mkdir -p "$(dirname "$DEST")"
+cp ./out/pointer.yaml "$DEST"
+git add "$DEST"
 ```
+
+> **The signer must be allowlisted.** The blocking *Evidence Pointer Contract*
+> gate rejects a committed pointer whose signer is not listed in
+> `recipes/evidence/allowlist.yaml` ("signer … is not in the allowlist; add a
+> community/partner entry"). A maintainer adds your verified signer (keyed by
+> its one-way `source` slug, or an anchored `identityPattern` for CI) as a
+> `community`/`partner` entry — coordinate this in your PR; the pointer cannot
+> merge until the entry exists.
 
 `--push` signs the bundle (cosign keyless via Sigstore) and attaches it to the
 OCI artifact as a Sigstore Bundle referrer. The tag is just a label — the
@@ -709,16 +728,27 @@ For the end-to-end producer-and-consumer walkthrough, see the
 
 ### Self-Verifying Before You Open the PR
 
-Run the verifier locally — it is the same code the CI gate runs
-against the committed pointer, so failures here will block merge:
+Run the verifier locally — it is the same code the warning-only
+recipe-evidence verify gate runs against the committed pointer. (A
+second, **blocking** *Evidence Pointer Contract* gate also checks that
+the committed pointer is signed and correctly placed under
+`recipes/evidence/<recipe>/<src>/<digest>.yaml`; signing locally and
+committing the nested pointer, as above, satisfies it.) A clean local
+run keeps the sticky comment green:
 
 ```bash
-aicr evidence verify recipes/evidence/<recipe-name>.yaml
+# Verify the emitted pointer before committing it...
+aicr evidence verify ./out/pointer.yaml
+# ...or the committed nested pointer after copying it into place:
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 ```
 
-Exit 0 means signature, schema, inventory, manifest hashes,
-fingerprint match against the recipe's criteria, and BOM
-cross-reference all passed. A non-zero exit writes a structured
+Exit 0 means the signature verified, the predicate parsed, every
+manifest/file hash matched, and the per-phase CTRF report digests
+matched the predicate. The fingerprint and BOM are only *surfaced*
+in the report (signer identity, fingerprint dimensions, phase counts,
+BOM info) — they are not cross-checked against the recipe criteria or
+registry. A non-zero exit writes a structured
 Markdown report describing the specific check that failed. See
 [`aicr evidence verify`](../user/cli-reference.md#aicr-evidence-verify)
 for the full check list and exit-code semantics.
@@ -726,9 +756,11 @@ for the full check list and exit-code semantics.
 ### What to Include in the PR
 
 The recipe-evidence CI gate posts a Markdown summary as a sticky
-comment, so you do not need to inline the verifier output. The PR
-template asks for three additional pieces of context the verifier
-cannot infer:
+comment, so you do not need to inline the verifier output. The
+[PR template](https://github.com/NVIDIA/aicr/blob/main/.github/PULL_REQUEST_TEMPLATE.md)
+has no dedicated evidence section, so add the following three pieces of
+context the verifier cannot infer to the PR description (the Summary or
+Implementation Notes section is fine):
 
 - **The OCI ref** of the pushed bundle, digest-pinned, so a
   maintainer can audit it directly:
@@ -740,8 +772,7 @@ cannot infer:
 - **Evidence disposition.** If `aicr evidence verify` reported a
   non-zero exit with a `1` in the JSON output's `exit` field
   (signature valid, recorded phase results show failures), include a
-  short justification in the PR template's "Evidence disposition"
-  section. The maintainer either applies the `evidence/known-failure`
+  short justification in the PR description. The maintainer either applies the `evidence/known-failure`
   label and merges, or requests changes. See
   [Exit-1 Review Process](../contributor/maintaining.md#exit-1-review-process)
   for what counts as an acceptable reason — broadly: optional check

@@ -299,16 +299,21 @@ for content genuinely uniform across the wildcard dimension.
 ## Merge Algorithm
 
 The resolver lives in `pkg/recipe/metadata_store.go`. The merge
-proceeds in fixed precedence (low → high):
+proceeds in this temporal order:
 
 ```text
-registry defaults → mixin → base chain → overlay leaf → CLI/API --set
-(lowest priority)                                       (highest priority)
+base chain (root → leaf) → mixins → registry defaults → CLI/API --set
 ```
 
-Each step wins over everything to its left — `--set` overrides the
-overlay leaf, the leaf overrides the base chain, and so on. Read as
-priority, not as temporal order.
+The base inheritance chain is merged first (root → leaf, later
+ancestors override earlier ones on same-named entries). Mixins are
+applied **after** the chain, not before it: `mergeMixins` appends each
+referenced mixin's constraints and componentRefs. A mixin constraint
+whose name already exists in the chain (or in another mixin) is
+**rejected** — constraints have no merge semantic, so a name collision
+is treated as an unambiguous conflict, not resolved by last-wins
+precedence. Registry defaults then fill any still-empty componentRef
+fields, and CLI/API `--set` overrides win last.
 
 Implementation notes:
 

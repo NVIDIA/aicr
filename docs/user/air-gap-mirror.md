@@ -10,11 +10,14 @@ the static image inventory across all registered components, see
 
 `aicr mirror list` renders each component's Helm chart with recipe-resolved
 values, scans referenced manifests, and produces a deduplicated list of
-container images and chart references. Manifest reads honor the recipe's
-data source — when the recipe was built with `--data <dir>`, an overlay
-manifest shadowing an embedded path is used in place of the embedded copy.
-The output is available in four formats — two general-purpose (YAML, JSON)
-and two tool-specific (Hauler, Zarf).
+container images and chart references. Manifest reads honor the data source
+resolved for the `mirror list` invocation itself: pass `--data <dir>` to
+`aicr mirror list` and an overlay manifest shadowing an embedded path is used
+in place of the embedded copy. The data directory is **not** remembered from
+when the recipe was generated — a saved recipe carries no `--data` path, so
+you must supply `--data` again on each `mirror list` run that needs the
+overlay. The output is available in four formats — two general-purpose
+(YAML, JSON) and two tool-specific (Hauler, Zarf).
 
 > **Trust boundary:** Discovery shells out to `helm template`, which executes
 > the full Go template engine (`tpl`, `include`, `lookup`). AICR recipes
@@ -259,4 +262,14 @@ OS). The resulting image list is typically a subset of the full inventory,
 limited to the components and sub-components your recipe enables.
 
 Use the inventory for security audit and compliance. Use `mirror list` to
-generate the exact manifest for a specific deployment.
+generate the deployment-specific manifest for a specific deployment.
+
+> **Completeness caveat:** discovery is best-effort, not all-or-nothing. A
+> per-component failure to load values, render the chart (`helm template`), or
+> extract images from a manifest is **non-fatal** — the component's images are
+> omitted and the failure is recorded as a warning, but the command still
+> exits 0. The YAML and JSON outputs carry these warnings in a `warnings`
+> field; the Hauler and Zarf outputs **omit them entirely**. Treat a
+> tool-specific manifest as authoritative only after confirming the YAML/JSON
+> run reported no warnings — otherwise the mirrored set may be silently
+> incomplete.

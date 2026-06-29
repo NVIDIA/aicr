@@ -40,27 +40,26 @@ jobs:
       
       - name: Deploy AICR Agent
         run: |
-          aicr snapshot --output cm://gpu-operator/aicr-snapshot --timeout 300s
-      
-      - name: Wait for completion
-        run: |
-          kubectl wait --for=condition=complete --timeout=300s job/aicr -n gpu-operator
+          # aicr snapshot deploys the in-cluster Job, waits synchronously for
+          # it to complete, writes the result, then cleans the Job up — no
+          # separate `kubectl wait` step is needed.
+          aicr snapshot --namespace gpu-operator \
+            --output cm://gpu-operator/aicr-snapshot --timeout 300s
       
       - name: Capture snapshot from ConfigMap
         run: |
-          kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}' > snapshot-$(date +%Y%m%d-%H%M%S).yaml
+          kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}' > snapshot.yaml
       
       - name: Compare with baseline
         run: |
           # Download baseline
           curl -O https://your-artifacts/baseline.yaml
-          
-          # Compare
-          if ! diff -q baseline.yaml snapshot-*.yaml; then
-            echo "::error::Configuration drift detected"
-            diff baseline.yaml snapshot-*.yaml
-            exit 1
-          fi
+
+          # Compare with the semantic differ. A raw `diff` would flag every
+          # new snapshot timestamp as drift; `aicr diff --fail-on-drift`
+          # exits non-zero only on a meaningful configuration change.
+          aicr diff --baseline baseline.yaml --target snapshot.yaml \
+            --fail-on-drift
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -94,11 +93,12 @@ jobs:
           kubeconfig: ${{ secrets.KUBECONFIG }}
 
       # 1. Snapshot: agent Job writes cluster state to a ConfigMap.
+      #    aicr snapshot waits synchronously for the Job and cleans it up,
+      #    so no separate `kubectl wait` step is needed.
       - name: Capture snapshot
         run: |
-          aicr snapshot --output cm://gpu-operator/aicr-snapshot --timeout 300s
-          kubectl wait --for=condition=complete --timeout=300s \
-            job/aicr -n gpu-operator
+          aicr snapshot --namespace gpu-operator \
+            --output cm://gpu-operator/aicr-snapshot --timeout 300s
 
       # 2. Recipe: read the snapshot ConfigMap, emit an optimized recipe.
       #    Use --service/--accelerator/--intent flags for query mode instead.
@@ -161,8 +161,11 @@ jobs:
       
       - name: Setup aicr
         run: |
-          curl -sLO https://github.com/nvidia/aicr/releases/latest/download/aicr_linux_amd64.tar.gz
-          tar -xzf aicr_linux_amd64.tar.gz
+          # GoReleaser archives are versioned (aicr_<version>_<os>_<arch>.tar.gz),
+          # so resolve the latest tag first rather than a fixed filename.
+          VERSION=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+          curl -sLO "https://github.com/NVIDIA/aicr/releases/download/${VERSION}/aicr_${VERSION#v}_linux_amd64.tar.gz"
+          tar -xzf "aicr_${VERSION#v}_linux_amd64.tar.gz"
           sudo mv aicr /usr/local/bin/
       
       - name: Generate recipe
@@ -185,7 +188,7 @@ jobs:
       - name: Commit to GitOps repo
         run: |
           # Copy entire bundle to GitOps repository
-          # Argo CD apps are in <component>/argocd/ directories
+          # Argo CD apps are in NNN-<component>/application.yaml files
           # app-of-apps.yaml is at bundle root
           cp -r bundles/* gitops-repo/
           
@@ -197,7 +200,7 @@ jobs:
 
 **Generated Argo CD Application with multi-source:**
 ```yaml
-# bundles/gpu-operator/argocd/application.yaml
+# bundles/NNN-gpu-operator/application.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -214,15 +217,15 @@ spec:
       targetRevision: v26.3.2
       helm:
         valueFiles:
-          - $values/gpu-operator/values.yaml
+          # Values live under the numbered bundle dir (NNN-<component>/)
+          - $values/002-gpu-operator/values.yaml
     # Values from GitOps repo
     - repoURL: <YOUR_GIT_REPO>
       targetRevision: main
       ref: values
-    # Additional manifests (ClusterPolicy, etc.)
-    - repoURL: <YOUR_GIT_REPO>
-      targetRevision: main
-      path: gpu-operator/manifests
+  # Post-install manifests (ClusterPolicy, etc.) are NOT a source on this
+  # Application — the bundler emits them as a separate numbered Application
+  # (e.g. NNN-gpu-operator-post/application.yaml) ordered by sync-wave.
   destination:
     server: https://kubernetes.default.svc
     namespace: gpu-operator
@@ -337,14 +340,17 @@ groups:
 
 ### 1. Caching Recipes
 
-API responses are cacheable (Cache-Control: max-age=300):
+API responses are cacheable (recipe and query responses carry
+`Cache-Control: public, max-age=600` — a 10-minute TTL). Note this is the
+HTTP response cache only; the server's internal per-`Client` provider caches
+are not time-bounded and persist until `Client.Close()` is called.
 
 ```python
 import requests
 from cachetools import TTLCache
 
-# Cache recipes for 5 minutes
-recipe_cache = TTLCache(maxsize=100, ttl=300)
+# Cache recipes for 10 minutes, matching the server's max-age=600
+recipe_cache = TTLCache(maxsize=100, ttl=600)
 
 def get_recipe_cached(params):
     cache_key = frozenset(params.items())

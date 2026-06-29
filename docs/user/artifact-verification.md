@@ -246,12 +246,21 @@ recipes/evidence/allowlist.yaml                            # maintained signer a
 
 Each file is a single-attestation V1 pointer — the same schema that
 `aicr evidence verify` already consumes. The `<src>` segment is a stable slug
-derived from the **verified** signer OIDC identity — the first 32 hex characters
-(128 bits) of `sha256(issuer + "\n" + identity)`. Because the slug is computed from the
-signer rather than chosen freely, the path is **not squattable**: the
+derived from the signer OIDC identity recorded in the pointer — the first 32 hex
+characters (128 bits) of `sha256(issuer + "\n" + identity)`. Because the slug is
+computed from the signer fields rather than chosen freely, the
 `Evidence Pointer Contract` CI job recomputes the slug from each pointer's own
-signer and rejects any file that does not live under the directory its signer
-hashes to. Consumers discover a recipe's evidence by glob —
+signer block and rejects any file that does not live under the directory its
+signer hashes to.
+
+> **Claimed vs. cryptographically-verified signer.** The on-disk contract gate
+> derives the slug from the signer fields the pointer *declares*; it does not,
+> by itself, cryptographically verify the bundle was signed by that identity
+> (the OCI signature verification is a separate, currently warning-only step).
+> So the path binds a *claimed* identity at gate time, not a proven one — see
+> [#1535](https://github.com/NVIDIA/aicr/issues/1535).
+
+Consumers discover a recipe's evidence by glob —
 `recipes/evidence/<recipe>/*/*.yaml` — and aggregate across sources; nothing is
 ever modified in place.
 

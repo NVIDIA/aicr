@@ -20,8 +20,8 @@ The short form:
 | Step | Command | Notes |
 |------|---------|-------|
 | 1. Pre-flight | `make qualify` on `main` | Must pass. Tests + lint + e2e + scan. |
-| 2. Bump | `./tools/release patch` (or `minor`/`rc`/`promote`) | Creates the signed tag locally. |
-| 3. Push | `git push origin <tag>` | Triggers `release.yaml` workflow. |
+| 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To promote a pre-release to stable on the same SHA, use `make bump-promote TAG=<rc-tag>` (e.g. `TAG=v1.3.0-rc2`). |
+| 3. Push | `git push origin <tag>` (done by the bump target) | Triggers the `On Tag Release` (`on-tag.yaml`) workflow. |
 | 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASING.md §Verification. |
 | 5. Demo | Cloud Run deploy auto-triggers on tag push | Inspect `aicrd.demo` health. |
 
@@ -44,8 +44,8 @@ and that the user's `gh` is recent enough (`gh attestation verify` is
 v2.49+). RELEASING.md §Container Attestations has both `gh` and
 `cosign` flows.
 
-**Cloud Run demo deploy fails after tag push.** Check
-`deploy-demo.yaml` workflow; the most common cause is GitHub Container
+**Cloud Run demo deploy fails after tag push.** Check the demo deploy
+job (`deploy.yaml`, called from `on-tag.yaml`); the most common cause is GitHub Container
 Registry (GHCR) pull
 failure during the first 60s after tag publish. Re-run the workflow.
 
@@ -85,10 +85,18 @@ attestation + maintainer judgement.
 
 ## Evidence-Backed Review (Future State per ADR-007)
 
-> **Status:** ADR-007 PR-D has not landed. `recipes/evidence/` does
-> not exist yet; `aicr evidence verify` ships but the CI gate is
-> warning-only. The runbook below describes the target state after
-> PR-D. Use it as the design contract, not an operational guide.
+> **Status (partially landed).** `recipes/evidence/` now exists: the
+> per-source pointer tree (`#1347` Option A / `#1401`) shipped, and two
+> signed nested pointers are committed today
+> (`h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
+> `recipes/evidence/<recipe>/<src>/<digest>.yaml`. Two gates run on
+> `recipes/evidence/**`: the **blocking** *Evidence Pointer Contract*
+> (`tools/evidence-pointercheck`) rejects any committed pointer that is
+> unsigned, lives at a flat path, sits under the wrong signer directory,
+> or whose signer is not allowlisted; and the **warning-only**
+> recipe-evidence verify gate (signature/integrity against OCI). The
+> ADR-007 `spec.maintainers` work (PR-D) is still future state. Treat
+> proposed-only items below as design contract, not operational guide.
 
 The motivating constraint: maintainers cannot independently re-run a
 contributor's validator on hardware they don't have. The evidence
@@ -104,22 +112,28 @@ items 6–8 are maintainer judgement calls.
 
 1. **Pointer file present.** At least one per-source pointer file under
    `recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml` — one immutable
-   file per signed run — exists for every touched overlay. The CI gate fails
-   closed when a recipe change has no matching pointer.
-2. **`recipe-evidence` check is green.** Exit 0 means the bundle
-   signature, schema, inventory, fingerprint match, constraint replay,
-   and BOM cross-reference all passed. Exit 1 requires explicit
-   disposition (see [Exit-1 Review Process](#exit-1-review-process)).
-   Exit 2 is a hard fail.
+   file per signed run — exists for every touched overlay. The CI gate is
+   warning-only: when a recipe change has no matching pointer it flags the
+   gap in the sticky comment but does not block merge.
+2. **`recipe-evidence` check is green.** Exit 0 means the shipped
+   verifier's checks passed: bundle signature, predicate/schema parse,
+   manifest-inventory hash binding, and signer cross-check. (Inline
+   constraint replay and BOM cross-reference are proposed in ADR-007 but
+   not yet implemented.) Exit 1 requires explicit disposition (see
+   [Exit-1 Review Process](#exit-1-review-process)). Exit 2 is a hard fail.
 3. **Signer identity is acceptable.** Open the sticky comment, find
    the recipe's `<details>` section, and review the signer block. See
    [Signer Identity Trust Patterns](#signer-identity-trust-patterns).
-4. **Bundle Open Container Initiative (OCI) ref matches PR description.** The recipe PR template
-   asks the contributor to paste the `bundle.oci` field; confirm the
+4. **Bundle Open Container Initiative (OCI) ref matches PR description.** The PR template
+   has no dedicated evidence section, so contributors paste the `bundle.oci` field
+   into the PR description (see the recipe-development guide); confirm the
    sticky comment shows the same ref.
-5. **Material slice digest matches.** Verifier step 6a recomputes
-   `sha256(JCS(material-slice(post-resolution recipe)))` and confirms
-   it matches the attestation's subject digest.
+5. **Manifest inventory hash matches.** The shipped verifier binds
+   `manifest.json` to the predicate's manifest digest and verifies every
+   bundle file and phase-report digest against it. (The semantic
+   material-slice / JCS subject-digest binding is proposed in ADR-007 but
+   not yet implemented — today's canonicalization hashes the normalized
+   full recipe, not a material slice.)
 6. **Test environment is plausible.** The PR template captures cloud,
    accelerator, OS, Kubernetes version, and cluster size. A GB200
    recipe attested from a single-node Minikube is a red flag.
@@ -148,9 +162,9 @@ warrant filtering, the tier-policy work pulls in.
 
 ### Exit-1 Review Process
 
-Exit 1 means the bundle verified cleanly (signature, schema,
-inventory, fingerprint) but one or more validator phases reported
-failures. Common causes: a conformance check failed on the
+Exit 1 means the bundle verified cleanly (signature, predicate/schema,
+manifest-inventory hash, signer cross-check) but one or more validator
+phases reported failures. Common causes: a conformance check failed on the
 contributor's hardware, a performance threshold was not met, an
 optional check requires a feature the contributor's cluster does not
 have.
@@ -161,8 +175,8 @@ Exit 1 is **not** the same as evidence/exempt. Exit 1 means
 
 **Workflow:**
 
-1. Contributor declares exit-1 intent in the PR template's "Evidence
-   disposition" section, with a reason.
+1. Contributor declares exit-1 intent in the PR description (the PR
+   template has no dedicated evidence section), with a reason.
 2. If acceptable, apply `evidence/known-failure` label and merge.
 3. If not, request changes. Typical resolutions: narrow the recipe
    criteria so the failing check is not selected, fix the underlying

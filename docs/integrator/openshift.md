@@ -20,16 +20,16 @@ Helm is the packaging and rendering layer, not a runtime requirement. OpenShift 
 
 The Subscription (Phase 1) and the Custom Resource (Phase 2) follow independent lifecycles: the Subscription bootstraps the operator environment while the CR acts as the ongoing trigger for the operator to provision and manage the workload. This separation creates two distinct operational flows — one for the operator installation and one for the workload configuration.
 
-When `--readiness-hooks` is enabled, a readiness gate is inserted between the two phases. This gate uses Chainsaw assertions to verify that the operator's ClusterServiceVersion (CSV) has reached `Succeeded` phase and the operator Deployment has at least one available replica before the CR chart is applied:
+When `--readiness-hooks` is enabled, a readiness gate is inserted between the two phases. This gate uses a Chainsaw assertion to verify that the operator's ClusterServiceVersion (CSV) has reached `Succeeded` phase before the CR chart is applied:
 
 ```text
 Phase 1 (OLM)         Readiness Gate              Phase 2 (CR)
 ┌─────────────────┐    ┌──────────────────────┐    ┌──────────────────┐
 │ OperatorGroup   │    │ CSV phase=Succeeded  │    │ Custom Resource  │
-│ Subscription    │───▶│ Deployment Available │───▶│ (operator CR)    │
+│ Subscription    │───▶│                      │───▶│ (operator CR)    │
 └─────────────────┘    └──────────────────────┘    └──────────────────┘
      install.sh         install.sh --wait            install.sh
-                        --wait-for-jobs
+                        --timeout
 ```
 
 ### OLM Architecture
@@ -51,14 +51,22 @@ The Operator Lifecycle Manager provides a declarative approach to managing opera
 
 ### Readiness Gates
 
-Each OLM component carries a `readiness.yaml` using Chainsaw assertions. The readiness gate checks two conditions:
+Each OLM component carries a `readiness.yaml` using a Chainsaw assertion that
+checks one condition:
 
 1. **CSV Succeeded** — the ClusterServiceVersion has reached `phase: Succeeded`
-2. **Deployment Available** — the operator Deployment has at least one available replica
 
-CSV `Succeeded` alone is insufficient — OLM marks it before pods finish pulling images. The two-step check ensures the operator controller is actually running before CRs are applied.
+OLM advances the CSV to `Succeeded` only once the operator's install strategy
+(its Deployment) reports available, so the CSV phase is the single signal the
+gate waits on before CRs are applied.
 
-When `--readiness-hooks` is enabled, the bundler emits a `-readiness` folder between the OLM and CR folders for each operator. The readiness Job runs with `helm install --wait --wait-for-jobs`, blocking the deployment pipeline until the operator is fully ready.
+> **Known issue ([#1532](https://github.com/NVIDIA/aicr/issues/1532)).** The
+> generated gate `Role` does not yet grant `operators.coreos.com` access, so
+> the CSV assertion currently fails with an RBAC-forbidden error on OCP until
+> that Role is extended. Track #1532 before relying on `--readiness-hooks` for
+> OLM components.
+
+When `--readiness-hooks` is enabled, the bundler emits a `-readiness` folder between the OLM and CR folders for each operator. The readiness Job runs with `helm install --wait --timeout`, blocking the deployment pipeline until the operator is fully ready.
 
 ### Naming Convention
 
@@ -159,7 +167,7 @@ ocp-bundle/
 │   ├── Chart.yaml
 │   ├── templates/
 │   │   └── check-job.yaml
-│   └── install.sh                          # runs with --wait --wait-for-jobs
+│   └── install.sh                          # runs with --wait --timeout
 ├── 0XX-<operator>-ocp/                     # Phase 2: Operator CR
 │   ├── Chart.yaml
 │   ├── templates/
@@ -170,7 +178,7 @@ ocp-bundle/
 │   # ... repeated for each operator in the recipe
 ```
 
-Each numbered folder is a standard local Helm chart. The `deploy.sh` script installs them sequentially. Readiness folders (`*-readiness`) use `helm install --wait --wait-for-jobs` to block until the gate passes.
+Each numbered folder is a standard local Helm chart. The `deploy.sh` script installs them sequentially. Readiness folders (`*-readiness`) use `helm install --wait --timeout` to block until the gate passes.
 
 ### 3. Deploy Components
 
@@ -192,7 +200,7 @@ helm upgrade --install <release> ./<folder> --create-namespace -n <namespace>
 For readiness gate folders, add the wait flags:
 
 ```bash
-helm upgrade --install <release> ./<readiness-folder> -n <namespace> --wait --wait-for-jobs
+helm upgrade --install <release> ./<readiness-folder> -n <namespace> --wait --timeout 10m
 ```
 
 ### 4. Monitor Operator Readiness
@@ -282,8 +290,12 @@ aicr bundle -r recipe.yaml \
 **CR phase overrides** control operator behavior — the Custom Resource spec fields that the operator reconciles:
 
 ```bash
---set gpuoperatorocp:spec.driver.version=570.86.16
+--set gpuoperatorocp:driver.rdma.enabled=false
 ```
+
+CR values keys are **flat** (`driver.rdma.enabled`, not `spec.driver.rdma.enabled`) — the template maps them into the ClusterPolicy CR `spec` itself, so an override must not include a `spec.` prefix.
+
+> **Note:** The GPU driver version is **not** overridable on OCP. Unlike the Helm-based GPU Operator, the OCP operator manages the driver via the certified driver container, so `driver.version` is intentionally absent from `gpu-operator-ocp/values.yaml` and a `--set gpuoperatorocp:driver.version=...` override is silently ignored.
 
 Override keys for each component are listed in `recipes/registry.yaml` under `valueOverrideKeys`. CR values keys mirror the upstream Helm chart values for consistency across services — the same knobs appear in OCP CR values as in EKS/AKS/GKE Helm values, even though the underlying mechanism differs (ClusterPolicy CR fields vs. Helm chart values).
 
@@ -316,7 +328,7 @@ Both phases emit `KindLocalHelm` folders, which all existing deployers handle:
 
 | Deployer | Phase 1 (OLM) | Readiness Gate | Phase 2 (CR) |
 |----------|---------------|----------------|--------------|
-| Helm | `helm upgrade --install` via `install.sh` | `--wait --wait-for-jobs` (readiness Job) | `helm upgrade --install` |
+| Helm | `helm upgrade --install` via `install.sh` | `--wait --timeout` (readiness Job) | `helm upgrade --install` |
 | Argo CD | `Application` CR, sync-wave N | `Application` CR, sync-wave N+1 | `Application` CR, sync-wave N+2 |
 
 **Argo CD example:**
@@ -363,12 +375,15 @@ Every `*-ocp` component carries values that define the operator's Custom Resourc
 
 ```yaml
 name: <cr-instance-name>
-spec:
-  # Operator-specific configuration
-  # Keys match the upstream Helm chart values where applicable
+# Operator-specific configuration — flat keys (no `spec.` prefix); the
+# template maps them into the CR `spec`. Keys match the upstream Helm chart
+# values where applicable, e.g. an override is `--set gpuoperatorocp:driver.rdma.enabled=false`.
+driver:
+  rdma:
+    enabled: true
 ```
 
-The actual values files live in `recipes/components/<component>/values.yaml`, with optional intent-specific overrides (e.g., `values-training.yaml`). Overlays reference these via `valuesFile` in `componentRefs`.
+The actual values files live in `recipes/components/<component>/values.yaml`, with optional service/intent-specific overrides named `values-<service>[-<intent>].yaml` (e.g., `values-eks-training.yaml`). Overlays reference these via `valuesFile` in `componentRefs`. The `gpu-operator-ocp` component currently ships only a base `values.yaml`; the `ocp-training` overlay carries no component value overrides.
 
 ## Overlay Structure
 

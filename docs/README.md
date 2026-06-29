@@ -95,12 +95,12 @@ Reference for the terms used across the docs site.
 | **Mixin** | A composable fragment (`kind: RecipeMixin`) under `recipes/mixins/` carrying only `constraints` and `componentRefs`, referenced via `spec.mixins`. |
 | **Bundle** | Deployment artifacts emitted by `aicr bundle`: Helm values, manifests, install scripts, checksums. |
 | **Bundler** | A per-component generator that emits the bundle inputs (e.g., GPU Operator bundler). |
-| **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocdhelm`, `flux`. |
+| **Deployer** | An output adapter that serializes a bundle in a tool-specific format: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. |
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator). Lives in `recipes/registry.yaml`. |
 | **ComponentRef** | A reference to a component inside a recipe — version, source, values file, dependencies. |
 | **Constraint** | A declarative validation rule on a recipe (e.g., `K8s.server.version >= 1.32.4`). |
 | **Validation Phase** | A stage of `aicr validate`: readiness (always implicit), deployment, performance, conformance. |
-| **Measurement** | A snapshot data point keyed by type (K8s, OS, GPU, SystemD), subtype, and reading. |
+| **Measurement** | A snapshot data point keyed by type (K8s, OS, GPU, SystemD, NodeTopology, NetworkTopology), subtype, and reading. |
 | **Specificity** | A score counting non-`any` criteria fields. More-specific overlays merge later. |
 | **Asymmetric matching** | Criteria-matching rule: recipe `any` is a wildcard; query `any` does not match a specific recipe. |
 | **ConfigMap URI** | `cm://namespace/name` — read or write snapshots and recipes directly to Kubernetes ConfigMaps. |

@@ -20,7 +20,7 @@ in the [Go library integration guide](./go-library.md).
 | `github.com/NVIDIA/aicr/pkg/client/v1` | **Public (stable)** | Facade: `Client`, `NewClient`, request/result types, source constructors. |
 | `pkg/recipe` | Public (evolving) | Recipe resolution, criteria, overlay system, component registry. |
 | `pkg/bundler` | Public (evolving) | Per-component Helm/Kustomize bundle generation. |
-| `pkg/validator` | Public (evolving) | Constraint evaluation, three-phase validation (Deployment, Performance, Conformance). |
+| `pkg/validator` | Public (evolving) | Constraint evaluation, three-phase validation (executed in order: Deployment, Conformance, Performance). |
 | `pkg/collector` | Public (evolving) | Observed state collection from clusters. |
 | `pkg/measurement` | Public (evolving) | Typed measurement model used by collectors and validators. |
 | `pkg/version` | Public (evolving) | Semver constraint evaluation. |
@@ -28,6 +28,15 @@ in the [Go library integration guide](./go-library.md).
 | `pkg/defaults` | Public (evolving) | Shared timeout and limit constants. |
 | `pkg/component` | Internal | Bundler utilities and test helpers. |
 | `pkg/constraints` | Internal | Constraint type definitions. |
+| `pkg/bom` | Internal | Bill-of-materials / image inventory generation. |
+| `pkg/config` | Internal | Config-file loading and flag/spec resolution. |
+| `pkg/corroborate` | Internal | Cross-source corroboration of observed state. |
+| `pkg/diff` | Internal | Structural diff between two snapshots. |
+| `pkg/fingerprint` | Internal | Cluster/provider fingerprint detection. |
+| `pkg/health` | Internal | Health-check orchestration. |
+| `pkg/helm` | Internal | Helm chart rendering helpers. |
+| `pkg/mirror` | Internal | Chart/image mirroring to air-gapped registries. |
+| `pkg/netutil` | Internal | Networking utilities. |
 | `pkg/snapshotter` | Public (evolving) | Snapshot orchestration. The facade exposes its own `Snapshot` and `AgentConfig` types; `pkg/snapshotter` is the underlying implementation. |
 | `pkg/serializer` | Internal | YAML/JSON serialization helpers. |
 | `pkg/manifest` | Internal | Helm-compatible manifest rendering. |
@@ -50,7 +59,7 @@ aliases — the table below documents which.
 | Facade symbol | Translates to/from | Notes |
 |---|---|---|
 | `aicr.Snapshot` | `pkg/snapshotter.Snapshot` | **Facade-owned struct**. Public fields are identifying metadata; full measurement payload is preserved in an unexported field for round-trip through `ValidateState`. Use `aicr.WrapSnapshot` to lift a `*snapshotter.Snapshot` loaded externally. |
-| `aicr.AgentConfig` | `pkg/snapshotter.AgentConfig` | **Facade-owned struct** mirroring every field. `Tolerations` keeps `k8s.io/api/core/v1.Toleration` since `k8s.io` is itself a stable contract. |
+| `aicr.AgentConfig` | `pkg/snapshotter.AgentConfig` | **Facade-owned struct** covering the deployment-time agent fields. `Tolerations` keeps `k8s.io/api/core/v1.Toleration` since `k8s.io` is itself a stable contract. It does **not** mirror every `pkg/snapshotter.AgentConfig` field — the network-collector fields `ClusterConfigPath` and `DiscoverNetwork` are not surfaced on the facade type. |
 | `aicr.PhaseResult` | `pkg/validator.PhaseResult` | **Facade-owned struct**. Exposes `Summary` (CTRF counts) and `RawReport` (CTRF JSON bytes); `Report *ctrf.Report` is retained for in-tree consumers that merge per-phase reports. |
 | `aicr.Phase`, `aicr.PhaseDeployment` / `PhasePerformance` / `PhaseConformance` | string consts | **Facade-owned**. Values match `pkg/validator/v1` constants verbatim for byte-identical wire round-trip. |
 | `aicr.ReportSummary` | `pkg/validator/ctrf.Summary` | **Facade-owned struct** with the CTRF count fields. |

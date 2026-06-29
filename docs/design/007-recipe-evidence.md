@@ -2,14 +2,32 @@
 
 ## Status
 
-**Proposed** — 2026-05-08 (design-only; not implemented).
+**Accepted, partially implemented** — proposed 2026-05-08.
 
 This ADR specifies the V1 contract. Implementation lands as five
 follow-on PRs tracked under
 [#750](https://github.com/NVIDIA/aicr/issues/750) and its children
 ([#751](https://github.com/NVIDIA/aicr/issues/751)–[#754](https://github.com/NVIDIA/aicr/issues/754)).
-Bundle formats, CLI flags, schema fields, and verifier behavior
-described below are future intent, not current behavior.
+The core bundle format, the committed pointer layout, and the
+`aicr evidence digest`/`publish`/`sign`/`verify` subcommands have
+landed; several schema fields and verifier guarantees described below
+remain future intent, as detailed in the Update note immediately below.
+
+> **Update.** Implementation has since landed in part. The `aicr evidence`
+> family currently ships `digest`, `publish`, `sign`, and `verify` — the
+> `list` and `show` subcommands described below are **not yet implemented**.
+> The shipped verifier always verifies the signature and performs
+> predicate/schema parse and manifest-inventory hash binding. Issuer/SAN
+> (signer-identity) pinning is **opt-in** — enforced only when
+> `expected-issuer` / `expected-identity-regexp` are supplied; a plain
+> `verify` run does not cross-check the signer identity. The richer
+> guarantees enumerated under "CLI family" remain the proposed contract and
+> are not wired today: inline constraint replay is explicitly reserved for a
+> follow-up slice (`pkg/evidence/verifier/verify.go`), and material-slice/JCS
+> canonicalization, chain manifests, BOM cross-reference, and the CI
+> material-slice gate are likewise future intent. The committed pointer layout
+> (`recipes/evidence/<recipe>/<source>/<digest>.yaml`) is implemented as
+> described.
 
 ## Problem
 
@@ -383,7 +401,10 @@ warning-only Markdown comment around two ideas that keep it low-noise on
 broad-impact PRs:
 
 - **Protected vs. other affected.** A recipe is *protected* — implicitly —
-  iff it has a committed pointer at `recipes/evidence/<slug>.yaml`. The
+  iff it has at least one committed pointer under its per-source tree
+  `recipes/evidence/<recipe>/<src>/<digest>.yaml` (the layout that shipped in
+  #1401; see [Per-source pointer layout](#per-source-pointer-layout-1347-option-a-implemented-in-1401)).
+  The
   protected set is what the gate actively verifies (pointer present →
   verify → digest compare) and renders as a status table. Recipes that are
   affected but carry no pointer are best-effort: evidence is
@@ -720,13 +741,20 @@ recipes/evidence/allowlist.yaml                            # maintained signer a
 ```
 
 `<src>` is `attestation.SourceSlug(issuer, identity)` — the first 32 hex
-characters (128 bits) of `sha256(issuer + "\n" + identity)` of the **verified** signer.
-Deriving the slug from the signer (rather than a free-form label) is what
-makes the path non-squattable: the `evidence-pointer-contract` CI job
-(`tools/evidence-pointercheck`, backed by `verifier.CheckEvidenceTree`)
-recomputes the slug from each committed pointer's own signer and rejects any
-file that does not live under the directory its signer hashes to, that is
-unsigned, or whose signer is not allowlisted as community/partner. Consumers
+characters (128 bits) of `sha256(issuer + "\n" + identity)` of the signer the
+pointer declares. (The on-disk contract gate uses the *claimed* signer fields;
+it does not by itself cryptographically verify the bundle signature — the OCI
+verification is a separate, currently warning-only step. See
+[#1535](https://github.com/NVIDIA/aicr/issues/1535).)
+Deriving the slug from the signer (rather than a free-form label)
+deterministically partitions evidence by signer: the
+`evidence-pointer-contract` CI job (`tools/evidence-pointercheck`, backed by
+`verifier.CheckEvidenceTree`) recomputes the slug from each committed pointer's
+own signer block and rejects any file that does not live under the directory
+its declared signer hashes to, that is unsigned, or whose signer is not
+allowlisted as community/partner. This is *structural* partitioning — it is not
+cryptographic anti-squatting, since the gate uses the claimed signer fields and
+does not itself verify the signature ([#1535](https://github.com/NVIDIA/aicr/issues/1535)). Consumers
 discover a recipe's evidence by glob (`verifier.DiscoverPointers`,
 `<recipe>/*/*.yaml`) and aggregate across sources; nothing is modified in
 place.
@@ -1165,7 +1193,7 @@ pull-trigger; let demand decide what V2 brings in.** Don't pre-build.
   `recipe-evidence/v1` predicate type.
 - [DSSE (Dead Simple Signing Envelope)](https://github.com/secure-systems-lab/dsse) —
   signature envelope wrapping the in-toto Statement.
-- [Sigstore Cosign](https://docs.sigstore.dev/cosign/overview/) —
+- [Sigstore Cosign](https://docs.sigstore.dev/cosign/signing/overview/) —
   keyless signing path used in V1; reference for `cosign attest` and
   `cosign verify-attestation`.
 - [Fulcio](https://github.com/sigstore/fulcio) — short-lived cert

@@ -279,9 +279,12 @@ Pattern reminders from CLAUDE.md:
 - Always check `ctx.Done()` if the handler under test spawns goroutines.
 - Never use a live cluster; the facade with `EmbeddedSource()` is fully in-process.
 
-For end-to-end coverage, the chainsaw suite under
-[`tests/chainsaw/server/`](https://github.com/NVIDIA/aicr/tree/main/tests/chainsaw)
-exercises the server binary against the embedded data set.
+The handlers, middleware chain, and `Server.Run` lifecycle are covered
+by in-process Go tests under
+[`pkg/server`](https://github.com/NVIDIA/aicr/tree/main/pkg/server)
+(`recipe_handler_test.go`, `middleware_test.go`, `serve_test.go`, and
+peers), which drive the facade against the embedded data set without a
+live cluster.
 
 ## References
 
