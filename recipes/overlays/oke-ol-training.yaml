@@ -15,24 +15,21 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: oke-training
+  name: oke-ol-training
 
 spec:
-  # Inherits from oke recipe (OKE-specific settings)
-  base: oke
+  base: oke-ol
 
   criteria:
     service: oke
+    os: ol
     intent: training
 
-  # Training specific constraints for OKE workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
       value: ">= 1.30"
 
   componentRefs:
-    # Training workloads use the training-optimized GPU Operator values
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-oke-training.yaml

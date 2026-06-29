@@ -464,6 +464,82 @@ func (s *MetadataStore) resolveInheritanceChain(recipeName string) ([]*RecipeMet
 	return chain, nil
 }
 
+// availableOSForCriteria returns the distinct, sorted OS values from overlays
+// that would match the given criteria if an appropriate OS were supplied.
+// It tests each OS-gated overlay by temporarily setting the query's OS to the
+// overlay's required OS value and running a full Criteria.Matches check, so
+// only overlays that satisfy all other criteria dimensions (accelerator, intent,
+// service, …) contribute. An empty slice means no OS-gated overlays would
+// match, so requiring --os would be unhelpful.
+func (s *MetadataStore) availableOSForCriteria(criteria *Criteria) []string {
+	seen := make(map[string]struct{})
+	for _, overlay := range s.Overlays {
+		c := overlay.Spec.Criteria
+		if c == nil {
+			continue
+		}
+		if c.OS == "" || c.OS == CriteriaOSAny {
+			continue // not OS-gated
+		}
+		// Would this overlay match if the query carried its required OS?
+		queryCopy := *criteria
+		queryCopy.OS = c.OS
+		if c.Matches(&queryCopy) {
+			seen[string(c.OS)] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for v := range seen {
+		result = append(result, v)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// requireOSIfNeeded returns ErrCodeInvalidRequest when the caller requested a
+// specific service+accelerator combination without specifying an OS, and no
+// OS-agnostic overlay exists for that exact combination while OS-gated overlays
+// do. The check matches on both service AND accelerator so that a generic service
+// overlay (e.g. oke.yaml with no accelerator) does not suppress the error for an
+// accelerator-specific request (e.g. service=oke accelerator=l40s).
+func (s *MetadataStore) requireOSIfNeeded(criteria *Criteria, overlays []*RecipeMetadata) error {
+	if criteria.Service == CriteriaServiceAny || criteria.Service == "" {
+		return nil
+	}
+	if criteria.OS != CriteriaOSAny && criteria.OS != "" {
+		return nil
+	}
+	accel := criteria.Accelerator
+	if accel == CriteriaAcceleratorAny {
+		accel = ""
+	}
+	// If any matched overlay covers this exact service+accelerator combination,
+	// the caller gets at least the OS-agnostic tier — no error.
+	for _, o := range overlays {
+		if o.Spec.Criteria == nil {
+			continue
+		}
+		c := o.Spec.Criteria
+		if c.Service != criteria.Service {
+			continue
+		}
+		overlayAccel := c.Accelerator
+		if overlayAccel == CriteriaAcceleratorAny {
+			overlayAccel = ""
+		}
+		if overlayAccel != accel {
+			continue
+		}
+		return nil // service+accelerator-specific overlay matched — no error
+	}
+	if available := s.availableOSForCriteria(criteria); len(available) > 0 {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("service '%s' has no OS-agnostic recipe for accelerator '%s'; specify an OS (valid: %s)",
+				criteria.Service, accel, strings.Join(available, ", ")))
+	}
+	return nil
+}
+
 // FindMatchingOverlays finds all overlays that match the given criteria and
 // returns maximal leaf candidates sorted by specificity (least specific first).
 //
@@ -894,6 +970,11 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 	}
 
 	overlays := s.FindMatchingOverlays(criteria)
+
+	if err := s.requireOSIfNeeded(criteria, overlays); err != nil {
+		return nil, err
+	}
+
 	mergedSpec, appliedOverlays := s.initBaseMergedSpec()
 
 	appliedOverlays, err := s.mergeOverlayChains(overlays, &mergedSpec, appliedOverlays)
@@ -943,6 +1024,10 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 
 	// Find matching overlays and filter by constraint evaluation
 	overlays := s.FindMatchingOverlays(criteria)
+
+	if err := s.requireOSIfNeeded(criteria, overlays); err != nil {
+		return nil, err
+	}
 
 	var filteredOverlays []*RecipeMetadata
 	var excludedOverlays []ExcludedOverlay

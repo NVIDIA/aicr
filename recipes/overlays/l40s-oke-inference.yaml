@@ -15,7 +15,7 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: gb200-oke-inference
+  name: l40s-oke-inference
 
 spec:
   # Inherits from oke-ol-inference recipe (OKE + OL + inference settings)
@@ -24,14 +24,12 @@ spec:
   criteria:
     service: oke
     os: ol
-    accelerator: gb200
+    accelerator: l40s
     intent: inference
 
-  # Specific constraints for GB200 on OKE inference workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.30"
 
   componentRefs:
     - name: gpu-operator
@@ -40,9 +38,25 @@ spec:
         - nfd
         - cert-manager
         - kube-prometheus-stack
+      overrides:
+        gdrcopy:
+          enabled: true
 
     - name: nfd
       type: Helm
       overrides:
         topologyUpdater:
           enable: true
+
+  # The deployment-phase floor is contributed by l40s-any.
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling

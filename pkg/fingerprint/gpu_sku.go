@@ -41,6 +41,7 @@ var gpuSKURegistry = []struct {
 	{[]string{"H200"}, "h200"},
 	{[]string{"A100"}, "a100"},
 	{[]string{"RTX", "PRO", "6000"}, "rtx-pro-6000"},
+	{[]string{"L40S"}, "l40s"},
 	{[]string{"L40"}, "l40"},
 }
 

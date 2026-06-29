@@ -147,11 +147,29 @@ phase_install() {
   command -v helmfile >/dev/null || { echo "helmfile not on PATH" >&2; exit 1; }
   command -v helm     >/dev/null || { echo "helm not on PATH"     >&2; exit 1; }
 
-  echo "::group::Install helm-diff plugin (idempotent)"
-  if ! helm plugin list 2>/dev/null | awk '{print $1}' | grep -qx diff; then
-    helm plugin install https://github.com/databus23/helm-diff
+  # Read helm-diff version from the single source of truth (.settings.yaml).
+  local SCRIPT_DIR
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local REPO_ROOT="${SCRIPT_DIR}/../../.."
+  local HELM_DIFF_VERSION
+  HELM_DIFF_VERSION="$(yq -r '.testing_tools.helm_diff' "${REPO_ROOT}/.settings.yaml")"
+
+  echo "::group::Install helm-diff plugin (${HELM_DIFF_VERSION})"
+  # Check installed version; reinstall if missing or at a different version so the
+  # .settings.yaml pin is always effective (not just "any version is fine").
+  local installed_ver
+  installed_ver="$(helm plugin list 2>/dev/null | awk '$1=="diff" {print $2}')"
+  if [[ "${installed_ver}" == "${HELM_DIFF_VERSION#v}" ]]; then
+    echo "helm-diff ${HELM_DIFF_VERSION} already installed"
   else
-    echo "helm-diff already installed"
+    if [[ -n "${installed_ver}" ]]; then
+      echo "helm-diff ${installed_ver} installed; removing to pin ${HELM_DIFF_VERSION}"
+      helm plugin remove diff
+    fi
+    # Install from the signed release tarball (helm-diff's recommended Helm 4
+    # method). The git-URL form requires --verify=false under Helm 4; the
+    # tarball form works without it and carries the upstream release signature.
+    helm plugin install "https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/helm-diff-linux-amd64.tgz"
   fi
   echo "::endgroup::"
 

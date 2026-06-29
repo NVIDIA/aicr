@@ -21,7 +21,7 @@ import (
 
 func TestAll_SortedAndComplete(t *testing.T) {
 	got := All()
-	want := []string{AmazonLinux, COS, RHEL, Talos, Ubuntu}
+	want := []string{AmazonLinux, COS, OracleLinux, RHEL, Talos, Ubuntu}
 	if len(got) != len(want) {
 		t.Fatalf("All() returned %d values, want %d", len(got), len(want))
 	}

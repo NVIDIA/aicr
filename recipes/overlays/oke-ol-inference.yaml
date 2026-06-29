@@ -15,21 +15,19 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: oke-inference
+  name: oke-ol-inference
 
 spec:
-  # Inherits from oke recipe (OKE-specific settings)
-  base: oke
+  base: oke-ol
 
   criteria:
     service: oke
+    os: ol
     intent: inference
 
-  # Inference gateway components via mixin
   mixins:
     - platform-inference
 
-  # Inference specific constraints for OKE workloads
   constraints:
     - name: K8s.server.version
       value: ">= 1.30"

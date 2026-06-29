@@ -15,14 +15,12 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: oke
+  name: oke-ol
 
 spec:
-  # Inherits from base (implicit when spec.base is empty)
-  # This recipe contains OKE-specific settings shared by all OKE deployments
-
   criteria:
     service: oke
+    os: ol
 
   # OKE-specific constraints
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}

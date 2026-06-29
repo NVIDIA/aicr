@@ -209,14 +209,24 @@ func TestParseProvider(t *testing.T) {
 			want:       "aks",
 		},
 		{
-			name:       "OCI OKE",
-			providerID: "oci://ocid1.instance.oc1.phx.abcdef123456",
+			name:       "OKE raw OCID (actual format)",
+			providerID: "ocid1.instance.oc1.us-chicago-1.anxxeljsaqwjupqcb4pa5kzxy4hef5dtclbkqsnmu6kedbkrne3s2bz5nwzq",
+			want:       "oke",
+		},
+		{
+			name:       "OKE raw OCID short",
+			providerID: "ocid1.instance.oc1.phx.abcdef123456",
 			want:       "oke",
 		},
 		{
 			name:       "empty provider",
 			providerID: "",
 			want:       "",
+		},
+		{
+			name:       "OKE oci:// scheme (legacy format)",
+			providerID: "oci://ocid1.instance.oc1.us-chicago-1.example",
+			want:       "oke",
 		},
 		{
 			name:       "unknown format",
