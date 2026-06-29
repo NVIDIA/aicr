@@ -169,8 +169,10 @@ used to manufacture consensus.
   verified against Rekor by digest" shape is not yet implemented, so such
   community bundles cannot be ingested — the producer fails closed rather
   than record an unverified signer.
-- Discovery currently walks the flat `recipes/evidence/<recipe>.yaml`
-  pointers. The per-source nested layout is forward-compatible.
+- Discovery walks the per-source nested layout
+  `recipes/evidence/<recipe>/<src>/<digest>.yaml` (the
+  `<recipe>/<src>/*.yaml` glob in `pkg/evidence/verifier/discover.go`); a
+  flat `recipes/evidence/<recipe>.yaml` is rejected as an unexpected root file.
 - The publish job writes to `gs://aicr-testgrid-staging/results` using the
   shared eidosx WIF service account from `uat-gcp.yaml`. GP3 will replace
   it with a dedicated `objectCreator`-only identity scoped to that prefix.
