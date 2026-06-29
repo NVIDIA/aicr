@@ -228,6 +228,10 @@ type RecipeRequest struct {
 	// ancestor. Set this when the cluster's OS is known so OS-specific
 	// constraints and mixins (kernel version, driver tuning) are
 	// included.
+	//
+	// Note: some service+accelerator combinations (e.g. OKE with L40S)
+	// have no OS-agnostic recipe and require an explicit OS value;
+	// omitting it returns ErrCodeInvalidRequest.
 	OS string
 
 	// Platform is the workload platform overlay. Mapped to

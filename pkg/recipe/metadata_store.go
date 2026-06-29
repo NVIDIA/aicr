@@ -497,11 +497,11 @@ func (s *MetadataStore) availableOSForCriteria(criteria *Criteria) []string {
 }
 
 // requireOSIfNeeded returns ErrCodeInvalidRequest when the caller requested a
-// specific service+accelerator combination but omitted --os, and no OS-agnostic
-// overlay exists for that exact combination while OS-gated overlays do. The
-// check matches on both service AND accelerator so that a generic service overlay
-// (e.g. oke.yaml with no accelerator) does not suppress the error for an
-// accelerator-specific request (e.g. --service oke --accelerator l40s).
+// specific service+accelerator combination without specifying an OS, and no
+// OS-agnostic overlay exists for that exact combination while OS-gated overlays
+// do. The check matches on both service AND accelerator so that a generic service
+// overlay (e.g. oke.yaml with no accelerator) does not suppress the error for an
+// accelerator-specific request (e.g. service=oke accelerator=l40s).
 func (s *MetadataStore) requireOSIfNeeded(criteria *Criteria, overlays []*RecipeMetadata) error {
 	if criteria.Service == CriteriaServiceAny || criteria.Service == "" {
 		return nil
@@ -534,8 +534,8 @@ func (s *MetadataStore) requireOSIfNeeded(criteria *Criteria, overlays []*Recipe
 	}
 	if available := s.availableOSForCriteria(criteria); len(available) > 0 {
 		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("service '%s' requires --os; available values: %s",
-				criteria.Service, strings.Join(available, ", ")))
+			fmt.Sprintf("service '%s' has no OS-agnostic recipe for accelerator '%s'; specify an OS (valid: %s)",
+				criteria.Service, accel, strings.Join(available, ", ")))
 	}
 	return nil
 }

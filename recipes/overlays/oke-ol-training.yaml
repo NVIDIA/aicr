@@ -18,7 +18,6 @@ metadata:
   name: oke-ol-training
 
 spec:
-  # Inherits from oke-ol recipe (OKE Oracle Linux shared settings)
   base: oke-ol
 
   criteria:
@@ -26,14 +25,11 @@ spec:
     os: ol
     intent: training
 
-  # Training specific constraints for OKE workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
       value: ">= 1.30"
 
   componentRefs:
-    # Training workloads use the training-optimized GPU Operator values
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-oke-training.yaml

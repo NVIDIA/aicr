@@ -18,7 +18,7 @@ metadata:
   name: l40s-oke-training
 
 spec:
-  # Inherits from oke-training recipe (OKE + training settings)
+  # Inherits from oke-ol-training recipe (OKE + OL + training settings)
   base: oke-ol-training
 
   criteria:

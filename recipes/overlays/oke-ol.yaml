@@ -18,9 +18,6 @@ metadata:
   name: oke-ol
 
 spec:
-  # Inherits from base (implicit when spec.base is empty)
-  # This recipe contains OKE-specific settings shared by all OKE deployments
-
   criteria:
     service: oke
     os: ol

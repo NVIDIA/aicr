@@ -141,7 +141,11 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
             enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
@@ -508,7 +512,11 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
             enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
