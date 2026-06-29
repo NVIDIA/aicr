@@ -124,19 +124,43 @@ func canonicalPointerSuffix(p *Pointer) (string, error) {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
 			"pointer.recipe is not a local path segment: "+p.Recipe)
 	}
+	// The digest becomes a path leaf. validatePointer only enforces the
+	// sha256: prefix when bundle.oci is set (not the hex body), so a digest like
+	// "sha256:x/../../escaped" would survive and traverse on filepath.Join.
+	// Require the canonical sha256:<hex> shape here: hex carries no path
+	// separator or ".", so the derived filename cannot escape <recipe>/<source>/.
+	if !isHexDigest(att.Bundle.Digest) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"pointer bundle digest is not a canonical sha256:<hex> value: "+att.Bundle.Digest)
+	}
 	source, err := SourceSlug(att.Signer.Issuer, att.Signer.Identity)
 	if err != nil {
 		return "", err
 	}
-	// The digest becomes a path leaf. validatePointer only enforces the
-	// sha256:<hex> shape when bundle.oci is set, so guard it here too: require a
-	// single, local element (no separator, no "..") before joining.
 	file := strings.ReplaceAll(att.Bundle.Digest, ":", "-") + ".yaml"
-	if file != filepath.Base(file) || !filepath.IsLocal(file) {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
-			"pointer bundle digest is not safe as a filename: "+att.Bundle.Digest)
-	}
 	return filepath.Join(p.Recipe, source, file), nil
+}
+
+// isHexDigest reports whether d is a "sha256:"-prefixed, non-empty,
+// lowercase-hex digest — the only shape a bundle digest takes. It is the
+// fail-closed check before the digest is turned into a path leaf: hex contains
+// no path separator or ".", so a value that passes cannot traverse out of the
+// canonical pointer directory.
+func isHexDigest(d string) bool {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(d, prefix) {
+		return false
+	}
+	hex := d[len(prefix):]
+	if hex == "" {
+		return false
+	}
+	for _, c := range hex {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // RelocatePointerToCanonical moves a freshly-signed pointer from its flat
@@ -188,6 +212,19 @@ func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) 
 	// for the operator to resolve, not something to overwrite.
 	if err := os.Link(currentPath, dest); err != nil {
 		if os.IsExist(err) {
+			// dest already exists. If it is the SAME inode as the source, a
+			// prior run linked it but stopped before removing the source — a
+			// completed placement, not a conflict. Finish it (idempotent
+			// recovery) rather than fail with a spurious clobber error. Only a
+			// dest backed by a DIFFERENT file is a real immutable-pointer
+			// conflict for the operator to resolve.
+			if sameInode(currentPath, dest) {
+				if rmErr := os.Remove(currentPath); rmErr != nil {
+					return "", errors.Wrap(errors.ErrCodeInternal,
+						"canonical pointer already placed but failed to remove the flat source: "+currentPath, rmErr)
+				}
+				return dest, nil
+			}
 			return "", errors.New(errors.ErrCodeConflict,
 				"canonical pointer path already exists, refusing to overwrite: "+dest)
 		}
@@ -200,6 +237,22 @@ func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) 
 			"relocated pointer to canonical path but failed to remove the flat source: "+currentPath, err)
 	}
 	return dest, nil
+}
+
+// sameInode reports whether a and b are the same underlying file (e.g. two
+// hard links to one inode). Used to recognize a partially-completed relocation
+// — source still linked to dest — as already placed rather than a conflict. A
+// stat failure on either path reports false (treat as not-same; fail safe).
+func sameInode(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fa, fb)
 }
 
 // WritePointer writes the pointer file to outputDir/pointer.yaml.

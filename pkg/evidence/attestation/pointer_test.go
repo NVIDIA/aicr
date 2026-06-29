@@ -208,6 +208,39 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		}
 	})
 
+	t.Run("recovers a partial move where dest is the same inode", func(t *testing.T) {
+		// Simulate a prior run that linked dest but stopped before removing the
+		// flat source (os.Link ok, os.Remove not yet). Retry must finish the
+		// move (remove the stale source, return dest) — not fail with a
+		// spurious clobber conflict.
+		root := t.TempDir()
+		flat := filepath.Join(root, "h100-gke-cos-training.yaml")
+		if _, err := WritePointerFile(flat, signed()); err != nil {
+			t.Fatalf("write flat: %v", err)
+		}
+		canonical := filepath.Join(root, "h100-gke-cos-training",
+			"7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+		if err := os.MkdirAll(filepath.Dir(canonical), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(flat, canonical); err != nil {
+			t.Fatalf("simulate prior link: %v", err)
+		}
+		dest, err := RelocatePointerToCanonical(flat, signed())
+		if err != nil {
+			t.Fatalf("expected idempotent recovery, got error: %v", err)
+		}
+		if dest != canonical {
+			t.Errorf("dest = %q, want %q", dest, canonical)
+		}
+		if _, err := os.Stat(flat); !os.IsNotExist(err) {
+			t.Errorf("flat source should be removed after recovery, stat err = %v", err)
+		}
+		if _, err := os.Stat(canonical); err != nil {
+			t.Errorf("canonical should remain after recovery: %v", err)
+		}
+	})
+
 	t.Run("rejects an unsigned pointer", func(t *testing.T) {
 		unsigned := signed()
 		unsigned.Attestations[0].Signer = nil

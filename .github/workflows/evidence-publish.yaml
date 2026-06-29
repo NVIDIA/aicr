@@ -137,11 +137,16 @@ jobs:
         run: .github/scripts/evidence-sign-unsigned.sh
 
       - name: Commit signed pointers
-        # always() so that if one pointer fails to sign, the ones that DID
-        # sign are still committed — otherwise the registry would hold a signed
-        # bundle whose committed pointer stays unsigned. The job still fails
-        # (the sign step exited non-zero), surfacing the failure.
-        if: ${{ always() && steps.sign.outputs.signed != '0' }}
+        # always(), with no signed-count guard: the git-diff check below decides
+        # whether there is anything to commit. This is load-bearing for partial
+        # failure — `aicr evidence sign` patches the signer block into the flat
+        # pointer BEFORE the relocation step, so if relocation then fails the
+        # bundle is already signed in the registry. Committing the signed (but
+        # not-yet-relocated) pointer persists that work, so the next dispatch
+        # takes the idempotent relocate-only path instead of re-signing and
+        # attaching a duplicate referrer. The job still fails (the sign step
+        # exited non-zero), surfacing the failure.
+        if: ${{ always() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

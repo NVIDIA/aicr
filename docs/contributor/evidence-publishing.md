@@ -127,6 +127,32 @@ which the eventual squash-merge re-signs under the repo's policy.
 > commits the patched pointers back, and a concurrent push would cause a
 > non-fast-forward — re-dispatch after `git pull` if that happens.
 
+### 4. Add your signer to the allowlist
+
+A signed, nested pointer is **not** sufficient on its own. The contract gate
+also requires the pointer's verified signer to be listed in
+[`recipes/evidence/allowlist.yaml`](../../recipes/evidence/allowlist.yaml) as a
+`community` or `partner` entry; an unlisted signer is rejected (it would only
+ever count as "reported", never corroborating). Your fork's GitHub Actions OIDC
+identity is a **new signer** that the existing entries do not cover, so you must
+add it in the same PR.
+
+The entry is keyed by the one-way `source` slug — the exact `<src>` directory
+the signing leg just created under `recipes/evidence/<recipe>/<src>/`. Add it
+under the `community` class (no cleartext identity; an optional `label` may
+carry a non-PII handle):
+
+```yaml
+# recipes/evidence/allowlist.yaml
+community:
+  - source: <src>          # the <src> directory segment from step 3
+    label: <your-gh-handle> # optional, non-PII
+```
+
+See the header of `recipes/evidence/allowlist.yaml` and
+[artifact verification](../user/artifact-verification.md) for the anti-sybil
+rules; maintainer review of this entry is the trust gate.
+
 ## Fallback: split the legs locally
 
 If you have a host with Sigstore egress (a jump box, CI runner, or
