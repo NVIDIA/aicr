@@ -133,6 +133,12 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 	// falls through to ValidateSignablePointer, which fails closed on an
 	// already-signed pointer rather than re-signing it. LoadAndValidatePointer
 	// already guarantees exactly one attestation, so [0] is safe.
+	//
+	// This trusts the on-disk signer block without re-materializing or
+	// cryptographically verifying the bundle — the same metadata-only trust the
+	// contract gate applies, and not a new escalation (a contributor can write
+	// the nested path directly). Closing that gap (verify the signature before
+	// honoring a committed signer) is tracked repo-wide in #1535.
 	if relocate && pointer.Attestations[0].Signer != nil {
 		dest, rerr := attestation.RelocatePointerToCanonical(path, pointer)
 		if rerr != nil {
