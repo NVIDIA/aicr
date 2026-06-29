@@ -124,6 +124,7 @@ Full documentation lives at **[docs.nvidia.com/aicr](https://docs.nvidia.com/aic
 For contributors:
 
 - **[Contributing Guide](CONTRIBUTING.md)** — Development setup, testing, and PR process
+- **[Code of Conduct](CODE_OF_CONDUCT.md)** — Community standards and enforcement
 - **[Development Guide](DEVELOPMENT.md)** — Local development, Make targets, and tooling
 - **[Architecture Overview](docs/contributor/index.md)** — System design and packages
 
