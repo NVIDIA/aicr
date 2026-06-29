@@ -30,10 +30,16 @@ To be considered, contributors should:
 1. Have made significant contributions to the project
 2. Demonstrated understanding of the [Design Principles](CONTRIBUTING.md#design-principles)
 3. Been nominated by an existing maintainer
-4. Received approval from the majority of current maintainers
+4. Received approval from a two-thirds supermajority of current maintainers (see [GOVERNANCE.md](GOVERNANCE.md#adding-and-removing-maintainers))
 
 ## Emeritus Maintainers
 
 Maintainers who are no longer actively maintaining the project:
 
 _None yet_
+
+## Governance
+
+Project decision-making, tie-breaking, the maintainer add/remove and emeritus
+processes, and areas of ownership are documented in [GOVERNANCE.md](GOVERNANCE.md).
+Path-level review ownership is defined in [`.github/CODEOWNERS`](.github/CODEOWNERS).
