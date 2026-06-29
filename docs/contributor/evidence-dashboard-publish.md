@@ -5,7 +5,9 @@ On every merge to `main` (and on demand) it regenerates the interim-evidence
 dashboard from the source-keyed evidence tree in GCS and deploys the static
 site to GitHub Pages. It is the consumer end of the chain whose producer is
 [evidence-ingest (GP2)](evidence-ingest.md): ingest writes the tree, publish
-renders and serves it.
+renders and serves it. (For the full `GPn` stage map of the
+evidence-corroboration pipeline, see
+[evidence-ingest.md](evidence-ingest.md).)
 
 Fern publishes the product docs to docs.nvidia.com via `publish-fern-docs.yml`;
 that is a separate surface. This workflow is the only one that deploys to
@@ -84,5 +86,7 @@ in `merge-gate.yaml`.
   re-derivation is deferred until `pkg/corroborate`'s loader is reconciled with
   the GP1 allowlist schema (`recipes/evidence/allowlist.yaml` uses
   `identityPattern`/`source`; the loader still expects an `identity` field).
-- A custom domain for the Pages site is deferred; the site is served at the
-  default `github.io` coordinate.
+- The Pages site is served at the custom domain `validation.aicr.run`: the
+  publish workflow reasserts it on every run by writing a `CNAME` file into
+  the site artifact (a deploy whose artifact omits `CNAME` would otherwise
+  silently clear the setting).

@@ -43,8 +43,8 @@
 #
 #   # snapshot node targeting (heterogeneous clusters)
 #   NODE_SELECTOR=nvidia.com/gpu.present=true pin the snapshot Job to a GPU node
-#                                             (so nvidia-smi data is collected; "" = any node)
-#   RUNTIME_CLASS=nvidia                      nvidia-smi access without consuming a GPU ("" = none)
+#                                             (so the GPU is detected via PCI/NFD; "" = any node)
+#   RUNTIME_CLASS=nvidia                      GPU device class without consuming a GPU ("" = none)
 #
 #   # where to publish
 #   PUSH_REF=ttl.sh/aicr-evidence-<uuid>:72h  OCI ref (default: fresh anonymous ttl.sh, 72h TTL)
@@ -72,9 +72,11 @@ INTENT="${INTENT:-}"
 PLATFORM="${PLATFORM:-}"
 
 # Snapshot node targeting. On a mixed CPU+GPU cluster the snapshot Job must land
-# on a GPU node, or nvidia-smi finds nothing and the accelerator fingerprint is
-# empty (and won't match the recipe). Defaults pin to a GPU-Operator-labeled node
-# and grant nvidia-smi access without consuming a GPU. Set either to "" to
+# on a GPU node, or PCI/NFD enumeration finds nothing and the accelerator
+# fingerprint is empty (and won't match the recipe). The GPU collector is
+# driver-free (PCI/NFD enumeration; no nvidia-smi or NVIDIA driver required).
+# Defaults pin to a GPU-Operator-labeled node and grant GPU device access
+# without consuming a GPU. Set either to "" to
 # disable (homogeneous GPU cluster, or a CPU-only recipe).
 NODE_SELECTOR="${NODE_SELECTOR:-nvidia.com/gpu.present=true}"
 RUNTIME_CLASS="${RUNTIME_CLASS:-nvidia}"
@@ -204,7 +206,7 @@ run "$AICR" recipe "${recipe_args[@]}"
 
 banner "Snapshot the live cluster (ON VPN)"
 note "Captures cluster state the validators run against. Needs the cluster reachable."
-note "Targets a GPU node so nvidia-smi data is collected (NODE_SELECTOR / RUNTIME_CLASS)."
+note "Targets a GPU node so the GPU is detected via PCI/NFD (NODE_SELECTOR / RUNTIME_CLASS)."
 # Build snapshot args so node targeting is opt-out: empty NODE_SELECTOR /
 # RUNTIME_CLASS simply omit the flag (homogeneous or CPU-only clusters).
 snapshot_args=(--output "$SNAPSHOT")

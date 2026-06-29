@@ -10,7 +10,7 @@ The agent is a Kubernetes Job that captures system configuration and writes outp
 
 **What it does:**
 
-- Runs `aicr snapshot --output cm://gpu-operator/aicr-snapshot` on a GPU node
+- Runs `aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot` on a GPU node
 - Writes snapshot to ConfigMap via Kubernetes API (no PersistentVolume required)
 - Exits after snapshot capture
 
@@ -31,8 +31,13 @@ The agent is a Kubernetes Job that captures system configuration and writes outp
 
 Agent uses ConfigMap URI scheme (`cm://namespace/name`) to write snapshots:
 ```bash
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 ```
+
+The agent's namespaced Role grants ConfigMap write access only in its
+deployment namespace (`--namespace`, default `default`). The `cm://` target
+namespace **must match `--namespace`** — otherwise the Job's ServiceAccount has
+no permission to create the ConfigMap and the snapshot write fails.
 
 This creates:
 ```yaml
@@ -88,8 +93,8 @@ aicr snapshot
 # Save to file
 aicr snapshot --output snapshot.yaml
 
-# Keep in ConfigMap for later use
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+# Keep in ConfigMap for later use (deployment namespace must match the cm:// namespace)
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 # Retrieve from ConfigMap later
 kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}'
@@ -122,13 +127,21 @@ aicr snapshot \
 **Available flags:**
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
 - `--namespace`: Deployment namespace (default: `default`)
-- `--image`: Container image (default: `ghcr.io/nvidia/aicr:latest`)
+- `--image`: Container image (default: matches the CLI version, e.g. `ghcr.io/nvidia/aicr:v0.8.0`; dev and snapshot builds use `:latest`)
+- `--image-pull-secret`: Secret name for pulling the agent image from a private registry (repeatable)
 - `--job-name`: Job name (default: `aicr`)
 - `--service-account-name`: ServiceAccount name (default: `aicr`)
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves the `aicr-node-reader` ClusterRole and ClusterRoleBinding active. By default these grant only read access to nodes, pods, and ClusterPolicy CRDs (not cluster-admin); however, when combined with `--discover-network` the retained ClusterRole also carries the cluster-scoped **mutating** discovery rules (CRD/namespace/DaemonSet create-delete, `pods/exec`, `nodes/patch`, `NicClusterPolicy` patch — see [Security Considerations](#security-considerations)), so it is **not** read-only in that case.
+- `--privileged`: Run agent in privileged mode (default: enabled; required for GPU/SystemD collectors). Set to `false` for PSS-restricted namespaces.
+- `--require-gpu`: Fail the snapshot if no GPU is found. In agent mode also requests an `nvidia.com/gpu` resource for the pod (required in CDI environments).
+- `--runtime-class`: Set `runtimeClassName` on the agent pod for `nvidia-smi` access without consuming a GPU. Use with `--node-selector` to target GPU nodes.
+- `--os`: Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Selects the per-OS pod configuration and service collector backend.
+- `--requests` / `--limits`: Override agent container resource requests/limits (comma-separated `name=quantity` pairs).
+- `--cluster-config`: Path to a pre-existing k8s-launch-kit cluster-config.yaml to ingest network topology (local agent mode only).
+- `--discover-network`: Enable live l8k discovery to populate the NetworkTopology measurement. **Not read-only** — writes `nvidia.kubernetes-launch-kit.*` node labels and may patch `NicClusterPolicy`.
 
 ### 4. Check Agent Logs (Debugging)
 
@@ -213,8 +226,8 @@ aicr bundle --recipe recipe.yaml --output ./bundles
 ## Complete Workflow
 
 ```shell
-# Step 1: Capture snapshot to ConfigMap
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+# Step 1: Capture snapshot to ConfigMap (deployment namespace must match the cm:// namespace)
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 # Step 2: Generate recipe from ConfigMap
 aicr recipe \
@@ -303,8 +316,9 @@ aicr snapshot --output baseline.yaml
 # Current (later snapshot)
 aicr snapshot --output current.yaml
 
-# Compare
-diff baseline.yaml current.yaml || echo "Configuration drift detected!"
+# Compare (semantic snapshot diff; --fail-on-drift exits non-zero on drift)
+aicr diff --baseline baseline.yaml --target current.yaml --fail-on-drift \
+  || { echo "Configuration drift detected!"; exit 1; }
 ```
 
 ## Troubleshooting
@@ -370,6 +384,25 @@ kubectl get serviceaccount aicr -n gpu-operator
 The agent requires these permissions (created automatically by the CLI):
 - **ClusterRole** (`aicr-node-reader`): Read access to nodes, pods, and ClusterPolicy CRDs (nvidia.com)
 - **Role** (`aicr`): Create/update ConfigMaps and list pods in the deployment namespace
+
+The baseline ClusterRole above is read-only (`get`/`list` only).
+
+**Additional privileges with `--discover-network`.** When `--discover-network`
+is set, the CLI appends a set of **cluster-scoped mutating** rules to the
+ClusterRole so k8s-launch-kit's live discovery can run. These grant far more
+than read access:
+- `apiextensions.k8s.io` CustomResourceDefinitions: `get`, `list`, `create`, `update`, `patch`
+- `namespaces`: `get`, `create`, `delete` (l8k creates and tears down a bootstrap namespace)
+- `apps/daemonsets`: `get`, `list`, `watch`, `create`, `delete`
+- `serviceaccounts`, `configmaps`: `get`, `create`, `delete`
+- `rbac.authorization.k8s.io` roles, rolebindings: `get`, `create`, `delete`
+- `pods/exec`: `create` (l8k exec's into the discovery DaemonSet pods to read VPD / link state)
+- `nodes`: `patch` (writes `nvidia.kubernetes-launch-kit.*` node labels)
+- `configuration.net.nvidia.com` nicdevices: `get`, `list`
+- `mellanox.com` nicclusterpolicies: `get`, `patch`
+
+Use `--discover-network` only against clusters where this mutation and the
+broader RBAC grant are acceptable.
 
 ### Pod Security Context
 

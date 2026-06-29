@@ -2,14 +2,24 @@
 
 ## Status
 
-**Proposed** — 2026-05-30 (design-only; not implemented).
+**Accepted, partially implemented** — 2026-05-30.
 
 This Architecture Decision Record (ADR) specifies the V1 contract for
 computing, recording, and publishing
-recipe health across every supported criteria combination. The package
-layout, CLI surface, generator, and CI workflow described below are intent,
-not current behavior. Implementation will be tracked under a follow-on epic
-once this ADR is accepted.
+recipe health across every supported criteria combination.
+
+**Implementation status.** The V1 structural-health axis has shipped: the
+`pkg/health` package computes per-recipe structural state, `make
+recipe-health-docs` regenerates the auto-generated section of
+`docs/user/recipe-health.md` (checked fresh by `make recipe-health-check`).
+The deferred validation-posture (evidence) axis described in *What V1 does not
+ship* has **not** yet fired into the health surface — the published Evidence
+column is still a uniform `pending` and `pkg/health` does not yet consume
+`recipes/evidence/`. Note the original flat-pointer layout assumed below has
+since been superseded: signed evidence now lands under the nested
+`recipes/evidence/<recipe>/<source-slug>/sha256-<digest>.yaml` tree (with a
+top-level `recipes/evidence/allowlist.yaml`), so `recipes/evidence/` is no
+longer empty even though the health axis has not yet read it.
 
 The V1 scope here was deliberately narrowed after a multi-perspective design
 review (architecture, supply-chain security, developer experience,
@@ -248,7 +258,8 @@ overstate:
 
 - Structural soundness **never** asserts runtime behavior. A recipe that
   resolves cleanly is "structurally sound," **not** "validated."
-- When the validation axis lands (first `recipes/evidence/<slug>.yaml`), it
+- When the validation axis lands (first signed evidence under
+  `recipes/evidence/<recipe>/<source-slug>/sha256-<digest>.yaml`), it
   will be a *separate* column derived from **verified** evidence — gated on
   `aicr evidence verify` success, reading the signed predicate's
   `AttestedAt`, never trusting an unsigned in-tree timestamp (this is how
@@ -436,7 +447,7 @@ an owner, an advisory matrix silently goes stale — and a stale public
 
 | Deferred feature | Pull-trigger to bring it in |
 |---|---|
-| Validation-posture axis (evidence freshness, `coverage_declared_vs_run`, freshness model, `--evidence-dir`/`--max-age`) | The first `recipes/evidence/<slug>.yaml` lands |
+| Validation-posture axis (evidence freshness, `coverage_declared_vs_run`, freshness model, `--evidence-dir`/`--max-age`) | The health surface consumes signed evidence from `recipes/evidence/<recipe>/<source-slug>/sha256-<digest>.yaml` (pointers now exist; the axis has not yet fired) |
 | Committed machine-readable `recipe-health.json` | A consumer needs it (e.g. the `/v1/health` endpoint) |
 | Committed internal detail doc (`docs/contributor/recipe-health-detail.md`) | Detail content grows beyond what `$GITHUB_STEP_SUMMARY` conveys (i.e. once the validation axis lands) |
 | `aicr recipe health` subcommand | A user needs ad-hoc per-combo health outside the generated doc |

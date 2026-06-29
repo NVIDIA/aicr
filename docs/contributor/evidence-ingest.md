@@ -8,6 +8,12 @@ bundles produced by `aicr validate --emit-attestation --push` (see
 consensus view. The tree it writes is rendered and served by
 [dashboard-publish (GP5)](evidence-dashboard-publish.md).
 
+The `GPn` labels name stages of the evidence-corroboration pipeline (epic #1400):
+**GP1** signer-allowlist management (`recipes/evidence/allowlist.yaml`),
+**GP2** ingest/verify (this doc), **GP3** dashboard infrastructure
+(`infra/evidence-dashboard`), **GP4** consensus/corroboration
+(`pkg/corroborate`), and **GP5** dashboard publish.
+
 Its defining property is **verify-before-count**: a bundle's signature,
 issuer, identity, and source registry are all checked in a step that
 holds no bucket-write credentials, *before* any of its results are
@@ -117,31 +123,43 @@ consumer.
    `recipes/evidence/allowlist.yaml` — a built-in heuristic admits AICR's
    own UAT identity (GitHub Actions OIDC + `NVIDIA/aicr`) as `first-party`
    so it is not mislabeled. Once the file exists this branch is never
-   taken and classification matches the GP4 consumer exactly.
+   taken. (Note: GP2 and GP4 do not yet parse the canonical
+   `identityPattern`/`source` schema identically — see the reconciliation note
+   below — so this is the intended end-state, not current full parity.)
 3. Otherwise `community`, `allowlisted=false` — the fail-closed default.
    Reported, but never counted toward consensus.
 
-The allowlist schema is **shared with the GP4 consumer** (`pkg/corroborate`)
-so both read the identical `recipes/evidence/allowlist.yaml` and classify
-a signer identically:
+The canonical `recipes/evidence/allowlist.yaml` keys first-party CI signers
+by an anchored `identityPattern` and external contributors/partners by a
+one-way `source` slug — it deliberately does **not** store a cleartext
+`identity` field (the loader rejects one, to keep personal emails out of the
+repo):
 
 ```yaml
-schemaVersion: "1.0.0"
+schemaVersion: 1.0.0
 firstParty:
-  - issuer: https://token.actions.githubusercontent.com
-    identity: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/main$'
+  - label: aicr-uat-aws
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
 community:
-  - issuer: https://token.actions.githubusercontent.com
-    identity: https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main
-partner:
-  - issuer: https://oidc.coreweave-lab.example
-    identity: https://oidc.coreweave-lab.example/attest
+  # Keyed by source slug only — first 32 hex of sha256(issuer + "\n" + identity).
+  - issuer: https://github.com/login/oauth
+    source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
+partner: []
 ```
 
-`identity` is an exact string, or a `^…$`-anchored regex (full-string
-match). The loader rejects an over-broad regex (unbounded `*`/`+`/`{n,}`
-that could span an org/repo segment) and overlapping entries, so the
-allowlist cannot itself be used to manufacture consensus.
+`identityPattern` is a `^…$`-anchored regex (full-string match); the loader
+rejects an over-broad regex (unbounded `*`/`+`/`{n,}` that could span an
+org/repo segment) and overlapping entries, so the allowlist cannot itself be
+used to manufacture consensus.
+
+> **Loaders not yet reconciled with the canonical schema.** Neither
+> loader parses the `identityPattern`/`source` allowlist above yet. Both
+> the GP2 ingest loader (`pkg/evidence/project`) and the GP4 consumer
+> (`pkg/corroborate`) still carry a single `Identity` field (and the GP1
+> canonical loader deliberately rejects a cleartext `identity`), so neither
+> can parse the canonical `recipes/evidence/allowlist.yaml`. Reconciling
+> both loaders with the GP1 allowlist schema is still outstanding.
 
 ## Forward limitations
 

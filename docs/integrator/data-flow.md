@@ -50,8 +50,9 @@ Each stage transforms input data into a different format:
 │ Snapshot (aicr.run/v1alpha2)                      │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
-│   created: timestamp                                    │
-│   hostname: string                                      │
+│   timestamp: RFC3339 string                             │
+│   version: CLI version that captured the snapshot       │
+│   source-node: node name the snapshot was taken on      │
 │                                                         │
 │ measurements: []Measurement                             │
 │   ├─ SystemD                                            │
@@ -70,9 +71,18 @@ Each stage transforms input data into a different format:
 │   │   └─ subtypes: [hardware]                           │
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
-│   └─ NodeTopology                                       │
-│       └─ subtypes: [summary, taint, label]              │
-│           └─ data: map[string]Reading                   │
+│   ├─ NodeTopology                                       │
+│   │   └─ subtypes: [summary, taint, label]              │
+│   │       └─ data: map[string]Reading                   │
+│   │                                                     │
+│   └─ NetworkTopology (only with --cluster-config /      │
+│       │                --discover-network)              │
+│       └─ subtypes: [identity, capabilities, pfs,        │
+│           │          kernel-modules]                    │
+│           ├─ identity/capabilities/kernel-modules:      │
+│           │     data: map[string]Reading                │
+│           └─ pfs: items: []ItemEntry                    │
+│                 (per item: context + data)              │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -99,7 +109,7 @@ data:
 **Agent Deployment:**  
 Kubernetes Job writes snapshots directly to ConfigMap without volumes:
 ```bash
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 ```
 
 **Reading Interface:**
@@ -137,8 +147,15 @@ type Reading interface {
 
 **Context Propagation:**
 - All collectors respect context cancellation
-- First error cancels remaining operations
-- Timeout: 30 seconds per collector
+- Collectors degrade gracefully: a collector that errors is logged and
+  skipped, and its measurement is omitted — a partial snapshot is the
+  intended outcome, not a hard failure of the whole snapshot. (The
+  orchestrator runs under `errgroup.WithContext` so a future
+  cancel-on-error collector is supported, but today per-collector errors
+  are swallowed.)
+- Each collector sets its own timeout rather than sharing a universal
+  one — e.g. 10s (OS, systemd), 60s (Kubernetes), 90s (node topology),
+  5s (NFD GPU detection), up to 10m (network discovery)
 
 ## Stage 2: Recipe (Data Optimization)
 
@@ -158,9 +175,10 @@ aicr recipe --snapshot system.yaml --intent training --platform kubeflow
 **Snapshot Mode (ConfigMap)** - Read from Kubernetes:
 ```bash
 # Agent or CLI writes snapshot to ConfigMap
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 # CLI reads from ConfigMap to generate recipe
+# (the cm:// URI carries the namespace; `aicr recipe` has no --namespace flag)
 aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --intent training --platform kubeflow
 
 # Recipe can also be written to ConfigMap
@@ -215,23 +233,29 @@ For the resolver internals (specificity scoring, deep-merge semantics) see
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Recipe (aicr.run/v1alpha2)                        │
+│ RecipeResult (aicr.run/v1alpha2)                          │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
-│   version: recipe format version                        │
-│   created: timestamp                                    │
+│   version: CLI version that generated the recipe        │
 │   appliedOverlays: inheritance chain (root to leaf)     │
+│   excludedOverlays: matched-but-excluded overlays       │
 │                                                         │
 │ criteria: Criteria (service, accelerator, intent, os)   │
 │                                                         │
+│ constraints: []Constraint                               │
+│   ├─ name: constraint identifier (e.g. K8s.server.ver…) │
+│   ├─ value: expression (e.g. ">= 1.32.4")               │
+│   └─ severity: error | warning                          │
+│                                                         │
 │ componentRefs: []ComponentRef                           │
 │   ├─ name: component name                               │
-│   ├─ version: component version                         │
-│   ├─ order: deployment order                            │
-│   └─ repository: Helm repository URL                    │
+│   ├─ chart: Helm chart name                             │
+│   ├─ source: repository URL or OCI reference            │
+│   ├─ version: chart/component version                   │
+│   └─ namespace: deploy namespace                        │
 │                                                         │
-│ constraints:                                            │
-│   └─ driver: version, cudaVersion                       │
+│ deploymentOrder: []string                               │
+│   └─ topologically sorted component names               │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -304,6 +328,7 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 **ConfigMap-based:**
 ```bash
 aicr validate \
+    --namespace gpu-operator \
     --recipe recipe.yaml \
     --snapshot cm://gpu-operator/aicr-snapshot
 ```
@@ -332,10 +357,12 @@ By default, the command exits with non-zero status on validation failures (ideal
 
 ```bash
 aicr validate \
+    --namespace gpu-operator \
     --recipe recipe.yaml \
     --snapshot cm://gpu-operator/aicr-snapshot
 
-# Exit code: 0 = all passed, 1 = failures detected
+# Exit code: 0 = all passed; 8 (ExitInternal, from ErrCodeInternal) when
+#   one or more phases did not pass
 # Use --fail-on-error=false for informational mode without failing
 ```
 
@@ -524,38 +551,50 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 **Helm Deployer** (default):
 ```
 bundle-output/
-├── README.md              # Root deployment guide with ordered steps
-├── deploy.sh              # Automation script (chmod +x)
-├── recipe.yaml            # Copy of the input recipe
-├── checksums.txt          # SHA256 checksums of all files
-├── cert-manager/
-│   ├── values.yaml        # Component Helm values
-│   └── README.md          # Component install/upgrade/uninstall
-├── gpu-operator/
-│   ├── values.yaml        # Component Helm values
-│   └── README.md          # Component install/upgrade/uninstall
-└── network-operator/
+├── README.md                    # Root deployment guide with ordered steps
+├── deploy.sh                    # Automation script (0755)
+├── checksums.txt                # SHA256 digests of all files (optional)
+├── 001-cert-manager/
+│   ├── install.sh               # Per-folder install script (0755)
+│   ├── values.yaml              # Static Helm values
+│   ├── cluster-values.yaml      # Per-cluster dynamic values
+│   └── upstream.env             # CHART/REPO/VERSION (upstream-helm folder)
+├── 002-gpu-operator/
+│   ├── install.sh
+│   ├── values.yaml
+│   ├── cluster-values.yaml
+│   └── upstream.env
+└── 003-network-operator/
+    ├── install.sh
     ├── values.yaml
-    ├── README.md
-    └── manifests/         # Optional manifest files
-        └── nfd-network-rule.yaml
+    ├── cluster-values.yaml
+    └── upstream.env
 ```
+
+Folder names carry the `NNN-<component>/` prefix (the number encodes
+deployment order). Local-chart components instead ship `Chart.yaml` +
+`templates/` in place of `upstream.env`.
 
 **Argo CD Deployer**:
 ```
 bundle-output/
-├── app-of-apps.yaml       # Parent Application (bundle root)
-├── gpu-operator/
+├── app-of-apps.yaml          # Parent Application (bundle root)
+├── 001-cert-manager/
+│   ├── values.yaml
+│   └── application.yaml      # With sync-wave annotation
+├── 002-gpu-operator/
 │   ├── values.yaml
 │   ├── manifests/
-│   └── argocd/
-│       └── application.yaml   # With sync-wave annotation
-├── network-operator/
+│   └── application.yaml      # With sync-wave annotation
+├── 003-network-operator/
 │   ├── values.yaml
-│   └── argocd/
-│       └── application.yaml   # With sync-wave annotation
+│   └── application.yaml      # With sync-wave annotation
 └── README.md
 ```
+
+Component folders use the same numbered `NNN-<name>/` prefix as the Helm
+deployer (the number encodes deployment order), and each folder holds its
+`application.yaml` directly — there is no nested `argocd/` subdirectory.
 
 Argo CD Application with multi-source:
 ```yaml
@@ -573,7 +612,7 @@ spec:
       chart: gpu-operator
       helm:
         valueFiles:
-          - $values/gpu-operator/values.yaml
+          - $values/002-gpu-operator/values.yaml
     # Values from GitOps repo
     - repoURL: <YOUR_GIT_REPO>
       targetRevision: main
@@ -581,7 +620,7 @@ spec:
     # Additional manifests (if present)
     - repoURL: <YOUR_GIT_REPO>
       targetRevision: main
-      path: gpu-operator/manifests
+      path: 002-gpu-operator/manifests
 ```
 
 ### Deployer Data Flow
@@ -605,10 +644,10 @@ spec:
 │     ├─ gpu-operator   → values.yaml, manifests/              │
 │     └─ network-operator → values.yaml, manifests/            │
 │                                                              │
-│  4. Run deployer (argocd) → per-component argocd/ dirs       │
-│     ├─ cert-manager/argocd/application.yaml (wave: 0)        │
-│     ├─ gpu-operator/argocd/application.yaml (wave: 1)        │
-│     └─ network-operator/argocd/application.yaml (wave: 2)    │
+│  4. Run deployer (argocd) → numbered NNN-<name>/ folders     │
+│     ├─ 001-cert-manager/application.yaml (wave: 0)          │
+│     ├─ 002-gpu-operator/application.yaml (wave: 1)          │
+│     └─ 003-network-operator/application.yaml (wave: 2)      │
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
 │  5. Generate checksums                                       │
@@ -624,16 +663,16 @@ spec:
 **JSON:**
 ```json
 {
-  "apiVersion": "v1",
-  "kind": "Recipe",
+  "apiVersion": "aicr.run/v1alpha2",
+  "kind": "Snapshot",
   "measurements": [...]
 }
 ```
 
 **YAML:**
 ```yaml
-apiVersion: v1
-kind: Recipe
+apiVersion: aicr.run/v1alpha2
+kind: Snapshot
 measurements:
   - type: K8s
     subtypes: [...]
@@ -644,7 +683,9 @@ measurements:
 TYPE    SUBTYPE      KEY                    VALUE
 K8s     image        gpu-operator           v25.3.3
 K8s     image        driver                 580.82.07
-GPU     driver       version                580.82.07
+GPU     hardware     gpu-present            true
+GPU     hardware     gpu-count              8
+GPU     hardware     model                  H100
 ```
 
 ### Serialization Pipeline
@@ -691,7 +732,7 @@ HTTP Request → Middleware Chain → Handler → Response
 HTTP/1.1 200 OK
 Content-Type: application/json
 X-Request-Id: 550e8400-e29b-41d4-a716-446655440000
-Cache-Control: public, max-age=300
+Cache-Control: public, max-age=600
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 95
 X-RateLimit-Reset: 1735650000
@@ -707,7 +748,12 @@ X-RateLimit-Reset: 1735650000
 - Location: `recipes/overlays/*.yaml` (including `base.yaml`), `recipes/mixins/*.yaml`
 - Embedded at compile time via `//go:embed` directives
 - Loaded once per process, cached in memory
-- TTL: 5 minutes (in-memory cache)
+- The per-`Client` metadata-store and component-registry caches persist for
+  the lifetime of the `Client` (keyed on `DataProvider` identity) and are
+  released only by `Client.Close()` — they do not expire on a timer
+- The HTTP recipe/query response `Cache-Control: max-age` is `600` seconds
+  (`defaults.RecipeCacheTTL`, 10 minutes) — a downstream/browser caching hint,
+  distinct from the in-process caches above
 
 **Bundle Templates:**
 - Location: `pkg/bundler/*/templates/*.tmpl`
