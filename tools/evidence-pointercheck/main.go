@@ -16,8 +16,18 @@
 // contract (#1347 / #1401) over the committed recipes/evidence/ tree. It is
 // the anti-squat gate run in CI on PRs touching recipes/evidence/**: every
 // committed pointer must parse as a single-attestation V1 pointer, be signed,
-// live under the <recipe>/<source>/ directory its own verified signer hashes
+// live under the <recipe>/<source>/ directory its own claimed signer hashes
 // to, and name a signer that is allowlisted as community or partner.
+//
+// This gate is structural, not cryptographic (#1535): it trusts the
+// issuer/identity the pointer supplies and checks path ownership + allowlist
+// membership offline (no registry or Sigstore egress). It does NOT verify
+// that a Fulcio/Rekor signature actually binds the claimed signer to the
+// bundle digest. That cryptographic check runs at ingest
+// (.github/workflows/evidence-ingest.yaml); a pointer that claims a signer it
+// does not control passes here but fails ingest and is never counted in
+// corroboration. Trust derives from the ingest verification, not from this
+// gate.
 //
 // Usage: evidence-pointercheck [-root recipes/evidence] [-allowlist <path>]
 //
@@ -60,5 +70,6 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stdout, "evidence-pointercheck: OK — all committed pointers honor the per-source contract")
+	fmt.Fprintln(os.Stdout, "evidence-pointercheck: OK — all committed pointers honor the per-source contract "+
+		"(structural check of the claimed signer; cryptographic signature verification runs at ingest)")
 }
