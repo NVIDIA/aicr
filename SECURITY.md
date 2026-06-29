@@ -21,6 +21,65 @@ To report a potential security vulnerability in any NVIDIA product:
 
 NVIDIA offers acknowledgement for externally reported security issues under our coordinated vulnerability disclosure policy. Visit [PSIRT Policies](https://www.nvidia.com/en-us/security/psirt-policies/) for details.
 
+## Acknowledgement and Response
+
+Reports submitted through the channels above are received by NVIDIA PSIRT.
+PSIRT acknowledges receipt of each report, coordinates with the reporter
+throughout the investigation, and provides progress updates as the issue moves
+toward remediation. The expectations for acknowledgement, ongoing
+communication, and reporter credit are defined in the
+[PSIRT Policies](https://www.nvidia.com/en-us/security/psirt-policies/), which
+set the response timeline for AICR. If you do not receive an acknowledgement,
+re-send your report to psirt@nvidia.com rather than opening a public issue.
+
+## Embargo, Coordinated Disclosure, and CVEs
+
+Confirmed vulnerabilities are handled under embargo. NVIDIA PSIRT manages the
+coordinated disclosure timeline: the issue is kept confidential while a fix is
+prepared, affected downstream consumers are notified where appropriate, and a
+security advisory is published when the embargo lifts. NVIDIA is a CVE Numbering
+Authority (CNA) and assigns CVE identifiers for resolved issues that require
+user action, so downstream users can track and patch them through standard
+vulnerability databases.
+
+AICR maintainers support this process by developing fixes privately and holding
+public discussion of an issue until PSIRT lifts the embargo. Please keep any
+reported vulnerability confidential until then.
+
+## Out of Scope
+
+The following generally do **not** qualify as security vulnerabilities in AICR.
+Reviewing this list before reporting helps PSIRT focus on real issues:
+
+- Findings that require physical access to a node or control-plane host.
+- Social engineering, phishing, or attacks that depend on an already-compromised
+  operator credential or workstation.
+- Theoretical weaknesses with no demonstrated, practical exploit path.
+- Vulnerabilities in upstream components that AICR only deploys (for example the
+  GPU Operator, Network Operator, or other Helm chart sub-images) — report those
+  to the owning project. We will help coordinate when an AICR default is involved.
+- Missing cluster hardening that is the operator's responsibility, such as
+  network policy, secrets management, or RBAC tightening covered by the
+  deployment documentation.
+
+When in doubt, report it — PSIRT would rather triage an out-of-scope report than
+miss a real one.
+
+## Supported Versions
+
+AICR is pre-1.0 and ships from a single active release line. Only the latest
+released minor receives security fixes; earlier minors are end-of-life and
+should be upgraded.
+
+| Version | Supported |
+|---------|-----------|
+| `0.15.x` (latest released minor) | ✅ Receives security fixes |
+| `< 0.15` | ❌ End-of-life — upgrade to the latest release |
+
+Security fixes ship in a new patch or minor release rather than as backports to
+end-of-life versions. When AICR reaches 1.0 this policy will be revised and a
+longer support window published here.
+
 ## Product Security Resources
 
 For all security-related concerns: https://www.nvidia.com/en-us/security
