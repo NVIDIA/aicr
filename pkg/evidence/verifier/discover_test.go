@@ -220,6 +220,91 @@ func TestCheckEvidenceTree_RejectsLooseFiles(t *testing.T) {
 	}
 }
 
+// flatPendingYAML renders an unsigned single-attestation pointer for
+// testRecipe that references a pushed bundle — the commit-flat intermediate
+// of the two-phase publish flow (#1530).
+func flatPendingYAML(recipe string) string {
+	return "schemaVersion: 1.0.0\n" +
+		"recipe: " + recipe + "\n" +
+		"attestations:\n  - bundle:\n      oci: ghcr.io/x/aicr-evidence:v1\n" +
+		"      digest: sha256:abc\n" +
+		"      predicateType: " + attestation.PredicateTypeV1 + "\n" +
+		"    attestedAt: 2026-06-23T18:24:27Z\n"
+}
+
+// TestCheckEvidenceTree_AcceptsFlatPendingPointer accepts a flat, unsigned
+// <recipe>.yaml at the root — the transient commit-flat state CI signs and
+// relocates. The per-source contract gate must not reject it on the PR before
+// the signing leg can run.
+func TestCheckEvidenceTree_AcceptsFlatPendingPointer(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, testRecipe+".yaml"),
+		[]byte(flatPendingYAML(testRecipe)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := CheckEvidenceTree(root, repoAllowlist)
+	if err != nil {
+		t.Fatalf("CheckEvidenceTree: %v", err)
+	}
+	for _, p := range problems {
+		t.Errorf("unexpected problem for a valid flat pending pointer: %s", p)
+	}
+}
+
+// TestCheckEvidenceTree_RejectsSignedFlatPointer rejects a SIGNED pointer left
+// flat at the root: a signed pointer has a derivable <source> and must live
+// nested under <recipe>/<source>/.
+func TestCheckEvidenceTree_RejectsSignedFlatPointer(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, testRecipe+".yaml"),
+		[]byte(pointerYAML("ghcr.io/x/e:v1", "sha256:abc", "alice@example.com")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := CheckEvidenceTree(root, repoAllowlist)
+	if err != nil {
+		t.Fatalf("CheckEvidenceTree: %v", err)
+	}
+	if len(problems) == 0 {
+		t.Fatal("expected a signed flat pointer to be rejected (must be nested)")
+	}
+}
+
+// TestCheckEvidenceTree_RejectsMisnamedFlatPointer rejects a flat pending
+// pointer whose filename does not match its recipe field.
+func TestCheckEvidenceTree_RejectsMisnamedFlatPointer(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "wrong-name.yaml"),
+		[]byte(flatPendingYAML(testRecipe)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := CheckEvidenceTree(root, repoAllowlist)
+	if err != nil {
+		t.Fatalf("CheckEvidenceTree: %v", err)
+	}
+	if len(problems) == 0 {
+		t.Fatal("expected a misnamed flat pending pointer to be rejected")
+	}
+}
+
+// TestCheckEvidenceTree_RejectsUnpushedFlatPointer rejects a flat pending
+// pointer that references no pushed bundle (nothing to sign later).
+func TestCheckEvidenceTree_RejectsUnpushedFlatPointer(t *testing.T) {
+	root := t.TempDir()
+	body := "schemaVersion: 1.0.0\nrecipe: " + testRecipe + "\n" +
+		"attestations:\n  - bundle:\n      predicateType: " + attestation.PredicateTypeV1 + "\n" +
+		"    attestedAt: 2026-06-23T18:24:27Z\n"
+	if err := os.WriteFile(filepath.Join(root, testRecipe+".yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := CheckEvidenceTree(root, repoAllowlist)
+	if err != nil {
+		t.Fatalf("CheckEvidenceTree: %v", err)
+	}
+	if len(problems) == 0 {
+		t.Fatal("expected a flat pending pointer with no pushed bundle to be rejected")
+	}
+}
+
 // TestCheckEvidenceTree_MissingAllowlist surfaces an operational error
 // (distinct from a contract violation) when the allowlist is unreadable.
 func TestCheckEvidenceTree_MissingAllowlist(t *testing.T) {

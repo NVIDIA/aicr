@@ -74,6 +74,12 @@ func (p TreeProblem) String() string { return p.Path + ": " + p.Message }
 //   - that verified signer is allowlisted as community or partner (first-party
 //     ingests directly and must not commit per-run pointers).
 //
+// One exception: a flat root-level <recipe>.yaml is accepted as a *pending*
+// pointer (unsigned, single-attestation, bundle-referencing) — the transient
+// commit-flat state of the two-phase publish flow (#1530), which the
+// fork-based CI leg signs and relocates under <recipe>/<source>/. See
+// checkPendingPointer.
+//
 // It returns the list of problems (empty when the tree is clean) plus a
 // non-nil error only for an operational failure (unreadable allowlist, etc.),
 // keeping policy violations distinct from infrastructure errors.
@@ -94,18 +100,64 @@ func CheckEvidenceTree(root, allowlistPath string) ([]TreeProblem, error) {
 	var problems []TreeProblem
 	for _, rd := range recipeDirs {
 		if !rd.IsDir() {
-			// Only allowlist.yaml is expected as a non-directory at the root.
-			if rd.Name() != AllowlistFileName {
-				problems = append(problems, TreeProblem{
-					Path:    filepath.Join(root, rd.Name()),
-					Message: "unexpected file at evidence root (pointers live under <recipe>/<source>/)",
-				})
+			// allowlist.yaml is the one expected non-directory at the root.
+			if rd.Name() == AllowlistFileName {
+				continue
+			}
+			// Any other root-level .yaml is a flat *pending* pointer — the
+			// transient commit-flat state of the two-phase publish flow
+			// (#1530). An unsigned pointer cannot live at its nested
+			// <source>/ path because that segment derives from the signer it
+			// does not yet have; the fork-based CI leg signs it and relocates
+			// it under <recipe>/<source>/. Accept it only as a valid, unsigned
+			// pending pointer named <recipe>.yaml; reject anything else.
+			path := filepath.Join(root, rd.Name())
+			if msg := checkPendingPointer(path); msg != "" {
+				problems = append(problems, TreeProblem{Path: path, Message: msg})
 			}
 			continue
 		}
 		problems = append(problems, checkRecipeDir(root, rd.Name(), al)...)
 	}
 	return problems, nil
+}
+
+// checkPendingPointer validates a flat root-level pointer as a pending
+// intermediate of the commit-flat -> CI-sign -> CI-relocate flow (#1530) and
+// returns a non-empty message describing the first violation, or "" when it
+// is an acceptable pending pointer. A pending pointer must:
+//
+//   - be named <recipe>.yaml (a deterministic flat name; arbitrary files are
+//     rejected here, preserving the old "unexpected file at root" behavior);
+//   - parse and validate as a single-attestation V1 pointer;
+//   - reference a pushed bundle (bundle.oci + bundle.digest) so it is
+//     actually signable later; and
+//   - be UNSIGNED — a signed pointer has a derivable <source> and must live
+//     under <recipe>/<source>/, never flat.
+//
+// No path-ownership or allowlist check applies: an unsigned pointer carries
+// no verified signer to anchor those checks. They are enforced on the
+// signed, relocated pointer once CI moves it into <recipe>/<source>/.
+func checkPendingPointer(path string) string {
+	base := filepath.Base(path)
+	if !strings.HasSuffix(base, ".yaml") {
+		return "unexpected file at evidence root (only allowlist.yaml and flat <recipe>.yaml pending pointers are allowed)"
+	}
+	ptr, err := LoadAndValidatePointer(path)
+	if err != nil {
+		return "invalid pending pointer at evidence root: " + err.Error()
+	}
+	if want := ptr.Recipe + ".yaml"; base != want {
+		return "flat pending pointer must be named <recipe>.yaml (expected " + want + ", got " + base + ")"
+	}
+	att := ptr.Attestations[0]
+	if att.Signer != nil {
+		return "signed pointer must live under <recipe>/<source>/, not flat at the evidence root"
+	}
+	if att.Bundle.OCI == "" || att.Bundle.Digest == "" {
+		return "pending pointer must reference a pushed bundle (bundle.oci + bundle.digest) to be signable"
+	}
+	return ""
 }
 
 // checkRecipeDir walks one <recipe>/ directory: every pointer must sit two

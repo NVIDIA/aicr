@@ -88,20 +88,104 @@ func MarshalPointer(p *Pointer) ([]byte, error) {
 // destination — only signed, pushed bundles earn a place in the tree — so
 // the hint returns guidance instead of a path.
 func PointerCopyToHint(p *Pointer) string {
-	const unpushed = "(sign and push the bundle, then commit under recipes/evidence/<recipe>/<source>/)"
+	suffix, err := canonicalPointerSuffix(p)
+	if err != nil {
+		return "(sign and push the bundle, then commit under recipes/evidence/<recipe>/<source>/)"
+	}
+	return "recipes/evidence/" + filepath.ToSlash(suffix)
+}
+
+// canonicalPointerSuffix returns the <recipe>/<source>/<bundle-digest>.yaml
+// path (relative to the evidence root) a signed, pushed pointer belongs at —
+// the single source of truth for the #1347 Option A per-source layout, shared
+// by PointerCopyToHint and RelocatePointerToCanonical. The <source> segment is
+// SourceSlug(signer), so an unsigned or unpushed pointer has no canonical
+// suffix and yields an error.
+func canonicalPointerSuffix(p *Pointer) (string, error) {
 	if p == nil || len(p.Attestations) == 0 {
-		return unpushed
+		return "", errors.New(errors.ErrCodeInvalidRequest, "pointer with at least one attestation is required")
 	}
 	att := p.Attestations[0]
-	if att.Signer == nil || att.Bundle.Digest == "" {
-		return unpushed
+	if att.Signer == nil {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"pointer has no signer; its canonical <source> path is underivable")
+	}
+	if att.Bundle.Digest == "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest, "pointer has no pushed bundle digest")
+	}
+	// recipe is the only attacker-influenced segment that reaches a filesystem
+	// path in RelocatePointerToCanonical (source is hex; the digest filename is
+	// validated sha256:<hex>). Reject anything that isn't a clean local path so
+	// a recipe like "../../etc" cannot escape the evidence tree on os.Rename —
+	// defense in depth that does not rely on the CI contract gate, which a
+	// direct `aicr evidence sign --relocate <file>` invocation bypasses.
+	// filepath.IsLocal also rejects "" and absolute paths.
+	if !filepath.IsLocal(p.Recipe) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"pointer.recipe is not a local path segment: "+p.Recipe)
 	}
 	source, err := SourceSlug(att.Signer.Issuer, att.Signer.Identity)
 	if err != nil {
-		return unpushed
+		return "", err
 	}
 	file := strings.ReplaceAll(att.Bundle.Digest, ":", "-") + ".yaml"
-	return "recipes/evidence/" + p.Recipe + "/" + source + "/" + file
+	return filepath.Join(p.Recipe, source, file), nil
+}
+
+// RelocatePointerToCanonical moves a freshly-signed pointer from its flat
+// pending location to its canonical per-source path, returning the
+// destination. The flat location is the only place an unsigned pointer can be
+// committed: the nested <source> path segment derives from the signer
+// (SourceSlug), which a `--no-sign` pointer does not have. Once the
+// fork-based CI leg signs it (`aicr evidence sign`), this completes the
+// commit-flat -> CI-sign -> CI-relocate-to-nested flow (#1530) by moving the
+// now-signed pointer under <recipe>/<source>/<bundle-digest>.yaml, where the
+// per-source contract gate (verifier.CheckEvidenceTree) requires it.
+//
+// The destination root is the directory currentPath sits in, so a flat
+// pointer at recipes/evidence/<recipe>.yaml lands under
+// recipes/evidence/<recipe>/<source>/. Parent directories are created. It is
+// a no-op (returns currentPath) when the pointer already lives at its
+// canonical path. It fails closed — without moving anything — when the
+// pointer is unsigned, has no pushed digest, or a different file already
+// occupies the canonical path (the per-source pointer is immutable, so a
+// collision is a genuine conflict for the operator to resolve, not something
+// to overwrite).
+func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) {
+	// canonicalPointerSuffix fails closed when the pointer is unsigned or has
+	// no pushed digest — the two states with no derivable canonical home.
+	relSuffix, err := canonicalPointerSuffix(p)
+	if err != nil {
+		return "", err
+	}
+	// The canonical layout is the <recipe>/<source>/<digest>.yaml suffix under
+	// the evidence root. When currentPath already ends in that suffix the
+	// pointer is at its canonical path — a no-op. Detecting it by suffix
+	// (rather than recomputing from filepath.Dir) is what keeps a flat pointer
+	// at <root>/<recipe>.yaml distinguishable from a nested one at
+	// <root>/<recipe>/<source>/<digest>.yaml: only the latter ends in the
+	// suffix, so the flat root is filepath.Dir, not a doubly-nested path.
+	cp := filepath.Clean(currentPath)
+	if cp == relSuffix || strings.HasSuffix(filepath.ToSlash(cp), "/"+filepath.ToSlash(relSuffix)) {
+		return currentPath, nil
+	}
+	dest := filepath.Join(filepath.Dir(currentPath), relSuffix)
+	// Fail closed on a pre-existing destination rather than clobber it (the
+	// per-source pointer is immutable, so a collision is a real conflict).
+	// Checked before MkdirAll so a rejected relocation creates no directories.
+	if _, statErr := os.Stat(dest); statErr == nil {
+		return "", errors.New(errors.ErrCodeConflict,
+			"canonical pointer path already exists, refusing to overwrite: "+dest)
+	} else if !os.IsNotExist(statErr) {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to stat canonical pointer path", statErr)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create canonical pointer directory", err)
+	}
+	if err := os.Rename(currentPath, dest); err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to move pointer to canonical path", err)
+	}
+	return dest, nil
 }
 
 // WritePointer writes the pointer file to outputDir/pointer.yaml.

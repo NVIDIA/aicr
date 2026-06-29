@@ -2667,7 +2667,9 @@ Signing is the only leg that needs Fulcio/Rekor egress, so this command is desig
 aicr evidence sign <pointer> [flags]
 ```
 
-The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. The pointer must carry exactly one attestation that is already pushed (`bundle.oci`/`bundle.digest` set) and not yet signed (empty `signer`); otherwise the command fails closed (an already-signed pointer is never re-signed).
+The positional `<pointer>` is the committed flat pending pointer `recipes/evidence/<recipe>.yaml`. The pointer must carry exactly one attestation that is already pushed (`bundle.oci`/`bundle.digest` set) and not yet signed (empty `signer`); otherwise the command fails closed (an already-signed pointer is never re-signed, except under `--relocate`, which moves an already-signed pointer without re-signing).
+
+With `--relocate`, the now-signed pointer is moved from its flat pending path to its canonical per-source path `recipes/evidence/<recipe>/<src>/<digest>.yaml` — the layout the per-source contract gate requires. A flat pointer is the only committable state for an unsigned pointer, because the `<src>` segment derives from the signer it does not yet have. This is the step the fork-based CI signing leg runs.
 
 **Flags:**
 
@@ -2678,6 +2680,7 @@ The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. Th
 | `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. |
 | `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS for the registry (pull + referrer attach; local-registry tests). |
 | `--insecure-tls` | | bool | `false` | Skip TLS verification for the registry (pull + referrer attach; self-signed registries). |
+| `--relocate` | | bool | `false` | After signing, move the pointer from its flat pending path (`recipes/evidence/<recipe>.yaml`) to its canonical per-source path (`recipes/evidence/<recipe>/<src>/<digest>.yaml`). Used by the fork-based CI signing leg to complete the commit-flat → sign → relocate flow. Idempotent: an already-signed flat pointer is moved without re-signing, and a pointer already at its canonical path is a no-op. If a **different** file already occupies the canonical path, the command fails closed with a conflict error rather than overwriting it (per-source pointers are immutable) — resolve by removing the duplicate, or `git pull` to sync a prior relocation, then re-run. |
 
 **Exit codes:**
 
@@ -2690,7 +2693,8 @@ The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. Th
 
 ```shell
 # In CI (ambient OIDC), after a contributor committed an unsigned pointer:
-aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml
+# sign and relocate it to its canonical per-source path.
+aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml --relocate
 ```
 
 ---

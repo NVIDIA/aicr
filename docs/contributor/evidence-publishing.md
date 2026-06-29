@@ -42,12 +42,20 @@ aicr validate \
   --emit-attestation ./out \
   --push ghcr.io/<your-fork-owner>/aicr-evidence \
   --no-sign
-cp ./out/pointer.yaml recipes/evidence/<slug>.yaml
+cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 ```
 
 `--no-sign` skips all OIDC/Fulcio/Rekor work, so this runs even where
 Sigstore egress is blocked. It pushes the content-addressed bundle and
-writes a pointer with an empty `signer` block. See
+writes a pointer with an empty `signer` block.
+
+Commit it **flat** at `recipes/evidence/<recipe>.yaml` (where `<recipe>` is
+the pointer's `recipe:` field). This is the *only* committable location for
+an unsigned pointer: the nested per-source path
+`recipes/evidence/<recipe>/<src>/<digest>.yaml` includes a `<src>`
+segment derived from the **signer**, which a `--no-sign` pointer does not yet
+have. The signing leg below relocates the pointer to that nested path once it
+is signed. See
 [`aicr validate`](../user/cli-reference.md#aicr-validate) and
 [`aicr evidence publish`](../user/cli-reference.md#aicr-evidence-publish)
 (which also accepts `--no-sign` if you push as a separate step).
@@ -63,11 +71,11 @@ writes a pointer with an empty `signer` block. See
 ### 2. Commit the unsigned pointer and push your branch
 
 ```shell
-git add recipes/evidence/<slug>.yaml
+git add recipes/evidence/<recipe>.yaml
 # Use -s (DCO sign-off) — required for all contributors. NVIDIA org members
 # additionally use -S (cryptographic signing); external contributors use -s
 # alone. See CONTRIBUTING.md.
-git commit -s -m "evidence: <slug> (unsigned; sign in CI)"
+git commit -s -m "evidence: <recipe> (unsigned; sign in CI)"
 git push
 ```
 
@@ -88,19 +96,22 @@ runs two ways in your fork:
 The auto-trigger is fork-only (it never runs on the canonical repo) and skips its
 own signing commit, so it can't loop. The workflow:
 
-- discovers every pointer in `recipes/evidence/*.yaml` with an empty
+- discovers every flat pointer in `recipes/evidence/*.yaml` with an empty
   `signer` (i.e. unsigned),
 - signs the bundle each one already references using the runner's ambient
-  OIDC token ([`aicr evidence sign`](../user/cli-reference.md#aicr-evidence-sign)),
-- patches the pointer's `signer` block in place and commits it back to the
-  branch.
+  OIDC token and **relocates** the now-signed pointer to its canonical
+  per-source path `recipes/evidence/<recipe>/<src>/<digest>.yaml`
+  ([`aicr evidence sign --relocate`](../user/cli-reference.md#aicr-evidence-sign)),
+- commits the move back to the branch.
 
 It is a clean no-op when there are no unsigned pointers, and it fails with a
 clear message if it cannot pull a bundle (the public-package requirement
-above). Pull the commit it pushes (`git pull`) — your PR now carries a pointer
-whose `signer` block is filled in (the *bundle* is signed; the commit-back
-itself is a normal, unsigned GitHub Actions commit, which the eventual
-squash-merge re-signs under the repo's policy).
+above). Pull the commit it pushes (`git pull`) — your PR now carries a
+**signed, nested** pointer (the flat pending file is gone). The *bundle* is
+signed; the commit-back itself is a normal, unsigned GitHub Actions commit,
+which the eventual squash-merge re-signs under the repo's policy. The
+per-source contract gate accepts the flat pending pointer while the PR is in
+flight and requires the signed, nested pointer once the signing leg has run.
 
 > The workflow declares `id-token: write` in its own `permissions:` block —
 > it is not a default. Your fork must have GitHub Actions enabled and not
@@ -121,11 +132,24 @@ aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml --emit-attestatio
 
 # Off VPN, where Sigstore is reachable: sign, push, and write the pointer.
 aicr evidence publish ./out --push ghcr.io/<your-fork-owner>/aicr-evidence
-cp ./out/pointer.yaml recipes/evidence/<slug>.yaml
 ```
 
-The signed artifact is content-addressed, so the result is identical
-regardless of which host ran which leg.
+`aicr evidence publish` signs the pointer, so commit it directly at its
+**canonical per-source path**, not flat. The command logs the exact
+destination (`copyTo=…`) — copy the pointer there:
+
+```shell
+# The path is recipes/evidence/<recipe>/<src>/<digest>.yaml; <src> is
+# derived from your signer identity. Use the copyTo path the command printed.
+mkdir -p recipes/evidence/<recipe>/<src>
+cp ./out/pointer.yaml recipes/evidence/<recipe>/<src>/<digest>.yaml
+```
+
+The flat commit-then-CI-sign flow above is only for the unsigned case: a
+signed pointer already has the signer the `<src>` segment derives from, so
+it goes straight to its nested path and needs no relocation. The signed
+artifact is content-addressed, so the result is identical regardless of which
+host ran which leg.
 
 ## See also
 

@@ -16,17 +16,22 @@
 #
 # A contributor publishes an UNSIGNED evidence bundle locally (where the
 # cluster lives, often behind a VPN that blocks Sigstore) and commits the
-# pointer:
+# pointer FLAT — recipes/evidence/<recipe>.yaml — because the nested
+# <source> path segment derives from the signer a `--no-sign` pointer does
+# not yet have:
 #
 #   aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml \
 #     --emit-attestation ./out --push ghcr.io/<owner>/aicr-evidence --no-sign
-#   cp ./out/pointer.yaml recipes/evidence/<slug>.yaml
+#   cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 #
 # They then run THIS workflow from their fork's Actions tab. It discovers
-# every committed pointer with an empty signer block, signs the bundle each
-# one references with the runner's ambient OIDC identity (where Sigstore IS
-# reachable), patches the pointer's signer block in place, and commits it
-# back to the branch. Clean no-op when there is nothing unsigned.
+# every flat pointer with an empty signer block, signs the bundle each one
+# references with the runner's ambient OIDC identity (where Sigstore IS
+# reachable), patches the pointer's signer block in place, RELOCATES it to
+# its canonical per-source path recipes/evidence/<recipe>/<source>/<digest>.yaml
+# (the layout the per-source contract gate requires), and commits the move
+# back to the branch. Clean no-op when there is nothing unsigned. This is the
+# commit-flat -> CI-sign -> CI-relocate-to-nested flow (#1530).
 #
 # Why workflow_dispatch (Option A): no recipe-name or bundle-ref inputs to
 # thread through — the committed pointer is the work item, and it already
@@ -138,13 +143,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- recipes/evidence/; then
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # -A stages the relocation as a delete (flat pointer) + add (nested
+          # pointer) plus any in-place signer patch, so the moved files commit
+          # correctly. Check the STAGED set after `git add` so an untracked
+          # relocated file is still counted as a change.
+          git add -A recipes/evidence/
+          if git diff --cached --quiet -- recipes/evidence/; then
             echo "No pointer changes to commit (nothing to sign)."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add recipes/evidence/
           # -s adds a `Signed-off-by:` (DCO) trailer matching the bot author,
           # so the DCO bot passes on the commit-back. The commit is NOT
           # cryptographically signed (no -S) — it fills in the evidence
