@@ -323,10 +323,14 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 // normalizeProviderID maps a raw Kubernetes spec.providerID (or an already-
 // normalized name stored by the collector) to the service type string used in
 // recipe criteria. OKE nodes emit a bare OCID ("ocid1.instance.oc1...") with
-// no scheme prefix; other providers use "<scheme>://..." which the collector
-// already normalizes, but we handle both here for resilience.
+// no scheme prefix; the collector's parseProvider maps the "oci://" scheme to
+// "oci" and then to "oke", but snapshots taken before that mapping existed may
+// carry "oci" verbatim. We handle all three forms here for resilience.
 func normalizeProviderID(v string) string {
 	if strings.HasPrefix(v, "ocid1.") {
+		return "oke"
+	}
+	if v == "oci" {
 		return "oke"
 	}
 	return v
