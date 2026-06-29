@@ -17,9 +17,16 @@
 # (which verifies signatures against OCI): this gate enforces the on-disk
 # contract — every committed pointer under recipes/evidence/ must be a
 # signed single-attestation V1 pointer that lives under the
-# <recipe>/<source>/ directory its own verified signer hashes to, and whose
+# <recipe>/<source>/ directory its own claimed signer hashes to, and whose
 # signer is allowlisted as community or partner. It runs with a read-only
 # token and no secrets (no OCI/registry access), so it is safe on fork PRs.
+#
+# This gate is structural, not cryptographic (#1535): it trusts the
+# issuer/identity the pointer supplies and does NOT verify a Fulcio/Rekor
+# signature binds that identity to the bundle. A pointer that claims a signer
+# it does not control passes here but fails cryptographic verification at
+# ingest (evidence-ingest.yaml) and is never counted in corroboration. Trust
+# derives from that ingest step, not from this gate.
 
 name: "Evidence Pointer Contract"
 

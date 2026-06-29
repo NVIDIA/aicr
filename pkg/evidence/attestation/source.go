@@ -31,7 +31,7 @@ import (
 // did not. It is still short enough for a workable directory name.
 const SourceSlugLength = 32
 
-// SourceSlug derives the stable per-source directory slug from a verified
+// SourceSlug derives the stable per-source directory slug from a
 // signer's OIDC issuer + identity. It is the first SourceSlugLength hex
 // characters of sha256(issuer + "\n" + identity).
 //
@@ -40,9 +40,12 @@ const SourceSlugLength = 32
 // Option A). Deriving it deterministically — rather than from a free-form
 // label — is what makes the path non-squattable: the CI path-ownership
 // check (verifier.CheckEvidenceTree) recomputes the slug from the pointer's
-// own verified signer and rejects any file that does not live under the
-// directory its signer hashes to. The newline separator is a domain
-// separator so ("a\nb", "") and ("a", "b") cannot collide.
+// own claimed signer and rejects any file that does not live under the
+// directory its signer hashes to. That check is structural, not
+// cryptographic — it proves the path matches the claimed signer, while the
+// signature that binds that identity to the bundle is verified at ingest
+// (issue #1535). The newline separator is a domain separator so
+// ("a\nb", "") and ("a", "b") cannot collide.
 //
 // The same derivation keys the GP2 ingest tree so a committed community
 // pointer and a first-party direct-ingest land under identical source

@@ -71,8 +71,23 @@ func (p TreeProblem) String() string { return p.Path + ": " + p.Message }
 //   - the <recipe> path segment equals the pointer's recipe;
 //   - the <source> path segment equals SourceSlug(signer.issuer, signer.identity)
 //     — so a party cannot write under another party's directory; and
-//   - that verified signer is allowlisted as community or partner (first-party
+//   - that claimed signer is allowlisted as community or partner (first-party
 //     ingests directly and must not commit per-run pointers).
+//
+// IMPORTANT — this gate is structural, not cryptographic (issue #1535). It
+// establishes signer identity from the issuer/identity fields the pointer
+// itself supplies; it does NOT pull the referenced bundle or verify a
+// Fulcio/Rekor signature actually binds that identity to the bundle digest.
+// So a committed pointer can *claim* an allowlisted signer it does not
+// control and pass here. That is by design: the gate runs offline in CI on
+// every PR (no registry/Sigstore egress) and only proves the on-disk tree is
+// internally consistent (path ownership + allowlist membership of the claimed
+// signer). The cryptographic binding is enforced separately at ingest time
+// (.github/workflows/evidence-ingest.yaml → VerifySignature +
+// CrossCheckPointerSigner): each pointer's signature is verified pinned to the
+// signer it claims, and a pointer that lied about who signed fails ingest and
+// is never counted in corroboration. Trust therefore derives from that ingest
+// step, not from passing this gate.
 //
 // allowPending controls the flat root-level <recipe>.yaml *pending* pointer
 // (unsigned, single-attestation, bundle-referencing) — the transient
@@ -222,6 +237,9 @@ func checkSourceDir(recipePath, recipe, source string, al *allowlist.Allowlist) 
 
 // checkPointerFile validates a single committed pointer file and returns a
 // non-empty message describing the first violation, or "" when it is clean.
+// The signer it reads is the pointer's *claimed* block — a structural
+// path-ownership + allowlist check, not cryptographic verification; see
+// CheckEvidenceTree for the trust boundary (issue #1535).
 func checkPointerFile(path, recipe, source string, al *allowlist.Allowlist) string {
 	ptr, err := LoadAndValidatePointer(path)
 	if err != nil {

@@ -759,6 +759,16 @@ discover a recipe's evidence by glob (`verifier.DiscoverPointers`,
 `<recipe>/*/*.yaml`) and aggregate across sources; nothing is modified in
 place.
 
+Cryptographic trust enters at **ingest** (GP2,
+`.github/workflows/evidence-ingest.yaml`), not at the merge gate. Each
+ingested pointer's signature is verified pinned to the signer it claims
+(`verifier.VerifySignature` + `CrossCheckPointerSigner`), so a pointer that
+named an allowlisted signer it does not control passes the structural gate but
+fails ingest and never reaches the corroboration count. The on-disk contract
+gate and the warning-only `recipe-evidence.yaml` OCI check are defense-in-depth
+around that blocking step — trust derives from the ingest verification, not
+from passing the merge gate ([#1535](https://github.com/NVIDIA/aicr/issues/1535)).
+
 The **allowlist** is the trust root, validated by `pkg/evidence/allowlist` to
 be disjoint, non-overlapping, and free of over-broad patterns. Community and
 partner entries are keyed by the one-way `source` slug only (no cleartext
