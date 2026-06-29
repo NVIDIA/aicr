@@ -143,6 +143,15 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          # POST /v1/bundle writes to a per-request os.MkdirTemp under /tmp.
+          # With readOnlyRootFilesystem: true, mount a writable emptyDir at
+          # /tmp or every bundle request fails with HTTP 500.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ```
 
 ```shell
@@ -227,52 +236,29 @@ duplicated here.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | 8080 | HTTP server port |
+| `SHUTDOWN_TIMEOUT_SECONDS` | 30 | Graceful-shutdown drain timeout (seconds) |
 | `AICR_LOG_LEVEL` | info | Logging level: debug, info, warn, error |
-| `RATE_LIMIT` | 100 | Requests per second |
-| `RATE_BURST` | 200 | Burst capacity |
-| `READ_TIMEOUT` | 30s | HTTP read timeout |
-| `WRITE_TIMEOUT` | 30s | HTTP write timeout |
-| `IDLE_TIMEOUT` | 60s | HTTP idle timeout |
+| `AICR_ALLOWED_ACCELERATORS` | (unset = all) | Comma-separated allowlist of accelerator types (e.g. `h100,l40`) |
+| `AICR_ALLOWED_SERVICES` | (unset = all) | Comma-separated allowlist of service types (e.g. `eks,gke`) |
+| `AICR_ALLOWED_INTENTS` | (unset = all) | Comma-separated allowlist of intent types (e.g. `training,inference`) |
+| `AICR_ALLOWED_OS` | (unset = all) | Comma-separated allowlist of OS types (e.g. `ubuntu,rhel`) |
 
-**Note:** The API server uses structured JSON logging to stderr. The CLI supports three logging modes (CLI/Text/JSON), but the API server always uses JSON for consistent log aggregation.
+**Note:** These are the only environment variables the API server reads. The four `AICR_ALLOWED_*` allowlists are parsed once at startup to restrict which criteria values the server will accept. Rate-limit, request-timeout, and body-size settings are compiled-in constants from `pkg/defaults`, not environment-tunable. The server uses structured JSON logging to stderr. The CLI supports three logging modes (CLI/Text/JSON), but the API server always uses JSON for consistent log aggregation.
 
 ### ConfigMap for Custom Recipe Data (Advanced)
 
-> **Note:** This example shows the concept of mounting custom recipe data. The actual recipe format uses a base-plus-overlay architecture. See `recipes/` for the current schema (`overlays/*.yaml` including `base.yaml`).
-
-```yaml
-# configmap.yaml - Example showing custom recipe data mounting
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: aicr-recipe-data
-  namespace: aicr
-data:
-  overlays/base.yaml: |
-    # Your custom base recipe
-    apiVersion: aicr.run/v1alpha2
-    kind: RecipeMetadata
-    # ... (see recipes/overlays/base.yaml for schema)
-```
-
-Mount in deployment:
-```yaml
-spec:
-  template:
-    spec:
-      volumes:
-        - name: recipe-data
-          configMap:
-            name: aicr-recipe-data
-      containers:
-        - name: api-server
-          volumeMounts:
-            - name: recipe-data
-              mountPath: /data
-          env:
-            - name: RECIPE_DATA_PATH
-              value: /data
-```
+> **Note:** The `aicrd` HTTP server resolves recipes from the binary's
+> **embedded** catalog only — it is not wired to consume an external recipe-data
+> overlay at runtime, so there is no ConfigMap mount or environment variable that
+> injects custom recipe data into the server.
+>
+> Custom recipe data (`overlays/*.yaml`, `validators/catalog.yaml`, …) is layered
+> on top of the embedded catalog via the `aicr` CLI's `--data <dir>` flag (see
+> [Data Extension](data-extension.md)). To serve customized data over HTTP today,
+> bake the additional overlays/catalog entries into a custom `aicrd` image rather
+> than mounting them at runtime. (Note that the data layout is a directory tree,
+> and ConfigMap data keys must match `[-._a-zA-Z0-9]+` — they cannot contain `/`,
+> so a flat ConfigMap cannot represent the `overlays/…` layout in any case.)
 
 ## High Availability
 
@@ -539,19 +525,15 @@ kubectl exec -n aicr -it deploy/aicrd -- \
 
 ### Rate Limiting
 
-Check rate limit settings:
-```shell
-kubectl exec -n aicr deploy/aicrd -- env | grep RATE
-```
+Rate-limit settings are **compiled-in** constants from `pkg/defaults`; the
+server does not read `RATE_LIMIT`/`RATE_BURST` (or any rate-limit) environment
+variables. To change the effective limits, front the server with an
+ingress/gateway that enforces its own rate limit (see the Ingress example
+above, which sets `nginx.ingress.kubernetes.io/rate-limit`), or build a custom
+`aicrd` image with adjusted `pkg/defaults` values.
 
-Adjust via deployment:
-```yaml
-env:
-  - name: RATE_LIMIT
-    value: "200"  # Increase limit
-  - name: RATE_BURST
-    value: "400"
-```
+Rate-limit rejections surface in the `aicr_rate_limit_rejects_total` metric and
+as HTTP 429 responses with the `X-RateLimit-*` headers.
 
 ## Upgrading
 

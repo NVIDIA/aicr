@@ -60,8 +60,8 @@ Visit the [releases page](https://github.com/NVIDIA/aicr/releases/latest) and do
 2. **Extract and install**
 
 ```shell
-# Example for Linux x86_64
-tar -xzf aicr_linux_amd64.tar.gz
+# Example for Linux x86_64 (substitute the version you downloaded for 0.15.0)
+tar -xzf aicr_0.15.0_linux_amd64.tar.gz
 sudo mv aicr /usr/local/bin/
 sudo chmod +x /usr/local/bin/aicr
 ```

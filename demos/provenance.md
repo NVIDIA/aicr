@@ -191,83 +191,27 @@ gh run view <run-id> --repo NVIDIA/aicr --log
 ## 6. In-cluster verification
 
 Verification at `docker pull` time is opt-in per consumer. To make it a
-property of the cluster, enforce it with an admission controller. Two
-production-grade options:
+property of the cluster, enforce it with an admission controller. AICR's
+images carry **GitHub Artifact Attestations** (Sigstore *bundles*), so the
+policy must verify the Sigstore bundle format:
 
-### Option 1: Sigstore Policy Controller
+- **Kyverno** — `type: SigstoreBundle`; see
+  [Verifying Sigstore Bundles](https://kyverno.io/docs/policy-types/cluster-policy/verify-images/sigstore/#verifying-sigstore-bundles).
+- **Sigstore Policy Controller** — requires **v0.13.0+** and
+  `signatureFormat: bundle` (see the
+  [Sigstore bundle format](https://docs.sigstore.dev/policy-controller/overview/#sigstore-bundle-format)
+  docs); enforcement runs only in namespaces labeled
+  `policy.sigstore.dev/include=true`.
 
-Install:
+Verify against AICR's release identity — issuer
+`https://token.actions.githubusercontent.com`, subject
+`https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/*`.
 
-```shell
-kubectl apply -f https://github.com/sigstore/policy-controller/releases/download/v0.10.0/release.yaml
-```
-
-Policy:
-
-```yaml
-apiVersion: policy.sigstore.dev/v1beta1
-kind: ClusterImagePolicy
-metadata:
-  name: aicr-images-require-attestation
-spec:
-  images:
-  - glob: "ghcr.io/nvidia/aicr*"
-  authorities:
-  - keyless:
-      url: https://fulcio.sigstore.dev
-      identities:
-      - issuerRegExp: ".*\\.github\\.com.*"
-        subjectRegExp: "https://github.com/NVIDIA/aicr/.*"
-    attestations:
-    - name: build-provenance
-      predicateType: https://slsa.dev/provenance/v1
-      policy:
-        type: cue
-        data: |
-          predicate: buildDefinition: buildType: "https://actions.github.io/buildtypes/workflow/v1"
-```
-
-### Option 2: Kyverno
-
-```yaml
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: verify-aicr-attestations
-spec:
-  validationFailureAction: Enforce
-  rules:
-  - name: verify-attestation
-    match:
-      any:
-      - resources:
-          kinds: [Pod]
-    verifyImages:
-    - imageReferences:
-      - "ghcr.io/nvidia/aicr*"
-      attestations:
-      - predicateType: https://slsa.dev/provenance/v1
-        attestors:
-        - entries:
-          - keyless:
-              issuer: https://token.actions.githubusercontent.com
-              subject: https://github.com/NVIDIA/aicr/.github/workflows/*
-```
-
-### Test enforcement
-
-Allowed (attested image):
-
-```shell
-kubectl run aicr-ok --image="${IMAGE}:${TAG}"
-```
-
-Rejected (unsigned image):
-
-```shell
-kubectl run no-attestation --image=nginx:latest
-# Error from server: image verification failed: no matching attestations found
-```
+> Validated, cluster-tested copy-paste policies are tracked in
+> [#1537](https://github.com/NVIDIA/aicr/issues/1537). Earlier inline examples
+> here used the legacy Cosign format / a pre-bundle Policy Controller version
+> and an out-of-scope negative test, so they were removed rather than ship
+> policy that silently fails to verify.
 
 ## Troubleshooting
 

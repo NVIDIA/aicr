@@ -111,7 +111,7 @@ body:
     attributes:
       label: Environment
       placeholder: |
-        - AICR version (CLI `aicr version`, API image tag, or commit SHA):
+        - AICR version (CLI `aicr --version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
         - Platform (eks/gke/aks/oke/ocp/kind/lke/bcm/other):
         - Kubernetes version:
@@ -120,7 +120,7 @@ body:
         - GPU type (h100/h200/gb200/b200/a100/l40/rtx-pro-6000/other):
         - Workload intent (training/inference):
       value: |
-        - AICR version (CLI `aicr version`, API image tag, or commit SHA):
+        - AICR version (CLI `aicr --version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
         - Platform (eks/gke/aks/oke/ocp/kind/lke/bcm/other):
         - Kubernetes version:

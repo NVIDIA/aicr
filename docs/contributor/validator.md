@@ -178,8 +178,8 @@ validators.Run(map[string]validators.CheckFunc{
 | **stderr** | Streamed live to the user — use `slog.*` |
 | `/dev/termination-log` | Failure reason (≤ 4096 bytes), written on `return error` |
 
-**Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/recipe/recipe.yaml`
-(override via `AICR_SNAPSHOT_PATH`, `AICR_RECIPE_PATH`).
+**Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
+(override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).
 
 **Environment** (set by the Job deployer from the catalog entry):
 
@@ -712,7 +712,7 @@ spec:
 Use Chainsaw's `assert` (expected match) and `error` (unexpected match
 must not exist). Always include an existence guard before phase
 assertions so an empty namespace can't yield a vacuous pass. See the
-[Chainsaw assert reference](https://kyverno.github.io/chainsaw/latest/operations/check/assert/)
+[Chainsaw assert reference](https://kyverno.github.io/chainsaw/latest/operations/assert/)
 for the full operator list.
 
 **Read-only allowlist.** Registry-declared assert files MUST use only
