@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
@@ -204,8 +206,10 @@ func TestRelocatePointerToCanonical(t *testing.T) {
 		if _, err := WritePointerFile(canonical, other); err != nil {
 			t.Fatalf("write canonical: %v", err)
 		}
-		if _, err := RelocatePointerToCanonical(flat, signed()); err == nil {
-			t.Error("expected a conflict error when the canonical path holds different content")
+		// Assert the structured code, not just non-nil, so an INTERNAL
+		// regression can't masquerade as the EEXIST conflict contract.
+		if _, err := RelocatePointerToCanonical(flat, signed()); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+			t.Errorf("expected ErrCodeConflict when the canonical path holds different content, got %v", err)
 		}
 		// The flat source must be left in place on a refusal (no move happened).
 		if _, err := os.Stat(flat); err != nil {
