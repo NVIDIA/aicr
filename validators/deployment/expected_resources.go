@@ -240,20 +240,20 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 	return failures
 }
 
-// verifyGPUReadinessSignals runs the three Go-resident deep checks
+// verifyGPUReadinessSignals runs the two Go-resident deep checks
 // introduced by issue #611. Returns the human-readable failure strings
-// plus the first *errors.StructuredError encountered across all three
-// helpers so the caller can propagate the original error code (e.g.,
+// plus the first *errors.StructuredError encountered across all checks
+// so the caller can propagate the original error code (e.g.,
 // ErrCodeInternal from a discovery/RBAC failure) instead of flattening
 // it into the generic ErrCodeNotFound summary — per PR #1235 review.
 //
 // Migration disposition (per #1220 plan):
 //
-//   - clusterPolicyReady: candidate for migration to registry-declared
-//     Chainsaw YAML in recipes/checks/gpu-operator/health-check.yaml.
-//     Deferred to follow-up because the existing expected_resources_test.go
-//     suite mocks ClusterPolicy state extensively, and the migration must
-//     prove assertion equivalence rather than just code equivalence.
+//   - clusterPolicyReady: removed (#1495). Now sole-sourced by the
+//     Chainsaw `validate-cluster-policy-ready` check in
+//     recipes/checks/gpu-operator/health-check.yaml, which polls the
+//     same ClusterPolicy status.state for ~5m (vs the former one-shot
+//     Go check that caused spurious failures on fresh gpu-operator installs).
 //   - verifyNodewrightReady (formerly skyhookReady): stays in Go. Names
 //     are derived from the recipe's own ManifestFiles at validate-time
 //     (see expectedNodewrightNames), not from a stable label, so static

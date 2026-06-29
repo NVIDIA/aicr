@@ -15,7 +15,7 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: oke
+  name: oke-ol
 
 spec:
   # Inherits from base (implicit when spec.base is empty)
@@ -35,12 +35,6 @@ spec:
   componentRefs:
     # No CSI driver component needed.
     # OCI Block Volume CSI driver is a built-in OKE addon (enabled by default).
-
-    # OKE pre-installs cert-manager as a managed addon; disable the AICR-managed
-    # instance to avoid installing a conflicting second copy.
-    - name: cert-manager
-      overrides:
-        enabled: false
 
     # OKE-specific GPU Operator overrides
     # OKE pre-installs NVIDIA drivers and container toolkit on GPU shapes

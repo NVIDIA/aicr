@@ -455,7 +455,7 @@ func TestFromMeasurements_GPUUnknownModelFromTopology(t *testing.T) {
 // SKU still surfaces descriptively via GPUModel.
 func TestFromMeasurements_LabelRecognizedWithUnknownPCI(t *testing.T) {
 	got := FromMeasurements([]*measurement.Measurement{
-		gpuHardwareMeasurement("l40s"), // PCI: unsupported-for-matching SKU
+		gpuHardwareMeasurement("a10"), // PCI: unsupported-for-matching SKU (a10 is not in the recipe enum)
 		topologyMeasurement(1, map[string]string{
 			"nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3|node1",
 		}),
@@ -463,7 +463,7 @@ func TestFromMeasurements_LabelRecognizedWithUnknownPCI(t *testing.T) {
 	if got.Accelerator.Value != "h100" || got.Accelerator.Source != "nodeTopology.label.nvidia.com/gpu.product" {
 		t.Errorf("Accelerator = %+v, want h100 from label (primary)", got.Accelerator)
 	}
-	if got.GPUModel.Value != "l40s" {
-		t.Errorf("GPUModel.Value = %q, want l40s (PCI discovery)", got.GPUModel.Value)
+	if got.GPUModel.Value != "a10" {
+		t.Errorf("GPUModel.Value = %q, want a10 (PCI discovery)", got.GPUModel.Value)
 	}
 }

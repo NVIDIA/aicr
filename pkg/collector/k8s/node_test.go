@@ -224,6 +224,11 @@ func TestParseProvider(t *testing.T) {
 			want:       "",
 		},
 		{
+			name:       "OKE oci:// scheme (legacy format)",
+			providerID: "oci://ocid1.instance.oc1.us-chicago-1.example",
+			want:       "oke",
+		},
+		{
 			name:       "unknown format",
 			providerID: "custom-provider://some-id",
 			want:       "custom-provider",

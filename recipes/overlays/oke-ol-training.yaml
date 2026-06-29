@@ -15,11 +15,11 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: oke-training
+  name: oke-ol-training
 
 spec:
-  # Inherits from oke recipe (OKE-specific settings)
-  base: oke
+  # Inherits from oke-ol recipe (OKE Oracle Linux shared settings)
+  base: oke-ol
 
   criteria:
     service: oke

@@ -49,6 +49,21 @@ v2.49+). RELEASING.md §Container Attestations has both `gh` and
 Registry (GHCR) pull
 failure during the first 60s after tag publish. Re-run the workflow.
 
+## Release Supply-Chain Monitoring
+
+The `Rekor Monitor` workflow (`.github/workflows/rekor-monitor.yaml`) runs
+hourly and calls the upstream `sigstore/rekor-monitor` reusable workflow. It
+watches the public-good Rekor transparency log for two things: that the log
+stays append-only (consistency), and that no entry appears under AICR's release
+signing identity that a release did not produce (identity). On either failure it
+opens an issue.
+
+This protects the trust root every AICR consumer depends on: the release
+binaries, the signed recipe catalog, and the container images all chain to that
+one identity. When the workflow files an issue, follow the triage steps in the
+workflow file's header comment; an unrecognized identity hit should be treated
+as potential OIDC/key compromise.
+
 ## Reviewing Recipe Contributions
 
 A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,

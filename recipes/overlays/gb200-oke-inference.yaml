@@ -19,7 +19,7 @@ metadata:
 
 spec:
   # Inherits from oke-inference recipe (OKE + inference settings)
-  base: oke-inference
+  base: oke-ol-inference
 
   criteria:
     service: oke

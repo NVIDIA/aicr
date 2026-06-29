@@ -19,7 +19,7 @@ metadata:
 
 spec:
   # Inherits from oke-training recipe (OKE + training settings)
-  base: oke-training
+  base: oke-ol-training
 
   criteria:
     service: oke
