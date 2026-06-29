@@ -22,7 +22,7 @@ spec:
     UAT CUJ1: Training workload on live OKE cluster with L40S GPU nodes.
     Tests the aicr workflow against a real OKE cluster (BM.GPU.L40S.4):
       Step 1: Snapshot the live cluster
-      Step 2: Generate recipe (OKE/L40S/training/ubuntu)
+      Step 2: Generate recipe (OKE/L40S/training/ol)
       Step 3: Validate deployment against live snapshot
       Step 4: Generate bundle with node scheduling
       Step 5: Validate bundle structure
@@ -57,7 +57,7 @@ spec:
                 --service oke \
                 --accelerator l40s \
                 --intent training \
-                --os ubuntu \
+                --os ol \
                 --output "${WORK}/recipe.yaml"
               test -f "${WORK}/recipe.yaml"
 

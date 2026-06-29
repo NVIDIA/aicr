@@ -29,6 +29,8 @@ constraints:
     value: '>= 1.30'
 componentRefs: ## alphabetically sorted
   - name: cert-manager
+    overrides:
+      enabled: false
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler

@@ -76,6 +76,8 @@ spec:
       snapshot: snapshot.yaml
     agent:
       namespace: aicr-validation
+      nodeSelector:
+        node.dgxc.nvidia.com/has-gpu: "true"
       tolerations:
         - skyhook.nvidia.com=runtime-required:NoSchedule
         - nvidia.com/gpu=present:NoSchedule
