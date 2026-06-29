@@ -15,6 +15,8 @@
 package attestation
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +25,17 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
+
+// sha256HexLen is the number of hex characters in a SHA-256 digest body
+// (256 bits / 4 bits per hex char). A bundle digest is "sha256:" + exactly
+// this many lowercase-hex characters.
+const sha256HexLen = 64
+
+// maxPointerReadBytes caps the bytes read when comparing two pointer files for
+// content equality. Pointers are tiny; anything larger is a bug or hostile
+// input, so reading more would only risk memory. Matches the 1 MiB verifier
+// ceiling.
+const maxPointerReadBytes = 1 << 20
 
 // PointerInputs carries the pointer-file fields that are not derived
 // from the Bundle itself. Leave Signer nil for unsigned bundles.
@@ -141,18 +154,20 @@ func canonicalPointerSuffix(p *Pointer) (string, error) {
 	return filepath.Join(p.Recipe, source, file), nil
 }
 
-// isHexDigest reports whether d is a "sha256:"-prefixed, non-empty,
-// lowercase-hex digest — the only shape a bundle digest takes. It is the
-// fail-closed check before the digest is turned into a path leaf: hex contains
-// no path separator or ".", so a value that passes cannot traverse out of the
-// canonical pointer directory.
+// isHexDigest reports whether d is a canonical bundle digest: the literal
+// "sha256:" followed by exactly sha256HexLen lowercase-hex characters. It is
+// the fail-closed check before the digest is turned into a path leaf — hex
+// contains no path separator or ".", so a value that passes cannot traverse
+// out of the canonical pointer directory — and the exact-length requirement
+// rejects malformed digests (e.g. "sha256:nothex" or a truncated hash) rather
+// than admitting any hex-ish string.
 func isHexDigest(d string) bool {
 	const prefix = "sha256:"
 	if !strings.HasPrefix(d, prefix) {
 		return false
 	}
 	hex := d[len(prefix):]
-	if hex == "" {
+	if len(hex) != sha256HexLen {
 		return false
 	}
 	for _, c := range hex {
@@ -177,11 +192,13 @@ func isHexDigest(d string) bool {
 // pointer at recipes/evidence/<recipe>.yaml lands under
 // recipes/evidence/<recipe>/<source>/. Parent directories are created. It is
 // a no-op (returns currentPath) when the pointer already lives at its
-// canonical path. It fails closed — without moving anything — when the
-// pointer is unsigned, has no pushed digest, or a different file already
-// occupies the canonical path (the per-source pointer is immutable, so a
-// collision is a genuine conflict for the operator to resolve, not something
-// to overwrite).
+// canonical path, and idempotent when the canonical path already holds this
+// same pointer (same inode, or byte-identical after a git round trip) — it
+// just drops the redundant flat source. It fails closed — without moving
+// anything — when the pointer is unsigned, has no pushed digest, or the
+// canonical path already holds a file with DIFFERENT content (the per-source
+// pointer is immutable, so that is a genuine conflict for the operator to
+// resolve, not something to overwrite).
 func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) {
 	// canonicalPointerSuffix fails closed when the pointer is unsigned or has
 	// no pushed digest — the two states with no derivable canonical home.
@@ -212,13 +229,22 @@ func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) 
 	// for the operator to resolve, not something to overwrite.
 	if err := os.Link(currentPath, dest); err != nil {
 		if os.IsExist(err) {
-			// dest already exists. If it is the SAME inode as the source, a
-			// prior run linked it but stopped before removing the source — a
-			// completed placement, not a conflict. Finish it (idempotent
-			// recovery) rather than fail with a spurious clobber error. Only a
-			// dest backed by a DIFFERENT file is a real immutable-pointer
+			// dest already exists. Treat it as a completed placement — not a
+			// conflict — when it already holds this same pointer, so the move
+			// finishes idempotently. Two cases qualify:
+			//   - same inode: a prior run linked dest but stopped before
+			//     removing the source (within one filesystem session); and
+			//   - identical content: after a git round trip the flat source and
+			//     the committed nested copy are distinct inodes but byte-equal
+			//     (pointers serialize deterministically), so SameFile alone
+			//     would wrongly report a conflict.
+			// Only a dest holding DIFFERENT bytes is a real immutable-pointer
 			// conflict for the operator to resolve.
-			if sameInode(currentPath, dest) {
+			placed, eqErr := pointerAlreadyPlaced(currentPath, dest)
+			if eqErr != nil {
+				return "", eqErr
+			}
+			if placed {
 				if rmErr := os.Remove(currentPath); rmErr != nil {
 					return "", errors.Wrap(errors.ErrCodeInternal,
 						"canonical pointer already placed but failed to remove the flat source: "+currentPath, rmErr)
@@ -226,7 +252,7 @@ func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) 
 				return dest, nil
 			}
 			return "", errors.New(errors.ErrCodeConflict,
-				"canonical pointer path already exists, refusing to overwrite: "+dest)
+				"canonical pointer path already exists with different content, refusing to overwrite: "+dest)
 		}
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to link pointer to canonical path", err)
 	}
@@ -239,10 +265,30 @@ func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) 
 	return dest, nil
 }
 
+// pointerAlreadyPlaced reports whether dest already holds the same pointer as
+// currentPath — either the same inode (a partial move within one filesystem
+// session) or byte-identical content (the committed-both case, where a git
+// round trip leaves distinct inodes). It returns an error rather than a bool on
+// a read failure so the caller fails closed instead of silently treating an
+// unreadable dest as a match or a conflict.
+func pointerAlreadyPlaced(currentPath, dest string) (bool, error) {
+	if sameInode(currentPath, dest) {
+		return true, nil
+	}
+	srcBytes, err := readPointerBytes(currentPath)
+	if err != nil {
+		return false, err
+	}
+	destBytes, err := readPointerBytes(dest)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(srcBytes, destBytes), nil
+}
+
 // sameInode reports whether a and b are the same underlying file (e.g. two
-// hard links to one inode). Used to recognize a partially-completed relocation
-// — source still linked to dest — as already placed rather than a conflict. A
-// stat failure on either path reports false (treat as not-same; fail safe).
+// hard links to one inode). A stat failure on either path reports false (treat
+// as not-same; fail safe).
 func sameInode(a, b string) bool {
 	fa, err := os.Stat(a)
 	if err != nil {
@@ -253,6 +299,25 @@ func sameInode(a, b string) bool {
 		return false
 	}
 	return os.SameFile(fa, fb)
+}
+
+// readPointerBytes reads a pointer file, bounded to maxPointerReadBytes so a
+// bloated or hostile path cannot exhaust memory during the equality check. A
+// file at or past the cap is rejected (a pointer is never that large).
+func readPointerBytes(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // operator-supplied path
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open pointer for comparison", err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxPointerReadBytes+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read pointer for comparison", err)
+	}
+	if int64(len(data)) > maxPointerReadBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "pointer file exceeds size limit: "+path)
+	}
+	return data, nil
 }
 
 // WritePointer writes the pointer file to outputDir/pointer.yaml.

@@ -68,6 +68,19 @@ is signed. See
 > *Packages* settings. Any OCI-1.1 registry works; it just has to be
 > readable.
 
+> **Grant the fork's Actions write access to the package.** Signing in CI
+> *attaches* the signature as an OCI referrer — a registry **write**, separate
+> from the public-read above. Two GHCR prerequisites the signing leg needs:
+> 1. The package's **Actions access** must include your fork repo with the
+>    **Write** role (GHCR package → *Settings* → *Manage Actions access* → add
+>    your fork). Without it the attach fails with HTTP **403** even though
+>    `packages: write` is granted in the workflow.
+> 2. A package first pushed from a local `aicr validate --push` may be linked
+>    to **NVIDIA/aicr** (the chart/repo it was built against) rather than your
+>    fork. Re-link it to your fork (GHCR package → *Settings* → *Change
+>    repository*) so your fork's Actions token is authorized. The first push
+>    from the fork's own CI links it correctly.
+
 ### 2. Commit the unsigned pointer and push your branch
 
 ```shell

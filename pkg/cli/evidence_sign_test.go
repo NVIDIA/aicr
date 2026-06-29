@@ -44,7 +44,7 @@ func signedFlatPointerYAML(recipe string) string {
 	return "schemaVersion: 1.0.0\n" +
 		"recipe: " + recipe + "\n" +
 		"attestations:\n  - bundle:\n      oci: ghcr.io/yuanchen8911/aicr-evidence:x\n" +
-		"      digest: sha256:33d4cf36\n" +
+		"      digest: sha256:33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317\n" +
 		"      predicateType: " + attestation.PredicateTypeV1 + "\n" +
 		"    signer:\n      identity: yuanchen97@gmail.com\n" +
 		"      issuer: https://github.com/login/oauth\n" +
@@ -74,7 +74,7 @@ func TestEvidenceSignCmd_RelocateOnlyForAlreadySigned(t *testing.T) {
 	}
 
 	// 7c4c0edc8c765a95a0f3afdb3bbb8e91 is SourceSlug(issuer, identity).
-	want := filepath.Join(root, recipe, "7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36.yaml")
+	want := filepath.Join(root, recipe, "7c4c0edc8c765a95a0f3afdb3bbb8e91", "sha256-33d4cf36622ead990c43a596f6f53c62b87d9fa4708f59b7e3f356f215e54317.yaml")
 	if _, err := os.Stat(want); err != nil {
 		t.Errorf("pointer not relocated to canonical path %q: %v", want, err)
 	}
