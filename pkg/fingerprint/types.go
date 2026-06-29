@@ -52,7 +52,7 @@ type IntDimension struct {
 
 // OSDimension extends Dimension with the raw OS version string. Value
 // is the criteria-aligned OS kind (ubuntu, rhel, cos, amazonlinux,
-// talos); Version carries the unmodified VERSION_ID from
+// talos, ol); Version carries the unmodified VERSION_ID from
 // /etc/os-release for audit purposes (recipe.Criteria has no version
 // field, so Version does not participate in Match).
 type OSDimension struct {
@@ -71,7 +71,7 @@ type Fingerprint struct {
 	Service Dimension `json:"service" yaml:"service"`
 
 	// Accelerator is the recipe-supported GPU SKU used for criteria
-	// matching (h100, h200, gb200, b200, a100, l40, rtx-pro-6000). It is
+	// matching (h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000). It is
 	// intentionally limited to the pkg/recipe accelerator enum: a GPU that
 	// AICR does not have recipe coverage for is left empty here (see
 	// GPUModel for the descriptive identity). Sourced from the GFD

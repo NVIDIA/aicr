@@ -67,15 +67,17 @@ func TestFromMeasurements_PCIBackfill(t *testing.T) {
 	})
 
 	t.Run("unsupported SKU populates GPUModel + unknown-sku note, never the matching Accelerator value", func(t *testing.T) {
-		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("l40s")})
+		// a10 is a known PCI SKU (device_ids.go) but is not a recipe-supported
+		// accelerator enum, so it exercises the unsupported-SKU path.
+		got := FromMeasurements([]*measurement.Measurement{gpuHardwareMeasurement("a10")})
 		if got.Accelerator.Value != "" {
-			t.Errorf("Accelerator.Value = %q, want empty (l40s is not a recipe-supported enum)", got.Accelerator.Value)
+			t.Errorf("Accelerator.Value = %q, want empty (a10 is not a recipe-supported enum)", got.Accelerator.Value)
 		}
 		if got.Accelerator.Note != noteUnknownSKU || got.Accelerator.Source != sourceAcceleratorPCI {
 			t.Errorf("Accelerator = %+v, want unknown-sku note from PCI (GPU present but unsupported)", got.Accelerator)
 		}
-		if got.GPUModel.Value != "l40s" || got.GPUModel.Source != sourceAcceleratorPCI {
-			t.Errorf("GPUModel = %+v, want value l40s from PCI", got.GPUModel)
+		if got.GPUModel.Value != "a10" || got.GPUModel.Source != sourceAcceleratorPCI {
+			t.Errorf("GPUModel = %+v, want value a10 from PCI", got.GPUModel)
 		}
 	})
 
@@ -346,6 +348,9 @@ func TestFromMeasurements_ServiceDetection(t *testing.T) {
 		{"gke", "gke"},
 		{"aks", "aks"},
 		{"oke", "oke"},
+		{"oci", "oke"},
+		{"oci://ocid1.instance.oc1.us-chicago-1.example", "oke"},
+		{"ocid1.instance.oc1.us-chicago-1.anxxeljsaqwjupqcb4pa5kzxy4hef5dtclbkqsnmu6kedbkrne3s2bz5nwzq", "oke"},
 		{"kind", "kind"},
 		{"", ""},
 	}
@@ -374,6 +379,7 @@ func TestFromMeasurements_OSDetection(t *testing.T) {
 		{"amzn AL2023", "amzn", "2023", "amazonlinux", "2023"},
 		{"al2 alias", "al2", "2", "amazonlinux", "2"},
 		{"talos", "talos", "1.7.6", "talos", "1.7.6"},
+		{"oracle linux", "ol", "8.10", "ol", "8.10"},
 		{"unknown ID drops both value and version", "freebsd", "13", "", ""},
 		{"both empty", "", "", "", ""},
 	}
@@ -451,7 +457,7 @@ func TestFromMeasurements_GPUUnknownModelFromTopology(t *testing.T) {
 // SKU still surfaces descriptively via GPUModel.
 func TestFromMeasurements_LabelRecognizedWithUnknownPCI(t *testing.T) {
 	got := FromMeasurements([]*measurement.Measurement{
-		gpuHardwareMeasurement("l40s"), // PCI: unsupported-for-matching SKU
+		gpuHardwareMeasurement("a10"), // PCI: unsupported-for-matching SKU (a10 is not in the recipe enum)
 		topologyMeasurement(1, map[string]string{
 			"nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3|node1",
 		}),
@@ -459,7 +465,7 @@ func TestFromMeasurements_LabelRecognizedWithUnknownPCI(t *testing.T) {
 	if got.Accelerator.Value != "h100" || got.Accelerator.Source != "nodeTopology.label.nvidia.com/gpu.product" {
 		t.Errorf("Accelerator = %+v, want h100 from label (primary)", got.Accelerator)
 	}
-	if got.GPUModel.Value != "l40s" {
-		t.Errorf("GPUModel.Value = %q, want l40s (PCI discovery)", got.GPUModel.Value)
+	if got.GPUModel.Value != "a10" {
+		t.Errorf("GPUModel.Value = %q, want a10 (PCI discovery)", got.GPUModel.Value)
 	}
 }

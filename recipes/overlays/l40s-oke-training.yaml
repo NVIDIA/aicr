@@ -15,7 +15,7 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: gb200-oke-training
+  name: l40s-oke-training
 
 spec:
   # Inherits from oke-ol-training recipe (OKE + OL + training settings)
@@ -24,22 +24,20 @@ spec:
   criteria:
     service: oke
     os: ol
-    accelerator: gb200
+    accelerator: l40s
     intent: training
 
-  # Specific constraints for GB200 on OKE training workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  # Specific constraints for L40S on OKE training workloads.
+  # L40S is Ada Lovelace (not Hopper/Blackwell) — no IMEX/NVLink ComputeDomain
+  # requirement, so the recipe keeps the OKE training baseline K8s floor.
   constraints:
-    # GB200 NVLS performance validation provisions the IMEX channel through a
-    # DRA ComputeDomain that requires the GA resource.k8s.io/v1 API, which
-    # ships in Kubernetes 1.34+. Floor the recipe there so a DRA-incapable
-    # cluster is rejected up front instead of failing the performance phase
-    # at runtime when the v1 ResourceClaimTemplate never reconciles.
     - name: K8s.server.version
-      value: ">= 1.34"
+      value: ">= 1.30"
 
   componentRefs:
-    # GB200-specific GPU Operator overrides (inherits valuesFile from oke-training)
+    # L40S-specific GPU Operator overrides (inherits valuesFile from oke-training).
+    # Nodewright tuning is omitted: the nodewright-customizations packages do
+    # not target service: oke.
     - name: gpu-operator
       type: Helm
       dependencyRefs:
@@ -56,15 +54,16 @@ spec:
         topologyUpdater:
           enable: true
 
+  # Validation checks for L40S on OKE training workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  #
+  # The deployment-phase floor (4 standard checks + gpu-operator version pin)
+  # is contributed by the l40s-any cross-cutting overlay and is not duplicated
+  # here, matching the a100-oke-training pattern.
+  #
+  # Performance gating is intentionally omitted until an empirical L40S-on-OCI
+  # NCCL baseline is established, matching the a100-oke-training rationale.
   validation:
-    performance:
-      # NVLS runtime support is OKE-specific. NET/RDMA is intentionally left
-      # out until OCI-specific pod RDMA exposure is verified on the testbed.
-      checks:
-        - nccl-all-reduce-bw-nvls
-      constraints:
-        - name: nccl-all-reduce-bw-nvls
-          value: ">= 500"
     conformance:
       checks:
         - platform-health

@@ -180,7 +180,7 @@ both entry points share it. Adding business logic to `pkg/cli` or
 | `pkg/client/v1` | `aicr.Client` facade — shared SDK used by CLI, server, and external Go callers |
 | **Recipe and data** | |
 | `pkg/recipe` | Recipe resolution, overlay/mixin composition, registry. [recipe.md](recipe.md) |
-| `pkg/recipe/oskind` | Single source of truth for OS criterion string values (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Imported by `pkg/recipe`, `pkg/collector`, `pkg/snapshotter`, and the CLI. |
+| `pkg/recipe/oskind` | Single source of truth for OS criterion string values (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Imported by `pkg/recipe`, `pkg/collector`, `pkg/snapshotter`, and the CLI. |
 | `pkg/constraints` | Declarative constraint operators (`>=`, `<=`, tolerance) and evaluation |
 | `pkg/measurement` | Schema for collector output and validator input |
 | `pkg/serializer` | Deterministic YAML/JSON for evidence and bundles |

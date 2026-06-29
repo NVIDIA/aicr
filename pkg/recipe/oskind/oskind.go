@@ -34,6 +34,7 @@ const (
 	RHEL        = "rhel"
 	COS         = "cos"
 	AmazonLinux = "amazonlinux"
+	OracleLinux = "ol"
 	Talos       = "talos"
 )
 
@@ -41,7 +42,7 @@ const (
 // alphabetically. Used by the recipe package's GetCriteriaOSTypes and
 // any caller that needs to enumerate concrete OS choices.
 func All() []string {
-	return []string{AmazonLinux, COS, RHEL, Talos, Ubuntu}
+	return []string{AmazonLinux, COS, OracleLinux, RHEL, Talos, Ubuntu}
 }
 
 // IsKnown reports whether s is one of the supported OS values, including
@@ -50,7 +51,7 @@ func All() []string {
 // recipe.ParseCriteriaOSType.
 func IsKnown(s string) bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case Any, Ubuntu, RHEL, COS, AmazonLinux, Talos:
+	case Any, Ubuntu, RHEL, COS, AmazonLinux, OracleLinux, Talos:
 		return true
 	default:
 		return false

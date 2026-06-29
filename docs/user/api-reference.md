@@ -121,10 +121,10 @@ Generate an optimized configuration recipe based on environment parameters.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `any` |
-| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000`, `any` |
+| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
-| `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`, `any` |
+| `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
 | `nodes` | integer | 0 | GPU node count (0 = any) |
 
@@ -888,7 +888,7 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 
 **"Invalid accelerator type" error:**
 ```shell
-# Use valid values: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any
+# Use valid values: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 
