@@ -138,8 +138,15 @@ func runEvidenceSignCmd(ctx context.Context, cmd *cli.Command) error {
 		if rerr != nil {
 			return rerr
 		}
-		slog.Info("evidence pointer already signed; relocated to canonical path",
-			"from", path, "to", dest, "recipe", pointer.Recipe)
+		if dest == path {
+			// RelocatePointerToCanonical no-ops when the pointer is already at
+			// its canonical path; don't claim a move that didn't happen.
+			slog.Info("evidence pointer already signed and at its canonical path; nothing to do",
+				"path", path, "recipe", pointer.Recipe)
+		} else {
+			slog.Info("evidence pointer already signed; relocated to canonical path",
+				"from", path, "to", dest, "recipe", pointer.Recipe)
+		}
 		return nil
 	}
 

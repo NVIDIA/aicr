@@ -24,13 +24,15 @@
 #     --emit-attestation ./out --push ghcr.io/<owner>/aicr-evidence --no-sign
 #   cp ./out/pointer.yaml recipes/evidence/<recipe>.yaml
 #
-# They then run THIS workflow from their fork's Actions tab. It discovers
-# every flat pointer with an empty signer block, signs the bundle each one
-# references with the runner's ambient OIDC identity (where Sigstore IS
-# reachable), patches the pointer's signer block in place, RELOCATES it to
-# its canonical per-source path recipes/evidence/<recipe>/<source>/<digest>.yaml
-# (the layout the per-source contract gate requires), and commits the move
-# back to the branch. Clean no-op when there is nothing unsigned. This is the
+# They then run THIS workflow from their fork's Actions tab. It scans every
+# flat pointer under recipes/evidence/ except allowlist.yaml and runs
+# `aicr evidence sign --relocate` on each: an unsigned pointer is signed with
+# the runner's ambient OIDC identity (where Sigstore IS reachable) and then
+# relocated; an already-signed flat pointer left by a partial prior run is
+# relocated without re-signing (idempotent). The destination is the canonical
+# per-source path recipes/evidence/<recipe>/<source>/<digest>.yaml (the layout
+# the per-source contract gate requires), and the move is committed back to the
+# branch. Clean no-op when there are no flat pointers. This is the
 # commit-flat -> CI-sign -> CI-relocate-to-nested flow (#1530).
 #
 # Why workflow_dispatch (Option A): no recipe-name or bundle-ref inputs to

@@ -74,16 +74,19 @@ func (p TreeProblem) String() string { return p.Path + ": " + p.Message }
 //   - that verified signer is allowlisted as community or partner (first-party
 //     ingests directly and must not commit per-run pointers).
 //
-// One exception: a flat root-level <recipe>.yaml is accepted as a *pending*
-// pointer (unsigned, single-attestation, bundle-referencing) — the transient
+// allowPending controls the flat root-level <recipe>.yaml *pending* pointer
+// (unsigned, single-attestation, bundle-referencing) — the transient
 // commit-flat state of the two-phase publish flow (#1530), which the
-// fork-based CI leg signs and relocates under <recipe>/<source>/. See
-// checkPendingPointer.
+// fork-based CI leg signs and relocates under <recipe>/<source>/. When true it
+// is accepted as a valid intermediate; when false (the merge gate's posture) a
+// flat root file is rejected just like any other unexpected root file, so an
+// unsigned pointer cannot land on a protected branch — the relocation must
+// have run first. See checkPendingPointer.
 //
 // It returns the list of problems (empty when the tree is clean) plus a
 // non-nil error only for an operational failure (unreadable allowlist, etc.),
 // keeping policy violations distinct from infrastructure errors.
-func CheckEvidenceTree(root, allowlistPath string) ([]TreeProblem, error) {
+func CheckEvidenceTree(root, allowlistPath string, allowPending bool) ([]TreeProblem, error) {
 	al, err := allowlist.Load(allowlistPath)
 	if err != nil {
 		// allowlist.Load already returns coded errors (NotFound for a missing
@@ -104,14 +107,26 @@ func CheckEvidenceTree(root, allowlistPath string) ([]TreeProblem, error) {
 			if rd.Name() == AllowlistFileName {
 				continue
 			}
-			// Any other root-level .yaml is a flat *pending* pointer — the
+			path := filepath.Join(root, rd.Name())
+			if !allowPending {
+				// Merge-gate posture: a flat pointer must have been signed and
+				// relocated under <recipe>/<source>/ before it can land here.
+				// Reject any root-level file so an unsigned (unverifiable,
+				// potentially squatting) pointer cannot merge to a protected
+				// branch while the fork-based sign+relocate leg has not run.
+				problems = append(problems, TreeProblem{
+					Path:    path,
+					Message: "unexpected file at evidence root (pointers live under <recipe>/<source>/; a flat pending pointer must be signed and relocated before merge)",
+				})
+				continue
+			}
+			// allowPending: a root-level .yaml is a flat *pending* pointer — the
 			// transient commit-flat state of the two-phase publish flow
 			// (#1530). An unsigned pointer cannot live at its nested
 			// <source>/ path because that segment derives from the signer it
 			// does not yet have; the fork-based CI leg signs it and relocates
 			// it under <recipe>/<source>/. Accept it only as a valid, unsigned
 			// pending pointer named <recipe>.yaml; reject anything else.
-			path := filepath.Join(root, rd.Name())
 			if msg := checkPendingPointer(path); msg != "" {
 				problems = append(problems, TreeProblem{Path: path, Message: msg})
 			}

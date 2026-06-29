@@ -62,4 +62,8 @@ jobs:
       - name: Check evidence pointer contract
         env:
           GOFLAGS: -mod=vendor
+        # No --allow-pending: this is the merge gate, so a flat unsigned pending
+        # pointer is rejected. It must be signed and relocated under
+        # <recipe>/<source>/ (the fork-based sign leg does this) before merge —
+        # an unsigned pointer must never land on main, where that leg never runs.
         run: go run ./tools/evidence-pointercheck -root recipes/evidence

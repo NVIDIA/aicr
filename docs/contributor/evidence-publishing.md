@@ -72,10 +72,9 @@ is signed. See
 
 ```shell
 git add recipes/evidence/<recipe>.yaml
-# Use -s (DCO sign-off) — required for all contributors. NVIDIA org members
-# additionally use -S (cryptographic signing); external contributors use -s
-# alone. See CONTRIBUTING.md.
-git commit -s -m "evidence: <recipe> (unsigned; sign in CI)"
+# Every commit from every contributor must be both signed off (-s, DCO) and
+# cryptographically signed (-S). See CONTRIBUTING.md.
+git commit -s -S -m "evidence: <recipe> (unsigned; sign in CI)"
 git push
 ```
 
@@ -104,14 +103,21 @@ own signing commit, so it can't loop. The workflow:
   ([`aicr evidence sign --relocate`](../user/cli-reference.md#aicr-evidence-sign)),
 - commits the move back to the branch.
 
-It is a clean no-op when there are no unsigned pointers, and it fails with a
+It is a clean no-op when there are no flat pointers, and it fails with a
 clear message if it cannot pull a bundle (the public-package requirement
 above). Pull the commit it pushes (`git pull`) — your PR now carries a
 **signed, nested** pointer (the flat pending file is gone). The *bundle* is
 signed; the commit-back itself is a normal, unsigned GitHub Actions commit,
-which the eventual squash-merge re-signs under the repo's policy. The
-per-source contract gate accepts the flat pending pointer while the PR is in
-flight and requires the signed, nested pointer once the signing leg has run.
+which the eventual squash-merge re-signs under the repo's policy.
+
+> **Run this leg before merge.** The blocking per-source contract gate
+> requires a **signed, nested** pointer; it rejects a flat pending pointer
+> still sitting at the evidence root. That is deliberate — an unsigned pointer
+> must not merge to `main`, where the fork-only sign workflow would never run
+> to complete it. So a PR whose pointer is still flat stays red until this leg
+> signs and relocates it (and you `git pull` the commit-back). Local tooling
+> can validate the transient flat state with
+> `evidence-pointercheck --allow-pending`, but the merge gate does not set it.
 
 > The workflow declares `id-token: write` in its own `permissions:` block —
 > it is not a default. Your fork must have GitHub Actions enabled and not

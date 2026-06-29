@@ -170,20 +170,27 @@ func RelocatePointerToCanonical(currentPath string, p *Pointer) (string, error) 
 		return currentPath, nil
 	}
 	dest := filepath.Join(filepath.Dir(currentPath), relSuffix)
-	// Fail closed on a pre-existing destination rather than clobber it (the
-	// per-source pointer is immutable, so a collision is a real conflict).
-	// Checked before MkdirAll so a rejected relocation creates no directories.
-	if _, statErr := os.Stat(dest); statErr == nil {
-		return "", errors.New(errors.ErrCodeConflict,
-			"canonical pointer path already exists, refusing to overwrite: "+dest)
-	} else if !os.IsNotExist(statErr) {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to stat canonical pointer path", statErr)
-	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create canonical pointer directory", err)
 	}
-	if err := os.Rename(currentPath, dest); err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to move pointer to canonical path", err)
+	// Move with an atomic no-clobber guarantee: os.Link fails with EEXIST if
+	// dest already exists, so the exclusivity check and the placement are a
+	// single operation — no TOCTOU gap (a Stat+Rename would let another writer
+	// create dest after the Stat, and Rename silently clobbers it on Unix). The
+	// per-source pointer is immutable, so a pre-existing dest is a real conflict
+	// for the operator to resolve, not something to overwrite.
+	if err := os.Link(currentPath, dest); err != nil {
+		if os.IsExist(err) {
+			return "", errors.New(errors.ErrCodeConflict,
+				"canonical pointer path already exists, refusing to overwrite: "+dest)
+		}
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to link pointer to canonical path", err)
+	}
+	// The link now holds dest; drop the flat source to complete the move. If
+	// this fails, dest is already correct — surface the leftover source.
+	if err := os.Remove(currentPath); err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			"relocated pointer to canonical path but failed to remove the flat source: "+currentPath, err)
 	}
 	return dest, nil
 }
