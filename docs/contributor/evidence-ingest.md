@@ -8,6 +8,12 @@ bundles produced by `aicr validate --emit-attestation --push` (see
 consensus view. The tree it writes is rendered and served by
 [dashboard-publish (GP5)](evidence-dashboard-publish.md).
 
+The `GPn` labels name stages of the evidence-corroboration pipeline (epic
+#1400): **GP1** signer-allowlist management (`recipes/evidence/allowlist.yaml`),
+**GP2** ingest/verify (this doc), **GP3** dashboard infrastructure
+(`infra/evidence-dashboard`), **GP4** consensus/corroboration
+(`pkg/corroborate`), and **GP5** dashboard publish.
+
 Its defining property is **verify-before-count**: a bundle's signature,
 issuer, identity, and source registry are all checked in a step that
 holds no bucket-write credentials, *before* any of its results are

@@ -1,8 +1,8 @@
-# ADR-013: OpenShift Support via In-Tree Helm Charts
+# ADR-014: OpenShift Support via In-Tree Helm Charts
 
 ## Status
 
-+**Accepted** — 2026-06-16 (implemented in OCP support PR stack).
+**Accepted** — 2026-06-16 (implemented in OCP support PR stack).
 
 ## Problem
 

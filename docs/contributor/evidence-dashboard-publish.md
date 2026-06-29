@@ -5,7 +5,9 @@ On every merge to `main` (and on demand) it regenerates the interim-evidence
 dashboard from the source-keyed evidence tree in GCS and deploys the static
 site to GitHub Pages. It is the consumer end of the chain whose producer is
 [evidence-ingest (GP2)](evidence-ingest.md): ingest writes the tree, publish
-renders and serves it.
+renders and serves it. (For the full `GPn` stage map of the
+evidence-corroboration pipeline, see
+[evidence-ingest.md](evidence-ingest.md).)
 
 Fern publishes the product docs to docs.nvidia.com via `publish-fern-docs.yml`;
 that is a separate surface. This workflow is the only one that deploys to
