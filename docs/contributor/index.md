@@ -110,7 +110,7 @@ intent; the linked page has the walkthrough.
 | Add or change a CLI flag or subcommand | `pkg/cli/<name>.go` + register in `pkg/cli/root.go` | [cli.md](cli.md) |
 | Add an HTTP endpoint | `pkg/server/<name>_handler.go` + `api/aicr/v1/server.yaml` | [api-server.md](api-server.md) |
 | Add a new community-standard bundle output format | `pkg/bundler/deployer/<name>/` | Open an issue first — discuss before coding |
-| Cut a release | `tools/release` + `git push origin <tag>` | [maintaining.md](maintaining.md) |
+| Cut a release | `tools/bump` (pushes the tag, triggering `on-tag.yaml`) | [maintaining.md](maintaining.md) |
 | Run unit / chainsaw / KWOK / e2e tests | `make qualify` and friends | [tests.md](tests.md) |
 
 ## Your First Contribution
@@ -130,7 +130,8 @@ A typical first PR path:
    chart pin, run `make bom-docs` and commit the regenerated
    `docs/user/container-images.md`. CLAUDE.md treats this as a
    hard rule.
-6. Sign the commit (`git commit -S`), open a PR, and let CI run.
+6. Sign the commit (`git commit -s -S` — DCO sign-off **and** cryptographic
+   signature, both required), open a PR, and let CI run.
 
 Use the PR template in `.github/PULL_REQUEST_TEMPLATE.md` as-is — do
 not inline a modified copy. Reviewers grade against
@@ -191,7 +192,7 @@ both entry points share it. Adding business logic to `pkg/cli` or
 | `pkg/fingerprint` | Cluster shape fingerprint for caching and provenance |
 | **Bundle generation** | |
 | `pkg/bundler` | Per-component bundle generation entry point. [component.md](component.md) |
-| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocdhelm`, `flux` |
+| `pkg/bundler/deployer` | Output adapters: `helm`, `helmfile`, `argocd`, `argocd-helm`, `flux` |
 | `pkg/bundler/validations` | Bundle-time component validation checks. [validator.md](validator.md#component-validations-bundle-time) |
 | `pkg/component` | Bundler utilities and test helpers |
 | `pkg/manifest`, `pkg/helm`, `pkg/bom` | Manifest rendering, chart inspection, BOM extraction |
@@ -219,7 +220,7 @@ deployment tools:
 | `helm` | Per-component `values.yaml` + install script | Direct Helm install |
 | `helmfile` | `helmfile.yaml` declarative release manifest | GitOps with Helmfile |
 | `argocd` | Argo CD `Application` manifests with sync-waves | Argo CD GitOps |
-| `argocdhelm` | Argo CD `Application` referencing per-component Helm charts | Argo CD + upstream Helm |
+| `argocd-helm` | Argo CD `Application` referencing per-component Helm charts | Argo CD + upstream Helm |
 | `flux` | Flux `HelmRelease` + `Kustomization` manifests | Flux GitOps |
 
 We are open to adding additional community-standard targets when
@@ -279,9 +280,10 @@ These five decisions shape how the codebase is laid out. Code that
 fights them tends to read as a re-architecture.
 
 - **Concurrent collection with `errgroup`.** Collectors run in
-  parallel; failure of any collector cancels the rest via context.
-  Fail-fast is the default; best-effort partial collection would
-  hide systemic problems behind partial data.
+  parallel under an `errgroup`. Snapshot collection is best-effort:
+  `collectSafe` logs an individual collector's failure and returns
+  `nil`, so one collector erroring degrades the snapshot gracefully
+  rather than aborting the whole capture.
 - **Pluggable collectors via factory.** Collectors implement a
   common interface and are constructed by `pkg/collector.Factory`,
   then wired into the snapshot run by `pkg/snapshotter`. Adding a
@@ -308,6 +310,9 @@ By contributor task:
 - **Adding a snapshot collector** → [collector.md](collector.md)
 - **Adding a validator check** → [validator.md](validator.md)
 - **Adding a bundle-time component validation** → [validator.md](validator.md#component-validations-bundle-time)
+- **Producing and signing recipe evidence** → [evidence-publishing.md](evidence-publishing.md)
+- **Ingesting published evidence into the source-keyed tree (GP2)** → [evidence-ingest.md](evidence-ingest.md)
+- **Publishing the evidence dashboard to GitHub Pages (GP5)** → [evidence-dashboard-publish.md](evidence-dashboard-publish.md)
 - **Maintaining recipes and cutting releases** → [maintaining.md](maintaining.md)
 - **Writing or running tests (unit, chainsaw, KWOK, e2e)** → [tests.md](tests.md)
 - **Using the project's Claude skills (snapshot analysis, docs audit, demos, decks, OpenVEX, release notes)** → [skills.md](skills.md)

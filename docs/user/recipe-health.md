@@ -34,8 +34,8 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **37**
-- Pass: **37** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **39**
+- Pass: **39** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -59,7 +59,7 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 | h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
-| h100-eks-ubuntu-training-slurm | eks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
+| h100-eks-ubuntu-training-slurm | eks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h200-eks-inference | eks | h200 | — | inference | — | pass | R:0 D:4 P:0 C:5 | pending |
 | h200-eks-training | eks | h200 | — | training | — | pass | R:0 D:4 P:1 C:10 | pending |
 | rtx-pro-6000-eks-ubuntu-inference-dynamo | eks | rtx-pro-6000 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
@@ -69,12 +69,14 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 | b200-gke-cos-training-kubeflow | gke | b200 | cos | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
-| h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
+| h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-inference-dynamo | kind | h100 | — | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-training-kubeflow | kind | h100 | — | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
-| h100-kind-training-slurm | kind | h100 | — | training | slurm | pass | R:0 D:4 P:0 C:9 | pending |
+| h100-kind-training-slurm | kind | h100 | — | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
 | rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:8 | pending |
 | rtx-pro-6000-lke-ubuntu-training | lke | rtx-pro-6000 | ubuntu | training | — | pass | R:0 D:4 P:0 C:8 | pending |
+| ocp-inference | ocp | — | — | inference | — | pass | R:0 D:3 P:0 C:1 | pending |
+| ocp-training | ocp | — | — | training | — | pass | R:0 D:3 P:0 C:1 | pending |
 | a100-oke-ubuntu-training-kubeflow | oke | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:8 | pending |
 | gb200-oke-ubuntu-inference-dynamo | oke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:10 | pending |
 | gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:8 | pending |

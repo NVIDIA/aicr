@@ -28,20 +28,24 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 |------------|------|---------|
 | `snapshot` | `snapshot.go` | Collect cluster/OS/GPU state; write file, stdout, or `cm://ns/name` ConfigMap. Can deploy a one-shot Job. |
 | `recipe` | `recipe.go` | Resolve a recipe from criteria flags or a snapshot; emit the hydrated spec. |
+| `recipe list` | `recipe_list.go` | List recipes matching the given criteria. |
+| `recipe sign-catalog` | `recipe_sign_catalog.go` | Sign the recipe catalog. |
+| `recipe verify-catalog` | `recipe_verify_catalog.go` | Verify the signed recipe catalog. |
 | `query` | `query.go` | Extract a single hydrated value from a recipe (`--selector components.gpu-operator.values.driver.version`). |
-| `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocdhelm`, `flux`). |
-| `bundle verify` | `bundle_verify.go` | Verify a bundle's Sigstore signature and OCI digest. |
+| `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`). |
+| `verify` | `bundle_verify.go` | Verify a bundle's checksums, attestation signatures, and provenance chain; report the achieved trust level and enforce a `--min-trust-level` / creator / CLI-version policy. |
 | `validate` | `validate.go` | Evaluate recipe constraints against a snapshot or live cluster; optionally emit evidence. |
 | `evidence digest` | `evidence_digest.go` | Print the canonical digest of a resolved recipe (offline). |
+| `evidence sign` | `evidence_sign.go` | Sign an emitted evidence bundle. |
 | `evidence publish` | `evidence_publish.go` | Sign and push an already-emitted evidence bundle; write its pointer. |
 | `evidence verify` | `evidence_verify.go` | Verify integrity claims on an evidence bundle (offline or registry). |
-| `diff` | `diff.go` | Structural diff between two recipes or snapshots. |
+| `diff` | `diff.go` | Compare two snapshots field-by-field, reporting added, removed, and modified readings (optionally failing on drift). |
 | `mirror` / `mirror list` | `mirror.go` | Mirror charts and images referenced by a recipe to an air-gapped registry; list what would be mirrored. |
 | `trust update` | `trust.go` | Refresh the Sigstore TUF trust root used by `verify` / `evidence verify`. |
 | `skill` | `skill.go` | Generate an agent skill file (Claude Code, Codex) from the live CLI command tree. |
 
 Each `*Cmd()` factory returns a `*cli.Command`. Verb-group parents
-(`evidence`, `mirror`, `trust`, `bundle verify`) declare their
+(`recipe`, `evidence`, `mirror`, `trust`) declare their
 subcommands in their own `Commands:` slice; see `evidence.go` for the
 canonical shape.
 

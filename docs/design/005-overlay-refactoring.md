@@ -2,8 +2,14 @@
 
 ## Status
 
-**Proposed** — 2026-03-19
+**Accepted, implemented** — 2026-03-19
 **Revised** — 2026-04-06 (prototype findings, resequenced phases)
+
+The mixin-based refactor has shipped: shared OS/platform fragments now live in
+`recipes/mixins/` (e.g. `os-ubuntu.yaml`, `os-talos.yaml`,
+`platform-kubeflow.yaml`, `platform-inference.yaml`) and are composed by leaf
+overlays in `recipes/overlays/` via the `pkg/recipe` overlay/mixin resolution
+system, eliminating the per-leaf duplication described below.
 
 ## Problem
 

@@ -1,5 +1,28 @@
 # ADR-006: Container Image Pinning Policy
 
+## Status
+
+**Accepted** — the three-layer policy below stands. The enforcement boundary is
+narrower than the Decision implies, and is clarified here:
+
+- **Chart-version pinning IS gated by `make qualify`.** `lint` depends on
+  `bom-pinning-check`, which runs `go run ./tools/bom ... -strict -skip-helm`
+  to verify every Helm component in the registry carries a pinned chart
+  version (per this ADR); `qualify` in turn depends on `lint`. So a missing
+  chart-version pin fails `lint` and therefore fails the merge gate — it is
+  not merely caught at review.
+- **Only BOM-doc *freshness* is opt-in.** `make bom-check` (which verifies the
+  committed `docs/user/container-images.md` matches a fresh regen) is a
+  separate target **not** wired into `qualify`, `lint`, or the merge gate. A
+  stale BOM doc — e.g. when an unbumped pin picks up upstream image drift — is
+  caught at PR review, not automatically gated. This is the only "opt-in"
+  piece; do not generalize it to chart-version strictness.
+- **Digest pinning is not yet universal.** Tag-only image references still
+  exist in tree, and the digest-pin test (`recipes/manifest_images_test.go`)
+  carries an explicit exemption map (e.g. CRD schemas that do not accept an
+  `@sha256:` field). Treat "every overridden image carries an `@sha256:`
+  digest" as the target state, not a fully enforced invariant.
+
 ## Problem
 
 AICR currently pins container images inconsistently across the registry. The
@@ -78,8 +101,10 @@ The reproducibility / patch-flow trade-off looks different at each layer:
 
 1. **Pin chart versions for every Helm component, no exceptions.**
    `recipes/registry.yaml` MUST declare `defaultVersion` for every helm
-   component. New components without a pin are rejected at PR review and by
-   `make bom BOM_STRICT=1` (wired into `make qualify`).
+   component. A missing chart-version pin is rejected by `make qualify`:
+   `lint` depends on `bom-pinning-check` (which runs the BOM tool with
+   `-strict`), and `qualify` depends on `lint`, so the pin is enforced at the
+   merge gate — not merely caught at review.
 
 2. **Digest-pin every image AICR overrides explicitly in-tree.** Anywhere
    AICR's `recipes/components/<name>/values.yaml` or embedded manifests set
@@ -115,7 +140,9 @@ flow; the diff lands as a normal PR with CI.
 
 A PR adding a new helm component to `recipes/registry.yaml` must:
 
-1. Set `defaultVersion`. CI gates this via `make bom BOM_STRICT=1`.
+1. Set `defaultVersion`. `bom-pinning-check` enforces this — it runs under
+   `make lint` (hence `make qualify`), so a missing pin fails the merge gate
+   (see Status).
 2. If the PR's `recipes/components/<name>/values.yaml` overrides any
    `image:` reference, every overridden value must include an `@sha256:`
    digest.
@@ -175,8 +202,9 @@ A PR adding a new helm component to `recipes/registry.yaml` must:
 1. **This ADR lands.** Sets policy, no code changes.
 2. **#748 Phase B lands.** Pin `gpu-operator`, `network-operator`,
    `nvidia-dra-driver-gpu`, `nodewright-operator` chart versions. Wire
-   `make bom BOM_STRICT=1` into `make qualify` so the contract is
-   enforced for new components.
+   chart-version strictness into the merge gate via `bom-pinning-check`
+   (a `make lint` dependency, hence covered by `make qualify`) so the
+   contract is enforced for new components.
 3. **#765 lands.** Tighten `pkg/bom.isLikelyImage` so chart-default
    placeholders (`vgpu-manager`-style bare scalars) don't dilute the
    published BOM.

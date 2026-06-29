@@ -1,8 +1,8 @@
-# ADR-013: OpenShift Support via In-Tree Helm Charts
+# ADR-014: OpenShift Support via In-Tree Helm Charts
 
 ## Status
 
-+**Accepted** — 2026-06-16 (implemented in OCP support PR stack).
+**Accepted** — 2026-06-16 (implemented in OCP support PR stack).
 
 ## Problem
 
@@ -80,7 +80,7 @@ The bundler emits the standard numbered-folder structure. For a component
     Chart.yaml
     templates/
         check-job.yaml
-    install.sh                         # helm install --wait --wait-for-jobs
+    install.sh                         # helm upgrade --install --wait --timeout
 003-gpu-operator-ocp/                  # KindLocalHelm — Custom Resource
     Chart.yaml
     templates/
@@ -136,7 +136,7 @@ recipes/components/
 ├── gpu-operator-ocp/
 │   ├── values.yaml                # ClusterPolicy spec defaults
 │   └── manifests/
-│       └── clusterpolicy.yaml     # Helm template: {{ .Values.spec.* }}
+│       └── clusterpolicy.yaml     # Helm template: {{ $v.driver.* }} (flat keys)
 ```
 
 Manifests are **Helm templates** rendered by the bundle rendering engine
@@ -177,7 +177,11 @@ This is the existing mechanism used by `gke-nccl-tcpxo`,
 
 This enables the full overlay system: overlays reference overlay-specific
 values files via `valuesFile` in `componentRefs`, and users can customize
-at bundle time via `--set gpuoperatorocp:spec.driver.version=570.86.16`.
+at bundle time via `--set gpuoperatorocp:driver.rdma.enabled=false` (CR
+values keys are flat — no `spec.` prefix — since the template maps them
+into the ClusterPolicy CR `spec`). The driver version is not overridable on
+OCP: the operator manages it via the certified driver container, so
+`driver.version` is absent from the values file by design.
 
 ### Overlay structure
 
@@ -224,7 +228,7 @@ handle:
 
 | Deployer | Phase 1 (OLM) | Readiness gate | Phase 2 (CR) |
 |----------|---------------|----------------|--------------|
-| Helm | `helm upgrade --install` via `deploy.sh` | `--wait --wait-for-jobs` (readiness Job) | `helm upgrade --install` |
+| Helm | `helm upgrade --install` via `deploy.sh` | `--wait --timeout` (Helm `--wait` blocks on the readiness hook Job; `--wait-for-jobs` is not used) | `helm upgrade --install` |
 | Argo CD | `Application` CR, sync-wave N | `Application` CR, sync-wave N+1 | `Application` CR, sync-wave N+2 |
 
 Helmfile and Flux are **not supported** with `--readiness-hooks` — the
@@ -325,35 +329,40 @@ This ensures consistency across services: the same knobs (`driver`,
 `toolkit`, `dcgm`, `dcgmExporter`, `cdi`, `hostPaths`, etc.) appear in
 OCP CR values as in EKS/AKS/GKE Helm values, even though the underlying
 mechanism differs (ClusterPolicy CR fields vs. Helm chart values). This
-makes overlay-specific values files (e.g., `values-training.yaml`)
-portable across services where possible and keeps the `--set` override
-keys familiar to users.
+makes the component's values portable across services where possible and
+keeps the `--set` override keys familiar to users.
 
 ```yaml
-name: gpu-cluster-policy
-spec:
-  operator:
-    defaultRuntime: crio
-  driver:
+name: cluster-policy
+operator:
+  defaultRuntime: crio
+driver:
+  enabled: true
+  rdma:
     enabled: true
-    version: "570.86.16"
-  toolkit:
-    enabled: true
-  devicePlugin:
-    enabled: true
-  dcgm:
-    enabled: true
-  dcgmExporter:
-    enabled: true
-  migManager:
-    enabled: true
-  gdrcopy:
-    enabled: true
-  nodeStatusExporter:
-    enabled: true
-  gfd:
-    enabled: true
+toolkit:
+  enabled: true
+devicePlugin:
+  enabled: true
+dcgm:
+  enabled: true
+dcgmExporter:
+  enabled: true
+migManager:
+  enabled: true
+gdrcopy:
+  enabled: true
+nodeStatusExporter:
+  enabled: true
+gfd:
+  enabled: true
 ```
+
+Keys are flat (no `spec.` prefix) — the template maps them into the
+ClusterPolicy CR `spec` itself. A `--set` override therefore omits `spec.`,
+e.g. `--set gpuoperatorocp:driver.rdma.enabled=false`. The driver version is
+not overridable on OCP (operator-managed); `driver.version` is intentionally
+absent from the values file.
 
 **CR template** (`recipes/components/gpu-operator-ocp/manifests/clusterpolicy.yaml`):
 
@@ -372,19 +381,17 @@ metadata:
 spec: {{ $v.spec | toYaml | nindent 2 }}
 ```
 
-**Training overlay values** (`recipes/components/gpu-operator-ocp/values-training.yaml`):
-
-```yaml
-spec:
-  migManager:
-    enabled: true
-  gdrcopy:
-    enabled: true
-```
+As implemented, the component ships a single
+`recipes/components/gpu-operator-ocp/values.yaml`; all GPU Operator settings
+(including `migManager` and `gdrcopy`) live in that base file, and the
+`ocp-training` overlay carries no component value overrides. The
+training-specific split sketched during design was not needed.
 
 Overlays reference values files via `valuesFile` in `componentRefs`. Users
-can further customize at bundle time:
-`--set gpuoperatorocp:spec.driver.version=570.86.16`.
+can further customize at bundle time, e.g.
+`--set gpuoperatorocp:driver.rdma.enabled=false`. CR values keys are flat
+(no `spec.` prefix); the driver version is operator-managed and not
+overridable on OCP.
 
 **Note:** Users who prefer raw manifests over Helm-based deployment can run
 `helm template <release> <bundle-folder>` on any emitted `KindLocalHelm`
