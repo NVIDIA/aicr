@@ -52,16 +52,18 @@ rather than self-asserted, then logged to the public Rekor transparency log.
 
 > **Note on the SLSA Build Level.** GitHub's attestation service yields Build
 > Level 2 by default; Build Level 3 additionally requires build **isolation**
-> via a dedicated reusable workflow. AICR currently attests from its release
-> job using composite actions (not an isolated reusable workflow), so the exact
-> level claimed elsewhere in the docs is being reconciled with the build
-> architecture in [#1536](https://github.com/NVIDIA/aicr/issues/1536).
+> via a dedicated reusable workflow. AICR generates image attestations from the
+> reusable [`attest-images.yaml`](https://github.com/NVIDIA/aicr/blob/main/.github/workflows/attest-images.yaml)
+> workflow, so the image provenance is **Build Level 3** — its signer identity is
+> that reusable workflow, which the caller cannot tamper with. Verify it by
+> pinning `--signer-workflow .../attest-images.yaml` (below). CLI binaries are
+> signed with `cosign attest-blob` from the release job and remain Build Level 2.
 
 **Method 1: GitHub CLI**
 
 ```shell
 # Verify provenance exists and is valid (using digest)
-gh attestation verify oci://${IMAGE_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://${IMAGE_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # Output shows:
 # ✓ Verification succeeded!
@@ -76,7 +78,7 @@ gh attestation verify oci://${IMAGE_DIGEST} --repo NVIDIA/aicr --signer-workflow
 ```shell
 # Get full provenance data (using digest)
 gh attestation verify oci://${IMAGE_DIGEST} \
-  --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}" \
+  --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}" \
   --format json | jq '.[] | select(.verificationResult.statement.predicateType | contains("slsa"))'
 
 # Key fields in provenance:
@@ -95,7 +97,7 @@ commit SHA, workflow, and run. A representative slice:
   "verificationResult": {
     "signature": {
       "certificate": {
-        "subjectAlternativeName": "https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v0.8.12",
+        "subjectAlternativeName": "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/v0.8.12",
         "issuer": "https://token.actions.githubusercontent.com",
         "githubWorkflowName": "on_tag",
         "githubWorkflowRepository": "NVIDIA/aicr",
@@ -115,7 +117,7 @@ commit SHA, workflow, and run. A representative slice:
 All AICR releases are built using GitHub Actions with full transparency:
 
 1. **Source Code** — Public GitHub repository
-2. **Build Workflow** — `.github/workflows/on-tag.yaml` (version controlled)
+2. **Build & Attest Workflows** — `.github/workflows/on-tag.yaml` builds and calls the reusable `.github/workflows/attest-images.yaml`, which signs the image attestations (both version controlled)
 3. **Build Logs** — Public GitHub Actions run logs
 4. **Attestations** — Signed and stored in the public transparency log (Rekor)
 5. **Artifacts** — Published to GitHub Releases and GHCR
@@ -176,12 +178,12 @@ cat aicr_${VERSION}_${OS}_${ARCH}.sbom.json
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ${IMAGE_API_DIGEST} | \
   jq -r '.payload' | base64 -d | jq '.predicate' > sbom.json
 
 # Method 2: GitHub CLI (build provenance only; the SPDX SBOM needs Method 1's Cosign flow)
-gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}" --format json
+gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}" --format json
 ```
 
 ### SBOM format
@@ -237,13 +239,13 @@ jq '.creationInfo.created' sbom.json
 
 ```shell
 # Verify using digest (preferred - no warnings)
-gh attestation verify oci://${IMAGE_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://${IMAGE_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # Verify the aicrd image
-gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # Note: You can still use tags, but tools may show warnings about mutability
-# gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+# gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 ```
 
 **Method 2: Cosign (SBOM attestations)**
@@ -253,14 +255,14 @@ gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-work
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ${IMAGE_DIGEST}
 
 # Extract and view the SBOM predicate
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ${IMAGE_DIGEST} | jq -r '.payload' | base64 -d | jq '.predicate'
 ```
 
@@ -325,7 +327,7 @@ Sigstore *bundle* format (not the legacy Cosign signature format):
 Pin every policy to AICR's release identity:
 
 - **issuer:** `https://token.actions.githubusercontent.com`
-- **subject:** `https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/*` (the release workflow; narrow to the release pattern rather than trusting every workflow/ref)
+- **subject:** `https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*` (the reusable attestation workflow that signs image provenance/SBOMs; narrow to the release pattern rather than trusting every workflow/ref)
 
 ### Kyverno
 
@@ -365,7 +367,7 @@ spec:
         url: https://fulcio.sigstore.dev
         identities:
           - issuer: https://token.actions.githubusercontent.com
-            subjectRegExp: '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$'
+            subjectRegExp: '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$'
       ctlog:
         url: https://rekor.sigstore.dev
       attestations:
