@@ -28,6 +28,12 @@ spec:
     os: ubuntu
     intent: training
 
+  # No performance phase: RTX Pro 6000 is a workstation-class card and LKE
+  # exposes no multi-node RDMA fabric, so the nccl-all-reduce-bw gate has no
+  # meaningful threshold at any node count (an all-reduce here is
+  # Ethernet-bound). The strict validation floor exempts LKE rtx-pro-6000
+  # training accordingly. See #1008.
+
   # Ubuntu OS constraints via mixin
   mixins:
     - os-ubuntu

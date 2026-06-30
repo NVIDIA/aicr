@@ -26,6 +26,12 @@ spec:
     accelerator: rtx-pro-6000
     intent: training
 
+  # No performance phase: RTX Pro 6000 is a workstation-class card and LKE
+  # exposes no multi-node RDMA fabric, so the nccl-all-reduce-bw gate has no
+  # meaningful threshold at any node count (an all-reduce here is
+  # Ethernet-bound). The strict validation floor exempts LKE rtx-pro-6000
+  # training accordingly. See #1008.
+
   # Specific constraints for RTX PRO 6000 on LKE training workloads
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:

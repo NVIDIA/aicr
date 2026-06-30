@@ -99,6 +99,21 @@ func (c classification) requiresPerformance() bool {
 	if c.IsKind || !c.isAcceleratorBound() {
 		return false
 	}
+	// LKE RTX Pro 6000 training has no meaningful NCCL all-reduce gate at
+	// any node count: RTX Pro 6000 is a workstation-class card and Linode
+	// exposes no multi-node RDMA fabric, so an all-reduce would be
+	// Ethernet-bound with no empirically-grounded threshold to assert —
+	// even a multi-node request cannot run the bandwidth check meaningfully.
+	// Exempt these overlays rather than block on a Linode testbed that
+	// would only ever measure Ethernet-bound throughput. Scoped to lke so
+	// a future rtx-pro-6000 training overlay on a fabric-capable service
+	// is not silently exempted. See #1008.
+	lkeRTXProTraining := c.Service == CriteriaServiceLKE &&
+		c.Accelerator == CriteriaAcceleratorRTXPro6000 &&
+		c.Intent == CriteriaIntentTraining
+	if lkeRTXProTraining {
+		return false
+	}
 	if c.Intent == CriteriaIntentTraining {
 		return true
 	}
@@ -357,6 +372,10 @@ func TestClassifyOverlay(t *testing.T) {
 		{"training-eks-h100", CriteriaIntentTraining, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, true},
 		{"training-aks-h100-kubeflow", CriteriaIntentTraining, CriteriaServiceAKS, CriteriaPlatformKubeflow, CriteriaAcceleratorH100, false, true, true},
 		{"training-kind-h100", CriteriaIntentTraining, CriteriaServiceKind, CriteriaPlatformAny, CriteriaAcceleratorH100, true, true, false},
+		// RTX Pro 6000 is workstation-class (single-node, no multi-node
+		// RDMA fabric): deployment required, but the NCCL all-reduce
+		// performance floor is N/A. See requiresPerformance.
+		{"training-lke-rtx-pro-6000", CriteriaIntentTraining, CriteriaServiceLKE, CriteriaPlatformAny, CriteriaAcceleratorRTXPro6000, false, true, false},
 		{"inference-eks-h100-plain", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformAny, CriteriaAcceleratorH100, false, true, false},
 		{"inference-eks-h100-dynamo", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformDynamo, CriteriaAcceleratorH100, false, true, true},
 		{"inference-eks-h100-nim", CriteriaIntentInference, CriteriaServiceEKS, CriteriaPlatformNIM, CriteriaAcceleratorH100, false, true, true},
