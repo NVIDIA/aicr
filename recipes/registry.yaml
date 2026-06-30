@@ -704,16 +704,21 @@ components:
     helm:
       defaultRepository: https://nvidia.github.io/topograph
       defaultChart: topograph/topograph
-      defaultVersion: "0.4.0"
+      defaultVersion: "0.5.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - nodeSelector
-          - node-observer.topograph.trigger.nodeSelector
         tolerationPaths:
           - tolerations
+      accelerated:
+        nodeSelectorPaths:
+          - node-observer.topograph.trigger.nodeSelector
+          - node-data-broker.nodeSelector
+        tolerationPaths:
           - node-observer.tolerations
+          - node-data-broker.tolerations
 
   - name: gatekeeper
     displayName: Gatekeeper

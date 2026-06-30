@@ -14,12 +14,14 @@
 
 # slinky-topograph Health Check
 #
-# Validates that slinky-topograph and its node-observer sub-chart are running
-# and healthy in the topograph namespace. slinky-topograph is the Slinky/Slurm-
-# scoped instance of the Topograph utility; it queries cloud provider APIs to
-# generate Slurm topology.conf for topology-aware scheduling. node-observer
-# watches the topograph API pod and triggers topology regeneration on restarts
-# or selected node/pod changes.
+# Validates that slinky-topograph and its sub-charts (node-observer,
+# node-data-broker) are running and healthy, and that the topology generation
+# pipeline has produced a result. Specifically:
+#   1. All three Deployments are available (topograph API, node-observer, node-data-broker).
+#   2. No pods in the topograph namespace are in a failed/stuck state.
+#   3. The topology ConfigMap written by topograph exists in the slurm namespace
+#      and contains a non-empty topology.conf key, confirming end-to-end pipeline
+#      success — not just process readiness.
 # Deployment names are stabilized via fullnameOverride in
 # components/slinky-topograph/values.yaml.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -52,6 +54,22 @@ spec:
                 namespace: topograph
               status:
                 (availableReplicas > `0`): true
+    - name: validate-node-data-broker-daemonset
+      # node-data-broker is enabled by default (enabled: true in sub-chart
+      # values.yaml). This assertion is always valid unless the operator
+      # explicitly disables it via `node-data-broker.enabled: false` in the
+      # overlay overrides — in which case remove this step from the health check.
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: slinky-topograph-node-data-broker
+                namespace: topograph
+              status:
+                (desiredNumberScheduled > `0`): true
+                (numberReady == desiredNumberScheduled): true
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /

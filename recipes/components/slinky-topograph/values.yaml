@@ -43,11 +43,11 @@ global:
   engine:
     name: slinky
     params:
-      plugin: topology/block
+      plugin: topology/tree
       podSelector:
         matchLabels:
           app.kubernetes.io/name: slurmd
-      topologyConfigmapName: slinky-slurm-config
+      topologyConfigmapName: slinky-slurm-config-topo
       topologyConfigPath: topology.conf
       namespace: slurm
 
@@ -58,8 +58,9 @@ global:
 config:
   requestAggregationDelay: 15s
 
-tolerations:
-  - operator: Exists
+serviceAccount:
+  create: true
+  name: slinky-topograph
 
 # node-observer sub-chart — watches the Topograph API pod and triggers
 # topology regeneration on API restarts or selected node/pod changes.
@@ -67,8 +68,6 @@ tolerations:
 node-observer:
   # Stabilize the Deployment name for health-check assertions.
   fullnameOverride: slinky-topograph-node-observer
-  tolerations:
-    - operator: Exists
   topograph:
     trigger:
       podSelector:
@@ -78,4 +77,4 @@ node-observer:
 # node-data-broker sub-chart
 # Bundled as a local chart dependency.
 node-data-broker:
-  enabled: false
+  fullnameOverride: slinky-topograph-node-data-broker
