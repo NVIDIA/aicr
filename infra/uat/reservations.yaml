@@ -1,0 +1,58 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# UAT reservation registry (#1274, DC1).
+#
+# Each row enumerates one reserved-capacity GPU pool the day/night UAT
+# broker arbitrates. The "name" is the lease key: the shared dispatch
+# surface (uat-run.yaml) holds a GitHub Actions concurrency group
+# "uat-<name>" so contending runs on the same reservation QUEUE instead of
+# racing the hardware. New infrastructure is onboarded by adding a row
+# here — no broker code change.
+#
+# NOTE — these values are identifiers, NOT secrets. A reservation-id (and the
+# GCP project path it embeds) grants no access on its own: access to the
+# reserved capacity — and to anything running on it — is governed by cloud
+# IAM/ACLs bound to the CI federation identity (see infra/uat-aws-account/
+# and infra/uat-gcp-account/), not by knowledge of the ID. They are safe to
+# commit; disclosure reveals only internal infra naming, not a way in.
+#
+# Fields:
+#   name                human-facing reservation / lease key (must be unique)
+#   cloud               aws | gcp
+#   reservation-id      the cloud capacity-reservation identifier; GCP uses
+#                       the fully-qualified resource path (matches the value
+#                       embedded in cluster-config-path verbatim)
+#   accelerator         GPU accelerator family on the reservation
+#   gpu-count           GPUs per reserved node (forward-looking metadata)
+#   cluster-config-path the github.com/mchmarny/cluster Cluster config the
+#                       actuator provisions from
+#   test-config-dir     directory holding the per-cloud AICRConfig test
+#                       files (the ./tests/uat/<cloud>/run phase runner roots
+#                       one level up, at the cluster-config)
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-0cbe491320188dfa6
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: tests/uat/aws/cluster-config.yaml
+    test-config-dir: tests/uat/aws/tests
+  - name: gcp-h100
+    cloud: gcp
+    reservation-id: projects/nv-dgxcloudprod-20240108/reservations/h100-a3-mega-phase-1-general-pool-384-us-c1-reservation
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: tests/uat/gcp/cluster-config.yaml
+    test-config-dir: tests/uat/gcp/tests

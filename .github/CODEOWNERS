@@ -41,6 +41,15 @@ docs/user/recipe-health.md @nvidia/aicr-maintainer
 # Recipe-quality surfaces (RQ): the CUJ/CLI coverage matrix generator
 tools/coverage/** @nvidia/aicr-maintainer
 
+# UAT day/night broker (#1274, DC1): the reservation-registry parser and
+# nightly version-matrix schedule helper that arbitrates reserved GPU time.
+# infra/uat/reservations.yaml is intentionally left under the default owner so
+# onboarding a reservation stays a low-friction data edit ("new infra extends
+# by data edit", #1274); the IDs there are identifiers, not secrets (see the
+# NOTE in that file).
+pkg/uatbroker/** @nvidia/aicr-maintainer
+tools/uat-broker/** @nvidia/aicr-maintainer
+
 # CI/CD and automation
 /Makefile @nvidia/aicr-maintainer
 /.goreleaser.yaml @nvidia/aicr-maintainer
