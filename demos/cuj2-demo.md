@@ -17,7 +17,7 @@
   │  base ─▶ eks ─▶ eks-inference ─▶ h100-eks-inference ─▶                 │
   │          h100-eks-ubuntu-inference ─▶ h100-eks-ubuntu-inference-dynamo │
   │                                                                        │
-  │  Output: 16 components, constraints, deployment order                  │
+  │  Output: 18 components, constraints, deployment order                  │
   └────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -35,24 +35,30 @@
   │      --storage-class <storage-class>                                   │
   │                                                                        │
   │  recipe.yaml ──▶ bundle/                                               │
-  │    ├── deploy.sh                                                       │
-  │    ├── cert-manager/             (TLS certificates)                    │
-  │    ├── prometheus-operator-crds/ (CRDs for monitoring stack)           │
-  │    ├── kube-prometheus-stack/    (Prometheus, Grafana, alerting)       │
-  │    ├── prometheus-adapter/       (custom metrics API for HPA)          │
-  │    ├── k8s-ephemeral-storage-metrics/  (storage monitoring)            │
-  │    ├── gpu-operator/             (GPU driver, device-plugin, DCGM)     │
-  │    ├── nvidia-dra-driver-gpu/    (Dynamic Resource Allocation)         │
-  │    ├── kai-scheduler/            (gang scheduling)                     │
-  │    ├── agentgateway-crds/        (Gateway API + inference CRDs)        │
-  │    ├── agentgateway/             (inference gateway controller)        │
-  │    ├── nvsentinel/               (security/compliance)                 │
-  │    ├── nodewright-operator/      (node configuration)                  │
-  │    ├── nodewright-customizations/ (H100 tuning)                        │
-  │    ├── aws-ebs-csi-driver/       (EBS storage)                         │
-  │    ├── aws-efa/                  (Elastic Fabric Adapter)              │
-  │    ├── dynamo-crds/              (Dynamo CRDs)                         │
-  │    └── dynamo-platform/          (inference serving platform)          │
+  │    ├── deploy.sh        (root automation script)                       │
+  │    ├── README.md        (root deployment guide)                        │
+  │    ├── checksums.txt    (SHA256 of listed files; excludes recipe.yaml) │
+  │    ├── recipe.yaml      (resolved recipe; not yet in checksums, #1549) │
+  │    ├── 001-agentgateway-crds/              (agentgateway.dev CRDs)     │
+  │    ├── 002-agentgateway-crds-post/         (Gateway API + Inf-Ext CRDs)│
+  │    ├── 003-aws-ebs-csi-driver/             (EBS storage)               │
+  │    ├── 004-aws-efa/                        (Elastic Fabric Adapter)    │
+  │    ├── 005-cert-manager/                   (TLS certificates)          │
+  │    ├── 006-agentgateway/                   (inference gateway)         │
+  │    ├── 007-agentgateway-post/              (post-chart manifests)      │
+  │    ├── 008-grove/                          (multinode inference)       │
+  │    ├── 009-nfd/                            (node feature discovery)    │
+  │    ├── 010-nodewright-operator/            (node configuration)        │
+  │    ├── 011-nodewright-customizations/      (H100 tuning)               │
+  │    ├── 012-prometheus-operator-crds/       (monitoring CRDs)           │
+  │    ├── 013-kube-prometheus-stack/          (Prometheus, Grafana)       │
+  │    ├── 014-gpu-operator/                   (driver, plugin, DCGM)      │
+  │    ├── 015-k8s-ephemeral-storage-metrics/  (storage metrics)           │
+  │    ├── 016-kai-scheduler/                  (gang scheduling)           │
+  │    ├── 017-dynamo-platform/                (inference serving)         │
+  │    ├── 018-nvidia-dra-driver-gpu/          (DRA driver)                │
+  │    ├── 019-nvsentinel/                     (GPU health/remediation)    │
+  │    └── 020-prometheus-adapter/             (custom metrics API (HPA))  │
   └────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -61,9 +67,9 @@
   │                                                                        │
   │  $ cd bundle && ./deploy.sh                                            │
   │                                                                        │
-  │  cert-manager ──▶ kube-prometheus-stack ──▶ gpu-operator ──▶           │
-  │  kai-scheduler ──▶ agentgateway ──▶ nvidia-dra-driver ──▶              │
-  │  dynamo-platform ──▶ nodewright ──▶ nvsentinel ──▶ ...                 │
+  │  selected components in deployment order (post-folders &               │
+  │  some steps omitted): agentgateway-crds ──▶ ... ──▶ cert-manager       │
+  │  ──▶ agentgateway ──▶ ... ──▶ gpu-operator ──▶ dynamo-platform ──▶ ... │
   │                                                                        │
   │  Result: Fully configured GPU cluster                                  │
   │    • 8x H100 GPUs advertised via DRA                                   │
@@ -98,47 +104,49 @@
 ```
 ┌─────────────────────────────────────┬─────────────────────────────────────┐
 │      TRAINING (kubeflow)            │      INFERENCE (dynamo)             │
-│      13 components, 7 overlays      │      16 components, 7 overlays      │
+│  15 components, 8 overlays +mixins  │  18 components, 8 overlays +mixins  │
 ├─────────────────────────────────────┼─────────────────────────────────────┤
 │                                     │                                     │
 │  base.yaml                          │  base.yaml                          │
+│  ├── nfd                            │  ├── nfd                            │
 │  ├── cert-manager                   │  ├── cert-manager                   │
+│  ├── gpu-operator                   │  ├── gpu-operator                   │
+│  ├── nvsentinel                     │  ├── nvsentinel                     │
+│  ├── nodewright-operator            │  ├── nodewright-operator            │
+│  ├── prometheus-operator-crds       │  ├── prometheus-operator-crds       │
 │  ├── kube-prometheus-stack          │  ├── kube-prometheus-stack          │
 │  ├── k8s-ephemeral-storage-metrics  │  ├── k8s-ephemeral-storage-metrics  │
-│  ├── gpu-operator                   │  ├── gpu-operator                   │
 │  ├── nvidia-dra-driver-gpu          │  ├── nvidia-dra-driver-gpu          │
-│  ├── kai-scheduler                  │  ├── kai-scheduler                  │
-│  ├── nvsentinel                     │  ├── nvsentinel                     │
-│  └── nodewright-operator               │  └── nodewright-operator               │
-│      │                              │      │                              │
+│  └── kai-scheduler                  │  └── kai-scheduler                  │
+│  monitoring-hpa (metadata)          │  monitoring-hpa (metadata)          │
+│  └── prometheus-adapter             │  └── prometheus-adapter             │
+│  h100-any (validation floor)        │  h100-any (validation floor)        │
 │  eks.yaml                           │  eks.yaml                           │
 │  ├── aws-ebs-csi-driver             │  ├── aws-ebs-csi-driver             │
 │  └── aws-efa                        │  └── aws-efa                        │
-│      │                              │      │                              │
 │  eks-training.yaml                  │  eks-inference.yaml                 │
-│  (no new components)                │  ├── agentgateway-crds      ◀── NEW │
-│      │                              │  └── agentgateway           ◀── NEW │
-│      │                              │      │                              │
+│  (gpu-operator overrides)           │  (inference constraints)            │
 │  h100-eks-training.yaml             │  h100-eks-inference.yaml            │
-│  ├── gpu-operator (CDI, gdrcopy)    │  └── nodewright-customizations         │
-│  └── nodewright-customizations         │      │                              │
-│      │                              │  h100-eks-ubuntu-inference.yaml     │
-│  h100-eks-ubuntu-training.yaml      │  (Ubuntu constraints)               │
-│  (Ubuntu constraints)               │      │                              │
-│      │                              │  h100-eks-ubuntu-inference-dynamo   │
-│  h100-eks-ubuntu-training-kubeflow  │  ├── gpu-operator (v26.3.2, CDI)    │
-│  └── kubeflow-trainer       ◀── NEW │  ├── nvidia-dra-driver (gpuRes)◀─NEW│
-│                                     │  ├── dynamo-crds             ◀─ NEW │
-│                                     │  └── dynamo-platform         ◀─ NEW │
-│                                     │                                     │
-├─────────────────────────────────────┼─────────────────────────────────────┤
-│  Unique: kubeflow-trainer           │  Unique: agentgateway-crds,         │
-│                                     │          agentgateway,              │
-│                                     │    dynamo-crds, dynamo-platform     │
+│  └── nodewright-customizations      │  └── nodewright-customizations      │
+│  h100-eks-ubuntu-training.yaml      │  h100-eks-ubuntu-inference.yaml     │
+│  (Ubuntu constraints)               │  (Ubuntu constraints)               │
+│  h100-eks-ubuntu-training-kubeflow  │  h100-eks-ubuntu-inference-dynamo   │
+│  mixins (merged separately):        │  ├── grove                          │
+│  + os-ubuntu, platform-kubeflow     │  └── dynamo-platform                │
+│  └── kubeflow-trainer (via mixin)   │  mixins (merged separately):        │
+│                                     │  + os-ubuntu, platform-inference    │
+│                                     │  ├── agentgateway-crds (via mixin)  │
+│                                     │  └── agentgateway (via mixin)       │
 ├─────────────────────────────────────┴─────────────────────────────────────┤
-│  Shared (base + eks): cert-manager, kube-prometheus-stack, gpu-operator,  │
-│    kai-scheduler, nvidia-dra-driver-gpu, nvsentinel, nodewright-operator,    │
-│    k8s-ephemeral-storage-metrics, aws-ebs-csi-driver, aws-efa             │
+│  Unique training: kubeflow-trainer                                        │
+│  Unique inference: agentgateway-crds, agentgateway, grove, dynamo-platform│
+├───────────────────────────────────────────────────────────────────────────┤
+│  Shared (base/eks/h100/hpa layers):                                       │
+│    cert-manager, kube-prometheus-stack, gpu-operator, kai-scheduler,      │
+│    nvidia-dra-driver-gpu, nvsentinel, nfd, nodewright-operator,           │
+│    nodewright-customizations, prometheus-adapter,                         │
+│    prometheus-operator-crds, k8s-ephemeral-storage-metrics,               │
+│    aws-ebs-csi-driver, aws-efa                                            │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -259,7 +267,7 @@ http://127.0.0.1:9090/chat.html
 │ 4 │ accelerator_metrics        │ gpu-operator (DCGM exporter)             │ base    │
 │ 5 │ ai_service_metrics         │ kube-prometheus-stack, prometheus-adapter│ base    │
 │ 6 │ ai_inference               │ agentgateway-crds, agentgateway          │ eks-inf │
-│ 7 │ robust_controller          │ dynamo-crds, dynamo-platform             │ dynamo  │
+│ 7 │ robust_controller          │ dynamo-platform                          │ dynamo  │
 │ 8 │ pod_autoscaling            │ prometheus-adapter + HPA                 │ base    │
 │ 9 │ cluster_autoscaling        │ EKS Auto Scaling Group (ASG)             │ infra   │
 ├───┴────────────────────────────┴──────────────────────────────────────────┴─────────┤
