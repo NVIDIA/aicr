@@ -17,7 +17,7 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [evidence.md](evidence.md) | Recipe evidence demo (validate emit + verify) |
 | [evidence-demo-slides.html](evidence-demo-slides.html) | Recipe evidence demo — slide deck |
 | [evidence-demo.sh](evidence-demo.sh) | Interactive split-leg evidence walkthrough (validate on VPN → publish off VPN → verify) |
-| [provenance.md](provenance.md) | Binary & image SLSA L3 provenance demo (verify, SBOM, Rekor, in-cluster enforcement) |
+| [provenance.md](provenance.md) | Binary & image SLSA provenance demo (verify, SBOM, Rekor, in-cluster enforcement) |
 | [provenance-demo-slides.html](provenance-demo-slides.html) | Build provenance — slide deck |
 | [provenance-demo.sh](provenance-demo.sh) | Interactive consumer-side verification walkthrough |
 | [bundle-attestation.md](bundle-attestation.md) | Bundle attestation demo (`aicr bundle --attest` + `aicr verify` trust levels) |

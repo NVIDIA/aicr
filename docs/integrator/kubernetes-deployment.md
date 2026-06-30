@@ -512,8 +512,20 @@ kubectl top pods -n aicr
 kubectl get hpa -n aicr
 
 # Check metrics
-kubectl exec -n aicr -it deploy/aicrd -- \
-  wget -qO- http://localhost:8080/metrics
+# aicrd ships on a distroless image (no shell or wget) — port-forward and curl locally
+kubectl port-forward -n aicr deploy/aicrd 8080:8080 &
+pf_pid=$!
+trap 'kill "$pf_pid" 2>/dev/null' EXIT
+# bounded wait; capture the metrics body from the successful probe itself, so
+# there is no second curl that could fail unnoticed
+ready=0; metrics=""
+for _ in $(seq 1 30); do
+  kill -0 "$pf_pid" 2>/dev/null || { echo "port-forward exited early"; break; }
+  if metrics=$(curl -fsS http://localhost:8080/metrics 2>/dev/null); then ready=1; break; fi
+  sleep 1
+done
+kill "$pf_pid" 2>/dev/null; trap - EXIT   # stop the port-forward
+if [ "$ready" -eq 1 ]; then printf '%s\n' "$metrics"; else echo "metrics endpoint not reachable"; exit 1; fi
 ```
 
 ### Connection Refused

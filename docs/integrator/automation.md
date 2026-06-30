@@ -65,7 +65,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cluster-snapshots
-          path: snapshot-*.yaml
+          path: snapshot.yaml
 ```
 
 ### Pattern 2: Canonical Snapshot to Bundle Pipeline

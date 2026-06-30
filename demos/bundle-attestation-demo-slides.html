@@ -191,7 +191,7 @@
     </table>
     <div class="grid2">
       <div class="mini"><h4>Without attestation</h4><p>Bundle is just files. <code class="inl">checksums.txt</code> catches accidental corruption, nothing else.</p></div>
-      <div class="mini"><h4>With <code class="inl">--attest</code></h4><p>Bundle is cryptographically bound to the creator <em>and</em> the binary that produced it. Recursive provenance.</p></div>
+      <div class="mini"><h4>With <code class="inl">--attest</code></h4><p>The files listed in <code class="inl">checksums.txt</code> are cryptographically bound to the creator <em>and</em> the binary that produced it (recipe.yaml excluded, #1549). Recursive provenance.</p></div>
     </div>
   </div>
 </section>
@@ -233,7 +233,7 @@
           <text x="46" y="214">recipe.yaml &#183; deploy.sh &#183; README.md</text>
           <text x="46" y="234">&lt;component&gt;/values.yaml &#183; ...</text>
           <text x="46" y="266" fill="#9aa7b4">checksums.txt</text>
-          <text x="46" y="282" fill="#6b7785" font-size="11">(SHA256 of every file above)</text>
+          <text x="46" y="282" fill="#6b7785" font-size="11">(SHA256 of the listed files; recipe.yaml excluded — #1549)</text>
         </g>
         <rect class="node-g" x="432" y="170" width="398" height="186" rx="9"/>
         <text class="ttl-g nlabel" x="448" y="194">attestation/</text>
@@ -279,7 +279,7 @@
         <g class="nsub" font-size="11.5">
           <text x="326" y="134">subject: aicr-linux-amd64 sha256</text>
           <text x="326" y="152">signer: NVIDIA/aicr CI</text>
-          <text x="326" y="170">issuer: token.actions.github.com</text>
+          <text x="326" y="170">issuer: token.actions.githubusercontent.com</text>
           <text x="326" y="194">workflow: on-tag.yaml@vX.Y.Z</text>
         </g>
         <rect class="node" x="604" y="80" width="240" height="136" rx="10"/>
@@ -336,9 +336,9 @@
       <thead><tr><th>Level</th><th>Name</th><th>Criteria</th></tr></thead>
       <tbody>
         <tr><td class="ok">4</td><td><code>verified</code></td><td>Checksums &nbsp;+ &nbsp;bundle attestation &nbsp;+ &nbsp;binary attestation pinned to NVIDIA CI</td></tr>
-        <tr><td class="ok">3</td><td><code>attested</code></td><td>Chain verified, but binary attestation missing or external data used</td></tr>
+        <tr><td class="ok">3</td><td><code>attested</code></td><td>Bundle attestation verified; binary attestation missing or external data used (a <em>failed</em> binary attestation reports attested but exits nonzero)</td></tr>
         <tr><td class="warn">2</td><td><code>unverified</code></td><td>Checksums valid, no <code class="inl">--attest</code> was passed</td></tr>
-        <tr><td class="bad">1</td><td><code>unknown</code></td><td>Missing or invalid <code class="inl">checksums.txt</code></td></tr>
+        <tr><td class="bad">1</td><td><code>unknown</code></td><td>Missing/invalid <code class="inl">checksums.txt</code>, or bundle attestation fails verification</td></tr>
       </tbody>
     </table>
     <div class="note">
@@ -366,8 +366,8 @@
 <span class="c"># Constrain the CLI version that produced the bundle.</span>
 <span class="p">$</span> aicr verify ./my-bundle --cli-version-constraint ">= 1.0.0"
 
-<span class="c"># JSON output for CI pipelines: branch on .trust_level / .verdict.</span>
-<span class="p">$</span> aicr verify ./my-bundle --format json | jq '.trust_level, .verdict'</pre>
+<span class="c"># CI: keep the verify exit code (a failed binary attestation reports attested but exits nonzero)</span>
+<span class="p">$</span> set -o pipefail; aicr verify ./my-bundle --format json | jq '.trustLevel, .trustReason'</pre>
     </div>
     <div class="grid2">
       <div class="mini"><h4 class="ok"><code class="inl">--min-trust-level verified</code></h4><p>Production gate. Demands the full chain back to NVIDIA CI.</p></div>
@@ -383,17 +383,18 @@
     <h2>Tamper-evident</h2>
     <div class="code">
       <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">tampered bundle</span><button class="copy">copy</button></div>
-<pre><span class="p">$</span> sed -i 's/replicas: 1/replicas: 99/' my-bundle/gpu-operator/values.yaml
+<pre><span class="p">$</span> f=$(ls my-bundle/[0-9]*-*/values.yaml | head -1)
+<span class="p">$</span> echo '# tampered' &gt;&gt; "$f"
 <span class="p">$</span> aicr verify ./my-bundle
 
 <span class="r">✗</span> Checksums failed: 1 file mismatch
-<span class="d">    gpu-operator/values.yaml — sha256 mismatch (got 3f9a…, want 7b21…)</span>
+<span class="d">    &lt;NNN-component&gt;/values.yaml — sha256 mismatch (got 3f9a…, want 7b21…)</span>
 <span class="d">  Trust level: <span class="r">unknown</span></span>
 
-<span class="r">Bundle verification: FAILED (exit 2)</span></pre>
+<span class="r">Bundle verification: FAILED (non-zero exit)</span></pre>
     </div>
     <p>The signature&rsquo;s subject is the digest of <code class="inl">checksums.txt</code>, and
-      <code class="inl">checksums.txt</code> pins every other file. Mutating any content file
+      <code class="inl">checksums.txt</code> pins every file it lists. Mutating a listed file
       breaks the checksum; mutating <code class="inl">checksums.txt</code> to match breaks the
       signature.</p>
   </div>
@@ -405,9 +406,9 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + SPDX SBOM on every published image and CLI binary, signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed SPDX SBOM on every published image (CLI binaries ship a separate, unsigned SBOM asset), signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
       <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <em>You are here.</em></p></div>
-      <div class="mini"><h4>Recipe evidence</h4><p>The signed validation result for a recipe on real hardware, OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
+      <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
       <div class="mini"><h4>Same primitives</h4><p>Sigstore keyless + Fulcio + Rekor + in-toto across the board — different subjects, one verification model.</p></div>
     </div>
     <div class="note">

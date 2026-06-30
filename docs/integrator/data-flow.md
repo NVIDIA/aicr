@@ -199,14 +199,17 @@ Snapshot → Query Extractor → Recipe Query
 #### Extraction mapping
 
 ```
-K8s/server/version          → k8s (version)
-K8s/image/gpu-operator      → service (eks/gke/aks detection)
-K8s/config/*                → intent hints
-OS/release/ID               → os (family)
-OS/release/VERSION_ID       → osv (version)
-OS/grub/BOOT_IMAGE          → kernel (version)
-GPU/hardware/model          → accelerator (type)
+K8s/node/provider     → service     (provider ID → eks/gke/aks/…)
+topology gpu.product  → accelerator (label primary; PCI id fallback)
+OS/release/ID         → os          (family)
+topology node count   → nodes       (count)
 ```
+
+`Fingerprint.ToCriteria` projects only **service, accelerator, os, and node
+count**. Intent and platform are recipe-author choices the cluster cannot
+reveal, so they always resolve to `any` and must be supplied via CLI flags.
+Other snapshot fields (K8s server version, OS version, kernel) are captured as
+measurements and become constraint *targets*, not recipe criteria.
 
 ### Recipe Generation
 
@@ -240,7 +243,7 @@ For the resolver internals (specificity scoring, deep-merge semantics) see
 │   appliedOverlays: inheritance chain (root to leaf)     │
 │   excludedOverlays: matched-but-excluded overlays       │
 │                                                         │
-│ criteria: Criteria (service, accelerator, intent, os)   │
+│ criteria: Criteria (6 dimensions — see mapping above)   │
 │                                                         │
 │ constraints: []Constraint                               │
 │   ├─ name: constraint identifier (e.g. K8s.server.ver…) │
@@ -371,59 +374,28 @@ aicr validate \
 ### Bundler Framework
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ Bundle Generator                                       │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│  RecipeResult → Bundler Registry → Parallel Execution  │
-│                                                        │
-│  ┌─────────────────┐                                   │
-│  │ RecipeResult    │                                   │
-│  └────────┬────────┘                                   │
-│           │                                            │
-│  ┌────────▼────────┐                                   │
-│  │ Get Component   │ (GetComponentRef)                 │
-│  │ ├─ Name         │                                   │
-│  │ ├─ Version      │                                   │
-│  │ └─ Values map   │ (GetValuesForComponent)           │
-│  └────────┬────────┘                                   │
-│           │                                            │
-│    ┌──────┴──────┐                                     │
-│    │   Parallel  │                                     │
-│    ├─────────────┤                                     │
-│    ├─ GPU Operator                                     │
-│    │  ├─ values map → values.yaml                      │
-│    │  ├─ values map → clusterpolicy.yaml               │
-│    │  └─ ScriptData → install.sh, README.md            │
-│    │                                                   │
-│    ├─ Network Operator                                 │
-│    │  ├─ values map → values.yaml                      │
-│    │  └─ ScriptData → install.sh, README.md            │
-│    │                                                   │
-│    ├─ Cert-Manager                                     │
-│    │  └─ values map → values.yaml                      │
-│    │                                                   │
-│    ├─ NVSentinel                                       │
-│    │  └─ values map → values.yaml                      │
-│    │                                                   │
-│    └─ Nodewright                                       │
-│       ├─ values map → values.yaml                      │
-│       └─ values map → nodewright-cr.yaml               │
-│                                                        │
-│  ┌────────▼────────┐                                   │
-│  │ Template Engine │ (go:embed templates)              │
-│  │ ├─ values.yaml  │                                   │
-│  │ ├─ manifests/   │                                   │
-│  │ └─ checksums.txt│                                   │
-│  └────────┬────────┘                                   │
-│           │                                            │
-│  ┌────────▼────────┐                                   │
-│  │ Generate Files  │                                   │
-│  │ └─ checksums    │                                   │
-│  └─────────────────┘                                   │
-│                                                        │
-└────────────────────────────────────────────────────────┘
+RecipeResult
+  -> DefaultBundler (one invocation): for each component,
+       GetComponentRef (name, version) + GetValuesForComponent (values map)
+  -> selected deployer writes its own layout (Helm deployer shown below;
+       argocd/argocd-helm/flux/helmfile differ):
+         - static values       -> <NNN-component>/values.yaml
+         - dynamic/per-cluster -> <NNN-component>/cluster-values.yaml
+         - component manifests -> <NNN-component>/   (e.g. ClusterPolicy or a
+                                   CR, for components that ship one)
+         - go:embed templates  -> per-component install.sh, and the root
+                                   README.md + deploy.sh
+  -> compute root checksums.txt over every emitted file
+     (recipe.yaml is written afterward and is not covered, #1549)
 ```
+
+`pkg/bundler/registry` exists but is **not** used by the production path: the
+default flow constructs a single `DefaultBundler`, extracts values for every
+component in one `DefaultBundler` invocation, builds one deployer
+(helm/argocd/argocd-helm/flux/helmfile), and invokes it once. Static values land in `values.yaml`; dynamic, per-cluster values land in
+`cluster-values.yaml`. Every component is handled in that single invocation, not by separate
+per-component bundlers. The per-component file layout above is the **Helm**
+deployer's; argocd/argocd-helm/flux/helmfile emit their own layouts.
 
 ### Configuration Extraction
 
@@ -444,29 +416,26 @@ values := input.GetValuesForComponent("gpu-operator")
 // }
 ```
 
-**Template Usage:**
-```yaml
-# Helm values.yaml - receives values map
-driver:
-  version: {{ index .Values "driver.version" }}
-  
-# README.md - receives combined map with Values + Script
-Driver Version: {{ index .Values "driver.version" }}
-Namespace: {{ .Script.Namespace }}
+**Template usage:** per-component `values.yaml` is the component's values map
+marshaled to YAML directly (not a Go-templated file). `README.md` and
+`deploy.sh` are rendered from `readmeTemplateData` / `deployTemplateData`,
+which expose fields like `RecipeVersion`, `Components`, and `Constraints`:
+
+```gotemplate
+# README.md (readmeTemplateData)
+Recipe version: {{ .RecipeVersion }}
+{{- range .Components }}
+- {{ .Name }} {{ .Version }}
+{{- end }}
 ```
 
-#### ScriptData for Metadata
+#### Template data
 
-```go
-// ScriptData struct for scripts and README metadata
-type ScriptData struct {
-    Timestamp        string
-    Version          string
-    Namespace        string
-    HelmRepository   string
-    HelmChartVersion string
-}
-```
+Scripts and READMEs are rendered from embedded templates using per-output
+structs defined in `pkg/bundler/deployer/helm/helm.go` — `readmeTemplateData`
+(recipe/bundler version, components, constraints) for `README.md`, and
+`deployTemplateData` (bundler version, components, readiness timeout) for
+`deploy.sh`. There is no `ScriptData` type.
 
 ### Bundle Structure
 
@@ -479,32 +448,17 @@ The deployer generates the final output structure. See [Deployer-Specific Output
 After bundlers generate artifacts, the deployer framework transforms them into deployment-specific formats based on the `--deployer` flag.
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ Deployer Selection                                     │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│  Bundle Artifacts + Recipe → Deployer → Output         │
-│                                                        │
-│  ┌─────────────────┐    ┌─────────────────┐            │
-│  │ Bundle Output   │    │ Recipe          │            │
-│  │ ├─ values.yaml  │    │ deploymentOrder │            │
-│  │ ├─ manifests/   │    │ componentRefs   │            │
-│  │ └─ scripts/     │    └────────┬────────┘            │
-│  └────────┬────────┘             │                     │
-│           │                      │                     │
-│           └───────────┬──────────┘                     │
-│                       │                                │
-│  ┌────────────────────▼────────────────────┐           │
-│  │ Deployer Selection (--deployer flag)    │           │
-│  │                                         │           │
-│  │ ├─ helm (default)                       │           │
-│  │ │   └─ Helm charts + README             │           │
-│  │ │                                       │           │
-│  │ └─ argocd                               │           │
-│  │     └─ Argo CD Application + sync-wave   │           │
-│  └─────────────────────────────────────────┘           │
-│                                                        │
-└────────────────────────────────────────────────────────┘
+Bundle artifacts + recipe (deploymentOrder, componentRefs)
+  → deployer selected by --deployer:
+      helm (default) — per-component Helm charts + root deploy.sh/README
+      argocd         — Argo CD App-of-Apps + sync-waves
+      argocd-helm    — Helm-chart app-of-apps (values overridable at install)
+      flux           — Flux HelmRelease manifests
+      helmfile       — helmfile.yaml release graph
+  → numbered NNN-<component>/ output + root checksums.txt
+
+Each component folder holds install.sh, values.yaml, and cluster-values.yaml
+(there is no scripts/ subdirectory).
 ```
 
 ### Deployment Order Flow
@@ -553,7 +507,7 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 bundle-output/
 ├── README.md                    # Root deployment guide with ordered steps
 ├── deploy.sh                    # Automation script (0755)
-├── checksums.txt                # SHA256 digests of all files (optional)
+├── checksums.txt                # SHA256 of all listed files (recipe.yaml excluded, #1549)
 ├── 001-cert-manager/
 │   ├── install.sh               # Per-folder install script (0755)
 │   ├── values.yaml              # Static Helm values
@@ -639,7 +593,7 @@ spec:
 │  2. Order components                                         │
 │     └─ orderComponentsByDeployment()                         │
 │                                                              │
-│  3. Run bundlers (parallel)                                  │
+│  3. Bundle (single DefaultBundler, all components)           │
 │     ├─ cert-manager   → values.yaml, manifests/              │
 │     ├─ gpu-operator   → values.yaml, manifests/              │
 │     └─ network-operator → values.yaml, manifests/            │
@@ -651,7 +605,7 @@ spec:
 │     └─ app-of-apps.yaml (bundle root, uses --repo URL)       │
 │                                                              │
 │  5. Generate checksums                                       │
-│     └─ checksums.txt for each component                      │
+│     └─ checksums.txt (root; all listed files, no recipe.yaml)│
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```

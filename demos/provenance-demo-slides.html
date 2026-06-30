@@ -161,10 +161,10 @@
   <div class="slide-inner">
     <div class="label">NVIDIA AI Cluster Runtime</div>
     <h1>Build provenance</h1>
-    <p class="lede">Every released AICR binary and image carries a signed SLSA Build Provenance Level 3
-      attestation and an SPDX SBOM — verifiable against NVIDIA CI without trusting the registry.</p>
+    <p class="lede">Every released AICR image carries a signed SLSA Build Provenance v1
+      attestation and a signed SPDX SBOM — verifiable against NVIDIA CI without trusting the registry (released binaries ship a separate, unsigned SBOM asset).</p>
     <div class="chips">
-      <span class="chip"><b>SLSA L3</b> hardened builder</span>
+      <span class="chip"><b>SLSA</b> provenance v1</span>
       <span class="chip"><b>Keyless</b> cosign + Fulcio</span>
       <span class="chip"><b>Public</b> Rekor transparency log</span>
       <span class="chip"><b>SPDX</b> SBOM per artifact</span>
@@ -185,7 +185,7 @@
       <thead><tr><th>Question</th><th>What proves it</th></tr></thead>
       <tbody>
         <tr><td>Did NVIDIA actually build this?</td><td>Sigstore signature pinned to NVIDIA&rsquo;s GitHub Actions identity</td></tr>
-        <tr><td>From which source, on which workflow?</td><td>SLSA Build Provenance L3: repo + commit SHA + workflow ref</td></tr>
+        <tr><td>From which source, on which workflow?</td><td>SLSA Build Provenance v1: repo + commit SHA + workflow ref</td></tr>
         <tr><td>What&rsquo;s inside it?</td><td>SPDX SBOM attestation: every package, library, license</td></tr>
       </tbody>
     </table>
@@ -197,12 +197,12 @@
 </section>
 
 <!-- 3 · PIPELINE -->
-<section class="slide" data-title="SLSA L3 pipeline">
+<section class="slide" data-title="SLSA build pipeline">
   <div class="slide-inner">
     <div class="label">02 · How it&rsquo;s made</div>
-    <h2>SLSA L3 build pipeline</h2>
+    <h2>SLSA build pipeline</h2>
     <figure class="fig">
-      <svg class="diagram" viewBox="0 0 860 372" role="img" aria-label="SLSA L3 build pipeline: tagged commit triggers GitHub Actions, goreleaser builds binaries and images, cosign signs via Fulcio and Rekor, artifacts land in GHCR with SBOM and provenance attestations">
+      <svg class="diagram" viewBox="0 0 860 372" role="img" aria-label="SLSA build pipeline: tagged commit triggers GitHub Actions, goreleaser builds binaries and images, cosign signs via Fulcio and Rekor, artifacts land in GHCR with SBOM and provenance attestations">
         <defs>
           <marker id="pD1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#46525f"/></marker>
           <marker id="pD1g" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#76b900"/></marker>
@@ -213,7 +213,7 @@
           <text class="nsub"   x="89"  y="67" text-anchor="middle">vX.Y.Z on main</text>
           <rect class="node" x="234" y="26" width="150" height="54" rx="9"/>
           <text class="nlabel" x="309" y="49" text-anchor="middle">on-tag.yaml</text>
-          <text class="nsub"   x="309" y="67" text-anchor="middle">hardened runner</text>
+          <text class="nsub"   x="309" y="67" text-anchor="middle">GitHub-hosted runner</text>
           <rect class="node" x="454" y="26" width="150" height="54" rx="9"/>
           <text class="nlabel" x="529" y="49" text-anchor="middle">goreleaser + ko</text>
           <text class="nsub"   x="529" y="67" text-anchor="middle">binaries + images</text>
@@ -320,7 +320,7 @@
 <span class="d">ghcr.io/nvidia/aicr@sha256:f0c1abc…</span>
 
 <span class="c"># 2. Verify the SLSA provenance attestation against NVIDIA's identity.</span>
-<span class="p">$</span> gh attestation verify oci://"$IMAGE@$DIGEST" --owner NVIDIA
+<span class="p">$</span> gh attestation verify oci://"$IMAGE@$DIGEST" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
 <span class="g">Loaded digest sha256:f0c1abc… for oci://ghcr.io/nvidia/aicr@…</span>
 <span class="g">✓ Verification succeeded!</span>
 
@@ -344,7 +344,7 @@
 <pre><span class="c"># Pull and verify the SPDX SBOM attestation.</span>
 <span class="p">$</span> cosign verify-attestation --type spdxjson \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/.*' \
+    --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
     "$IMAGE@$DIGEST" > predicate.json
 
 <span class="c"># Vulnerability scan, straight off the SBOM (no re-pull).</span>
@@ -403,7 +403,7 @@
     </figure>
     <div class="code">
       <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">rekor-cli</span><button class="copy">copy</button></div>
-<pre><span class="p">$</span> rekor-cli search --sha "$(crane digest $IMAGE:$TAG | cut -d: -f2)"
+<pre><span class="p">$</span> rekor-cli search --sha "${DIGEST#sha256:}"   # reuse the digest captured earlier
 <span class="d">Found matching entries (listed by UUID):</span>
 <span class="d">24296fb24b8ad77a&hellip;</span>
 
@@ -421,7 +421,7 @@
     <p>Verification at <code class="inl">docker pull</code> is opt-in. To make it a property of
       the cluster, enforce it with an admission controller — either
       <a href="https://docs.sigstore.dev/policy-controller/overview/">Sigstore Policy Controller</a>
-      or <a href="https://kyverno.io/">Kyverno</a>.</p>
+      (validated for AICR) or <a href="https://kyverno.io/">Kyverno</a> (its bundle support was cluster-tested and does not yet verify AICR — see #1537).</p>
     <div class="code">
       <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">ClusterImagePolicy (sigstore)</span><button class="copy">copy</button></div>
 <pre><span class="d">apiVersion:</span> policy.sigstore.dev/v1beta1
@@ -429,20 +429,22 @@
 <span class="d">metadata: { name: aicr-images-require-attestation }</span>
 <span class="d">spec:</span>
   <span class="d">images:</span>
-  - <span class="d">glob:</span> <span class="g">"ghcr.io/nvidia/aicr*"</span>
+  - <span class="d">glob:</span> <span class="g">"ghcr.io/nvidia/aicr**"</span>
   <span class="d">authorities:</span>
-  - <span class="d">keyless:</span>
+  - <span class="d">signatureFormat:</span> bundle
+    <span class="d">keyless:</span>
       <span class="d">url:</span> https://fulcio.sigstore.dev
       <span class="d">identities:</span>
-      - <span class="d">issuerRegExp:</span> <span class="g">".*\.github\.com.*"</span>
-        <span class="d">subjectRegExp:</span> <span class="g">"https://github.com/NVIDIA/aicr/.*"</span>
+      - <span class="d">issuer:</span> https://token.actions.githubusercontent.com
+        <span class="d">subjectRegExp:</span> <span class="g">'^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$'</span>
+    <span class="d">ctlog: { url: https://rekor.sigstore.dev }</span>
     <span class="d">attestations:</span>
     - <span class="d">name:</span> build-provenance
       <span class="d">predicateType:</span> https://slsa.dev/provenance/v1</pre>
     </div>
     <div class="grid2">
       <div class="mini"><h4 class="ok">Allowed</h4><p><code class="inl">kubectl run a --image=ghcr.io/nvidia/aicr:vX.Y.Z</code> — has attestation, identity matches.</p></div>
-      <div class="mini"><h4 class="bad">Rejected</h4><p><code class="inl">kubectl run b --image=nginx:latest</code> — <em>no matching attestations found</em>.</p></div>
+      <div class="mini"><h4 class="bad">Rejected</h4><p>A <code class="inl">ghcr.io/nvidia/aicr*</code> image without a valid release attestation — <em>no matching attestations found</em>. Images outside the glob (e.g. <code class="inl">nginx:latest</code>) are not evaluated.</p></div>
     </div>
   </div>
 </section>
@@ -453,9 +455,9 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + SPDX SBOM on every published image and CLI binary, signed by NVIDIA CI. <em>You are here.</em></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed SPDX SBOM on every published image (CLI binaries ship a separate SBOM asset), signed by NVIDIA CI. <em>You are here.</em></p></div>
       <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
-      <div class="mini"><h4>Recipe evidence</h4><p>The signed validation result for a recipe on real hardware, OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
+      <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
       <div class="mini"><h4>Same primitives</h4><p>Sigstore keyless + Fulcio + Rekor + in-toto across the board — different subjects, one verification model.</p></div>
     </div>
     <div class="note">

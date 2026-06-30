@@ -30,9 +30,9 @@ each one subsumes the guarantees of the levels beneath it.
 | Level | Name | What it guarantees |
 |-------|------|--------------------|
 | 4 | `verified` | Checksums valid, bundle attestation verified, binary attestation verified with identity pinned to NVIDIA CI, and no external data |
-| 3 | `attested` | Full chain cryptographically verified, but binary attestation is missing or external `--data` was used, which caps trust because that data's own provenance is unknown |
+| 3 | `attested` | Bundle attestation cryptographically verified, but the chain is incomplete — the binary attestation is missing or external `--data` was used. A binary attestation that *fails* verification also reports `attested` diagnostically but makes `aicr verify` exit nonzero |
 | 2 | `unverified` | Checksums valid, but no attestation files exist (the bundle was created without `--attest`) |
-| 1 | `unknown` | Checksums are missing or invalid |
+| 1 | `unknown` | Checksums are missing/invalid, or the bundle attestation fails verification |
 
 The ordering matters for enforcement: `verified` > `attested` > `unverified` >
 `unknown`. A bundle that uses external data can never exceed `attested`, and a
@@ -53,7 +53,7 @@ aicr verify ./my-bundle
 
 Under the hood this runs three checks:
 
-1. **Checksums**: every content file is hashed and matched against `checksums.txt`.
+1. **Checksums**: every file listed in `checksums.txt` is hashed and matched (recipe.yaml is not yet listed — #1549).
 2. **Bundle attestation**: the bundle's signature is verified against the Sigstore trusted root.
 3. **Binary attestation**: the provenance chain is verified with identity pinned to NVIDIA CI.
 
@@ -116,10 +116,10 @@ cosign public-key --key gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k 
 aicr verify ./bundles/<bundle-dir> --key ./bundle-signer.pub
 ```
 
-A local PEM key is read from disk only. Note, however, that resolving the key
-is only part of verification: by default the bundle's Rekor transparency-log
-entry is also checked (see the next section), so a PEM key makes verification
-fully offline only when the Sigstore trusted-root cache is already warm.
+A local PEM key is read from disk only. The bundle's Rekor transparency-log
+entry is also checked by default, but its inclusion proof is embedded in the
+bundle and the trusted root falls back to the embedded copy on a cache miss —
+so verification runs fully offline without `aicr trust update`.
 
 ## Privately-Signed Bundle Verification
 
@@ -170,17 +170,11 @@ reported as invalid-request failures.
 
 `aicr verify` is offline by default and does not call out to Sigstore at verify
 time; the Rekor inclusion proof is embedded in the bundle, so no live Rekor
-call is made. The check does, however, need the Sigstore *trusted root*, which
-is loaded from the local cache at `~/.sigstore/root/` when present and otherwise
-fetched over the network. Pre-populate that cache before going offline:
-
-```shell
-# Warm the Sigstore trusted-root cache (contacts the TUF CDN once).
-aicr trust update
-```
-
-Once the cache is warm, KMS-signed bundles verified with a local PEM key
-(above) verify with no further network access.
+call is made. The check needs the Sigstore *trusted root*, but verification forces the local
+cache (`WithForceCache`) and falls back to the **embedded** trusted root on a
+cache miss — it does not fetch on the verify path, so offline verification works
+out of the box. `aicr trust update` refreshes the cached trust material (it
+contacts the TUF CDN once) but is **not** required for offline verification.
 
 Two scope limits to be aware of, both reflected in the current CLI reference:
 
@@ -198,8 +192,8 @@ Two scope limits to be aware of, both reflected in the current CLI reference:
 
 Recipe-evidence bundles, produced by `aicr validate --emit-attestation`, are
 verified with `aicr evidence verify`. When the bundle carries a signature, the
-command verifies it against the Sigstore trusted root, recomputes every file's
-sha256 against `manifest.json`, and surfaces the predicate's fingerprint, phase
+command verifies it against the Sigstore trusted root, recomputes every
+manifest-listed payload file's sha256 against `manifest.json`, and surfaces the predicate's fingerprint, phase
 counts, and BOM info.
 
 Bundles are **minimized by default**: the published `snapshot.yaml` keeps only
@@ -230,7 +224,7 @@ To require a specific signer, pin the OIDC issuer and identity:
 ```shell
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
-  --expected-identity-regexp '^https://github\.com/myorg/.*$'
+  --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 ```
 
 ## Per-Source Pointer Layout and the Signer Allowlist
@@ -253,12 +247,15 @@ computed from the signer fields rather than chosen freely, the
 signer block and rejects any file that does not live under the directory its
 signer hashes to.
 
-> **Claimed vs. cryptographically-verified signer.** The on-disk contract gate
-> derives the slug from the signer fields the pointer *declares*; it does not,
-> by itself, cryptographically verify the bundle was signed by that identity
-> (the OCI signature verification is a separate, currently warning-only step).
-> So the path binds a *claimed* identity at gate time, not a proven one — see
-> [#1535](https://github.com/NVIDIA/aicr/issues/1535).
+> **Where cryptographic trust enters (#1535).** The on-disk
+> pointer-contract merge gate is *structural*: it derives the slug from the
+> signer fields the pointer declares and checks path ownership + allowlist
+> membership, but does not itself verify a signature. Cryptographic trust is
+> enforced **after merge, at ingest** (`evidence-ingest.yaml`), which verifies
+> the signature pinned to the claimed signer and cross-checks the certificate
+> before any result is counted — so a pointer that lied about its signer passes
+> the gate but fails ingest. See
+> [#1535](https://github.com/NVIDIA/aicr/issues/1535) and ADR-007. (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).)
 
 Consumers discover a recipe's evidence by glob —
 `recipes/evidence/<recipe>/*/*.yaml` — and aggregate across sources; nothing is
@@ -268,8 +265,10 @@ The **allowlist** (`recipes/evidence/allowlist.yaml`) is the trust root. It
 pins, per class — `first-party`, `community`, `partner` — the signers that may
 contribute corroborating evidence. Community and partner entries are keyed by
 the one-way `source` slug only — the cleartext identity (e.g. a personal
-email) is **never** stored in the repo; an optional non-PII `label` (e.g. a
-GitHub handle) is for display, and may be omitted to stay fully pseudonymous.
+email) is **never** stored in the *allowlist*; an optional non-PII `label`
+(e.g. a GitHub handle) is for display and may be omitted. (The committed
+pointer and Rekor still carry `signer.identity` — see the note below — so a
+contributor is not anonymous.)
 First-party entries pin a tightly-bounded anchored `identityPattern` whose
 issuer/org/repo/workflow segment is literal (a wildcard is permitted only in
 the ref) — these are CI workflow URLs, not personal identities. The classes
@@ -277,10 +276,12 @@ are disjoint and no two entries overlap, so a verified signer classifies
 exactly one way. A verified signer that is **not** listed is admitted as
 *reported* only — it never counts toward corroboration.
 
-(Keyless Sigstore still records the signer identity in the public Rekor
-transparency log; keeping it out of the allowlist only avoids committing it to
-this repository. The loader rejects a stray `identity:` field, so cleartext
-cannot be reintroduced by accident.)
+(Only the **allowlist** is slug-only — its loader rejects a stray `identity:`
+field. Committed **pointers** (`recipes/evidence/<recipe>/<src>/*.yaml`) do
+carry `signer.identity`, and keyless Sigstore also records it in the public
+Rekor log, so the signer identity is public regardless. Sign with a
+non-personal identity — a GitHub `users.noreply.github.com` address or CI's
+ambient OIDC — not a personal email.)
 
 First-party AICR CI (the UAT workflows) signs with the GitHub Actions OIDC
 issuer and **ingests evidence directly** — it does not commit a per-run pointer,

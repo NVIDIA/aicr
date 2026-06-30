@@ -91,13 +91,14 @@
 //
 // Rate-limit headers (X-RateLimit-Limit, X-RateLimit-Remaining,
 // X-RateLimit-Reset) and Cache-Control are emitted automatically. Recipe and
-// query responses are cache-control public, max-age=300 by default.
+// query responses are cache-control public, max-age=600 by default.
 //
 // # Configuration
 //
-// PORT and the rate-limit / timeout settings are read from environment by
-// loadConfig; functional options on Server (WithName, WithVersion,
-// WithHandler) override individual fields and are used internally by Serve.
+// PORT and SHUTDOWN_TIMEOUT_SECONDS are read from the environment; rate-limit
+// and other timeout defaults come from pkg/defaults constants. Functional
+// options on Server (WithName, WithVersion, WithHandler) override individual
+// fields and are used internally by Serve.
 //
 // # References
 //

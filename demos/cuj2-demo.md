@@ -303,7 +303,6 @@ http://127.0.0.1:9090/chat.html
 ### CNCF AI Conformance Program Submission
 
 - [Evidence Docs](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf)
-- [Submission Docs](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf/submission)
 
 ## Upstream PRs
 

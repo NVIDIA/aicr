@@ -28,38 +28,23 @@ Basic (parameters via flags):
 aicr recipe --service eks --accelerator gb200 | yq .
 ```
 
-From criteria file:
+From explicit criteria flags:
 
 ```shell
-cat > "${TMPDIR:-/tmp}/criteria.yaml" << 'EOF'
-kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: h100-eks-training-kubeflow
-spec:
-  service: eks
-  accelerator: h100
-  os: ubuntu
-  intent: training
-  platform: kubeflow
-EOF
+aicr recipe \
+  --service eks --accelerator h100 --os ubuntu \
+  --intent training --platform kubeflow \
+  --output recipe.yaml
 ```
 
-Generate recipe from criteria file
+
+Inspect the generated recipe on stdout (pipe to `yq`):
 
 ```shell
-aicr recipe --criteria "${TMPDIR:-/tmp}/criteria.yaml" --output recipe.yaml
+aicr recipe --service eks --accelerator h100 --os ubuntu \
+  --intent training --platform kubeflow | yq .
 ```
 
-> Metadata overlays: `components=11 overlays=7`
-
-CLI flags override criteria file values
-
-```shell
-aicr recipe --criteria "${TMPDIR:-/tmp}/criteria.yaml" --service gke | yq .
-```
-
-> Metadata overlays: `components=7 overlays=2`
 
 ![data flow](images/recipe.png)
 

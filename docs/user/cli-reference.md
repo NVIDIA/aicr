@@ -1693,7 +1693,7 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 | Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
 | Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
 
-> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the shipped bundle (defaults and stubs), not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
+> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the files listed in `checksums.txt` (recipe.yaml excluded, #1549), not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -2109,14 +2109,14 @@ The generated ArtifactGenerator CRs extract per-component chart directories from
 
 #### Bundle Attestation
 
-> **Prerequisite:** The `--attest` flag requires a binary installed using the install script, which includes a cryptographic attestation from NVIDIA. Binaries installed via `go install` or manual download do not include this file and cannot use `--attest`.
+> **Prerequisite:** `--attest` needs the binary attestation `aicr-attestation.sigstore.json` beside the `aicr` binary. The install script and the release archives both include it (keep it next to `aicr` when installing manually); binaries from `go install` lack it and cannot use `--attest`.
 
 When `--attest` is passed, the bundle command performs five steps:
 
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
 3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
-4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the bundle content (via `checksums.txt` digest) and the binary that produced it.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549) and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
@@ -2242,7 +2242,7 @@ HashiCorp Vault (`hashivault://`) is not supported: its client libraries are MPL
 
 ##### Attestation Scope
 
-Attestation binds the **shipped bundle** — defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
+Attestation binds the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549; the attestation files are verified separately) — defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
 
 If you need to enforce specific install-time values (e.g., pinning `driver.version`), that is a **policy concern**, not an attestation one. Use admission control (Kyverno, Gatekeeper) or Argo sync hooks to reject deployments that violate the policy. `aicr verify` checks bundle integrity and provenance; it does not evaluate install-time value constraints.
 
@@ -2519,13 +2519,13 @@ aicr verify <bundle-dir> [flags]
 | Level | Name | Criteria |
 |-------|------|----------|
 | 4 | `verified` | Full chain: checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
-| 3 | `attested` | Chain verified but binary attestation missing or external data (`--data`) was used |
+| 3 | `attested` | Bundle attestation verified; binary attestation missing/unverified, or external data (`--data`) used. A *failed* binary attestation also reports attested but exits nonzero (#1550) |
 | 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
-| 1 | `unknown` | Missing or invalid checksums |
+| 1 | `unknown` | Missing/invalid checksums, or bundle attestation fails verification |
 
 #### Verification steps
 
-1. **Checksums** — verifies all content files match `checksums.txt`
+1. **Checksums** — verifies all files listed in `checksums.txt` match
 2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
 3. **Binary attestation** — provenance chain verified with identity pinned to NVIDIA CI (`on-tag.yaml` workflow)
 
@@ -2559,7 +2559,7 @@ aicr verify ./my-bundle --trust-root ./trusted_root.json
 
 > **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
 >
-> Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache when present and otherwise fetched over the network, so run `aicr trust update` once to pre-populate it. A local PEM key therefore makes verification fully offline only when the trusted-root cache is already warm. Verification that drops the transparency-log requirement entirely, for true air-gapped use, is tracked in [#1154](https://github.com/NVIDIA/aicr/issues/1154).
+> Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache and falls back to the embedded trusted root on a cache miss, so no network fetch happens on the verify path and `aicr trust update` is not required for offline use. Verification that drops the transparency-log requirement entirely, for true air-gapped use, is tracked in [#1154](https://github.com/NVIDIA/aicr/issues/1154).
 >
 > **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
 
@@ -2613,7 +2613,7 @@ Sign, push, and write the pointer for a recipe-evidence v1 bundle that was produ
 
 This decouples the cluster-bound validate step from the Fulcio/Rekor-bound signing step so they can run on different networks: validation must run where the cluster is reachable (often a corporate VPN), but keyless signing must reach `fulcio.sigstore.dev` + `rekor.sigstore.dev`, which corporate networks frequently block. Run `validate --emit-attestation` on the VPN, then `evidence publish` from a host with Sigstore egress (CI runner, jump box, hotspot).
 
-The signed artifact is content-addressable, so the result is byte-for-byte identical to the one-shot `validate --emit-attestation --push` output regardless of which host ran which leg — the predicate (including its baked-in `attestedAt` timestamp) is signed verbatim from the bundle on disk.
+The **unsigned** subject/predicate — and therefore the OCI bundle digest — is identical regardless of which host ran which leg, because the predicate (including its baked-in `attestedAt`) is signed verbatim from the bundle on disk. The Sigstore signature, Fulcio certificate, and Rekor entry differ per signing run, so the *signed bytes* themselves are not byte-for-byte reproducible.
 
 **Synopsis:**
 
@@ -2710,7 +2710,7 @@ aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml --relocate
 
 ### aicr evidence verify
 
-Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.
+Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every manifest-listed payload file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.
 
 Inline constraint replay is reserved for a follow-up PR.
 
@@ -2768,7 +2768,7 @@ aicr evidence verify ./out/summary-bundle
 # Pin the expected OIDC signer.
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
-  --expected-identity-regexp '^https://github\.com/myorg/.*$'
+  --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 
 # CI pipelines: JSON output.
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml -o result.json -t json

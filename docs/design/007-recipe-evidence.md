@@ -16,11 +16,17 @@ remain future intent, as detailed in the Update note immediately below.
 > **Update.** Implementation has since landed in part. The `aicr evidence`
 > family currently ships `digest`, `publish`, `sign`, and `verify` — the
 > `list` and `show` subcommands described below are **not yet implemented**.
-> The shipped verifier always verifies the signature and performs
-> predicate/schema parse and manifest-inventory hash binding. Issuer/SAN
-> (signer-identity) pinning is **opt-in** — enforced only when
-> `expected-issuer` / `expected-identity-regexp` are supplied; a plain
-> `verify` run does not cross-check the signer identity. The richer
+> The shipped verifier verifies the signature when the bundle carries one
+> and performs predicate/schema parse and manifest-inventory hash binding; an
+> *unsigned* bundle that otherwise passes those checks yields a `pending
+> signature` (exit 0) result, whereas an unsigned bundle that fails predicate,
+> inventory, or phase checks is reported as that failure, not pending. When a
+> pointer declares a signer, that claim
+> is **always** cross-checked against the bundle's certificate, so a pointer
+> cannot lie about who signed. What is **opt-in** is external issuer/SAN
+> pinning — enforced only when `expected-issuer` / `expected-identity-regexp`
+> are supplied; without them a plain `verify` run does not pin the signer to
+> an expected identity. The richer
 > guarantees enumerated under "CLI family" remain the proposed contract and
 > are not wired today: inline constraint replay is explicitly reserved for a
 > follow-up slice (`pkg/evidence/verifier/verify.go`), and material-slice/JCS
@@ -221,8 +227,10 @@ surface item 1 below for the full schema).
    Fulcio/Rekor-bound signing step (Sigstore egress) run on different
    hosts. Because the bundle is content-addressable and the predicate
    (with its baked-in `attestedAt`) is signed verbatim from disk, the
-   signed artifact is identical to the one-shot path. See the CLI
-   reference for `aicr evidence publish`.
+   unsigned subject/predicate and the OCI digest are identical to the
+   one-shot path; the signature material (certificate, signature, Rekor
+   entry, signing time) differs per run. See the CLI reference for
+   `aicr evidence publish`.
 
    **Canonical invocation: `--config aicr.yaml`.** PR-A extends
    `pkg/config.AICRConfig` with a `ValidateSpec` sibling of
@@ -767,12 +775,13 @@ named an allowlisted signer it does not control passes the structural gate but
 fails ingest and never reaches the corroboration count. The on-disk contract
 gate and the warning-only `recipe-evidence.yaml` OCI check are defense-in-depth
 around that blocking step — trust derives from the ingest verification, not
-from passing the merge gate ([#1535](https://github.com/NVIDIA/aicr/issues/1535)).
+from passing the merge gate ([#1535](https://github.com/NVIDIA/aicr/issues/1535)). (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).)
 
 The **allowlist** is the trust root, validated by `pkg/evidence/allowlist` to
 be disjoint, non-overlapping, and free of over-broad patterns. Community and
-partner entries are keyed by the one-way `source` slug only (no cleartext
-identity is committed; an optional non-PII `label` is for display); first-party
+partner entries are keyed by the one-way `source` slug only (no cleartext identity is committed to
+the *allowlist*; the committed pointer and the public Rekor log still carry
+`signer.identity`; an optional non-PII `label` is for display); first-party
 entries pin a tightly-bounded `identityPattern` (a CI workflow URL, not
 personal PII) and ingest directly with no committed per-run pointer. Committed
 pointers are the community/partner channel. A verified signer absent from the

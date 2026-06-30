@@ -114,8 +114,10 @@ run_expect_fail() {
   "$@" || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s[exit %s — expected failure ✓]%s\n' "$GREEN" "$rc" "$RESET"
+    return 0
   else
     printf '%s[exit 0 — UNEXPECTED: command was supposed to fail]%s\n' "$RED" "$RESET"
+    return 1
   fi
 }
 
@@ -167,10 +169,14 @@ recipe_args=(--service "$SERVICE" --accelerator "$ACCELERATOR" --os "$OS" --inte
 pause "Press Enter to generate the recipe"
 run "$AICR" recipe "${recipe_args[@]}"
 
-banner "Bootstrap the Sigstore trusted root (idempotent)"
-note "Pulls the current TUF root used to verify Fulcio cert chains. Safe to re-run."
-pause "Press Enter to run aicr trust update"
-run "$AICR" trust update
+banner "Refresh the Sigstore trusted root (optional)"
+note "aicr verify falls back to the embedded root; this only refreshes a stale cache."
+if [ -n "${AICR_TRUST_UPDATE:-}" ]; then
+  pause "Press Enter to run aicr trust update"
+  run "$AICR" trust update
+else
+  note "Skipped — set AICR_TRUST_UPDATE=1 to refresh (avoids aborting offline under set -e)."
+fi
 
 banner "Create the attested bundle (LIVE OIDC SIGN)"
 printf '%s%s' "$YELLOW" "$BOLD"
@@ -220,15 +226,15 @@ pause "Press Enter to run aicr verify --min-trust-level $MIN_TRUST"
 run "$AICR" verify "$BUNDLE" --min-trust-level "$MIN_TRUST"
 
 banner "Verify — JSON output (CI path)"
-note "Structured output for pipeline branching: .trust_level + .verdict + per-gate results."
+note "Structured output for pipeline branching: .trustLevel + .bundleCreator + .toolVersion."
 pause "Press Enter to run aicr verify --format json"
-run bash -c "'$AICR' verify '$BUNDLE' --format json | jq '{ trust_level, verdict, creator, cli: .cli_version }'"
+run bash -c "set -o pipefail; '$AICR' verify '$BUNDLE' --format json | jq '{ trustLevel, bundleCreator, toolVersion }'"
 
 # --- tamper -------------------------------------------------------------------
 
 banner "Tamper-evident: mutate a content file, verify fails"
-note "The signature's subject is the digest of checksums.txt, which pins every file."
-note "Mutating any content file breaks its checksum; mutating checksums.txt breaks the signature."
+note "The signature's subject is the digest of checksums.txt, which pins every file it lists (recipe.yaml is not yet covered, #1549)."
+note "Mutating any file listed in checksums.txt breaks its checksum; mutating checksums.txt breaks the signature."
 # Pick a file the bundle is guaranteed to contain. README.md is always present.
 TAMPER_TARGET="$BUNDLE/README.md"
 if [ ! -f "$TAMPER_TARGET" ]; then

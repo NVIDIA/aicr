@@ -91,11 +91,16 @@ attestation + maintainer judgement.
 > (`h100-gke-cos-training`, `gb200-eks-ubuntu-training`), each under
 > `recipes/evidence/<recipe>/<src>/<digest>.yaml`. Two gates run on
 > `recipes/evidence/**`: the **blocking** *Evidence Pointer Contract*
-> (`tools/evidence-pointercheck`) rejects any committed pointer that is
-> unsigned, lives at a flat path, sits under the wrong signer directory,
-> or whose signer is not allowlisted; and the **warning-only**
-> recipe-evidence verify gate (signature/integrity against OCI). The
-> ADR-007 `spec.maintainers` work (PR-D) is still future state. Treat
+> (`tools/evidence-pointercheck`) rejects any committed pointer that lacks a
+> signer claim, lives at a flat path, sits under the wrong signer directory,
+> or whose *claimed* signer is not allowlisted — a structural check on the
+> pointer's signer fields, not cryptographic signature verification (#1535);
+> and the **warning-only**
+> recipe-evidence verify gate (signature/integrity against OCI). Cryptographic
+> trust is enforced **after merge, at ingest** (`evidence-ingest.yaml`), which
+> verifies the signature pinned to the claimed signer before any result is
+> counted (#1535). (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).) The ADR-007 `spec.maintainers` work (PR-D) is still future
+> state. Treat
 > proposed-only items below as design contract, not operational guide.
 
 The motivating constraint: maintainers cannot independently re-run a
@@ -107,27 +112,36 @@ they cannot reproduce.
 
 Use this checklist on any PR that touches `recipes/overlays/**`,
 `recipes/mixins/**`, `recipes/components/**`, or `recipes/registry.yaml`.
-Items 1–5 are validated automatically by the `recipe-evidence` check;
-items 6–8 are maintainer judgement calls.
+Items 1, 2, and 5 are validated automatically by the `recipe-evidence`
+check; items 3–4 and 6–8 are maintainer judgement calls. The sticky comment
+renders only Recipe / Source / Pointer / Verify / Digest-match columns — it
+does not surface the signer identity or OCI ref, so review those from the
+committed pointer file and the PR description.
 
 1. **Pointer file present.** At least one per-source pointer file under
    `recipes/evidence/<recipe>/<src>/<bundle-digest>.yaml` — one immutable
    file per signed run — exists for every touched overlay. The CI gate is
    warning-only: when a recipe change has no matching pointer it flags the
    gap in the sticky comment but does not block merge.
-2. **`recipe-evidence` check is green.** Exit 0 means the shipped
-   verifier's checks passed: bundle signature, predicate/schema parse,
-   manifest-inventory hash binding, and signer cross-check. (Inline
-   constraint replay and BOM cross-reference are proposed in ADR-007 but
-   not yet implemented.) Exit 1 requires explicit disposition (see
-   [Exit-1 Review Process](#exit-1-review-process)). Exit 2 is a hard fail.
-3. **Signer identity is acceptable.** Open the sticky comment, find
-   the recipe's `<details>` section, and review the signer block. See
+2. **`recipe-evidence` check is green.** This warning-only OCI check runs
+   `aicr evidence verify` per pointer; exit 0 means the bundle verified
+   (predicate/schema parse, manifest-inventory hash binding, and — when the
+   bundle is signed — signature + claimed-signer cross-check) **or** is a
+   valid *pending* (unsigned) pointer. It does not by itself prove the signer
+   is a trusted identity: the blocking on-disk pointer-contract gate is
+   structural (it checks the *claimed* signer against the allowlist, not a
+   cryptographic signature — see
+   [#1535](https://github.com/NVIDIA/aicr/issues/1535)). A structured `exit: 1` (in `--format json`) requires explicit disposition
+   (see [Exit-1 Review Process](#exit-1-review-process)); `exit: 2` is a hard
+   fail. Both collapse to OS exit code 2, so distinguish them by reading
+   `.exit` from `aicr evidence verify --format json`.
+3. **Signer identity is acceptable.** Open the committed pointer file under
+   `recipes/evidence/<recipe>/<src>/` and review its `signer` block. See
    [Signer Identity Trust Patterns](#signer-identity-trust-patterns).
 4. **Bundle Open Container Initiative (OCI) ref matches PR description.** The PR template
    has no dedicated evidence section, so contributors paste the `bundle.oci` field
    into the PR description (see the recipe-development guide); confirm the
-   sticky comment shows the same ref.
+   pointer's `bundle.oci` matches the ref pasted in the PR description.
 5. **Manifest inventory hash matches.** The shipped verifier binds
    `manifest.json` to the predicate's manifest digest and verifies every
    bundle file and phase-report digest against it. (The semantic
@@ -162,14 +176,16 @@ warrant filtering, the tier-policy work pulls in.
 
 ### Exit-1 Review Process
 
-Exit 1 means the bundle verified cleanly (signature, predicate/schema,
+A structured `exit: 1` (the `.exit` field from `aicr evidence verify --format
+json`; the process itself exits with OS code 2) means the bundle verified
+cleanly (signature, predicate/schema,
 manifest-inventory hash, signer cross-check) but one or more validator
 phases reported failures. Common causes: a conformance check failed on the
 contributor's hardware, a performance threshold was not met, an
 optional check requires a feature the contributor's cluster does not
 have.
 
-Exit 1 is **not** the same as evidence/exempt. Exit 1 means
+A structured `exit: 1` is **not** the same as evidence/exempt: `exit: 1` means
 "evidence was produced and shows a partial failure"; exempt means
 "no evidence was produced."
 
@@ -177,7 +193,7 @@ Exit 1 is **not** the same as evidence/exempt. Exit 1 means
 
 1. Contributor declares exit-1 intent in the PR description (the PR
    template has no dedicated evidence section), with a reason.
-2. If acceptable, apply `evidence/known-failure` label and merge.
+2. If acceptable, apply `evidence/known-failure` label (not yet created — future state) and merge.
 3. If not, request changes. Typical resolutions: narrow the recipe
    criteria so the failing check is not selected, fix the underlying
    constraint, or attest against a different cluster where the check
@@ -190,6 +206,11 @@ or any reason that asks the maintainer to extend trust beyond what
 the evidence shows.
 
 ### evidence/exempt Bypass Policy
+
+> **Future state.** The `evidence/known-failure` and `evidence/exempt` labels
+> are not yet created, and the recipe-evidence check does not yet implement the
+> exemption bypass. This section describes the intended process, not current
+> operational behavior.
 
 The `evidence/exempt` label bypasses the recipe-evidence check
 entirely. It exists for PRs that modify files under `recipes/` for
@@ -224,21 +245,27 @@ that what merged is still verifiable:
 # Enumerate recently-touched pointers
 git log --since='6 months ago' --diff-filter=AM \
   --name-only --pretty=format: \
-  -- recipes/evidence/ | sort -u
+  -- recipes/evidence/ ':(exclude)recipes/evidence/allowlist.yaml' | sort -u
 
-# For each, re-verify against the current OCI artifact
-aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
+# For each, re-verify against the current OCI artifact (POINTER = one path
+# from the list above)
+POINTER="recipes/evidence/<recipe>/<src>/<digest>.yaml"
+aicr evidence verify "$POINTER"
 ```
 
 Exit 0 confirms the bundle is still fetchable and the signature still
-chains. If the OCI registry has been deleted, fall back to Rekor:
+chains. If the OCI registry has been deleted the bytes are gone, so
+`aicr evidence verify` (and `cosign verify-attestation`, which also pulls the
+artifact) can no longer run. The only remaining record is the Rekor
+transparency log: search it by the bundle digest recorded in the pointer to
+confirm the entry existed and who signed it (it cannot recover the bytes).
 
 ```bash
-cosign verify-attestation --type=recipe-evidence/v1 <bundle-oci-ref>
+# pull the digest out of the pointer and strip the algorithm prefix
+DIGEST=$(yq -r '.attestations[0].bundle.digest' "$POINTER")
+UUID=$(rekor-cli search --sha "${DIGEST#sha256:}" --format json | jq -er '.UUIDs[0]')
+rekor-cli get --uuid "$UUID"
 ```
-
-A passing Rekor verify confirms the bundle existed and was signed by
-the recorded identity, even if the bytes are no longer fetchable.
 
 Pointers older than 24 months are past the V1 re-cert age cutoff (see
 ADR-007 §"What V1 does not ship"). File an issue asking the

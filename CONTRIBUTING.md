@@ -138,7 +138,7 @@ More specific recipes are never matched unless explicitly requested. Generic int
 
 Trust is established through evidence, not assertions. Every released artifact carries verifiable proof of origin and build process.
 
-**What:** All releases include SLSA Build Level 3 provenance, SBOM attestations, and Sigstore signatures. Users can verify exactly which commit, workflow, and build produced any artifact.
+**What:** All releases include SLSA build provenance (build level under review, #1536), SBOM attestations, and Sigstore signatures. Users can verify exactly which commit, workflow, and build produced any artifact.
 
 **Why:** This underpins supply-chain security, compliance, and confidence. "Trust us" is not a security model.
 

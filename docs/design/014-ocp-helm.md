@@ -378,8 +378,20 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-spec: {{ $v.spec | toYaml | nindent 2 }}
+spec:
+  operator:
+    defaultRuntime: {{ $v.operator.defaultRuntime }}
+  driver:
+    enabled: {{ $v.driver.enabled }}
+    kernelModuleType: {{ $v.driver.kernelModuleType | default "auto" }}
+    rdma:
+      enabled: {{ $v.driver.rdma.enabled }}
+      useHostMofed: {{ $v.driver.rdma.useHostMofed }}
+  # … remaining flat keys (cdi, dcgm, gfd, migManager, …) mapped the same way
 ```
+
+The template maps the flat values keys field-by-field under `spec:` (there is
+no `spec` values key); this is why a `--set` override omits the `spec.` prefix.
 
 As implemented, the component ships a single
 `recipes/components/gpu-operator-ocp/values.yaml`; all GPU Operator settings

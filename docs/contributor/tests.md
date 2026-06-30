@@ -13,8 +13,7 @@ against real cloud accounts.
 
 The pre-push gate is **`make qualify`**. It runs tests with the race
 detector and coverage threshold, lints (golangci-lint + yamllint),
-e2e, vulnerability scan, BOM regen check (opt-in flag elsewhere),
-and license check. CI runs the equivalent — if `make qualify` passes
+e2e, vulnerability scan, and license check. CI runs the equivalent — if `make qualify` passes
 locally, CI will pass.
 
 ## Test Surfaces
@@ -500,7 +499,8 @@ the pre-push gate is local.
   wired into `make qualify`, `make lint`, or the merge gate today.
   CI does not catch this. Run `make bom-docs` locally any time the
   change touches charts.
-- **Coverage decrease > 0.5%** blocks the PR. Add tests rather than
+- **Coverage decrease > 0.5%** is flagged for justification (the project-wide
+  75% floor is what blocks). Add tests rather than
   reaching for `// nolint` or `t.Skip` — both are review-blockers
   under the no-skip-tests rule in CLAUDE.md.
 - **Live-cluster connections from unit tests.** A test that forgets
@@ -509,7 +509,7 @@ the pre-push gate is local.
   `--no-cluster` (CLI / chainsaw) on the validator path.
 - **CLI tests asserting on stdout.** `pkg/cli` writes through
   `cmd.Root().Writer`. A test that captures `os.Stdout` will see
-  nothing. Use `cmd.SetOut(buf)` and assert on `buf.String()`.
+  nothing. Use `cmd.Writer = buf` and assert on `buf.String()`.
 
 ## See Also
 

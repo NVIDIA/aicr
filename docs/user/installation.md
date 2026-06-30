@@ -44,7 +44,7 @@ This script:
 - Verifies the installation
 - Uses `GITHUB_TOKEN` environment variable for authenticated API calls (avoids rate limits)
 
-> **Supply Chain Security**: AICR includes SLSA Build Level 3 compliance with signed SBOMs and verifiable attestations. See [SECURITY](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md#supply-chain-security) for verification instructions.
+> **Supply Chain Security**: AICR includes SLSA build provenance (build level under review, #1536) with signed image SBOMs and verifiable attestations. See [SECURITY](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md#supply-chain-security) for verification instructions.
 
 ### Option 3: Manual Installation
 
@@ -63,6 +63,8 @@ Visit the [releases page](https://github.com/NVIDIA/aicr/releases/latest) and do
 # Example for Linux x86_64 (substitute the version you downloaded for 0.15.0)
 tar -xzf aicr_0.15.0_linux_amd64.tar.gz
 sudo mv aicr /usr/local/bin/
+# keep the binary attestation beside it so `aicr bundle --attest` works
+[ -f aicr-attestation.sigstore.json ] && sudo mv aicr-attestation.sigstore.json /usr/local/bin/
 sudo chmod +x /usr/local/bin/aicr
 ```
 
