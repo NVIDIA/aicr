@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **33**
-- Unique images: **82**
+- Components: **34**
+- Unique images: **84**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -62,6 +62,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | slinky-slurm | helm | slurm | 1.1.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.1.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.1.0 | 0 |
+| slinky-topograph | helm | topograph/topograph | 0.4.0 | 2 |
 
 ## Images by component
 
@@ -254,6 +255,11 @@ _No images extracted._
 ### slinky-slurm-operator-crds
 
 _No images extracted._
+
+### slinky-topograph
+
+- `curlimages/curl:8.13.0`
+- `ghcr.io/nvidia/topograph:v0.4.0`
 
 <!-- END AICR-BOM -->
 

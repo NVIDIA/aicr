@@ -1,0 +1,111 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# slinky-topograph Health Check
+#
+# Validates that slinky-topograph and its node-observer sub-chart are running
+# and healthy in the topograph namespace. slinky-topograph is the Slinky/Slurm-
+# scoped instance of the Topograph utility; it queries cloud provider APIs to
+# generate Slurm topology.conf for topology-aware scheduling. node-observer
+# watches the topograph API pod and triggers topology regeneration on restarts
+# or selected node/pod changes.
+# Deployment names are stabilized via fullnameOverride in
+# components/slinky-topograph/values.yaml.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: slinky-topograph-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-topograph-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slinky-topograph
+                namespace: topograph
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-node-observer-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: slinky-topograph-node-observer
+                namespace: topograph
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        # Assert no pods are in unhealthy phases (Pending / Failed /
+        # Unknown) or stuck in Running phase with a known-bad
+        # container-waiting reason (CrashLoopBackOff,
+        # ImagePullBackOff, ErrImagePull, CreateContainerConfigError).
+        # Phase-only filtering misses CrashLoopBackOff because such
+        # pods typically remain in Running phase with an unhealthy
+        # container.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                phase: Unknown
+        # JMESPath projection (not single-element match): kyverno-json's
+        # sliceNode.Assert gates on exact slice length before per-element
+        # comparison, so a `containerStatuses: - state: ...` shape only
+        # matches single-container pods and silently passes sidecars. Use
+        # `containerStatuses[?...] | length(@) > 0` to fire on any
+        # container at any index. Parallel initContainerStatuses block
+        # below catches init-container failures (invisible to
+        # containerStatuses). Per PR #1245 review (@ArangoGutierrez).
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: topograph
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

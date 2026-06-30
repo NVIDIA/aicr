@@ -695,6 +695,26 @@ components:
         tolerationPaths:
           - nodesets.slinky.podSpec.tolerations
 
+  - name: slinky-topograph
+    displayName: slinky-topograph
+    valueOverrideKeys:
+      - slinkytopograph
+    healthCheck:
+      assertFile: checks/slinky-topograph/health-check.yaml
+    helm:
+      defaultRepository: https://nvidia.github.io/topograph
+      defaultChart: topograph/topograph
+      defaultVersion: "0.4.0"
+      defaultNamespace: topograph
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+          - node-observer.topograph.trigger.nodeSelector
+        tolerationPaths:
+          - tolerations
+          - node-observer.tolerations
+
   - name: gatekeeper
     displayName: Gatekeeper
     valueOverrideKeys:

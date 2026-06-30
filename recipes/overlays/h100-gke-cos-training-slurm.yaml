@@ -73,12 +73,26 @@ spec:
         - cert-manager
         - slinky-slurm-operator-crds
 
+    - name: slinky-topograph
+      type: Helm
+      valuesFile: components/slinky-topograph/values.yaml
+      dependencyRefs:
+        - slinky-slurm-operator
+        - slinky-slurm-operator-crds
+      overrides:
+        global:
+          provider:
+            name: gcp
+          engine:
+            name: slinky
+
     - name: slinky-slurm
       type: Helm
       valuesFile: components/slinky-slurm/values.yaml
       dependencyRefs:
         - slinky-slurm-operator
         - slinky-slurm-operator-crds
+        - slinky-topograph
       overrides:
         nodesets:
           slinky:
