@@ -1,4 +1,4 @@
-# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+﻿# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -266,7 +266,10 @@ jobs:
           # Guard: Tier 1 is expected to stay well under 256 (no batching needed).
           # Warn early if organic growth is approaching the limit.
           tier1_pair_count=$(echo "$tier1_pairs" | jq 'length')
-          if (( tier1_pair_count > 200 )); then
+          if (( tier1_pair_count > 256 )); then
+            echo "::error::Tier 1 has ${tier1_pair_count} pairs (>256) — add batching before passing this to kwok-test-run.yaml"
+            exit 1
+          elif (( tier1_pair_count > 200 )); then
             echo "::warning::Tier 1 has ${tier1_pair_count} pairs (>200) — consider adding batching before it reaches 256"
           fi
 
