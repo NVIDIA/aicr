@@ -880,7 +880,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 | `OS.release.ID` | Operating system identifier (ubuntu, rhel) |
 | `OS.release.VERSION_ID` | OS version (24.04, 22.04) |
 | `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
-| `GPU.info.type` | GPU hardware type |
+| `GPU.hardware.model` | GPU model (e.g. `h100`, `l40s`) |
 
 Supported operators:
 

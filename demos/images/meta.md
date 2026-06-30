@@ -9,23 +9,23 @@ Visual: Vertical stack of 6 stat cards, each with a large bold number and muted 
 
 ```
 ┌─────────────────────────────────────────────┐
-│  18  Registered Components                  │
+│  33  Registered Components                  │
 │  Helm and Kustomize charts in the registry  │
 ├─────────────────────────────────────────────┤
-│  23  Overlay Layers                         │
+│  97  Overlay Files                          │
 │  Specialization overlays across all         │
 │  criteria combinations                      │
 ├─────────────────────────────────────────────┤
-│  427  Config Values                         │
-│  Total leaf configuration values across     │
-│  all component value files                  │
+│  31  values.yaml Files                      │
+│  Files named exactly values.yaml            │
+│  under recipes/components/                  │
 ├─────────────────────────────────────────────┤
 │  5  Criteria Dimensions                     │
 │  service, accelerator, intent, os, platform │
 ├─────────────────────────────────────────────┤
-│  15  Max Components per Recipe              │
+│  18  Max Components per Recipe              │
 │  Most specialized inference recipe          │
-│  (H100 + EKS + Dynamo)                     │
+│  (H100 + EKS + Ubuntu + Dynamo)             │
 ├─────────────────────────────────────────────┤
 │  6  Overlay Chain Depth                     │
 │  base > service > intent > accelerator      │
@@ -43,20 +43,20 @@ Visual: Left-to-right horizontal pipeline, boxes connected by labeled arrows
 ```
 ┌──────────────┐  +SERVICE=EKS  ┌──────────────┐  +INTENT=TRAINING  ┌──────────────┐
 │   GENERIC    │───────────────▶│   + EKS      │──────────────────▶│  + TRAINING  │
-│   (Base)     │                │              │                   │              │
-│ 9 components │                │ +2 components│                   │ gpu-operator  │
-│ 427 values   │                │ aws-ebs-csi  │                   │ overrides:    │
-│              │                │ aws-efa      │                   │ CDI, gdrcopy  │
-└──────────────┘                │ +70 values   │                   └──────────────┘
+│   (base+wild)│                │              │                   │              │
+│ 11 components│                │ +2 components│                   │ gpu-operator  │
+│              │                │ aws-ebs-csi  │                   │ overrides:    │
+│              │                │ aws-efa      │                   │ CDI           │
+└──────────────┘                │              │                   └──────────────┘
                                 └──────────────┘                          │
                                                                           ▼
 ┌──────────────┐  +PLATFORM=    ┌──────────────┐  +ACCELERATOR=    ┌──────────────┐
 │   RESOLVED   │◀──────────────│  + UBUNTU    │◀────────────────│  + H100      │
 │   RECIPE     │   KUBEFLOW    │              │   H100           │              │
 │              │                │ OS kernel    │                   │ +nodewright- │
-│ 12 unique    │  +kubeflow-   │ constraint   │                   │ customizations │
+│ 15 unique    │  +kubeflow-   │ constraint   │                   │ customizations │
 │ components   │  trainer      │ >= 6.8       │                   │ behavior     │
-│              │  +36 values   │              │                   │ mutations    │
+│              │               │              │                   │ mutations    │
 └──────────────┘                └──────────────┘                   └──────────────┘
 ```
 
@@ -77,10 +77,10 @@ Visual: Single input forking into two divergent paths
 ┌───────────────────────┐       ┌───────────────────────┐
 │  TRAINING (Kubeflow)  │       │  INFERENCE (Dynamo)   │
 │                       │       │                       │
-│  12 components        │       │  15 components        │
+│  15 components        │       │  18 components        │
 │                       │       │                       │
 │  Unique:              │       │  Unique:              │
-│    kubeflow-trainer   │       │    dynamo-crds        │
+│    kubeflow-trainer   │       │    grove              │
 │                       │       │    dynamo-platform    │
 │  GPU Operator:        │       │    agentgateway-crds  │
 │    CDI=true           │       │    agentgateway       │
@@ -99,13 +99,14 @@ Caption: "intent=training vs intent=inference produces divergent component graph
 ---
 
 **Section 4: Cross-Service Comparison** (Right Panel, Bottom)
-Visual: Horizontal bar chart, 3 bars for same generic workload across services
+Visual: Horizontal bar chart, 3 bars for the same workload across services
+(criteria: `--accelerator h100 --intent training`; GKE additionally needs `--os cos`)
 
-| Service  | Components | Service-Specific Additions            |
-|----------|------------|---------------------------------------|
-| EKS      | 14         | aws-efa, aws-ebs-csi-driver           |
-| GKE/COS  | 10         | COS-specific GPU Operator overrides   |
-| Kind     | 16         | network-operator, DRA driver, local   |
+| Service  | Components | Service-Specific Additions / Omissions        |
+|----------|------------|-----------------------------------------------|
+| EKS      | 14         | aws-efa, aws-ebs-csi-driver, nodewright-customizations |
+| GKE/COS  | 13         | gke-nccl-tcpxo, nodewright-customizations, COS GPU overrides |
+| Kind     | 12         | network-operator; no cloud CSI/EFA            |
 
 Caption: "Same intent, different service = different component sets and values"
 
@@ -117,7 +118,7 @@ Caption: "Same intent, different service = different component sets and values"
 - Header: Dark bg, "AI Cluster Runtime" bold NVIDIA Green
 - Footer: Dark bg, white text
 - NVIDIA Green for active/matching/passing elements
-- Orange for delta callouts (+N components, +N values)
+- Orange for delta callouts (+N components)
 - Grey for muted subtitles and secondary text
 - Component names in monospace font
 - Numbers large and bold in stat cards

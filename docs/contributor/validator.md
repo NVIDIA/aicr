@@ -642,8 +642,9 @@ type ValidationFunc func(
 
 ### Common pitfalls
 
-- **Function name typo in YAML.** Silently skipped — no error raised.
-  Add a test that calls `Get("...")` (or `RegistryHas(...)`) for every
+- **Function name typo in YAML.** Fails closed — `RunValidations` raises
+  `ErrCodeInvalidRequest` ("unknown validation function") rather than
+  skipping the check. Add a test that calls `Get("...")` for every
   shipping check.
 - **Returning an error when you mean a warning.** Errors stop the
   bundle. If the user can ship through it, return a warning.
@@ -812,7 +813,8 @@ Patterns common to all four surfaces.
   error.** Masquerades broken YAML as passing. Fail closed — return
   `ErrCodeInvalidRequest`. (CLAUDE.md anti-pattern.)
 - **Function-name typo in `registry.yaml` `validations:` block.**
-  Silently skipped, no error. Add a registry-lookup test for every
+  Fails closed — `RunValidations` raises `ErrCodeInvalidRequest`
+  ("unknown validation function"). Add a registry-lookup test for every
   shipping function.
 - **`yaml.Marshal` on `map[string]any` for output that feeds CTRF or
   a digest.** `yaml.v3` walks randomized Go map order. Use

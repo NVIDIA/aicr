@@ -46,7 +46,7 @@ Expected:
 - Completes in <10s
 - `recipe.yaml` created
 - Criteria matching flags
-- 13 components, 7 overlays
+- 15 components, 8 overlays
 
 ## Bundle
 
