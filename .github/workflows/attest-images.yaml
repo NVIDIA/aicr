@@ -1,0 +1,113 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reusable workflow that generates SLSA build-provenance + SBOM attestations
+# for the released container images.
+#
+# Running attestation generation from a *reusable* workflow is what makes the
+# provenance SLSA Build Level 3: the attestation's builder identity becomes this
+# workflow (`.github/workflows/attest-images.yaml`), a vetted, isolated builder
+# that callers cannot tamper with — verifiable with:
+#
+#   gh attestation verify oci://<image>@<digest> --repo NVIDIA/aicr \
+#     --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml
+#
+# Generating attestations directly in a top-level (caller) workflow only yields
+# Build Level 2. See:
+#   https://docs.github.com/actions/security-guides/using-artifact-attestations-and-reusable-workflows-to-achieve-slsa-v1-build-level-3
+
+name: Attest Images (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Image tag to resolve and attest (e.g. v1.2.3)'
+        required: true
+        type: string
+
+env:
+  # Keep in sync with on-tag.yaml. The validator phase images live under
+  # aicr-validators/<phase>; the readiness gate under its own repo path.
+  VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
+  GATE_IMAGE: ghcr.io/nvidia/aicr-gate
+
+jobs:
+  attest:
+    name: Attest Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Attest aicr image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ghcr.io/nvidia/aicr
+          tag: ${{ inputs.tag }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest aicrd image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ghcr.io/nvidia/aicrd
+          tag: ${{ inputs.tag }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest deployment validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/deployment
+          tag: ${{ inputs.tag }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest performance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/performance
+          tag: ${{ inputs.tag }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest conformance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/conformance
+          tag: ${{ inputs.tag }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest aiperf-bench image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/aiperf-bench
+          tag: ${{ inputs.tag }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest gate image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.GATE_IMAGE }}
+          tag: ${{ inputs.tag }}
+          crane_version: ${{ steps.versions.outputs.crane }}

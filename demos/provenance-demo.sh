@@ -145,16 +145,16 @@ banner "Verify the image: SLSA Provenance v1 (via gh)"
 note "Requires GitHub auth: run 'gh auth login' or set GH_TOKEN first."
 note "gh attestation verify fetches the attestation from the GitHub attestations API, validates the Sigstore"
 note "signature against Fulcio's cert chain + Rekor's inclusion proof, and asserts the"
-note "artifact comes from --repo $OWNER/aicr and was signed by the on-tag.yaml release workflow."
+note "artifact comes from --repo $OWNER/aicr and was signed by the attest-images.yaml reusable workflow (the SLSA Build L3 trusted builder)."
 pause "Press Enter to verify provenance"
-run gh attestation verify "oci://$IMAGE_DIGEST" --repo "$OWNER/aicr" --signer-workflow "$OWNER/aicr/.github/workflows/on-tag.yaml" --source-ref "refs/tags/$TAG"
+run gh attestation verify "oci://$IMAGE_DIGEST" --repo "$OWNER/aicr" --signer-workflow "$OWNER/aicr/.github/workflows/attest-images.yaml" --source-ref "refs/tags/$TAG"
 
 banner "Verify the aicrd server image"
 note "Same flow, second subject. Resolve its own digest first — tags can drift independently."
 pause "Press Enter to resolve + verify aicrd"
 DIGEST_AICRD="$(crane digest "$IMAGE_AICRD:$TAG")"
 note "aicrd digest: $DIGEST_AICRD"
-run gh attestation verify "oci://$IMAGE_AICRD@$DIGEST_AICRD" --repo "$OWNER/aicr" --signer-workflow "$OWNER/aicr/.github/workflows/on-tag.yaml" --source-ref "refs/tags/$TAG"
+run gh attestation verify "oci://$IMAGE_AICRD@$DIGEST_AICRD" --repo "$OWNER/aicr" --signer-workflow "$OWNER/aicr/.github/workflows/attest-images.yaml" --source-ref "refs/tags/$TAG"
 
 # --- verify the SBOM attestation ---------------------------------------------
 
@@ -165,7 +165,7 @@ pause "Press Enter to verify the SBOM attestation"
 run cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   "$IMAGE_DIGEST" \
   --output-file "$PREDICATE"
 

@@ -44,7 +44,7 @@ This script:
 - Verifies the installation
 - Uses `GITHUB_TOKEN` environment variable for authenticated API calls (avoids rate limits)
 
-> **Supply Chain Security**: AICR includes SLSA build provenance (build level under review, #1536) with signed image SBOMs and verifiable attestations. See [SECURITY](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md#supply-chain-security) for verification instructions.
+> **Supply Chain Security**: AICR includes SLSA Build Level 3 image provenance with signed image SBOMs and verifiable attestations. See [SECURITY](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md#supply-chain-security) for verification instructions.
 
 ### Option 3: Manual Installation
 

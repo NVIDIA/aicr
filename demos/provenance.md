@@ -68,7 +68,7 @@ and was signed by the exact release workflow named in `--signer-workflow`
 (pinning `--owner` alone would trust any workflow in any NVIDIA repository).
 
 ```shell
-gh attestation verify "oci://${IMAGE_DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://${IMAGE_DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 ```
 
 Expected output:
@@ -81,14 +81,14 @@ Loaded 1 attestation from GitHub API
 The following policy criteria will be enforced:
   - OIDC Issuer must match: https://token.actions.githubusercontent.com
   - Source Repository URI must match: https://github.com/NVIDIA/aicr
-  - Build signer workflow must match: NVIDIA/aicr/.github/workflows/on-tag.yaml
+  - Build signer workflow must match: NVIDIA/aicr/.github/workflows/attest-images.yaml
   - Predicate type must match: https://slsa.dev/provenance/v1
 ```
 
 Same for `aicrd`:
 
 ```shell
-gh attestation verify "oci://${IMAGE_AICRD}@${DIGEST_AICRD}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify "oci://${IMAGE_AICRD}@${DIGEST_AICRD}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 ```
 
 ### Why pin to the digest
@@ -107,7 +107,7 @@ envelope to disk:
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   "${IMAGE_DIGEST}" \
   --output-file predicate.json
 ```
@@ -209,7 +209,7 @@ policy must verify the Sigstore bundle format:
 
 Verify against AICR's release identity — issuer
 `https://token.actions.githubusercontent.com`, subject
-`https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/*`.
+`https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*`.
 
 > Validated, cluster-tested copy-paste policies are tracked in
 > [#1537](https://github.com/NVIDIA/aicr/issues/1537). Earlier inline examples
