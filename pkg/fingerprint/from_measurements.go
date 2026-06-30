@@ -54,8 +54,7 @@ const (
 	noteUnknownSKU          = "unknown-sku"
 )
 
-//	FromMeasurements builds a Fingerprint from a snapshot's measurement
-//
+// FromMeasurements builds a Fingerprint from a snapshot's measurement
 // slice. Dimensions whose source signal is missing keep their zero
 // value (empty string for Dimension/OSDimension, 0 for IntDimension);
 // callers compare those against criteria using Match, which treats
