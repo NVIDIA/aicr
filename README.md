@@ -63,7 +63,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
 | **Drift Detection** | `aicr diff` compares two snapshots to surface configuration drift between clusters or over time. |
-| **Supply Chain Security** | SLSA build provenance (level under review, #1536), signed image SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
+| **Supply Chain Security** | SLSA Build Level 3 image provenance, signed image SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
 
 ## Supported Components
 

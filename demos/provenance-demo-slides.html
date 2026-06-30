@@ -300,7 +300,7 @@
     <div class="note">
       <span class="t info">Why keyless</span>
       No long-lived signing key to leak. The signer&rsquo;s identity is the workflow ref
-      (<code class="inl">https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/vX.Y.Z</code>) — verifiable against Fulcio&rsquo;s cert chain and Rekor&rsquo;s transparency log without contacting NVIDIA.
+      (<code class="inl">https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/vX.Y.Z</code>) — verifiable against Fulcio&rsquo;s cert chain and Rekor&rsquo;s transparency log without contacting NVIDIA.
     </div>
   </div>
 </section>
@@ -320,7 +320,7 @@
 <span class="d">ghcr.io/nvidia/aicr@sha256:f0c1abc…</span>
 
 <span class="c"># 2. Verify the SLSA provenance attestation against NVIDIA's identity.</span>
-<span class="p">$</span> gh attestation verify oci://"$IMAGE@$DIGEST" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+<span class="p">$</span> gh attestation verify oci://"$IMAGE@$DIGEST" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 <span class="g">Loaded digest sha256:f0c1abc… for oci://ghcr.io/nvidia/aicr@…</span>
 <span class="g">✓ Verification succeeded!</span>
 

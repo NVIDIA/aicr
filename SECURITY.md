@@ -147,12 +147,35 @@ and how it is signed:
 
 | Guarantee | Artifact | Format / Standard | Signing |
 |-----------|----------|-------------------|---------|
-| Build provenance | Container images | SLSA Build Provenance v1 (build level under review — #1536) | Sigstore keyless via GitHub Actions OIDC |
+| Build provenance | Container images | SLSA Build Level 3 (provenance v1) | Sigstore keyless via GitHub Actions OIDC, generated from a reusable workflow |
 | Build provenance | CLI binaries | SLSA Build Provenance v1 (Sigstore bundle) | Cosign keyless, logged to public Rekor |
 | Signed SBOM | Container images | SPDX v2.3 JSON attestation | Cosign keyless (Fulcio + Rekor) |
 | Binary SBOM | CLI binaries | SPDX v2.3 JSON (via GoReleaser) | Separate release asset (`*.sbom.json`), not embedded |
 | Bundle attestation | `aicr bundle` output | SLSA Build Provenance v1 | Sigstore keyless OIDC (opt-in `--attest`) |
 | Recipe / bundle validity | `aicr verify` trust levels | `verified` / `attested` / `unverified` / `unknown` | Checksums + Sigstore trusted root |
+
+**Why image provenance is Build Level 3.** Image attestations are generated
+from a dedicated *reusable* workflow
+([`.github/workflows/attest-images.yaml`](.github/workflows/attest-images.yaml)),
+not inline in the release job. That reusable workflow is what raises the level
+from 2 to 3: it isolates provenance generation from the build, so the signing
+identity (the Fulcio certificate's subject) is the reusable workflow itself —
+which the calling workflow cannot alter. Because the build steps cannot forge or
+tamper with the provenance, it satisfies the defining requirement of SLSA Build
+Level 3 ([SLSA v1.0 levels](https://slsa.dev/spec/v1.0/levels)). GitHub issues
+Build Level 2 for attestations generated directly in a caller workflow and Build
+Level 3 only when they are produced by a reusable workflow
+([GitHub docs](https://docs.github.com/actions/security-guides/using-artifact-attestations-and-reusable-workflows-to-achieve-slsa-v1-build-level-3)).
+Confirm the trusted builder by pinning verification to it:
+
+```shell
+gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml
+```
+
+CLI binaries remain SLSA Build Provenance v1 (Build Level 2): they are signed
+with `cosign attest-blob` from the release job (`on-tag.yaml`), which does not
+provide the reusable-workflow isolation.
 
 `aicr verify` reports one of four trust levels for a bundle: `verified`
 (full chain verified, binary identity pinned to NVIDIA CI), `attested`
@@ -173,7 +196,8 @@ export IMAGE="ghcr.io/nvidia/aicr"
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
 
 # Verify build provenance (the SPDX SBOM uses the Cosign flow in docs/integrator/supply-chain-verification.md)
-gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+# --signer-workflow pins the trusted reusable builder; passing it is the SLSA Build Level 3 check.
+gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 # ✓ Verification succeeded!
 #   • Build provenance (SLSA v1.0)
 ```

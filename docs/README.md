@@ -5,7 +5,7 @@ configuration artifacts for GPU-accelerated Kubernetes clusters.
 Given a description of your environment — cloud, accelerator, OS,
 intent — AICR emits the Helm, Argo CD, Flux, or Helmfile artifacts
 your deployment tool consumes. The output is hardware-aware,
-version-locked, and backed by SLSA build provenance (level under review, #1536).
+version-locked, and backed by SLSA Build Level 3 image provenance.
 
 For the project pitch, supported environments, and a feature
 overview, see the [repository README](https://github.com/NVIDIA/aicr).
@@ -104,7 +104,7 @@ Reference for the terms used across the docs site.
 | **Specificity** | A score counting non-`any` criteria fields. More-specific overlays merge later. |
 | **Asymmetric matching** | Criteria-matching rule: recipe `any` is a wildcard; query `any` does not match a specific recipe. |
 | **ConfigMap URI** | `cm://namespace/name` — read or write snapshots and recipes directly to Kubernetes ConfigMaps. |
-| **SLSA / SBOM** | Supply-chain Levels for Software Artifacts (releases ship SLSA build provenance; build level under review in #1536) and Software Bill of Materials shipped with binaries and images. |
+| **SLSA / SBOM** | Supply-chain Levels for Software Artifacts (release images reach Build Level 3) and Software Bill of Materials shipped with binaries and images. |
 
 ## Links
 

@@ -136,7 +136,7 @@ Tags: `latest`, `vX.Y.Z`
 
 Every release includes:
 
-- **SLSA Build Provenance v1** — verifiable build attestations (build level under review, #1536)
+- **SLSA Build Level 3 Provenance** — verifiable image build attestations (provenance v1), generated from a reusable workflow
 - **SBOM** — Software Bill of Materials (SPDX format)
 - **Sigstore Signatures** — keyless signing via Fulcio + Rekor
 - **Checksums** — SHA256 for all binaries
@@ -160,20 +160,20 @@ Every release includes:
 export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 
 # GitHub CLI (core images)
-gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # GitHub CLI (validator images)
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/deployment:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/performance:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/conformance:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
-gh attestation verify oci://ghcr.io/nvidia/aicr-validators/aiperf-bench:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/on-tag.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/deployment:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/performance:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/conformance:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/aiperf-bench:${TAG} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
 # Cosign
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ghcr.io/nvidia/aicr:${TAG}
 ```
 

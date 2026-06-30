@@ -442,74 +442,22 @@ jobs:
   # Attestation Job (runs after all images are pushed and scanned)
   # =============================================================================
 
+  # Attestation is generated from a REUSABLE workflow on purpose: that is what
+  # makes the image provenance SLSA Build Level 3 (the builder identity becomes
+  # attest-images.yaml, verifiable via `gh attestation verify --signer-workflow`).
+  # Generating it inline in this caller workflow would only be Build Level 2.
+  # See #1536.
   attest:
     name: Attest Images
-    runs-on: ubuntu-latest
     needs: [image-vuln-scan]
-    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Attest aicr image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ghcr.io/nvidia/aicr
-          tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest aicrd image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ghcr.io/nvidia/aicrd
-          tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest deployment validator image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/deployment
-          tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest performance validator image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/performance
-          tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest conformance validator image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/conformance
-          tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest aiperf-bench image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/aiperf-bench
-          tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
-
-      - name: Attest gate image
-        uses: ./.github/actions/attest-image-from-tag
-        with:
-          image_name: ${{ env.GATE_IMAGE }}
-          tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
+    uses: ./.github/workflows/attest-images.yaml
+    with:
+      tag: ${{ github.ref_name }}
 
 
   # =============================================================================
