@@ -16,6 +16,7 @@ package k8s
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -92,6 +93,16 @@ func TestKubernetesCollector_CollectWithTimeout(t *testing.T) {
 }
 
 func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
+	// Match the client package's discovery-isolation pattern so this test
+	// cannot select a real workstation kubeconfig.
+	t.Setenv("KUBECONFIG", os.Getenv("KUBECONFIG"))
+	if err := os.Unsetenv("KUBECONFIG"); err != nil {
+		t.Fatalf("unset KUBECONFIG: %v", err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
 	ctx := context.TODO()
 
 	// Create collector without a valid client
