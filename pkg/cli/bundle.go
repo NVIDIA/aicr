@@ -117,6 +117,12 @@ type bundleCmdOptions struct {
 	// deployer's "aicr-bundle" default is used when this is empty. See #1019.
 	bundleChartName string
 
+	// ociParentNamespace is the OCI registry + repository path with the
+	// chart segment stripped; used as the default repoURL baked into the
+	// argocd-helm bundle's values.yaml. Derived from ociRef when --output
+	// is an OCI reference; empty for local-directory output. See #1342.
+	ociParentNamespace string
+
 	// appName overrides the parent Argo Application's metadata.name. Empty
 	// means each deployer applies its own default ("aicr-stack" for
 	// argocd-helm, "nvidia-stack" for argocd). See #1011.
@@ -207,6 +213,15 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		// resolves against an artifact that doesn't exist in the registry
 		// when the user picks a non-default name. See #1019.
 		opts.bundleChartName = opts.ociRef.ChartName()
+		// Derive the parent namespace (strip chart segment) so the argocd-helm
+		// deployer can bake it into values.yaml as the default repoURL. This
+		// mirrors the logic in printArgoCDHelmOCIInstructions. See #1342.
+		parentPath := path.Dir(opts.ociRef.Repository)
+		if parentPath == "." || parentPath == "/" {
+			opts.ociParentNamespace = oci.URIScheme + opts.ociRef.Registry
+		} else {
+			opts.ociParentNamespace = oci.URIScheme + opts.ociRef.Registry + "/" + parentPath
+		}
 	} else {
 		// Resolve local output path to absolute to ensure consistent behavior
 		// regardless of how the binary is invoked.
@@ -837,6 +852,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),
+		config.WithOCIParentNamespace(opts.ociParentNamespace),
 		config.WithAppName(opts.appName),
 	)
 
