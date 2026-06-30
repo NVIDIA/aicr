@@ -54,7 +54,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.32.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
-  nvkind: '24c190e165d43a2f20589cb779a4db5b2af0313f'
+  nvkind: 'c57050497cffee36f10c8b918d2727c4f26d886e'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.4'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
