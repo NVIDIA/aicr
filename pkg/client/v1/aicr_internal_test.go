@@ -1046,3 +1046,160 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 		}
 	}
 }
+
+// TestAdoptRecipe_RejectsIncoherentRef pins issue #1584 at the REST/adopt
+// boundary: POST /v1/bundle decodes a RecipeResult and calls adoptRecipe,
+// which never runs the resolver — so coherence must be enforced here. An
+// incoherent ref (Helm carrying a Kustomize tag) is rejected, and a coherent
+// lowercase-typed ref (the OpenAPI wire form) is accepted case-insensitively.
+func TestAdoptRecipe_RejectsIncoherentRef(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	base := func(refs []recipe.ComponentRef) *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			Kind:          recipe.RecipeResultKind,
+			APIVersion:    recipe.RecipeAPIVersion,
+			Criteria:      &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+			ComponentRefs: refs,
+		}
+	}
+
+	// Incoherent: Helm ref carrying a Kustomize tag -> rejected.
+	_, err = client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
+		{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Version: "v1", Tag: "v2"},
+	}))
+	if err == nil {
+		t.Fatal("adoptRecipe accepted an incoherent Helm+tag ref; want ErrCodeInvalidRequest")
+	}
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+
+	// Coherent, lowercase type (OpenAPI wire form) -> accepted AND canonicalized
+	// so downstream deployers see the canonical constant.
+	res, err := client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
+		{Name: "gpu-operator", Type: recipe.ComponentType("helm"), Version: "v1"},
+	}))
+	if err != nil {
+		t.Fatalf("adoptRecipe rejected a coherent lowercase-typed ref: %v", err)
+	}
+	if got := res.internal.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
+		t.Errorf("adopted lowercase type not canonicalized: got %q, want %q", got, recipe.ComponentTypeHelm)
+	}
+
+	// A type-less ref for a registry component (valid before #1584 — the
+	// deployers derive the type from fields) must be back-filled from the
+	// registry, not rejected.
+	res2, err := client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
+		{Name: "gpu-operator", Version: "v1"},
+	}))
+	if err != nil {
+		t.Fatalf("adoptRecipe rejected a type-less registry ref instead of back-filling: %v", err)
+	}
+	if got := res2.internal.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
+		t.Errorf("type-less registry ref not back-filled: got %q, want %q", got, recipe.ComponentTypeHelm)
+	}
+}
+
+// blockingReadFileProvider parks ReadFile of a target file (e.g. registry.yaml)
+// on a signal, so a test can deterministically pin adoptRecipe inside its
+// registry-backed type back-fill while a second goroutine calls Close.
+type blockingReadFileProvider struct {
+	underlying  recipe.DataProvider
+	target      string
+	readStarted chan struct{}
+	readUnblock chan struct{}
+}
+
+func (b *blockingReadFileProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if strings.HasSuffix(path, b.target) {
+		select {
+		case <-b.readStarted:
+		default:
+			close(b.readStarted)
+		}
+		<-b.readUnblock
+	}
+	return b.underlying.ReadFile(ctx, path)
+}
+
+func (b *blockingReadFileProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
+	return b.underlying.WalkDir(ctx, root, fn)
+}
+
+func (b *blockingReadFileProvider) Source(path string) string { return b.underlying.Source(path) }
+
+// TestClient_CloseDrainsInflightAdopt pins the inflight registration added for
+// adoptRecipe (issue #1584): PrepareAndValidate reads the component registry to
+// back-fill a missing type, so a concurrent Close must drain the adopt before
+// evicting caches. A type-less gpu-operator ref forces the registry ReadFile,
+// which parks; Close must block on inflight.Wait until the adopt completes.
+func TestClient_CloseDrainsInflightAdopt(t *testing.T) {
+	t.Parallel()
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	blockedDP := &blockingReadFileProvider{
+		underlying:  embedded,
+		target:      "registry.yaml",
+		readStarted: make(chan struct{}),
+		readUnblock: make(chan struct{}),
+	}
+	c := &Client{
+		builder: recipe.NewBuilder(recipe.WithDataProvider(blockedDP)),
+		dp:      blockedDP,
+	}
+
+	adoptDone := make(chan struct{})
+	go func() {
+		defer close(adoptDone)
+		_, _ = c.adoptRecipe(context.Background(), &recipe.RecipeResult{
+			Kind:       recipe.RecipeResultKind,
+			APIVersion: recipe.RecipeAPIVersion,
+			Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v1"}, // type-less -> forces registry back-fill
+			},
+		})
+	}()
+
+	select {
+	case <-blockedDP.readStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("adoptRecipe never read registry.yaml within 5s")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		_ = c.Close()
+	}()
+
+	select {
+	case <-closeDone:
+		t.Fatal("Close returned before in-flight adoptRecipe drained; inflight registration is missing")
+	case <-time.After(100 * time.Millisecond):
+		// Expected: Close parked on inflight.Wait().
+	}
+
+	close(blockedDP.readUnblock)
+	select {
+	case <-adoptDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("adoptRecipe did not complete within 10s after unblock")
+	}
+	select {
+	case <-closeDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not complete within 10s after adopt drained")
+	}
+}

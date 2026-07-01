@@ -69,3 +69,22 @@ func TestBundleHandler_EmptyComponentRefs(t *testing.T) {
 		t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
 }
+
+// TestBundleHandler_IncoherentComponentRef verifies the HTTP decode-to-bundle
+// path rejects an incoherent ref (a Helm component carrying a Kustomize tag)
+// with 400 rather than producing a mismatched bundle. Pins issue #1584 at the
+// POST /v1/bundle boundary.
+func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
+	t.Parallel()
+	h := newTestBundleHandler(t)
+
+	body := `{"apiVersion": "aicr.run/v1alpha2", "kind": "Recipe", "componentRefs": [` +
+		`{"name": "gpu-operator", "type": "Helm", "version": "v1", "tag": "v2"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleBundles(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d. Body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
