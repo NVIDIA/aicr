@@ -167,9 +167,26 @@ phase_install() {
       helm plugin remove diff
     fi
     # Install from the signed release tarball (helm-diff's recommended Helm 4
-    # method). The git-URL form requires --verify=false under Helm 4; the
-    # tarball form works without it and carries the upstream release signature.
-    helm plugin install "https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/helm-diff-linux-amd64.tgz"
+    # method). Helm 4 verifies plugin provenance by default (--verify=true):
+    # the .prov signature is checked against a keyring. Import the maintainer's
+    # release key, pin it to the published fingerprint (fail closed on
+    # mismatch), export it to a legacy keyring, and verify against it.
+    local HELM_DIFF_KEY_FPR="C5645EF47482257A1F806D2BEA17A2A206AFF8CD"
+    local HELM_DIFF_GNUPGHOME HELM_DIFF_KEYRING
+    HELM_DIFF_GNUPGHOME="$(mktemp -d)"
+    HELM_DIFF_KEYRING="$(mktemp)"
+    GNUPGHOME="${HELM_DIFF_GNUPGHOME}" curl -fsSL "https://github.com/databus23.gpg" \
+      | GNUPGHOME="${HELM_DIFF_GNUPGHOME}" gpg --import
+    if ! GNUPGHOME="${HELM_DIFF_GNUPGHOME}" gpg --with-colons --fingerprint \
+        | awk -F: '/^fpr:/{print $10}' | grep -qx "${HELM_DIFF_KEY_FPR}"; then
+      echo "::error::helm-diff release key fingerprint mismatch (expected ${HELM_DIFF_KEY_FPR})" >&2
+      rm -rf "${HELM_DIFF_GNUPGHOME}" "${HELM_DIFF_KEYRING}"
+      exit 1
+    fi
+    GNUPGHOME="${HELM_DIFF_GNUPGHOME}" gpg --export "${HELM_DIFF_KEY_FPR}" > "${HELM_DIFF_KEYRING}"
+    helm plugin install "https://github.com/databus23/helm-diff/releases/download/${HELM_DIFF_VERSION}/helm-diff-linux-amd64.tgz" \
+      --keyring "${HELM_DIFF_KEYRING}"
+    rm -rf "${HELM_DIFF_GNUPGHOME}" "${HELM_DIFF_KEYRING}"
   fi
   echo "::endgroup::"
 

@@ -244,9 +244,23 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        if [[ -x /usr/local/bin/helm ]]; then echo "helm already installed"; helm version; exit 0; fi
         HELM_VERSION="${{ inputs.helm_version }}"
         HELM_VERSION="${HELM_VERSION#v}"
+        # The runner image may ship a preinstalled helm (ubuntu-latest bundles
+        # Helm 3 at /usr/local/bin/helm). Only skip installation when the
+        # existing binary already matches the pinned version; a bare presence
+        # check silently ignores the .settings.yaml pin and leaves jobs running
+        # the runner's stock Helm 3 instead of the pinned Helm 4.
+        if [[ -x /usr/local/bin/helm ]]; then
+          INSTALLED="$(/usr/local/bin/helm version --template '{{.Version}}' 2>/dev/null || true)"
+          INSTALLED="${INSTALLED#v}"
+          if [[ "${INSTALLED}" == "${HELM_VERSION}" ]]; then
+            echo "helm ${HELM_VERSION} already installed"
+            helm version
+            exit 0
+          fi
+          echo "helm ${INSTALLED:-unknown} present; replacing with pinned ${HELM_VERSION}"
+        fi
         HELM_BASE="https://get.helm.sh"
         HELM_TAR="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
         HELM_TMP="$(mktemp -d)"
