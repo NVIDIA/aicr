@@ -33,7 +33,7 @@ The lease is a GitHub Actions concurrency group keyed by reservation name — `u
 
 This replaces the previous behavior, where a second run hitting a busy AWS reservation hard-failed on the capacity check. Now it queues.
 
-**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. At launch this is acceptable: there are two reservations, each contended by at most the nightly cron plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed; surfacing that signal so a dropped request is never silent is handled by the reliability follow-up (DC6). If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
+**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. At launch this is acceptable: there are two reservations, each contended by at most the nightly cron plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed. So that a dropped request is never silent, the `uat-superseded-notice.yaml` observer watches for it: triggered on `workflow_run: completed` for `UAT Run`, it classifies a cancelled run that never started a job as a supersede (versus a genuine mid-run cancel) and emits a job-summary entry plus a `::warning`. (The nightly controller reconciles the same signal synchronously for the cells it dispatches; a DC6 regression guard, #1279, will exercise the observer.) If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
 
 ## Adding a reservation
 
@@ -58,5 +58,4 @@ The values in this file are identifiers, **not secrets** — a reservation-id gr
 What ships now is the lease, the data-driven dispatch surface, and a main-only nightly batch. Still to come:
 
 - **Version matrix (DC1 follow-up / DC5).** The nightly batch will expand into a time-boxed, `main`-first, previous-N-stable-releases schedule (`uat-broker schedule`), each release row installing the released `aicr` images at that version.
-- **Superseded-run surfacing (DC6).** A reactive notice so a dropped (superseded) request is visible to its requester.
 - **Per-intent shaping + daytime deployment (DC2 / DC8).** Selecting the test config and recipe by `intent`, and the morning-handoff daytime human-access cluster.
