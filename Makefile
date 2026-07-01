@@ -174,13 +174,23 @@ LICENSE_IGNORES = \
 	-ignore 'dist/**' \
 	-ignore 'vendor/**' \
 	-ignore '**/testdata/**' \
+	-ignore 'recipes/evidence/*.yaml' \
+	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore '.licenses-cache/**'
 
+# The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
+# generated, header-less pointer shapes MarshalPointer emits — the transient
+# flat <recipe>.yaml pending state and the final <recipe>/<source>/sha256-*.yaml
+# (any committed header is stripped on the next publish/sign). They are kept
+# narrow (not a recursive **) so unrelated YAML added under the tree still gets
+# header enforcement. The flat glob also covers the hand-maintained
+# allowlist.yaml, so the license target headers it explicitly below.
 .PHONY: license
 license: ## Add/verify license headers in source files
 	@echo "Ensuring license headers..."
 	@addlicense -f .github/headers/LICENSE $(LICENSE_IGNORES) .
+	@addlicense -f .github/headers/LICENSE recipes/evidence/allowlist.yaml
 
 #### DO NOT CHANGE THIS SET OF ALLOWED LICENSES, DO NOT ADD IGNORES
 license-check: ## Check license is approved
