@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-06-30T22:17:15Z
+    bundle:
+      digest: sha256:be4680f26ad9ebeb57145f1953f18311ca00e81a4edb37773e0ec1060c6bd261
+      oci: ghcr.io/nvidia/aicr-evidence:h100-gke-cos-training-cb0800ddf394
+      predicateType: https://aicr.run/recipe-evidence/v1
+    signer:
+      identity: yuanchen97@gmail.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 2027401692
+recipe: h100-gke-cos-training
+schemaVersion: 1.0.0
