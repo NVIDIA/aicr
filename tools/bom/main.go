@@ -42,8 +42,29 @@ import (
 
 const (
 	defaultHelmTimeout = 90 * time.Second
-	kindHelm           = "helm"
+	// Component kinds reference the shared pkg/bom identifiers so the tool and
+	// the BOM renderer cannot drift on the string values.
+	kindHelm      = bom.TypeHelm
+	kindKustomize = bom.TypeKustomize
+	kindManifest  = bom.TypeManifest
 )
+
+// pinnedVersion returns the version the BOM advertises for a component, chosen
+// by its effective deployment type: a Helm component's chart defaultVersion or
+// a Kustomize component's defaultTag. Manifest components have neither and
+// return "". Keeping this in lockstep with the freshness test's expectation
+// (tools/bom/freshness_test.go) is what lets a Kustomize component pass the
+// committed-BOM check — the generator must emit the same field the test reads.
+func pinnedVersion(c component) string {
+	switch c.kind() {
+	case kindHelm:
+		return c.Helm.DefaultVersion
+	case kindKustomize:
+		return c.Kustomize.DefaultTag
+	default:
+		return ""
+	}
+}
 
 func main() {
 	var (
@@ -197,15 +218,23 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 // surveyComponent renders the component's chart (if any) and walks its
 // embedded manifests directory, returning the union of image refs.
 func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer, skipHelm bool) bom.ComponentResult {
+	version := pinnedVersion(c)
+	// Repository carries the Helm chart repo or, for a Kustomize component, its
+	// source; pkg/bom names the property by effective type. Chart/Namespace are
+	// Helm-only and stay empty for Kustomize.
+	repository := c.Helm.DefaultRepository
+	if c.kind() == kindKustomize {
+		repository = c.Kustomize.DefaultSource
+	}
 	res := bom.ComponentResult{
 		Name:        c.Name,
 		DisplayName: c.DisplayName,
 		Type:        c.kind(),
-		Repository:  c.Helm.DefaultRepository,
+		Repository:  repository,
 		Chart:       c.Helm.DefaultChart,
-		Version:     c.Helm.DefaultVersion,
+		Version:     version,
 		Namespace:   c.Helm.DefaultNamespace,
-		Pinned:      c.Helm.DefaultVersion != "",
+		Pinned:      version != "",
 	}
 
 	images := map[string]struct{}{}

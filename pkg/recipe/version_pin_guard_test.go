@@ -239,15 +239,51 @@ func assertExemptionDefaultsInstalled(ctx context.Context, t *testing.T, store *
 		if cfg == nil {
 			continue // unknown component is reported elsewhere
 		}
+
+		// Select the version field by the registry component's type. Comparing
+		// against whichever of Version/Tag happens to match would let an
+		// inactive field spoof a default installation (e.g. a Helm component
+		// whose unused Tag coincidentally equals the default), so the active
+		// field is chosen by type and the other is ignored.
+		regType := cfg.GetType()
+		kustomize := regType == ComponentTypeKustomize
 		def := cfg.Helm.DefaultVersion
-		if def == "" {
+		if kustomize {
 			def = cfg.Kustomize.DefaultTag
 		}
 
 		installed := false
 		for _, r := range results {
 			ref := r.GetComponentRef(e.component)
-			if ref != nil && ref.IsEnabled() && (ref.Version == def || ref.Tag == def) {
+			if ref == nil || !ref.IsEnabled() {
+				continue
+			}
+			// Fail closed on refs whose deploy shape does not unambiguously
+			// match the registry default's type. A leaf overlay can inherit
+			// Type/Version from a Helm registry default while ALSO setting Tag
+			// or Path (mergeComponentRef merges each field independently and no
+			// resolver validation rejects the mix). The Helm/Helmfile/ArgoCD
+			// deployers drop Type, and localformat classifies any ref with a
+			// Tag or Path as Kustomize (see deployer/localformat.classify), so
+			// such a ref actually installs Kustomize — it must NOT count as
+			// installing the Helm default via its inactive inherited Version.
+			// Require BOTH the declared Type and the deploy-classified type to
+			// match the registry type before comparing the active field.
+			deploysKustomize := ref.Tag != "" || ref.Path != ""
+			if ref.Type != regType || deploysKustomize != kustomize {
+				continue
+			}
+			if kustomize && ref.Path == "" {
+				// localformat rejects a Kustomize deployment without a Path
+				// (Path is required to build from), so such a ref never
+				// actually installs the default — do not count it.
+				continue
+			}
+			active := ref.Version
+			if kustomize {
+				active = ref.Tag
+			}
+			if active == def {
 				installed = true
 				break
 			}
