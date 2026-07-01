@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Assert Dynamo platform components are healthy.
-# Chart: dynamo-platform 1.2.0
+# Chart: dynamo-platform 1.2.1
 # Provides NVIDIA Dynamo inference serving: OpenAI-compatible endpoints,
 # KV-cache-aware routing, disaggregated prefill/decode, SLA-driven autoscaling.
 #

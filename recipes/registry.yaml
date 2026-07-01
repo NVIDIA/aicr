@@ -482,7 +482,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "1.2.0"
+      defaultVersion: "1.2.1"
       defaultNamespace: dynamo-system
     storageClassPaths:
       - nats.config.jetstream.fileStore.pvc.storageClassName
