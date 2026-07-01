@@ -231,12 +231,15 @@ recipe-evidence bundle out.
 
 ### Assumptions
 
-* Target cluster is the UAT GKE cluster provisioned by
-  [`.github/workflows/uat-gcp.yaml`](../.github/workflows/uat-gcp.yaml). To
-  bring it up without running the UAT suite or tearing it down:
+* Target cluster is the UAT GKE cluster provisioned by the
+  [`.github/workflows/uat-gcp.yaml`](../.github/workflows/uat-gcp.yaml)
+  pipeline. It is now invoked through the shared dispatch surface
+  [`uat-run.yaml`](../.github/workflows/uat-run.yaml) keyed by reservation
+  (#1274); to bring the cluster up without running the UAT suite or tearing it
+  down:
 
   ```shell
-  gh workflow run uat-gcp.yaml -f skip_delete=true -f skip_tests=true
+  gh workflow run uat-run.yaml -f reservation=gcp-h100 -f skip_delete=true -f skip_tests=true
   ```
 
   > Make sure to cleanup after yourself
