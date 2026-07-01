@@ -20,7 +20,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -214,14 +213,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		// when the user picks a non-default name. See #1019.
 		opts.bundleChartName = opts.ociRef.ChartName()
 		// Derive the parent namespace (strip chart segment) so the argocd-helm
-		// deployer can bake it into values.yaml as the default repoURL. This
-		// mirrors the logic in printArgoCDHelmOCIInstructions. See #1342.
-		parentPath := path.Dir(opts.ociRef.Repository)
-		if parentPath == "." || parentPath == "/" {
-			opts.ociParentNamespace = oci.URIScheme + opts.ociRef.Registry
-		} else {
-			opts.ociParentNamespace = oci.URIScheme + opts.ociRef.Registry + "/" + parentPath
-		}
+		// deployer can bake it into values.yaml as the default repoURL. See #1342.
+		opts.ociParentNamespace = opts.ociRef.ParentNamespace()
 	} else {
 		// Resolve local output path to absolute to ensure consistent behavior
 		// regardless of how the binary is invoked.
@@ -1056,17 +1049,8 @@ func printArgoCDHelmOCIInstructions(w io.Writer, ref *oci.Reference) {
 
 	chartRef := fmt.Sprintf("%s%s/%s:%s", oci.URIScheme, ref.Registry, ref.Repository, ref.Tag)
 
-	// Parent namespace: the registry + repository path with the chart
-	// (last) segment stripped. path.Dir returns "." for a single-segment
-	// repo (e.g., "aicr-bundle"); in that case the parent is just the
-	// registry, with no path component.
-	parentPath := path.Dir(ref.Repository)
-	var repoURL string
-	if parentPath == "." || parentPath == "/" {
-		repoURL = oci.URIScheme + ref.Registry
-	} else {
-		repoURL = oci.URIScheme + ref.Registry + "/" + parentPath
-	}
+	// Delegate to canonical derivation so baked repoURL and printed hint always match. See #1342.
+	repoURL := ref.ParentNamespace()
 
 	fmt.Fprintf(w, "\nargocd-helm bundle pushed: %s\n", chartRef)
 	fmt.Fprintln(w, "\nTo install:")
