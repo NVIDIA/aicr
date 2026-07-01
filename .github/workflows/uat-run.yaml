@@ -31,6 +31,14 @@ run-name: "UAT ${{ inputs.reservation }} @ ${{ inputs.aicr_version || 'main' }}$
 # cloud-appropriate reusable pipeline. Because every run for a reservation
 # routes through here and shares the lease, contending runs QUEUE instead of
 # racing the hardware.
+#
+# DC2 (#1275) adds two orthogonal dials, both forwarded to the cloud pipeline:
+#   - intent (training|inference) selects the per-intent test config +
+#     recipe criteria.
+#   - lifecycle (nightly|daytime-up|daytime-down) selects the cluster
+#     lifecycle: the nightly provision→CUJ→teardown, the daytime
+#     provision-and-hold (stable lease-tagged name, no teardown), or the
+#     evening teardown of that held daytime cluster.
 on:
   workflow_dispatch:
     inputs:
@@ -46,8 +54,18 @@ on:
         description: 'Unique correlation key set by the nightly controller so it can find this run; leave empty for manual runs.'
         type: string
         default: ''
+      intent:
+        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml) and recipe criteria.'
+        type: choice
+        options: [training, inference]
+        default: training
+      lifecycle:
+        description: 'Cluster lifecycle. nightly: provision→CUJ→teardown. daytime-up: provision+deploy+HOLD (stable name, no teardown). daytime-down: tear down the held daytime cluster.'
+        type: choice
+        options: [nightly, daytime-up, daytime-down]
+        default: nightly
       skip_delete:
-        description: 'Skip cluster teardown (manual debugging only).'
+        description: 'Skip cluster teardown (manual debugging only; ignored for daytime lifecycles).'
         type: boolean
         default: false
       skip_tests:
@@ -65,6 +83,12 @@ on:
       dispatch_key:
         type: string
         default: ''
+      intent:
+        type: string
+        default: training
+      lifecycle:
+        type: string
+        default: nightly
       skip_delete:
         type: boolean
         default: false
@@ -153,6 +177,8 @@ jobs:
     with:
       reservation: ${{ inputs.reservation }}
       aicr_version: ${{ inputs.aicr_version }}
+      intent: ${{ inputs.intent }}
+      lifecycle: ${{ inputs.lifecycle }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
@@ -172,6 +198,8 @@ jobs:
     with:
       reservation: ${{ inputs.reservation }}
       aicr_version: ${{ inputs.aicr_version }}
+      intent: ${{ inputs.intent }}
+      lifecycle: ${{ inputs.lifecycle }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}

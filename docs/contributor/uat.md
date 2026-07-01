@@ -6,14 +6,14 @@
 
 Each reserved GPU pool follows a daily cycle, with every phase acquiring the *same* per-reservation lease so CI and human use never overlap on one reservation:
 
-- **Night — the nightly batch.** On a cron, `uat-nightly-batch.yaml` runs the [version matrix](#the-version-matrix) per reservation — `main` plus the previous N stable releases — each cell a full provision → CUJ → evidence → publish → teardown.
-- **Morning — handoff.** Once the batch drains a reservation, the daytime human-access deployment is stood up on it (owned by DC2/DC8; not yet implemented).
+- **Night — the nightly batch.** On a cron, `uat-nightly-batch.yaml` runs the [version matrix](#the-version-matrix) per reservation — `main` plus the previous N stable releases — each cell a full provision → CUJ → evidence → publish → teardown. This is the `lifecycle=nightly` mode: provision-and-destroy under a run-scoped cluster name.
+- **Morning — handoff.** Once the batch drains a reservation, the daytime human-access deployment is stood up on it with `lifecycle=daytime-up`: provision, deploy the stack, and **hold** (no teardown) under a stable, reservation-tagged cluster name. DC2 owns this provision-and-hold mechanic; DC8 owns *what* is deployed and how access is shared.
 - **Day — human use.** The daytime cluster is used outside CI.
-- **Evening — teardown.** The daytime cluster is torn down before the next night batch.
+- **Evening — teardown.** The daytime cluster is torn down with `lifecycle=daytime-down` **before** the next night batch, releasing the reservation.
 
-The phases are independently scheduled (cron edges), not chained: the per-reservation lease — plus a pre-batch guard (DC2) — keeps them from overlapping, so a crashed or overrunning phase never orphans the reservation. A hosted GitHub Actions job is capped at the runner's timeout (hours, not a whole working day), so a single lease-holding run cannot span the day; the lease only needs to cover the brief transition windows, and the steady-state daytime cluster's existence is guarded by its lease-tag rather than a continuously held run.
+The phases are independently scheduled (cron edges), not chained: the per-reservation lease — plus a [pre-batch guard](#pre-batch-guard) — keeps them from overlapping, so a crashed or overrunning phase never orphans the reservation. A hosted GitHub Actions job is capped at the runner's timeout (hours, not a whole working day), so a single lease-holding run cannot span the day; the lease only needs to cover the brief transition windows, and the steady-state daytime cluster's existence is tracked by its stable, reservation-tagged name rather than a continuously held run.
 
-> The morning handoff, the daytime deployment, and the evening teardown are owned by sibling work (DC2 and DC8) and are not yet wired up. What ships today is the **night side** (the nightly batch) plus the **lease + dispatch surface** every phase builds on.
+> What ships today is the **night side** (the nightly batch), the **lease + dispatch surface** every phase builds on, and DC2's **per-intent selection**, **daytime provision-and-hold / teardown mechanics**, and **pre-batch guard**. The daytime deployment's *workload content* and out-of-band access distribution are owned by DC8 and layer on top of the `daytime-up` mechanic.
 
 ## Requesting a UAT run
 
@@ -25,7 +25,55 @@ gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h1
 
 `uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml` or `uat-gcp.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
 
-The nightly batch and (later) the daytime handoff call this *same* surface, so every run for a reservation contends on one lease.
+Two further inputs shape the run (both default to the nightly-batch behavior, so the cron needs neither):
+
+```bash
+# Inference intent, nightly provision→CUJ→teardown
+gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
+  -f reservation=aws-h100 -f intent=inference
+
+# Morning handoff: stand up the daytime cluster and hold it
+gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
+  -f reservation=aws-h100 -f lifecycle=daytime-up
+
+# Evening teardown of the held daytime cluster
+gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main \
+  -f reservation=aws-h100 -f lifecycle=daytime-down
+```
+
+The nightly batch and the daytime handoff/teardown call this *same* surface, so every run for a reservation contends on one lease.
+
+## Selecting the intent
+
+The `intent` input (`training` — the default — or `inference`) selects both the recipe criteria and the per-intent test config the pipeline consumes: `tests/uat/<cloud>/tests/h100-<intent>-config.yaml`. The two configs are siblings with the same `AICRConfig` shape; they differ only in `spec.recipe.criteria.intent`/`platform` (`training`/`kubeflow` vs `inference`/`dynamo`) and the stable evidence push prefix. Both intents provision from the *same* `cluster-config.yaml` — the GPU pool count comes from the reservation row and the system/CPU pools stay per-run dynamic (GCP autoscales; AWS is fixed at `desired: 3`), so nothing about the cluster shape is hardcoded per intent.
+
+The nightly CUJ steps are intent-aware: the training TrainJob step runs only for `intent=training`. The served-inference workload (`phase_serve`) is owned by DC3 and out of scope here, so an `intent=inference` run stands up and validates the inference stack (Dynamo platform, KAI scheduler, DRA driver) and signs evidence, but does not yet exercise a served endpoint.
+
+An unrecognized `intent` (or a missing sibling config) fails closed in the pipeline's `Validate inputs` step before any provisioning.
+
+## Cluster lifecycles
+
+The `lifecycle` input selects one of three cluster lifecycles, all sharing the reservation lease:
+
+| Lifecycle | Cluster name | Provisions | Deploys | CUJ | Teardown at job end |
+|-----------|--------------|-----------|---------|-----|---------------------|
+| `nightly` (default) | `aicr-uat-<run_id>` (AWS) / `aicr-<run_id>` (GCP) — run-scoped | yes | yes | yes (prep→install→validate→train/verify) | yes (unless `skip_delete`) |
+| `daytime-up` | `aicr-uat-day-<reservation>` (AWS) / `aicr-day-<reservation>` (GCP) — **stable** | yes | yes (prep→install) | no | **no — holds** |
+| `daytime-down` | same stable name | no | no | no | yes (tears down the held cluster) |
+
+The nightly per-run name isolates concurrent history (OCI tags, Terraform state) per run. The daytime name is **stable and reservation-tagged** so the evening `daytime-down` teardown and the nightly pre-batch guard can find the held cluster without tracking a run id. `skip_delete` is a nightly-only debugging escape and is ignored by the daytime lifecycles.
+
+## Pre-batch guard
+
+A missed evening teardown must surface as a **blocked batch, never as silent contention** with the still-running daytime deployment. Before it provisions, every `nightly` run asserts that no daytime cluster (by the stable `aicr-uat-day-<reservation>` / `aicr-day-<reservation>` name) is still up on the target reservation. The check runs *after* the run has acquired the reservation lease and authenticated to the cloud, and *before* Bringup — so it fails fast rather than racing. It fails **closed**: only a definitive "cluster does not exist" (AWS `ResourceNotFoundException`, GCP `code=404`) clears the run to proceed; a throttle or auth error blocks the batch rather than being read as "clear."
+
+If the guard trips, tear the daytime cluster down with `lifecycle=daytime-down` (which releases the reservation), then re-run the batch.
+
+## Capacity assertions and the GCP posture
+
+**AWS — post-lease assertion.** `uat-aws.yaml` asserts the EC2 capacity reservation is provisioned large enough for the GPU pool's desired count. Because the reservation lease is now the contention gate, this is **not** a race-and-fail pre-flight: it checks the reservation's `TotalInstanceCount` (its fixed provisioned size), not the momentary `AvailableInstanceCount`. A genuinely undersized/exhausted reservation still fails; transient contention (another run's not-yet-released nodes) no longer does, because the lease already guaranteed we are the only run consuming the reservation.
+
+**GCP — actuator-time failure (decided posture).** `uat-gcp.yaml` has **no** pre-flight capacity/quota assertion, and DC2 deliberately did **not** add one. GCP relies on the GKE actuator failing at provision time if the reservation is exhausted. With the reservation lease serializing contending runs, a provision-time failure means a genuinely undersized/exhausted reservation, not a race — so a symmetric gcloud reservation check would add a second cloud API surface without changing the outcome. This is a recorded decision, not an oversight; there is intentionally no capacity step in the GCP pipeline.
 
 ## How queuing works (the reservation lease)
 
@@ -70,6 +118,7 @@ The values in this file are identifiers, **not secrets** — a reservation-id gr
 
 ## Roadmap
 
-What ships now is the lease, the data-driven dispatch surface, the time-boxed nightly version matrix (`main` + previous-N stable releases, release cells installing released artifacts), and superseded-run surfacing (the controller flags a dropped cell inline; the `uat-superseded-notice.yaml` observer catches ad-hoc dropped runs). Still to come:
+What ships now is the lease, the data-driven dispatch surface, the time-boxed nightly version matrix (`main` + previous-N stable releases, release cells installing released artifacts), superseded-run surfacing (the controller flags a dropped cell inline; the `uat-superseded-notice.yaml` observer catches ad-hoc dropped runs), per-intent selection, and the daytime provision-and-hold / teardown / pre-batch-guard mechanics. Still to come:
 
-- **Per-intent shaping + daytime deployment (DC2 / DC8).** Selecting the test config and recipe by `intent`, and the morning-handoff daytime human-access cluster.
+- **Served-inference CUJ (DC3).** The `phase_serve` step an `intent=inference` run will exercise on the deployed inference stack.
+- **Daytime workload + access (DC8).** *What* the daytime cluster deploys on top of DC2's `daytime-up` mechanic, the served-endpoint exposure, and out-of-band access distribution.
