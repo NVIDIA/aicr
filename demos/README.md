@@ -23,6 +23,8 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [bundle-attestation.md](bundle-attestation.md) | Bundle attestation demo (`aicr bundle --attest` + `aicr verify` trust levels) |
 | [bundle-attestation-demo-slides.html](bundle-attestation-demo-slides.html) | Bundle attestation — slide deck |
 | [bundle-attestation-demo.sh](bundle-attestation-demo.sh) | Interactive bundle sign + verify + tamper walkthrough |
+| [dynamic.md](dynamic.md) | Dynamic install-time values (cluster-values.yaml split, install-time override, OCI artifact) |
+| [private-signing.md](private-signing.md) | Private/enterprise signing & verification (self-hosted Sigstore, KMS-backed, headless OIDC) |
 | [examples/CUJ2-Test-Report.md](examples/CUJ2-Test-Report.md) | Dated historical capture (2026-03-13) of a CUJ2 inference run — example test report, not a runbook |
 
 ## Recording Test Runs
