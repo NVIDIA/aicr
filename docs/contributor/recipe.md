@@ -514,8 +514,12 @@ diverges; that reinstates the exact fiction the guard prevents.
 
 ## Common Pitfalls
 
-- **Skipping `make bom-docs`** after a chart pin or values change.
-  The diff doesn't surface in qualify; the BOM goes stale silently.
+- **Skipping `make bom-docs`** after a values change that alters
+  rendered images. A stale version *column* now fails CI
+  (`TestCommittedBOMVersionsMatchRegistry`), but *image* drift from a
+  values change without a pin bump does not surface in qualify — the
+  BOM goes stale silently. See
+  [Version freshness is gated; image drift is not](#version-freshness-is-gated-image-drift-is-not).
 - **Mutating in place during merge.** Overlay-derived `map[string]any`
   and `[]any` must be deep-copied, not aliased. `deepMergeMap` does
   this for you; a bespoke helper that recurses into maps but copies
