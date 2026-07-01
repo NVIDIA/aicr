@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 )
 
 const fixtureGCS = "testdata/gcs"
@@ -575,4 +577,60 @@ func TestGenerateErrors(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestOrderVersionsNewestFirst locks the version ordering contract: Versions[0] is
+// the newest tool RELEASE (semantic version), not the most-recently-attested one.
+// The decisive fixture is v0.10.0 vs v0.9.0 — a regression to a lexical/string
+// sort would wrongly rank v0.9.0 first and fail here (the end-to-end fixtures all
+// happen to sort identically under semver and sort.Strings, so they can't catch
+// it).
+func TestOrderVersionsNewestFirst(t *testing.T) {
+	mustTime := func(s string) time.Time {
+		ts, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatalf("bad time %q: %v", s, err)
+		}
+		return ts
+	}
+	tests := []struct {
+		name     string
+		versions []string
+		newest   map[string]time.Time
+		want     []string
+	}{
+		{
+			name:     "semver ordering beats lexical (v0.10.0 > v0.9.0)",
+			versions: []string{"v0.9.0", "v1.0.0", "v0.10.0", "v0.13.0"},
+			want:     []string{"v1.0.0", "v0.13.0", "v0.10.0", "v0.9.0"},
+		},
+		{
+			name:     "prerelease sorts below its release",
+			versions: []string{"v1.0.0-rc.1", "v1.0.0", "v0.16.0"},
+			want:     []string{"v1.0.0", "v1.0.0-rc.1", "v0.16.0"},
+		},
+		{
+			name:     "attestation breaks ties among non-semver tags",
+			versions: []string{"edge", "nightly"},
+			newest: map[string]time.Time{
+				"edge":    mustTime("2026-06-01T00:00:00Z"),
+				"nightly": mustTime("2026-06-02T00:00:00Z"),
+			},
+			want: []string{"nightly", "edge"},
+		},
+		{
+			name:     "real releases outrank non-semver tags",
+			versions: []string{"edge", "v0.14.0"},
+			want:     []string{"v0.14.0", "edge"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := append([]string(nil), tt.versions...)
+			orderVersionsNewestFirst(got, tt.newest)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("orderVersionsNewestFirst(%v) = %v, want %v", tt.versions, got, tt.want)
+			}
+		})
+	}
 }

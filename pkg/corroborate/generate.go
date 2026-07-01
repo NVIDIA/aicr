@@ -535,21 +535,7 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 	for v := range verLatest {
 		versions = append(versions, v)
 	}
-	sort.Slice(versions, func(i, j int) bool {
-		vi, vj := versions[i], versions[j]
-		// Primary: semantic version, newest first. semver.Compare orders valid
-		// versions correctly (v1.0.0 > v0.16.1, unlike a string sort) and ranks any
-		// non-semver tag below every real release.
-		if c := semver.Compare(vi, vj); c != 0 {
-			return c > 0
-		}
-		// Fallback for equal/non-comparable versions: most recent attestation, then
-		// a stable string tiebreak.
-		if !verNewest[vi].Equal(verNewest[vj]) {
-			return verNewest[vi].After(verNewest[vj])
-		}
-		return vi > vj
-	})
+	orderVersionsNewestFirst(versions, verNewest)
 
 	gridSigners := map[string]struct{}{}
 	tabVersions := make([]TabVersion, 0, len(versions))
@@ -634,8 +620,24 @@ type rowKey struct {
 	name  string
 }
 
-// unionRows is the union of (phase, CTRF name) across all signers' latest runs,
-// sorted by PhaseOrder then name.
+// orderVersionsNewestFirst sorts AICR version strings so the newest tool RELEASE
+// leads (Versions[0], the default dashboard view): by semantic version first —
+// semver.Compare gets v0.10.0 > v0.9.0 right where a lexical sort does not — then
+// by most-recent attestation, then a stable string tiebreak. A malformed / non-
+// "v"-prefixed tag is invalid semver and ranks below every real release.
+func orderVersionsNewestFirst(versions []string, verNewest map[string]time.Time) {
+	sort.Slice(versions, func(i, j int) bool {
+		vi, vj := versions[i], versions[j]
+		if c := semver.Compare(vi, vj); c != 0 {
+			return c > 0
+		}
+		if !verNewest[vi].Equal(verNewest[vj]) {
+			return verNewest[vi].After(verNewest[vj])
+		}
+		return vi > vj
+	})
+}
+
 // addRunRows records every (phase, CTRF name) present in a single run.
 func addRunRows(seen map[rowKey]struct{}, run *signerRun) {
 	for phase, byName := range run.statuses {
