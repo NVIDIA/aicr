@@ -494,11 +494,16 @@ the pre-push gate is local.
   shell first. This is one of the most common local-only CI-passes-fine
   failure modes.
 - **Forgetting `make bom-docs`** after a `recipes/registry.yaml`,
-  component values, or chart-pin change. `docs/user/container-images.md`
-  goes stale silently — `make bom-check` is **opt-in only** and not
-  wired into `make qualify`, `make lint`, or the merge gate today.
-  CI does not catch this. Run `make bom-docs` locally any time the
-  change touches charts.
+  component values, or chart-pin change. The BOM's **version column
+  and component set are now gated**: `TestCommittedBOMVersionsMatchRegistry`
+  (run by `make test` → `make qualify`, and by the `bom-freshness`
+  merge-gate job on docs-only PRs) fails CI if a pinned version drifts
+  or a component row is missing/orphaned. What is **not** gated at PR
+  time is *rendered-image drift* — a chart bumping an image inside its
+  own templates with no pin change on our side; `make bom-check` (a full
+  re-render comparison) is its **opt-in** blocking check, and the weekly
+  BOM-refresh workflow auto-detects it and opens a PR. So run
+  `make bom-docs` locally any time the change touches charts.
 - **Coverage decrease > 0.5%** is flagged for justification (the project-wide
   75% floor is what blocks). Add tests rather than
   reaching for `// nolint` or `t.Skip` — both are review-blockers
