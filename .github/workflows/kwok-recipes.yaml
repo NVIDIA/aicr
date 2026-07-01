@@ -299,7 +299,7 @@ jobs:
 
           tier3_batches=$(jq -cn \
             --argjson recipes "$tier3" \
-            --argjson deployers "$deployers" \
+            --argjson deployers "${DEPLOYERS}" \
             --argjson size "$TIER3_BATCH_SIZE" '
               [ $recipes[] as $r | $deployers[] as $d | {recipe: $r, deployer: $d} ]
               | [ range(0; length; $size) as $i
