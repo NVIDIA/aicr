@@ -14,6 +14,15 @@
 
 name: UAT Run
 
+# A distinct run title per dispatch so the nightly controller can identify the
+# run it dispatched — `gh workflow run` does not return a run id, so the
+# controller matches on this display title. The controller supplies a unique
+# dispatch_key (its run id + cell index) that is appended here, so a concurrent
+# manual dispatch of the same reservation/version can never be mistaken for the
+# controller's run. A manual dispatch omits the key and the suffix is dropped.
+# Quoted so YAML does not treat the ` #` in the dispatch_key suffix as a comment.
+run-name: "UAT ${{ inputs.reservation }} @ ${{ inputs.aicr_version || 'main' }}${{ inputs.dispatch_key != '' && format(' #{0}', inputs.dispatch_key) || '' }}"
+
 # The shared UAT dispatch surface and reservation-lease owner (#1274, DC1).
 # A human (workflow_dispatch) or the nightly batch (workflow_call) requests a
 # run against a named reservation; this workflow holds the per-reservation
@@ -29,6 +38,14 @@ on:
         description: 'Reservation name from infra/uat/reservations.yaml (e.g. aws-h100, gcp-h100).'
         type: string
         required: true
+      aicr_version:
+        description: 'Released aicr version to test (e.g. v1.2.3); empty = build from source (main tip).'
+        type: string
+        default: ''
+      dispatch_key:
+        description: 'Unique correlation key set by the nightly controller so it can find this run; leave empty for manual runs.'
+        type: string
+        default: ''
       skip_delete:
         description: 'Skip cluster teardown (manual debugging only).'
         type: boolean
@@ -42,6 +59,12 @@ on:
       reservation:
         type: string
         required: true
+      aicr_version:
+        type: string
+        default: ''
+      dispatch_key:
+        type: string
+        default: ''
       skip_delete:
         type: boolean
         default: false
@@ -129,6 +152,7 @@ jobs:
     uses: ./.github/workflows/uat-aws.yaml
     with:
       reservation: ${{ inputs.reservation }}
+      aicr_version: ${{ inputs.aicr_version }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
@@ -147,6 +171,7 @@ jobs:
     uses: ./.github/workflows/uat-gcp.yaml
     with:
       reservation: ${{ inputs.reservation }}
+      aicr_version: ${{ inputs.aicr_version }}
       cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}

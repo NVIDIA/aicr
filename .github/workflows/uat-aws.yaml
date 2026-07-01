@@ -28,6 +28,10 @@ on:
         description: 'Reservation name (lease key) this run targets; used for labeling.'
         type: string
         required: true
+      aicr_version:
+        description: 'Released aicr version to install (e.g. v1.2.3); empty = build from source (main tip).'
+        type: string
+        default: ''
       cluster_config_path:
         description: 'Cluster-config the EKS actuator provisions from (from infra/uat/reservations.yaml).'
         type: string
@@ -102,6 +106,9 @@ jobs:
 
       # Build from source
       - name: Setup Go
+        # Main cells only: release cells install a prebuilt binary and must not
+        # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
@@ -110,19 +117,35 @@ jobs:
             go.sum
             vendor/modules.txt
 
+      # Main cell (aicr_version empty): build the aicr binary from the
+      # checked-out source (tip). Release cells install the released binary
+      # instead (next step).
       - name: Build aicr binary
-        if: inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
         env:
           GOFLAGS: -mod=vendor
         run: |
           go build -o ./aicr ./cmd/aicr
           ./aicr --version
 
+      # Release cell (aicr_version set): install the RELEASED aicr binary at that
+      # version instead of building. The released binary self-resolves its own
+      # version's images — validators via pkg/validator/catalog (:latest ->
+      # :<version>) and the snapshot-agent via ghcr.io/nvidia/aicr:<version> — so
+      # the validator/agent build+push steps below are skipped for release cells.
+      - name: Install released aicr
+        if: inputs.aicr_version != '' && inputs.skip_tests != true
+        uses: ./.github/actions/install-aicr-release
+        with:
+          aicr-version: ${{ inputs.aicr_version }}
+
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login
 
+      # Main cell only: release cells use the released validator images the
+      # released binary self-resolves to (skipped when aicr_version is set).
       - name: Build and push validator images
-        if: inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
         run: |
           GO_VERSION="$(cat .go-version)"
           # CHAINSAW_* args dropped in #1236 — the deployment validator
@@ -191,7 +214,10 @@ jobs:
           install_helmfile: 'true'
           helmfile_version: '${{ steps.versions.outputs.helmfile }}'
           helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
-          install_ko: 'true'
+          # ko builds the snapshot-agent image (main cells only). Release cells
+          # install a prebuilt binary and build no images, so skip ko — a bad ko
+          # pin or download must not fail a release cell before UAT starts.
+          install_ko: ${{ inputs.aicr_version == '' && inputs.skip_tests != true && 'true' || 'false' }}
           ko_version: ${{ steps.versions.outputs.ko }}
 
       # The snapshot agent runs in-cluster as its own image, separate from the
@@ -204,7 +230,7 @@ jobs:
       # arch: the GPU worker (p5.48xlarge) is amd64. Lives in the aicr-validators
       # namespace (not the release ghcr.io/nvidia/aicr repo); cleaned up below.
       - name: Build and push snapshot-agent image
-        if: inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
         env:
           GOFLAGS: -mod=vendor
           KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
@@ -267,9 +293,10 @@ jobs:
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
-          # Snapshot agent = PR-built image (see "Build and push snapshot-agent
-          # image"), not the stale released default. Honored by `aicr snapshot`.
-          AICR_IMAGE: ghcr.io/nvidia/aicr-validators/agent:${{ env.VALIDATOR_TAG }}
+          # Snapshot agent: main cell = the PR-built image (see "Build and push
+          # snapshot-agent image"); release cell = the released aicr image at that
+          # version. Honored by `aicr snapshot`.
+          AICR_IMAGE: ${{ inputs.aicr_version == '' && format('ghcr.io/nvidia/aicr-validators/agent:{0}', env.VALIDATOR_TAG) || format('ghcr.io/nvidia/aicr:{0}', inputs.aicr_version) }}
         run: ./tests/uat/aws/run prep "${TEST_CONFIG}"
 
       - name: UAT - install (helmfile apply)
@@ -379,11 +406,13 @@ jobs:
         if: always()
         env:
           SUMMARY_RESERVATION: ${{ inputs.reservation }}
+          SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
         run: |
           {
             echo "## UAT Results (AWS)"
             echo ""
             printf '**Reservation:** `%s`\n' "$SUMMARY_RESERVATION"
+            printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
             echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
             echo ""
             echo "| Phase | Status |"
@@ -405,8 +434,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Cleanup (after artifacts so a failed cleanup does not lose evidence).
+      # Main cell only — release cells reference shared, permanent released image
+      # tags and must not delete them.
       - name: Cleanup validator image
-        if: always() && inputs.skip_tests != true
+        if: always() && inputs.aicr_version == '' && inputs.skip_tests != true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

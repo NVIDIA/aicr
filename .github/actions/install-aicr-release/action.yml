@@ -1,0 +1,111 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Install released aicr
+description: >-
+  Download a released aicr binary, verify its integrity (checksum) and
+  provenance (SLSA Build Provenance v1 attestation, keyless-signed by NVIDIA's
+  on-tag.yaml release workflow), and install it to ./aicr for a UAT release
+  cell. Fails closed if the binary is unattested or the attestation does not
+  verify — a release cell never runs an unverified binary. The released binary
+  self-resolves its own version's validator images (pkg/validator/catalog
+  rewrites :latest -> :<version>) and snapshot-agent (ghcr.io/nvidia/aicr:<version>),
+  so a release cell builds no images. Shared by uat-aws.yaml and uat-gcp.yaml.
+
+inputs:
+  aicr-version:
+    description: 'Released aicr version tag to install (e.g. v1.2.3).'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # verify-blob-attestation needs no OIDC token (verification, not signing);
+    # it fetches only the Sigstore trusted root, so the caller's contents:read
+    # ceiling suffices. Pinned to the same SHA the release/build workflows use.
+    - name: Install Cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+    - name: Download, verify, and install released aicr
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        AICR_VERSION: ${{ inputs.aicr-version }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        # The binary asset drops the leading v (aicr_1.2.3_linux_amd64.tar.gz)
+        # while image tags keep it; match the asset with a glob.
+        gh release download "$AICR_VERSION" --repo "$REPO" \
+          --pattern 'aicr_*_linux_amd64.tar.gz' --pattern 'aicr_checksums.txt' --dir ./_rel
+
+        # Pin provenance to NVIDIA CI's release workflow AND the exact requested
+        # tag. The signer SAN is the on-tag.yaml workflow that ran `cosign
+        # attest-blob` at that tag; binding the specific tag (not refs/tags/.*)
+        # stops a binary attested for one release from satisfying a different
+        # one. Validate the tag first (also rejects injection into the regex),
+        # then escape its dots so they match literally, and anchor the pattern.
+        if [[ ! "$AICR_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.]*)?$ ]]; then
+          echo "::error::aicr-version must be a release tag like v1.2.3 (or v1.2.3-rc1); got '${AICR_VERSION}'." >&2
+          exit 1
+        fi
+        identity_tag="${AICR_VERSION//./\\.}"
+        identity_re="^https://github.com/${REPO}/.github/workflows/on-tag\\.yaml@refs/tags/${identity_tag}$"
+
+        (
+          cd ./_rel
+          set -- aicr_*_linux_amd64.tar.gz
+          asset="$1"
+
+          # (1) Integrity: the tarball matches the release's published checksum.
+          # Necessary but not sufficient — aicr_checksums.txt ships in the same
+          # release, so it only catches download corruption, not a tampered
+          # release. Provenance (below) is the authenticity check.
+          grep " ${asset}\$" aicr_checksums.txt | sha256sum -c -
+
+          # Extract the binary (required) plus its SLSA provenance bundle, which
+          # goreleaser ships inside the archive (archives.files, strip_parent).
+          tar -xzf "${asset}" aicr
+          tar -xzf "${asset}" aicr-attestation.sigstore.json 2>/dev/null || true
+
+          # (2) Provenance: the exact binary bytes were built by NVIDIA's release
+          # workflow. cosign attest-blob's subject is the binary digest, so this
+          # binds authenticity to the installed artifact — not to the checksums
+          # manifest. Fail closed: a UAT release cell must not run an unattested
+          # or unverifiable binary.
+          if [ ! -f aicr-attestation.sigstore.json ]; then
+            echo "::error::release ${AICR_VERSION} ships no binary attestation (aicr-attestation.sigstore.json); refusing to run UAT against an unattested binary." >&2
+            exit 1
+          fi
+          # 3-attempt retry absorbs transient Sigstore trusted-root fetch flakes
+          # (mirrors the attest-blob retry in .goreleaser.yaml; see #1249).
+          for n in 1 2 3; do
+            if cosign verify-blob-attestation \
+                --bundle aicr-attestation.sigstore.json \
+                --type https://slsa.dev/provenance/v1 \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+                --certificate-identity-regexp "$identity_re" \
+                aicr; then
+              break
+            fi
+            if [ "$n" -eq 3 ]; then
+              echo "::error::cosign provenance verification failed for ${AICR_VERSION} after 3 attempts." >&2
+              exit 1
+            fi
+            echo "cosign verify attempt ${n} failed; retrying" >&2
+            sleep $((n * 5))
+          done
+        )
+
+        install -m 0755 ./_rel/aicr ./aicr
+        ./aicr --version
