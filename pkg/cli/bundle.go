@@ -1055,6 +1055,6 @@ func printArgoCDHelmOCIInstructions(w io.Writer, ref *oci.Reference) {
 	fmt.Fprintf(w, "\nargocd-helm bundle pushed: %s\n", chartRef)
 	fmt.Fprintln(w, "\nTo install:")
 	fmt.Fprintf(w, "  helm install <release> %s \\\n", chartRef)
-	fmt.Fprintln(w, "    --namespace argocd \\")
-	fmt.Fprintf(w, "    --set repoURL=%s\n", repoURL)
+	fmt.Fprintln(w, "    --namespace argocd")
+	fmt.Fprintf(w, "    # repoURL defaults to %s (override with --set repoURL=oci://mirror if mirroring)\n", repoURL)
 }

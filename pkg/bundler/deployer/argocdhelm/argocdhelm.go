@@ -309,6 +309,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// the {{ required }} safety-net is unchanged. See #1342.
 	repoURLDefault := g.OCIParentNamespace
 	dynamicOnlyValues[rootValuesRepoURLKey] = repoURLDefault
+	dynamicOnlyValues[rootValuesTargetRevisionKey] = ""
 
 	valuesPath, valuesSize, err := writeRootValuesFile(dynamicOnlyValues, outputDir)
 	if err != nil {
