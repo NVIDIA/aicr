@@ -468,7 +468,7 @@ func (c *Config) BundleChartName() string {
 // OCIParentNamespace returns the OCI parent namespace baked into the
 // argocd-helm bundle's root values.yaml as the default repoURL. See #1342.
 func (c *Config) OCIParentNamespace() string {
-    return c.ociParentNamespace
+	return c.ociParentNamespace
 }
 
 // AppName returns the parent Application name override for the argocd-helm
@@ -743,9 +743,9 @@ func WithBundleChartName(name string) Option {
 // without the chart segment) baked into the argocd-helm bundle's values.yaml
 // as the default repoURL. Empty keeps repoURL as "" (local output). See #1342.
 func WithOCIParentNamespace(ns string) Option {
-    return func(c *Config) {
-        c.ociParentNamespace = ns
-    }
+	return func(c *Config) {
+		c.ociParentNamespace = ns
+	}
 }
 
 // WithAppName sets the parent Argo Application's `metadata.name` for the

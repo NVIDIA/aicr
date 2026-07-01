@@ -168,10 +168,10 @@ type Generator struct {
 	AppName string
 
 	// OCIParentNamespace is the OCI registry + repository path with the
-    // chart-name segment stripped. When set, written as the default repoURL
-    // in the bundle's root values.yaml so deploying from the push-target
-    // registry requires no --set flags. Empty for local-directory output. See #1342.
-    OCIParentNamespace string
+	// chart-name segment stripped. When set, written as the default repoURL
+	// in the bundle's root values.yaml so deploying from the push-target
+	// registry requires no --set flags. Empty for local-directory output. See #1342.
+	OCIParentNamespace string
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
@@ -304,11 +304,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// Bake the OCI parent namespace as the repoURL default when the bundle was
-    // pushed to a registry — `helm show values` and a plain `helm install` both
-    // work without --set flags. For local output, OCIParentNamespace is "" and
-    // the {{ required }} safety-net is unchanged. See #1342.
-    repoURLDefault := g.OCIParentNamespace
-    dynamicOnlyValues[rootValuesRepoURLKey] = repoURLDefault
+	// pushed to a registry — `helm show values` and a plain `helm install` both
+	// work without --set flags. For local output, OCIParentNamespace is "" and
+	// the {{ required }} safety-net is unchanged. See #1342.
+	repoURLDefault := g.OCIParentNamespace
+	dynamicOnlyValues[rootValuesRepoURLKey] = repoURLDefault
 
 	valuesPath, valuesSize, err := writeRootValuesFile(dynamicOnlyValues, outputDir)
 	if err != nil {
