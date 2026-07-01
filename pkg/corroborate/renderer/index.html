@@ -30,6 +30,12 @@
     --green:#76b900;
     --green-dim:#5c9200;
 
+    /* CLI / code affordance accent — deliberately distinct from the green
+       AICR-version selector it sits beside (echoes GCP's blue "Equivalent
+       code"); not a consensus-state hue. */
+    --cli:#4d9de0;
+    --cli-dim:#3a7bb0;
+
     /* ---- consensus state colors (vivid on dark) ---- */
     --confirmed:#3ddc84;
     --single:#36c5d6;
@@ -120,6 +126,48 @@
   .crit select.set{border-color:var(--green-dim);color:var(--green)}
   .crit select:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 2px rgba(118,185,0,.2)}
 
+  /* two-zone control strip: SELECT RECIPE | FILTER EVIDENCE (§4 visual unify) */
+  .control-strip{align-items:stretch}
+  .ctl-zone{display:flex;flex-direction:column;gap:6px}
+  .zone-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .zone-title{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.9px;color:var(--ink-faint)}
+  .zone-title b{color:var(--green);font-weight:700}
+  .zone-help{font-family:var(--mono);font-size:9px;color:var(--ink-faint);opacity:.7}
+  .zone-controls{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+  .zone-divider{width:1px;align-self:stretch;background:var(--line-hi);margin:2px 6px}
+
+  /* ============ HEADER OUTBOUND LINKS (§1) ============ */
+  .header-links{display:flex;align-items:center;gap:16px}
+  .header-links .hlink{
+    display:inline-flex;align-items:center;gap:5px;
+    font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);text-decoration:none;letter-spacing:.2px;
+    white-space:nowrap;transition:color .12s;
+    background:none;border:none;padding:0;cursor:pointer;   /* button.hlink (Install) matches a.hlink */
+  }
+  .header-links .hlink:hover{color:var(--ink-strong)}
+  .header-links .hlink:hover .hl-txt{text-decoration:underline}
+  .header-links .hlink:focus-visible{outline:2px solid var(--green);outline-offset:3px;border-radius:4px}
+  .header-links .hlink.active{color:var(--green)}
+  .header-links .hl-ic{display:inline-flex;align-items:center}
+  .header-links .hl-ic svg{display:block}
+  /* Install AICR — a small preview code snippet + copy button (segmented chip) */
+  .hinstall{display:inline-flex;align-items:stretch;border:1px solid var(--line-hi);border-radius:6px;overflow:hidden;background:var(--panel-2)}
+  .hinstall-label{display:inline-flex;align-items:center;font-family:var(--mono);font-size:8.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--ink-faint);padding:0 8px;white-space:nowrap;border-right:1px solid var(--line)}
+  .hinstall-code{display:inline-flex;align-items:center;font-family:var(--mono);font-size:10.5px;color:var(--ink-strong);padding:5px 9px;white-space:nowrap}
+  .hinstall-code::before{content:"$ ";color:var(--green)}
+  .hinstall-copy{flex:none;background:var(--panel);color:var(--ink-soft);border:none;border-left:1px solid var(--line);font-size:11px;padding:0 9px;cursor:pointer}
+  .hinstall-copy:hover{color:var(--green);background:rgba(118,185,0,.08)}
+  .hinstall-copy.active{color:var(--green)}
+  .hinstall-copy:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+
+  /* ============ COMPACT-NAV TOGGLES ============ */
+  /* Topbar buttons reclaim space by collapsing the left groups panel and the
+     filter/criteria bars. Defaulted collapsed on mobile (set in JS). */
+  .nav-toggles{display:flex;gap:8px}
+  .nav-toggles .btn{padding:5px 10px}
+  body.nav-collapsed aside.sidebar{display:none}
+  body.filters-collapsed .criteria-bar{display:none}
+
   /* ============ APP SHELL: sidebar + main ============ */
   .shell{display:flex;align-items:stretch;flex:1;min-height:0}
 
@@ -183,6 +231,11 @@
   }
   .btn:hover{border-color:var(--green);color:var(--ink-strong)}
   .btn.active{border-color:var(--green);color:var(--green);background:rgba(118,185,0,.08)}
+  /* prominent "Copy CLI command" (the payoff action — like GCP's Equivalent Code) */
+  .cli-btn{border-color:var(--cli-dim);color:var(--cli);background:rgba(77,157,224,.12);font-weight:600;padding:7px 13px}
+  .cli-btn:hover{border-color:var(--cli);background:rgba(77,157,224,.2);color:var(--ink-strong)}
+  .cli-btn.active{border-color:var(--cli);background:rgba(77,157,224,.22);color:var(--cli)}
+  .cli-btn .cli-ic{font-family:var(--mono);opacity:.75;margin-right:2px;letter-spacing:-1px}
   .toggle-group{display:inline-flex;border:1px solid var(--line-hi);border-radius:5px;overflow:hidden}
   .toggle-group button{
     background:var(--panel-2);color:var(--ink-soft);border:none;border-right:1px solid var(--line-hi);
@@ -195,7 +248,7 @@
   /* ============ LAYOUT ============ */
   main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
   .view{animation:fade .22s ease;flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 18px 18px}
-  #landing-host{flex:1;min-height:0;overflow:auto}
+  #landing-host{flex:1;min-height:0;overflow:auto;padding:4px 2px 2px}  /* top pad so a hovered card's lifted outline isn't clipped by the scroll edge */
   #catalog-host{flex:1;min-height:0;display:flex}
   @keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 
@@ -205,6 +258,40 @@
   }
   .section-title b{color:var(--green);font-weight:700}
   .section-sub{font-size:12px;color:var(--ink-soft);margin:-4px 0 14px;max-width:820px;line-height:1.5}
+  /* landing: title is value-led, so case it normally instead of the uppercase axis-label style */
+  #view-landing .section-title{text-transform:none;letter-spacing:.2px;font-size:18px;color:var(--ink-strong)}
+  #view-landing .section-sub{font-size:13px}
+
+  /* ============ LANDING: summary stats + how-to + legend (§3/§6) ============ */
+  .summary-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+  .summary-row .stat{
+    font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 11px;
+  }
+  .summary-row .stat b{color:var(--green);font-weight:700;font-size:13px}
+  .summary-row .stat-fresh{color:var(--ink-faint)}
+  .summary-row .stat-fresh b{color:var(--ink-soft)}
+  details.howto{margin:0 0 16px;max-width:880px}
+  details.howto>summary{
+    cursor:pointer;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.7px;
+    color:var(--ink-soft);list-style:none;display:inline-flex;align-items:center;gap:7px;padding:4px 0;
+  }
+  details.howto>summary::-webkit-details-marker{display:none}
+  details.howto>summary::before{content:"▸";color:var(--green);font-size:9px}
+  details.howto[open]>summary::before{content:"▾"}
+  details.howto>summary:hover{color:var(--ink-strong)}
+  .howto-body{padding:8px 2px 2px;font-size:12.5px;color:var(--ink-soft);line-height:1.55}
+  .howto-body .mono{color:var(--ink-strong)}
+  .howto-body b{color:var(--green)}
+  .legend-title{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--ink-faint);margin:12px 0 7px}
+  .legend{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:6px 18px}
+  .legend-item{display:flex;align-items:center;gap:10px}
+  .legend-item .pbadge{flex:none}
+  .legend-desc{color:var(--ink-soft);font-size:12px}
+
+  /* §8 filter-empty state */
+  .empty-state{padding:40px 6px;color:var(--ink-soft);display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+  .empty-state p{margin:0;font-size:13px}
 
   /* ============ BREADCRUMB ============ */
   .breadcrumb{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
@@ -216,11 +303,6 @@
   .breadcrumb a.crumb:hover{border-color:var(--green-dim);color:var(--green);text-decoration:none;background:rgba(118,185,0,.07)}
   .breadcrumb .crumb.cur{color:var(--ink-strong);border-color:var(--line-hi)}
   .breadcrumb .sep{color:var(--ink-faint)}
-  .back-btn{
-    font-family:var(--mono);font-size:12px;color:var(--ink-soft);background:var(--panel-2);
-    border:1px solid var(--line-hi);border-radius:6px;padding:5px 11px;cursor:pointer;transition:all .12s;
-  }
-  .back-btn:hover{border-color:var(--green);color:var(--green)}
 
   /* per-tab status badge */
   .tab-status{
@@ -268,57 +350,84 @@
   table.catalog tbody tr.dimmed{opacity:.26}
   table.catalog td{padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:middle}
   table.catalog tbody tr:last-child td{border-bottom:none}
-  .recipe-name{font-family:var(--mono);font-size:13px;color:var(--ink-strong);font-weight:600}
-  .recipe-coord{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:3px}
-  .recipe-coord .seg{color:var(--single)}
-  .recipe-coord .dim{color:var(--ink-faint)}
-  /* dashboard section header row — one labeled block per accelerator-os dashboard */
+  /* recipe row name: the coordinate prefix is muted (the divider already states
+     the accelerator/os) and the distinguishing intent[-platform] tail is the
+     emphasized part, so rows read as variations rather than repeated long names. */
+  .recipe-name{font-family:var(--mono);font-size:12.5px;font-weight:500}
+  .recipe-name .rn-head{color:var(--ink-faint)}
+  .recipe-name .rn-tail{color:var(--ink-strong);font-weight:650}
+  /* accelerator section header — the accelerator is the star (OS rides along as
+     subtle meta). Distinct bg, green left accent, a heavier top rule, and a drop
+     shadow separate it from the recipe rows below. */
   table.catalog tr.dash-sec td{
     position:sticky;top:36px;z-index:20;
-    background:linear-gradient(180deg,#141d2c,#0f141d);
-    border-top:1px solid var(--line-hi);border-bottom:1px solid var(--line-hi);
-    padding:7px 13px;
+    background:#172339;
+    border-top:2px solid var(--line-hi);border-bottom:1px solid var(--line-hi);
+    box-shadow:inset 4px 0 0 var(--green), 0 3px 5px -2px rgba(0,0,0,.5);
+    padding:9px 13px 9px 15px;
   }
-  .dash-sec-inner{display:flex;align-items:center;gap:11px}
-  .dash-sec-inner .dname{font-family:var(--mono);font-size:12.5px;font-weight:700;color:var(--ink-strong);letter-spacing:.3px}
-  .dash-sec-inner .dtag{font-family:var(--mono);font-size:8.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--green);
-    border:1px solid var(--green-dim);background:rgba(118,185,0,.08);border-radius:4px;padding:1px 6px}
+  .dash-sec-inner{display:flex;align-items:baseline;gap:11px}
+  .dash-sec-inner .dname{font-family:var(--mono);font-size:13.5px;font-weight:700;color:var(--green);letter-spacing:1.5px;text-transform:uppercase}
   .dash-sec-inner .dmeta{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .dash-sec-inner .dos{color:var(--ink);text-transform:uppercase;letter-spacing:.5px}
   .catalog tr.dash-sec.dimmed{opacity:.34}
 
   /* ============ PER-RECIPE MATRIX (sources-as-columns) ============ */
-  .matrix-shell{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column}
+  /* hug the grid so few-column recipes don't float in an empty panel */
+  .matrix-shell{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column;align-self:flex-start;width:max-content;max-width:100%}
   .matrix-scroll{overflow:auto;flex:1;min-height:0}
-  table.matrix{border-collapse:separate;border-spacing:0;width:100%;min-width:max-content;font-family:var(--mono)}
+  /* Tile-grid sizing: fixed layout so the <col> widths below are authoritative
+     (under auto layout the columns expand to their no-wrap content and the
+     status cells render as wide bars). width:max-content keeps the table exactly
+     as wide as its columns so the tiles stay uniform; it scrolls horizontally
+     when sources overflow and simply leaves trailing space for few-source grids.
+     The mobile media query overrides the <col> widths for tighter phones. */
+  table.matrix{border-collapse:separate;border-spacing:0;width:max-content;min-width:0;table-layout:fixed;font-family:var(--mono)}
+  col.mcol-test{width:236px}
+  col.mcol-cons{width:158px}
+  col.mcol-src{width:40px}
 
   /* class group-header row */
   table.matrix .grouprow th{
     position:sticky;top:0;z-index:38;background:var(--bg-2);
-    border-bottom:1px solid var(--line);padding:0;height:26px;
+    border-bottom:1px solid var(--line);padding:0;height:26px;overflow:hidden;
   }
   .clshead{
-    display:flex;align-items:center;justify-content:center;gap:6px;height:26px;
-    font-size:9.5px;text-transform:uppercase;letter-spacing:.8px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;gap:5px;height:26px;
+    font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;
     border-left:1px solid var(--line);
+    overflow:hidden;white-space:nowrap;padding:0 4px;  /* contain within the colspan cell — never overflow */
   }
   .clshead.first-party{color:#9fe6c0;background:rgba(61,220,132,.06)}
   .clshead.community{color:#bfa6ff;background:rgba(192,139,255,.06)}
   .clshead.partner{color:#9fd9ff;background:rgba(54,197,214,.06)}
+  /* §5 neutral single band (no class walls) */
+  .clshead.sources-band{color:var(--ink-faint);background:transparent;letter-spacing:.6px}
   .clshead .cnt{color:var(--ink-faint);font-weight:500}
 
   /* column header row (source ids) */
   table.matrix .colrow th{
     position:sticky;top:26px;z-index:36;background:var(--bg-2);
-    border-bottom:2px solid var(--line-hi);padding:4px 6px;vertical-align:bottom;
+    border-bottom:2px solid var(--line-hi);padding:4px 3px;vertical-align:bottom;overflow:hidden;
     font-size:9.5px;font-weight:600;color:var(--ink-soft);text-align:center;white-space:nowrap;
     border-left:1px solid var(--line);cursor:pointer;box-shadow:0 1px 0 var(--line-hi);
   }
   table.matrix .colrow th:hover{background:#16202f}
-  table.matrix .colrow th .src-head{display:flex;flex-direction:column;align-items:center;gap:4px}
-  table.matrix .colrow th .src-lbl{font-size:10px;color:var(--ink-strong);max-width:66px;overflow:hidden;text-overflow:ellipsis}
-  table.matrix .colrow th .src-tag{font-size:8px;color:var(--ink-faint);letter-spacing:.4px;display:inline-flex;align-items:center;gap:4px}
+  table.matrix .colrow th .src-head{display:flex;flex-direction:column;align-items:center;gap:3px}
+  /* labels truncate to the narrow tile column; full name is on the tooltip.
+     fitMatrixColumns() adds .labels-full when the columns are wide enough to show
+     every label in full (no truncation) — see the JS sizing pass. */
+  table.matrix .colrow th .src-lbl{font-size:9px;color:var(--ink-strong);max-width:36px;overflow:hidden;text-overflow:ellipsis}
+  table.matrix.labels-full .colrow th .src-lbl{max-width:none}
+  table.matrix .colrow th .src-tag{font-size:7px;color:var(--ink-faint);letter-spacing:.4px;display:flex;flex-direction:column;align-items:center;gap:1px;white-space:normal;word-break:break-all;line-height:1.15}
   table.matrix .colrow th .src-open{font-size:8px;color:var(--single);opacity:.7}
   table.matrix .colrow th .rep-mark{color:var(--reported);font-weight:700}
+  table.matrix .colrow th .ok-mark{color:var(--ink-faint);font-weight:500}
+  /* §8: stale source de-emphasis + age marker */
+  table.matrix .colrow th.src-stale{opacity:.62}
+  table.matrix .colrow th .src-age{font-size:7px;color:var(--contested);letter-spacing:.3px}
+  /* §a11y: visible focus ring for keyboard drill-in on source headers */
+  table.matrix .colrow th:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
 
   /* sticky corner: test-name + consensus headers (top-left, both axes) */
   th.corner-test{
@@ -348,6 +457,7 @@
   }
   .phase-sec-inner{display:flex;align-items:center;gap:11px;padding:8px 13px;text-align:left;cursor:pointer;
     background:linear-gradient(180deg,#141d2c,#0f141d)}
+  .phase-sec-inner:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
   .phase-sec-inner .ptw{font-size:9px;color:var(--ink-faint);width:11px;transition:transform .12s}
   .phase-sec-inner.collapsed .ptw{transform:rotate(-90deg)}
   .phase-sec-inner .pname{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--green);font-weight:700}
@@ -355,6 +465,7 @@
 
   /* test data rows */
   tr.trow{transition:background .1s}
+  tr.trow td{height:26px}  /* compact rows */
   tr.trow:nth-child(odd){background:var(--row-alt)}
   tr.trow:hover{background:#16203160}
   tr.trow:hover td.cell-test{box-shadow:inset 3px 0 0 var(--green)}
@@ -362,14 +473,14 @@
   tr.trow.filtered{display:none}
   td.cell-test{
     position:sticky;left:0;z-index:18;background:var(--row);
-    border-bottom:1px solid var(--line);padding:7px 13px;
+    border-bottom:1px solid var(--line);padding:3px 13px;
     font-size:12px;color:var(--ink-strong);white-space:nowrap;cursor:pointer;
   }
   tr.trow:nth-child(odd) td.cell-test{background:var(--row-alt)}
   td.cell-cons{
     position:sticky;left:236px;z-index:18;background:var(--row);
     border-bottom:1px solid var(--line);border-left:1px solid var(--line);
-    padding:6px 12px;cursor:pointer;
+    padding:2px 12px;cursor:pointer;
   }
   tr.trow:nth-child(odd) td.cell-cons{background:var(--row-alt)}
   .cons-cell{display:inline-flex;align-items:center;gap:6px;width:100%}
@@ -383,7 +494,8 @@
   .tile{
     position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     border-radius:0;
-    font-family:var(--mono);font-size:0;font-weight:700;line-height:1;
+    /* §a11y: a visible glyph (✓/✕/·) is the non-color cue for pass/fail/not-run */
+    font-family:var(--mono);font-size:11px;font-weight:700;line-height:1;
     transition:box-shadow .08s;
   }
   td.cell-src:hover .tile{box-shadow:inset 0 0 0 2px var(--green)}
@@ -398,11 +510,11 @@
   td.cell-src.reported-col{border-left:1px dashed rgba(192,139,255,.45)}
   td.cell-src.reported-col .tile{outline:1px dashed rgba(192,139,255,.55);outline-offset:-2px}
   table.matrix .colrow th.reported-col{border-left:1px dashed rgba(192,139,255,.45)}
-  /* tile letters are kept in the DOM for screen readers but hidden visually
-     (.tile font-size:0) so cells read as solid TestGrid-style color only */
+  /* tiles carry a visible glyph (✓/✕/·) + aria-label so status is conveyed by
+     shape and text, not color alone (WCAG 1.4.1) */
 
   /* ============ TIME-SERIES (builds over time) ============ */
-  .ts-shell{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column}
+  .ts-shell{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column;align-self:flex-start;width:max-content;max-width:100%}
   .ts-head{flex:none}
   .ts-head{padding:13px 16px;border-bottom:1px solid var(--line-hi);background:var(--bg-2);
     display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
@@ -416,31 +528,45 @@
   .ts-stat .v.flaky{color:var(--contested)}
   .ts-stat .k{font-family:var(--mono);font-size:8.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint)}
   .ts-scroll{overflow:auto;flex:1;min-height:0}
-  table.tsgrid{border-collapse:separate;border-spacing:0;font-family:var(--mono);min-width:max-content}
+  /* Same tile-grid sizing as the matrix: fixed layout + <col> widths so the
+     build columns are compact tiles rather than bars sized by their header text.
+     The long run id is dropped from the header (date + version identify the
+     build; the full id is on the th title tooltip); ver/k8s/date wrap. */
+  table.tsgrid{border-collapse:separate;border-spacing:0;font-family:var(--mono);width:max-content;min-width:0;table-layout:fixed}
+  col.tscol-name{width:236px}
+  col.tscol-build{width:50px}
   table.tsgrid th.ts-corner{
     position:sticky;left:0;top:0;z-index:16;background:var(--bg-2);text-align:left;
-    border-bottom:1px solid var(--line-hi);padding:7px 13px;min-width:236px;vertical-align:bottom;
+    border-bottom:1px solid var(--line-hi);padding:7px 13px;vertical-align:bottom;
     font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:var(--ink-faint);
   }
   table.tsgrid th.ts-build{
     position:sticky;top:0;z-index:12;background:var(--bg-2);border-bottom:1px solid var(--line-hi);border-left:1px solid var(--line);
-    padding:6px 6px;vertical-align:bottom;text-align:center;white-space:nowrap;
+    padding:6px 3px;vertical-align:bottom;text-align:center;overflow:hidden;
   }
   table.tsgrid th.ts-build.newest{background:#13202d;box-shadow:inset 0 -2px 0 var(--green)}
-  .bh-id{font-size:10px;font-weight:700;color:var(--ink-strong)}
-  .bh-ver{font-size:8.5px;color:var(--single)}
-  .bh-k8s{font-size:8.5px;color:var(--ink-faint)}
-  .bh-when{font-size:8px;color:var(--ink-faint);margin-top:2px}
+  /* passive indicator (not a control) of which AICR version's consensus the
+     matrix is showing; the version is chosen via FILTER EVIDENCE → AICR VERSION. */
+  .grid-ver-note{margin-left:4px;font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.7px;
+    color:var(--ink-faint);border:1px solid var(--line-hi);border-radius:5px;padding:3px 8px;background:var(--panel-2);cursor:help}
+  .grid-ver-note.fellback{color:var(--contested);border-color:var(--contested)}
+  /* § FILTER EVIDENCE: build columns not matching the active facets are dimmed */
+  table.tsgrid th.ts-build.dimcol,table.tsgrid td.ts-cell.dimcol{opacity:.25}
+  .bh-id{display:none}  /* long run id lives on the th title tooltip; keep the header compact */
+  .bh-ver{font-size:8.5px;color:var(--single);white-space:normal;word-break:break-all;line-height:1.2}
+  .bh-k8s{font-size:8px;color:var(--ink-faint);white-space:normal;word-break:break-all;line-height:1.2}
+  .bh-when{font-size:8px;color:var(--ink-faint);margin-top:2px;white-space:normal;word-break:break-all;line-height:1.2}
   .bh-newest{font-size:7.5px;color:var(--green);letter-spacing:.5px;text-transform:uppercase;margin-top:3px}
   table.tsgrid tr.ts-phase th{
     position:sticky;left:0;z-index:10;background:linear-gradient(180deg,#141d2c,#0f141d);
     border-top:1px solid var(--line-hi);border-bottom:1px solid var(--line-hi);
-    padding:6px 13px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:1.3px;color:var(--green);font-weight:700;
+    padding:0;text-align:left;  /* collapsible .phase-sec-inner supplies padding + chevron */
   }
   table.tsgrid td.ts-name{
     position:sticky;left:0;z-index:8;background:var(--row);border-bottom:1px solid var(--line);
-    padding:5px 13px;font-size:11.5px;color:var(--ink-strong);white-space:nowrap;
+    padding:2px 13px;font-size:11.5px;color:var(--ink-strong);white-space:nowrap;
   }
+  table.tsgrid tr.ts-row td{height:26px}  /* compact rows */
   table.tsgrid td.ts-name.ts-name-norun{color:var(--ink-faint)}
   .norun-tag{display:block;font-size:8px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.4px;margin-top:1px;opacity:.85}
   table.tsgrid tr.ts-row:nth-child(odd) td.ts-name{background:var(--row-alt)}
@@ -478,23 +604,66 @@
   .tooltip{
     position:fixed;z-index:200;pointer-events:none;opacity:0;transition:opacity .1s;
     background:#05080d;border:1px solid var(--line-hi);border-radius:7px;padding:9px 11px;
-    font-family:var(--mono);font-size:10.5px;color:var(--ink);max-width:360px;line-height:1.55;
+    font-family:var(--mono);font-size:10.5px;color:var(--ink);line-height:1.55;
+    max-width:min(360px,calc(100vw - 24px));  /* never wider than the (mobile) viewport */
     box-shadow:0 10px 30px rgba(0,0,0,.7);
   }
   .tooltip.show{opacity:1}
-  .tooltip .tt-id{color:var(--green);font-weight:700;margin-bottom:3px;word-break:break-all}
+  /* pinned = tap-to-show on touch: make it interactive so the drill-in link and
+     close button are tappable, and give it a dismiss affordance */
+  .tooltip.pinned{pointer-events:auto}
+  .tooltip .tt-id{color:var(--green);font-weight:700;margin-bottom:3px;word-break:break-all;padding-right:18px}
   .tooltip .tt-row{display:flex;gap:8px}
   .tooltip .tt-k{color:var(--ink-faint);min-width:64px}
   .tt-pass{color:var(--pass)}.tt-fail{color:var(--fail)}.tt-notrun{color:var(--notrun)}.tt-reported{color:var(--reported)}
-  .tooltip a.tt-ev{color:var(--single);pointer-events:auto}
-
-  /* ============ FOOTER ============ */
-  footer{
-    margin:26px 0 0;padding:14px 18px 36px;border-top:1px solid var(--line);
-    font-family:var(--mono);font-size:11px;color:var(--ink-faint);line-height:1.65;
+  .tooltip a.tt-ev{color:var(--single);pointer-events:auto;display:inline-block;padding:3px 0}
+  .tooltip .tt-close{position:absolute;top:5px;right:8px;color:var(--ink-faint);font-size:14px;line-height:1;cursor:pointer;display:none}
+  .tooltip.pinned .tt-close{display:block}
+  /* §7: copyable digest + verify command */
+  .tooltip .tt-digest,.tooltip .tt-cmd{word-break:break-all;font-size:10px;flex:1}
+  .tooltip .tt-cmd{color:var(--single)}
+  .tooltip .tt-copy{
+    flex:none;background:var(--panel-2);color:var(--ink-soft);border:1px solid var(--line-hi);border-radius:4px;
+    font-size:10px;line-height:1;padding:2px 5px;cursor:pointer;align-self:flex-start;pointer-events:auto;
   }
-  footer code{color:var(--ink-soft);background:rgba(255,255,255,.04);padding:1px 5px;border-radius:4px}
-  footer b{color:var(--contested)}
+  .tooltip .tt-copy:hover{border-color:var(--green);color:var(--green)}
+  .tooltip .tt-note{color:var(--ink-faint);font-size:9.5px;margin-top:4px;font-style:italic}
+  .tooltip .tt-stale{color:var(--contested)}
+
+  /* ============ CLI / CONFIG PREVIEW POPUP ============ */
+  .cli-pop-backdrop{
+    position:fixed;inset:0;z-index:300;background:rgba(3,6,10,.66);
+    display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px 16px;
+    backdrop-filter:blur(2px);
+  }
+  .cli-pop-backdrop.hidden{display:none}
+  .cli-pop{
+    position:relative;background:var(--panel);border:1px solid var(--line-hi);border-radius:11px;
+    box-shadow:var(--shadow-lg);width:min(680px,100%);max-height:84vh;overflow:auto;padding:18px 20px 20px;
+  }
+  .cli-pop-close{position:absolute;top:10px;right:12px;background:none;border:none;color:var(--ink-faint);font-size:20px;line-height:1;cursor:pointer}
+  .cli-pop-close:hover{color:var(--ink-strong)}
+  .cli-pop-title{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--ink-strong);word-break:break-all;padding-right:24px;margin-bottom:14px}
+  .cli-pop-sec{margin-bottom:16px}
+  .cli-pop-sec:last-child{margin-bottom:0}
+  .cli-pop-h{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:var(--cli);font-weight:700;margin-bottom:3px}
+  .cli-pop-desc{font-size:11.5px;color:var(--ink-soft);margin-bottom:8px;line-height:1.5}
+  .cli-pop-desc code{font-family:var(--mono);font-size:11px;color:var(--ink);background:#05080d;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .cli-pop-code{
+    display:flex;align-items:flex-start;gap:8px;background:#05080d;border:1px solid var(--line);border-radius:7px;padding:10px 12px;
+  }
+  .cli-pop-code code{flex:1;font-family:var(--mono);font-size:11.5px;color:var(--ink-strong);white-space:pre-wrap;word-break:break-all;line-height:1.5}
+  /* config block: multi-line YAML, so preserve indentation (no word-break) and
+     let it scroll horizontally rather than mangle the tree structure. */
+  .cli-pop-code.is-yaml code{white-space:pre;word-break:normal;overflow-x:auto}
+  .cli-pop-copy{
+    flex:none;background:var(--panel-2);color:var(--ink-soft);border:1px solid var(--line-hi);border-radius:5px;
+    font-size:10.5px;font-family:var(--mono);padding:3px 8px;cursor:pointer;white-space:nowrap;
+  }
+  .cli-pop-copy:hover{border-color:var(--cli);color:var(--cli)}
+  .cli-pop-copy.active{border-color:var(--cli);color:var(--cli);background:rgba(77,157,224,.12)}
+  .cli-pop-sep{border:none;border-top:1px solid var(--line);margin:16px 0}
+
 
   /* ============ DATA-FETCH STATES (renderer variant) ============ */
   .loading-note{font-family:var(--mono);font-size:12.5px;color:var(--ink-faint);padding:30px 6px}
@@ -502,6 +671,98 @@
     padding:16px 18px;color:var(--ink);font-size:13px;line-height:1.6;max-width:680px}
   .error-banner b{color:var(--failing)}
   .error-banner .mono{color:var(--ink-strong)}
+
+  /* ============ RESPONSIVE / MOBILE ============
+     On desktop the dashboard is a fixed-viewport console: the body is 100vh with
+     overflow:hidden and a fixed 262px left nav, and the grid panes fill the
+     remaining flex space. On narrow screens that traps the grids in a sliver of
+     width and disables page scroll, so only the criteria bar is usable. Below
+     820px we drop out of the fixed-viewport model: the page scrolls vertically,
+     the nav stacks above the content (both in normal document flow), and the
+     grid scroll panes get an explicit height so their sticky headers and
+     horizontal scrolling keep working. The grids retain min-width:max-content,
+     so they scroll sideways instead of collapsing. */
+  @media (max-width:820px){
+    html,body{height:auto}
+    body{overflow:auto;-webkit-text-size-adjust:100%}
+    header.topbar{padding:9px 12px}
+    .criteria-bar{padding:7px 12px}
+    /* zones stack; the vertical divider would read as a stray line, so drop it */
+    .zone-divider{display:none}
+    .control-strip{gap:10px}
+    /* §1: header links collapse to icon-only on narrow widths; the Install chip
+       drops its command preview and keeps just the label + copy */
+    .header-links{gap:12px}
+    .header-links .hl-txt{display:none}
+    .hinstall-code{display:none}
+    .hinstall-label{border-right:none}
+
+    /* nav stacks above content; both flow in the document and scroll with the page */
+    .shell{flex-direction:column;flex:0 0 auto;align-items:stretch;min-height:0}
+    aside.sidebar{
+      width:auto;align-self:auto;flex:none;
+      border-right:none;border-bottom:1px solid var(--line-hi);
+      max-height:42vh;overflow-y:auto;
+    }
+    main{flex:0 0 auto;overflow:visible}
+    .view{padding:14px 12px 18px;overflow:visible}
+
+    /* scroll panes lose their fixed-height flex parent — pin a real height so the
+       grids render and scroll on both axes instead of collapsing to zero */
+    #landing-host,#catalog-host{min-height:auto;overflow:visible}
+    #catalog-host{display:block}
+    .matrix-shell,.ts-shell{flex:none}
+    .matrix-scroll,.ts-scroll,.catalog-wrap{max-height:78vh;flex:none}
+
+    /* Tighten the matrix into a dense tile grid. On desktop the table is
+       table-layout:auto with min-width:max-content, so every column expands to
+       its no-wrap content width (max-width is ignored on auto table cells) and
+       the status tiles render as wide bars. On mobile we switch to fixed layout
+       so the <col> widths are authoritative: narrow sticky Test/Consensus
+       columns and ~34px source columns turn the cells into compact squares. The
+       table keeps width:auto so it grows past the viewport (horizontal scroll)
+       rather than squishing the tiles, with min-width:100% as a floor. */
+    table.matrix{table-layout:fixed;min-width:0;width:max-content}
+    col.mcol-test{width:118px}
+    col.mcol-cons{width:84px}
+    col.mcol-src{width:34px}
+    /* The desktop min-widths (236px/158px) sit on these cells and, under fixed
+       layout, override the <col> widths — zero them so the columns honor the
+       <col> sizing above. */
+    table.matrix th.corner-test,table.matrix td.cell-test{
+      min-width:0;padding:6px 8px;font-size:10.5px;white-space:normal;word-break:break-word;line-height:1.3;overflow:hidden;
+    }
+    table.matrix th.corner-cons,table.matrix td.cell-cons{
+      min-width:0;left:118px;padding:5px 7px;overflow:hidden;
+    }
+    table.matrix .cons-cell{flex-wrap:wrap;gap:3px}
+    table.matrix .colrow th{padding:4px 2px;overflow:hidden}
+    table.matrix .colrow th .src-head{gap:2px}
+    table.matrix .colrow th .src-lbl{max-width:30px;font-size:8.5px}
+    table.matrix .colrow th .src-tag{font-size:6.5px;white-space:normal;word-break:break-all;line-height:1.2}
+    table.matrix .colrow th .src-open{display:none}
+    table.matrix tr.trow td{height:26px}
+
+    /* Time-series grid: same treatment as the matrix. The build columns are
+       sized by their header text (the long run id), so without fixed layout they
+       stay wide bars. Switch to fixed layout, pin a narrow label column and ~46px
+       build columns via <col>, zero the desktop min-widths, and clip/wrap the
+       build headers (the long run id is hidden — date + version identify the
+       build) so the status cells become a dense tile grid. */
+    table.tsgrid{table-layout:fixed;min-width:0;width:max-content}
+    col.tscol-name{width:132px}
+    col.tscol-build{width:46px}
+    table.tsgrid th.ts-corner,table.tsgrid td.ts-name,table.tsgrid tr.ts-phase th{
+      min-width:0;width:auto;overflow:hidden;
+    }
+    table.tsgrid td.ts-name{white-space:normal;word-break:break-word;font-size:10.5px;padding:5px 9px}
+    table.tsgrid th.ts-build{min-width:0;padding:5px 2px;overflow:hidden}
+    table.tsgrid th.ts-build .bh-id{display:none}
+    table.tsgrid th.ts-build .bh-ver,
+    table.tsgrid th.ts-build .bh-k8s,
+    table.tsgrid th.ts-build .bh-when{white-space:normal;word-break:break-all;line-height:1.2}
+    table.tsgrid tr.ts-row td{height:26px}
+  }
 </style>
 </head>
 <body>
@@ -510,47 +771,47 @@
   <div class="brand" id="brand-home" role="button" tabindex="0" title="Back to overview">
     <div class="logo">AI</div>
     <div class="title-wrap">
-      <div class="title">AICR Recipe Validation <small>— Corroboration · TestGrid</small></div>
+      <div class="title">AICR Recipe Validation <small>— validated GPU configs, independently corroborated</small></div>
     </div>
+  </div>
+  <div class="nav-toggles">
+    <button class="btn" id="toggle-nav" title="show/hide the dashboards panel">☰ dashboards</button>
+    <button class="btn" id="toggle-filters" title="show/hide recipe selectors &amp; evidence filters">⚙ filters</button>
   </div>
   <div class="spacer"></div>
-  <div class="facets">
-    <div class="facet">
-      <label for="f-k8s">k8s version</label>
-      <select id="f-k8s"><option value="">all</option></select>
-    </div>
-    <div class="facet">
-      <label for="f-aicr">aicr version</label>
-      <select id="f-aicr"><option value="">all</option></select>
-    </div>
-    <div class="facet">
-      <label for="f-class">source class</label>
-      <select id="f-class">
-        <option value="">all</option>
-        <option value="first-party">first-party (1P)</option>
-        <option value="community">community</option>
-        <option value="partner">partner</option>
-      </select>
-    </div>
-    <button class="btn" id="f-reset" title="reset facets">reset</button>
-  </div>
+  <nav class="header-links" id="header-links" aria-label="Site links"></nav>
 </header>
 
-<!-- ============ CRITERIA SELECTOR BAR ============ -->
-<div class="criteria-bar" id="criteria-bar">
-  <span class="cb-title">▸ <b>criteria</b> selector</span>
-  <div class="crit"><label for="c-service">service</label><select id="c-service"></select></div>
-  <div class="crit"><label for="c-accelerator">accelerator</label><select id="c-accelerator"></select></div>
-  <div class="crit"><label for="c-os">os</label><select id="c-os"></select></div>
-  <div class="crit"><label for="c-intent">intent</label><select id="c-intent"></select></div>
-  <div class="crit"><label for="c-platform">platform</label><select id="c-platform"></select></div>
-  <button class="btn" id="c-reset" title="clear criteria">clear</button>
+<!-- ============ CONTROL STRIP: two zones — SELECT RECIPE | FILTER EVIDENCE ============
+     Criteria axes select WHICH recipe (the coordinate); facets filter WHICH
+     runs/evidence within it. Distinct jobs, unified visual treatment. -->
+<div class="criteria-bar control-strip" id="criteria-bar">
+  <div class="ctl-zone" id="zone-select">
+    <div class="zone-head"><span class="zone-title">▸ <b>select recipe</b></span><span class="zone-help">choose the cluster configuration</span></div>
+    <div class="zone-controls">
+      <div class="crit"><label for="c-service">service</label><select id="c-service"></select></div>
+      <div class="crit"><label for="c-accelerator">accelerator</label><select id="c-accelerator"></select></div>
+      <div class="crit"><label for="c-os">os</label><select id="c-os"></select></div>
+      <div class="crit"><label for="c-intent">intent</label><select id="c-intent"></select></div>
+      <div class="crit"><label for="c-platform">platform</label><select id="c-platform"></select></div>
+      <button class="btn" id="c-reset" title="clear recipe selection">clear</button>
+    </div>
+  </div>
+  <div class="zone-divider" aria-hidden="true"></div>
+  <div class="ctl-zone" id="zone-filter">
+    <div class="zone-head"><span class="zone-title"><b>filter evidence</b></span><span class="zone-help">narrow which runs are shown</span></div>
+    <div class="zone-controls">
+      <div class="crit"><label for="f-k8s">k8s version</label><select id="f-k8s"><option value="">all</option></select></div>
+      <div class="crit"><label for="f-aicr">aicr version</label><select id="f-aicr"><option value="">all</option></select></div>
+      <button class="btn" id="f-reset" title="reset evidence filters">reset</button>
+    </div>
+  </div>
 </div>
 
 <div class="shell">
   <!-- ============ LEFT NAV TREE ============ -->
   <aside class="sidebar" id="sidebar">
-    <div class="side-title"><span>▦</span> Dashboard <b>groups</b></div>
+    <div class="side-title"><span>▦</span> <b>Dashboards</b></div>
     <div id="tree-host"></div>
   </aside>
 
@@ -558,22 +819,36 @@
     <!-- LANDING / OVERVIEW (default on load) -->
     <section class="view" id="view-landing">
       <div class="breadcrumb"><span class="crumb cur">overview</span></div>
-      <div class="section-title">AICR corroboration <b>across CSPs</b></div>
-      <div class="section-sub">Pick a <span class="mono">group → dashboard → tab</span> in the left tree to drill in:
-        <b style="color:var(--green)">group</b> = cloud service (eks/gke/aks/oke/lke),
-        <b style="color:var(--green)">dashboard</b> = <span class="mono">accelerator-os</span>,
-        <b style="color:var(--green)">tab</b> = <span class="mono">intent[-platform]</span>. Selecting a tab opens its
-        cross-source corroboration grid; clicking a source column there opens that source's builds-over-time time-series.</div>
-      <div id="landing-crit-note" class="mono" style="font-size:11px;color:var(--green);margin:-6px 0 12px"></div>
+      <div class="section-title">Validated GPU cluster configurations <b>— independently corroborated</b></div>
+      <div class="section-sub">Find a GPU cluster configuration that independent sources have validated. Each recipe's status is
+        corroborated across sources — <b style="color:var(--ink-strong)">disagreement is surfaced, never averaged</b>.</div>
+
+      <!-- summary stats (counts + freshness) — populated from index.meta -->
+      <div class="summary-row" id="summary-row"></div>
+
+      <!-- §3/§6: taxonomy + consensus legend, folded away by default -->
+      <details class="howto" id="howto">
+        <summary>How to read this dashboard</summary>
+        <div class="howto-body">
+          <p>Pick a <b>cloud service</b> (eks/gke/aks/oke/lke), then an
+            <span class="mono">accelerator-os</span>, then a <b>recipe</b> (<span class="mono">intent[-platform]</span>).
+            A recipe opens its cross-source corroboration grid; clicking a source column opens that source's
+            builds-over-time history.</p>
+          <div class="legend-title">Consensus states</div>
+          <div class="legend" id="consensus-legend"></div>
+        </div>
+      </details>
+
+      <div id="landing-crit-note" class="mono" style="font-size:11px;color:var(--green);margin:-2px 0 12px"></div>
       <div id="landing-host"></div>
     </section>
 
     <!-- GROUP CATALOG VIEW -->
     <section class="view hidden" id="view-catalog">
       <div class="breadcrumb" id="catalog-crumb"></div>
-      <div class="section-title">Dashboard group <b id="cat-group-name">eks</b> · recipes × phases</div>
-      <div class="section-sub">Each row is a recipe coordinate <span class="mono">accelerator-os / intent[-platform]</span>; each cell is the
-        phase consensus rolled up across all sources (CONTESTED &gt; FAILING &gt; UNTESTED &gt; SINGLE &gt; CONFIRMED). Select a row — or a tab in the left tree — to open its corroboration matrix.</div>
+      <div class="section-title">Dashboard <b id="cat-group-name">eks</b> · recipes × phases</div>
+      <div class="section-sub">Each row is a recipe; each cell is the phase consensus rolled up across all sources
+        (worst-first: CONTESTED &gt; FAILING &gt; UNTESTED &gt; SINGLE &gt; CONFIRMED). Select a recipe to open its corroboration matrix.</div>
       <div id="catalog-host"></div>
     </section>
 
@@ -581,9 +856,11 @@
     <section class="view hidden" id="view-grid">
       <div class="breadcrumb" id="grid-crumb"></div>
       <div class="section-title" style="margin-bottom:12px">
-        <button class="back-btn" id="back-btn">← back to group</button>
         <span id="grid-recipe-name" class="mono" style="color:var(--ink-strong);font-weight:600;text-transform:none;letter-spacing:0"></span>
         <span id="grid-status"></span>
+        <span id="grid-version-host"></span>
+        <button class="btn cli-btn" id="copy-cli" title="show the CLI command that generates this recipe">
+          <span class="cli-ic">&gt;_</span> CLI command</button>
       </div>
       <div class="controls-row" id="controls-row" style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:14px">
         <div class="facet">
@@ -608,9 +885,6 @@
     <!-- SOURCE TIME-SERIES VIEW (builds over time) -->
     <section class="view hidden" id="view-ts">
       <div class="breadcrumb" id="ts-crumb"></div>
-      <div class="section-title" style="margin-bottom:12px">
-        <button class="back-btn" id="ts-back-btn">← back to corroboration</button>
-      </div>
       <div class="ts-shell">
         <div class="ts-head" id="ts-head"></div>
         <div class="ts-scroll" id="ts-host"></div>
@@ -619,11 +893,30 @@
   </main>
 </div>
 
-<footer>
-  Disagreement (CONTESTED) is surfaced, never averaged. Each source's full <b>per-source time-series</b> (builds over time) is available by drilling its column.
-</footer>
 
 <div class="tooltip" id="tooltip"></div>
+
+<!-- CLI / config preview popup (opened from "CLI command" in the grid view) -->
+<div class="cli-pop-backdrop hidden" id="cli-popup">
+  <div class="cli-pop" role="dialog" aria-modal="true" aria-label="CLI command and configuration">
+    <button class="cli-pop-close" id="cli-pop-close" title="close" aria-label="close">×</button>
+    <div class="cli-pop-title" id="cli-pop-title"></div>
+
+    <div class="cli-pop-sec">
+      <div class="cli-pop-h">CLI command</div>
+      <div class="cli-pop-desc">Generate this recipe with the AICR CLI.</div>
+      <div class="cli-pop-code"><code id="cli-pop-cmd"></code><button class="cli-pop-copy" data-pop-copy="cmd" aria-label="copy CLI command">⧉ copy</button></div>
+    </div>
+
+    <hr class="cli-pop-sep">
+
+    <div class="cli-pop-sec">
+      <div class="cli-pop-h">…or a config file</div>
+      <div class="cli-pop-desc">The same selection as an <code>AICRConfig</code>, so it version-controls with your workflow. Run <code>aicr recipe --config config.yaml</code>.</div>
+      <div class="cli-pop-code is-yaml"><code id="cli-pop-cfg"></code><button class="cli-pop-copy" data-pop-copy="cfg" aria-label="copy config YAML">⧉ copy</button></div>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -641,6 +934,21 @@ const PHASES = ["deployment","performance","conformance"];
 const CLASS_ORDER = ["first-party","community","partner"];
 const CLASS_SHORT = { "first-party":"1P", "community":"COMM", "partner":"PTNR" };
 const CLASS_TITLE = { "first-party":"First-party (1P)", "community":"Community (COMM)", "partner":"Partner (PTNR)" };
+// §5 — the source-class taxonomy (1P/COMM/PTNR) is internal trust plumbing that
+// drives consensus weight in Go; it is NOT a user browse axis. With CLASS_BANDS
+// off, the matrix presents every signer as one "community" of sources: no
+// colored per-class column-group walls and no per-source class code — only the
+// allowlisted-vs-"reported" (zero-weight) distinction is surfaced. Class still
+// rides in the data + tooltip and still drives the (unchanged) Go consensus.
+// Flip to true to restore the per-class bands; touches no consensus code.
+const CLASS_BANDS = false;
+
+// Inline SVG icons for the header links (§1 — collapse to icon-only on narrow).
+// Fixed constants, not user data; rendered via innerHTML safely.
+const HLINK_ICONS = {
+  docs:    `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 1h5.2L13 4.8V15H4V1zm5 .9V5h3.1L9 1.9zM5.6 7.5h4.8v1H5.6v-1zm0 2.4h4.8v1H5.6v-1z"/></svg>`,
+  github:  `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 .2a8 8 0 0 0-2.5 15.6c.4.07.55-.17.55-.38v-1.3c-2.2.48-2.67-1.06-2.67-1.06-.36-.92-.88-1.16-.88-1.16-.72-.49.05-.48.05-.48.8.06 1.22.82 1.22.82.7 1.2 1.85.86 2.3.66.07-.51.28-.86.5-1.06-1.76-.2-3.6-.88-3.6-3.9 0-.86.3-1.57.82-2.12-.08-.2-.36-1 .08-2.1 0 0 .67-.21 2.2.81a7.6 7.6 0 0 1 4 0c1.53-1.02 2.2-.81 2.2-.81.44 1.1.16 1.9.08 2.1.51.55.82 1.26.82 2.12 0 3.03-1.85 3.7-3.61 3.89.28.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .2z"/></svg>`,
+};
 
 // esc HTML-escapes a value before it is interpolated into innerHTML. The data
 // model is built from contributor-supplied evidence (CTRF test names, signer
@@ -652,18 +960,20 @@ function esc(v){
   ));
 }
 const PLATFORM_NONE = "(none)";
-const N_BUILDS_DEFAULT = 10;
 
+// label = chip text; desc = plain-English meaning surfaced in the legend, badge
+// titles, and ARIA labels (§6). SINGLE = one source has passed it (verified once,
+// but not yet corroborated by a second independent source).
 const STATE_META = {
-  CONFIRMED:{ cls:"st-confirmed", ic:"✓",  label:"CONFIRMED" },
-  SINGLE:   { cls:"st-single",    ic:"1×", label:"SINGLE" },
-  CONTESTED:{ cls:"st-contested", ic:"⚠",  label:"CONTESTED" },
-  FAILING:  { cls:"st-failing",   ic:"✗",  label:"FAILING" },
-  UNTESTED: { cls:"st-untested",  ic:"–",  label:"UNTESTED" },
+  CONFIRMED:{ cls:"st-confirmed", ic:"✓",  label:"CONFIRMED",   desc:"multiple independent sources agree it passes" },
+  SINGLE:   { cls:"st-single",    ic:"1×", label:"SINGLE",      desc:"one source passed; not yet corroborated" },
+  CONTESTED:{ cls:"st-contested", ic:"⚠",  label:"CONTESTED",   desc:"sources disagree — inspect the runs" },
+  FAILING:  { cls:"st-failing",   ic:"✗",  label:"FAILING",     desc:"corroborated as failing" },
+  UNTESTED: { cls:"st-untested",  ic:"–",  label:"UNTESTED",    desc:"no evidence yet" },
   // PARTIAL is an overview-only recipe rollup: corroborated on the phases that
   // ran, but not all phases are covered (e.g. a runner without the hardware for
   // performance). Never a per-row or per-phase state — see rollupRecipe.
-  PARTIAL:  { cls:"st-partial",   ic:"◐",  label:"PARTIAL" },
+  PARTIAL:  { cls:"st-partial",   ic:"◐",  label:"PARTIAL",     desc:"passing where tested, but not all phases have run" },
 };
 const STATE_COLOR = {
   CONFIRMED:"var(--confirmed)", SINGLE:"var(--single)", CONTESTED:"var(--contested)",
@@ -682,9 +992,11 @@ const PHASE_PRIORITY = ["CONTESTED","FAILING","UNTESTED","SINGLE","CONFIRMED"];
    ------------------------------------------------------------ */
 let SOURCES = {};
 let SRC_META = {};
+let SRC_LATEST_WHEN = {};   // §8: signer-id-hash -> newest "when" string, for freshness/age
 let DATA = { recipes: [] };
 let TREE = [];
 let CRITERIA_VALUES = {};
+let META = {};   // index.meta: { links:{install,docs,github}, counts:{recipes,csps,sources}, generatedAt }
 let RECIPE_BY_NAME = {};
 let COORD_TO_IDX = {};       // "group/dashboard/tab" -> DATA.recipes index (hash routing)
 
@@ -727,12 +1039,15 @@ function shapeSVG(cls, color, hollow, size){
   inner += ` fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
   return `<svg viewBox="0 0 17 17" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${inner}</svg>`;
 }
+// §a11y: tiles carry a redundant glyph (not color-only) AND an aria-label so
+// pass/fail are distinguishable without hue and announced to screen readers.
 function tileEl(res){
   const span = document.createElement("span");
-  if (res === "pass"){ span.className = "tile t-pass"; span.textContent = "P"; }
-  else if (res === "fail"){ span.className = "tile t-fail"; span.textContent = "F"; }
-  else if (res === "not-run" || res === "skipped"){ span.className = "tile t-notrun"; span.textContent = "N"; }
-  else { span.className = "tile t-empty"; span.textContent = "·"; }
+  span.setAttribute("role", "img");
+  if (res === "pass"){ span.className = "tile t-pass"; span.textContent = "✓"; span.setAttribute("aria-label", "pass"); }
+  else if (res === "fail"){ span.className = "tile t-fail"; span.textContent = "✕"; span.setAttribute("aria-label", "fail"); }
+  else if (res === "not-run" || res === "skipped"){ span.className = "tile t-notrun"; span.textContent = "·"; span.setAttribute("aria-label", "not run"); }
+  else { span.className = "tile t-empty"; span.textContent = ""; span.setAttribute("aria-label", "no data"); }
   return span;
 }
 function badgeEl(state, pass, fail, reported){
@@ -747,6 +1062,8 @@ function badgeEl(state, pass, fail, reported){
   else if (state === "UNTESTED")  cnt = "";
   else                            cnt = `×${pass}`;
   chip.innerHTML = `<span class="ic">${m.ic}</span>${m.label}` + (cnt ? `<span class="cnt">${cnt}</span>` : "");
+  chip.title = m.desc;                                         // §6 plain-English on hover
+  chip.setAttribute("aria-label", `${m.label}: ${m.desc}` + (cnt ? ` (${cnt})` : ""));
   wrap.appendChild(chip);
   if (reported > 0){
     const r = document.createElement("span");
@@ -827,23 +1144,36 @@ function tabStatusEl(recipe){
 /* ============================================================
    FACET STATE (in-grid run-metadata facets — read from JSON model)
    ============================================================ */
-const facets = { k8s:"", aicr:"", cls:"" };
-const anyFacet = () => facets.k8s || facets.aicr || facets.cls;
+// §5: the source-class facet was removed (class is internal trust plumbing, not
+// a user browse axis). Class still drives consensus in Go; the UI no longer
+// filters on it. Evidence facets are version-only now.
+const facets = { k8s:"", aicr:"" };
 
-function runMatchesFacets(src){
-  const meta = SRC_META[src], cls = SOURCES[src];
-  if (facets.k8s && (!meta || meta.k8sVer !== facets.k8s)) return false;
-  if (facets.aicr && (!meta || meta.aicrVer !== facets.aicr)) return false;
-  if (facets.cls && (!cls || cls.class !== facets.cls)) return false;
-  return true;
+// AICR VERSION is a version *lens*, not a dimming filter: it selects which baked
+// consensus grid the matrix/catalog/landing summarize (see activeVer / versionView),
+// so it never dims. Only the k8s facet dims *within* the selected version — and it
+// must resolve each source's k8s from the run actually ON SCREEN (test._runMeta,
+// which is baked per version), NOT the newest-only SRC_META. Otherwise, under a
+// non-newest lens, the dimming would disagree with the per-cell tooltip and a
+// source that only ran under the selected older version would always look dimmed.
+function cellK8sMatches(test, src){
+  if (!facets.k8s) return true;
+  const rm = test._runMeta && test._runMeta[src];
+  return !!rm && rm.k8sVer === facets.k8s;
 }
-function testMatchesFacets(test){
-  if (!anyFacet()) return true;
-  return distinctRuns(test.runs).some(r => runMatchesFacets(r.src));
+function matrixRowDimmed(test){
+  if (!facets.k8s) return false;
+  return !distinctRuns(test.runs).some(r => cellK8sMatches(test, r.src));
 }
-function recipeMatchesFacets(recipe){
-  if (!anyFacet()) return true;
-  return recipe.tests.some(testMatchesFacets);
+// A source column is dimmed when no test in the active-version grid has a matching
+// -k8s run for it; a catalog row is dimmed when the recipe has no such run at all.
+function srcMatchesK8sInTests(src, tests){
+  if (!facets.k8s) return true;
+  return tests.some(t => cellK8sMatches(t, src));
+}
+function recipeMatchesK8s(recipe){
+  if (!facets.k8s) return true;
+  return versionView(recipe).tests.some(t => distinctRuns(t.runs).some(r => cellK8sMatches(t, r.src)));
 }
 
 /* ============================================================
@@ -894,7 +1224,7 @@ function renderTree(){
     gHead.className = "tree-node tg-group" + (empty ? " empty" : "") + (collapsedGroups.has(g.name) ? " collapsed" : "");
     gHead.innerHTML =
       `<span class="tw">▾</span><span class="csp">${esc(g.name.slice(0,3).toUpperCase())}</span>` +
-      `<span>${esc(g.name)}</span><span class="badge-mini">${visTabs} tab${visTabs===1?"":"s"}</span>`;
+      `<span>${esc(g.name)}</span><span class="badge-mini">${visTabs} recipe${visTabs===1?"":"s"}</span>`;
     gHead.addEventListener("click", () => {
       const wasCollapsed = collapsedGroups.has(g.name);
       if (wasCollapsed) collapsedGroups.delete(g.name); else collapsedGroups.add(g.name);
@@ -930,7 +1260,7 @@ function renderTree(){
         d.tabs.forEach(t => {
           const recipe = DATA.recipes[t.idx];
           if (anyCriteria() && !recipeMatchesCriteria(recipe)) return;
-          const roll = rollupRecipe(recipe);
+          const roll = rollupRecipe(versionView(recipe));
           const tab = document.createElement("div");
           const isActive = (currentRecipeIdx === t.idx) &&
             !document.getElementById("view-grid").classList.contains("hidden");
@@ -1015,10 +1345,81 @@ function showLanding(){
   if (typeof restoreCriteriaSelects === "function") restoreCriteriaSelects();
   hideAllViews();
   document.getElementById("view-landing").classList.remove("hidden");
+  renderSummaryRow();        // §3 counts + freshness
+  renderConsensusLegend();   // §6 always-available legend
   renderLanding();
   renderTree();
   window.scrollTo({ top:0, behavior:"auto" });
 }
+
+// §3 — landing summary stats from index.meta.counts + freshness stamp.
+function renderSummaryRow(){
+  const host = document.getElementById("summary-row");
+  if (!host) return;
+  host.innerHTML = "";
+  const c = (META && META.counts) || {};
+  const stats = [
+    [c.recipes, "recipes validated"],
+    [c.csps, "dashboards"],
+    [c.sources, "independent sources"],
+  ];
+  stats.forEach(([v, label]) => {
+    if (v == null) return;
+    const s = document.createElement("span");
+    s.className = "stat";
+    s.innerHTML = `<b>${esc(String(v))}</b> ${esc(label)}`;
+    s.setAttribute("aria-label", `${v} ${label}`);
+    host.appendChild(s);
+  });
+  if (META && META.generatedAt){
+    const s = document.createElement("span");
+    s.className = "stat stat-fresh";
+    s.innerHTML = `data as of <b>${esc(META.generatedAt)}</b>`;
+    s.setAttribute("aria-label", `data as of ${META.generatedAt}`);
+    host.appendChild(s);
+  }
+}
+
+// §6 — graphical consensus legend (plain-English meaning per state).
+function renderConsensusLegend(){
+  const host = document.getElementById("consensus-legend");
+  if (!host) return;
+  host.innerHTML = "";
+  ["CONFIRMED","SINGLE","CONTESTED","FAILING","UNTESTED","PARTIAL"].forEach(s => {
+    const m = STATE_META[s];
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    item.innerHTML =
+      `<span class="pbadge ${m.cls}"><span class="ic">${m.ic}</span>${m.label}</span>` +
+      `<span class="legend-desc">${esc(m.desc)}</span>`;
+    host.appendChild(item);
+  });
+}
+
+// §8 — freshness. Age is measured against META.generatedAt (the data's "as of"
+// stamp, derived from the newest run), so it's reproducible from the snapshot
+// rather than the viewer's clock. STALE_DAYS flips the de-emphasis threshold;
+// set to 0 to disable the staleness UI entirely.
+const STALE_DAYS = 30;
+function parseWhen(s){
+  if (!s) return null;
+  const m = /(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(s);
+  if (!m) return null;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0));
+}
+function sourceAgeDays(src){
+  if (!STALE_DAYS) return null;
+  const ref = parseWhen(META && META.generatedAt);
+  const when = parseWhen(SRC_LATEST_WHEN[src]);
+  if (ref == null || when == null) return null;
+  return Math.max(0, Math.round((ref - when) / 86400000));
+}
+function ageLabel(days){
+  if (days == null) return "";
+  if (days <= 0) return "today";
+  return days === 1 ? "1 day ago" : days + " days ago";
+}
+
 function showGroupCatalog(name){
   if (typeof restoreCriteriaSelects === "function") restoreCriteriaSelects();
   currentGroup = name;
@@ -1053,7 +1454,7 @@ function renderLanding(){
       const tabs = anyCriteria() ? d.tabs.filter(t=>recipeMatchesCriteria(DATA.recipes[t.idx])) : d.tabs;
       if (tabs.length === 0) return;
       dashCount++;
-      tabs.forEach(t => { tabCount++; tally[rollupRecipe(DATA.recipes[t.idx]).state]++; });
+      tabs.forEach(t => { tabCount++; tally[rollupRecipe(versionView(DATA.recipes[t.idx])).state]++; });
     });
     let bars = "";
     if (empty){
@@ -1067,7 +1468,7 @@ function renderLanding(){
     card.innerHTML =
       `<div class="lc-top"><span class="lc-csp">${esc(g.name.toUpperCase())}</span>` +
       `<div><div class="lc-name">${esc(g.name)}</div>` +
-      `<div class="lc-sub">${dashCount} dashboard${dashCount===1?"":"s"} · ${tabCount} tab${tabCount===1?"":"s"}</div></div></div>` +
+      `<div class="lc-sub">${tabCount} recipe${tabCount===1?"":"s"}</div></div></div>` +
       `<div class="lc-bars">${bars}</div>`;
     if (!empty) card.addEventListener("click", () => {
       collapsedGroups.delete(g.name);
@@ -1075,6 +1476,21 @@ function renderLanding(){
     });
     grid.appendChild(card);
   });
+  // §8: explicit "nothing matches" state instead of a blank page when criteria
+  // filter everything out.
+  if (!grid.children.length){
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.innerHTML = `<p>No recipes match the current selection.</p>` +
+      `<button class="btn" id="empty-reset">clear selection</button>`;
+    host.appendChild(empty);
+    const btn = empty.querySelector("#empty-reset");
+    if (btn) btn.addEventListener("click", () => {
+      CRIT_AXES.forEach(axis => { const s = document.getElementById("c-" + axis); if (s) s.value = ""; });
+      if (typeof applyCriteria === "function") applyCriteria();
+    });
+    return;
+  }
   host.appendChild(grid);
 }
 
@@ -1093,7 +1509,8 @@ function renderCatalog(){
 
   const group = TREE.find(g => g.name === currentGroup);
   const dashes = (group ? group.dashboards : [])
-    .map(d => ({ ao: d.ao, tabs: d.tabs.filter(t => recipeMatchesCriteria(DATA.recipes[t.idx])) }))
+    .map(d => ({ ao: d.ao, accelerator: d.accelerator, os: d.os,
+                 tabs: d.tabs.filter(t => recipeMatchesCriteria(DATA.recipes[t.idx])) }))
     .filter(d => d.tabs.length > 0);
 
   if (dashes.length === 0){
@@ -1118,7 +1535,7 @@ function renderCatalog(){
   table.className = "catalog";
   table.innerHTML = `
     <thead><tr>
-      <th style="width:40%">Dashboard / tab</th>
+      <th style="width:40%">Recipe</th>
       <th>Deployment</th><th>Performance</th><th>Conformance</th>
     </tr></thead><tbody></tbody>`;
   const tbody = table.querySelector("tbody");
@@ -1128,38 +1545,50 @@ function renderCatalog(){
     secTr.className = "dash-sec";
     const secTd = document.createElement("td");
     secTd.setAttribute("colspan","4");
+    // Accelerator-focused divider: the accelerator is the star; the OS rides
+    // along as subtle context (it still distinguishes same-accelerator dashboards).
+    const osMeta = d.os ? `<span class="dos">${esc(d.os)}</span> · ` : "";
     secTd.innerHTML =
-      `<div class="dash-sec-inner"><span class="dname">${esc(d.ao)}</span>` +
-      `<span class="dtag">dashboard</span>` +
-      `<span class="dmeta">${d.tabs.length} tab${d.tabs.length===1?"":"s"} · ${esc(currentGroup)}</span></div>`;
+      `<div class="dash-sec-inner"><span class="dname">${esc(d.accelerator || d.ao)}</span>` +
+      `<span class="dmeta">${osMeta}${d.tabs.length} recipe${d.tabs.length===1?"":"s"}</span></div>`;
     secTr.appendChild(secTd);
     tbody.appendChild(secTr);
 
     d.tabs.forEach(t => {
       const idx = t.idx;
       const recipe = DATA.recipes[idx];
+      const vv = versionView(recipe);   // rollups reflect the AICR version in view
       const tr = document.createElement("tr");
       tr.tabIndex = 0;
       tr.setAttribute("role","button");
-      if (!recipeMatchesFacets(recipe)) tr.classList.add("dimmed");
+      if (!recipeMatchesK8s(recipe)) tr.classList.add("dimmed");
 
-      const cp = coordParts(recipe.coord);
       const tdName = document.createElement("td");
-      tdName.innerHTML =
-        `<div class="recipe-name">${esc(cp.ip)}</div>` +
-        `<div class="recipe-coord"><span class="dim">tab ·</span> <span class="seg">${esc(recipe.name)}</span></div>`;
+      // Fully qualified recipe name, but with the distinguishing intent[-platform]
+      // tail emphasized and the redundant coordinate prefix (already stated by the
+      // accelerator divider) muted, so the rows read as variations on a theme.
+      const ip = coordParts(recipe.coord).ip;
+      const tail = "-" + ip;
+      let nameHTML;
+      if (ip && recipe.name.endsWith(tail)){
+        const head = recipe.name.slice(0, recipe.name.length - ip.length); // keeps the joining "-"
+        nameHTML = `<span class="rn-head">${esc(head)}</span><span class="rn-tail">${esc(ip)}</span>`;
+      } else {
+        nameHTML = `<span class="rn-tail">${esc(recipe.name)}</span>`;
+      }
+      tdName.innerHTML = `<div class="recipe-name mono">${nameHTML}</div>`;
       tr.appendChild(tdName);
 
       PHASES.forEach(ph => {
         const td = document.createElement("td");
-        const tests = recipe.tests.filter(t2 => t2.phase === ph);
+        const tests = vv.tests.filter(t2 => t2.phase === ph);
         if (tests.length === 0){
-          td.appendChild(badgeEl(recipe._phaseRollup[ph] || "UNTESTED", 0, 0, 0));
+          td.appendChild(badgeEl(vv._phaseRollup[ph] || "UNTESTED", 0, 0, 0));
         } else {
           // State from the baked Go rollup (single source of truth); pass/fail/
           // reported are display tallies derived from the rows.
           const r = rollupPhase(tests);
-          td.appendChild(badgeEl(recipe._phaseRollup[ph] || r.state, r.pass, r.fail, r.reported));
+          td.appendChild(badgeEl(vv._phaseRollup[ph] || r.state, r.pass, r.fail, r.reported));
         }
         tr.appendChild(td);
       });
@@ -1181,6 +1610,7 @@ function renderCatalog(){
 const gridCtl = { filter:"", onlyNonPass:false, sort:"phase" };
 const NONPASS_STATES = new Set(["CONTESTED","FAILING","UNTESTED"]);
 const collapsedPhases = new Set();
+const collapsedTsPhases = new Set();   // per source-view (keyed recipe/src/phase)
 
 function sourceColumns(recipe){
   const seen = new Set();
@@ -1220,6 +1650,50 @@ function sortTests(tests){
 /* ============================================================
    RENDER: PER-RECIPE MATRIX (tests × sources, solid tiles)
    ============================================================ */
+// The corroboration matrix shows one AICR-version grid at a time. The version is
+// driven by the single FILTER EVIDENCE → AICR VERSION control (facets.aicr) —
+// there is no separate matrix version picker. Pick the matching version if the
+// recipe has one, otherwise the newest (Versions[0]).
+function activeVer(recipe){
+  const vs = recipe.versions || [];
+  if (!vs.length) return { aicrVer: "", tests: recipe.tests || [], _phaseRollup: recipe._phaseRollup || {} };
+  if (facets.aicr){
+    const hit = vs.find(v => v.aicrVer === facets.aicr);
+    if (hit) return hit;
+  }
+  return vs[0];   // newest
+}
+// A recipe projected onto the AICR version currently in view, so that EVERY
+// consensus summary (landing tally, sidebar tree, catalog cells, matrix) reflects
+// the one FILTER EVIDENCE → AICR VERSION selection — not a mix of the selected
+// version in the matrix and the newest version everywhere else.
+function versionView(recipe){
+  const v = activeVer(recipe);
+  return { name: recipe.name, coord: recipe.coord, versions: recipe.versions,
+           tests: v.tests, _phaseRollup: v._phaseRollup };
+}
+// Grid header: verdict badge + a passive indicator of which AICR version's
+// consensus is on screen. The version itself is chosen via FILTER EVIDENCE, not
+// here — this is a label, not a control.
+function refreshGridHeader(recipe){
+  const ver = activeVer(recipe);
+  const statusHost = document.getElementById("grid-status");
+  statusHost.innerHTML = "";
+  statusHost.appendChild(tabStatusEl({ tests: ver.tests }));
+
+  const vhost = document.getElementById("grid-version-host");
+  if (!vhost) return;
+  vhost.innerHTML = "";
+  if (!ver.aicrVer) return;
+  const fellBack = !!facets.aicr && ver.aicrVer !== facets.aicr;
+  const note = document.createElement("span");
+  note.className = "grid-ver-note" + (fellBack ? " fellback" : "");
+  note.textContent = fellBack ? `AICR ${ver.aicrVer} · no ${facets.aicr} runs` : `AICR ${ver.aicrVer}`;
+  note.title = fellBack
+    ? `No ${facets.aicr} evidence for this recipe — showing consensus among AICR ${ver.aicrVer} runs. Switch via FILTER EVIDENCE → AICR VERSION.`
+    : `Consensus is computed among AICR ${ver.aicrVer} runs only — cross-version agreement is not reproduction. Switch via FILTER EVIDENCE → AICR VERSION.`;
+  vhost.appendChild(note);
+}
 function openGrid(idx){
   currentRecipeIdx = idx;
   const recipe = DATA.recipes[idx];
@@ -1242,25 +1716,92 @@ function openGrid(idx){
   });
 
   document.getElementById("grid-recipe-name").textContent = recipe.name;
-  const statusHost = document.getElementById("grid-status");
-  statusHost.innerHTML = "";
-  statusHost.appendChild(tabStatusEl(recipe));
+  refreshGridHeader(recipe);   // status + segment bar + AICR-version selector for the active version
 
   renderMatrix(recipe);
 
   hideAllViews();
   document.getElementById("view-grid").classList.remove("hidden");
   renderTree();
+  fitMatrixColumns();   // size source columns now that the grid is visible (widths need a laid-out container)
   window.scrollTo({ top:0, behavior:"auto" });
 }
 
+// Adaptive source-column sizing. When the full source labels fit in the space
+// left after the Test/Consensus columns, widen every source column so nothing is
+// truncated (and drop the ellipsis via .labels-full). Otherwise fall back to
+// compact square tiles + truncation, with the full label on the tooltip. Runs
+// when a grid opens and on resize, so it re-fits as the viewport changes.
+function fitMatrixColumns(){
+  const view = document.getElementById("view-grid");
+  if (!view || view.classList.contains("hidden")) return;
+  const table = document.querySelector("#matrix-host table.matrix");
+  if (!table) return;
+  const srcCols = [...table.querySelectorAll("col.mcol-src")];
+  const labels = [...table.querySelectorAll("tr.colrow th .src-lbl")];
+  if (!srcCols.length) return;
+
+  // Measure the widest label in the actual rendered font.
+  const probe = labels[0];
+  const cs = probe ? getComputedStyle(probe) : null;
+  const ctx = fitMatrixColumns._ctx || (fitMatrixColumns._ctx = document.createElement("canvas").getContext("2d"));
+  ctx.font = cs ? `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}` : "9px monospace";
+  let maxLabel = 0;
+  labels.forEach(l => { maxLabel = Math.max(maxLabel, ctx.measureText(l.textContent).width); });
+
+  const CELL_PAD = 14;                 // header h-padding + a small buffer for measurement slack
+  const COMPACT = window.matchMedia("(max-width:820px)").matches ? 34 : 40;
+  const MAXW = 200;                    // cap so one very long label can't make an absurd column
+  const target = Math.min(MAXW, Math.max(COMPACT, Math.ceil(maxLabel) + CELL_PAD));
+
+  // Width available to the table = the content area minus the view's own padding.
+  const main = document.querySelector("main");
+  const vcs = getComputedStyle(view);
+  const viewPad = parseFloat(vcs.paddingLeft) + parseFloat(vcs.paddingRight);
+  const tableAvail = (main ? main.clientWidth : window.innerWidth) - viewPad - 4;
+
+  const corner = table.querySelector("th.corner-test"), cons = table.querySelector("th.corner-cons");
+  const labelW = (corner ? corner.offsetWidth : 0) + (cons ? cons.offsetWidth : 0);
+  const srcAvail = tableAvail - labelW;
+
+  const full = target * srcCols.length <= srcAvail;     // every label fits without scrolling
+  const colW = full ? target : COMPACT;
+  srcCols.forEach(c => { c.style.width = colW + "px"; });
+  table.classList.toggle("labels-full", full);
+}
+let _fitBound = false;
+function bindFitResize(){
+  if (_fitBound) return; _fitBound = true;
+  let raf = 0;
+  window.addEventListener("resize", () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fitMatrixColumns); });
+}
+bindFitResize();
+
 function renderMatrix(recipe){
-  const { cols, byClass } = sourceColumns(recipe);
+  // Render the active AICR-version grid (activeVer, chosen via FILTER EVIDENCE →
+  // AICR VERSION). Other views (landing/catalog/tree) keep using recipe.tests =
+  // the newest version.
+  const ver = activeVer(recipe);
+  const aTests = ver.tests || [];
+  const aRollup = ver._phaseRollup || {};
+  const { cols, byClass } = sourceColumns({ tests: aTests });
 
   const host = document.getElementById("matrix-host");
   host.innerHTML = "";
   const table = document.createElement("table");
   table.className = "matrix";
+
+  // Column sizing model: <col> widths take precedence over per-cell widths, and
+  // (unlike max-width on a cell) they are honored when the table switches to
+  // table-layout:fixed. Desktop leaves these unset so the auto layout is
+  // unchanged; the mobile media query pins them to turn the status cells into
+  // compact square tiles. The source widths must live here rather than on the
+  // colrow <th> because those sit under colspan'd class-group headers.
+  const colgroup = document.createElement("colgroup");
+  const colTest = document.createElement("col"); colTest.className = "mcol-test"; colgroup.appendChild(colTest);
+  const colCons = document.createElement("col"); colCons.className = "mcol-cons"; colgroup.appendChild(colCons);
+  cols.forEach(() => { const c = document.createElement("col"); c.className = "mcol-src"; colgroup.appendChild(c); });
+  table.appendChild(colgroup);
 
   const totalCols = 2 + cols.length;
 
@@ -1280,17 +1821,32 @@ function renderMatrix(recipe){
   cornerCons.textContent = "Consensus";
   groupRow.appendChild(cornerCons);
 
-  CLASS_ORDER.forEach(cls => {
-    const n = byClass[cls].length;
-    if (n === 0) return;
+  if (CLASS_BANDS){
+    CLASS_ORDER.forEach(cls => {
+      const n = byClass[cls].length;
+      if (n === 0) return;
+      const th = document.createElement("th");
+      th.setAttribute("colspan", String(n));
+      const inner = document.createElement("div");
+      inner.className = "clshead " + cls;
+      // short code (1P/COMM/PTNR) keeps the group label inside narrow colspans;
+      // full class name is in each source header's tooltip
+      inner.innerHTML = `${CLASS_SHORT[cls] || cls} <span class="cnt">×${n}</span>`;
+      th.title = `${CLASS_TITLE[cls] || cls} — ${n} source${n > 1 ? "s" : ""}`;
+      th.appendChild(inner);
+      groupRow.appendChild(th);
+    });
+  } else {
+    // §5: one neutral band over all sources — no class walls. (Keeps the two
+    // header rows aligned for the rowspan'd Test/Consensus corners.)
     const th = document.createElement("th");
-    th.setAttribute("colspan", String(n));
+    th.setAttribute("colspan", String(cols.length));
     const inner = document.createElement("div");
-    inner.className = "clshead " + cls;
-    inner.innerHTML = `${CLASS_TITLE[cls]} <span class="cnt">×${n}</span>`;
+    inner.className = "clshead sources-band";
+    inner.innerHTML = `independent sources <span class="cnt">×${cols.length}</span>`;
     th.appendChild(inner);
     groupRow.appendChild(th);
-  });
+  }
   thead.appendChild(groupRow);
 
   const colRow = document.createElement("tr");
@@ -1300,16 +1856,39 @@ function renderMatrix(recipe){
     const meta = SOURCES[src];
     const reported = meta && !meta.allowlisted;
     if (reported) th.classList.add("reported-col");
-    if (anyFacet() && !runMatchesFacets(src)) th.style.opacity = ".3";
+    if (!srcMatchesK8sInTests(src, aTests)) th.style.opacity = ".3";
     const head = document.createElement("div");
     head.className = "src-head";
+    // §5: with class bands off, the per-source tag carries only the trust signal
+    // that matters to a visitor — "reported" (zero-weight) vs nothing (counts
+    // toward consensus). The class code is shown only when CLASS_BANDS is on.
+    const tag = CLASS_BANDS
+      ? `${esc(CLASS_SHORT[cls] || cls)}${reported ? ` <span class="rep-mark">❖ reported</span>` : ""}`
+      : (reported ? `<span class="rep-mark">❖ reported</span>` : `<span class="ok-mark">✓ counts</span>`);
+    // §8: de-emphasize stale sources (no run within STALE_DAYS of the snapshot)
+    const ageD = sourceAgeDays(src);
+    const stale = ageD != null && ageD > STALE_DAYS;
+    if (stale) th.classList.add("src-stale");
+    const ageTag = stale ? `<span class="src-age" title="last attested ${esc(ageLabel(ageD))}">⏱ ${ageD}d</span>` : "";
     head.innerHTML =
       `<span class="src-lbl">${esc(meta ? meta.label : src)}</span>` +
-      `<span class="src-tag">${esc(CLASS_SHORT[cls] || cls)}${reported ? ` <span class="rep-mark">❖ reported</span>` : ""}</span>` +
+      `<span class="src-tag">${tag}</span>` +
+      ageTag +
       `<span class="src-open" title="open builds-over-time time-series">⤢</span>`;
     th.appendChild(head);
-    th.title = (meta ? meta.label : src) + " — click to open builds-over-time time-series";
-    th.addEventListener("click", () => openTimeSeries(recipe, src));
+    // Custom tooltip (works on hover AND tap) replaces the native title so the
+    // truncated source label has a full-text affordance on touch devices too.
+    th.dataset.tipSrc = JSON.stringify({
+      label: meta ? meta.label : src, id: src, cls,
+      clsTitle: CLASS_TITLE[cls] || cls, allow: !reported,
+    });
+    th._nav = () => openTimeSeries(recipe, src);
+    // §a11y: keyboard-reachable drill-in (mirror catalog-row pattern)
+    th.tabIndex = 0;
+    th.setAttribute("role", "button");
+    th.setAttribute("aria-label", `open time-series for ${meta ? meta.label : src}`);
+    th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); openTimeSeries(recipe, src); } });
+    bindCellNav(th);
     colRow.appendChild(th);
   });
   thead.appendChild(colRow);
@@ -1317,11 +1896,11 @@ function renderMatrix(recipe){
 
   const tbody = document.createElement("tbody");
   PHASES.forEach(ph => {
-    let tests = recipe.tests.filter(t => t.phase === ph);
+    let tests = aTests.filter(t => t.phase === ph);
     if (tests.length === 0) return;
     tests = sortTests(tests);
 
-    const rollState = recipe._phaseRollup[ph] || rollupPhase(tests).state; // baked Go state
+    const rollState = aRollup[ph] || rollupPhase(tests).state; // baked Go state (active version)
     const phaseKey = `${recipe.name}/${ph}`;
     const collapsed = collapsedPhases.has(phaseKey);
 
@@ -1334,10 +1913,16 @@ function renderMatrix(recipe){
     inner.innerHTML =
       `<span class="ptw">▾</span><span class="pname">${ph}</span>` +
       `<span class="pmeta">${tests.length} test${tests.length>1?"s":""} · rollup ${rollState}</span>`;
-    inner.addEventListener("click", () => {
+    inner.tabIndex = 0;
+    inner.setAttribute("role", "button");
+    inner.setAttribute("aria-expanded", String(!collapsed));
+    inner.setAttribute("aria-label", `${collapsed ? "expand" : "collapse"} ${ph} phase`);
+    const togglePhase = () => {
       if (collapsedPhases.has(phaseKey)) collapsedPhases.delete(phaseKey); else collapsedPhases.add(phaseKey);
       renderMatrix(recipe);
-    });
+    };
+    inner.addEventListener("click", togglePhase);
+    inner.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); togglePhase(); } });
     secTh.appendChild(inner);
     secTr.appendChild(secTh);
     tbody.appendChild(secTr);
@@ -1348,7 +1933,7 @@ function renderMatrix(recipe){
       const c = consensusOf(test);
       const tr = document.createElement("tr");
       tr.className = "trow";
-      if (!testMatchesFacets(test)) tr.classList.add("dimmed");
+      if (matrixRowDimmed(test)) tr.classList.add("dimmed");
       const f = gridCtl.filter.trim().toLowerCase();
       if (f && !test.name.toLowerCase().includes(f)) tr.classList.add("filtered");
       if (gridCtl.onlyNonPass && !NONPASS_STATES.has(c.state)) tr.classList.add("filtered");
@@ -1374,7 +1959,7 @@ function renderMatrix(recipe){
         const meta = SOURCES[src];
         const reported = meta && !meta.allowlisted;
         if (reported) td.classList.add("reported-col");
-        const dimmed = anyFacet() && !runMatchesFacets(src);
+        const dimmed = !cellK8sMatches(test, src);
         const res = resultFor(test, src);
         td.appendChild(tileEl(res === null ? "empty" : res));
         // tooltip metadata comes from the baked per-run LATEST build info in the JSON
@@ -1386,7 +1971,8 @@ function renderMatrix(recipe){
           build: rm.build || "—", buildWhen: rm.when || "—", evidenceRef: rm.evidenceRef || "",
         });
         if (dimmed) td.classList.add("dimcell");
-        td.addEventListener("click", () => openTimeSeries(recipe, src, test.name));
+        td._nav = () => openTimeSeries(recipe, src, test.name);
+        bindCellNav(td);
         tr.appendChild(td);
       });
 
@@ -1395,6 +1981,7 @@ function renderMatrix(recipe){
   });
   table.appendChild(tbody);
   host.appendChild(table);
+  fitMatrixColumns();   // re-fit source columns after a re-render (sort/filter/facets); no-op while the view is hidden
 }
 
 function backToCatalog(){
@@ -1428,6 +2015,8 @@ async function openTimeSeries(recipe, src, focusTest){
   currentRecipeIdx = DATA.recipes.indexOf(recipe);
   currentTsSrc = src;
   const cp = coordParts(recipe.coord);
+  currentGroup = cp.service;
+  reflectCriteriaForCoord(recipe.coord);   // reflect the recipe in the SELECT RECIPE dropdowns (esp. on a direct deep-link)
   setHash(hashSegs(cp.service, cp.ao, cp.ip, src));
   const meta = SOURCES[src];
   const reported = meta && !meta.allowlisted;
@@ -1449,6 +2038,7 @@ async function openTimeSeries(recipe, src, focusTest){
   // switch to the TS view immediately with a loading state, then fetch the series.
   hideAllViews();
   document.getElementById("view-ts").classList.remove("hidden");
+  renderTree();   // populate the sidebar tree (e.g. on a direct deep-link to a source's time-series)
   headHost.innerHTML = `<div class="ts-src"><div class="ts-title">${meta ? esc(meta.label) : esc(src)}</div></div>`;
   host.innerHTML = `<div class="loading-note">loading build history for <span class="mono">${esc(recipe.name)}</span> …</div>`;
   window.scrollTo({ top:0, behavior:"auto" });
@@ -1462,98 +2052,157 @@ async function openTimeSeries(recipe, src, focusTest){
   }
   if (currentTsSrc !== src || currentRecipeIdx !== DATA.recipes.indexOf(recipe)) return; // navigated away
 
+  // Full build history for this source. There is no per-testgrid version picker:
+  // the single FILTER EVIDENCE → AICR VERSION control drives it. AICR version is a
+  // hard FILTER here (columns for other versions are removed — the per-source
+  // analogue of the matrix version lens); the k8s facet still only DIMS columns.
   const cols = (series.builds && series.builds[src]) || [];
-  const health = (series.health && series.health[src]) || { flakePct:0, lastPassBuild:null, builds:cols.length };
-  const nBuilds = cols.length || N_BUILDS_DEFAULT;
+  const vcols = facets.aicr ? cols.filter(b => b.aicrVer === facets.aicr) : cols;
 
   headHost.innerHTML = "";
   const left = document.createElement("div");
   left.className = "ts-src";
+  // Source label + signer identity only — the recipe coordinate is already the
+  // breadcrumb above, so restating it here would be redundant.
   left.innerHTML =
     `<span class="src-shape">${shapeSVG(meta?meta.class:"community", reported?"var(--reported)":"var(--ink-soft)", reported, 22)}</span>` +
     `<div><div class="ts-title">${esc(meta ? meta.label : src)} ${reported ? `<span class="reported-flag">❖ reported</span>` : ""}</div>` +
-    `<div class="ts-id">${esc(meta ? meta.id : src)}</div>` +
-    `<div class="ts-id" style="color:var(--single)">${esc(recipe.name)} · ${esc(cp.ip)}</div></div>`;
+    `<div class="ts-id">${esc(meta ? meta.id : src)}</div></div>`;
   headHost.appendChild(left);
 
   const right = document.createElement("div");
   right.className = "ts-health";
+  const tsAge = sourceAgeDays(src);
+  const ageStat = tsAge == null ? "" :
+    `<div class="ts-stat"><span class="v${tsAge > STALE_DAYS ? " flaky" : ""}">${esc(ageLabel(tsAge))}</span><span class="k">last attested</span></div>`;
   right.innerHTML =
-    `<div class="ts-stat"><span class="v ${health.flakePct>=10?"flaky":""}">${health.flakePct}%</span><span class="k">flakiness</span></div>` +
-    `<div class="ts-stat"><span class="v">${health.lastPassBuild ? esc(health.lastPassBuild) : "—"}</span><span class="k">last all-pass build</span></div>` +
-    `<div class="ts-stat"><span class="v">${health.builds}</span><span class="k">builds shown</span></div>`;
+    ageStat +
+    `<div class="ts-stat"><span class="v">${vcols.length}</span><span class="k">builds shown</span></div>`;
   headHost.appendChild(right);
 
-  // body grid — recipe's FULL union test list × builds (results default not-run)
+  // body grid — recipe's FULL union test list × builds (results default not-run).
+  // paint() rebuilds the table so collapsible phase sections can re-render
+  // without re-fetching the series.
   const tests = recipe.tests;
-  host.innerHTML = "";
-  const table = document.createElement("table");
-  table.className = "tsgrid";
+  function paint(){
+    host.innerHTML = "";
+    // AICR version filtered this source down to nothing — say so rather than
+    // rendering a grid of empty placeholder columns.
+    if (!vcols.length){
+      host.innerHTML = `<div class="loading-note">${facets.aicr
+        ? `No builds for this source at AICR ${esc(facets.aicr)} — clear or change the FILTER EVIDENCE → AICR VERSION selection.`
+        : "No build history for this source."}</div>`;
+      return;
+    }
+    const vn = vcols.length;
 
-  const thead = document.createElement("thead");
-  const hr = document.createElement("tr");
-  const corner = document.createElement("th");
-  corner.className = "ts-corner";
-  corner.textContent = "Test  ·  builds →";
-  hr.appendChild(corner);
-  for (let b = 0; b < nBuilds; b++){
-    const bm = cols[b] || {};
-    const th = document.createElement("th");
-    th.className = "ts-build" + (b === 0 ? " newest" : "");
-    th.innerHTML =
-      `<div class="bh-id">${esc(bm.id || "")}</div>` +
-      `<div class="bh-ver">${esc(bm.aicrVer || "")}</div>` +
-      `<div class="bh-k8s">k8s ${esc(bm.k8sVer || "")}</div>` +
-      `<div class="bh-when">${esc(bm.when || "")}</div>` +
-      (b === 0 ? `<div class="bh-newest">newest</div>` : ``);
-    hr.appendChild(th);
-  }
-  thead.appendChild(hr);
-  table.appendChild(thead);
+    const table = document.createElement("table");
+    table.className = "tsgrid";
 
-  const tbody = document.createElement("tbody");
-  PHASES.forEach(ph => {
-    const phaseTests = tests.filter(t => t.phase === ph);
-    if (phaseTests.length === 0) return;
-    const secTr = document.createElement("tr");
-    secTr.className = "ts-phase";
-    const secTh = document.createElement("th");
-    secTh.setAttribute("colspan", String(1 + nBuilds));
-    secTh.textContent = ph;
-    secTr.appendChild(secTh);
-    tbody.appendChild(secTr);
+    // See the matrix colgroup note: <col> widths let the mobile media query switch
+    // this grid to table-layout:fixed and pin narrow build columns so the status
+    // cells render as a dense tile grid instead of content-sized bars. Desktop
+    // leaves these unset.
+    const tsColgroup = document.createElement("colgroup");
+    const tcCorner = document.createElement("col"); tcCorner.className = "tscol-name"; tsColgroup.appendChild(tcCorner);
+    for (let b = 0; b < vn; b++){ const c = document.createElement("col"); c.className = "tscol-build"; tsColgroup.appendChild(c); }
+    table.appendChild(tsColgroup);
 
-    phaseTests.forEach(test => {
-      const tr = document.createElement("tr");
-      tr.className = "ts-row";
-      if (focusTest && test.name === focusTest) tr.style.boxShadow = "inset 3px 0 0 var(--green)";
-      const td0 = document.createElement("td");
-      td0.className = "ts-name";
-      const neverRan = resultFor(test, src) === null;
-      if (neverRan){
-        td0.classList.add("ts-name-norun");
-        td0.innerHTML = `${esc(test.name)}<span class="norun-tag">not reported by this source</span>`;
-      } else {
-        td0.textContent = test.name;
-      }
-      tr.appendChild(td0);
-      for (let b = 0; b < nBuilds; b++){
-        const bm = cols[b] || { results:{} };
-        const res = (bm.results && bm.results[test.name]) || "not-run";
-        const td = document.createElement("td");
-        td.className = "ts-cell";
-        td.appendChild(tileEl(res));
-        td.dataset.tipBuild = JSON.stringify({
-          test: test.name, build: bm.id || "—", res, aicr: bm.aicrVer || "—", k8s: bm.k8sVer || "—", when: bm.when || "—",
-          label: meta ? meta.label : src, ev: bm.evidenceRef || "",
-        });
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    const corner = document.createElement("th");
+    corner.className = "ts-corner";
+    corner.textContent = "Test  ·  builds →";
+    hr.appendChild(corner);
+    // § FILTER EVIDENCE: AICR version already removed non-matching columns above;
+    // the k8s facet dims the remaining columns whose k8s doesn't match (mirrors
+    // how the matrix dims non-matching source columns by k8s).
+    const dimCol = vcols.map(bm => !!facets.k8s && bm.k8sVer !== facets.k8s);
+    for (let b = 0; b < vn; b++){
+      const bm = vcols[b] || {};
+      const th = document.createElement("th");
+      th.className = "ts-build" + (b === 0 ? " newest" : "") + (dimCol[b] ? " dimcol" : "");
+      // Header is truncated to a compact tile column; expose the full build
+      // identity on hover since the run id is hidden in the tile-grid layout.
+      th.title = [bm.id, bm.aicrVer, bm.k8sVer ? "k8s " + bm.k8sVer : "", bm.when]
+        .filter(Boolean).join("  ·  ");
+      th.innerHTML =
+        `<div class="bh-id">${esc(bm.id || "")}</div>` +
+        `<div class="bh-ver">${esc(bm.aicrVer || "")}</div>` +
+        `<div class="bh-k8s">k8s ${esc(bm.k8sVer || "")}</div>` +
+        `<div class="bh-when">${esc(bm.when || "")}</div>` +
+        (b === 0 ? `<div class="bh-newest">newest</div>` : ``);
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    PHASES.forEach(ph => {
+      const phaseTests = tests.filter(t => t.phase === ph);
+      if (phaseTests.length === 0) return;
+      const phaseKey = `${recipe.name}/${src}/${ph}`;
+      const collapsed = collapsedTsPhases.has(phaseKey);
+
+      const secTr = document.createElement("tr");
+      secTr.className = "ts-phase";
+      const secTh = document.createElement("th");
+      secTh.setAttribute("colspan", String(1 + vn));
+      const inner = document.createElement("div");
+      inner.className = "phase-sec-inner" + (collapsed ? " collapsed" : "");
+      inner.innerHTML =
+        `<span class="ptw">▾</span><span class="pname">${esc(ph)}</span>` +
+        `<span class="pmeta">${phaseTests.length} test${phaseTests.length>1?"s":""}</span>`;
+      inner.tabIndex = 0;
+      inner.setAttribute("role", "button");
+      inner.setAttribute("aria-expanded", String(!collapsed));
+      inner.setAttribute("aria-label", `${collapsed ? "expand" : "collapse"} ${ph} phase`);
+      const togglePhase = () => {
+        if (collapsedTsPhases.has(phaseKey)) collapsedTsPhases.delete(phaseKey); else collapsedTsPhases.add(phaseKey);
+        paint();
+      };
+      inner.addEventListener("click", togglePhase);
+      inner.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); togglePhase(); } });
+      secTh.appendChild(inner);
+      secTr.appendChild(secTh);
+      tbody.appendChild(secTr);
+
+      if (collapsed) return;
+
+      phaseTests.forEach(test => {
+        const tr = document.createElement("tr");
+        tr.className = "ts-row";
+        if (focusTest && test.name === focusTest) tr.style.boxShadow = "inset 3px 0 0 var(--green)";
+        const td0 = document.createElement("td");
+        td0.className = "ts-name";
+        const neverRan = resultFor(test, src) === null;
+        if (neverRan){
+          td0.classList.add("ts-name-norun");
+          td0.innerHTML = `${esc(test.name)}<span class="norun-tag">not reported by this source</span>`;
+        } else {
+          td0.textContent = test.name;
+        }
+        tr.appendChild(td0);
+        for (let b = 0; b < vn; b++){
+          const bm = vcols[b] || { results:{} };
+          const res = (bm.results && bm.results[test.name]) || "not-run";
+          const td = document.createElement("td");
+          td.className = "ts-cell" + (dimCol[b] ? " dimcol" : "");
+          td.appendChild(tileEl(res));
+          td.dataset.tipBuild = JSON.stringify({
+            test: test.name, build: bm.id || "—", res, aicr: bm.aicrVer || "—", k8s: bm.k8sVer || "—", when: bm.when || "—",
+            label: meta ? meta.label : src, ev: bm.evidenceRef || "",
+          });
+          bindCellNav(td);  // tap pins the tooltip on touch; hover handles desktop
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      });
     });
-  });
-  table.appendChild(tbody);
-  host.appendChild(table);
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+  paint();
 
   if (focusTest){
     const row = [...host.querySelectorAll(".ts-row")].find(r => r.querySelector(".ts-name").textContent === focusTest);
@@ -1564,55 +2213,156 @@ async function openTimeSeries(recipe, src, focusTest){
 /* ============================================================
    TOOLTIP (delegated; matrix cells + build cells)
    ============================================================ */
+// ---- compact-nav toggles: collapse the groups panel and the filter/criteria
+// bars to reclaim screen space. Default collapsed on mobile. ----
+const _tgNav = document.getElementById("toggle-nav");
+const _tgFil = document.getElementById("toggle-filters");
+function _syncNavToggles(){
+  _tgNav.classList.toggle("active", !document.body.classList.contains("nav-collapsed"));
+  _tgFil.classList.toggle("active", !document.body.classList.contains("filters-collapsed"));
+}
+_tgNav.addEventListener("click", () => { document.body.classList.toggle("nav-collapsed"); _syncNavToggles(); fitMatrixColumns(); });
+_tgFil.addEventListener("click", () => { document.body.classList.toggle("filters-collapsed"); _syncNavToggles(); fitMatrixColumns(); });
+if (window.matchMedia("(max-width:820px)").matches){ document.body.classList.add("nav-collapsed", "filters-collapsed"); }
+_syncNavToggles();
+
 const tooltip = document.getElementById("tooltip");
 function tipResultClass(res){ return res==="pass"?"tt-pass":res==="fail"?"tt-fail":"tt-notrun"; }
 
-document.body.addEventListener("mouseover", e => {
-  const cell = e.target.closest("[data-tip]");
-  const bcell = e.target.closest("[data-tip-build]");
-  if (cell && cell.dataset.tip){
-    const d = JSON.parse(cell.dataset.tip);
+// HOVER-capable pointer (desktop/mouse) vs coarse/touch. On hover devices the
+// tooltip follows the cursor and a click drills in; on touch devices a tap pins
+// the tooltip (with a drill-in link + close button) and a tap elsewhere dismisses
+// it — so the same rich detail is reachable on both, and a truncated label always
+// has a full-text affordance.
+const HOVER = window.matchMedia("(hover:hover)").matches;
+
+// Build the tooltip body for a tip-bearing element. Returns false if none.
+// §7 — the evidence ref + a runnable verify command, copyable. Payloads are
+// stashed on tooltip._copy (read by the delegated .tt-copy handler) rather than
+// embedded in attributes, so a ref can never inject markup.
+function evidenceRows(ref){
+  if (!ref) return "";
+  const cmd = "aicr evidence verify " + ref;
+  tooltip._copy = { ref: ref, cmd: cmd };
+  return (
+    `<div class="tt-row"><span class="tt-k">evidence</span><span class="mono tt-digest">${esc(ref)}</span>` +
+      `<button class="tt-copy" data-copy-key="ref" title="copy evidence ref" aria-label="copy evidence reference">⧉</button></div>` +
+    `<div class="tt-row"><span class="tt-k">verify</span><span class="mono tt-cmd">${esc(cmd)}</span>` +
+      `<button class="tt-copy" data-copy-key="cmd" title="copy verify command" aria-label="copy verify command">⧉</button></div>`
+  );
+}
+function renderTip(el){
+  tooltip._copy = null;
+  if (el.dataset.tip){
+    const d = JSON.parse(el.dataset.tip);
     const repLine = d.allow ? "" :
-      `<div class="tt-row"><span class="tt-k">flag</span><span class="tt-reported">❖ reported · not allowlisted</span></div>`;
+      `<div class="tt-row"><span class="tt-k">flag</span><span class="tt-reported">❖ reported · not allowlisted (zero-weight)</span></div>`;
     tooltip.innerHTML =
+      `<span class="tt-close" data-tip-close>×</span>` +
       `<div class="tt-id">${esc(d.label)}</div>` +
       `<div class="tt-row"><span class="tt-k">signer</span><span style="word-break:break-all">${esc(d.id)}</span></div>` +
-      `<div class="tt-row"><span class="tt-k">class</span><span>${esc(d.cls)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">aicr</span><span>${esc(d.aicr)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">k8s</span><span>${esc(d.k8s)}</span></div>` +
-      `<div class="tt-row"><span class="tt-k">latest build</span><span>${esc(d.build)} · ${esc(d.buildWhen)}</span></div>` +
-      `<div class="tt-row"><span class="tt-k">run time</span><span>${esc(d.when)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">build</span><span>${esc(d.build)} · ${esc(d.buildWhen)}</span></div>` +
       repLine +
-      (d.evidenceRef ? `<div class="tt-row"><span class="tt-k">evidence</span><span class="mono" style="word-break:break-all;font-size:10px">${esc(d.evidenceRef)}</span></div>` : "") +
-      `<div class="tt-row" style="margin-top:4px"><a href="#" class="tt-ev">open time-series ↗</a></div>`;
-    tooltip.classList.add("show");
-  } else if (bcell && bcell.dataset.tipBuild){
-    const d = JSON.parse(bcell.dataset.tipBuild);
+      evidenceRows(d.evidenceRef) +
+      `<div class="tt-note">this run's evidence — per signer, per build</div>` +
+      (el._nav ? `<div class="tt-row" style="margin-top:5px"><a href="#" class="tt-ev">open this signer's time-series ↗</a></div>` : "");
+    return true;
+  }
+  if (el.dataset.tipSrc){
+    const d = JSON.parse(el.dataset.tipSrc);
+    const repLine = d.allow
+      ? `<div class="tt-row"><span class="tt-k">standing</span><span style="color:var(--confirmed)">✓ counts toward consensus</span></div>`
+      : `<div class="tt-row"><span class="tt-k">standing</span><span class="tt-reported">❖ reported · not allowlisted (zero-weight)</span></div>`;
+    const age = sourceAgeDays(d.id);
+    const ageLine = age == null ? "" :
+      `<div class="tt-row"><span class="tt-k">last attested</span><span${age > STALE_DAYS ? ' class="tt-stale"' : ''}>${esc(ageLabel(age))}${age > STALE_DAYS ? " · stale" : ""}</span></div>`;
     tooltip.innerHTML =
+      `<span class="tt-close" data-tip-close>×</span>` +
+      `<div class="tt-id">${esc(d.label)}</div>` +
+      `<div class="tt-row"><span class="tt-k">signer</span><span style="word-break:break-all">${esc(d.id)}</span></div>` +
+      repLine +
+      ageLine +
+      (el._nav ? `<div class="tt-row" style="margin-top:5px"><a href="#" class="tt-ev">open time-series ↗</a></div>` : "");
+    return true;
+  }
+  if (el.dataset.tipBuild){
+    const d = JSON.parse(el.dataset.tipBuild);
+    tooltip.innerHTML =
+      `<span class="tt-close" data-tip-close>×</span>` +
       `<div class="tt-id">${esc(d.build)} — ${esc(d.label)}</div>` +
       `<div class="tt-row"><span class="tt-k">test</span><span>${esc(d.test)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">result</span><span class="${tipResultClass(d.res)}">${esc(d.res)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">aicr</span><span>${esc(d.aicr)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">k8s</span><span>${esc(d.k8s)}</span></div>` +
       `<div class="tt-row"><span class="tt-k">when</span><span>${esc(d.when)}</span></div>` +
-      (d.ev ? `<div class="tt-row"><span class="tt-k">evidence</span><span class="mono" style="word-break:break-all;font-size:10px">${esc(d.ev)}</span></div>` : "");
-    tooltip.classList.add("show");
+      evidenceRows(d.ev);
+    return true;
   }
-});
-document.body.addEventListener("mousemove", e => {
-  if (!tooltip.classList.contains("show")) return;
-  let x = e.clientX + 14, y = e.clientY + 14;
+  return false;
+}
+function positionTip(x, y){
   const w = tooltip.offsetWidth, h = tooltip.offsetHeight;
-  if (x + w > window.innerWidth - 8) x = e.clientX - w - 14;
-  if (y + h > window.innerHeight - 8) y = e.clientY - h - 14;
+  if (x + w > window.innerWidth - 8) x = Math.max(8, x - w - 28);
+  if (y + h > window.innerHeight - 8) y = Math.max(8, y - h - 28);
   tooltip.style.left = x + "px";
   tooltip.style.top = y + "px";
+}
+function hideTip(){ tooltip.classList.remove("show", "pinned"); tooltip._nav = null; }
+function pinTipAt(el){
+  if (!renderTip(el)) return;
+  tooltip._nav = el._nav || null;
+  tooltip.classList.add("show", "pinned");
+  const r = el.getBoundingClientRect();
+  positionTip(r.left + r.width / 2, r.bottom + 8);
+}
+
+// Click behavior (§7). A status cell (per-signer run) opens its detail panel on
+// click — desktop and touch alike — and the panel's link drills into the
+// time-series. A source-column header drills in directly on a desktop click but
+// pins its tip on touch. Everything else (build cells) opens its panel.
+function bindCellNav(el){
+  el.addEventListener("click", e => {
+    const isHeaderNav = el.dataset.tipSrc && el._nav;
+    if (isHeaderNav && HOVER){ el._nav(); return; }
+    e.preventDefault();
+    pinTipAt(el);
+  });
+}
+
+if (HOVER){
+  document.body.addEventListener("mouseover", e => {
+    if (tooltip.classList.contains("pinned")) return;   // don't disturb a pinned panel
+    const el = e.target.closest("[data-tip],[data-tip-src],[data-tip-build]");
+    if (el){ if (renderTip(el)){ tooltip._nav = el._nav || null; tooltip.classList.add("show"); } }
+  });
+  document.body.addEventListener("mousemove", e => {
+    if (!tooltip.classList.contains("show") || tooltip.classList.contains("pinned")) return;
+    positionTip(e.clientX + 14, e.clientY + 14);
+  });
+  document.body.addEventListener("mouseout", e => {
+    if (tooltip.classList.contains("pinned")) return;   // pinned panels stay until closed
+    if (e.target.closest("[data-tip],[data-tip-src],[data-tip-build]")) hideTip();
+  });
+}
+
+// Copy buttons + drill-in link + close + tap-away dismiss (touch and mouse).
+document.body.addEventListener("click", e => {
+  const copyBtn = e.target.closest(".tt-copy");
+  if (copyBtn){
+    e.preventDefault();
+    const payload = (tooltip._copy || {})[copyBtn.dataset.copyKey];
+    if (payload) copyText(payload, copyBtn);
+    return;
+  }
+  if (e.target.closest("a.tt-ev")){ e.preventDefault(); const nav = tooltip._nav; hideTip(); if (nav) nav(); return; }
+  if (e.target.closest("[data-tip-close]")){ hideTip(); return; }
+  if (e.target.closest("#tooltip")) return;           // taps inside the pinned panel do nothing
+  if (e.target.closest("[data-tip],[data-tip-src],[data-tip-build]")) return; // its own bindCellNav handles it
+  if (tooltip.classList.contains("pinned")) hideTip(); // tap-away
 });
-document.body.addEventListener("mouseout", e => {
-  if (e.target.closest("[data-tip],[data-tip-build]")) tooltip.classList.remove("show");
-});
-document.body.addEventListener("click", e => { if (e.target.closest("a.tt-ev")) e.preventDefault(); });
 
 /* ============================================================
    FACET WIRING
@@ -1623,7 +2373,10 @@ function rerenderActive(){
   } else if (!document.getElementById("view-catalog").classList.contains("hidden")){
     renderCatalog();
   } else if (!document.getElementById("view-grid").classList.contains("hidden") && currentRecipeIdx !== null){
-    renderMatrix(DATA.recipes[currentRecipeIdx]);
+    const r = DATA.recipes[currentRecipeIdx];
+    refreshGridHeader(r);   // FILTER EVIDENCE → AICR VERSION now drives which version grid + the header note
+    renderMatrix(r);
+    fitMatrixColumns();
   } else if (!document.getElementById("view-ts").classList.contains("hidden") && currentRecipeIdx !== null && currentTsSrc){
     openTimeSeries(DATA.recipes[currentRecipeIdx], currentTsSrc);
   }
@@ -1631,18 +2384,132 @@ function rerenderActive(){
 function applyFacets(){
   facets.k8s = document.getElementById("f-k8s").value;
   facets.aicr = document.getElementById("f-aicr").value;
-  facets.cls = document.getElementById("f-class").value;
   rerenderActive();
 }
 document.getElementById("f-k8s").addEventListener("change", applyFacets);
 document.getElementById("f-aicr").addEventListener("change", applyFacets);
-document.getElementById("f-class").addEventListener("change", applyFacets);
 document.getElementById("f-reset").addEventListener("click", () => {
   document.getElementById("f-k8s").value = "";
   document.getElementById("f-aicr").value = "";
-  document.getElementById("f-class").value = "";
   applyFacets();
 });
+
+/* ============================================================
+   COPY AFFORDANCES — §2 (copy CLI) and §8 (copy share link)
+   Pure client-side; user-gesture navigator.clipboard with a textarea fallback.
+   No data-contract or CSP impact (no fetch/connect).
+   ============================================================ */
+function flashCopied(btn){
+  if (btn._orig == null) btn._orig = btn.innerHTML;   // preserve icon+label markup
+  btn.textContent = "✓ copied";
+  btn.classList.add("active");
+  clearTimeout(btn._t);
+  btn._t = setTimeout(() => { btn.innerHTML = btn._orig; btn._orig = null; btn.classList.remove("active"); }, 1500);
+}
+function copyText(text, btn){
+  const done = () => flashCopied(btn);
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+function fallbackCopy(text, done){
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    done();
+  } catch (e){ /* clipboard unavailable — no-op */ }
+}
+// §2 Phase A: the reproducible `aicr recipe` invocation for the current coord.
+// The `aicr recipe …` invocation for this coordinate (criteria flags).
+function recipeGenCommand(recipe){
+  const c = recipe.coord || {};
+  let cmd = `aicr recipe --service ${c.service} --accelerator ${c.accelerator} --os ${c.os} --intent ${c.intent}`;
+  if (c.platform && c.platform !== PLATFORM_NONE) cmd += ` --platform ${c.platform}`;
+  return cmd;
+}
+// The same selection expressed as an AICRConfig document (spec.recipe.criteria),
+// i.e. what you'd pass to `aicr recipe --config config.yaml` instead of flags.
+// kind/apiVersion mirror pkg/config (Kind) + pkg/header (GroupVersion); they are
+// stable constants, so this is derived entirely from the coordinate — no server
+// round-trip and no recipe resolution.
+const AICR_CONFIG_API_VERSION = "aicr.run/v1alpha2";
+function recipeConfigYAML(recipe){
+  const c = recipe.coord || {};
+  const crit = [
+    `      service: ${c.service}`,
+    `      accelerator: ${c.accelerator}`,
+    `      os: ${c.os}`,
+    `      intent: ${c.intent}`,
+  ];
+  if (c.platform && c.platform !== PLATFORM_NONE) crit.push(`      platform: ${c.platform}`);
+  return [
+    `kind: AICRConfig`,
+    `apiVersion: ${AICR_CONFIG_API_VERSION}`,
+    `metadata:`,
+    `  name: ${recipe.name}`,
+    `spec:`,
+    `  recipe:`,
+    `    criteria:`,
+    ...crit,
+  ].join("\n");
+}
+// §2: "CLI command" opens a preview popup with the command (copyable), instead
+// of a blind clipboard write.
+let _cliPopReturnFocus = null;
+// Esc + focus-trap handler, attached only while the popup is open (scoped, not
+// a leaked global) so Tab cycles within the dialog and Esc closes it.
+function _cliPopKeydown(e){
+  const pop = document.getElementById("cli-popup");
+  if (!pop) return;
+  if (e.key === "Escape"){ e.preventDefault(); closeCliPopup(); return; }
+  if (e.key !== "Tab") return;
+  const f = [...pop.querySelectorAll("button, [href], [tabindex]:not([tabindex='-1'])")].filter(el => el.offsetParent !== null);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+}
+function openCliPopup(recipe){
+  const pop = document.getElementById("cli-popup");
+  if (!pop || !recipe) return;
+  const cmd = recipeGenCommand(recipe);
+  const cfg = recipeConfigYAML(recipe);
+  pop._copy = { cmd, cfg };
+  document.getElementById("cli-pop-title").textContent = recipe.name;
+  document.getElementById("cli-pop-cmd").textContent = cmd;
+  document.getElementById("cli-pop-cfg").textContent = cfg;
+  pop.classList.remove("hidden");
+  // a11y: trap focus in the dialog and restore it to the trigger on close
+  _cliPopReturnFocus = document.activeElement;
+  document.addEventListener("keydown", _cliPopKeydown);
+  document.getElementById("cli-pop-close").focus();
+}
+function closeCliPopup(){
+  const pop = document.getElementById("cli-popup");
+  if (!pop || pop.classList.contains("hidden")) return;
+  pop.classList.add("hidden");
+  document.removeEventListener("keydown", _cliPopKeydown);
+  if (_cliPopReturnFocus && _cliPopReturnFocus.focus) _cliPopReturnFocus.focus();
+  _cliPopReturnFocus = null;
+}
+{
+  const cli = document.getElementById("copy-cli");
+  if (cli) cli.addEventListener("click", () => { if (currentRecipeIdx != null) openCliPopup(DATA.recipes[currentRecipeIdx]); });
+  const pop = document.getElementById("cli-popup");
+  if (pop){
+    document.getElementById("cli-pop-close").addEventListener("click", closeCliPopup);
+    pop.addEventListener("click", e => { if (!e.target.closest(".cli-pop")) closeCliPopup(); });   // click outside the dialog
+    pop.querySelectorAll(".cli-pop-copy").forEach(btn => btn.addEventListener("click", () => {
+      const payload = (pop._copy || {})[btn.dataset.popCopy];
+      if (payload) copyText(payload, btn);
+    }));
+  }
+}
 
 /* ============================================================
    CRITERIA SELECTOR WIRING
@@ -1708,10 +2575,8 @@ document.getElementById("sort-sel").addEventListener("change", e => {
 /* ============================================================
    GLOBAL WIRING
    ============================================================ */
-document.getElementById("back-btn").addEventListener("click", backToCatalog);
-document.getElementById("ts-back-btn").addEventListener("click", () => {
-  if (currentRecipeIdx !== null) openGrid(currentRecipeIdx); else backToCatalog();
-});
+// No back buttons: the breadcrumb above each view is the up-navigation (clicking a
+// parent crumb calls backToCatalog / openGrid / showLanding). Esc still steps up.
 document.addEventListener("keydown", e => {
   if (e.key === "Escape"){
     if (!document.getElementById("view-ts").classList.contains("hidden")){
@@ -1730,6 +2595,7 @@ document.addEventListener("keydown", e => {
 const SERVICE_ORDER = ["eks","gke","aks","oke","lke"];
 
 function buildModelFromIndex(index){
+  META = index.meta || {};
   // sources
   SOURCES = {};
   SRC_META = {};
@@ -1746,18 +2612,27 @@ function buildModelFromIndex(index){
   index.groups.forEach(g => {
     g.dashboards.forEach(d => {
       d.tabs.forEach(tab => {
-        const tests = tab.tests.map(t => {
-          // v1 schema: per-row latest-per-signer lives in `signers`.
+        // Consensus is baked per AICR version (newest-first). Map each version's
+        // grid; the recipe's default view (tests/_phaseRollup) is the NEWEST
+        // version, which is what the overview/landing/tree summarize.
+        const mapTests = rows => (rows || []).map(t => {
           const sig = t.signers || [];
           const runs = sig.map(r => [r.src, r.result]);
           const runMeta = {};
           sig.forEach(r => { runMeta[r.src] = { build: r.build, aicrVer: r.aicrVer, k8sVer: r.k8sVer, when: r.when, evidenceRef: r.evidenceRef }; });
           return { phase: t.phase, name: t.name, runs, _consensus: t.consensus, _reported: t.reported, _runMeta: runMeta };
         });
+        const versions = (tab.versions || []).map(v => ({
+          aicrVer: v.aicrVer, tests: mapTests(v.tests), _phaseRollup: v.phaseRollup || {},
+        }));
+        const newest = versions[0] || { aicrVer: "", tests: [], _phaseRollup: {} };
         const idx = DATA.recipes.length;
-        // Tab.phaseRollup is computed and frozen in Go (Contract 4 single source
-        // of truth); the page consumes it rather than re-deriving the state.
-        DATA.recipes.push({ coord: tab.coord, name: tab.recipe, tests, _phaseRollup: tab.phaseRollup || {} });
+        // Tab consensus is computed and frozen in Go (single source of truth);
+        // the page consumes it rather than re-deriving the state.
+        DATA.recipes.push({
+          coord: tab.coord, name: tab.recipe, versions,
+          tests: newest.tests, _phaseRollup: newest._phaseRollup,   // newest-version default view
+        });
         RECIPE_BY_NAME[tab.recipe] = idx;
         tabOf[tab.recipe] = { service: g.service, ao: `${d.accelerator}-${d.os}` };
       });
@@ -1769,9 +2644,14 @@ function buildModelFromIndex(index){
   DATA.recipes.forEach((r, i) => { COORD_TO_IDX[coordPath(r)] = i; });
 
   // per-source latest run metadata (best-effort: first run seen for each source)
+  // plus SRC_LATEST_WHEN = the newest "when" per source (for freshness/age §8).
+  // "when" is "YYYY-MM-DD HH:MM UTC" which sorts lexicographically = chronologically.
+  SRC_LATEST_WHEN = {};
   DATA.recipes.forEach(r => r.tests.forEach(t => {
     Object.keys(t._runMeta).forEach(src => {
-      if (!SRC_META[src]) SRC_META[src] = { aicrVer: t._runMeta[src].aicrVer, k8sVer: t._runMeta[src].k8sVer, when: t._runMeta[src].when };
+      const w = t._runMeta[src].when;
+      if (!SRC_META[src]) SRC_META[src] = { aicrVer: t._runMeta[src].aicrVer, k8sVer: t._runMeta[src].k8sVer, when: w };
+      if (w && (!SRC_LATEST_WHEN[src] || w > SRC_LATEST_WHEN[src])) SRC_LATEST_WHEN[src] = w;
     });
   }));
 
@@ -1779,6 +2659,8 @@ function buildModelFromIndex(index){
   TREE = index.groups.map(g => {
     const dashboards = g.dashboards.map(d => ({
       ao: `${d.accelerator}-${d.os}`,
+      accelerator: d.accelerator,
+      os: d.os,
       tabs: d.tabs.map(tab => ({ tab: coordParts(tab.coord).ip, idx: RECIPE_BY_NAME[tab.recipe] })),
     }));
     let count = 0; dashboards.forEach(d => count += d.tabs.length);
@@ -1793,9 +2675,15 @@ function buildModelFromIndex(index){
   });
   currentGroup = TREE.length ? TREE[0].name : null;
 
-  // build the in-grid facet dropdowns from the sources' run metadata
-  const k8sSet = new Set(), aicrSet = new Set();
-  for (const k in SRC_META){ k8sSet.add(SRC_META[k].k8sVer); aicrSet.add(SRC_META[k].aicrVer); }
+  // k8s facet: the distinct k8s versions across sources' latest runs.
+  const k8sSet = new Set();
+  for (const k in SRC_META){ k8sSet.add(SRC_META[k].k8sVer); }
+  // AICR VERSION facet: every baked consensus version (each recipe grid is computed
+  // per version). This is what lets the single FILTER EVIDENCE → AICR VERSION
+  // control re-lens the whole dashboard — including versions that are no source's
+  // newest run, which a sources-latest scan would miss.
+  const aicrSet = new Set();
+  DATA.recipes.forEach(r => (r.versions || []).forEach(v => { if (v.aicrVer) aicrSet.add(v.aicrVer); }));
   const k8sSel = document.getElementById("f-k8s");
   const aicrSel = document.getElementById("f-aicr");
   [...k8sSet].sort().forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; k8sSel.appendChild(o); });
@@ -1836,7 +2724,56 @@ async function boot(){
     return;
   }
   buildModelFromIndex(index);
+  renderHeaderLinks();   // §1: data-driven Install/Docs/GitHub from index.meta.links
   route(); // resolve the initial view from the URL hash (deep-link support)
+}
+
+// §1 — render outbound header links from index.meta.links. Each link is built
+// with setAttribute (never innerHTML) so a URL can't inject; an empty/missing
+// target renders nothing (fail-soft). Plain <a> navigations — no CSP impact.
+function renderHeaderLinks(){
+  const host = document.getElementById("header-links");
+  if (!host) return;
+  host.innerHTML = "";
+  const links = (META && META.links) || {};
+  // install is a shell command — render a small preview code snippet + copy
+  // button ("Install AICR"), not a link. docs/github are http(s) links.
+  const installCmd = links.install;
+  if (installCmd && typeof installCmd === "string"){
+    const w = document.createElement("div");
+    w.className = "hinstall";
+    w.title = "Install AICR — copy and run in your shell";
+    const label = document.createElement("span");
+    label.className = "hinstall-label";
+    label.textContent = "Install AICR";
+    const code = document.createElement("code");
+    code.className = "hinstall-code";
+    code.textContent = installCmd;                 // textContent — no injection
+    const copy = document.createElement("button");
+    copy.className = "hinstall-copy";
+    copy.textContent = "⧉";
+    copy.setAttribute("aria-label", "copy install command");
+    copy.addEventListener("click", () => copyText(installCmd, copy));
+    w.append(label, code, copy);
+    host.appendChild(w);
+  }
+  for (const d of [{ key: "docs", label: "Docs" }, { key: "github", label: "GitHub" }]){
+    const url = links[d.key];
+    // defense-in-depth: only http(s) hrefs (reject javascript:/data: even though
+    // the source is trusted generator output)
+    if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url)) continue;
+    const a = document.createElement("a");
+    a.className = "hlink";
+    // icon + label; the icon SVG and label are fixed constants (no user data) so
+    // innerHTML is safe. §1: the label collapses to icon-only on narrow widths.
+    a.innerHTML = `<span class="hl-ic">${HLINK_ICONS[d.key] || ""}</span><span class="hl-txt">${d.label}</span>`;
+    a.setAttribute("href", url);
+    a.setAttribute("target", "_blank");
+    a.setAttribute("rel", "noopener noreferrer");
+    a.setAttribute("title", d.label + " — " + url);
+    a.setAttribute("aria-label", d.label);
+    host.appendChild(a);
+  }
 }
 
 // brand / header logo -> overview (landing)

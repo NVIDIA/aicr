@@ -375,6 +375,13 @@ else
 fi
 
 resolve_binary
+# Cache the public Sigstore TUF root before the chainsaw sign step. `aicr bundle
+# --attest` verifies the binary's OWN attestation against PUBLIC Sigstore, which
+# needs the TUF root; on a fresh machine that root is absent and the bundle step
+# fails initializing the TUF client. Non-fatal: if the fetch fails but a root is
+# already cached (e.g. air-gapped host prepared earlier), the run can still pass.
+msg "Caching Sigstore trusted root (aicr trust update)"
+"${AICR_BIN}" trust update || log_warning "aicr trust update failed; relying on any previously cached root"
 build_tls_proxy
 create_cluster
 deploy_stack

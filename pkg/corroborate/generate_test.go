@@ -63,23 +63,38 @@ func readIndex(t *testing.T, path string) Index {
 	return idx
 }
 
+// findRow returns the row from the NEWEST-version grid (Versions[0]) — the
+// overview semantics. Use findRowAtVersion for a specific AICR version.
 func findRow(t *testing.T, idx Index, recipe, phase, name string) Row {
 	t.Helper()
-	for _, g := range idx.Groups {
-		for _, d := range g.Dashboards {
-			for _, tab := range d.Tabs {
-				if tab.Recipe != recipe {
-					continue
-				}
-				for _, r := range tab.Tests {
-					if r.Phase == phase && r.Name == name {
-						return r
-					}
-				}
+	tab := findTab(t, idx, recipe)
+	if len(tab.Versions) == 0 {
+		t.Fatalf("recipe %s has no version grids", recipe)
+	}
+	for _, r := range tab.Versions[0].Tests {
+		if r.Phase == phase && r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("row not found in newest version: %s %s/%s", recipe, phase, name)
+	return Row{}
+}
+
+// findRowAtVersion returns a row from a specific AICR version's grid.
+func findRowAtVersion(t *testing.T, idx Index, recipe, aicrVer, phase, name string) Row {
+	t.Helper()
+	tab := findTab(t, idx, recipe)
+	for _, v := range tab.Versions {
+		if v.AICRVer != aicrVer {
+			continue
+		}
+		for _, r := range v.Tests {
+			if r.Phase == phase && r.Name == name {
+				return r
 			}
 		}
 	}
-	t.Fatalf("row not found: %s %s/%s", recipe, phase, name)
+	t.Fatalf("row not found: %s @ %s %s/%s", recipe, aicrVer, phase, name)
 	return Row{}
 }
 
@@ -103,6 +118,20 @@ func TestGenerateEndToEnd(t *testing.T) {
 
 	if idx.Schema != SchemaVersion {
 		t.Errorf("schema = %q, want %q", idx.Schema, SchemaVersion)
+	}
+
+	// Meta: additive presentation metadata. Links are the baked constants; counts
+	// match the data; GeneratedAt is derived from the newest run AttestedAt.
+	if idx.Meta.Links.GitHub != LinkGitHub || idx.Meta.Links.Docs != LinkDocs || idx.Meta.Links.Install != LinkInstall {
+		t.Errorf("meta.links = %+v, want the Link* constants", idx.Meta.Links)
+	}
+	if idx.Meta.Counts.Recipes != 2 || idx.Meta.Counts.Sources != 3 || idx.Meta.Counts.CSPs != len(idx.Groups) {
+		t.Errorf("meta.counts = %+v, want {recipes:2 csps:%d sources:3}", idx.Meta.Counts, len(idx.Groups))
+	}
+	// Exact value pins the contract: the newest run AttestedAt (2026-06-20 05:00Z
+	// across the fixtures), rendered deterministically — never the wall clock.
+	if want := "2026-06-20 05:00 UTC"; idx.Meta.GeneratedAt != want {
+		t.Errorf("meta.generatedAt = %q, want %q (newest run AttestedAt)", idx.Meta.GeneratedAt, want)
 	}
 
 	// Sources: classes re-derived from the verified signer via the allowlist.
@@ -135,8 +164,9 @@ func TestGenerateEndToEnd(t *testing.T) {
 		t.Errorf("operator-health reported = %d, want 1 (rogue)", oh.Reported)
 	}
 
-	// Recency: nvidia's latest run passed (v1.0.0), so the older failing run
-	// (v0.14.0) must not pull this to CONTESTED.
+	// Version-aware: nvidia's v1.0.0 run is in the newest grid; its older failing
+	// v0.14.0 run lives in a separate version grid (asserted below) and cannot
+	// pull the v1.0.0 consensus to CONTESTED.
 	var nvidia *Latest
 	for i := range oh.Signers {
 		if oh.Signers[i].Src == srcNVIDIA {
@@ -164,6 +194,21 @@ func TestGenerateEndToEnd(t *testing.T) {
 	nccl := findRow(t, idx, recipeA, "performance", "nccl-allreduce-bw")
 	if nccl.Consensus != string(StateContested) {
 		t.Errorf("nccl = %q, want CONTESTED", nccl.Consensus)
+	}
+
+	// Version-aware consensus: the recipe splits into per-AICR-version grids,
+	// newest-first. The newest (v1.0.0) carries the corroborated consensus above;
+	// nvidia's older v0.14.0 run is isolated in its own grid where, alone and
+	// failing, operator-health is FAILING (never mixed into the v1.0.0 verdict).
+	tabA := findTab(t, idx, recipeA)
+	if len(tabA.Versions) < 2 {
+		t.Fatalf("recipeA versions = %d, want >= 2 (v1.0.0 and v0.14.0)", len(tabA.Versions))
+	}
+	if tabA.Versions[0].AICRVer != "v1.0.0" {
+		t.Errorf("newest version = %q, want v1.0.0", tabA.Versions[0].AICRVer)
+	}
+	if got := findRowAtVersion(t, idx, recipeA, "v0.14.0", "deployment", "operator-health").Consensus; got != string(StateFailing) {
+		t.Errorf("operator-health @ v0.14.0 = %q, want FAILING (nvidia's isolated older run)", got)
 	}
 
 	// Recipe B: FAILING + SINGLE + bare-intent (empty platform).

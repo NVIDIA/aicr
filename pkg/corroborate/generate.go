@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -431,8 +433,31 @@ func build(recipes map[string]*recipeAgg) (Index, map[string]Series, GenerateRes
 
 	groups := assembleGroups(builts)
 
+	// GeneratedAt is the newest run AttestedAt across all recipes — derived from
+	// evidence (order-independent max), never the wall clock, so the emitted
+	// index.json stays byte-reproducible.
+	var newest time.Time
+	for _, agg := range recipes {
+		for _, rs := range agg.bySigner {
+			for _, r := range rs {
+				if r.attestedAt.After(newest) {
+					newest = r.attestedAt
+				}
+			}
+		}
+	}
+	generatedAt := ""
+	if !newest.IsZero() {
+		generatedAt = newest.UTC().Format("2006-01-02 15:04 UTC")
+	}
+
 	index := Index{
-		Schema:   SchemaVersion,
+		Schema: SchemaVersion,
+		Meta: Meta{
+			Links:       Links{Install: LinkInstall, Docs: LinkDocs, GitHub: LinkGitHub},
+			Counts:      Counts{Recipes: len(builts), CSPs: len(groups), Sources: len(sources)},
+			GeneratedAt: generatedAt,
+		},
 		Criteria: criteriaValues(present),
 		Sources:  sources,
 		Groups:   groups,
@@ -469,23 +494,102 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 	}
 
 	signerIDs := make([]string, 0, len(runsByID))
-	latest := make(map[string]*signerRun, len(runsByID))
+	latestAny := make(map[string]*signerRun, len(runsByID)) // newest run per signer, version-blind
 	for id, rs := range runsByID {
-		latest[id] = rs[0]
+		latestAny[id] = rs[0]
 		signerIDs = append(signerIDs, id)
 	}
 	sort.Strings(signerIDs)
 
-	rowKeys := unionRows(latest)
+	// Every signing identity is cataloged (class/allowlist are per-identity and
+	// stable across its runs), independent of which version grids it lands in.
+	for _, id := range signerIDs {
+		registerSource(sources, latestAny[id])
+	}
 
+	// Version-aware consensus: bucket each signer's runs by AICR version and take
+	// its newest run AT that version, so corroboration only counts agreement at
+	// the SAME version (cross-version agreement is not reproduction). Order
+	// versions newest-first by SEMANTIC version so Versions[0] is the newest tool
+	// release (the default view) — a re-run of an older release must not jump the
+	// queue just because it was attested more recently.
+	verLatest := map[string]map[string]*signerRun{}
+	verNewest := map[string]time.Time{}
+	for id, rs := range runsByID { // rs is sorted newest-first
+		seenVer := map[string]struct{}{}
+		for _, r := range rs {
+			v := r.meta.AICRVersion
+			if _, ok := seenVer[v]; !ok {
+				seenVer[v] = struct{}{}
+				if verLatest[v] == nil {
+					verLatest[v] = map[string]*signerRun{}
+				}
+				verLatest[v][id] = r
+			}
+			if r.attestedAt.After(verNewest[v]) {
+				verNewest[v] = r.attestedAt
+			}
+		}
+	}
+	versions := make([]string, 0, len(verLatest))
+	for v := range verLatest {
+		versions = append(versions, v)
+	}
+	sort.Slice(versions, func(i, j int) bool {
+		vi, vj := versions[i], versions[j]
+		// Primary: semantic version, newest first. semver.Compare orders valid
+		// versions correctly (v1.0.0 > v0.16.1, unlike a string sort) and ranks any
+		// non-semver tag below every real release.
+		if c := semver.Compare(vi, vj); c != 0 {
+			return c > 0
+		}
+		// Fallback for equal/non-comparable versions: most recent attestation, then
+		// a stable string tiebreak.
+		if !verNewest[vi].Equal(verNewest[vj]) {
+			return verNewest[vi].After(verNewest[vj])
+		}
+		return vi > vj
+	})
+
+	gridSigners := map[string]struct{}{}
+	tabVersions := make([]TabVersion, 0, len(versions))
+	for _, v := range versions {
+		latest := verLatest[v]
+		ids := make([]string, 0, len(latest))
+		for id := range latest {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		rowKeys := unionRows(latest)
+		rows, statesByPhase := computeGrid(rowKeys, ids, latest, gridSigners)
+		tabVersions = append(tabVersions, TabVersion{
+			AICRVer:     v,
+			PhaseRollup: phaseRollup(statesByPhase),
+			Tests:       rows,
+		})
+	}
+
+	tab := Tab{
+		Recipe:   agg.name,
+		Coord:    coordMap(agg.criteria),
+		Versions: tabVersions,
+	}
+	// The time-series spans every build/version, so its union test set must come
+	// from ALL runs (not just each signer's newest), or a test that ran only in an
+	// older build would be dropped from the history.
+	series := buildSeries(agg, gridSigners, unionRowsAllBuilds(runsByID), runsByID)
+	return tab, series, runCount
+}
+
+// computeGrid bakes one version's consensus grid: for each (phase, CTRF) row it
+// buckets every signer's latest-at-version result, computes the consensus, and
+// records the pass/fail signers for the cell. not-run signers feed consensus but
+// are omitted from the cell's Signers list (they render as empty cells). Signers
+// that contributed a pass/fail are added to gridSigners (the series' column set).
+func computeGrid(rowKeys []rowKey, signerIDs []string, latest map[string]*signerRun, gridSigners map[string]struct{}) ([]Row, map[string][]State) {
 	rows := make([]Row, 0, len(rowKeys))
 	statesByPhase := map[string][]State{}
-	gridSigners := map[string]struct{}{}
-
 	for _, rk := range rowKeys {
-		// One pass per signer: bucket the result once, feed it to consensus, and
-		// (for pass/fail) add the signer to the grid. not-run signers render as
-		// empty cells, so they go to consensus but not to the Signers list.
 		signerResults := make([]SignerResult, 0, len(signerIDs))
 		signers := make([]Latest, 0, len(signerIDs))
 		for _, id := range signerIDs {
@@ -495,12 +599,7 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 				res = BucketStatus(status)
 			}
 			// Anti-sybil: the consensus distinct-signer key is the VERIFIED
-			// (issuer, identity), not meta.json's IDHash. The IDHash is a
-			// contributor-controlled field; keying consensus on it would let one
-			// verified identity submitted under two IDHashes count as two
-			// distinct allowlisted signers and manufacture a CONFIRMED. The
-			// display keys (Latest.Src, Sources, Series) use canonicalSourceID,
-			// also derived from the verified pair (see id above).
+			// (issuer, identity), not meta.json's contributor-controlled IDHash.
 			signerResults = append(signerResults, SignerResult{SignerID: signerIdentityKey(run.meta.Signer), Allowlisted: run.allowlisted, Result: res})
 			if res != ResultPass && res != ResultFail {
 				continue
@@ -515,7 +614,6 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 				EvidenceRef: run.meta.EvidenceRef,
 			})
 			gridSigners[id] = struct{}{}
-			registerSource(sources, run)
 		}
 		c := ComputeConsensus(signerResults)
 		statesByPhase[rk.phase] = append(statesByPhase[rk.phase], c.State)
@@ -527,15 +625,7 @@ func buildRecipe(agg *recipeAgg, sources map[string]Source) (Tab, Series, int) {
 			Signers:   signers,
 		})
 	}
-
-	tab := Tab{
-		Recipe:      agg.name,
-		Coord:       coordMap(agg.criteria),
-		PhaseRollup: phaseRollup(statesByPhase),
-		Tests:       rows,
-	}
-	series := buildSeries(agg, gridSigners, rowKeys, runsByID)
-	return tab, series, runCount
+	return rows, statesByPhase
 }
 
 // rowKey identifies a single grid row.
@@ -546,15 +636,17 @@ type rowKey struct {
 
 // unionRows is the union of (phase, CTRF name) across all signers' latest runs,
 // sorted by PhaseOrder then name.
-func unionRows(latest map[string]*signerRun) []rowKey {
-	seen := map[rowKey]struct{}{}
-	for _, run := range latest {
-		for phase, byName := range run.statuses {
-			for name := range byName {
-				seen[rowKey{phase: phase, name: name}] = struct{}{}
-			}
+// addRunRows records every (phase, CTRF name) present in a single run.
+func addRunRows(seen map[rowKey]struct{}, run *signerRun) {
+	for phase, byName := range run.statuses {
+		for name := range byName {
+			seen[rowKey{phase: phase, name: name}] = struct{}{}
 		}
 	}
+}
+
+// sortedRowKeys returns the row set ordered by PhaseOrder then CTRF name.
+func sortedRowKeys(seen map[rowKey]struct{}) []rowKey {
 	keys := make([]rowKey, 0, len(seen))
 	for rk := range seen {
 		keys = append(keys, rk)
@@ -568,6 +660,30 @@ func unionRows(latest map[string]*signerRun) []rowKey {
 		return keys[i].name < keys[j].name
 	})
 	return keys
+}
+
+// unionRows collects the row set across a latest-per-signer map (one AICR-version
+// consensus grid).
+func unionRows(latest map[string]*signerRun) []rowKey {
+	seen := map[rowKey]struct{}{}
+	for _, run := range latest {
+		addRunRows(seen, run)
+	}
+	return sortedRowKeys(seen)
+}
+
+// unionRowsAllBuilds collects the row set across EVERY run (all versions/builds).
+// The time-series history must allocate a row for any test that ever ran — using
+// only the newest-per-signer set would silently drop tests that exist solely in
+// older builds/versions.
+func unionRowsAllBuilds(runsByID map[string][]*signerRun) []rowKey {
+	seen := map[rowKey]struct{}{}
+	for _, rs := range runsByID {
+		for _, run := range rs {
+			addRunRows(seen, run)
+		}
+	}
+	return sortedRowKeys(seen)
 }
 
 // sortRunsNewestFirst orders a signer's runs by AttestedAt descending, breaking
