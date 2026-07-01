@@ -34,7 +34,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
-| dynamo-platform | helm | dynamo-platform | 1.2.0 | 3 |
+| dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
 | gpu-operator | helm | nvidia/gpu-operator | v26.3.2 | 14 |
@@ -97,7 +97,7 @@ _No images extracted._
 
 - `nats:2.10.21-alpine`
 - `natsio/nats-server-config-reloader:0.16.0`
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.2.0`
+- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.2.1`
 
 ### gatekeeper
 

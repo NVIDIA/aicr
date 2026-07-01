@@ -38,7 +38,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/epp-image:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/epp-image:1.2.1
               env:
                 - name: DYN_KV_CACHE_BLOCK_SIZE
                   value: "128"
@@ -93,7 +93,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
               args:
@@ -120,7 +120,7 @@ spec:
                       key: token
                       optional: true
             - name: sidecar-frontend
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               args:
                 - -m
                 - dynamo.frontend
