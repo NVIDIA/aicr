@@ -111,7 +111,10 @@ not both.
 the live ComponentConfig is the one in `pkg/recipe/components.go`.
 
 Defaults flow into a `ComponentRef` only when the field is empty —
-see [applyRegistryDefaults](#merge-algorithm) below.
+see [applyRegistryDefaults](#merge-algorithm) below. `defaultVersion`
+is the single source of truth for a component's version and a pinned
+overlay must not diverge from it unexpectedly — see
+[Version pinning is single-source](#version-pinning-is-single-source).
 
 ## Overlay (`recipes/overlays/`)
 
@@ -473,16 +476,50 @@ when a chart bumps an image inside its own templates without a
 registry pin change on our side. That drift will appear in the BOM
 diff whether you expected it or not.
 
-**Freshness is not gated at merge time.** `make bom-check` verifies
-the committed BOM matches a fresh regen, but it is **opt-in only** —
-not wired into `make qualify`, `make lint`, or the PR gate. Do not
-rely on local qualify or CI to catch a missed regen. Wiring
-`bom-check` into the gate is a desirable follow-up.
+### Version freshness is gated; image drift is not
+
+`TestCommittedBOMVersionsMatchRegistry` (`tools/bom/freshness_test.go`,
+run by `make test` → `make qualify`) diffs the committed doc's version
+column against the registry pins with no Helm rendering, so a chart-pin
+bump that forgets `make bom-docs` fails CI. It does **not** catch
+*upstream image drift* — a chart bumping an image inside its own
+templates without a pin change on our side. Full `make bom-check`
+verifies that too by re-rendering, but it is **opt-in only** — not
+wired into `make qualify`, `make lint`, or the PR gate. So you still
+must run `make bom-docs` after a values change; wiring `bom-check` into
+the gate remains a desirable follow-up.
+
+### Version pinning is single-source
+
+The BOM renders each chart at its registry `defaultVersion`, but at
+resolution the registry default is only a *fallback*: a `componentRef`
+that sets `version` (Helm) or `tag` (Kustomize) in `base.yaml`, an
+overlay, or a mixin overrides it. So the BOM reflects what recipes
+actually install **only when no pin diverges from the registry
+default**. A pin that drifts from the default — most dangerously on a
+component whose sole consumer diverges — makes the BOM advertise a
+version no recipe installs (issue #1424; #1418's `aws-efa` bug).
+
+The registry `defaultVersion` is therefore the single source of truth
+for a component's version. `TestOverlayVersionPinsMatchRegistry`
+(`pkg/recipe/version_pin_guard_test.go`, run by `make test` →
+`make qualify`) fails if any `base`/overlay/mixin pin diverges from the
+registry default. A version bump must update the registry default (the
+BOM reads it) **and** every pin that sets it, or CI fails. If an
+overlay must legitimately run a different chart version (e.g. a
+platform validated against an older chart), add an entry to
+`versionPinExemptions` with a justification — a declared divergence is
+not a silent one. Do **not** exempt a component whose only consumer
+diverges; that reinstates the exact fiction the guard prevents.
 
 ## Common Pitfalls
 
-- **Skipping `make bom-docs`** after a chart pin or values change.
-  The diff doesn't surface in qualify; the BOM goes stale silently.
+- **Skipping `make bom-docs`** after a values change that alters
+  rendered images. A stale version *column* now fails CI
+  (`TestCommittedBOMVersionsMatchRegistry`), but *image* drift from a
+  values change without a pin bump does not surface in qualify — the
+  BOM goes stale silently. See
+  [Version freshness is gated; image drift is not](#version-freshness-is-gated-image-drift-is-not).
 - **Mutating in place during merge.** Overlay-derived `map[string]any`
   and `[]any` must be deep-copied, not aliased. `deepMergeMap` does
   this for you; a bespoke helper that recurses into maps but copies
@@ -497,10 +534,17 @@ rely on local qualify or CI to catch a missed regen. Wiring
   every docs page that lists current values, issue templates, the
   `Specificity()` helper. Start from the Go type in `criteria.go`
   and follow the audit list in CLAUDE.md.
-- **Setting identity fields in a mixin componentRef.** A mixin may
-  not set `chart`, `version`, `valuesFile`, etc. — the resolver
-  rejects with the offending field name. Move chart-changing logic
-  to an overlay.
+- **Setting identity fields in a mixin componentRef when overriding
+  an inherited component.** A mixin may not override `chart`,
+  `version`, `valuesFile`, etc. on a component the inheritance chain
+  already carries — the resolver rejects with the offending field
+  name. Move chart-changing logic to an overlay. (A mixin may still
+  *introduce* a new component with these fields.)
+- **Bumping a chart version in only one place.** The registry
+  `defaultVersion` is the single source of truth; an overlay `version`
+  pin that drifts from it makes the BOM advertise a version no recipe
+  installs. `TestOverlayVersionPinsMatchRegistry` fails on undeclared
+  drift — see [Version pinning is single-source](#version-pinning-is-single-source).
 - **Assuming the cluster fingerprint is trustworthy.** The
   fingerprint block persisted in `aicr snapshot` output is
   advisory; trust-bearing consumers recompute via

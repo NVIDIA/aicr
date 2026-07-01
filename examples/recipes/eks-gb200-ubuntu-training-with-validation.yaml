@@ -119,7 +119,6 @@ componentRefs:
       driver:
         kernelModuleConfig:
           name: kernel-module-params
-        version: 580.82.07
       gdrcopy:
         enabled: true
     dependencyRefs:
@@ -140,7 +139,7 @@ componentRefs:
     chart: nvsentinel
     type: Helm
     source: oci://ghcr.io/nvidia
-    version: v1.3.0
+    version: v1.9.0
     valuesFile: components/nvsentinel/values.yaml
     dependencyRefs:
       - cert-manager

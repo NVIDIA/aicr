@@ -41,7 +41,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v25.10.1
+    version: v26.3.2
     valuesFile: components/gpu-operator/values-eks-training.yaml
     dependencyRefs:
       - cert-manager
@@ -50,7 +50,7 @@ componentRefs:
     chart: nvsentinel
     type: Helm
     source: oci://ghcr.io/nvidia
-    version: v1.3.0
+    version: v1.9.0
     valuesFile: components/nvsentinel/values.yaml
     dependencyRefs:
       - cert-manager
