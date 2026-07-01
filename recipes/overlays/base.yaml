@@ -50,7 +50,7 @@ spec:
     - name: nvsentinel
       type: Helm
       source: oci://ghcr.io/nvidia
-      version: v1.3.0
+      version: v1.9.0
       valuesFile: components/nvsentinel/values.yaml
       dependencyRefs:
         - cert-manager
