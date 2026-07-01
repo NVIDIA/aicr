@@ -351,6 +351,9 @@ func TestFromMeasurements_ServiceDetection(t *testing.T) {
 		{"oci", "oke"},
 		{"oci://ocid1.instance.oc1.us-chicago-1.example", "oke"},
 		{"ocid1.instance.oc1.us-chicago-1.anxxeljsaqwjupqcb4pa5kzxy4hef5dtclbkqsnmu6kedbkrne3s2bz5nwzq", "oke"},
+		{"lke", "lke"},
+		{"linode", "lke"},
+		{"linode://58291", "lke"},
 		{"kind", "kind"},
 		{"", ""},
 	}

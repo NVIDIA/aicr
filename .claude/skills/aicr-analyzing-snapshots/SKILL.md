@@ -51,8 +51,8 @@ Key fields for provider identification:
 | Field Path | What It Reveals |
 |------------|----------------|
 | `K8s.server.version` | K8s version + vendor suffix (`-eks-`, `-gke`, `-aks`, `+lke`) |
-| `K8s.node.provider` | Mapped provider: eks, gke, aks, oke, metal3, kind |
-| `K8s.node.provider-id` | Raw provider URI (`aws://`, `gce://`, `azure://`, `oci://`, `metal3://`) |
+| `K8s.node.provider` | Mapped provider: eks, gke, aks, oke, lke, metal3, kind |
+| `K8s.node.provider-id` | Raw provider URI (`aws://`, `gce://`, `azure://`, `oci://`, `linode://`, `metal3://`) |
 | `K8s.node.kernel-version` | Kernel + arch indicator (e.g., `-64k` = ARM 64K pages) |
 | `K8s.node.container-runtime-*` | Runtime name and version |
 | `K8s.node.kubelet-version` | Kubelet version |
@@ -66,6 +66,7 @@ Key fields for provider identification:
 | `gce://` | gke | Google GKE |
 | `azure://` | aks | Azure AKS |
 | `oci://` | oke | Oracle OKE |
+| `linode://` | lke | Akamai Cloud / Linode LKE |
 | `metal3://` | bare-metal | Metal3/Ironic, self-managed |
 | `kind://` | kind | Local dev cluster |
 | *(none/other)* | any | Self-managed, check version string |

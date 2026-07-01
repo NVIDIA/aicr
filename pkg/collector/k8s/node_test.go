@@ -229,6 +229,16 @@ func TestParseProvider(t *testing.T) {
 			want:       "oke",
 		},
 		{
+			name:       "Akamai Cloud LKE",
+			providerID: "linode://58291",
+			want:       "lke",
+		},
+		{
+			name:       "Akamai Cloud LKE uppercase normalized",
+			providerID: "LINODE://58291",
+			want:       "lke",
+		},
+		{
 			name:       "unknown format",
 			providerID: "custom-provider://some-id",
 			want:       "custom-provider",

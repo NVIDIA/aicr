@@ -28,6 +28,7 @@ import (
 // don't want to import them just for the names.
 const (
 	serviceOKE              = "oke"
+	serviceLKE              = "lke"
 	subtypeK8sServer        = "server"
 	subtypeK8sNode          = "node"
 	subtypeGPUHardware      = "hardware"
@@ -330,6 +331,10 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 //   - "oci" — bare string stored by the collector before the "oci://" → "oke"
 //     mapping existed
 //   - "oke" — already normalized; pass through
+//
+// Akamai Cloud / Linode LKE nodes carry "linode://<instance-id>"; the collector
+// normalizes this to "lke" via parseProvider, but hand-crafted snapshots may
+// carry the raw "linode://..." URL or the bare "linode" string.
 func normalizeProviderID(v string) string {
 	if strings.HasPrefix(v, "ocid1.") {
 		return serviceOKE
@@ -339,6 +344,12 @@ func normalizeProviderID(v string) string {
 	}
 	if v == "oci" {
 		return serviceOKE
+	}
+	if strings.HasPrefix(v, "linode://") {
+		return serviceLKE
+	}
+	if v == "linode" {
+		return serviceLKE
 	}
 	return v
 }

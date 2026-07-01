@@ -85,6 +85,7 @@
 //   - GKE: cloud.google.com/gke-nodepool
 //   - AKS: kubernetes.azure.com/cluster
 //   - OKE: node.info.ds.oke
+//   - LKE: lke.linode.com/pool-id
 //   - Self-managed: No provider-specific labels
 //
 // # Context Support
