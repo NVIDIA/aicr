@@ -17,6 +17,7 @@ package bom
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -26,6 +27,17 @@ import (
 const (
 	defaultRootName = "aicr"
 	defaultSupplier = "NVIDIA Corporation"
+)
+
+// ComponentResult.Type identifiers, shared so producers (tools/bom, the
+// attestation builder) and this renderer cannot drift on the string values.
+// Type is compared case-insensitively at render time because the attestation
+// builder supplies the recipe ComponentType enum ("Kustomize") while the
+// standalone generator supplies the lowercase kind ("kustomize").
+const (
+	TypeHelm      = "helm"
+	TypeKustomize = "kustomize"
+	TypeManifest  = "manifest"
 )
 
 // Metadata identifies the artifact the BOM describes (e.g., the AICR repo
@@ -142,20 +154,38 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 		compRef := meta.Name + "/" + r.Name
 		rootChildren = append(rootChildren, compRef)
 
+		// Name the deployment properties by effective component type so a
+		// Kustomize component's Git source and tag are not mislabeled as a Helm
+		// repository/version (the CycloneDX doc already declares
+		// aicr:component:type). Helm and manifest components keep the
+		// aicr:helm:* names. Chart is Helm-only and omitted for Kustomize.
+		kustomize := strings.EqualFold(r.Type, TypeKustomize)
 		props := []cdx.Property{
 			{Name: "aicr:component:type", Value: r.Type},
 		}
 		if r.Repository != "" {
-			props = append(props, cdx.Property{Name: "aicr:helm:repository", Value: r.Repository})
+			name := "aicr:helm:repository"
+			if kustomize {
+				name = "aicr:kustomize:source"
+			}
+			props = append(props, cdx.Property{Name: name, Value: r.Repository})
 		}
-		if r.Chart != "" {
+		if r.Chart != "" && !kustomize {
 			props = append(props, cdx.Property{Name: "aicr:helm:chart", Value: r.Chart})
 		}
 		if r.Version != "" {
-			props = append(props, cdx.Property{Name: "aicr:helm:version", Value: r.Version})
+			name := "aicr:helm:version"
+			if kustomize {
+				name = "aicr:kustomize:tag"
+			}
+			props = append(props, cdx.Property{Name: name, Value: r.Version})
 		}
 		if r.Namespace != "" {
-			props = append(props, cdx.Property{Name: "aicr:helm:namespace", Value: r.Namespace})
+			name := "aicr:helm:namespace"
+			if kustomize {
+				name = "aicr:kustomize:namespace"
+			}
+			props = append(props, cdx.Property{Name: name, Value: r.Namespace})
 		}
 		props = append(props, cdx.Property{Name: "aicr:version:pinned", Value: strconv.FormatBool(r.Pinned)})
 		for _, w := range r.Warnings {

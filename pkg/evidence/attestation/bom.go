@@ -78,15 +78,23 @@ func BuildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *cat
 		if !c.IsEnabled() {
 			continue
 		}
+		// The pinned version lives in Version for Helm and Tag for Kustomize;
+		// select the active field so a Kustomize component's tag is recorded
+		// (and marked pinned) rather than dropped. pkg/bom names the CycloneDX
+		// property by effective type.
+		pin := c.Version
+		if c.Type == recipe.ComponentTypeKustomize {
+			pin = c.Tag
+		}
 		results = append(results, bom.ComponentResult{
 			Name:        c.Name,
 			DisplayName: c.Name,
 			Type:        string(c.Type),
 			Repository:  c.Source,
 			Chart:       c.Chart,
-			Version:     c.Version,
+			Version:     pin,
 			Namespace:   c.Namespace,
-			Pinned:      c.Version != "",
+			Pinned:      pin != "",
 		})
 	}
 

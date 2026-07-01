@@ -11,12 +11,18 @@ narrower than the Decision implies, and is clarified here:
   version (per this ADR); `qualify` in turn depends on `lint`. So a missing
   chart-version pin fails `lint` and therefore fails the merge gate — it is
   not merely caught at review.
-- **Only BOM-doc *freshness* is opt-in.** `make bom-check` (which verifies the
-  committed `docs/user/container-images.md` matches a fresh regen) is a
-  separate target **not** wired into `qualify`, `lint`, or the merge gate. A
-  stale BOM doc — e.g. when an unbumped pin picks up upstream image drift — is
-  caught at PR review, not automatically gated. This is the only "opt-in"
-  piece; do not generalize it to chart-version strictness.
+- **BOM-doc *version* freshness is gated; *rendered-image* freshness is
+  opt-in.** `TestCommittedBOMVersionsMatchRegistry` (run by `make test` →
+  `make qualify`, and by the `bom-freshness` merge-gate job on docs-only PRs)
+  fails CI if the committed `docs/user/container-images.md` version column or
+  component set drifts from the registry — so a version pin change that forgets
+  `make bom-docs` is automatically gated. Not gated at PR time is *upstream
+  image drift* — an unbumped pin picking up a new image inside a chart's
+  templates. `make bom-check` (a full re-render comparison) is its opt-in
+  blocking check and is **not** wired into `qualify`, `lint`, or the merge
+  gate; the scheduled BOM-refresh workflow (`.github/workflows/bom-refresh.yaml`)
+  auto-detects that drift weekly and opens a PR. Do not generalize the opt-in
+  piece to chart-version strictness.
 - **Digest pinning is not yet universal.** Tag-only image references still
   exist in tree, and the digest-pin test (`recipes/manifest_images_test.go`)
   carries an explicit exemption map (e.g. CRD schemas that do not accept an

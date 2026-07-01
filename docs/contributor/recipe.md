@@ -479,15 +479,25 @@ diff whether you expected it or not.
 ### Version freshness is gated; image drift is not
 
 `TestCommittedBOMVersionsMatchRegistry` (`tools/bom/freshness_test.go`,
-run by `make test` → `make qualify`) diffs the committed doc's version
+run by `make test` → `make qualify`) checks the committed doc's version
 column against the registry pins with no Helm rendering, so a chart-pin
-bump that forgets `make bom-docs` fails CI. It does **not** catch
-*upstream image drift* — a chart bumping an image inside its own
-templates without a pin change on our side. Full `make bom-check`
-verifies that too by re-rendering, but it is **opt-in only** — not
-wired into `make qualify`, `make lint`, or the PR gate. So you still
-must run `make bom-docs` after a values change; wiring `bom-check` into
-the gate remains a desirable follow-up.
+bump that forgets `make bom-docs` fails CI. The check treats the doc as
+an *exact* registry projection: it is bidirectional (a component added
+to the registry without a doc row, or a doc row left behind after a
+component is removed, both fail), rejects duplicate rows, and compares
+**every** row — pinned components by their effective type (Helm
+`defaultVersion` or Kustomize `defaultTag`) and unpinned components
+against the `—` sentinel, so a fabricated version on an otherwise
+unpinned row cannot slip through. Because a docs-only PR that edits the committed
+BOM skips the full `tests` job, the `bom-freshness` job in
+`.github/workflows/merge-gate.yaml` runs this same test whenever
+`docs/user/container-images.md` or `recipes/registry.yaml` change, so
+the gate holds for docs-only edits too. It does **not** catch *upstream
+image drift* — a chart bumping an image inside its own templates without
+a pin change on our side. Full `make bom-check` verifies that too by
+re-rendering, but it is **opt-in only** — not wired into `make qualify`,
+`make lint`, or the PR gate. So you still must run `make bom-docs` after
+a values change.
 
 ### Version pinning is single-source
 

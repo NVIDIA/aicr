@@ -204,3 +204,63 @@ func TestWriteMarkdown_EmptyComponentNoImages(t *testing.T) {
 		t.Errorf("expected empty-component marker in output:\n%s", buf.String())
 	}
 }
+
+// TestBuildBOM_VersionPropertyByType verifies the version property is named by
+// component type: a Kustomize component's tag is emitted as aicr:kustomize:tag,
+// not mislabeled as aicr:helm:version (the doc already declares the type).
+func TestBuildBOM_VersionPropertyByType(t *testing.T) {
+	results := []ComponentResult{
+		{Name: "helm-comp", Type: "helm", Repository: "https://charts.example/nvidia", Chart: "c", Version: "v1.2.3", Pinned: true},
+		// Capitalized "Kustomize" mirrors the attestation builder's ComponentType enum;
+		// the property naming must be case-insensitive.
+		{Name: "kustomize-comp", Type: "Kustomize", Repository: "oci://example/kustomize-src", Version: "v0.5.0", Namespace: "kust-ns", Pinned: true},
+	}
+	doc := BuildBOM(Metadata{Name: "aicr", Version: "v0.0.0"}, results)
+	if doc.Components == nil {
+		t.Fatal("components is nil")
+	}
+
+	propFor := func(name string) map[string]string {
+		t.Helper()
+		for _, c := range *doc.Components {
+			if c.Name == name && c.Properties != nil {
+				m := map[string]string{}
+				for _, p := range *c.Properties {
+					m[p.Name] = p.Value
+				}
+				return m
+			}
+		}
+		t.Fatalf("component %q not found", name)
+		return nil
+	}
+
+	helmProps := propFor("helm-comp")
+	if helmProps["aicr:helm:version"] != "v1.2.3" {
+		t.Errorf("helm component: aicr:helm:version = %q, want v1.2.3", helmProps["aicr:helm:version"])
+	}
+	if helmProps["aicr:helm:repository"] != "https://charts.example/nvidia" {
+		t.Errorf("helm component: aicr:helm:repository = %q, want the repo URL", helmProps["aicr:helm:repository"])
+	}
+	for _, k := range []string{"aicr:kustomize:tag", "aicr:kustomize:source"} {
+		if _, ok := helmProps[k]; ok {
+			t.Errorf("helm component should not carry %s", k)
+		}
+	}
+
+	kustProps := propFor("kustomize-comp")
+	if kustProps["aicr:kustomize:tag"] != "v0.5.0" {
+		t.Errorf("kustomize component: aicr:kustomize:tag = %q, want v0.5.0", kustProps["aicr:kustomize:tag"])
+	}
+	if kustProps["aicr:kustomize:source"] != "oci://example/kustomize-src" {
+		t.Errorf("kustomize component: aicr:kustomize:source = %q, want the source URL", kustProps["aicr:kustomize:source"])
+	}
+	if kustProps["aicr:kustomize:namespace"] != "kust-ns" {
+		t.Errorf("kustomize component: aicr:kustomize:namespace = %q, want kust-ns", kustProps["aicr:kustomize:namespace"])
+	}
+	for _, k := range []string{"aicr:helm:version", "aicr:helm:repository", "aicr:helm:chart", "aicr:helm:namespace"} {
+		if _, ok := kustProps[k]; ok {
+			t.Errorf("kustomize component must NOT carry %s (mislabels Kustomize metadata as Helm)", k)
+		}
+	}
+}

@@ -53,6 +53,7 @@ jobs:
       actions: ${{ steps.changes.outputs.actions }}
       deps: ${{ steps.changes.outputs.deps }}
       renovate: ${{ steps.changes.outputs.renovate }}
+      bom: ${{ steps.changes.outputs.bom }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -77,6 +78,18 @@ jobs:
               # Make target or its pinned image trigger the gate.
               - '.github/renovate.json5'
               - 'Makefile'
+            bom:
+              # Inputs to the committed-BOM version-freshness check. The full
+              # `tests` job already runs it for code changes, but a docs-only
+              # PR editing the committed BOM (or a registry change that somehow
+              # lands as a docs-only diff) yields code=false and skips `tests`,
+              # so gate the freshness test on the doc + registry directly. The
+              # generator sources are included so a generator change also
+              # re-runs the check independently of the full suite.
+              - 'docs/user/container-images.md'
+              - 'recipes/registry.yaml'
+              - 'tools/bom/**'
+              - 'pkg/bom/**'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.
       #
@@ -320,6 +333,52 @@ jobs:
       - run: echo "No Renovate config changes — validation not required"
 
   # ---------------------------------------------------------------------------
+  # BOM version freshness — ensures the committed container-images.md matches
+  # the registry pins even on docs-only PRs (which skip the full `tests` job).
+  # ---------------------------------------------------------------------------
+
+  bom-freshness:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.bom == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+      - name: Verify committed BOM versions match the registry
+        env:
+          GOFLAGS: -mod=vendor
+        # `go test -run <name>` exits 0 with "no tests to run" if the test is
+        # renamed or removed, which would let this gate silently no-op. Assert
+        # the named test actually executed by requiring its PASS line.
+        run: |
+          set -uo pipefail
+          out=$(go test ./tools/bom/... -run '^TestCommittedBOMVersionsMatchRegistry$' -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          if ! grep -q '^--- PASS: TestCommittedBOMVersionsMatchRegistry' <<<"$out"; then
+            echo "::error::TestCommittedBOMVersionsMatchRegistry did not execute (renamed or removed?); the BOM freshness gate would silently pass. Update this job to run the freshness check."
+            exit 1
+          fi
+
+  bom-freshness-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.bom != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No BOM/registry changes — BOM freshness check not required"
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — the single required status check
   # ---------------------------------------------------------------------------
 
@@ -339,6 +398,8 @@ jobs:
       - verify-licenses-skip
       - verify-renovate
       - verify-renovate-skip
+      - bom-freshness
+      - bom-freshness-skip
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:

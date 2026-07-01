@@ -302,9 +302,14 @@ regenerated file in the **same PR** whenever you:
 - Change a `values.yaml` in a way that affects which images render
   (image-repo override, subchart enable/disable, etc.)
 
-`make bom-check` verifies the committed BOM matches a fresh regen
-but is **opt-in only** — not wired into `make qualify`, `make lint`,
-or the merge gate. Do not rely on CI to catch a missed regen.
+The BOM's version column and component set are gated at PR time
+(`TestCommittedBOMVersionsMatchRegistry` plus the `bom-freshness`
+merge-gate job), so a missed regen after a version or component-set
+change fails CI. Not gated at PR time is *rendered-image drift* — a
+chart pulling a new image with no pin change on our side; `make
+bom-check` (a full re-render comparison) is its **opt-in** blocking
+check, and the weekly BOM-refresh workflow auto-detects it and opens a
+PR. Still run `make bom-docs` locally on any chart-touching change.
 
 ## Boundary: Components Are Metadata
 
