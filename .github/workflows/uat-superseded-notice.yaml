@@ -1,0 +1,108 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reactive surfacing for a *superseded* UAT run (issue #1274, DC1).
+#
+# The reservation lease (uat-run.yaml's `uat-<reservation>` concurrency group,
+# cancel-in-progress: false) holds at most one in-progress + one pending run.
+# When a third contender arrives, GitHub cancels the older PENDING run before it
+# starts any job — it is superseded, not failed, and would otherwise vanish
+# silently. This observer runs on the default branch (workflow_run events fire
+# only from the default branch), classifies each cancelled "UAT Run" as a
+# pending supersede (cancelled with no started job) versus a genuine mid-run
+# cancel, and for a supersede emits a job-summary entry plus a ::warning so a
+# dropped request is visible to its requester.
+#
+# This is the reactive/primary layer. The nightly controller
+# (uat-nightly-batch.yaml) also reconciles the same signal synchronously for the
+# cells it dispatches; the two are complementary, and a DC6 regression guard
+# (#1279) will exercise this observer. The workflow never checks out the
+# triggering run's code and reads only trusted `workflow_run.*` metadata, so a
+# fork-influenced run title cannot inject into the shell.
+
+name: "UAT: Superseded Run Notice"
+
+on:
+  workflow_run:
+    workflows: ["UAT Run"]
+    types: [completed]
+
+permissions:
+  actions: read  # read the triggering run's jobs to classify it
+
+concurrency:
+  # One notice per triggering run; never cancel an in-flight notice.
+  group: uat-superseded-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  notice:
+    # Only a cancelled run can be a pending supersede — skip success/failure
+    # cheaply. Gate to the canonical repo so forks don't run it.
+    if: ${{ github.event.workflow_run.conclusion == 'cancelled' && github.repository == 'nvidia/aicr' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Classify and surface a superseded run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          # Fetch the triggering run's jobs. Distinguish a real empty result
+          # (superseded) from a transient API/auth/rate-limit failure: the
+          # latter must NOT be misread as "zero jobs", which would emit a false
+          # superseded warning. On a fetch failure, skip rather than cry wolf.
+          if ! jobs_json=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" 2>/dev/null); then
+            echo "::warning::could not fetch jobs for run ${RUN_ID}; skipping supersede classification."
+            exit 0
+          fi
+          # A run cancelled while PENDING (superseded on the reservation lease)
+          # never starts a job: total_count == 0, or every job has a null
+          # started_at. A human/mid-run cancel has at least one started job.
+          superseded=$(jq -r '
+            ((.total_count // 0) == 0)
+            or (([.jobs[]? | select(.started_at != null)] | length) == 0)
+            | tostring' <<<"$jobs_json")
+
+          if [[ "$superseded" != "true" ]]; then
+            echo "Run ${RUN_ID} was cancelled after starting a job — a genuine cancel, not a pending supersede; nothing to surface."
+            exit 0
+          fi
+
+          # RUN_TITLE is the triggering run's display title. uat-run.yaml sets a
+          # run-name of "UAT <reservation> @ <version> ..." (#1579), so the title
+          # names the superseded reservation. It is trusted workflow_run metadata
+          # passed via env (never inlined into the script). The step-summary is
+          # file content (safe as-is); the ::warning:: command is percent-encoded
+          # below since %, CR, and LF are workflow-command metacharacters.
+          {
+            echo "### ⚠️ UAT run superseded"
+            echo ""
+            echo "**${RUN_TITLE}** was cancelled while pending and never ran — superseded on the reservation lease (a newer run took its single pending slot)."
+            echo ""
+            echo "- Run: [\`${RUN_ID}\`](${RUN_URL})"
+            echo "- Branch: \`${HEAD_BRANCH}\`"
+            echo ""
+            echo "Re-dispatch this reservation once it frees if the coverage is still needed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Percent-encode workflow-command metacharacters so a crafted run title
+          # cannot inject or truncate the annotation.
+          esc() { local s=$1; s=${s//'%'/'%25'}; s=${s//$'\r'/'%0D'}; s=${s//$'\n'/'%0A'}; printf '%s' "$s"; }
+          echo "::warning::UAT run superseded while pending — $(esc "$RUN_TITLE") ($(esc "$RUN_URL")); re-dispatch when the reservation frees."
