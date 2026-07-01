@@ -6,7 +6,7 @@
   "results": {
     "tool": {
       "name": "aicr",
-      "version": "v0.14.2"
+      "version": "v1.0.0"
     },
     "summary": {
       "tests": 2,
