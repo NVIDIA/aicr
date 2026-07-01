@@ -117,42 +117,48 @@ Update the `nccl-plugin-gpudirecttcpx-dev` image tag in your workload to match.
 
 ## Running the NCCL Benchmark
 
-The GKE H100 training recipe (`h100-gke-cos-training`) already selects the
-automated `nccl-all-reduce-bw` performance check (floor `>= 250` GB/s), so
-`aicr validate --phase performance` runs the NCCL all-reduce benchmark for you.
-If you want to run the benchmark by hand — for example to debug the GPUDirect
-TCPX data path directly with raw Pods and a TCPXO daemon sidecar, which differs
-from the EKS TrainJob-based approach — use either of the two profiles below.
-Each pod runs a `tcpxo-daemon` sidecar (manages the GPUDirect TCPXO data path)
-plus the `nccl-test` container.
+### Automated (recommended): `aicr validate`
 
-### Option 1: testdata manifests (matches validator framework)
+The GKE H100 training recipe (`h100-gke-cos-training`) already selects the
+automated `nccl-all-reduce-bw` performance check (floor `>= 300` GB/s), so the
+benchmark is fully driven for you:
 
 ```shell
-export NAMESPACE=nccl-perf
-export GPU_COUNT_PER_NODE=8
-export GPU_COUNT=16
-export WORKER_COUNT=2
-export TEST_TYPE=all_reduce_perf
-export MIN_MESSAGE_SIZE=1M
-export MAX_MESSAGE_SIZE=8G
-
-kubectl create ns $NAMESPACE
-envsubst < validators/performance/testdata/h100/gke/runtime.yaml | kubectl apply -f -
-
-# Wait for pods to be 2/2 Running
-kubectl get pods -n $NAMESPACE -o wide -w
-
-# Trigger the AllReduce benchmark from host-1
-kubectl exec nccl-test-host-1 -n $NAMESPACE -c nccl-test -- \
-  /scripts/allreduce.sh nccl-host-1 nccl-host-2
-
-# Expected: ~340 GB/s busBW at 16 GB (AllReduce), ~100 GB/s avg
-# Clean up
-kubectl delete ns $NAMESPACE
+aicr validate --recipe recipes/overlays/h100-gke-cos-training.yaml \
+  --phase performance
 ```
 
-### Option 2: standalone demo manifests
+The validator runs the all-reduce sweep over the validator-fixed `1K`–`16G`
+message-size range and asserts the busBW floor. It deploys the
+`TrainingRuntime` (`validators/performance/testdata/h100/gke/runtime.yaml`)
+**plus** the shared `TrainJob` (`validators/performance/testdata/trainjob.yaml`)
+that actually launches the worker Pods. The runtime template carries the GKE
+multi-NIC and NRI device annotation keys (`networking.gke.io/interfaces` and
+`devices.gke.io/container.tcpxo-daemon`) as `${...}` placeholders, and the
+validator **discovers and substitutes their concrete values dynamically** at
+apply time — the interface list from the cluster's discovered GPU NIC networks
+and the NRI device annotation sized to the per-node GPU count. Because those
+values are resolved at runtime, the framework manifest cannot be reproduced by a
+plain `kubectl apply` / `envsubst` of `runtime.yaml` alone, so running the
+framework path by hand is not supported. Use `aicr validate` for the
+framework-equivalent benchmark.
+
+**Prerequisites:** the automated check needs at least **2 schedulable GPU nodes**
+with allocatable GPUs — the all-reduce measures East-West fabric between nodes.
+The validator counts *discovered* schedulable GPU nodes: with fewer than 2 it
+returns a successful *skipped* result without measuring bandwidth. The selected
+nodes also need **free** GPU capacity (the TrainJob places a full GPU node per
+worker); if the GPUs are already occupied the workers stay Pending and the check
+times out — it does not skip. If Kubeflow Trainer is not already installed, the validator
+downloads and installs it (Trainer v2.2.0 from GitHub, then removes it
+afterward), so the validator environment needs GitHub egress.
+
+### Manual standalone benchmark
+
+To exercise the GPUDirect TCPXO data path directly with raw Pods and a TCPXO
+daemon sidecar (independent of the validator framework — useful for debugging),
+use the standalone demo manifest. Each pod runs a `tcpxo-daemon` sidecar
+(manages the GPUDirect TCPXO data path) plus the `nccl-test` container.
 
 NRI profile (recommended, no `hostNetwork`):
 

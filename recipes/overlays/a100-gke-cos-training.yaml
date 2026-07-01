@@ -84,7 +84,7 @@ spec:
   #
   # Performance gating is intentionally omitted until an empirical A100-on-GKE
   # NCCL baseline is established. The H100 GKE training overlay pins an absolute
-  # nccl-all-reduce-bw floor (>= 250) calibrated on 8-GPU H100 NVLink nodes;
+  # nccl-all-reduce-bw floor (>= 300) calibrated on 8-GPU H100 NVLink nodes;
   # that value is neither fabric-class aware (https://github.com/NVIDIA/aicr/issues/1256)
   # nor valid for A100, so carrying it would only false-fail healthy runs.
   validation:

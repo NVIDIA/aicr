@@ -63,10 +63,12 @@ spec:
   # here.
   #
   # Performance gating is intentionally omitted until an empirical A100-on-Azure
-  # NCCL baseline is established. The H100 AKS training overlay pins an absolute
-  # nccl-all-reduce-bw floor (>= 100); that value is calibrated for H100 ND-series
-  # nodes and is neither fabric-class aware (https://github.com/NVIDIA/aicr/issues/1256)
-  # nor valid for A100, so carrying it would only false-fail healthy runs.
+  # NCCL baseline is established. AKS has no validator NCCL runtime template or
+  # scheduling path (it is not in the support table), so even the H100 AKS
+  # training overlay leaves the performance phase undeclared rather than gate on
+  # an unmeasured floor (see issue #1337). A100 on Azure is likewise unmeasured
+  # and would need its own fabric-aware baseline (#1256), so carrying any floor
+  # here would only false-fail healthy runs.
   validation:
     conformance:
       checks:

@@ -159,7 +159,7 @@ aicr validate \
     --recipe recipe.yaml \
     --toleration dedicated=gpu-workload:NoSchedule \
     --toleration nvidia.com/gpu=present:NoSchedule \
-    --phase conformance \
+    --phase all \
     --output report.json
 ```
 
@@ -206,12 +206,14 @@ kubectl logs -f -n kubeflow -l trainer.kubeflow.org/job-name=pytorch-mnist
 
 ## Performance Validation (GKE)
 
-> **Note:** `aicr validate --phase performance` is not yet automated for GKE.
-> The GKE NCCL test uses raw Pods with a TCPXO daemon sidecar (required for
-> GPUDirect), which differs from the EKS TrainJob-based approach. Run the test
-> manually — see [GKE TCPXO Networking](../docs/integrator/gke-tcpxo-networking.md#running-the-nccl-benchmark)
-> for the runnable NCCL benchmark, prerequisites, TCPXO runtime requirements,
-> and result expectations.
+> **Note:** `aicr validate --phase performance` runs the NCCL all-reduce
+> benchmark automatically for `h100-gke-cos-training` — it deploys the
+> TrainJob and injects the GKE multi-NIC / TCPXO annotations for you. It
+> requires at least 2 *discovered* schedulable GPU nodes (fewer than 2 returns
+> a successful *skipped* result); the selected nodes also need free GPU capacity
+> or the TrainJob stays Pending and the check times out — it does not skip. See [GKE TCPXO Networking](../docs/integrator/gke-tcpxo-networking.md#running-the-nccl-benchmark)
+> for prerequisites, TCPXO runtime requirements, result expectations, and a
+> manual standalone benchmark for debugging the data path directly.
 
 ## Success
 
@@ -320,7 +322,7 @@ EOF
 ```
 
 > CLI flags always win over the same field in `--config`, so the same config
-> drives both the pre-deploy dry-run validate and the post-deploy conformance
+> drives both the pre-deploy dry-run validate and the post-deploy `--phase all`
 > validate — phase and `--no-cluster` are toggled on the command line.
 
 ### Snapshot
@@ -351,7 +353,7 @@ aicr validate --config aicr-config.yaml \
 ```
 
 `--phase deployment` and `--no-cluster` are CLI overrides — neither is pinned
-in the config so the same file works for the conformance run below.
+in the config so the same file works for the post-deploy `--phase all` run below.
 
 ### Generate Bundle
 
@@ -387,7 +389,7 @@ cd ..
 
 ```shell
 aicr validate --config aicr-config.yaml \
-    --phase conformance \
+    --phase all \
     --output report.json
 ```
 
@@ -404,7 +406,8 @@ present) to `ghcr.io/<owner>/aicr-evidence`.
     ├── bom.cdx.json                 # CycloneDX SBOM
     ├── ctrf/                        # per-phase CTRF test results
     │   ├── conformance.json
-    │   └── deployment.json
+    │   ├── deployment.json
+    │   └── performance.json
     ├── manifest.json                # per-file sha256 inventory
     ├── recipe.yaml                  # canonical post-resolution recipe
     ├── snapshot.yaml                # cluster snapshot at validate-time
@@ -454,5 +457,5 @@ so no `podTemplateOverrides` are needed.
 ### Success
 
 Job success + signed evidence verifies (`exit 0`) + fabric bandwidth within
-range from the manual NCCL run (see
+range from the automated post-deploy `aicr validate --phase all` run's included performance phase (see
 [GKE TCPXO Networking](../docs/integrator/gke-tcpxo-networking.md#running-the-nccl-benchmark)).
