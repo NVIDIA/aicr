@@ -14,7 +14,7 @@
     "allowlisted": true
   },
   "runId": "run-2026-06-18T0200",
-  "aicrVersion": "v0.14.2",
+  "aicrVersion": "v1.0.0",
   "k8sVersion": "1.31",
   "k8sConstraint": ">= 1.32.4",
   "bundleDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",

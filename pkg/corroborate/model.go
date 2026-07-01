@@ -20,6 +20,17 @@ package corroborate
 // to series/<recipe>.json.
 const SchemaVersion = "aicr-corroboration/v1"
 
+// Outbound header targets, baked into index.json meta so the renderer stays
+// data-driven (a maintainer flips one literal here, not the template). An empty
+// value renders nothing (the renderer fails soft). LinkInstall is a shell
+// command (copied to the clipboard), not a URL; LinkDocs/LinkGitHub are http(s)
+// links opened in a new tab.
+const (
+	LinkGitHub  = "https://github.com/NVIDIA/aicr"
+	LinkDocs    = "https://docs.aicr.run/"
+	LinkInstall = "curl -sfL https://get.aicr.run | bash"
+)
+
 // Index is the boot payload (index.json): the facet value sets, the source
 // catalog, and the CSP-first navigation tree (groups -> dashboards -> tabs)
 // with baked-in consensus. The static renderer fetches this on load and needs
@@ -27,6 +38,10 @@ const SchemaVersion = "aicr-corroboration/v1"
 type Index struct {
 	// Schema is always SchemaVersion.
 	Schema string `json:"schema"`
+
+	// Meta is presentation metadata (outbound links, summary counts, and the
+	// deterministic generated-at stamp). Additive; never feeds consensus.
+	Meta Meta `json:"meta"`
 
 	// Criteria holds the facet dropdown values per axis (service, accelerator,
 	// os, intent, platform), ordered by the criteria registry's canonical
@@ -38,6 +53,37 @@ type Index struct {
 
 	// Groups is the CSP-first catalog tree, ordered by service.
 	Groups []Group `json:"groups"`
+}
+
+// Meta is presentation metadata for the renderer header and landing summary.
+// Purely additive — none of it feeds the consensus math.
+type Meta struct {
+	// Links are the outbound header navigation targets.
+	Links Links `json:"links"`
+
+	// Counts are the landing summary tallies.
+	Counts Counts `json:"counts"`
+
+	// GeneratedAt is the newest run AttestedAt rendered "YYYY-MM-DD HH:MM UTC",
+	// or "" (omitted) when no run carried a parseable AttestedAt. Derived from
+	// evidence, never the publish clock, so it stays byte-reproducible.
+	GeneratedAt string `json:"generatedAt,omitempty"`
+}
+
+// Links are the outbound header navigation targets. An empty value hides that
+// link in the renderer.
+type Links struct {
+	Install string `json:"install"`
+	Docs    string `json:"docs"`
+	GitHub  string `json:"github"`
+}
+
+// Counts are the landing-page summary tallies (validated recipes, CSPs, and
+// distinct signing sources).
+type Counts struct {
+	Recipes int `json:"recipes"`
+	CSPs    int `json:"csps"`
+	Sources int `json:"sources"`
 }
 
 // Source is one signer's public catalog record, keyed in Index.Sources by its
@@ -70,7 +116,10 @@ type Dashboard struct {
 	Tabs        []Tab  `json:"tabs"`
 }
 
-// Tab is one recipe (intent[-platform]) with its baked grid.
+// Tab is one recipe (intent[-platform]). Its consensus is split per AICR
+// version so that corroboration only counts agreement at the SAME version
+// (cross-version agreement is not reproduction). Versions are newest-first;
+// the overview/landing summarize the newest (Versions[0]).
 type Tab struct {
 	// Recipe is the overlay metadata.name (the series-file slug).
 	Recipe string `json:"recipe"`
@@ -78,6 +127,16 @@ type Tab struct {
 	// Coord is the full five-dimension criteria for display and facet
 	// filtering (service, accelerator, os, intent, platform).
 	Coord map[string]string `json:"coord"`
+
+	// Versions holds one baked consensus grid per AICR version present in the
+	// evidence, newest-first.
+	Versions []TabVersion `json:"versions"`
+}
+
+// TabVersion is one recipe's baked consensus grid for a single AICR version.
+type TabVersion struct {
+	// AICRVer is the AICR version this grid's consensus was computed at.
+	AICRVer string `json:"aicrVer"`
 
 	// PhaseRollup maps each phase to its worst-first rollup state.
 	PhaseRollup map[string]string `json:"phaseRollup"`
