@@ -14,27 +14,44 @@
 
 name: UAT - AWS
 
+# Reusable per-cloud UAT pipeline — invoked by uat-run.yaml, the shared
+# dispatch surface that owns the per-reservation concurrency lease (#1274,
+# DC1). It is intentionally NOT directly dispatchable or scheduled: the
+# nightly cron lives in uat-nightly-batch.yaml and ad-hoc runs go through
+# uat-run.yaml, so every run on the AWS reservation serializes on the same
+# lease. The filename is kept so the keyless-cosign signing identity (and the
+# EXPECTED_IDENTITY_REGEXP pins) stay `uat-aws.yaml@…` unchanged.
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      reservation:
+        description: 'Reservation name (lease key) this run targets; used for labeling.'
+        type: string
+        required: true
+      cluster_config_path:
+        description: 'Cluster-config the EKS actuator provisions from (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
+      test_config_dir:
+        description: 'Directory holding the AICRConfig test files (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
       skip_delete:
-        description: 'Skip cluster teardown (manual runs only; schedule always deletes)'
+        description: 'Skip cluster teardown (manual runs only; the nightly batch always deletes).'
         type: boolean
         default: false
       skip_tests:
-        description: 'Skip UAT test execution (manual runs only; schedule always tests)'
+        description: 'Skip UAT test execution (manual runs only; the nightly batch always tests).'
         type: boolean
         default: false
-  schedule:
-    - cron: '0 4 * * *' # daily at midnight PST, runs on default branch only
 
 permissions:
   contents: read
 
-# Long-running cloud provisioning — never cancel mid-teardown.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+# NOTE: the per-reservation concurrency lease is owned by the caller
+# (uat-run.yaml). A reusable workflow must not declare its own concurrency
+# here, or every reservation would serialize against one group instead of
+# queueing per reservation.
 
 jobs:
   uat-aws:
@@ -61,8 +78,9 @@ jobs:
       AWS_REGION: "us-east-1"
       GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
       DEPLOYMENT_ID: "aicr-uat-${{ github.run_id }}"
-      CLUSTER_CONFIG: tests/uat/aws/cluster-config.yaml
-      TEST_CONFIG: tests/uat/aws/tests/h100-training-config.yaml
+      CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
+      # Training is the DC1 launch intent; DC2 selects the file by intent.
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-training-config.yaml
       # v0.4.23 — required for the .eks-nested cluster-config schema; the
       # prior pin (v0.2.6) read .compute.nodeGroups.* directly and failed
       # Terraform parse with "object with 1 attribute eks".
@@ -359,10 +377,13 @@ jobs:
       # Summary
       - name: Test Summary
         if: always()
+        env:
+          SUMMARY_RESERVATION: ${{ inputs.reservation }}
         run: |
           {
             echo "## UAT Results (AWS)"
             echo ""
+            printf '**Reservation:** `%s`\n' "$SUMMARY_RESERVATION"
             echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
             echo ""
             echo "| Phase | Status |"

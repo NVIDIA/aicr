@@ -108,3 +108,5 @@ navigation:
         path: contributor/maintaining.md
       - page: Publishing Recipe Evidence
         path: contributor/evidence-publishing.md
+      - page: UAT Day/Night Cycle
+        path: contributor/uat.md
