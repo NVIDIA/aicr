@@ -1,6 +1,6 @@
 # UAT GCP Account Setup
 
-IAM configuration for the nightly GKE UAT workflow (`.github/workflows/uat-gcp.yaml`).
+IAM configuration for the GKE UAT pipeline (`.github/workflows/uat-gcp.yaml`), invoked through the shared dispatch surface (`uat-run.yaml`) for ad-hoc runs and via the nightly batch (`uat-nightly-batch.yaml`) on a cron.
 
 ## Relationship to demo-api-server
 

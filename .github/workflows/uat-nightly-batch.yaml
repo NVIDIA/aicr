@@ -1,0 +1,102 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT Nightly Batch
+
+# The night side of the day/night cycle (#1274, DC1): on a nightly cron, run
+# one UAT pass per reservation. Reservations are enumerated from the
+# checked-in registry (infra/uat/reservations.yaml) so adding a reservation
+# needs no change here. Each cell invokes the shared uat-run.yaml, which holds
+# the per-reservation lease — so different reservations (independent hardware)
+# run in parallel while runs on the SAME reservation serialize.
+#
+# PR-2 scope: one main (build-from-source) pass per reservation. The
+# time-boxed, main-first, previous-N-stable version matrix (uat-broker
+# schedule) lands in the follow-up (DC1 PR-3 / DC5's versioned install).
+on:
+  schedule:
+    - cron: '0 4 * * *' # 04:00 UTC daily (evening in US Pacific); default branch only
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Serialize batch runs: a manual dispatch should not fan out a second batch
+# alongside the cron one. (The per-reservation leases in uat-run.yaml would
+# queue the duplicates anyway, but there is no reason to start them.)
+concurrency:
+  group: uat-nightly-batch
+  cancel-in-progress: false
+
+jobs:
+  # Enumerate reservation names from the registry into a JSON array for the
+  # matrix below — keeps the batch data-driven (no per-reservation YAML).
+  enumerate:
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    outputs:
+      reservations: ${{ steps.list.outputs.reservations }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+      - name: Enumerate reservations
+        id: list
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          set -euo pipefail
+          go build -o ./bin/uat-broker ./tools/uat-broker
+          mapfile -t names < <(./bin/uat-broker reservations --list)
+          if [ "${#names[@]}" -eq 0 ]; then
+            echo "::error::no reservations found in infra/uat/reservations.yaml"
+            exit 1
+          fi
+          json=$(printf '%s\n' "${names[@]}" | jq -R . | jq -cs .)
+          echo "reservations=${json}" >> "$GITHUB_OUTPUT"
+          echo "Reservations: ${json}"
+
+  # One UAT pass per reservation. Different reservations are independent
+  # hardware, so they run in parallel; uat-run.yaml's per-reservation lease
+  # serializes any run that shares a reservation (e.g. a concurrent ad-hoc
+  # dispatch). The caller grants the permission superset uat-run.yaml's nested
+  # pipeline + evidence-ingest need.
+  run:
+    needs: enumerate
+    strategy:
+      fail-fast: false
+      matrix:
+        reservation: ${{ fromJSON(needs.enumerate.outputs.reservations) }}
+    # Superset ceiling for the nested pipeline (uat-run.yaml → uat-{aws,gcp}
+    # → evidence-ingest); a reusable workflow's jobs cannot exceed it.
+    permissions:
+      contents: read  # checkout inside the called pipeline
+      actions: read  # required by the nested uat-{aws,gcp} + evidence-ingest jobs
+      id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
+      packages: write  # push validator + snapshot-agent images to GHCR
+    uses: ./.github/workflows/uat-run.yaml
+    with:
+      reservation: ${{ matrix.reservation }}

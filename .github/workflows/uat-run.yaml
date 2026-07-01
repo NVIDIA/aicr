@@ -1,0 +1,153 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT Run
+
+# The shared UAT dispatch surface and reservation-lease owner (#1274, DC1).
+# A human (workflow_dispatch) or the nightly batch (workflow_call) requests a
+# run against a named reservation; this workflow holds the per-reservation
+# concurrency lease, resolves the reservation row from the checked-in registry
+# (infra/uat/reservations.yaml) via the uat-broker helper, and dispatches the
+# cloud-appropriate reusable pipeline. Because every run for a reservation
+# routes through here and shares the lease, contending runs QUEUE instead of
+# racing the hardware.
+on:
+  workflow_dispatch:
+    inputs:
+      reservation:
+        description: 'Reservation name from infra/uat/reservations.yaml (e.g. aws-h100, gcp-h100).'
+        type: string
+        required: true
+      skip_delete:
+        description: 'Skip cluster teardown (manual debugging only).'
+        type: boolean
+        default: false
+      skip_tests:
+        description: 'Skip UAT test execution (manual debugging only).'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      reservation:
+        type: string
+        required: true
+      skip_delete:
+        type: boolean
+        default: false
+      skip_tests:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# The reservation lease. Every run targeting a given reservation serializes on
+# this group, so a contender waits rather than racing the reservation;
+# cancel-in-progress:false keeps an in-progress run (and its teardown) from
+# being killed.
+#
+# NOTE: this is a single-slot lease, not a full queue. GitHub concurrency holds
+# at most one in-progress + one PENDING run per group; a third contender
+# supersedes (cancels) the older pending one — cancel-in-progress:false only
+# protects the in-progress run, not the pending slot. Acceptable at launch (two
+# reservations, at most cron + one ad-hoc each); preserving every request would
+# need the deferred standing broker (see docs/contributor/uat.md, #1264).
+#
+# github.event.inputs is used for the dispatch path because the inputs context
+# is unreliable in a top-level concurrency group on workflow_dispatch
+# (community #45734/#35341); inputs.* covers the workflow_call path, where
+# github.event.inputs is empty.
+concurrency:
+  group: uat-${{ github.event.inputs.reservation || inputs.reservation }}
+  cancel-in-progress: false
+
+jobs:
+  # Resolve the reservation row to the cloud + on-disk config paths the
+  # cloud-specific pipeline consumes. A typo'd reservation name fails here
+  # (uat-broker exits NOT_FOUND), so the registry is the single source of truth.
+  resolve:
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    outputs:
+      cloud: ${{ steps.row.outputs.cloud }}
+      cluster_config_path: ${{ steps.row.outputs['cluster-config-path'] }}
+      test_config_dir: ${{ steps.row.outputs['test-config-dir'] }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+      - name: Resolve reservation row
+        id: row
+        env:
+          GOFLAGS: -mod=vendor
+          # Pass via env (not inline interpolation) to avoid expression
+          # injection through the dispatch input.
+          RESERVATION: ${{ inputs.reservation }}
+        run: |
+          set -euo pipefail
+          go build -o ./bin/uat-broker ./tools/uat-broker
+          ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
+
+  # One of run-aws / run-gcp fires based on the resolved cloud (the registry
+  # validates cloud ∈ {aws,gcp}, so exactly one matches). The caller job grants
+  # the permission SUPERSET its callee needs — a reusable workflow's jobs are
+  # ceilinged by the calling job's permissions, and the called pipeline does
+  # OIDC, GHCR push, and (nested) evidence-ingest GCS WIF.
+  run-aws:
+    needs: resolve
+    if: needs.resolve.outputs.cloud == 'aws'
+    # Superset ceiling for the nested pipeline (a reusable workflow's jobs
+    # cannot exceed the caller's permissions).
+    permissions:
+      contents: read  # checkout inside the called pipeline
+      actions: read  # required by the nested uat-{aws,gcp} + evidence-ingest jobs
+      id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
+      packages: write  # push validator + snapshot-agent images to GHCR
+    uses: ./.github/workflows/uat-aws.yaml
+    with:
+      reservation: ${{ inputs.reservation }}
+      cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
+      test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
+      skip_delete: ${{ inputs.skip_delete }}
+      skip_tests: ${{ inputs.skip_tests }}
+
+  run-gcp:
+    needs: resolve
+    if: needs.resolve.outputs.cloud == 'gcp'
+    # Superset ceiling for the nested pipeline (a reusable workflow's jobs
+    # cannot exceed the caller's permissions).
+    permissions:
+      contents: read  # checkout inside the called pipeline
+      actions: read  # required by the nested uat-{aws,gcp} + evidence-ingest jobs
+      id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
+      packages: write  # push validator + snapshot-agent images to GHCR
+    uses: ./.github/workflows/uat-gcp.yaml
+    with:
+      reservation: ${{ inputs.reservation }}
+      cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
+      test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
+      skip_delete: ${{ inputs.skip_delete }}
+      skip_tests: ${{ inputs.skip_tests }}

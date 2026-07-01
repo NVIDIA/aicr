@@ -1,6 +1,6 @@
 # AWS Account OIDC Setup for GitHub Actions
 
-Terraform configuration for AWS IAM OIDC federation enabling keyless GitHub Actions auth for the daily UAT workflow ([`.github/workflows/uat-aws.yaml`](../../.github/workflows/uat-aws.yaml)) that creates ephemeral EKS clusters.
+Terraform configuration for AWS IAM OIDC federation enabling keyless GitHub Actions auth for the UAT pipeline ([`.github/workflows/uat-aws.yaml`](../../.github/workflows/uat-aws.yaml)) that creates ephemeral EKS clusters. The pipeline is invoked through the shared dispatch surface (`uat-run.yaml`) — for ad-hoc runs and via the nightly batch (`uat-nightly-batch.yaml`) on a cron.
 
 ## Prerequisites
 
