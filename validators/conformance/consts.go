@@ -27,7 +27,8 @@ const (
 	resourceCRDs = "customresourcedefinitions"
 	// versionV1alpha1 is the API version used by legacy NVIDIA and TrainJob CRDs.
 	versionV1alpha1 = "v1alpha1"
-	// versionV1beta1 is the API version used by DynamoGraphDeployment in Dynamo 1.2.
+	// versionV1beta1 is the API version used by DynamoGraphDeployment in
+	// Dynamo 1.2 and NVIDIA ComputeDomain.
 	versionV1beta1 = "v1beta1"
 	// labelNVIDIAGPUPresent is the "key=value" selector for GPU-bearing nodes
 	// when scaled-up via the cluster autoscaler.

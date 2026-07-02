@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<!--
+ Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AICR · Slinky Slurm · Demo — slides</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14181d;
+    --panel-2: #1b2026;
+    --border: #2a313a;
+    --text: #e6edf3;
+    --dim: #9aa7b4;
+    --green: #76b900;
+    --green-bright: #93d22a;
+    --green-tint: rgba(118, 185, 0, 0.12);
+    --amber: #e3a008;
+    --amber-tint: rgba(227, 160, 8, 0.12);
+    --blue: #67b7dc;
+    --blue-tint: rgba(103, 183, 220, 0.12);
+    --red: #e5534b;
+    --sans: "NVIDIA Sans", "NVIDIASans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 16px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--green-bright); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code.inl { font-family: var(--mono); font-size: 0.9em; background: var(--panel-2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 5px; }
+  strong { color: var(--text); }
+  em { color: var(--dim); }
+
+  .deck-top {
+    position: fixed; top: 0; left: 0; right: 0; height: 48px; z-index: 30;
+    display: flex; align-items: center; gap: 12px; padding: 0 22px;
+    background: rgba(11,13,16,0.9); border-bottom: 1px solid var(--border);
+  }
+  .deck-top .brand { font-weight: 700; letter-spacing: 0.02em; font-size: 14px; }
+  .deck-top .brand .sub { color: var(--dim); font-weight: 500; }
+  .deck-top .sect { margin-left: auto; color: var(--green-bright); font-family: var(--mono); font-size: 12.5px; }
+
+  .deck-bottom {
+    position: fixed; bottom: 3px; left: 0; right: 0; height: 50px; z-index: 30;
+    display: flex; align-items: center; gap: 16px; padding: 0 22px;
+    background: rgba(11,13,16,0.9); border-top: 1px solid var(--border);
+  }
+  .navbtn {
+    font-size: 22px; line-height: 1; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; width: 40px; height: 32px;
+    cursor: pointer; user-select: none;
+  }
+  .navbtn:hover { color: var(--green-bright); border-color: var(--green); }
+  .deck-bottom .meter { margin: 0 auto; display: flex; align-items: center; gap: 16px; }
+  .deck-bottom #counter { font-family: var(--mono); font-size: 13px; color: var(--text); }
+  .hint { color: var(--dim); font-family: var(--mono); font-size: 12.5px; }
+  .progress { position: fixed; bottom: 0; left: 0; right: 0; height: 3px; background: var(--border); z-index: 31; }
+  .progress > i { display: block; height: 100%; width: 0; background: var(--green); transition: width 0.2s ease; }
+
+  .slide {
+    position: fixed; inset: 0; z-index: 10;
+    display: none; flex-direction: column; justify-content: center; align-items: center;
+    padding: 70px 48px 80px;
+  }
+  .slide.active { display: flex; }
+  .slide-inner { width: 100%; max-width: 1040px; max-height: 86vh; overflow-y: auto; }
+  .slide.center .slide-inner { text-align: center; }
+
+  .label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--green); margin-bottom: 8px; }
+  .slide h1 { font-size: clamp(38px, 6vw, 62px); line-height: 1.08; margin: 0 0 18px; font-weight: 800; letter-spacing: -0.02em; }
+  .slide h2 { font-size: clamp(26px, 3.6vw, 40px); margin: 0 0 16px; font-weight: 750; letter-spacing: -0.01em; }
+  .slide p { color: #cdd6df; max-width: 76ch; }
+  .lede { font-size: clamp(17px, 2.2vw, 22px); color: var(--dim); margin: 0 auto 22px; max-width: 64ch; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
+  .chip { font-size: 14px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); padding: 6px 13px; border-radius: 999px; }
+  .chip b { color: var(--green-bright); font-weight: 600; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 16px 0; }
+  @media (max-width: 900px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  .mini { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; text-align: left; }
+  .mini h4 { margin: 0 0 6px; font-size: 15px; color: var(--green-bright); }
+  .mini p { font-size: 14px; color: var(--dim); margin: 0; }
+  .mini.blue h4 { color: var(--blue); }
+  .mini.amber h4 { color: var(--amber); }
+
+  .note { border-left: 3px solid var(--green); background: var(--green-tint); padding: 13px 18px; border-radius: 0 10px 10px 0; margin: 16px 0; text-align: left; }
+  .note.blue { border-left-color: var(--blue); background: var(--blue-tint); }
+  .note.amber { border-left-color: var(--amber); background: var(--amber-tint); }
+  .note .t { font-weight: 700; display: block; margin-bottom: 4px; color: var(--green-bright); }
+  .note.blue .t { color: var(--blue); }
+  .note.amber .t { color: var(--amber); }
+
+  .code { position: relative; background: #0e1116; border: 1px solid var(--border); border-radius: 10px; margin: 14px 0; overflow: hidden; text-align: left; }
+  .code .bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+  .code .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .code .bar .name { margin-left: 6px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .code .bar .copy { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--dim); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+  .code .bar .copy:hover { color: var(--green-bright); border-color: var(--green); }
+  pre { margin: 0; padding: 15px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55; color: #d7dee6; }
+  pre .p { color: var(--green-bright); } pre .c { color: #6b7785; } pre .g { color: var(--green); }
+  pre .a { color: var(--amber); } pre .b { color: var(--blue); } pre .d { color: var(--dim); }
+
+  table.r { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px; }
+  table.r th, table.r td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.r th { color: var(--dim); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  table.r td code { font-family: var(--mono); font-size: 12.5px; }
+
+  svg.diagram { display: block; margin: 4px auto; width: auto; height: auto; max-width: min(980px, 90vw); max-height: 54vh; }
+  figure.fig { margin: 0; }
+  .fig figcaption { color: var(--dim); font-size: 13.5px; text-align: center; padding: 8px 0 0; }
+  .diagram text { font-family: var(--sans); fill: var(--text); }
+  .diagram .nlabel { font-weight: 650; font-size: 14px; }
+  .diagram .nsub { fill: var(--dim); font-size: 11.5px; }
+  .diagram .mono { font-family: var(--mono); }
+  .diagram .edge { stroke: #46525f; stroke-width: 1.7; fill: none; }
+  .diagram .edge-g { stroke: var(--green); stroke-width: 2; fill: none; }
+  .diagram .edge-b { stroke: var(--blue); stroke-width: 2; fill: none; }
+  .diagram .elabel { fill: var(--dim); font-size: 11px; }
+  .diagram .node { fill: var(--panel-2); stroke: var(--border); }
+  .diagram .node-g { fill: rgba(118,185,0,0.10); stroke: var(--green); }
+  .diagram .node-a { fill: rgba(227,160,8,0.10); stroke: var(--amber); }
+  .diagram .node-b { fill: rgba(103,183,220,0.10); stroke: var(--blue); }
+  .diagram .ttl-g { fill: var(--green-bright); }
+  .diagram .ttl-a { fill: var(--amber); }
+  .diagram .ttl-b { fill: var(--blue); }
+  .workflow-step { cursor: pointer; outline: none; }
+  .workflow-step rect { transition: stroke-width 0.16s ease, filter 0.16s ease; }
+  .workflow-step:hover rect, .workflow-step:focus-visible rect, .workflow-step.is-active rect {
+    stroke-width: 2.6;
+    filter: drop-shadow(0 0 7px rgba(118,185,0,0.34));
+  }
+  .workflow-summary {
+    min-height: 112px;
+    margin: 12px 0 14px;
+    padding: 16px 18px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    text-align: left;
+  }
+  .workflow-summary h3 {
+    margin: 0 0 6px;
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--green-bright);
+  }
+  .workflow-summary p {
+    margin: 0;
+    max-width: none;
+    color: #cdd6df;
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+
+<div class="deck-top">
+  <span class="brand">NVIDIA AICR<span class="sub">&nbsp;· AICR · Slinky Slurm · Demo</span></span>
+  <span class="sect" id="sect"></span>
+</div>
+
+<!-- 1 · TITLE -->
+<section class="slide center" data-title="">
+  <div class="slide-inner">
+    <div class="label">NVIDIA AI Cluster Runtime</div>
+    <h1>AICR · Slinky Slurm · Demo</h1>
+    <p class="lede">A compact walkthrough of the AICR flow: generate a recipe, render a bundle, deploy to a cluster, validate the Slurm stack.</p>
+    <div class="chips">
+      <span class="chip"><b>Recipe</b> criteria to overlay chain</span>
+      <span class="chip"><b>Bundle</b> deployable artifacts</span>
+      <span class="chip"><b>Deploy</b> ordered cluster install</span>
+      <span class="chip"><b>Validate</b> conformance proof</span>
+    </div>
+    <p class="hint" style="margin-top:30px">←  →  or  Space  to navigate  ·  F for fullscreen</p>
+  </div>
+</section>
+
+<!-- 2 · NORMAL WORKFLOW -->
+<section class="slide" data-title="Normal workflow">
+  <div class="slide-inner">
+    <div class="label">01 · Normal workflow</div>
+    <h2>AICR's usual shape starts with a snapshot</h2>
+    <figure class="fig">
+      <svg class="diagram" viewBox="0 0 940 160" role="img" aria-label="Normal AICR workflow from Snapshot to Recipe to Bundle to Deploy to Validate">
+        <defs>
+          <marker id="normalA" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#76b900"/></marker>
+        </defs>
+        <g class="workflow-step is-active" data-step="snapshot" tabindex="0" role="button" aria-label="Show Snapshot summary">
+          <rect class="node-b" x="20" y="50" width="160" height="86" rx="12"/>
+          <text class="nlabel ttl-b" x="100" y="80" text-anchor="middle">0. Snapshot</text>
+          <text class="nsub" x="100" y="100" text-anchor="middle">capture cluster</text>
+          <text class="nsub mono" x="100" y="120" text-anchor="middle">snapshot.yaml</text>
+        </g>
+        <g class="workflow-step" data-step="recipe" tabindex="0" role="button" aria-label="Show Recipe summary">
+          <rect class="node-g" x="210" y="50" width="160" height="86" rx="12"/>
+          <text class="nlabel ttl-g" x="290" y="80" text-anchor="middle">1. Recipe</text>
+          <text class="nsub" x="290" y="100" text-anchor="middle">choose plan</text>
+          <text class="nsub mono" x="290" y="120" text-anchor="middle">recipe.yaml</text>
+        </g>
+        <g class="workflow-step" data-step="bundle" tabindex="0" role="button" aria-label="Show Bundle summary">
+          <rect class="node" x="400" y="50" width="160" height="86" rx="12"/>
+          <text class="nlabel" x="480" y="80" text-anchor="middle">2. Bundle</text>
+          <text class="nsub" x="480" y="100" text-anchor="middle">render artifacts</text>
+          <text class="nsub mono" x="480" y="120" text-anchor="middle">bundle/</text>
+        </g>
+        <g class="workflow-step" data-step="deploy" tabindex="0" role="button" aria-label="Show Deploy summary">
+          <rect class="node" x="590" y="50" width="160" height="86" rx="12"/>
+          <text class="nlabel" x="670" y="80" text-anchor="middle">3. Deploy</text>
+          <text class="nsub" x="670" y="100" text-anchor="middle">install stack</text>
+          <text class="nsub mono" x="670" y="120" text-anchor="middle">deploy.sh</text>
+        </g>
+        <g class="workflow-step" data-step="validate" tabindex="0" role="button" aria-label="Show Validate summary">
+          <rect class="node-a" x="780" y="50" width="140" height="86" rx="12"/>
+          <text class="nlabel ttl-a" x="850" y="80" text-anchor="middle">4. Validate</text>
+          <text class="nsub" x="850" y="100" text-anchor="middle">prove result</text>
+          <text class="nsub mono" x="850" y="120" text-anchor="middle">report.json</text>
+        </g>
+        <line class="edge-g" x1="180" y1="93" x2="204" y2="93" marker-end="url(#normalA)"/>
+        <line class="edge-g" x1="370" y1="93" x2="394" y2="93" marker-end="url(#normalA)"/>
+        <line class="edge-g" x1="560" y1="93" x2="584" y2="93" marker-end="url(#normalA)"/>
+        <line class="edge-g" x1="750" y1="93" x2="774" y2="93" marker-end="url(#normalA)"/>
+      </svg>
+    </figure>
+    <div class="workflow-summary" aria-live="polite">
+      <h3 id="workflow-summary-title">Snapshot</h3>
+      <p id="workflow-summary-body">A point-in-time capture of the cluster. It records facts like Kubernetes version, OS, GPUs, labels, taints, topology, and runtime state.</p>
+    </div>
+    <div class="note blue">
+      <span class="t">Slurm nuance</span>
+      Today's Slinky Slurm leaves are generated from criteria flags, not from snapshot intake. Validation still captures or loads snapshot data for pre-flight checks before running Slurm health checks.
+    </div>
+  </div>
+</section>
+
+<!-- 3 · FLOW -->
+<section class="slide" data-title="Slinky flow">
+  <div class="slide-inner">
+    <div class="label">02 · End-to-end</div>
+    <h2>Slinky Slurm e2e flow</h2>
+    <figure class="fig">
+      <svg class="diagram" viewBox="0 0 920 390" role="img" aria-label="Slinky Slurm flow from Recipe to Bundle to Deploy to Validate">
+        <defs>
+          <marker id="flowA" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#76b900"/></marker>
+          <marker id="flowB" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#46525f"/></marker>
+        </defs>
+        <rect class="node-g" x="26" y="42" width="172" height="92" rx="12"/>
+        <text class="nlabel ttl-g" x="112" y="72" text-anchor="middle">1. Recipe</text>
+        <text class="nsub" x="112" y="94" text-anchor="middle">Query Mode</text>
+        <text class="nsub mono" x="112" y="114" text-anchor="middle">recipe.yaml</text>
+        <rect class="node" x="258" y="42" width="172" height="92" rx="12"/>
+        <text class="nlabel" x="344" y="72" text-anchor="middle">2. Bundle</text>
+        <text class="nsub" x="344" y="94" text-anchor="middle">scheduling values</text>
+        <text class="nsub mono" x="344" y="114" text-anchor="middle">bundle/</text>
+        <rect class="node-b" x="490" y="42" width="172" height="92" rx="12"/>
+        <text class="nlabel ttl-b" x="576" y="72" text-anchor="middle">3. Deploy</text>
+        <text class="nsub" x="576" y="94" text-anchor="middle">install stack</text>
+        <text class="nsub mono" x="576" y="114" text-anchor="middle">./deploy.sh</text>
+        <rect class="node-a" x="722" y="42" width="172" height="92" rx="12"/>
+        <text class="nlabel ttl-a" x="808" y="72" text-anchor="middle">4. Validate</text>
+        <text class="nsub" x="808" y="94" text-anchor="middle">deployment + conformance</text>
+        <text class="nsub mono" x="808" y="114" text-anchor="middle">report.json</text>
+        <line class="edge-g" x1="198" y1="88" x2="252" y2="88" marker-end="url(#flowA)"/>
+        <line class="edge-g" x1="430" y1="88" x2="484" y2="88" marker-end="url(#flowA)"/>
+        <line class="edge-g" x1="662" y1="88" x2="716" y2="88" marker-end="url(#flowA)"/>
+
+        <rect class="node" x="26" y="188" width="868" height="180" rx="12"/>
+        <text class="nlabel mono ttl-g" x="46" y="216">E2E expectation</text>
+        <text class="nsub" x="46" y="242">EKS + H100 + Ubuntu + training + Slinky Slurm</text>
+        <g class="mono nsub" font-size="12">
+          <text x="46" y="278">base → eks → eks-training → h100-eks-training → h100-eks-ubuntu-training → h100-eks-ubuntu-training-slurm</text>
+          <text x="46" y="304">Output: Slinky operator CRDs, Slinky operator, Slinky Slurm cluster chart, constraints, and deployment order</text>
+          <text x="46" y="330">Result: Slurm controller, login pod, rest API, and GPU-backed NodeSet ready</text>
+        </g>
+      </svg>
+    </figure>
+  </div>
+</section>
+
+<!-- 4 · RECIPE -->
+<section class="slide" data-title="Recipe">
+  <div class="slide-inner">
+    <div class="label">03 · Generate</div>
+    <h2>Recipe: criteria become a resolved plan</h2>
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">recipe</span><button class="copy">copy</button></div>
+<pre><span class="p">$</span> aicr recipe --service eks --accelerator h100 \
+    --intent training --os ubuntu --platform slurm \
+    --output recipe.yaml</pre>
+    </div>
+    <figure class="fig">
+      <svg class="diagram" viewBox="0 0 920 268" role="img" aria-label="Overlay chain from base to Slinky Slurm-specific leaf recipe">
+        <defs>
+          <marker id="recipeA" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#46525f"/></marker>
+        </defs>
+        <g transform="translate(18,38)">
+          <rect class="node" x="0" y="0" width="118" height="70" rx="10"/>
+          <text class="nlabel mono" x="59" y="31" text-anchor="middle">base</text>
+          <text class="nsub" x="59" y="51" text-anchor="middle">common stack</text>
+          <line class="edge" x1="118" y1="35" x2="150" y2="35" marker-end="url(#recipeA)"/>
+          <rect class="node" x="156" y="0" width="118" height="70" rx="10"/>
+          <text class="nlabel mono" x="215" y="31" text-anchor="middle">eks</text>
+          <text class="nsub" x="215" y="51" text-anchor="middle">AWS add-ons</text>
+          <line class="edge" x1="274" y1="35" x2="306" y2="35" marker-end="url(#recipeA)"/>
+          <rect class="node" x="312" y="0" width="136" height="70" rx="10"/>
+          <text class="nlabel mono" x="380" y="31" text-anchor="middle">eks-training</text>
+          <text class="nsub" x="380" y="51" text-anchor="middle">training defaults</text>
+          <line class="edge" x1="448" y1="35" x2="480" y2="35" marker-end="url(#recipeA)"/>
+          <rect class="node" x="486" y="0" width="150" height="70" rx="10"/>
+          <text class="nlabel mono" x="561" y="31" text-anchor="middle">h100-eks</text>
+          <text class="nsub" x="561" y="51" text-anchor="middle">GPU tuning</text>
+          <line class="edge" x1="636" y1="35" x2="668" y2="35" marker-end="url(#recipeA)"/>
+          <rect class="node" x="674" y="0" width="196" height="70" rx="10"/>
+          <text class="nlabel mono" x="772" y="31" text-anchor="middle">ubuntu + slurm</text>
+          <text class="nsub" x="772" y="51" text-anchor="middle">OS + platform leaf</text>
+        </g>
+        <rect class="node-g" x="110" y="158" width="700" height="72" rx="11"/>
+        <text class="nlabel ttl-g" x="460" y="186" text-anchor="middle">recipe.yaml</text>
+        <text class="nsub" x="460" y="208" text-anchor="middle">component refs + constraints + deployment order + validation checks</text>
+      </svg>
+    </figure>
+    <div class="note">
+      <span class="t">Presenter line</span>
+      Slurm leaves are generated from criteria flags today. The recipe resolves the Slinky CRDs, operator, cluster chart, GPU GRES settings, constraints, and install order.
+    </div>
+  </div>
+</section>
+
+<!-- 5 · SLURM LEAVES -->
+<section class="slide" data-title="Slurm leaves">
+  <div class="slide-inner">
+    <div class="label">04 · Choose</div>
+    <h2>Slurm leaves are selected with Query Mode</h2>
+    <div class="grid3">
+      <div class="mini">
+        <h4>EKS</h4>
+        <p><code class="inl">aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform slurm</code></p>
+        <p style="margin-top:10px">Leaf overlay: <strong>h100-eks-ubuntu-training-slurm</strong>.</p>
+      </div>
+      <div class="mini blue">
+        <h4>GKE</h4>
+        <p><code class="inl">aicr recipe --service gke --accelerator h100 --intent training --os cos --platform slurm</code></p>
+        <p style="margin-top:10px">Leaf overlay: <strong>h100-gke-cos-training-slurm</strong>.</p>
+      </div>
+      <div class="mini amber">
+        <h4>Kind</h4>
+        <p><code class="inl">aicr recipe --service kind --accelerator h100 --intent training --platform slurm</code></p>
+        <p style="margin-top:10px">CPU-only NodeSet path for smoke and CI-style checks.</p>
+      </div>
+    </div>
+    <div class="note">
+      <span class="t">Shared Slinky shape</span>
+      Cloud H100 leaves bake in <code class="inl">Gres=gpu:h100:8</code> and matching <code class="inl">nvidia.com/gpu: 8</code> slurmd limits so <code class="inl">srun --gres=gpu:N</code> works after deploy.
+    </div>
+  </div>
+</section>
+
+<!-- 6 · BUNDLE -->
+<section class="slide" data-title="Bundle">
+  <div class="slide-inner">
+    <div class="label">05 · Render</div>
+    <h2>Bundle: deployment artifacts from the recipe</h2>
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">bundle</span><button class="copy">copy</button></div>
+<pre><span class="p">$</span> aicr bundle --recipe recipe.yaml \
+    --accelerated-node-selector nodeGroup=gpu-worker \
+    --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+    --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+    --system-node-selector nodeGroup=system-worker \
+    --system-node-toleration dedicated=system-workload:NoSchedule \
+    --system-node-toleration dedicated=system-workload:NoExecute \
+    --storage-class &lt;storage-class&gt; \
+    --set slinkyslurm:nodesets.slinky.replicas=1 \
+    --output bundle</pre>
+    </div>
+    <div class="grid3">
+      <div class="mini"><h4>System placement</h4><p>cert-manager, monitoring, and the Slinky operator land on the system pool.</p></div>
+      <div class="mini"><h4>Accelerated placement</h4><p><code class="inl">nodesets.slinky</code> lands on GPU workers with matching selectors and tolerations.</p></div>
+      <div class="mini"><h4>Slurm overrides</h4><p><code class="inl">slinkyslurm</code> and <code class="inl">slurmcluster</code> target the cluster chart values.</p></div>
+    </div>
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">bundle layout</span><button class="copy">copy</button></div>
+<pre>bundle/
+  deploy.sh
+  cert-manager/
+  prometheus-operator-crds/
+  kube-prometheus-stack/
+  prometheus-adapter/
+  k8s-ephemeral-storage-metrics/
+  gpu-operator/
+  nvidia-dra-driver-gpu/
+  nvsentinel/
+  nodewright-operator/
+  nodewright-customizations/
+  aws-ebs-csi-driver/
+  aws-efa/
+  slinky-slurm-operator-crds/
+  slinky-slurm-operator/
+  slinky-slurm/</pre>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · NODE PLACEMENT -->
+<section class="slide" data-title="Node placement">
+  <div class="slide-inner">
+    <div class="label">06 · Cluster shape</div>
+    <h2>Three-pool bundle: Slurm control plane on CPU workers</h2>
+    <table class="r">
+      <thead><tr><th>Role</th><th>Instance</th><th>Label</th><th>Taint</th></tr></thead>
+      <tbody>
+        <tr><td>GPU worker</td><td>p5.48xlarge</td><td><code>nodeGroup=gpu-worker</code></td><td><code>dedicated=worker-workload:NoSchedule</code><br><code>dedicated=worker-workload:NoExecute</code></td></tr>
+        <tr><td>System</td><td>m4.16xlarge</td><td><code>nodeGroup=system-worker</code></td><td><code>dedicated=system-workload:NoSchedule</code><br><code>dedicated=system-workload:NoExecute</code></td></tr>
+        <tr><td>CPU worker</td><td>m4.16xlarge</td><td><code>nodeGroup=cpu-worker</code></td><td><code>dedicated=worker-workload:NoSchedule</code><br><code>dedicated=worker-workload:NoExecute</code></td></tr>
+      </tbody>
+    </table>
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">bundle · cpu-worker Slurm control plane</span><button class="copy">copy</button></div>
+<pre><span class="p">$</span> WORKER_TOLS='[{"key":"dedicated","operator":"Equal","value":"worker-workload","effect":"NoSchedule"},{"key":"dedicated","operator":"Equal","value":"worker-workload","effect":"NoExecute"}]'
+
+<span class="p">$</span> aicr bundle \
+  --recipe recipe.yaml \
+  --deployer helm \
+  --system-node-selector nodeGroup=system-worker \
+  --system-node-toleration dedicated=system-workload:NoSchedule \
+  --system-node-toleration dedicated=system-workload:NoExecute \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --set awsebscsidriver:enabled=false \
+  --set nodewright:enabled=false \
+  --set nodewrightcustomizations:enabled=false \
+  --set-json "slinkyslurm:controller.podSpec={\"nodeSelector\":{\"nodeGroup\":\"cpu-worker\"},\"tolerations\":${WORKER_TOLS}}" \
+  --set-json "slinkyslurm:restapi.podSpec={\"nodeSelector\":{\"nodeGroup\":\"cpu-worker\"},\"tolerations\":${WORKER_TOLS}}" \
+  --set-json "slinkyslurm:loginsets.slinky.podSpec={\"nodeSelector\":{\"nodeGroup\":\"cpu-worker\"},\"tolerations\":${WORKER_TOLS}}" \
+  --output ./bundles</pre>
+    </div>
+  </div>
+</section>
+
+<!-- 8 · NODE PLACEMENT WITHOUT CPU WORKER -->
+<section class="slide" data-title="Node placement">
+  <div class="slide-inner">
+    <div class="label">07 · Cluster shape</div>
+    <h2>Two-pool bundle: Slurm control plane on GPU workers</h2>
+    <table class="r">
+      <thead><tr><th>Role</th><th>Instance</th><th>Label</th><th>Taint</th></tr></thead>
+      <tbody>
+        <tr><td>GPU worker</td><td>p5.48xlarge</td><td><code>nodeGroup=gpu-worker</code></td><td><code>dedicated=worker-workload:NoSchedule</code><br><code>dedicated=worker-workload:NoExecute</code></td></tr>
+        <tr><td>System</td><td>m4.16xlarge</td><td><code>nodeGroup=system-worker</code></td><td><code>dedicated=system-workload:NoSchedule</code><br><code>dedicated=system-workload:NoExecute</code></td></tr>
+      </tbody>
+    </table>
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">bundle · gpu-worker Slurm control plane</span><button class="copy">copy</button></div>
+<pre><span class="p">$</span> WORKER_TOLS='[{"key":"dedicated","operator":"Equal","value":"worker-workload","effect":"NoSchedule"},{"key":"dedicated","operator":"Equal","value":"worker-workload","effect":"NoExecute"}]'
+
+<span class="p">$</span> aicr bundle \
+  --recipe recipe.yaml \
+  --deployer helm \
+  --system-node-selector nodeGroup=system-worker \
+  --system-node-toleration dedicated=system-workload:NoSchedule \
+  --system-node-toleration dedicated=system-workload:NoExecute \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --set-json "slinkyslurm:controller.podSpec={\"nodeSelector\":{\"nodeGroup\":\"gpu-worker\"},\"tolerations\":${WORKER_TOLS}}" \
+  --set-json "slinkyslurm:restapi.podSpec={\"nodeSelector\":{\"nodeGroup\":\"gpu-worker\"},\"tolerations\":${WORKER_TOLS}}" \
+  --set-json "slinkyslurm:loginsets.slinky.podSpec={\"nodeSelector\":{\"nodeGroup\":\"gpu-worker\"},\"tolerations\":${WORKER_TOLS}}" \
+  --output ./bundles</pre>
+    </div>
+    <div class="note blue">
+      <span class="t">Two-pool shape</span>
+      Without a CPU-worker pool, the Slurm controller, REST API, and login pod are pinned to GPU workers with the same worker tolerations.
+    </div>
+  </div>
+</section>
+
+<!-- 9 · DEPLOY -->
+<section class="slide" data-title="Deploy">
+  <div class="slide-inner">
+    <div class="label">08 · Apply</div>
+    <h2>Deploy: install in dependency order</h2>
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">deploy</span><button class="copy">copy</button></div>
+<pre><span class="p">$</span> cd bundle
+<span class="p">$</span> ./deploy.sh</pre>
+    </div>
+    <figure class="fig">
+      <svg class="diagram" viewBox="0 0 920 292" role="img" aria-label="Deployment order from platform foundations to Slinky Slurm">
+        <defs>
+          <marker id="deployA" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#76b900"/></marker>
+        </defs>
+        <rect class="node" x="24" y="46" width="170" height="70" rx="10"/>
+        <text class="nlabel" x="109" y="74" text-anchor="middle">Foundations</text>
+        <text class="nsub" x="109" y="94" text-anchor="middle">certs + monitoring</text>
+        <rect class="node" x="254" y="46" width="170" height="70" rx="10"/>
+        <text class="nlabel" x="339" y="74" text-anchor="middle">Slurm API</text>
+        <text class="nsub" x="339" y="94" text-anchor="middle">CRDs + operator</text>
+        <rect class="node" x="484" y="46" width="170" height="70" rx="10"/>
+        <text class="nlabel" x="569" y="74" text-anchor="middle">Cluster chart</text>
+        <text class="nsub" x="569" y="94" text-anchor="middle">controller + login</text>
+        <rect class="node-g" x="714" y="46" width="182" height="70" rx="10"/>
+        <text class="nlabel ttl-g" x="805" y="74" text-anchor="middle">NodeSet</text>
+        <text class="nsub" x="805" y="94" text-anchor="middle">slurmd workers</text>
+        <line class="edge-g" x1="194" y1="81" x2="248" y2="81" marker-end="url(#deployA)"/>
+        <line class="edge-g" x1="424" y1="81" x2="478" y2="81" marker-end="url(#deployA)"/>
+        <line class="edge-g" x1="654" y1="81" x2="708" y2="81" marker-end="url(#deployA)"/>
+        <rect class="node-b" x="82" y="172" width="756" height="76" rx="11"/>
+        <text class="nlabel ttl-b" x="460" y="200" text-anchor="middle">Slinky-managed Slurm cluster</text>
+        <text class="nsub" x="460" y="222" text-anchor="middle">controller · login pod · restapi · GPU NodeSet · Gres=gpu:h100:8 · nvidia.com/gpu limits</text>
+      </svg>
+    </figure>
+    <div class="note blue">
+      <span class="t">What AICR contributes</span>
+      Deploy order for the Slurm path is explicit: cert-manager, then Slinky CRDs, then the Slinky operator, then the Slinky Slurm cluster chart.
+    </div>
+  </div>
+</section>
+
+<!-- 10 · VALIDATE -->
+<section class="slide" data-title="Validate">
+  <div class="slide-inner">
+    <div class="label">09 · Prove</div>
+    <h2>Validate: deployment and Slurm conformance</h2>
+    <div class="code">
+      <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">validate</span><button class="copy">copy</button></div>
+<pre><span class="p">$</span> aicr validate --recipe recipe.yaml \
+    --node-selector nodeGroup=system-worker \
+    --toleration dedicated=system-workload:NoSchedule \
+    --toleration dedicated=system-workload:NoExecute \
+    --phase deployment --phase conformance</pre>
+    </div>
+    <div class="grid3">
+      <div class="mini"><h4>Deployment phase</h4><p>Chainsaw component health: CRDs, Deployments, DaemonSets, and Slinky Slurm readiness.</p></div>
+      <div class="mini"><h4>Conformance phase</h4><p><code class="inl">slinky-slurm-health</code> runs from the login pod and checks Slurm behavior.</p></div>
+      <div class="mini amber"><h4>Performance phase</h4><p>Not supported yet for Slurm leaves; a Kubernetes Pod benchmark would bypass <code class="inl">slurmd</code>.</p></div>
+      <div class="mini"><h4>scontrol ping</h4><p>Confirms the controller path responds.</p></div>
+      <div class="mini"><h4>Node state gate</h4><p>Checks idle or mixed nodes before submitting work.</p></div>
+      <div class="mini"><h4>Bounded srun</h4><p>Runs <code class="inl">srun --immediate=5 --time=0:03 hostname</code>.</p></div>
+    </div>
+    <div class="note amber">
+      <span class="t">Takeaway</span>
+      Deployment says the resources are installed. Conformance says Slinky can actually drive Slurm from the login pod.
+    </div>
+  </div>
+</section>
+
+<div class="deck-bottom">
+  <button class="navbtn" id="prev" aria-label="Previous slide">‹</button>
+  <div class="meter">
+    <span id="counter">1 / 10</span>
+    <span class="hint">←  →  ·  Space  ·  F fullscreen</span>
+  </div>
+  <button class="navbtn" id="next" aria-label="Next slide">›</button>
+</div>
+<div class="progress"><i id="pfill"></i></div>
+
+<script>
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var counter = document.getElementById('counter');
+  var pfill = document.getElementById('pfill');
+  var sect = document.getElementById('sect');
+  var i = 0;
+
+  function clamp(n) { return Math.max(0, Math.min(slides.length - 1, n)); }
+  function show(n) {
+    i = clamp(n);
+    slides.forEach(function (s, k) { s.classList.toggle('active', k === i); });
+    counter.textContent = (i + 1) + ' / ' + slides.length;
+    pfill.style.width = ((i + 1) / slides.length * 100) + '%';
+    sect.textContent = slides[i].getAttribute('data-title') || '';
+    var h = '#' + (i + 1);
+    if (location.hash !== h) history.replaceState(null, '', h);
+    slides[i].querySelector('.slide-inner').scrollTop = 0;
+  }
+  function next() { show(i + 1); }
+  function prev() { show(i - 1); }
+
+  document.getElementById('next').addEventListener('click', next);
+  document.getElementById('prev').addEventListener('click', prev);
+
+  document.addEventListener('keydown', function (e) {
+    var target = e.target;
+    if (target && ((target.closest && target.closest('button, [role="button"], a, input, textarea, select')) || target.isContentEditable)) {
+      return;
+    }
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown' || e.key === 'n') { e.preventDefault(); next(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'p') { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') { e.preventDefault(); show(0); }
+    else if (e.key === 'End') { e.preventDefault(); show(slides.length - 1); }
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) { (document.documentElement.requestFullscreen || function () {}).call(document.documentElement); }
+      else { (document.exitFullscreen || function () {}).call(document); }
+    }
+  });
+
+  document.querySelectorAll('.code .copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = btn.closest('.code').querySelector('pre');
+      var prev = btn.textContent;
+      function setCopyState(text) {
+        btn.textContent = text;
+        setTimeout(function () { btn.textContent = prev; }, 1200);
+      }
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        setCopyState('copy unavailable');
+        return;
+      }
+      navigator.clipboard.writeText(pre.innerText).then(function () {
+        setCopyState('copied');
+      }).catch(function () {
+        setCopyState('copy unavailable');
+      });
+    });
+  });
+
+  var workflowSummaries = {
+    snapshot: {
+      title: 'Snapshot',
+      body: 'A point-in-time capture of the cluster. It records facts like Kubernetes version, OS, GPUs, labels, taints, topology, and runtime state.'
+    },
+    recipe: {
+      title: 'Recipe',
+      body: 'The desired plan. AICR turns criteria or snapshot facts into a resolved configuration: components, constraints, values, validation checks, and deployment order.'
+    },
+    bundle: {
+      title: 'Bundle',
+      body: 'The deployable package generated from the recipe. It contains Helm values, manifests, deploy scripts, and optional evidence or attestation files.'
+    },
+    deploy: {
+      title: 'Deploy',
+      body: 'The install step. AICR applies the bundle in dependency order so CRDs, operators, and workload charts land on the target cluster.'
+    },
+    validate: {
+      title: 'Validate',
+      body: 'The proof step. AICR checks the recipe against snapshot facts and runs cluster checks to confirm the deployed stack is healthy and usable.'
+    }
+  };
+
+  function selectWorkflowStep(step) {
+    var data = workflowSummaries[step];
+    if (!data) return;
+    document.querySelectorAll('.workflow-step').forEach(function (el) {
+      el.classList.toggle('is-active', el.getAttribute('data-step') === step);
+    });
+    document.getElementById('workflow-summary-title').textContent = data.title;
+    document.getElementById('workflow-summary-body').textContent = data.body;
+  }
+
+  document.querySelectorAll('.workflow-step').forEach(function (el) {
+    el.addEventListener('click', function () {
+      selectWorkflowStep(el.getAttribute('data-step'));
+    });
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectWorkflowStep(el.getAttribute('data-step'));
+      }
+    });
+  });
+
+  var start = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(start) ? 0 : start - 1);
+  window.addEventListener('hashchange', function () {
+    var n = parseInt((location.hash || '').slice(1), 10);
+    if (!isNaN(n) && n - 1 !== i) show(n - 1);
+  });
+</script>
+</body>
+</html>

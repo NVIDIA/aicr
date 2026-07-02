@@ -38,6 +38,7 @@ func main() {
 		"robust-controller":         CheckRobustController,
 		"secure-accelerator-access": CheckSecureAcceleratorAccess,
 		"slinky-slurm-health":       CheckSlinkySlurmHealth,
+		"slinky-slurm-imex-channel": CheckSlinkySlurmIMEXChannel,
 		"gpu-operator-health":       CheckGPUOperatorHealth,
 		"platform-health":           CheckPlatformHealth,
 	})

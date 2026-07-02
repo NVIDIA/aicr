@@ -215,6 +215,13 @@ validators:
     timeout: 5m
     args: ["slinky-slurm-health"]
     env: []
+  - name: slinky-slurm-imex-channel
+    phase: conformance
+    description: "Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["slinky-slurm-imex-channel"]
+    env: []
   - name: gpu-operator-health
     phase: conformance
     description: "Verify GPU operator health (conformance diagnostic)"
