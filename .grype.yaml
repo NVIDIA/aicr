@@ -34,3 +34,29 @@ exclude:
 # suppressed CVEs are all in Python / glibc / libcap2 / ncurses /
 # pillow and never surface against Go source.
 # Reviewed: 2026-06-01
+
+# Go-source suppressions (accepted risk, not "not affected").
+#
+# Unlike the aiperf-bench image CVEs above, these Go-module findings are
+# REACHABLE in AICR source and are suppressed only because no fixed
+# release exists upstream yet. Each entry MUST record the reachable path,
+# the no-fix status, the target fixed version, and a review date. Drop the
+# entry the moment a fixed version is vendored — do not let it linger.
+ignore:
+  # GHSA-fxhp-mv3v-67qp (CVE-2026-50163) — oras-go tar extraction: a
+  # hardlink entry with a relative Linkname escapes the extract dir via
+  # process-CWD resolution. REACHABLE: `aicr evidence verify` pulls an OCI
+  # bundle via oras.Copy into a file.Store that unpacks the gzip-tar layer
+  # to disk (pkg/evidence/verifier/fetch.go). Exploiting it requires an
+  # operator to verify a hostile/attacker-crafted bundle (CVSS UI:R).
+  # No fixed v2 release exists: latest tag is v2.6.1 (affected); the fix
+  # (b11f777) is only on the v3 module line (github.com/oras-project/oras-go/v3),
+  # which itself has only a v3.0.0-dev pre-release. Advisory declares the
+  # v2 patch as v2.7.0 but it is not yet tagged.
+  # ACTION: bump oras.land/oras-go/v2 to v2.7.0 and delete this entry.
+  # Review: 2026-08-01
+  - vulnerability: GHSA-fxhp-mv3v-67qp
+    reason: >-
+      Reachable but no fixed v2 release exists yet; fix is v3-only
+      (unstable v3.0.0-dev). Track upstream v2.7.0 tag, then bump and
+      remove. See CVE-2026-50163.
