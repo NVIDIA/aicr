@@ -41,6 +41,23 @@
 #   test-config-dir     directory holding the per-cloud AICRConfig test
 #                       files (the ./tests/uat/<cloud>/run phase runner roots
 #                       one level up, at the cluster-config)
+#   nightly-intents     (optional) the recipe intents the NIGHTLY version-matrix
+#                       batch (#1274, DC1) runs on this reservation, as a YAML
+#                       list — [training], [inference], or [training,
+#                       inference]. Empty/absent defaults to [training] (the
+#                       pre-DC3 behavior). DC3 (#1276) sets it to [training,
+#                       inference] on BOTH reservations so training and inference
+#                       both run nightly on both clouds. The batch runs the
+#                       intents SEQUENTIALLY within each version cell, through
+#                       the same per-reservation lease (intent inner-loop,
+#                       version outer-loop) — no second cron, no contention, and
+#                       `main` lands both intents before any release cell. Each
+#                       (version × intent) is a full provision→CUJ→teardown cell,
+#                       so listing both intents roughly doubles a reservation's
+#                       nightly cell count; the batch time-box drops the oldest
+#                       cells first if the budget is exceeded (tune previous_n /
+#                       deadline_offset_hours). Entries must be recognized and
+#                       unique. Not one-per-cloud (unlike daytime-intent).
 #   daytime-intent      (optional) opts this reservation into the daytime
 #                       human-access rotation (#1281, DC8) and picks the
 #                       flavor stood up during the working day: training |
@@ -59,6 +76,7 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
+    nightly-intents: [training, inference]
     daytime-intent: training
   - name: gcp-h100
     cloud: gcp
@@ -67,4 +85,5 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/gcp/cluster-config.yaml
     test-config-dir: tests/uat/gcp/tests
+    nightly-intents: [training, inference]
     daytime-intent: inference

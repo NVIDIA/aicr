@@ -27,8 +27,16 @@ uat-broker reservations --name aws-h100 >> "$GITHUB_OUTPUT"
 # gpu-count=8
 # cluster-config-path=tests/uat/aws/cluster-config.yaml
 # test-config-dir=tests/uat/aws/tests
+# nightly-intents=training,inference
 # daytime-intent=training
 ```
+
+`nightly-intents` is the comma-separated list of intents the nightly batch runs
+on this reservation (#1276, DC3); it is emitted **resolved** (an un-annotated
+reservation reports the `training` default rather than an empty value). The
+launch set is `training,inference` on both reservations, so both CUJs run
+nightly on both clouds — the controller splits on comma and dispatches one
+serialized cell per intent per version.
 
 List every reservation name (one per line):
 
