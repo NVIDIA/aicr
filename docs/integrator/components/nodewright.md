@@ -57,15 +57,17 @@ Uses a set of bash scripts to do the necessary actions to bring an ubuntu worker
 
 Package: [nvidia-setup](https://github.com/NVIDIA/nodewright-packages/blob/main/nvidia-setup)
 
-See the [Tuning status](#tuning) table below for the current service + accelerator coverage. Each service must be added explicitly; the documentation for the addition is in the readme for how to make this update.
+See the [Tuning status](#tuning-and-setup) table below for the current service + accelerator coverage. Each service must be added explicitly; the documentation for the addition is in the readme for how to make this update.
 
 The [version overview](https://github.com/NVIDIA/nodewright-packages/blob/main/nvidia-setup/VERSION_OVERVIEW.md) has all of the information about what each version for a service + accelerator pair will install or configure.
 
 # Manifests
 
-## Tuning
+## Tuning and Setup
 
-Includes the setup and optimizations for a specific service, accelerator and intent. Note that while it does have if statements around the service and intent, the inclusion of nvidia-setup (which requires service) means these are not optional today and would need to be split out to properly support that.
+Tuning are typically alterations to sysctl, kernel boot parameters and service drop ins to make the system better optimized for AI workloads.
+
+Setup generally is any configuration needed to make AI workloads work in that service that is not already provided by that service. In EKS for example this is kernel and EFA installation. For BCM it is symlinks to support gpu operator.
 
 The table below is generated from the recipes by `make tuning-docs` — **do not edit it by hand**. **Setup** and **Tuning** are the pinned nodewright package versions applied for each service + accelerator. **Profile** is the tuning profile accelerator when it differs from the selected accelerator (for example, `h200` and `a100` nodes use the `h100` profile), and `–` when identical. In the **Setup** and **Tuning** columns, `–` means no such package is applied for that service + accelerator. `*` means the recipe pins no value for that dimension.
 
@@ -85,9 +87,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 
 {/* END AICR-TUNING */}
 
-To support non-service-specific tuning (for example, h100 + inference), the nvidia-tuned package would need to be separated out, or nvidia-setup updated to support additional services or make fewer assumptions about what it is installing — it is currently opinionated towards EKS.
-
-See [recipes/components/nodewright-customizations/manifests/tuning.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests/tuning.yaml)
+See [recipes/components/nodewright-customizations/manifests](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests) for the specifics on packages and their configuration.
 
 ## Tuning-gke
 
