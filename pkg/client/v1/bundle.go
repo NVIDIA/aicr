@@ -94,10 +94,11 @@ type BundleOptions struct {
 // takes an already-decoded RecipeResult and binds the same provider.
 //
 // Synchronization mirrors LoadRecipe: snapshot the per-Client provider under
-// the read lock so a concurrent Close can't race the read. Unlike the
-// resolve/load paths it does not register in the inflight WaitGroup — it does
-// no cache-using work itself (the subsequent MakeBundle call does, and
-// registers there).
+// the read lock and register in the inflight WaitGroup so Close drains before
+// evicting the cache. PrepareAndValidate reads the component registry (to
+// back-fill missing types), so — unlike before #1584 — this path does do
+// cache-using work of its own and must register, not only rely on the
+// subsequent MakeBundle call.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, ctx, or recipe is nil, or when
@@ -113,13 +114,21 @@ func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "nil RecipeResult")
 	}
 
+	// Snapshot the provider and register as an in-flight cache user under the
+	// read lock: PrepareAndValidate below reads the component registry (to
+	// back-fill missing types), so Close must drain this before evicting the
+	// cache — otherwise a concurrent Close could evict, this call repopulate,
+	// and we would return a result owned by a closed Client. Same protocol as
+	// the resolve/load paths.
 	c.mu.RLock()
 	if c.builder == nil {
 		c.mu.RUnlock()
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
 	}
 	dp := c.dp
+	c.inflight.Add(1)
 	c.mu.RUnlock()
+	defer c.inflight.Done()
 
 	// Deep-copy the caller-supplied recipe BEFORE binding the provider.
 	// BindDataProvider mutates the receiver's unexported provider field, and
@@ -130,6 +139,19 @@ func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 	// is untouched.
 	cp := rec.DeepCopy()
 	cp.BindDataProvider(dp)
+
+	// An adopted RecipeResult is decoded from an external source (e.g. the
+	// POST /v1/bundle body) and never passes through the resolver, so
+	// canonicalize its component types and validate coherence here — otherwise
+	// an incoherent ref (e.g. Helm + Kustomize tag/path) would deploy as a
+	// different type than declared and mismatch the attestation BOM, and a
+	// lowercase type would deploy inconsistently downstream. PrepareAndValidate
+	// back-fills missing types from the registry first (this boundary does not
+	// run ApplyRegistryDefaults) so a type-less registry ref — valid before
+	// #1584 — still resolves rather than being rejected. See issue #1584.
+	if err := cp.PrepareAndValidate(); err != nil {
+		return nil, err
+	}
 
 	result, err := loadedResultFromInternal(cp)
 	if err != nil {

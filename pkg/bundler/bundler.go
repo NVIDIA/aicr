@@ -219,6 +219,21 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			"recipe must contain at least one component reference")
 	}
 
+	// Reject incoherent component refs (e.g. a Helm ref that also carries a
+	// Kustomize tag/path, which the deployers silently build as Kustomize)
+	// before generating anything. DefaultBundler.Make is a public entry point
+	// (docs/integrator/public-api.md) reachable without the CLI/server
+	// validation boundaries, so it must apply the same coherence gate. Validate
+	// a provider-preserving defensive copy — a struct copy keeps the bound
+	// provider, and a fresh ComponentRefs slice keeps type back-fill/
+	// canonicalization from mutating the caller's RecipeResult. See #1584.
+	validated := *recipeResult
+	validated.ComponentRefs = append([]recipe.ComponentRef(nil), recipeResult.ComponentRefs...)
+	if err := validated.PrepareAndValidate(); err != nil {
+		return nil, err
+	}
+	recipeResult = &validated
+
 	enabledRefs, filteredOrder, filterErr := b.filterEnabledComponents(recipeResult)
 	if filterErr != nil {
 		return nil, filterErr

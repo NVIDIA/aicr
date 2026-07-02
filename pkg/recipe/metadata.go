@@ -217,6 +217,183 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 	// DataProvider is available. See issue #1219.
 }
 
+// coherenceProblem reports why a resolved ComponentRef's deployment-shape
+// fields are internally inconsistent, or "" if the ref is coherent. The rules
+// mirror what the deployers enforce so an incoherent ref is rejected at
+// resolution rather than silently deploying as a different type (or producing
+// a signed attestation whose metadata does not match what deploys):
+//
+//   - the deployers do not trust the declared Type — Helm/Helmfile/ArgoCD drop
+//     it, and localformat classifies any ref carrying a Tag or Path as
+//     Kustomize (see pkg/bundler/deployer/localformat classify/write) — so a
+//     Helm ref must not carry Kustomize fields;
+//   - a Kustomize ref needs a Path to build from; and
+//   - a Tag is only meaningful with a Source (git repo / OCI ref).
+//
+// Keep these in lockstep with the localformat rules.
+func (ref *ComponentRef) coherenceProblem() string {
+	hasTag, hasPath := ref.Tag != "", ref.Path != ""
+	// Match the type case-insensitively: the resolver emits the canonical
+	// ComponentType ("Helm"/"Kustomize"), but the REST wire format and
+	// hand-authored recipes may use lowercase (see the /v1/bundle OpenAPI
+	// example), and the deployers classify by tag/path rather than by this
+	// field — so "helm" and "Helm" must be treated the same here.
+	switch {
+	case strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)):
+		if hasTag || hasPath {
+			return fmt.Sprintf("component %q is Helm but carries Kustomize field(s) (tag=%q, path=%q); "+
+				"the deployers classify any ref with a tag or path as Kustomize, so it would deploy as a "+
+				"different type than declared", ref.Name, ref.Tag, ref.Path)
+		}
+	case strings.EqualFold(string(ref.Type), string(ComponentTypeKustomize)):
+		if !hasPath {
+			return fmt.Sprintf("component %q is Kustomize but has no path; a path is required to build from", ref.Name)
+		}
+		if hasTag && ref.Source == "" {
+			return fmt.Sprintf("component %q is Kustomize with tag %q but no source; a tag is only "+
+				"meaningful with a git source", ref.Name, ref.Tag)
+		}
+		// A Kustomize ref wraps a single primary source; the deployers reject a
+		// ref that also carries post-manifests (ManifestFiles). PreManifestFiles
+		// are pre-injected separately and remain supported.
+		if len(ref.ManifestFiles) > 0 {
+			return fmt.Sprintf("component %q is Kustomize but also declares manifestFiles; a component may "+
+				"declare either Kustomize (tag/path) or raw manifest files, not both", ref.Name)
+		}
+	default:
+		// After ApplyRegistryDefaults every registry-backed ref has a supported
+		// Type; an empty or unknown Type here means an externally-supplied ref
+		// the registry did not populate. The deployers classify by tag/path, not
+		// by this field, so an unsupported Type would deploy ambiguously — fail
+		// closed rather than silently accept it.
+		return fmt.Sprintf("component %q has unsupported type %q; expected %q or %q",
+			ref.Name, ref.Type, ComponentTypeHelm, ComponentTypeKustomize)
+	}
+	return ""
+}
+
+// canonicalizeComponentTypes normalizes each ref's case-insensitively-matched
+// Type to the canonical ComponentType constant ("helm" -> "Helm"), so registry
+// defaulting (which switches on the exact constant) and the deployers (Flux
+// rejects a lowercase "helm", ArgoCD-Helm mis-handles a lowercase "kustomize")
+// all see a consistent value. Unknown types are left unchanged for the
+// coherence check to reject. Call this at every boundary that produces a
+// RecipeResult, before defaulting and before returning the result.
+func canonicalizeComponentTypes(refs []ComponentRef) {
+	for i := range refs {
+		switch {
+		case strings.EqualFold(string(refs[i].Type), string(ComponentTypeHelm)):
+			refs[i].Type = ComponentTypeHelm
+		case strings.EqualFold(string(refs[i].Type), string(ComponentTypeKustomize)):
+			refs[i].Type = ComponentTypeKustomize
+		}
+	}
+}
+
+// backfillComponentTypes sets ref.Type from the registry component's type for
+// each ENABLED ref that has no explicit type, using this result's bound
+// DataProvider's registry. It mirrors what ApplyRegistryDefaults does on the
+// resolve path, so a hand-authored or hydrated recipe that omits `type` —
+// valid before #1584, since the deployers derive the type from the ref's
+// fields — is not rejected by ValidateCoherence. It is the first step of
+// PrepareAndValidate (the load and adopt boundaries do not run
+// ApplyRegistryDefaults). Disabled refs are ignored (they are excluded from the
+// bundle and skipped by ValidateCoherence, so a disabled type-less stub must
+// not trigger a registry load), and the registry is not consulted at all when
+// no enabled ref needs a type. Non-registry components are left untouched
+// (their empty type still fails closed).
+func (r *RecipeResult) backfillComponentTypes() error {
+	if r == nil {
+		return nil
+	}
+	// Only touch the registry if an ENABLED ref actually needs a type. This
+	// avoids a spurious registry load (and its potential error) for the common
+	// case where every ref already declares a type — and, critically, for a
+	// disabled legacy stub with an empty type: ValidateCoherence skips disabled
+	// refs, so back-filling one must not be able to fail the whole recipe on a
+	// registry error when no enabled ref needs it.
+	needsBackfill := false
+	for i := range r.ComponentRefs {
+		if r.ComponentRefs[i].Type == "" && r.ComponentRefs[i].IsEnabled() {
+			needsBackfill = true
+			break
+		}
+	}
+	if !needsBackfill {
+		return nil
+	}
+	// A type-less ref needs the registry to resolve its type; propagate a
+	// load/parse/timeout failure as-is rather than swallowing it and letting
+	// ValidateCoherence report a misleading, non-retryable "unsupported type".
+	registry, err := GetComponentRegistryFor(r.provider)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry to back-fill component types")
+	}
+	for i := range r.ComponentRefs {
+		if r.ComponentRefs[i].Type != "" || !r.ComponentRefs[i].IsEnabled() {
+			continue
+		}
+		if cfg := registry.Get(r.ComponentRefs[i].Name); cfg != nil {
+			r.ComponentRefs[i].Type = cfg.GetType()
+		}
+	}
+	return nil
+}
+
+// PrepareAndValidate normalizes a RecipeResult's component refs and rejects
+// incoherent ones, in the required order: back-fill missing types on enabled
+// refs from the registry, canonicalize the type casing, then validate
+// coherence (which itself only inspects enabled refs). Boundaries
+// that produce a RecipeResult WITHOUT running ApplyRegistryDefaults — file load
+// (LoadFromFileWithProvider) and external adoption (client adoptRecipe) — call
+// this single method so the three steps cannot drift or be partially applied
+// (e.g. validating before canonicalizing would reject legitimate lowercase
+// types; skipping the back-fill would reject type-less registry refs). The
+// resolve path (finalizeRecipeResult) instead back-fills via ApplyRegistryDefaults
+// and canonicalizes before defaulting, so it calls ValidateCoherence directly.
+func (r *RecipeResult) PrepareAndValidate() error {
+	if r == nil {
+		return nil
+	}
+	if err := r.backfillComponentTypes(); err != nil {
+		return err
+	}
+	canonicalizeComponentTypes(r.ComponentRefs)
+	return r.ValidateCoherence()
+}
+
+// ValidateCoherence rejects enabled ComponentRefs whose deployment-shape fields
+// are internally inconsistent (see coherenceProblem), aggregating every
+// offender into one ErrCodeInvalidRequest so the author sees all problems at
+// once. Disabled refs are skipped: they are excluded from the bundle, so their
+// shape never reaches a deployer.
+//
+// It is invoked at every boundary that produces a RecipeResult — criteria
+// resolution (finalizeRecipeResult), file load (LoadFromFileWithProvider), and
+// external adoption (client adoptRecipe / POST /v1/bundle) — so an incoherent
+// ref cannot slip in via a hand-authored or decoded hydrated recipe.
+func (r *RecipeResult) ValidateCoherence() error {
+	if r == nil {
+		return nil
+	}
+	var problems []string
+	for i := range r.ComponentRefs {
+		if !r.ComponentRefs[i].IsEnabled() {
+			continue
+		}
+		if p := r.ComponentRefs[i].coherenceProblem(); p != "" {
+			problems = append(problems, p)
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return errors.New(errors.ErrCodeInvalidRequest,
+		"recipe has incoherent component ref(s): "+strings.Join(problems, "; "))
+}
+
 // ExpectedResource represents a Kubernetes resource that should exist after deployment.
 type ExpectedResource struct {
 	// Kind is the resource kind (e.g., "Deployment", "DaemonSet").

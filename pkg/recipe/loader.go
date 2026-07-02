@@ -106,5 +106,16 @@ func LoadFromFileWithProvider(ctx context.Context, path, kubeconfig, version str
 				inputAPIVersion, header.GroupVersion))
 	}
 
+	// Back-fill missing types from the registry (this boundary does not run
+	// ApplyRegistryDefaults), canonicalize case, then reject incoherent refs. A
+	// hydrated RecipeResult read from disk bypasses finalizeRecipeResult, so
+	// without this a hand-authored recipe with e.g. a Helm ref carrying a
+	// Kustomize tag/path would reach the bundler/attestation unchecked, and a
+	// lowercase type would deploy inconsistently — while a type-less registry
+	// ref (valid before #1584) must still resolve, not be rejected. See #1584.
+	if err := rec.PrepareAndValidate(); err != nil {
+		return nil, err
+	}
+
 	return rec, nil
 }

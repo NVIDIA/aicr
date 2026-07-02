@@ -492,6 +492,7 @@ criteria:
   os: any
 componentRefs:
   - name: gpu-operator
+    type: Helm
     version: vXX.Y.Z          # illustrative; see Component Catalog for current pins
     source: https://helm.ngc.nvidia.com/nvidia
 deploymentOrder:
