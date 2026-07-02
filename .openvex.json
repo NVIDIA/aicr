@@ -3,8 +3,8 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-06-15T00:00:00Z",
-  "version": 4,
+  "timestamp": "2026-07-02T00:00:00Z",
+  "version": 5,
   "tooling": "manual; aiperf-bench statements verified against aiperf v0.7.0 source; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); aicr-gate statements suppress CVEs in the embedded upstream kyverno/chainsaw binary (affected packages identified via vuln.go.dev), justified by chainsaw's ephemeral cluster-internal readiness-gate usage",
   "statements": [
     {
@@ -968,6 +968,74 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.4, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain and older golang.org/x/{crypto,net}; kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. chainsaw acts only as an HTTP/2 client of the trusted in-cluster API server; triggering this requires a hostile server or hostname, which the gate's usage does not present."
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5037",
+        "description": "chainsaw (embedded kyverno binary): inefficient candidate hostname parsing in crypto/x509 (GO-2026-5037 / CVE-2026-27145)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-gate",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-gate"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.4, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain (go 1.26.0; crypto/x509 fixed in 1.26.4); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected crypto/x509 candidate-hostname parsing runs only during TLS certificate verification of the in-cluster API server, whose hostname (the operator-configured endpoint) and presented certificate are trusted inputs. An adversary cannot supply the crafted hostname or certificate needed to trigger the inefficient-parsing slowdown, so the code is reachable but its inputs are not attacker-controlled."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-27145",
+        "description": "chainsaw (embedded kyverno binary): inefficient candidate hostname parsing in crypto/x509 (GO-2026-5037 / CVE-2026-27145)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-gate",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-gate"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.4, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) was built with an older Go toolchain (go 1.26.0; crypto/x509 fixed in 1.26.4); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected crypto/x509 candidate-hostname parsing runs only during TLS certificate verification of the in-cluster API server, whose hostname (the operator-configured endpoint) and presented certificate are trusted inputs. An adversary cannot supply the crafted hostname or certificate needed to trigger the inefficient-parsing slowdown, so the code is reachable but its inputs are not attacker-controlled."
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5015",
+        "description": "chainsaw (embedded kyverno binary): server panic during CheckHostKey/Authenticate in golang.org/x/crypto/ssh (CVE-2026-39835)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-gate",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-gate"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.4, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) bundles golang.org/x/crypto v0.49.0 (fixed in v0.52.0); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected code path is server-side golang.org/x/crypto/ssh handshake handling (CheckHostKey/Authenticate). chainsaw operates no SSH server and never invokes golang.org/x/crypto/ssh; the panic is reachable only by an SSH server processing a malicious client, which the gate's readiness-check workload does not present."
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-5014",
+        "description": "chainsaw (embedded kyverno binary): bypass of certificate restrictions in golang.org/x/crypto/ssh (CVE-2026-39828)."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-gate",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-gate"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The aicr-gate image embeds the upstream, cosign-attested kyverno/chainsaw binary (/usr/local/bin/chainsaw, CHAINSAW_VERSION in .settings.yaml) alongside the AICR gate binary; see cmd/gate/Dockerfile. The vulnerable code is present ONLY in that embedded chainsaw binary -- the AICR gate binary is clean (built with Go 1.26.4, golang.org/x/crypto v0.53.0, golang.org/x/net v0.56.0). chainsaw v0.2.15 (the latest release) bundles golang.org/x/crypto v0.49.0 (fixed in v0.52.0); kyverno has not yet shipped a rebuilt release. Within AICR, chainsaw runs exclusively as an ephemeral, cluster-internal readiness-gate Job: the bundler launches it to `chainsaw test` recipe-authored assertions, talking only to the trusted in-cluster Kubernetes API server. It exposes no network listener, accepts no untrusted ingress, and processes only operator-authored manifests and trusted API-server responses. The affected code path is golang.org/x/crypto/ssh certificate-restriction enforcement. chainsaw performs no SSH authentication and never invokes golang.org/x/crypto/ssh; with no SSH server or client in the gate's readiness-check workload, the restriction-bypass is not reachable."
     }
   ]
 }
