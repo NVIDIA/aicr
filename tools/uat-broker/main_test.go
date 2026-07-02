@@ -37,6 +37,7 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
+    nightly-intents: [training, inference]
     daytime-intent: training
   - name: gcp-h100
     cloud: gcp
@@ -45,6 +46,7 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/gcp/cluster-config.yaml
     test-config-dir: tests/uat/gcp/tests
+    nightly-intents: [training, inference]
     daytime-intent: inference
 `
 
@@ -76,10 +78,38 @@ func TestReservationsResolve(t *testing.T) {
 		"gpu-count=8",
 		"cluster-config-path=tests/uat/aws/cluster-config.yaml",
 		"test-config-dir=tests/uat/aws/tests",
+		"nightly-intents=training,inference",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q\ngot:\n%s", want, stdout)
 		}
+	}
+}
+
+// TestReservationsResolveNightlyIntentsDefaults verifies the resolved output
+// reports the training default when a row omits nightly-intents, so the nightly
+// batch's intent loop is never handed an empty list.
+func TestReservationsResolveNightlyIntentsDefaults(t *testing.T) {
+	const reg = `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`
+	p := filepath.Join(t.TempDir(), "reservations.yaml")
+	if err := os.WriteFile(p, []byte(reg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := invoke("", "reservations", "--file", p, "--name", "aws-h100")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "nightly-intents=training") {
+		t.Errorf("stdout missing resolved default nightly-intents=training\ngot:\n%s", stdout)
 	}
 }
 

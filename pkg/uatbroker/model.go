@@ -48,6 +48,17 @@ type Reservation struct {
 	GPUCount          int    `yaml:"gpu-count"`
 	ClusterConfigPath string `yaml:"cluster-config-path"`
 	TestConfigDir     string `yaml:"test-config-dir"`
+	// NightlyIntents lists the recipe intents the nightly version-matrix batch
+	// (#1274, DC1) runs on this reservation, each a full CUJ per version cell:
+	// "training", "inference", or both. Empty defaults to ["training"] (the
+	// pre-DC3 behavior) — see NightlyIntentsOrDefault. DC3 (#1276) sets it to
+	// [training, inference] on every reservation so both CUJs run nightly on
+	// both clouds; the batch dispatches them SEQUENTIALLY through the shared
+	// per-reservation lease (intent inner-loop, version outer-loop), so there is
+	// never contention and `main` lands both intents before any release cell.
+	// Entries must be recognized intents and unique (a duplicate would
+	// double-run the same cell).
+	NightlyIntents []string `yaml:"nightly-intents"`
 	// DaytimeIntent opts this reservation into the daytime human-access
 	// rotation (#1281, DC8) and picks the flavor stood up on it during the
 	// working day: "training" or "inference". Empty means the reservation is
@@ -55,6 +66,20 @@ type Reservation struct {
 	// configurable cloud→flavor default — data, not code — so the split
 	// (AWS=training, GCP=inference at launch) can change without a workflow edit.
 	DaytimeIntent string `yaml:"daytime-intent"`
+}
+
+// NightlyIntentsOrDefault returns the reservation's nightly-batch intents,
+// defaulting an empty list to [IntentTraining] — the pre-DC3 behavior, so an
+// un-annotated reservation keeps running only the training CUJ nightly. Validate
+// guarantees any listed value is a recognized, non-duplicate intent. The
+// returned slice is a fresh copy the caller may mutate freely.
+func (r *Reservation) NightlyIntentsOrDefault() []string {
+	if len(r.NightlyIntents) == 0 {
+		return []string{IntentTraining}
+	}
+	out := make([]string, len(r.NightlyIntents))
+	copy(out, r.NightlyIntents)
+	return out
 }
 
 // DaytimeAssignment is one reservation's slot in the daytime human-access

@@ -100,6 +100,25 @@ func (r *Registry) Validate() error {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("reservation %s has a non-positive gpu-count (%d)", res.Name, res.GPUCount))
 		}
+		// nightly-intents is optional (empty defaults to [training]), but every
+		// listed value must be a recognized intent — a typo would otherwise
+		// dispatch a nonexistent per-intent config in the nightly batch — and
+		// must be unique, since a duplicate would double-run the same cell. There
+		// is no one-per-cloud limit (unlike daytime-intent): every reservation
+		// runs the nightly batch, and each may run any subset of the intents.
+		seenIntent := make(map[string]bool, len(res.NightlyIntents))
+		for _, intent := range res.NightlyIntents {
+			if !validIntents[intent] {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("reservation %s has unknown nightly-intent %q (want %s or %s)",
+						res.Name, intent, IntentTraining, IntentInference))
+			}
+			if seenIntent[intent] {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("reservation %s lists duplicate nightly-intent %q", res.Name, intent))
+			}
+			seenIntent[intent] = true
+		}
 		// daytime-intent is optional (empty = not in the daytime rotation), but
 		// when set it must be a recognized intent — a typo would otherwise
 		// silently drop the reservation from the daytime rotation or dispatch a

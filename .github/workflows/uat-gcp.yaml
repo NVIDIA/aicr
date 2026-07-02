@@ -71,8 +71,10 @@ jobs:
     runs-on: ubuntu-latest
     # Covers the uncapped non-UAT steps (build, validator image push, GKE
     # provisioning, evidence upload) + the UAT phase steps (prep 15 + install 45
-    # + validate 40 + train 25 + verify 5 = 130) + the always()-run Destroy
-    # Cluster teardown. The teardown MUST fit in this budget: a job-level timeout
+    # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
+    # = up to 145) + the always()-run Destroy Cluster teardown. Only one of
+    # train/serve runs per intent, so the budget counts the larger (serve).
+    # The teardown MUST fit in this budget: a job-level timeout
     # cancels pending always() steps, so an undersized cap would skip teardown
     # and leak the GPU node.
     timeout-minutes: 180
@@ -107,6 +109,16 @@ jobs:
       GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:latest"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
+      # Pin validator-image resolution for MAIN cells to this run's freshly
+      # built+pushed validators (the `Build and push validator images` step
+      # tags them `:uat-<run_id>`), mirroring how AICR_IMAGE pins the agent — so
+      # the validators pair with the binary under test rather than a stale
+      # :latest. The main binary is stamped version=main (below), which the
+      # catalog would otherwise leave on the :latest path. Empty for release
+      # cells (aicr_version set): they use the released :<version> validators the
+      # released binary self-resolves, and an empty AICR_VALIDATOR_IMAGE_TAG is
+      # a no-op (the catalog ignores an empty override).
+      AICR_VALIDATOR_IMAGE_TAG: ${{ inputs.aicr_version == '' && format('uat-{0}', github.run_id) || '' }}
 
     steps:
       # Checkout
@@ -165,9 +177,34 @@ jobs:
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GOFLAGS: -mod=vendor
+          # github.sha via env (never inline ${{ }} in a shell run — expression
+          # injection). It is a 40-hex commit, so no real risk, but env is the
+          # repo norm and keeps zizmor/CodeRabbit quiet.
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          go build -o ./aicr ./cmd/aicr
-          ./aicr --version
+          set -euo pipefail
+          # Stamp the main-cell binary's version metadata via ldflags (mirroring
+          # goreleaser's pkg/cli.{version,commit,date} targets) so the emitted
+          # recipe/evidence report "main" + the commit instead of the un-stamped
+          # "dev"/"unknown" defaults. version="main" is deliberately NOT a
+          # release-shaped string, so it does not trip the catalog's
+          # :latest→:<version> validator-image rewrite; validator resolution is
+          # pinned explicitly below (AICR_VALIDATOR_IMAGE_TAG). Release cells
+          # install a goreleaser-built binary already stamped with its tag, so
+          # this step is main-only.
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build \
+            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -o ./aicr ./cmd/aicr
+          # Assert the stamp actually landed — a broken ldflags target path would
+          # otherwise silently leave the binary on the default dev/unknown
+          # metadata (which then propagates to the evidence/TestGrid version).
+          VER_OUT="$(./aicr --version)"
+          echo "${VER_OUT}"
+          if ! printf '%s' "${VER_OUT}" | grep -qF "main (commit: ${COMMIT_SHA}"; then
+            echo "::error::aicr binary not stamped (want 'main (commit: ${COMMIT_SHA}…'); got: ${VER_OUT}" >&2
+            exit 1
+          fi
 
       # Release cell (aicr_version set): install the RELEASED aicr binary at that
       # version instead of building. The released binary self-resolves its own
@@ -393,10 +430,11 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run conformance "${TEST_CONFIG}"
 
-      # The TrainJob CUJ is training-intent-specific. For intent=inference the
-      # served-workload CUJ (phase_serve) is owned by DC3 and out of scope here,
-      # so the train step is skipped; verify/evidence still cover the deployed
-      # inference stack.
+      # The CUJ phase is intent-selected, mirroring the runner's intent-aware
+      # `all`: training runs the Kubeflow TrainJob; inference runs the served
+      # DynamoGraphDeployment (phase_serve, DC3) — deploy, wait for readiness,
+      # hit the OpenAI-compatible endpoint, assert a completion. Exactly one
+      # fires per run; verify/evidence cover the deployed stack either way.
       - name: UAT - train (TrainJob)
         id: train
         if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
@@ -406,6 +444,19 @@ jobs:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run train "${TEST_CONFIG}"
+
+      - name: UAT - serve (DynamoGraphDeployment + endpoint)
+        id: serve
+        if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
+        # Larger budget than train: a cold pull of the multi-GB vllm-runtime
+        # image + model download + engine warmup precedes the first served
+        # token (phase_serve's SERVE_READY_TIMEOUT_SECONDS is 30m).
+        timeout-minutes: 40
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/gcp/run serve "${TEST_CONFIG}"
 
       - name: UAT - verify (evidence verify)
         id: verify
@@ -465,6 +516,7 @@ jobs:
             evidence-result.json
             evidence/pointer.yaml
             train-logs/**
+            serve-logs/**
           retention-days: 30
           if-no-files-found: ignore
 
@@ -497,6 +549,7 @@ jobs:
             echo "| Install | ${{ steps.install.outcome }} |"
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
+            echo "| Serve | ${{ steps.serve.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""

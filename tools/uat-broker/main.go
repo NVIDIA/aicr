@@ -188,6 +188,11 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(&b, "gpu-count=%d\n", res.GPUCount)
 		fmt.Fprintf(&b, "cluster-config-path=%s\n", res.ClusterConfigPath)
 		fmt.Fprintf(&b, "test-config-dir=%s\n", res.TestConfigDir)
+		// The nightly batch's intents for this reservation, comma-joined and
+		// resolved (not raw) so an un-annotated reservation reports the training
+		// default rather than an empty value the caller must re-default. The
+		// nightly controller splits on comma and dispatches one cell per intent.
+		fmt.Fprintf(&b, "nightly-intents=%s\n", strings.Join(res.NightlyIntentsOrDefault(), ","))
 		// Empty when the reservation is not in the daytime rotation; callers
 		// that don't consume this key simply ignore the line.
 		fmt.Fprintf(&b, "daytime-intent=%s\n", res.DaytimeIntent)

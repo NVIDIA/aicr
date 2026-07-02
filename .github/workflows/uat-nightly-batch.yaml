@@ -154,6 +154,21 @@ jobs:
           POLL_INTERVAL_SECONDS=5
           go build -o ./bin/uat-broker ./tools/uat-broker
 
+          # Nightly intents for this reservation (#1276, DC3). The batch runs
+          # EACH listed intent (training and/or inference) as its own full CUJ
+          # cell per version, dispatched SEQUENTIALLY through the shared
+          # per-reservation lease — so both intents run nightly with no
+          # contention and no second cron. The broker resolves an empty list to
+          # the training default, so this is always non-empty; fail closed if it
+          # somehow is not (a broker/registry regression).
+          NIGHTLY_INTENTS_CSV=$(./bin/uat-broker reservations --name "$RESERVATION" | sed -n 's/^nightly-intents=//p')
+          if [[ -z "$NIGHTLY_INTENTS_CSV" ]]; then
+            echo "::error::could not resolve nightly-intents for ${RESERVATION}" >&2
+            exit 1
+          fi
+          IFS=',' read -r -a intents <<< "$NIGHTLY_INTENTS_CSV"
+          echo "Nightly intents for ${RESERVATION}: ${intents[*]}"
+
           # Validate previous_n before the broker consumes it. `--previous-n` is
           # an int flag so it rejects non-integers, but it would accept a
           # negative and mis-shape the schedule; reject non-integer or negative
@@ -185,75 +200,85 @@ jobs:
           deadline=$(( BATCH_START + DEADLINE_OFFSET_HOURS * 3600 ))
           cell=0
           leg_failed=""
+          # Version outer-loop, intent inner-loop: `main` runs every intent
+          # before any release cell, so a time-box drop always sheds the OLDEST
+          # release cells first — never main's inference. Each (version × intent)
+          # is a full provision→CUJ→teardown dispatched through the shared lease,
+          # so the intents serialize automatically (no contention).
           for ver in "${versions[@]}"; do
-            if (( $(date +%s) >= deadline )); then
-              echo "::notice::Time-box reached — dropping remaining cells for ${RESERVATION} (oldest release first)."
-              break
-            fi
-            cell=$((cell + 1))
-            label="${ver:-main}"
-            # Unique per-dispatch key (controller run id + attempt + reservation
-            # + cell index) so the resolver below watches THIS run and never a
-            # concurrent manual dispatch of the same reservation/version.
-            dispatch_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RESERVATION}-${cell}"
-            title="UAT ${RESERVATION} @ ${label} #${dispatch_key}"
-            echo "::group::${title}"
+            for intent in "${intents[@]}"; do
+              if (( $(date +%s) >= deadline )); then
+                echo "::notice::Time-box reached — dropping remaining cells for ${RESERVATION} (oldest release first)."
+                break 2
+              fi
+              cell=$((cell + 1))
+              label="${ver:-main}"
+              # Unique per-dispatch key (controller run id + attempt + reservation
+              # + cell index) so the resolver below watches THIS run and never a
+              # concurrent manual dispatch of the same reservation/version. The
+              # cell index increments per (version × intent), so the two intents
+              # of one version get distinct keys and distinct run titles.
+              dispatch_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RESERVATION}-${cell}"
+              title="UAT ${RESERVATION} @ ${label} #${dispatch_key}"
+              echo "::group::${title} [intent=${intent}]"
 
-            gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \
-              -f reservation="$RESERVATION" -f aicr_version="$ver" \
-              -f dispatch_key="$dispatch_key"
+              gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \
+                -f reservation="$RESERVATION" -f aicr_version="$ver" \
+                -f intent="$intent" \
+                -f dispatch_key="$dispatch_key"
 
-            # Resolve the dispatched run by its run-name — this title MUST match
-            # uat-run.yaml's `run-name:` (which appends the same dispatch_key).
-            # dispatch_key makes the title globally unique, so an exact title
-            # match is unambiguous; no createdAt filter (a runner clock running
-            # ahead of GitHub's API clock would falsely reject this dispatch).
-            run_id=""
-            for _ in $(seq 1 "$POLL_MAX_ATTEMPTS"); do
-              sleep "$POLL_INTERVAL_SECONDS"
-              run_id=$(gh run list --repo "$REPO" --workflow uat-run.yaml \
-                --event workflow_dispatch --limit 50 \
-                --json databaseId,displayTitle,createdAt 2>/dev/null \
-                | jq -r --arg t "$title" \
-                    'map(select(.displayTitle == $t))
-                     | sort_by(.createdAt) | .[-1].databaseId // empty' || true)
-              [[ -n "$run_id" ]] && break
-            done
-            if [[ -z "$run_id" ]]; then
-              # Fail the leg rather than continue: an unwatched run can still
-              # hold the reservation's pending slot and let a later (lower-
-              # priority) cell supersede it, breaking version ordering.
-              echo "::error::Dispatched ${title} but could not resolve its run id; stopping this reservation leg to preserve version ordering."
+              # Resolve the dispatched run by its run-name — this title MUST match
+              # uat-run.yaml's `run-name:` (which appends the same dispatch_key).
+              # dispatch_key makes the title globally unique, so an exact title
+              # match is unambiguous; no createdAt filter (a runner clock running
+              # ahead of GitHub's API clock would falsely reject this dispatch).
+              run_id=""
+              for _ in $(seq 1 "$POLL_MAX_ATTEMPTS"); do
+                sleep "$POLL_INTERVAL_SECONDS"
+                run_id=$(gh run list --repo "$REPO" --workflow uat-run.yaml \
+                  --event workflow_dispatch --limit 50 \
+                  --json databaseId,displayTitle,createdAt 2>/dev/null \
+                  | jq -r --arg t "$title" \
+                      'map(select(.displayTitle == $t))
+                       | sort_by(.createdAt) | .[-1].databaseId // empty' || true)
+                [[ -n "$run_id" ]] && break
+              done
+              if [[ -z "$run_id" ]]; then
+                # Fail the leg rather than continue: an unwatched run can still
+                # hold the reservation's pending slot and let a later (lower-
+                # priority) cell supersede it, breaking version ordering.
+                echo "::error::Dispatched ${title} but could not resolve its run id; stopping this reservation leg to preserve version ordering."
+                echo "::endgroup::"
+                exit 1
+              fi
+
+              echo "Waiting on run ${run_id} ..."
+              # --exit-status is intentionally not fatal here; classify the run's
+              # conclusion below so we can distinguish a benign superseded run from
+              # a real failure without aborting mid-loop.
+              # Output is discarded: in a non-TTY log `gh run watch` APPENDS a full
+              # status render every refresh (no in-place redraw), which flooded the
+              # drive log with tens of thousands of duplicate lines per multi-hour
+              # cell. We only need it to BLOCK until the run finishes; the
+              # conclusion is read from `gh run view` below, so the live render is
+              # redundant. --interval 60 keeps the polling gentle on the API.
+              gh run watch "$run_id" --repo "$REPO" --interval 60 --exit-status >/dev/null 2>&1 || true
+
+              conclusion=$(gh run view "$run_id" --repo "$REPO" --json conclusion --jq '.conclusion' 2>/dev/null || echo "")
+              njobs=$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs" --jq '.total_count' 2>/dev/null || echo "")
+              if [[ "$conclusion" == "cancelled" && "$njobs" == "0" ]]; then
+                # Benign: the single-slot reservation lease dropped a pending run.
+                # Surface it (must not be silent) but do not fail the leg — the
+                # superseded-run observer complements this (DC1 superseded surfacing).
+                echo "::warning::${title} [intent=${intent}] was superseded while pending (dropped by the reservation lease); re-dispatch when the reservation frees."
+              elif [[ "$conclusion" != "success" ]]; then
+                # Real cell failure/timeout — record it so the leg (and thus the
+                # nightly batch) fails, but keep testing the remaining cells.
+                echo "::error::${title} [intent=${intent}] finished with conclusion '${conclusion:-unknown}'."
+                leg_failed=1
+              fi
               echo "::endgroup::"
-              exit 1
-            fi
-
-            echo "Waiting on run ${run_id} ..."
-            # --exit-status is intentionally not fatal here; classify the run's
-            # conclusion below so we can distinguish a benign superseded run from
-            # a real failure without aborting mid-loop.
-            # Output is discarded: in a non-TTY log `gh run watch` APPENDS a full
-            # status render every refresh (no in-place redraw), which flooded the
-            # drive log with tens of thousands of duplicate lines per multi-hour
-            # cell. We only need it to BLOCK until the run finishes; the
-            # conclusion is read from `gh run view` below, so the live render is
-            # redundant. --interval 60 keeps the polling gentle on the API.
-            gh run watch "$run_id" --repo "$REPO" --interval 60 --exit-status >/dev/null 2>&1 || true
-
-            conclusion=$(gh run view "$run_id" --repo "$REPO" --json conclusion --jq '.conclusion' 2>/dev/null || echo "")
-            njobs=$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs" --jq '.total_count' 2>/dev/null || echo "")
-            if [[ "$conclusion" == "cancelled" && "$njobs" == "0" ]]; then
-              # Benign: the single-slot reservation lease dropped a pending run.
-              # Surface it (must not be silent) but do not fail the leg — the
-              # superseded-run observer complements this (DC1 superseded surfacing).
-              echo "::warning::${title} was superseded while pending (dropped by the reservation lease); re-dispatch when the reservation frees."
-            elif [[ "$conclusion" != "success" ]]; then
-              # Real cell failure/timeout — record it so the leg (and thus the
-              # nightly batch) fails, but keep testing the remaining versions.
-              echo "::error::${title} finished with conclusion '${conclusion:-unknown}'."
-              leg_failed=1
-            fi
-            echo "::endgroup::"
+            done
           done
 
           if [[ -n "$leg_failed" ]]; then

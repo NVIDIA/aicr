@@ -18,6 +18,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -184,6 +185,67 @@ reservations:
     cluster-config-path: c.yaml
     test-config-dir: t
     daytime-intent: serving
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// Empty/absent nightly-intents is valid — it defaults to [training].
+			name: "empty nightly-intents ok",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+		},
+		{
+			name: "valid nightly-intents both",
+			yaml: `
+reservations:
+  - name: gcp-h100
+    cloud: gcp
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents: [training, inference]
+`,
+		},
+		{
+			name: "unknown nightly-intent in list",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents: [training, serving]
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// A duplicate would double-run the same cell — reject it.
+			name: "duplicate nightly-intent in list",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents: [training, training]
 `,
 			wantErr: true,
 			code:    errors.ErrCodeInvalidRequest,
@@ -431,5 +493,56 @@ func TestCommittedRegistryValid(t *testing.T) {
 		if n > 1 {
 			t.Errorf("cloud %q has %d daytime reservations, want at most 1 (both flavors per cloud is out of scope at launch)", cloud, n)
 		}
+	}
+
+	// The launch nightly intents (#1276, DC3): BOTH training and inference run
+	// nightly on BOTH reservations, serialized through the shared lease. A
+	// future change to the per-reservation intent set changes this deliberately.
+	wantNightly := map[string][]string{
+		"aws-h100": {IntentTraining, IntentInference},
+		"gcp-h100": {IntentTraining, IntentInference},
+	}
+	for name, want := range wantNightly {
+		res, lookupErr := reg.Lookup(name)
+		if lookupErr != nil {
+			t.Errorf("committed registry missing %q: %v", name, lookupErr)
+			continue
+		}
+		got := res.NightlyIntentsOrDefault()
+		if !slices.Equal(got, want) {
+			t.Errorf("committed registry nightly-intents[%q] = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestNightlyIntentsOrDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		set  []string
+		want []string
+	}{
+		{"empty defaults to training", nil, []string{IntentTraining}},
+		{"explicit training only", []string{IntentTraining}, []string{IntentTraining}},
+		{"both intents", []string{IntentTraining, IntentInference}, []string{IntentTraining, IntentInference}},
+		{"inference only", []string{IntentInference}, []string{IntentInference}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := Reservation{NightlyIntents: tt.set}
+			if got := r.NightlyIntentsOrDefault(); !slices.Equal(got, tt.want) {
+				t.Errorf("NightlyIntentsOrDefault() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNightlyIntentsOrDefaultCopies verifies the returned slice is a copy —
+// mutating it must not corrupt the registry's backing array.
+func TestNightlyIntentsOrDefaultCopies(t *testing.T) {
+	r := Reservation{NightlyIntents: []string{IntentTraining, IntentInference}}
+	got := r.NightlyIntentsOrDefault()
+	got[0] = "mutated"
+	if r.NightlyIntents[0] != IntentTraining {
+		t.Errorf("mutating the returned slice corrupted the reservation: %v", r.NightlyIntents)
 	}
 }
