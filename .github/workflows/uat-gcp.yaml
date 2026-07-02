@@ -25,13 +25,21 @@ on:
   workflow_call:
     inputs:
       reservation:
-        description: 'Reservation name (lease key) this run targets; used for labeling.'
+        description: 'Reservation name (lease key) this run targets; used for labeling and the daytime cluster name.'
         type: string
         required: true
       aicr_version:
         description: 'Released aicr version to install (e.g. v1.2.3); empty = build from source (main tip).'
         type: string
         default: ''
+      intent:
+        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml).'
+        type: string
+        default: training
+      lifecycle:
+        description: 'nightly (provision→CUJ→teardown) | daytime-up (provision+deploy+HOLD) | daytime-down (tear down the held daytime cluster).'
+        type: string
+        default: nightly
       cluster_config_path:
         description: 'Cluster-config the GKE actuator provisions from (from infra/uat/reservations.yaml).'
         type: string
@@ -82,10 +90,20 @@ jobs:
       GCP_REGION: "us-central1"
       GCP_WIF_PROVIDER: "projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
       GCP_WIF_SERVICE_ACCOUNT: "github-actions@eidosx.iam.gserviceaccount.com"
-      DEPLOYMENT_ID: "aicr-${{ github.run_id }}"
+      # Cluster name (GKE actuator derives it from .deployment.id). The nightly
+      # per-run lifecycle uses a run-scoped name for per-run isolation; the
+      # daytime lifecycles use a STABLE, reservation-tagged name so the evening
+      # teardown (daytime-down) and the nightly pre-batch guard can find the
+      # held cluster. Reservation names are lowercase alnum+hyphen, so the
+      # derived name is a valid GKE cluster name.
+      DEPLOYMENT_ID: >-
+        ${{ (inputs.lifecycle == 'daytime-up' || inputs.lifecycle == 'daytime-down')
+        && format('aicr-day-{0}', inputs.reservation)
+        || format('aicr-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
-      # Training is the DC1 launch intent; DC2 selects the file by intent.
-      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-training-config.yaml
+      # DC2 selects the AICRConfig by intent; both intents drive the same
+      # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
       GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:latest"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
@@ -96,6 +114,30 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
+
+      # Fail closed on an unrecognized intent/lifecycle before any provisioning:
+      # workflow_dispatch constrains these to a choice, but workflow_call passes
+      # free strings, so a caller typo must surface as a clear error rather than
+      # a missing-file failure deep in a phase. Also assert the per-intent config
+      # exists so a missing sibling config fails here, not mid-run.
+      - name: Validate inputs
+        env:
+          INTENT: ${{ inputs.intent }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+        run: |
+          set -euo pipefail
+          case "${INTENT}" in
+            training|inference) ;;
+            *) echo "::error::unknown intent '${INTENT}' (want training|inference)"; exit 1 ;;
+          esac
+          case "${LIFECYCLE}" in
+            nightly|daytime-up|daytime-down) ;;
+            *) echo "::error::unknown lifecycle '${LIFECYCLE}' (want nightly|daytime-up|daytime-down)"; exit 1 ;;
+          esac
+          if [[ ! -f "${TEST_CONFIG}" ]]; then
+            echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
+          fi
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID}"
 
       # Versions
       - name: Load versions
@@ -117,9 +159,10 @@ jobs:
 
       # Main cell (aicr_version empty): build the aicr binary from the
       # checked-out source (tip). Release cells install the released binary
-      # instead (next step).
+      # instead (next step). daytime-down tears down the held cluster only — it
+      # builds nothing and pushes no images.
       - name: Build aicr binary
-        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GOFLAGS: -mod=vendor
         run: |
@@ -132,7 +175,7 @@ jobs:
       # :<version>) and the snapshot-agent via ghcr.io/nvidia/aicr:<version> — so
       # the validator/agent build+push steps below are skipped for release cells.
       - name: Install released aicr
-        if: inputs.aicr_version != '' && inputs.skip_tests != true
+        if: inputs.aicr_version != '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         uses: ./.github/actions/install-aicr-release
         with:
           aicr-version: ${{ inputs.aicr_version }}
@@ -143,7 +186,7 @@ jobs:
       # Main cell only: release cells use the released validator images the
       # released binary self-resolves to (skipped when aicr_version is set).
       - name: Build and push validator images
-        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         run: |
           GO_VERSION="$(cat .go-version)"
           # CHAINSAW_* args dropped in #1236 — the deployment validator
@@ -167,6 +210,49 @@ jobs:
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
+
+      # GCP capacity posture (#1275, DC2). Unlike AWS, GCP has NO pre-flight
+      # capacity/quota assertion here — the decision (recorded in
+      # docs/contributor/uat.md) is to rely on the GKE actuator failing at
+      # provision time if the reservation is exhausted, rather than adding a
+      # symmetric gcloud reservation check. The reservation lease (uat-run.yaml)
+      # already serializes contending runs, so a provision-time failure means a
+      # genuinely undersized/exhausted reservation, not a race. There is
+      # intentionally no capacity step below.
+
+      # Pre-batch guard (#1275, DC2). The nightly lifecycle refuses to provision
+      # into a reservation that still holds an un-torn-down daytime cluster: a
+      # missed evening teardown must surface as a BLOCKED batch, not as silent
+      # contention. Detect by the stable daytime cluster name
+      # (aicr-day-<reservation>); we already hold the reservation lease
+      # (uat-run.yaml) and are authenticated, so this runs before Bringup and
+      # fails fast rather than racing. Only the nightly lifecycle guards —
+      # daytime-up creates that cluster, daytime-down removes it.
+      - name: Pre-batch guard — refuse if a daytime cluster still holds the reservation
+        id: guard
+        if: inputs.lifecycle == 'nightly'
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+        run: |
+          set -euo pipefail
+          DAYTIME_NAME="aicr-day-${RESERVATION}"
+          set +e
+          OUT=$(gcloud container clusters describe "${DAYTIME_NAME}" \
+            --region "${GCP_REGION}" --project "${GCP_PROJECT_ID}" 2>&1)
+          RC=$?
+          set -e
+          if [[ ${RC} -eq 0 ]]; then
+            echo "::error::daytime cluster ${DAYTIME_NAME} still holds reservation ${RESERVATION}; refusing to start the nightly batch. Tear it down first (uat-run lifecycle=daytime-down)."
+            exit 1
+          fi
+          # Fail closed on anything that is NOT a definitive "does not exist":
+          # a throttle/auth error must not be read as "clear to proceed".
+          if grep -qE 'code=404|Not found|No cluster' <<<"${OUT}"; then
+            echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
+          else
+            echo "::error::could not determine daytime-cluster state for ${DAYTIME_NAME}: ${OUT}"
+            exit 1
+          fi
 
       # Deps
       - name: Install tools
@@ -199,7 +285,7 @@ jobs:
       # aicr-validators namespace (not the release ghcr.io/nvidia/aicr repo);
       # cleaned up below.
       - name: Build and push snapshot-agent image
-        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GOFLAGS: -mod=vendor
           KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
@@ -219,9 +305,10 @@ jobs:
           yq -i '.deployment.id = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
 
-      # Bringup
+      # Bringup — skipped for daytime-down (teardown-only; nothing to provision).
       - name: Bringup Infra
         id: infra
+        if: inputs.lifecycle != 'daytime-down'
         run: |
           set -euox pipefail
           docker run \
@@ -289,9 +376,12 @@ jobs:
       # until the GPU stack converges — the readiness barrier the helmfile
       # bundle lacks (the helm deploy.sh `kubectl wait`s instead). Step id stays
       # `conformance` so the train/verify gating below is unaffected.
+      # daytime-up provisions and deploys the stack, then HOLDS: the CUJ
+      # (conformance/train/verify + evidence) is a nightly-batch concern, so
+      # daytime-up stops after install and leaves the cluster up for handoff.
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
-        if: steps.install.outcome == 'success'
+        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
         # Larger budget than conformance-only: the deployment phase waits out
         # cold-start GPU bring-up (driver install/migration). (The performance
         # phase's NCCL benchmark skips on single-GPU-node clusters like this
@@ -303,9 +393,13 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run conformance "${TEST_CONFIG}"
 
+      # The TrainJob CUJ is training-intent-specific. For intent=inference the
+      # served-workload CUJ (phase_serve) is owned by DC3 and out of scope here,
+      # so the train step is skipped; verify/evidence still cover the deployed
+      # inference stack.
       - name: UAT - train (TrainJob)
         id: train
-        if: steps.conformance.outcome == 'success'
+        if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
         timeout-minutes: 25
         shell: bash
         env:
@@ -380,16 +474,21 @@ jobs:
         env:
           SUMMARY_RESERVATION: ${{ inputs.reservation }}
           SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
+          SUMMARY_INTENT: ${{ inputs.intent }}
+          SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
         run: |
           {
             echo "## UAT Results (GCP)"
             echo ""
-            printf '**Reservation:** `%s`\n' "$SUMMARY_RESERVATION"
+            printf '**Reservation:** `%s` · **Intent:** `%s` · **Lifecycle:** `%s`\n' \
+              "$SUMMARY_RESERVATION" "$SUMMARY_INTENT" "$SUMMARY_LIFECYCLE"
+            printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
             printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
             echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
             echo ""
             echo "| Phase | Status |"
             echo "|-------|--------|"
+            echo "| Pre-batch guard | ${{ steps.guard.outcome }} |"
             echo "| Dependencies | ${{ steps.deps.outcome }} |"
             echo "| Config | ${{ steps.config.outcome }} |"
             echo "| Cluster | ${{ steps.infra.outcome }} |"
@@ -409,7 +508,7 @@ jobs:
       # Main cell only — release cells reference shared, permanent released image
       # tags and must not delete them.
       - name: Cleanup validator image
-        if: always() && inputs.aicr_version == '' && inputs.skip_tests != true
+        if: always() && inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -431,9 +530,20 @@ jobs:
       # and the actuator's STS exchange fails. The `id-token: write` permission
       # is granted for the whole job, so re-running auth mints a fresh token
       # file. Mirrors the AWS teardown credential refresh.
+      #
+      # Teardown gating (#1275, DC2): tear down for the nightly lifecycle
+      # (unless skip_delete) and for daytime-down (the explicit evening
+      # teardown of the held cluster — daytime-down provisions nothing, so it
+      # does not gate on steps.infra). NEVER for daytime-up, which holds the
+      # cluster for handoff. skip_delete is a nightly-only debugging escape and
+      # is ignored for daytime-down.
       - name: Re-authenticate to GCP for teardown
         id: auth_teardown
-        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
         with:
           workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
@@ -442,7 +552,11 @@ jobs:
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
       - name: Destroy Cluster
-        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
         shell: bash
         run: |
           set -euxo pipefail
@@ -485,4 +599,4 @@ jobs:
     uses: ./.github/workflows/evidence-ingest.yaml
     with:
       bundle_ref: ${{ needs.uat-gcp.outputs.bundle_ref }}
-      recipe: gke-h100-training
+      recipe: gke-h100-${{ inputs.intent }}
