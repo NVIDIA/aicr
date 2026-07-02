@@ -23,6 +23,18 @@ const (
 // validClouds is the set of accepted Reservation.Cloud values.
 var validClouds = map[string]bool{CloudAWS: true, CloudGCP: true}
 
+// Recognized recipe-intent values. The daytime human-access rotation (#1281,
+// DC8) picks one flavor per reservation via Reservation.DaytimeIntent; these
+// mirror the intents the per-cloud UAT pipelines accept.
+const (
+	IntentTraining  = "training"
+	IntentInference = "inference"
+)
+
+// validIntents is the set of accepted intent values (Reservation.DaytimeIntent
+// and, downstream, the pipeline's intent input).
+var validIntents = map[string]bool{IntentTraining: true, IntentInference: true}
+
 // Reservation is one row of the UAT reservation registry
 // (infra/uat/reservations.yaml). Each row maps a reservation Name — the key
 // the day/night broker leases via the GitHub Actions concurrency group
@@ -36,6 +48,22 @@ type Reservation struct {
 	GPUCount          int    `yaml:"gpu-count"`
 	ClusterConfigPath string `yaml:"cluster-config-path"`
 	TestConfigDir     string `yaml:"test-config-dir"`
+	// DaytimeIntent opts this reservation into the daytime human-access
+	// rotation (#1281, DC8) and picks the flavor stood up on it during the
+	// working day: "training" or "inference". Empty means the reservation is
+	// NOT part of the daytime rotation (nightly batch only). This is the
+	// configurable cloud→flavor default — data, not code — so the split
+	// (AWS=training, GCP=inference at launch) can change without a workflow edit.
+	DaytimeIntent string `yaml:"daytime-intent"`
+}
+
+// DaytimeAssignment is one reservation's slot in the daytime human-access
+// rotation: the reservation to lease and the intent (flavor) to stand up on
+// it. The daytime scheduler (uat-daytime.yaml) consumes a JSON array of these
+// as its dispatch matrix.
+type DaytimeAssignment struct {
+	Reservation string `json:"reservation"`
+	Intent      string `json:"intent"`
 }
 
 // Registry is the parsed reservations.yaml document.

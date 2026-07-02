@@ -27,6 +27,7 @@ uat-broker reservations --name aws-h100 >> "$GITHUB_OUTPUT"
 # gpu-count=8
 # cluster-config-path=tests/uat/aws/cluster-config.yaml
 # test-config-dir=tests/uat/aws/tests
+# daytime-intent=training
 ```
 
 List every reservation name (one per line):
@@ -34,6 +35,20 @@ List every reservation name (one per line):
 ```sh
 uat-broker reservations --list
 ```
+
+Print the daytime human-access rotation (#1281, DC8) as JSON — one
+`{reservation, intent}` entry per row with a non-empty `daytime-intent`,
+in document order — for the daytime scheduler's dispatch matrix:
+
+```sh
+uat-broker reservations --daytime | jq -c .
+# [{"reservation":"aws-h100","intent":"training"},{"reservation":"gcp-h100","intent":"inference"}]
+```
+
+The output is pretty-printed; the daytime scheduler compacts it with `jq -c`
+into a one-line `strategy.matrix.include` array.
+
+`--name`, `--list`, and `--daytime` are mutually exclusive.
 
 ### `schedule`
 

@@ -27,6 +27,11 @@
 //	uat-broker reservations --list [--file <registry>]
 //	    Print every reservation name, one per line.
 //
+//	uat-broker reservations --daytime [--file <registry>]
+//	    Print the daytime human-access rotation (#1281, DC8) as a JSON array
+//	    of {reservation, intent} — one entry per row with a non-empty
+//	    daytime-intent — for the daytime scheduler's dispatch matrix.
+//
 //	uat-broker schedule [--file <registry>] [--reservations a,b] \
 //	    [--previous-n N] [--include-main] < tags
 //	    Read candidate tags from stdin and print the ordered nightly
@@ -63,6 +68,7 @@ const usage = `uat-broker — UAT reservation registry + nightly schedule helper
 Usage:
   uat-broker reservations --name <name> [--file <registry>]   resolve one row as key=value lines
   uat-broker reservations --list [--file <registry>]          list reservation names
+  uat-broker reservations --daytime [--file <registry>]       print the daytime rotation as JSON [{reservation,intent}]
   uat-broker schedule [--file <registry>] [--reservations a,b] [--previous-n N] [--include-main]
                                                               expand the nightly version matrix (tags on stdin) as JSON`
 
@@ -118,13 +124,15 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("reservations", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		file string
-		name string
-		list bool
+		file    string
+		name    string
+		list    bool
+		daytime bool
 	)
 	fs.StringVar(&file, "file", defaultRegistryPath, "path to the reservation registry")
 	fs.StringVar(&name, "name", "", "reservation name to resolve")
 	fs.BoolVar(&list, "list", false, "list all reservation names, one per line")
+	fs.BoolVar(&daytime, "daytime", false, "print the daytime human-access rotation as JSON: [{\"reservation\",\"intent\"}]")
 	if err := fs.Parse(args); err != nil {
 		return flagParseErr(err, "reservations")
 	}
@@ -132,10 +140,28 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"reservations: unexpected positional arguments: "+strings.Join(fs.Args(), " "))
 	}
+	// The three output modes are mutually exclusive: --name resolves one row,
+	// --list prints names, --daytime prints the daytime rotation.
+	if selected := boolCount(list, daytime, name != ""); selected > 1 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"reservations: --name, --list, and --daytime are mutually exclusive")
+	}
 
 	reg, err := uatbroker.LoadRegistryFile(file)
 	if err != nil {
 		return err
+	}
+
+	// The daytime rotation is JSON (a dispatch matrix), written directly by the
+	// encoder; the other two modes are line-oriented. Handle JSON first so its
+	// output path is unambiguous.
+	if daytime {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(reg.DaytimeAssignments()); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "encode daytime assignments", err)
+		}
+		return nil
 	}
 
 	// Build the output first, then write it in one checked call so a broken
@@ -144,14 +170,12 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 	// the strings.Builder cannot fail.
 	var b strings.Builder
 	switch {
-	case list && name != "":
-		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --list and --name are mutually exclusive")
 	case list:
 		for _, n := range reg.Names() {
 			fmt.Fprintln(&b, n)
 		}
 	case name == "":
-		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --name is required (or pass --list)")
+		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --name is required (or pass --list or --daytime)")
 	default:
 		res, lookupErr := reg.Lookup(name)
 		if lookupErr != nil {
@@ -164,6 +188,9 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(&b, "gpu-count=%d\n", res.GPUCount)
 		fmt.Fprintf(&b, "cluster-config-path=%s\n", res.ClusterConfigPath)
 		fmt.Fprintf(&b, "test-config-dir=%s\n", res.TestConfigDir)
+		// Empty when the reservation is not in the daytime rotation; callers
+		// that don't consume this key simply ignore the line.
+		fmt.Fprintf(&b, "daytime-intent=%s\n", res.DaytimeIntent)
 	}
 
 	if _, err := io.WriteString(stdout, b.String()); err != nil {
@@ -315,6 +342,18 @@ func scheduleIsEmpty(schedule map[string][]uatbroker.Cell) bool {
 		}
 	}
 	return true
+}
+
+// boolCount returns how many of the given flags are true — used to enforce
+// mutual exclusivity of a set of mode flags.
+func boolCount(flags ...bool) int {
+	n := 0
+	for _, f := range flags {
+		if f {
+			n++
+		}
+	}
+	return n
 }
 
 // splitCSV splits a comma-separated list, trimming whitespace and dropping

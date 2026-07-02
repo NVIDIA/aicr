@@ -7,13 +7,13 @@
 Each reserved GPU pool follows a daily cycle, with every phase acquiring the *same* per-reservation lease so CI and human use never overlap on one reservation:
 
 - **Night — the nightly batch.** On a cron, `uat-nightly-batch.yaml` runs the [version matrix](#the-version-matrix) per reservation — `main` plus the previous N stable releases — each cell a full provision → CUJ → evidence → publish → teardown. This is the `lifecycle=nightly` mode: provision-and-destroy under a run-scoped cluster name.
-- **Morning — handoff.** Once the batch drains a reservation, the daytime human-access deployment is stood up on it with `lifecycle=daytime-up`: provision, deploy the stack, and **hold** (no teardown) under a stable, reservation-tagged cluster name. DC2 owns this provision-and-hold mechanic; DC8 owns *what* is deployed and how access is shared.
-- **Day — human use.** The daytime cluster is used outside CI.
-- **Evening — teardown.** The daytime cluster is torn down with `lifecycle=daytime-down` **before** the next night batch, releasing the reservation.
+- **Morning — handoff.** Once the batch drains a reservation, the [daytime human-access deployment](#daytime-human-access-deployment) is stood up on it with `lifecycle=daytime-up`: provision, deploy the stack, and **hold** (no teardown) under a stable, reservation-tagged cluster name. The `uat-daytime.yaml` scheduler fires this on a morning cron for every reservation in the daytime rotation. DC2 owns the provision-and-hold mechanic; DC8 (`uat-daytime.yaml`) owns *which* flavor lands on *which* cloud and how access is shared.
+- **Day — human use.** The daytime cluster is used outside CI — humans reach it [out-of-band](#daytime-human-access-deployment), never through the CI path.
+- **Evening — teardown.** `uat-daytime.yaml` fires `lifecycle=daytime-down` on an evening cron to tear the daytime cluster down and release the reservation **before** the next night batch.
 
 The phases are independently scheduled (cron edges), not chained: the per-reservation lease — plus a [pre-batch guard](#pre-batch-guard) — keeps them from overlapping, so a crashed or overrunning phase never orphans the reservation. A hosted GitHub Actions job is capped at the runner's timeout (hours, not a whole working day), so a single lease-holding run cannot span the day; the lease only needs to cover the brief transition windows, and the steady-state daytime cluster's existence is tracked by its stable, reservation-tagged name rather than a continuously held run.
 
-> What ships today is the **night side** (the nightly batch), the **lease + dispatch surface** every phase builds on, and DC2's **per-intent selection**, **daytime provision-and-hold / teardown mechanics**, and **pre-batch guard**. The daytime deployment's *workload content* and out-of-band access distribution are owned by DC8 and layer on top of the `daytime-up` mechanic.
+> What ships today is the **night side** (the nightly batch), the **lease + dispatch surface** every phase builds on, DC2's **per-intent selection**, **daytime provision-and-hold / teardown mechanics**, and **pre-batch guard**, and DC8's **day side** — the `uat-daytime.yaml` scheduler that stands up one human-facing deployment per cloud each morning and tears it down each evening. The served-inference *workload* an `intent=inference` cluster runs (`phase_serve`) is still owned by DC3.
 
 ## Requesting a UAT run
 
@@ -62,6 +62,71 @@ The `lifecycle` input selects one of three cluster lifecycles, all sharing the r
 | `daytime-down` | same stable name | no | no | no | yes (tears down the held cluster) |
 
 The nightly per-run name isolates concurrent history (OCI tags, Terraform state) per run. The daytime name is **stable and reservation-tagged** so the evening `daytime-down` teardown and the nightly pre-batch guard can find the held cluster without tracking a run id. `skip_delete` is a nightly-only debugging escape and is ignored by the daytime lifecycles.
+
+## Daytime human-access deployment
+
+The **day side** of the cycle (issue #1281, DC8) stands up **one long-lived, human-facing deployment per cloud** for the working day — a place to submit jobs, hit a served endpoint, and demo, **outside CI**. It is *not* a UAT cell: it emits **no evidence bundle** and produces **no TestGrid column**, and access is distributed [out-of-band](#reaching-the-daytime-cluster). The scarce reservation time is split between this human use and the nightly [version matrix](#the-version-matrix); the two never overlap on one reservation because both route through the same lease.
+
+### The cloud→flavor split
+
+Which cloud hosts which flavor is **data, not code**: the `daytime-intent` column of each row in `infra/uat/reservations.yaml`. A row with `daytime-intent: training` or `daytime-intent: inference` joins the daytime rotation; an empty/absent value keeps the reservation nightly-batch-only. The launch default splits the two flavors across the two clouds:
+
+| Reservation | Cloud | `daytime-intent` | Daytime deployment |
+|-------------|-------|------------------|--------------------|
+| `aws-h100` | AWS | `training` | training stack (Kubeflow `TrainJob`s) |
+| `gcp-h100` | GCP | `inference` | inference stack (Dynamo, OpenAI-compatible endpoint) |
+
+Re-splitting (or adding a daytime reservation) is a registry edit — no workflow change. Only **one** reservation per cloud may carry a `daytime-intent` today: a single reservation cannot host both a held daytime cluster and the nightly batch at once, so *both* flavors on one cloud during the day is out of scope until more capacity lands. The `uatbroker` committed-registry test enforces the one-per-cloud invariant and the launch split.
+
+### The scheduler (`uat-daytime.yaml`)
+
+`uat-daytime.yaml` is a thin scheduler over the `daytime-up` / `daytime-down` mechanics — it owns no lifecycle logic. It enumerates the rotation (`uat-broker reservations --daytime` → a JSON `{reservation, intent}` matrix) and, once per reservation, dispatches the shared `uat-run.yaml` with the reservation's intent and the edge's lifecycle, then watches the dispatched run to completion so a failed handoff/teardown surfaces on the scheduler run. Because it goes through `uat-run.yaml`, each daytime run takes the **same per-reservation lease** as the nightly batch.
+
+Two cron edges (UTC), plus a manual `workflow_dispatch` with an `action: up | down` input:
+
+| Edge | Cron (UTC) | Action | Lifecycle dispatched |
+|------|-----------|--------|----------------------|
+| Morning handoff | `0 15 * * *` | `up` | `daytime-up` (provision + deploy + hold) |
+| Evening teardown | `0 2 * * *` | `down` | `daytime-down` (tear down + release) |
+
+The evening teardown runs ~2h before the nightly batch opens (`0 4 * * *`), leaving margin for a ~10–15 min destroy. A manual run to stand up or tear down the whole rotation by hand:
+
+```bash
+gh workflow run uat-daytime.yaml --repo NVIDIA/aicr --ref main -f action=up    # morning handoff
+gh workflow run uat-daytime.yaml --repo NVIDIA/aicr --ref main -f action=down  # evening teardown
+```
+
+Different reservations run in parallel (independent hardware); a daytime run that finds its reservation still busy (an overrunning batch) *queues* on the lease rather than racing.
+
+### If the evening teardown is missed
+
+The teardown is not the only safety net. If a `daytime-down` is skipped or fails and the daytime cluster is still up when the nightly batch opens, DC2's [pre-batch guard](#pre-batch-guard) **blocks** the batch (fail-closed) rather than racing the held deployment. Recover by tearing the daytime cluster down — `gh workflow run uat-daytime.yaml -f action=down`, or a single `uat-run.yaml … -f lifecycle=daytime-down` for one reservation — then re-run the batch.
+
+### Reaching the daytime cluster
+
+Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoint URL through the CI path, the evidence bundle, or the dashboard. Instead, the cluster's stable name is public knowledge and access is gated by **cloud IAM** on the daytime cluster — so an authorized operator mints their own kubeconfig directly and no credential ever transits CI:
+
+```bash
+# AWS — training cluster (aicr-uat-day-aws-h100)
+aws eks update-kubeconfig --region us-east-1 --name aicr-uat-day-aws-h100
+
+# GCP — inference cluster (aicr-day-gcp-h100)
+gcloud container clusters get-credentials aicr-day-gcp-h100 --region <region>
+```
+
+**Training (AWS).** Submit Kubeflow `TrainJob`s against the held cluster — the same CUJ the nightly `intent=training` run exercises (see `demos/cuj1-training.md`).
+
+**Inference (GCP).** The `daytime-up` run deploys the Dynamo inference *platform* (dynamo-platform + KAI scheduler + DRA driver). Apply a `DynamoGraphDeployment` served workload — reuse an existing serve asset such as `demos/workloads/inference/vllm-agg.yaml`; DC8 does **not** invent a serving stack — then reach its OpenAI-compatible endpoint by port-forwarding the frontend:
+
+```bash
+kubectl port-forward -n dynamo-system svc/vllm-agg-frontend 8000:8000 &
+curl http://localhost:8000/v1/models
+curl http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"<model>","messages":[{"role":"user","content":"hello"}]}'
+```
+
+Once DC3's `phase_serve` lands, the served workload is deployed automatically as part of `daytime-up`; until then it is a one-command manual apply on the held cluster.
 
 ## Pre-batch guard
 
@@ -118,7 +183,7 @@ The values in this file are identifiers, **not secrets** — a reservation-id gr
 
 ## Roadmap
 
-What ships now is the lease, the data-driven dispatch surface, the time-boxed nightly version matrix (`main` + previous-N stable releases, release cells installing released artifacts), superseded-run surfacing (the controller flags a dropped cell inline; the `uat-superseded-notice.yaml` observer catches ad-hoc dropped runs), per-intent selection, and the daytime provision-and-hold / teardown / pre-batch-guard mechanics. Still to come:
+What ships now is the lease, the data-driven dispatch surface, the time-boxed nightly version matrix (`main` + previous-N stable releases, release cells installing released artifacts), superseded-run surfacing (the controller flags a dropped cell inline; the `uat-superseded-notice.yaml` observer catches ad-hoc dropped runs), per-intent selection, the daytime provision-and-hold / teardown / pre-batch-guard mechanics, and the DC8 [daytime human-access scheduler](#daytime-human-access-deployment) (`uat-daytime.yaml`) — one held deployment per cloud each working day, torn down before the batch, with out-of-band access. Still to come:
 
-- **Served-inference CUJ (DC3).** The `phase_serve` step an `intent=inference` run will exercise on the deployed inference stack.
-- **Daytime workload + access (DC8).** *What* the daytime cluster deploys on top of DC2's `daytime-up` mechanic, the served-endpoint exposure, and out-of-band access distribution.
+- **Served-inference CUJ (DC3).** The `phase_serve` step an `intent=inference` run — nightly *and* the daytime inference cluster — will exercise on the deployed inference stack, deploying the served `DynamoGraphDeployment` automatically instead of the current manual apply.
+- **Both flavors per cloud during the day.** Blocked on capacity — one reservation cannot hold both a daytime cluster and the nightly batch at once. Pulls once more infra lands.

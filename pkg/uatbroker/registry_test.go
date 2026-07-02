@@ -143,6 +143,102 @@ reservations:
 			wantErr: true,
 			code:    errors.ErrCodeInvalidRequest,
 		},
+		{
+			// Empty/absent daytime-intent is valid — the reservation is simply
+			// not in the daytime rotation.
+			name: "empty daytime-intent ok",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+		},
+		{
+			name: "valid daytime-intent",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    daytime-intent: inference
+`,
+		},
+		{
+			name: "unknown daytime-intent",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    daytime-intent: serving
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// Two daytime reservations on one cloud would contend for the same
+			// reservation (a cloud cannot hold both a held daytime cluster and the
+			// nightly batch at once), so Validate must reject it.
+			name: "two daytime reservations same cloud",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    daytime-intent: training
+  - name: aws-b200
+    cloud: aws
+    reservation-id: cr-y
+    accelerator: b200
+    gpu-count: 8
+    cluster-config-path: c2.yaml
+    test-config-dir: t2
+    daytime-intent: inference
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// Two daytime reservations across DIFFERENT clouds is fine — that is
+			// exactly the launch topology (AWS training + GCP inference).
+			name: "daytime reservations across clouds ok",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    daytime-intent: training
+  - name: gcp-h100
+    cloud: gcp
+    reservation-id: projects/p/reservations/r
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c2.yaml
+    test-config-dir: t2
+    daytime-intent: inference
+`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -229,6 +325,65 @@ func TestLoadRegistryFile(t *testing.T) {
 	}
 }
 
+func TestDaytimeAssignments(t *testing.T) {
+	// Only rows with a non-empty daytime-intent appear, in document order.
+	const yaml = `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    daytime-intent: training
+  - name: gcp-h100
+    cloud: gcp
+    reservation-id: projects/p/reservations/r
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c2.yaml
+    test-config-dir: t2
+    daytime-intent: inference
+  - name: aws-b200
+    cloud: aws
+    reservation-id: cr-y
+    accelerator: b200
+    gpu-count: 8
+    cluster-config-path: c3.yaml
+    test-config-dir: t3
+`
+	reg, err := ParseRegistry([]byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseRegistry: %v", err)
+	}
+	got := reg.DaytimeAssignments()
+	want := []DaytimeAssignment{
+		{Reservation: "aws-h100", Intent: IntentTraining},
+		{Reservation: "gcp-h100", Intent: IntentInference},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("DaytimeAssignments() = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("DaytimeAssignments()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDaytimeAssignmentsNone(t *testing.T) {
+	// A registry with no daytime-intent rows yields an empty (non-nil) slice —
+	// the scheduler's matrix is then empty and it dispatches nothing.
+	reg, err := ParseRegistry([]byte(validRegistryYAML))
+	if err != nil {
+		t.Fatalf("ParseRegistry: %v", err)
+	}
+	if got := reg.DaytimeAssignments(); len(got) != 0 {
+		t.Errorf("DaytimeAssignments() = %+v, want empty", got)
+	}
+}
+
 // TestCommittedRegistryValid guards the actual checked-in registry: it must
 // parse, validate, and carry the two launch reservations. A bad data edit
 // fails here before it can break the broker workflows.
@@ -246,6 +401,35 @@ func TestCommittedRegistryValid(t *testing.T) {
 		}
 		if res.Cloud != cloud {
 			t.Errorf("%q cloud = %q, want %q", name, res.Cloud, cloud)
+		}
+	}
+
+	// The launch cloud→flavor split (#1281, DC8): AWS hosts training, GCP hosts
+	// inference. A future re-split changes these values here deliberately.
+	assignments := reg.DaytimeAssignments()
+	gotIntent := make(map[string]string, len(assignments))
+	for _, a := range assignments {
+		gotIntent[a.Reservation] = a.Intent
+	}
+	wantIntent := map[string]string{"aws-h100": IntentTraining, "gcp-h100": IntentInference}
+	for name, intent := range wantIntent {
+		if gotIntent[name] != intent {
+			t.Errorf("committed registry daytime-intent[%q] = %q, want %q", name, gotIntent[name], intent)
+		}
+	}
+	// At most one daytime reservation per cloud: one reservation cannot host
+	// both a held daytime cluster and the nightly batch at once.
+	perCloud := make(map[string]int)
+	for _, a := range assignments {
+		res, lookupErr := reg.Lookup(a.Reservation)
+		if lookupErr != nil {
+			t.Fatalf("Lookup(%q): %v", a.Reservation, lookupErr)
+		}
+		perCloud[res.Cloud]++
+	}
+	for cloud, n := range perCloud {
+		if n > 1 {
+			t.Errorf("cloud %q has %d daytime reservations, want at most 1 (both flavors per cloud is out of scope at launch)", cloud, n)
 		}
 	}
 }
