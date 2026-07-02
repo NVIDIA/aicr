@@ -25,10 +25,10 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, any
-//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, any
+//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any
 //	    Intent      CriteriaIntentType      // training, inference, any
-//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, talos, any
+//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
 //	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
 //	    Nodes       int                     // node count (0 = any)
 //	}
@@ -68,6 +68,7 @@
 //   - CriteriaServiceKind: kind (local clusters)
 //   - CriteriaServiceLKE: Linode LKE
 //   - CriteriaServiceBCM: NVIDIA Base Command Manager
+//   - CriteriaServiceOCP: Red Hat OpenShift Container Platform
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
@@ -77,6 +78,7 @@
 //   - CriteriaAcceleratorB200: NVIDIA B200
 //   - CriteriaAcceleratorA100: NVIDIA A100
 //   - CriteriaAcceleratorL40: NVIDIA L40
+//   - CriteriaAcceleratorL40S: NVIDIA L40S
 //   - CriteriaAcceleratorRTXPro6000: NVIDIA RTX PRO 6000
 //   - CriteriaAcceleratorAny: Any accelerator (wildcard)
 //
@@ -90,6 +92,7 @@
 //   - CriteriaOSRHEL: Red Hat Enterprise Linux
 //   - CriteriaOSCOS: Container-Optimized OS (GKE)
 //   - CriteriaOSAmazonLinux: Amazon Linux
+//   - CriteriaOSOracleLinux: Oracle Linux (OKE Gen2 GPU image)
 //   - CriteriaOSTalos: Talos Linux
 //   - CriteriaOSAny: Any OS (wildcard)
 //
@@ -179,11 +182,11 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, bcm, any (default: any)
-//   - accelerator: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, any (default: any)
+//   - accelerator: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
-//   - os: ubuntu, rhel, cos, amazonlinux, talos, any (default: any)
+//   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)
 //   - nodes: integer node count (default: 0 = any)
 //
 // # Criteria Files (CLI and HTTP API - POST)
@@ -196,7 +199,7 @@
 //
 //	type RecipeCriteria struct {
 //	    Kind       string    // Must be "RecipeCriteria"
-//	    APIVersion string    // Must be "aicr.nvidia.com/v1alpha1"
+//	    APIVersion string    // Must be "aicr.run/v1alpha2"
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
 //	    }
@@ -206,7 +209,7 @@
 // Example criteria file (criteria.yaml):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -277,7 +280,7 @@
 //
 // Base structure (recipes/overlays/base.yaml):
 //
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	kind: Base
 //	metadata:
 //	  name: base
@@ -289,7 +292,7 @@
 //
 // Overlay structure (recipes/overlays/*.yaml):
 //
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	kind: Overlay
 //	metadata:
 //	  name: h100-training

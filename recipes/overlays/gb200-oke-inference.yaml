@@ -13,16 +13,17 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-oke-inference
 
 spec:
-  # Inherits from oke-inference recipe (OKE + inference settings)
-  base: oke-inference
+  # Inherits from oke-ol-inference recipe (OKE + OL + inference settings)
+  base: oke-ol-inference
 
   criteria:
     service: oke
+    os: ol
     accelerator: gb200
     intent: inference
 

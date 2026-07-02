@@ -37,7 +37,7 @@
 # Node scheduling paths define WHERE CLI flags like --system-node-selector are applied.
 # The actual values come from CLI flags, not from this file.
 #
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 
 components:
@@ -160,7 +160,7 @@ components:
     helm:
       defaultRepository: https://aws.github.io/eks-charts
       defaultChart: aws-efa-k8s-device-plugin
-      defaultVersion: v0.5.26
+      defaultVersion: v0.5.29
       defaultNamespace: kube-system
     nodeScheduling:
       accelerated:
@@ -203,7 +203,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
-      defaultVersion: v0.17.0
+      defaultVersion: v0.17.1
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:
@@ -482,8 +482,10 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "1.2.0"
+      defaultVersion: "1.2.1"
       defaultNamespace: dynamo-system
+    storageClassPaths:
+      - nats.config.jetstream.fileStore.pvc.storageClassName
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -715,3 +717,69 @@ components:
         tolerationPaths:
           - controllerManager.tolerations
           - audit.tolerations
+
+  # ── OCP (OpenShift Container Platform) components ──────────────────────
+  #
+  # OLM installer and CR charts for OCP operators.
+  # All use defaultRepository: "" (manifest-only, in-tree templates).
+  # Ordering is enforced via dependencyRefs in overlays.
+
+  - name: gpu-operator-ocp-olm
+    displayName: GPU Operator OCP (OLM)
+    valueOverrideKeys:
+      - gpuoperatorocpolm
+    healthCheck:
+      assertFile: checks/gpu-operator-ocp-olm/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gpu-operator
+
+  - name: gpu-operator-ocp
+    displayName: GPU Operator OCP (CR)
+    valueOverrideKeys:
+      - gpuoperatorocp
+    healthCheck:
+      assertFile: checks/gpu-operator-ocp/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gpu-operator
+
+  - name: network-operator-ocp-olm
+    displayName: Network Operator OCP (OLM)
+    valueOverrideKeys:
+      - networkoperatorocpolm
+    healthCheck:
+      assertFile: checks/network-operator-ocp-olm/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
+
+  - name: network-operator-ocp
+    displayName: Network Operator OCP (CR)
+    valueOverrideKeys:
+      - networkoperatorocp
+    healthCheck:
+      assertFile: checks/network-operator-ocp/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: nvidia-network-operator
+
+  - name: nfd-ocp-olm
+    displayName: Node Feature Discovery OCP (OLM)
+    valueOverrideKeys:
+      - nfdocpolm
+    healthCheck:
+      assertFile: checks/nfd-ocp-olm/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: openshift-nfd
+
+  - name: nfd-ocp
+    displayName: Node Feature Discovery OCP (CR)
+    healthCheck:
+      assertFile: checks/nfd-ocp/health-check.yaml
+    valueOverrideKeys:
+      - nfdocp
+    helm:
+      defaultRepository: ""
+      defaultNamespace: openshift-nfd

@@ -1,8 +1,9 @@
 # Build Provenance Demo
 
-Every released AICR binary and image carries a signed SLSA Build Provenance v1
-attestation and an SPDX SBOM, produced by NVIDIA CI on tag and recorded in the
-public Rekor transparency log. This demo walks the consumer-side verification
+Every released AICR image carries a signed SLSA Build Provenance v1 attestation
+and a signed SPDX SBOM, produced by NVIDIA CI on tag and recorded in the public
+Rekor transparency log. Released binaries ship a separate SPDX SBOM asset
+(`*.sbom.json`) — only the image SBOM uses the signed OCI attestation flow. This demo walks the consumer-side verification
 chain — what a downstream operator runs to confirm an artifact came from NVIDIA,
 from a known commit, and contains a known software bill of materials.
 
@@ -31,11 +32,8 @@ This walkthrough covers:
 | `grype` *(optional)* | SBOM-based vulnerability scan |
 | `rekor-cli` *(optional)* | Transparency-log lookup |
 
-Bootstrap the Sigstore trusted root once on the verifier's machine:
-
-```shell
-aicr trust update
-```
+This demo uses `gh` and `cosign`, which manage their own Sigstore trust roots,
+so no `aicr trust update` is needed.
 
 ## 1. Resolve the latest tag to a digest
 
@@ -62,13 +60,15 @@ DIGEST_AICRD=$(crane digest "${IMAGE_AICRD}:${TAG}")
 
 ## 2. Verify the image (SLSA Provenance v1)
 
-`gh attestation verify` is the simplest path: it pulls the attestation from
-GHCR, validates the Sigstore signature against the Fulcio cert chain and a
-Rekor inclusion proof, and enforces that the signer is a workflow owned by
-`--owner`.
+`gh attestation verify` is the simplest path (run `gh auth login` or set
+`GH_TOKEN` first): it fetches the attestation from the GitHub attestations API
+by default, validates the Sigstore signature against the Fulcio cert chain and a
+Rekor inclusion proof, and enforces that the artifact comes from `--repo`
+and was signed by the exact release workflow named in `--signer-workflow`
+(pinning `--owner` alone would trust any workflow in any NVIDIA repository).
 
 ```shell
-gh attestation verify "oci://${IMAGE_DIGEST}" --owner NVIDIA
+gh attestation verify "oci://${IMAGE_DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 ```
 
 Expected output:
@@ -80,14 +80,15 @@ Loaded 1 attestation from GitHub API
 
 The following policy criteria will be enforced:
   - OIDC Issuer must match: https://token.actions.githubusercontent.com
-  - Source Repository Owner URI must match: https://github.com/NVIDIA
+  - Source Repository URI must match: https://github.com/NVIDIA/aicr
+  - Build signer workflow must match: NVIDIA/aicr/.github/workflows/attest-images.yaml
   - Predicate type must match: https://slsa.dev/provenance/v1
 ```
 
 Same for `aicrd`:
 
 ```shell
-gh attestation verify "oci://${IMAGE_AICRD}@${DIGEST_AICRD}" --owner NVIDIA
+gh attestation verify "oci://${IMAGE_AICRD}@${DIGEST_AICRD}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 ```
 
 ### Why pin to the digest
@@ -106,7 +107,7 @@ envelope to disk:
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/.*' \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   "${IMAGE_DIGEST}" \
   --output-file predicate.json
 ```
@@ -133,8 +134,9 @@ gh release download "$TAG" \
 
 ## 4. SBOM use cases
 
-The SBOM is the same SPDX JSON whether sourced from the OCI attestation or the
-release page, so downstream tools work either way.
+The image SBOM (OCI attestation) and the binary SBOM (release asset) are
+distinct artifacts that share the same SPDX JSON *format*, so downstream tools
+work with either.
 
 **Vulnerability scan:**
 
@@ -191,87 +193,33 @@ gh run view <run-id> --repo NVIDIA/aicr --log
 ## 6. In-cluster verification
 
 Verification at `docker pull` time is opt-in per consumer. To make it a
-property of the cluster, enforce it with an admission controller. Two
-production-grade options:
+property of the cluster, enforce it with an admission controller. AICR's
+images carry **GitHub Artifact Attestations** (Sigstore *bundles*), so the
+policy must verify the Sigstore bundle format:
 
-### Option 1: Sigstore Policy Controller
+- **Kyverno** — `type: SigstoreBundle`; see
+  [Verifying Sigstore Bundles](https://kyverno.io/docs/policy-types/cluster-policy/verify-images/sigstore/#verifying-sigstore-bundles).
+  Not yet verified against AICR images — cluster testing returned `no matching
+  signatures found`; prefer Policy Controller. See #1537.
+- **Sigstore Policy Controller** — requires **v0.13.0+** and
+  `signatureFormat: bundle` (see the
+  [Sigstore bundle format](https://docs.sigstore.dev/policy-controller/overview/#sigstore-bundle-format)
+  docs); enforcement runs only in namespaces labeled
+  `policy.sigstore.dev/include=true`.
 
-Install:
+Verify against AICR's release identity — issuer
+`https://token.actions.githubusercontent.com`, subject
+`https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/*`.
 
-```shell
-kubectl apply -f https://github.com/sigstore/policy-controller/releases/download/v0.10.0/release.yaml
-```
-
-Policy:
-
-```yaml
-apiVersion: policy.sigstore.dev/v1beta1
-kind: ClusterImagePolicy
-metadata:
-  name: aicr-images-require-attestation
-spec:
-  images:
-  - glob: "ghcr.io/nvidia/aicr*"
-  authorities:
-  - keyless:
-      url: https://fulcio.sigstore.dev
-      identities:
-      - issuerRegExp: ".*\\.github\\.com.*"
-        subjectRegExp: "https://github.com/NVIDIA/aicr/.*"
-    attestations:
-    - name: build-provenance
-      predicateType: https://slsa.dev/provenance/v1
-      policy:
-        type: cue
-        data: |
-          predicate: buildDefinition: buildType: "https://actions.github.io/buildtypes/workflow/v1"
-```
-
-### Option 2: Kyverno
-
-```yaml
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: verify-aicr-attestations
-spec:
-  validationFailureAction: Enforce
-  rules:
-  - name: verify-attestation
-    match:
-      any:
-      - resources:
-          kinds: [Pod]
-    verifyImages:
-    - imageReferences:
-      - "ghcr.io/nvidia/aicr*"
-      attestations:
-      - predicateType: https://slsa.dev/provenance/v1
-        attestors:
-        - entries:
-          - keyless:
-              issuer: https://token.actions.githubusercontent.com
-              subject: https://github.com/NVIDIA/aicr/.github/workflows/*
-```
-
-### Test enforcement
-
-Allowed (attested image):
-
-```shell
-kubectl run aicr-ok --image="${IMAGE}:${TAG}"
-```
-
-Rejected (unsigned image):
-
-```shell
-kubectl run no-attestation --image=nginx:latest
-# Error from server: image verification failed: no matching attestations found
-```
+> Validated, cluster-tested copy-paste policies are tracked in
+> [#1537](https://github.com/NVIDIA/aicr/issues/1537). Earlier inline examples
+> here used the legacy Cosign format / a pre-bundle Policy Controller version
+> and an out-of-scope negative test, so they were removed rather than ship
+> policy that silently fails to verify.
 
 ## Troubleshooting
 
-**"sigstore verification failed — trusted root may be stale"** — run `aicr trust update`.
+**"sigstore verification failed — trusted root may be stale"** — this demo uses `cosign`/`gh`, which manage their own Sigstore TUF roots; run `cosign initialize` to refresh cosign's (not `aicr trust update`).
 
 **`gh attestation verify` returns "no attestations found"** — the artifact predates
 the GitHub-attestation rollout (initially shipped in CI mid-2024) or the digest is

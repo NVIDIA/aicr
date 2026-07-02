@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 
@@ -50,7 +50,7 @@ spec:
     - name: nvsentinel
       type: Helm
       source: oci://ghcr.io/nvidia
-      version: v1.3.0
+      version: v1.9.0
       valuesFile: components/nvsentinel/values.yaml
       dependencyRefs:
         - cert-manager
@@ -64,7 +64,7 @@ spec:
     - name: nodewright-operator
       type: Helm
       source: oci://ghcr.io/nvidia/nodewright/charts
-      version: v0.17.0
+      version: v0.17.1
       valuesFile: components/nodewright-operator/values.yaml
 
     - name: prometheus-operator-crds

@@ -13,8 +13,7 @@ against real cloud accounts.
 
 The pre-push gate is **`make qualify`**. It runs tests with the race
 detector and coverage threshold, lints (golangci-lint + yamllint),
-e2e, vulnerability scan, BOM regen check (opt-in flag elsewhere),
-and license check. CI runs the equivalent — if `make qualify` passes
+e2e, vulnerability scan, and license check. CI runs the equivalent — if `make qualify` passes
 locally, CI will pass.
 
 ## Test Surfaces
@@ -77,13 +76,17 @@ through `cmd.Root().Writer` so tests can intercept output:
 
 ```go
 buf := &bytes.Buffer{}
-cmd := newRecipeCmd(client)
-cmd.SetOut(buf)
-cmd.SetArgs([]string{"--service", "eks", "--accelerator", "h100"})
-if err := cmd.Execute(); err != nil {
-    t.Fatalf("execute: %v", err)
+cmd := recipeCmd()
+cmd.Writer = buf
+args := []string{"recipe", "--service", "eks", "--accelerator", "h100"}
+if err := cmd.Run(context.Background(), args); err != nil {
+    t.Fatalf("run: %v", err)
 }
 ```
+
+(The CLI is built on `urfave/cli/v3`: a command exposes a `Writer`
+field and is invoked with `cmd.Run(ctx, args)` where `args[0]` is the
+command name — there is no Cobra-style `SetOut`/`SetArgs`/`Execute`.)
 
 Direct `fmt.Println` / `fmt.Printf` to stdout in `pkg/cli` breaks
 this pattern and is a review-blocker.
@@ -241,8 +244,8 @@ real hardware. CI uses it to validate two things per recipe:
    the overlay expects.
 2. **Deployer output correctness.** The same recipe is re-rendered
    through every output adapter — `helm`, `argocd-oci`,
-   `argocd-helm-oci`, `flux-oci` — and each renders to a working
-   bundle the GitOps controllers can reconcile.
+   `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` — and each
+   renders to a working bundle the GitOps controllers can reconcile.
 
 KWOK nodes have no kubelet, so pods never actually run. KWOK testing
 **does not exercise** runtime validators (NCCL, inference-perf) or
@@ -255,7 +258,9 @@ simulated reflection of production shape, not a relaxed substitute.
 
 For the design rationale and the spike findings that justify the
 chart pin and Repository-secret shape, see
-[ADR-008](https://github.com/NVIDIA/aicr/blob/main/docs/design/008-kwok-deployer-matrix.md).
+[ADR-008](https://github.com/NVIDIA/aicr/blob/main/docs/design/008-kwok-deployer-matrix.md);
+for the Git-source lanes (in-cluster Gitea, `flux-git` and `argocd-git`),
+see [ADR-010](https://github.com/NVIDIA/aicr/blob/main/docs/design/010-kwok-git-source-lanes.md).
 For cluster-level KWOK setup (node profiles, recipe auto-discovery),
 see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 
@@ -263,23 +268,27 @@ see [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md).
 
 | Tier | Trigger | Deployers exercised |
 |------|---------|----------------------|
-| Tier 1 — generic overlays | every PR + push | `helm`, `argocd-oci`, `argocd-helm-oci`, `flux-oci` |
+| Tier 1 — generic overlays | every PR + push | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
 | Tier 2 — diff-aware accelerator overlays | PR only, conditional on changed files | `helm` only |
-| Tier 3 — full overlay set | push to `main` + nightly schedule | `helm`, `argocd-oci`, `argocd-helm-oci`, `flux-oci` |
+| Tier 3 — full overlay set | push to `main` + nightly schedule | `helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git` |
 
 | Lane | Pull artifact | Apply manifests | Reconcile to Ready |
 |---|---|---|---|
 | `helm` | n/a (filesystem) | `helm install` | pods scheduled |
 | `argocd-oci` | repo-server OCI pull | Argo CD sync | `Synced+Healthy` |
 | `argocd-helm-oci` | `helm pull` OCI | wrapper chart install | `Synced+Healthy` |
+| `argocd-git` | repo-server Git clone (in-cluster Gitea) | Argo CD sync | root App Git `repoURL` + `Synced+Healthy` |
 | `flux-oci` | source-controller OCI pull | kustomize-controller apply | all HelmReleases `Ready=True` + ArtifactGenerators Ready |
+| `flux-git` | source-controller Git clone (in-cluster Gitea) | kustomize-controller apply | GitRepositories Ready + all HelmReleases `Ready=True` |
 
 Tier 2 stays `helm`-only because its job is to verify accelerator-specific
 overlays still render correctly when their inputs change. The deployer
 shape is orthogonal — re-running through Argo CD would only re-exercise
 template rendering, which Tier 1 and Tier 3 already cover on the generic
-overlays. For filesystem (Git-source) round-trip coverage of `argocd` /
-`flux`, see [#963](https://github.com/NVIDIA/aicr/issues/963).
+overlays. The `flux-git` and `argocd-git` lanes cover the filesystem
+(Git-source) round-trip of
+[#963](https://github.com/NVIDIA/aicr/issues/963) for both GitOps
+controllers, sharing the same in-cluster Gitea infrastructure.
 
 ### Running KWOK Locally
 
@@ -293,11 +302,12 @@ make kwok-test-deployer RECIPE=eks-training DEPLOYER=argocd-oci
 ```
 
 Valid `DEPLOYER` values: `helm`, `argocd-oci`, `argocd-helm-oci`,
-`flux-oci`. The target invokes
+`argocd-git`, `flux-oci`, `flux-git`. The target invokes
 `kwok/scripts/run-all-recipes.sh --deployer <name> <recipe>`, which
 calls `install-infra.sh` once with `DEPLOYER` exported (in-cluster
 `registry:2` always; Argo CD for `argocd-*`; Flux 2 controllers for
-`flux-oci`), then runs `validate-scheduling.sh` for the recipe.
+`flux-*`; Gitea additionally for the Git-source lanes `flux-git` and
+`argocd-git`), then runs `validate-scheduling.sh` for the recipe.
 
 **Registry host port.** The Kind cluster exposes the in-cluster
 `registry:2` Service on **host port 5500** (`kwok/kind-config.yaml`'s
@@ -308,11 +318,21 @@ macOS. Linux runners have 5500 free too. The in-cluster NodePort
 independent — Argo CD's repo-server reaches the registry via Service
 DNS (`registry.aicr-registry.svc.cluster.local:5000`) regardless.
 
+**Gitea host port (flux-git / argocd-git).** The same pattern exposes
+the in-cluster Gitea on **host port 3300** (NodePort `30300`) so the
+runner can `git push` the filesystem bundle; 3300 avoids Gitea's
+default 3000, commonly held by Grafana / local dev servers. The GitOps
+controller (Flux's source-controller or Argo CD's repo-server) clones
+via Service DNS (`gitea.aicr-registry.svc.cluster.local:3000`).
+Clusters created before the 3300 mapping existed must be recreated
+(`kind delete cluster --name aicr-kwok-test`) — `install-infra.sh`
+exit code 71 is the telltale.
+
 **Sweeping all deployers locally.** `make kwok-test-all` defaults to
 `helm`; there is no matrix-aware make target. Loop in shell:
 
 ```bash
-for d in helm argocd-oci argocd-helm-oci flux-oci; do
+for d in helm argocd-oci argocd-helm-oci argocd-git flux-oci flux-git; do
   make kwok-test-deployer RECIPE=eks-training DEPLOYER="$d" || break
 done
 
@@ -336,6 +356,9 @@ and local loops can branch on failure mode without parsing logs.
 | `install-infra.sh` | 60 | Flux install manifest apply failed |
 | `install-infra.sh` | 61 | Flux controller not Ready within 180 s |
 | `install-infra.sh` | 62 | Flux CRDs not Established within 60 s |
+| `install-infra.sh` | 70 | Gitea Deployment not Ready within 120 s |
+| `install-infra.sh` | 71 | Gitea not reachable on host port within 60 s (cluster likely predates the 3300 port mapping) |
+| `install-infra.sh` | 72 | Gitea admin user bootstrap failed |
 | `validate-scheduling.sh` | 50 | GitOps sync deadline hit |
 | `run-all-recipes.sh` | 50 | Three consecutive GitOps sync timeouts; ADR-008 3-strike rule tripped |
 
@@ -351,13 +374,23 @@ independent.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KWOK_ARGOCD_SYNC_TIMEOUT` | `300` s | Deadline for all child Argo CD Applications to reach `Synced+Healthy` |
+| `KWOK_ARGOCD_SYNC_TIMEOUT` | `480` s | Deadline for all child Argo CD Applications to reach `Synced+Healthy` |
 | `KWOK_ARGOCD_ROOT_GRACE` | `30` s | Grace period for the root Application before deadline counting starts |
-| `KWOK_FLUX_SYNC_TIMEOUT` | `300` s | Deadline for OCIRepository fetch + Kustomization apply + HelmReleases `Ready=True` + ArtifactGenerators Ready |
+| `KWOK_FLUX_SYNC_TIMEOUT` | `500` s | Deadline for source fetch (OCIRepository or GitRepository) + Kustomization apply + HelmReleases `Ready=True` + ArtifactGenerators Ready |
 | `KWOK_FLUX_ROOT_GRACE` | `30` s | Grace period for the outer Kustomization before deadline counting starts |
 
+The Git-source lanes (`flux-git`, `argocd-git`) additionally honor
+`KWOK_GITEA_HOST_PORT` (default `3300`), `KWOK_GITEA_USER` (default
+`aicr`), and `KWOK_GITEA_PASSWORD` (default `aicr-kwok-ci`) — shared
+between `install-infra.sh` (Gitea install + admin bootstrap) and
+`validate-scheduling.sh` (`git push`). The password is a CI-only
+credential for the ephemeral in-cluster Gitea, not a secret.
+`argocd-git` reuses the `KWOK_ARGOCD_SYNC_TIMEOUT` budget.
+
 On a clean local Kind cluster `Synced+Healthy` lands in ~30 s; the
-300-second default exists to absorb CI variance. If a local run trips
+480-second default exists to absorb CI variance (the all-semantics gate
+waits for every Application, not just the first one, so it needs more
+budget than the old exists-semantics check did). If a local run trips
 code 50 but the cluster is otherwise healthy, raise the relevant
 timeout before assuming the recipe is broken — cold-cluster image
 pulls are the most common cause.
@@ -369,8 +402,9 @@ When `kwok-test` fails, it uploads an artifact named
 
 - `<cluster>-resources.txt`, `<cluster>-nodes.txt`, `<cluster>-pods.txt`, `<cluster>-events.txt`
 - `<cluster>-argo-apps.yaml` plus the repo-server and application-controller logs (argocd lanes)
-- `<cluster>-flux-resources.yaml` (OCIRepositories, Kustomizations, HelmReleases, ArtifactGenerators, ExternalArtifacts) plus source-, kustomize-, and helm-controller logs (flux-oci lane)
+- `<cluster>-flux-resources.yaml` (OCIRepositories, GitRepositories, Kustomizations, HelmReleases, ArtifactGenerators, ExternalArtifacts) plus source-, kustomize-, and helm-controller logs (flux-* lanes)
 - `<cluster>-registry.log` — last 200 lines of the in-cluster `registry:2`
+- `<cluster>-gitea.log` — last 200 lines of the in-cluster Gitea (Git-source lanes: `flux-git`, `argocd-git`)
 
 Start with the repo-server log (Argo CD) or source-controller log
 (Flux) for OCI-pull failures. Application-controller / kustomize-controller
@@ -380,17 +414,22 @@ helm-controller logs surface per-`HelmRelease` install outcomes.
 ### Adding a New Deployer Value
 
 The deployer set is finite and matches what `pkg/bundler` emits. To
-add a new value (say, `argocd-git`):
+add a new value:
 
 1. Add a `case` branch in `kwok/scripts/validate-scheduling.sh`'s
    `resolve_argocd_root_app()` (or `resolve_flux_root_names()` for
    Flux-reconciled lanes), plus branches in `generate_bundle` and
-   `deploy_bundle`. Reuse the existing `argocd-oci` / `flux-oci`
-   branches as templates.
+   `deploy_bundle`. Reuse the existing `argocd-oci` / `argocd-git` /
+   `flux-oci` / `flux-git` branches as templates. For a Git-source lane,
+   `argocd-git` and `flux-git` are the closest models — they share the
+   `compute_gitea_urls()` / `push_bundle_to_gitea()` helpers (Gitea
+   dual-view URLs, push-to-create, branch `main`).
 2. Extend the `DEPLOYER` allowlist in
    `kwok/scripts/run-all-recipes.sh` (`case "$DEPLOYER" in` in `main()`).
 3. Extend the `case "${DEPLOYER}"` branches in `install-infra.sh`'s
-   `main()` so the right controller stack is installed.
+   `main()` so the right controller stack is installed (a Git-source
+   lane composes its GitOps controller install with `install_gitea`,
+   as `argocd-git` and `flux-git` do).
 4. Extend the `deployer:` input description in
    `.github/actions/kwok-test/action.yml`.
 5. Add the value to the `deployer:` matrix in Tier 1 and Tier 3 of
@@ -455,12 +494,18 @@ the pre-push gate is local.
   shell first. This is one of the most common local-only CI-passes-fine
   failure modes.
 - **Forgetting `make bom-docs`** after a `recipes/registry.yaml`,
-  component values, or chart-pin change. `docs/user/container-images.md`
-  goes stale silently — `make bom-check` is **opt-in only** and not
-  wired into `make qualify`, `make lint`, or the merge gate today.
-  CI does not catch this. Run `make bom-docs` locally any time the
-  change touches charts.
-- **Coverage decrease > 0.5%** blocks the PR. Add tests rather than
+  component values, or chart-pin change. The BOM's **version column
+  and component set are now gated**: `TestCommittedBOMVersionsMatchRegistry`
+  (run by `make test` → `make qualify`, and by the `bom-freshness`
+  merge-gate job on docs-only PRs) fails CI if a pinned version drifts
+  or a component row is missing/orphaned. What is **not** gated at PR
+  time is *rendered-image drift* — a chart bumping an image inside its
+  own templates with no pin change on our side; `make bom-check` (a full
+  re-render comparison) is its **opt-in** blocking check, and the weekly
+  BOM-refresh workflow auto-detects it and opens a PR. So run
+  `make bom-docs` locally any time the change touches charts.
+- **Coverage decrease > 0.5%** is flagged for justification (the project-wide
+  75% floor is what blocks). Add tests rather than
   reaching for `// nolint` or `t.Skip` — both are review-blockers
   under the no-skip-tests rule in CLAUDE.md.
 - **Live-cluster connections from unit tests.** A test that forgets
@@ -469,7 +514,7 @@ the pre-push gate is local.
   `--no-cluster` (CLI / chainsaw) on the validator path.
 - **CLI tests asserting on stdout.** `pkg/cli` writes through
   `cmd.Root().Writer`. A test that captures `os.Stdout` will see
-  nothing. Use `cmd.SetOut(buf)` and assert on `buf.String()`.
+  nothing. Use `cmd.Writer = buf` and assert on `buf.String()`.
 
 ## See Also
 
@@ -478,4 +523,5 @@ the pre-push gate is local.
 - [validator.md](validator.md) — validator engine, chainsaw checks, container-per-validator pattern
 - [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md) — coding rules and anti-patterns table
 - [ADR-008](https://github.com/NVIDIA/aicr/blob/main/docs/design/008-kwok-deployer-matrix.md) — KWOK deployer matrix rationale
+- [ADR-010](https://github.com/NVIDIA/aicr/blob/main/docs/design/010-kwok-git-source-lanes.md) — Git-source lanes (Gitea, flux-git, argocd-git)
 - [kwok/README.md](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md) — KWOK cluster setup and node profiles

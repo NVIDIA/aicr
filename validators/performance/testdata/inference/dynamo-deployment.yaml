@@ -43,15 +43,22 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               env:
                 - name: SERVED_MODEL_NAME
                   # Quoted so a scalar-looking model ID (e.g. a pure-numeric or
                   # boolean-like name that passes validateModelID) parses as a
                   # string, not int/bool/null, after ${MODEL} substitution.
                   value: "${MODEL}"
+                # Least-loaded routing balances by each worker's active
+                # in-flight load rather than KV-overlap, so a transiently-slow
+                # worker stops receiving its full share. This mitigates the
+                # stochastic EKS H100 worker-stall / throughput degradation at
+                # the saturation knee (see issue #1197): capacity-blind and
+                # KV-overlap routing both let a backed-up worker accumulate
+                # requests, spiking TTFT p99 to 4-77s.
                 - name: DYN_ROUTER_MODE
-                  value: kv
+                  value: least-loaded
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:
@@ -72,7 +79,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
               args:

@@ -188,6 +188,44 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 			// cert-manager first, then gpu-operator and network-operator (alphabetically), then nvsentinel
 			want: []string{"cert-manager", "gpu-operator", "network-operator", "nvsentinel"},
 		},
+		{
+			name: "disabled leaf component excluded from order",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "cert-manager", Type: ComponentTypeHelm},
+					{Name: "gpu-operator", Type: ComponentTypeHelm},
+					{Name: "k8s-ephemeral-storage-metrics", Type: ComponentTypeHelm, Overrides: map[string]any{"enabled": false}},
+				},
+			},
+			want: []string{"cert-manager", "gpu-operator"},
+		},
+		{
+			name: "disabled dependency treated as externally satisfied",
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					// cert-manager disabled (e.g. provided by the CSP); gpu-operator
+					// and nvsentinel still depend on it but must not deadlock or
+					// trigger a false circular-dependency error.
+					{Name: "cert-manager", Type: ComponentTypeHelm, Overrides: map[string]any{"enabled": false}},
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
+					{Name: "nvsentinel", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager", "gpu-operator"}},
+				},
+			},
+			want: []string{"gpu-operator", "nvsentinel"},
+		},
+		{
+			name: "undeclared dependency still surfaces as cycle error",
+			// gpu-operator depends on cert-manager, which is neither declared
+			// nor disabled — it simply does not exist. This must remain an
+			// error: only declared-but-disabled edges are dropped, so the
+			// enabled-filtering does not mask a genuine missing dependency.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
+				},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -344,6 +382,22 @@ func TestRecipeMetadataSpecTopologicalLevels(t *testing.T) {
 			want: [][]string{
 				{"cert-manager", "nfd", "prometheus-operator-crds"},
 				{"kube-prometheus-stack"},
+				{"gpu-operator"},
+				{"nvsentinel"},
+			},
+		},
+		{
+			name: "disabled root collapses dependents up one level",
+			// cert-manager disabled (provided externally); its edge is treated
+			// as satisfied, so gpu-operator and nvsentinel no longer wait on it.
+			spec: RecipeMetadataSpec{
+				ComponentRefs: []ComponentRef{
+					{Name: "cert-manager", Type: ComponentTypeHelm, Overrides: map[string]any{"enabled": false}},
+					{Name: "gpu-operator", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager"}},
+					{Name: "nvsentinel", Type: ComponentTypeHelm, DependencyRefs: []string{"cert-manager", "gpu-operator"}},
+				},
+			},
+			want: [][]string{
 				{"gpu-operator"},
 				{"nvsentinel"},
 			},
@@ -2151,8 +2205,10 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
 		{"gb200-eks-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, "", CriteriaIntentTraining, ""}, true},
 		{"gb200-eks-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, "", CriteriaIntentInference, ""}, true},
-		{"gb200-oke-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, "", CriteriaIntentTraining, ""}, true},
-		{"gb200-oke-inference", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, "", CriteriaIntentInference, ""}, true},
+		{"gb200-oke-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSOracleLinux, CriteriaIntentTraining, ""}, true},
+		{"gb200-oke-inference", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSOracleLinux, CriteriaIntentInference, ""}, true},
+		{"l40s-oke-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorL40S, CriteriaOSOracleLinux, CriteriaIntentTraining, ""}, true},
+		{"l40s-oke-inference", criteria{CriteriaServiceOKE, CriteriaAcceleratorL40S, CriteriaOSOracleLinux, CriteriaIntentInference, ""}, true},
 		{"rtx-pro-6000-lke-training", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentTraining, ""}, true},
 		{"rtx-pro-6000-lke-inference", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentInference, ""}, true},
 		{"b200-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentTraining, ""}, true},

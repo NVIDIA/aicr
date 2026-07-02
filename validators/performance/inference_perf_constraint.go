@@ -1116,8 +1116,19 @@ func waitForNamespaceGone(ctx context.Context, clients typedcorev1.NamespaceInte
 				"timed out waiting for namespace to be fully deleted", ctx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return errors.New(errors.ErrCodeInternal,
-					"namespace watch channel closed unexpectedly")
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return errors.Wrap(errors.ErrCodeTimeout,
+						"timed out waiting for namespace to be fully deleted", ctxErr)
+				}
+				// Watch channel closed without cancellation — apiserver
+				// hiccups (rolling restart, LB drop) commonly cause this.
+				// Re-Get before failing a healthy run: the namespace may have
+				// been deleted during the closure window.
+				if _, getErr := clients.Get(ctx, namespace, metav1.GetOptions{}); apierrors.IsNotFound(getErr) {
+					return nil
+				}
+				return errors.New(errors.ErrCodeUnavailable,
+					"namespace watch channel closed before deletion observed")
 			}
 			if event.Type == watch.Deleted {
 				return nil
@@ -1223,8 +1234,35 @@ func waitForDynamoDeploymentReady(ctx *validators.Context, config *inferenceWork
 				"timed out waiting for DynamoGraphDeployment to become ready", waitCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return errors.New(errors.ErrCodeInternal,
-					"DynamoGraphDeployment watch channel closed unexpectedly")
+				if ctxErr := waitCtx.Err(); ctxErr != nil {
+					return errors.Wrap(errors.ErrCodeTimeout,
+						"timed out waiting for DynamoGraphDeployment to become ready", ctxErr)
+				}
+				// Watch closed without cancellation — re-Get before declaring
+				// failure so an apiserver hiccup doesn't fail a ready deployment.
+				recheck, getErr := ctx.DynamicClient.Resource(dynamoDeploymentGVR).
+					Namespace(config.namespace).Get(waitCtx, inferenceDeploymentName, metav1.GetOptions{})
+				switch {
+				case getErr == nil:
+					if isDynamoDeploymentReady(recheck) {
+						slog.Info("DynamoGraphDeployment is ready")
+						return nil
+					}
+					return errors.New(errors.ErrCodeUnavailable,
+						"DynamoGraphDeployment watch channel closed before ready state observed")
+				case apierrors.IsNotFound(getErr):
+					return errors.New(errors.ErrCodeUnavailable,
+						"DynamoGraphDeployment watch channel closed before ready state observed")
+				case errors.IsTransient(getErr):
+					// The re-check itself raced the deadline — keep it transient.
+					return errors.Wrap(errors.ErrCodeTimeout,
+						"DynamoGraphDeployment watch closed and re-check timed out", getErr)
+				default:
+					// A real re-check failure (RBAC, apiserver) is deterministic —
+					// surface it instead of masking it as "closed before observed".
+					return errors.Wrap(errors.ErrCodeInternal,
+						"DynamoGraphDeployment watch closed and re-check failed", getErr)
+				}
 			}
 			obj, ok := event.Object.(*unstructured.Unstructured)
 			if !ok {
@@ -1758,10 +1796,12 @@ func resolveModel(ctx *validators.Context) string {
 	return resolveInferenceModel()
 }
 
-// resolveRoutingMode returns where KV-aware routing decisions are made for the
+// resolveRoutingMode returns where routing decisions are made for the
 // benchmark workload. The default `dynamo-router` mode keeps routing in the
-// Dynamo frontend. `gateway-epp` switches to Gateway API Inference Extension:
-// EPP performs KV-aware endpoint selection and worker frontend sidecars run in
+// Dynamo frontend, which uses load-aware least-loaded routing
+// (DYN_ROUTER_MODE=least-loaded) — see the deployment template and issue
+// #1197. `gateway-epp` switches to Gateway API Inference Extension: EPP
+// performs KV-aware endpoint selection and worker frontend sidecars run in
 // direct mode so they honor EPP's routing headers. The sidecars do not relay
 // local vLLM ZMQ KV events onto NATS; that relay is handled by the worker
 // runtime.

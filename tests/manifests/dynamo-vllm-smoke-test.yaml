@@ -60,7 +60,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               env:
                 - name: SERVED_MODEL_NAME
                   value: Qwen/Qwen3-0.6B
@@ -81,7 +81,7 @@ spec:
               resourceClaimName: vllm-smoke-gpu-claim
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
               args:

@@ -27,7 +27,7 @@ attestations:
 - bundle:
     oci: ghcr.io/owner/aicr-evidence:v1
     digest: sha256:abc
-    predicateType: https://aicr.nvidia.com/recipe-evidence/v1
+    predicateType: https://aicr.run/recipe-evidence/v1
   attestedAt: 2026-05-08T10:23:11Z
 `
 	p := filepath.Join(t.TempDir(), "pointer.yaml")
@@ -50,10 +50,10 @@ func TestLoadAndValidatePointer_Rejects(t *testing.T) {
 	}{
 		{"unsupported schema", `schemaVersion: 2.0.0
 recipe: x
-attestations: [{bundle: {predicateType: https://aicr.nvidia.com/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}]
+attestations: [{bundle: {predicateType: https://aicr.run/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}]
 `},
 		{"missing recipe", `schemaVersion: 1.0.0
-attestations: [{bundle: {predicateType: https://aicr.nvidia.com/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}]
+attestations: [{bundle: {predicateType: https://aicr.run/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}]
 `},
 		{"no attestations", `schemaVersion: 1.0.0
 recipe: x
@@ -62,8 +62,8 @@ attestations: []
 		{"multiple attestations", `schemaVersion: 1.0.0
 recipe: x
 attestations:
-- {bundle: {predicateType: https://aicr.nvidia.com/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}
-- {bundle: {predicateType: https://aicr.nvidia.com/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}
+- {bundle: {predicateType: https://aicr.run/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}
+- {bundle: {predicateType: https://aicr.run/recipe-evidence/v1}, attestedAt: 2026-05-08T10:23:11Z}
 `},
 		{"wrong predicate type", `schemaVersion: 1.0.0
 recipe: x
@@ -72,7 +72,7 @@ attestations: [{bundle: {predicateType: wrong}, attestedAt: 2026-05-08T10:23:11Z
 		{"bad digest format", `schemaVersion: 1.0.0
 recipe: x
 attestations:
-- bundle: {oci: ghcr.io/x/y:v1, digest: no-prefix, predicateType: https://aicr.nvidia.com/recipe-evidence/v1}
+- bundle: {oci: ghcr.io/x/y:v1, digest: no-prefix, predicateType: https://aicr.run/recipe-evidence/v1}
   attestedAt: 2026-05-08T10:23:11Z
 `},
 	}

@@ -676,14 +676,14 @@ func buildProviderWithValues(t *testing.T, valuesPath string, values map[string]
 	registryYAML := []byte(`components: []
 `)
 	baseYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: base
 spec:
   componentRefs: []
 `)
 	overlayYAML := []byte(`kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: bound-values
 spec:

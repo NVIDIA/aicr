@@ -24,6 +24,8 @@ navigation:
         path: user/installation.md
       - page: CLI Reference
         path: user/cli-reference.md
+      - page: Artifact Verification
+        path: user/artifact-verification.md
       - page: API Reference
         path: user/api-reference.md
       - page: Agent Deployment
@@ -34,6 +36,8 @@ navigation:
         path: user/component-catalog.md
       - page: Recipe Health
         path: user/recipe-health.md
+      - page: TestGrid
+        path: user/testgrid.md
       - page: Validation
         path: user/validation.md
       - page: Coverage Matrix
@@ -53,12 +57,24 @@ navigation:
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking
         path: integrator/gke-tcpxo-networking.md
+      - page: OpenShift Deployment
+        path: integrator/openshift.md
+      - page: Talos Integration
+        path: integrator/talos-integration.md
       - page: Recipe Development
         path: integrator/recipe-development.md
       - page: Data Extension
         path: integrator/data-extension.md
       - page: Validator Extension
         path: integrator/validator-extension.md
+      - page: Supply Chain Verification
+        path: integrator/supply-chain-verification.md
+      - page: Go Library Integration
+        path: integrator/go-library.md
+      - page: Public API Surface
+        path: integrator/public-api.md
+      - page: Measurement Schema
+        path: integrator/measurement-api.md
       - section: Components
         contents:
           - page: Nodewright
@@ -76,6 +92,8 @@ navigation:
         path: contributor/collector.md
       - page: Validators
         path: contributor/validator.md
+      - page: Evidence Ingest
+        path: contributor/evidence-ingest.md
       - page: Inference-Perf Fluctuation (investigation)
         path: contributor/inference-perf-fluctuation.md
       - page: CLI
@@ -88,3 +106,7 @@ navigation:
         path: contributor/skills.md
       - page: Maintaining AICR
         path: contributor/maintaining.md
+      - page: Publishing Recipe Evidence
+        path: contributor/evidence-publishing.md
+      - page: UAT Day/Night Cycle
+        path: contributor/uat.md

@@ -15,9 +15,11 @@
 package fingerprint
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 )
 
@@ -25,20 +27,22 @@ import (
 // constants because the collector packages keep them unexported and we
 // don't want to import them just for the names.
 const (
+	serviceOKE              = "oke"
+	serviceLKE              = "lke"
 	subtypeK8sServer        = "server"
 	subtypeK8sNode          = "node"
-	subtypeGPUSMI           = "smi"
+	subtypeGPUHardware      = "hardware"
 	subtypeOSRelease        = "release"
 	subtypeTopologySummary  = "summary"
 	subtypeTopologyLabel    = "label"
 	keyK8sNodeProvider      = "provider"
-	keyGPUSMIModel          = "gpu.model"
+	keyGPUHardwareSKU       = "model"
 	keyOSReleaseID          = "ID"
 	keyOSReleaseVersionID   = "VERSION_ID"
 	keyTopologyNodeCount    = "node-count"
 	labelKeyRegion          = "topology.kubernetes.io/region"
 	sourceServiceProvider   = "k8s.node.provider"
-	sourceAcceleratorSMI    = "gpu.smi.gpu.model"
+	sourceAcceleratorPCI    = "gpu.hardware.model"
 	sourceOSRelease         = "os.release"
 	sourceK8sServerVersion  = "k8s.server.version"
 	sourceTopologyNodeCount = "nodeTopology.summary.node-count"
@@ -57,7 +61,7 @@ const (
 // missing fingerprint values as "unknown" rather than "mismatched."
 func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 	fp := &Fingerprint{}
-	var topo *measurement.Measurement
+	var topo, gpu *measurement.Measurement
 	for _, m := range measurements {
 		if m == nil {
 			continue
@@ -66,7 +70,7 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 		case measurement.TypeK8s:
 			populateFromK8s(fp, m)
 		case measurement.TypeGPU:
-			populateFromGPU(fp, m)
+			gpu = m
 		case measurement.TypeOS:
 			populateFromOS(fp, m)
 		case measurement.TypeNodeTopology:
@@ -75,30 +79,83 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 		case measurement.TypeSystemD:
 			// systemd measurements do not contribute to the cluster
 			// fingerprint; intentionally skipped.
+		case measurement.TypeNetworkTopology:
+			// network topology measurements describe per-group hardware
+			// (PFs, rails, RDMA capabilities) that doesn't currently feed
+			// any fingerprint dimension; intentionally skipped. Phase 4
+			// (multi-group support) will revisit this to derive multi-gpu
+			// from distinct `identity.gpuType` Context values.
 		}
 	}
 	if topo != nil {
 		reconcileAccelerator(fp, topo)
 	}
+	if gpu != nil {
+		populatePCIDiscovery(fp, gpu)
+	}
 	return fp
 }
 
-// reconcileAccelerator cross-references the per-node smi reading with
-// cluster-wide nvidia.com/gpu.product labels (when the GPU operator
-// labels nodes). The smi collector only inspects a single node's
-// nvidia-smi output, so a heterogeneous cluster (e.g. half H100, half
-// L40) would otherwise be claimed as homogeneous in whichever SKU the
-// snapshotter happened to land on. The topology label data lets us
-// detect disagreement and surface it as multi-gpu rather than lie.
+// populatePCIDiscovery records the PCI device-ID–derived SKU from the GPU
+// "hardware" subtype. The descriptive SKU always populates GPUModel (the
+// real hardware, supported or not). The matching Accelerator dimension is
+// only backfilled when (a) no higher-priority source already resolved it
+// and (b) the node is not heterogeneous:
+//   - a recipe-supported SKU sets the matching Accelerator value, so a
+//     driver-less, unlabeled node still matches recipes for supported GPUs;
+//   - an unsupported SKU never enters the matching dimension (which would
+//     skew Fingerprint.Match / ToCriteria) but records the unknown-sku note
+//     so "GPU present but unsupported" stays visible — mirroring the
+//     topology path in reconcileAccelerator. The descriptive SKU is in
+//     GPUModel either way.
+func populatePCIDiscovery(fp *Fingerprint, gpu *measurement.Measurement) {
+	st := gpu.GetSubtype(subtypeGPUHardware)
+	if st == nil {
+		return
+	}
+	sku, err := st.GetString(keyGPUHardwareSKU)
+	if err != nil || sku == "" {
+		return
+	}
+	fp.GPUModel = Dimension{Value: sku, Source: sourceAcceleratorPCI}
+
+	// Don't disturb a higher-priority resolution (label-resolved value or
+	// the multi-gpu note from a heterogeneous topology).
+	if fp.Accelerator.Value != "" || fp.Accelerator.Note == noteMultiGPU {
+		return
+	}
+	if isSupportedAccelerator(sku) {
+		fp.Accelerator = Dimension{Value: sku, Source: sourceAcceleratorPCI}
+		return
+	}
+	// GPU present but its SKU is outside the recipe-supported enum. Preserve
+	// the unknown-sku signal unless the topology source already set one.
+	if fp.Accelerator.Note == "" {
+		fp.Accelerator = Dimension{Source: sourceAcceleratorPCI, Note: noteUnknownSKU}
+	}
+}
+
+// isSupportedAccelerator reports whether sku is in the static OSS
+// recipe-accelerator enum. Used to gate the PCI backfill of the matching
+// Accelerator dimension; descriptive SKUs outside the enum still surface via
+// GPUModel.
+func isSupportedAccelerator(sku string) bool {
+	return slices.Contains(recipe.GetCriteriaAcceleratorTypes(), sku)
+}
+
+// reconcileAccelerator resolves the matching Accelerator dimension from the
+// cluster-wide nvidia.com/gpu.product labels (set by GPU Feature Discovery).
+// The label is the primary source: it reflects every GPU node, so a
+// heterogeneous cluster (e.g. half H100, half L40) is surfaced as multi-gpu
+// rather than claimed homogeneous. The per-node PCI device ID is a lower-
+// priority fallback applied afterward by populatePCIDiscovery.
 //
 // Resolution order:
 //   - Topology shows multiple GPU SKUs (disambiguated keys) → record
 //     multi-gpu note, clear Value.
-//   - Topology shows one GPU SKU and smi was empty → backfill from
-//     topology so non-GPU snapshotter nodes still surface accelerator.
-//   - Topology label present but unrecognized AND smi did not already
-//     mark unknown-sku → record unknown-sku via the topology source.
-//   - Otherwise → keep smi result.
+//   - Topology shows one recognized GPU SKU → set it.
+//   - Topology label present but unrecognized → record unknown-sku via the
+//     topology source (the PCI fallback may still refine this later).
 func reconcileAccelerator(fp *Fingerprint, topo *measurement.Measurement) {
 	st := topo.GetSubtype(subtypeTopologyLabel)
 	if st == nil {
@@ -121,9 +178,8 @@ func reconcileAccelerator(fp *Fingerprint, topo *measurement.Measurement) {
 		fp.Accelerator = Dimension{Value: sku, Source: sourceTopologyGPU}
 		return
 	}
-	// Topology label present but unrecognized — mark unknown-sku via
-	// the topology source unless smi already marked it (no point
-	// overwriting an identical signal from a less-specific source).
+	// Topology label present but unrecognized — mark unknown-sku via the
+	// topology source so registry staleness is visible in the snapshot.
 	if fp.Accelerator.Note == "" {
 		fp.Accelerator = Dimension{Source: sourceTopologyGPU, Note: noteUnknownSKU}
 	}
@@ -169,29 +225,9 @@ func populateFromK8s(fp *Fingerprint, m *measurement.Measurement) {
 	}
 	if st := m.GetSubtype(subtypeK8sNode); st != nil {
 		if v, err := st.GetString(keyK8sNodeProvider); err == nil && v != "" {
-			fp.Service = Dimension{Value: v, Source: sourceServiceProvider}
+			fp.Service = Dimension{Value: normalizeProviderID(v), Source: sourceServiceProvider}
 		}
 	}
-}
-
-func populateFromGPU(fp *Fingerprint, m *measurement.Measurement) {
-	st := m.GetSubtype(subtypeGPUSMI)
-	if st == nil {
-		return
-	}
-	model, err := st.GetString(keyGPUSMIModel)
-	if err != nil || model == "" {
-		return
-	}
-	if sku := ParseGPUSKU(model); sku != "" {
-		fp.Accelerator = Dimension{Value: sku, Source: sourceAcceleratorSMI}
-		return
-	}
-	// nvidia-smi reported a product string we don't recognize. Surface
-	// the staleness via unknown-sku so a maintainer sees the registry
-	// gap rather than the snapshot reading as "no GPU." The raw model
-	// stays in the underlying measurement for forensics.
-	fp.Accelerator = Dimension{Source: sourceAcceleratorSMI, Note: noteUnknownSKU}
 }
 
 func populateFromOS(fp *Fingerprint, m *measurement.Measurement) {
@@ -286,6 +322,38 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 	return value, false
 }
 
+// normalizeProviderID maps a raw Kubernetes spec.providerID (or an already-
+// normalized name stored by the collector) to the service type string used in
+// recipe criteria. OKE nodes can appear in four forms:
+//   - "ocid1.instance.oc1..." — bare OCID (no scheme); what K8s stores natively
+//   - "oci://ocid1.instance.oc1..." — full scheme URL; the collector normalizes
+//     this to "oke" via parseProvider, but hand-crafted snapshots may carry it
+//   - "oci" — bare string stored by the collector before the "oci://" → "oke"
+//     mapping existed
+//   - "oke" — already normalized; pass through
+//
+// Akamai Cloud / Linode LKE nodes carry "linode://<instance-id>"; the collector
+// normalizes this to "lke" via parseProvider, but hand-crafted snapshots may
+// carry the raw "linode://..." URL or the bare "linode" string.
+func normalizeProviderID(v string) string {
+	if strings.HasPrefix(v, "ocid1.") {
+		return serviceOKE
+	}
+	if strings.HasPrefix(v, "oci://") {
+		return serviceOKE
+	}
+	if v == "oci" {
+		return serviceOKE
+	}
+	if strings.HasPrefix(v, "linode://") {
+		return serviceLKE
+	}
+	if v == "linode" {
+		return serviceLKE
+	}
+	return v
+}
+
 // normalizeOSID maps an /etc/os-release ID value to the
 // recipe.CriteriaOSType enum. Returns "" for IDs that do not match a
 // supported OS kind so callers treat them as "fingerprint did not
@@ -301,6 +369,8 @@ func normalizeOSID(id string) string {
 		return oskind.COS
 	case oskind.AmazonLinux, "amzn", "amazon", "al2", "al2023":
 		return oskind.AmazonLinux
+	case oskind.OracleLinux:
+		return oskind.OracleLinux
 	case oskind.Talos:
 		return oskind.Talos
 	default:

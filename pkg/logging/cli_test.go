@@ -93,6 +93,54 @@ func TestCLIHandler_ErrorMessage(t *testing.T) {
 	}
 }
 
+func TestCLIHandler_FailureStatusColoredRed(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  string
+		wantRed bool
+	}{
+		{"failed status at info level is red", "failed", true},
+		{"error status at info level is red", "error", true},
+		{"passed status at info level is green", "passed", false},
+		{"skipped status at info level is green", "skipped", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			handler := newCLIHandler(&buf, slog.LevelInfo)
+			handler.color = true // force color even though the writer is a buffer
+			logger := slog.New(handler)
+
+			logger.Info("validator completed", "name", "deployment", "status", tt.status)
+
+			output := buf.String()
+			gotRed := strings.Contains(output, colorRed)
+			if gotRed != tt.wantRed {
+				t.Errorf("status=%q colored red = %v, want %v (output: %q)", tt.status, gotRed, tt.wantRed, output)
+			}
+			// A non-red line must still be colored green (not left uncolored).
+			if !tt.wantRed && !strings.Contains(output, colorGreen) {
+				t.Errorf("status=%q should be green, got: %q", tt.status, output)
+			}
+		})
+	}
+
+	// A handler-bound status attr (logger.With) must also trigger red, since
+	// hasFailureStatus inspects h.attrs in addition to the record attrs.
+	t.Run("handler-bound failed status at info level is red", func(t *testing.T) {
+		var buf bytes.Buffer
+		handler := newCLIHandler(&buf, slog.LevelInfo)
+		handler.color = true
+		logger := slog.New(handler).With("status", "failed")
+
+		logger.Info("validator completed", "name", "deployment")
+
+		if output := buf.String(); !strings.Contains(output, colorRed) {
+			t.Errorf("handler-bound status=failed should be red, got: %q", output)
+		}
+	})
+}
+
 func TestCLIHandler_NoColorWhenNotTTY(t *testing.T) {
 	var buf bytes.Buffer
 	handler := newCLIHandler(&buf, slog.LevelInfo)

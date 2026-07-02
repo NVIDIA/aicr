@@ -31,7 +31,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
 )
 
 // keyVerificationIdentity verifies a public-key-signed bundle attestation
@@ -43,6 +42,7 @@ import (
 type keyVerificationIdentity struct {
 	pub      crypto.PublicKey
 	identity string // KMS URI, or "pem:<sha256-fingerprint>" for a local key
+	src      TrustedRootSource
 }
 
 // NewKeyVerificationIdentity resolves keyRef to a public key and returns the
@@ -53,7 +53,10 @@ type keyVerificationIdentity struct {
 // agree on provider resolution and error classification), and anything else is
 // read as a local PEM. Scheme detection reuses isKMSURI (kmsidentity.go), the
 // single source of truth shared with the signing side.
-func NewKeyVerificationIdentity(ctx context.Context, keyRef string) (VerificationIdentity, error) {
+func NewKeyVerificationIdentity(ctx context.Context, keyRef string, src TrustedRootSource) (VerificationIdentity, error) {
+	if src == nil {
+		src = PublicGoodTrustedRoot
+	}
 	if isKMSURI(keyRef) {
 		// Verification needs only the public half; the live signer seam is
 		// discarded. resolveKMSPublicKey already classifies the failure
@@ -66,29 +69,31 @@ func NewKeyVerificationIdentity(ctx context.Context, keyRef string) (Verificatio
 		// Store the scheme-normalized URI so the identity (BundleCreator,
 		// --require-creator matching) is canonical regardless of caller casing,
 		// matching how resolveKMSPublicKey resolves the key.
-		return &keyVerificationIdentity{pub: pub, identity: normalizeURIScheme(keyRef)}, nil
+		return &keyVerificationIdentity{pub: pub, identity: normalizeURIScheme(keyRef), src: src}, nil
 	}
 
 	pub, fp, err := loadPEMPublicKey(keyRef)
 	if err != nil {
 		return nil, err
 	}
-	return &keyVerificationIdentity{pub: pub, identity: "pem:" + fp}, nil
+	return &keyVerificationIdentity{pub: pub, identity: "pem:" + fp, src: src}, nil
 }
 
 // Identity returns the key identity (KMS URI or pem:<fp>). The verifier
 // substitutes this as BundleCreator since a key-signed bundle has no cert SAN.
 func (k *keyVerificationIdentity) Identity() string { return k.identity }
 
-// TrustedMaterial combines the Sigstore public-good root (for the Rekor tlog,
-// which #407 uploads to by default) with a bare-public-key trust anchor (for
-// the signature itself). The key is wrapped in an always-valid ExpiringKey
-// (zero start/end) because a raw public key carries no notBefore/notAfter the
-// way a Fulcio certificate does, so there is no validity window to enforce.
-func (k *keyVerificationIdentity) TrustedMaterial(_ context.Context) (root.TrustedMaterial, error) {
-	publicGood, err := trust.GetTrustedMaterial()
+// TrustedMaterial combines the trust anchors from src (the public-good root by
+// default, or a union with a private trusted_root.json under
+// `verify --trust-root`; both carry the Rekor tlog, which #407 uploads to by
+// default) with a bare-public-key trust anchor (for the signature itself). The
+// key is wrapped in an always-valid ExpiringKey (zero start/end) because a raw
+// public key carries no notBefore/notAfter the way a Fulcio certificate does,
+// so there is no validity window to enforce.
+func (k *keyVerificationIdentity) TrustedMaterial(ctx context.Context) (root.TrustedMaterial, error) {
+	base, err := k.src(ctx)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load trusted root", err)
+		return nil, err
 	}
 	ver, err := signature.LoadVerifier(k.pub, crypto.SHA256)
 	if err != nil {
@@ -97,7 +102,7 @@ func (k *keyVerificationIdentity) TrustedMaterial(_ context.Context) (root.Trust
 	keyMaterial := root.NewTrustedPublicKeyMaterial(func(string) (root.TimeConstrainedVerifier, error) {
 		return root.NewExpiringKey(ver, time.Time{}, time.Time{}), nil
 	})
-	return root.TrustedMaterialCollection{publicGood, keyMaterial}, nil
+	return root.TrustedMaterialCollection{base, keyMaterial}, nil
 }
 
 // PolicyOption binds verification to the public key rather than a Fulcio

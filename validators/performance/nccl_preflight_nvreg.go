@@ -269,8 +269,31 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 				map[string]interface{}{"pod": name})
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return "", aicrErrors.New(aicrErrors.ErrCodeInternal,
-					"preflight pod watch channel closed unexpectedly")
+				if ctxErr := waitCtx.Err(); ctxErr != nil {
+					return "", aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
+						"NVreg preflight pod did not terminate in time", ctxErr,
+						map[string]any{"pod": name})
+				}
+				// Watch closed without cancellation — re-Get before failing, in
+				// case the pod reached a terminal phase during the closure window.
+				current, getErr := podsClient.Get(waitCtx, name, metav1.GetOptions{})
+				switch {
+				case getErr == nil:
+					if p := current.Status.Phase; p == corev1.PodSucceeded || p == corev1.PodFailed {
+						return p, nil
+					}
+					return "", aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+						"preflight pod watch channel closed before pod terminated")
+				case apierrors.IsNotFound(getErr):
+					return "", aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+						"preflight pod watch channel closed and pod not found on re-check")
+				case aicrErrors.IsTransient(getErr):
+					return "", aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"preflight pod watch closed and re-check timed out", getErr)
+				default:
+					return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+						"preflight pod watch closed and re-check failed", getErr)
+				}
 			}
 			if event.Type == watch.Deleted {
 				return "", aicrErrors.New(aicrErrors.ErrCodeInternal,

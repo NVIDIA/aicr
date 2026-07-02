@@ -32,6 +32,11 @@ bin/
 /bom
 /health
 
+# install
+/aicr_*.tar.gz
+/aicr-attestation.sigstore.json
+/recipe-catalog.sigstore.json
+
 # =============================================================================
 # Build & Release
 # =============================================================================
@@ -78,6 +83,10 @@ image-oci
 /evidence
 /report.json
 /evidence-result.json
+/rekor.pub
+/ctfe.pub
+/trusted_root.json
+/fulcio-chain.pem
 
 # =============================================================================
 # Terraform

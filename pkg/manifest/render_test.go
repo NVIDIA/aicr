@@ -181,6 +181,30 @@ func TestHelmFuncMapFunctions(t *testing.T) {
 		}
 	})
 
+	t.Run("quote", func(t *testing.T) {
+		fn := funcs["quote"].(func(...any) string)
+
+		tests := []struct {
+			name string
+			in   []any
+			want string
+		}{
+			{"single string", []any{"hello"}, `"hello"`},
+			{"multiple values", []any{"a", "b"}, `"a" "b"`},
+			{"integer", []any{42}, `"42"`},
+			{"nil skipped", []any{"a", nil, "b"}, `"a" "b"`},
+			{"empty input", []any{}, ""},
+			{"bool", []any{true}, `"true"`},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if got := fn(tt.in...); got != tt.want {
+					t.Errorf("quote(%v) = %q, want %q", tt.in, got, tt.want)
+				}
+			})
+		}
+	})
+
 	t.Run("trunc", func(t *testing.T) {
 		fn := funcs["trunc"].(func(int, string) string)
 

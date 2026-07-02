@@ -178,8 +178,8 @@ validators.Run(map[string]validators.CheckFunc{
 | **stderr** | Streamed live to the user — use `slog.*` |
 | `/dev/termination-log` | Failure reason (≤ 4096 bytes), written on `return error` |
 
-**Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/recipe/recipe.yaml`
-(override via `AICR_SNAPSHOT_PATH`, `AICR_RECIPE_PATH`).
+**Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
+(override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).
 
 **Environment** (set by the Job deployer from the catalog entry):
 
@@ -478,13 +478,15 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   counts (stddev 0), a pinned prompt pool, and greedy decoding
   (`temperature: 0`). Input determinism stabilizes *throughput*; it does not
   remove system-side p99 jitter at the knee.
-- **Routing matters.** The inference-perf workload uses Dynamo's KV router
-  (`DYN_ROUTER_MODE=kv`) with live worker KV events. Frontend-to-worker
+- **Routing matters.** The inference-perf workload uses Dynamo's load-aware
+  least-loaded router (`DYN_ROUTER_MODE=least-loaded`), which balances by each
+  worker's active in-flight load so a transiently-slow worker stops receiving
+  its full share — mitigating the stochastic EKS H100 worker-stall / throughput
+  degradation at the saturation knee (issue #1197). Frontend-to-worker
   requests use Dynamo's request plane (Dynamo 1.2 defaults to TCP; AICR does
-  not set `DYN_REQUEST_PLANE=nats`). The platform chart enables the NATS event
-  plane, the local vLLM engine publishes KV-cache events through its ZMQ
-  publisher, and the Dynamo worker runtime relays those events onto NATS so
-  routing decisions use observed cache state instead of approximate prediction.
+  not set `DYN_REQUEST_PLANE=nats`). Workers still publish local vLLM KV-cache
+  events through their ZMQ publisher (relayed onto the NATS event plane), but
+  least-loaded routing does not consume them.
   The `inference-routing-mode` recipe input defaults to `dynamo-router`; set
   `gateway-epp` to validate the GAIE/EPP path through agentgateway with worker
   frontend sidecars in direct mode. The direct-mode sidecars honor EPP routing
@@ -640,8 +642,9 @@ type ValidationFunc func(
 
 ### Common pitfalls
 
-- **Function name typo in YAML.** Silently skipped — no error raised.
-  Add a test that calls `Get("...")` (or `RegistryHas(...)`) for every
+- **Function name typo in YAML.** Fails closed — `RunValidations` raises
+  `ErrCodeInvalidRequest` ("unknown validation function") rather than
+  skipping the check. Add a test that calls `Get("...")` for every
   shipping check.
 - **Returning an error when you mean a warning.** Errors stop the
   bundle. If the user can ship through it, return a warning.
@@ -710,7 +713,7 @@ spec:
 Use Chainsaw's `assert` (expected match) and `error` (unexpected match
 must not exist). Always include an existence guard before phase
 assertions so an empty namespace can't yield a vacuous pass. See the
-[Chainsaw assert reference](https://kyverno.github.io/chainsaw/latest/operations/check/assert/)
+[Chainsaw assert reference](https://kyverno.github.io/chainsaw/latest/operations/assert/)
 for the full operator list.
 
 **Read-only allowlist.** Registry-declared assert files MUST use only
@@ -731,6 +734,28 @@ make check-health COMPONENT=gpu-operator   # one component
 make check-health-all                      # everything in recipes/checks/
 make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 ```
+
+### Timeout budgeting
+
+During `aicr validate --phase deployment`, registry health checks in
+`recipes/checks/<component>/health-check.yaml` run in-process inside
+the `expected-resources` check (`validators/chainsaw/inprocess.go`).
+
+A Test's `spec.timeouts.assert` is the **whole-Test budget** — one
+deadline shared across every step and retry. Slurm's
+[`health-check.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/checks/slinky-slurm/health-check.yaml)
+uses `assert: 7m` so workload-readiness steps can converge before the
+pod-phase guard runs.
+
+The `expected-resources` catalog timeout (8m in
+`recipes/validators/catalog.yaml`) is the **outer** envelope. It must
+exceed the longest in-tree `assert` value plus headroom for
+pre-chainsaw work, chainsaw teardown, and log flush
+(`defaults.JobEnvelopeMargin`). If assert runs too close to that
+catalog deadline, the Job can SIGKILL the pod before chainsaw reports
+the failing step — operators see truncated output instead of a useful
+failure. Raise the catalog `timeout` in tandem when you need a longer
+assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
 
 ## Constraint evaluation algorithm
 
@@ -788,7 +813,8 @@ Patterns common to all four surfaces.
   error.** Masquerades broken YAML as passing. Fail closed — return
   `ErrCodeInvalidRequest`. (CLAUDE.md anti-pattern.)
 - **Function-name typo in `registry.yaml` `validations:` block.**
-  Silently skipped, no error. Add a registry-lookup test for every
+  Fails closed — `RunValidations` raises `ErrCodeInvalidRequest`
+  ("unknown validation function"). Add a registry-lookup test for every
   shipping function.
 - **`yaml.Marshal` on `map[string]any` for output that feeds CTRF or
   a digest.** `yaml.v3` walks randomized Go map order. Use

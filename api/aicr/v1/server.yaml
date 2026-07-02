@@ -112,7 +112,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
             default: any
         - name: accelerator
           in: query
@@ -120,7 +120,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -128,7 +128,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -141,10 +141,14 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
             default: any
         - name: platform
           in: query
@@ -184,7 +188,7 @@ paths:
                 basic:
                   summary: Basic recipe request
                   value:
-                    apiVersion: aicr.nvidia.com/v1alpha1
+                    apiVersion: aicr.run/v1alpha2
                     kind: Recipe
                     metadata:
                       version: v1.0.0
@@ -210,13 +214,15 @@ paths:
                       os: any
                     componentRefs:
                       - name: gpu-operator
+                        type: Helm
                         version: v25.3.3
-                        order: 1
-                        repository: https://helm.ngc.nvidia.com/nvidia
+                        source: https://helm.ngc.nvidia.com/nvidia
+                        chart: gpu-operator
                       - name: network-operator
+                        type: Helm
                         version: v25.4.0
-                        order: 2
-                        repository: https://helm.ngc.nvidia.com/nvidia
+                        source: https://helm.ngc.nvidia.com/nvidia
+                        chart: network-operator
                     constraints:
                       driver:
                         version: "580.82.07"
@@ -321,7 +327,7 @@ paths:
                 summary: Minimal criteria (single field)
                 value:
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: eks-minimal
                   spec:
@@ -330,7 +336,7 @@ paths:
                 summary: Full criteria specification
                 value:
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: gb200-eks-ubuntu-training
                   spec:
@@ -347,7 +353,7 @@ paths:
                 summary: Minimal criteria (single field)
                 value: |
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: eks-minimal
                   spec:
@@ -356,7 +362,7 @@ paths:
                 summary: Full criteria specification
                 value: |
                   kind: RecipeCriteria
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   metadata:
                     name: gb200-eks-ubuntu-training
                   spec:
@@ -479,7 +485,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
             default: any
         - name: accelerator
           in: query
@@ -487,7 +493,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -495,7 +501,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -508,10 +514,14 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
             default: any
         - name: platform
           in: query
@@ -935,17 +945,18 @@ paths:
               simpleRecipe:
                 summary: Simple recipe with GPU operator
                 value:
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   kind: Recipe
                   componentRefs:
                     - name: gpu-operator
+                      type: Helm
                       version: v25.3.3
-                      type: helm
-                      repository: https://helm.ngc.nvidia.com/nvidia
+                      source: https://helm.ngc.nvidia.com/nvidia
+                      chart: gpu-operator
               fullRecipe:
                 summary: Full recipe with metadata
                 value:
-                  apiVersion: aicr.nvidia.com/v1alpha1
+                  apiVersion: aicr.run/v1alpha2
                   kind: Recipe
                   metadata:
                     version: v1.0.0
@@ -971,9 +982,10 @@ paths:
                     os: any
                   componentRefs:
                     - name: gpu-operator
+                      type: Helm
                       version: v25.3.3
-                      order: 1
-                      repository: https://helm.ngc.nvidia.com/nvidia
+                      source: https://helm.ngc.nvidia.com/nvidia
+                      chart: gpu-operator
       responses:
         "200":
           description: Zip archive containing generated bundles
@@ -1237,8 +1249,8 @@ components:
         apiVersion:
           type: string
           description: API version
-          enum: [aicr.nvidia.com/v1alpha1]
-          example: aicr.nvidia.com/v1alpha1
+          enum: [aicr.run/v1alpha2]
+          example: aicr.run/v1alpha2
         metadata:
           type: object
           description: Resource metadata
@@ -1257,12 +1269,12 @@ components:
         service:
           type: string
           description: Kubernetes service type
-          enum: [eks, gke, aks, oke, kind, lke, bcm, any]
+          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
           example: eks
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+          enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
           example: h100
         intent:
           type: string
@@ -1272,7 +1284,7 @@ components:
         os:
           type: string
           description: Operating system family
-          enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+          enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
           example: ubuntu
         platform:
           type: string
@@ -1301,12 +1313,35 @@ components:
           description: Optional unit of measurement
           example: "MB"
 
+    ItemEntry:
+      type: object
+      description: |
+        One ordered element of a Subtype.items list. Mirrors Subtype's
+        scalar-value contract: data holds Reading scalars; context holds
+        string-typed descriptive metadata. Used when a subtype carries a
+        homogeneous array of structured records (e.g. one entry per PF).
+      properties:
+        data:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Reading"
+          description: Key-value pairs of scalar measurements for this item.
+        context:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional descriptive metadata for this item (string-typed).
+
     Subtype:
       type: object
-      description: A subtype within a measurement containing specific configuration data
-      required: [name, data]
+      description: |
+        A subtype within a measurement. A subtype must carry at least one
+        entry in `data` or `items`. `items` is used when the subtype payload
+        is naturally a list of structured records (e.g. per-PF entries under
+        a NetworkTopology `pfs` subtype).
+      required: [subtype]
       properties:
-        name:
+        subtype:
           type: string
           description: Subtype identifier (e.g., service name, configuration category)
           example: containerd.service
@@ -1320,17 +1355,28 @@ components:
           additionalProperties: true
           description: Optional metadata about the source and collection method
           nullable: true
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ItemEntry"
+          description: |
+            Optional ordered list of structured records. Independent of `data` —
+            a subtype may carry either or both.
 
     Measurement:
       type: object
-      description: A measurement grouping related configuration subtypes
+      description: |
+        A measurement grouping related configuration subtypes. Most types
+        appear at most once per snapshot; `NetworkTopology` is currently
+        emitted at most once but is the planned multi-instance exception
+        (one Measurement per discovered hardware group).
       required: [type, subtypes]
       properties:
         type:
           type: string
           description: Measurement type category
-          enum: [systemd, os, k8s, gpu]
-          example: systemd
+          enum: [K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology]
+          example: SystemD
         subtypes:
           type: array
           items:
@@ -1345,7 +1391,8 @@ components:
         apiVersion:
           type: string
           description: API version of the recipe format
-          example: aicr.nvidia.com/v1alpha1
+          enum: [aicr.run/v1alpha2]
+          example: aicr.run/v1alpha2
         kind:
           type: string
           description: Resource type
@@ -1414,19 +1461,40 @@ components:
           type: array
           items:
             type: object
+            required: [name]
             properties:
               name:
                 type: string
                 description: Component name
+              type:
+                type: string
+                enum: [Helm, Kustomize]
+                description: >-
+                  Deployment type; send the canonical value `Helm` or
+                  `Kustomize` (the normative contract). A Helm ref must not carry
+                  `tag`/`path`; a Kustomize ref requires `path` (and, when it
+                  sets `tag`, a `source`). Incoherent combinations are rejected
+                  with 400. For back-compatibility the server back-fills a
+                  missing type on an enabled ref from the registry when the
+                  component is known (a missing type on an unknown component is
+                  rejected with 400), and accepts other casings (e.g. `helm`)
+                  and normalizes them — but clients should send the canonical
+                  values above.
               version:
                 type: string
-                description: Component version
-              order:
-                type: integer
-                description: Deployment order
-              repository:
+                description: Chart version (Helm)
+              tag:
                 type: string
-                description: Helm repository URL
+                description: Git tag/ref (Kustomize); only meaningful with a source
+              source:
+                type: string
+                description: Chart repository URL (Helm) or OCI/Git source reference (Kustomize)
+              chart:
+                type: string
+                description: Helm chart name
+              path:
+                type: string
+                description: Path within the source to the kustomization (Kustomize)
           description: List of component references with deployment order
         constraints:
           type: object

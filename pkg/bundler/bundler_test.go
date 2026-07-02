@@ -213,7 +213,7 @@ func TestMake_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -290,7 +290,7 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -346,6 +346,86 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 	}
 }
 
+// TestMake_DisabledDependencyPruned verifies that disabling a component that
+// others depend on bundles successfully: the dangling dependency edge on the
+// dependent is pruned so the helmfile level computation does not see an
+// undeclared dependency and fail with a false circular-dependency error.
+func TestMake_DisabledDependencyPruned(t *testing.T) {
+	// Use the helmfile deployer: it recomputes levels via
+	// ComponentRefsTopologicalLevels, the only path that inspects dependency
+	// edges at bundle time. Without the prune loop, the dangling
+	// gpu-operator → cert-manager edge would surface here as a false
+	// circular-dependency error, so this is where the regression is pinned.
+	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1alpha2",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager disabled (platform-provided); gpu-operator depends on it.
+			{Name: "cert-manager", Version: "v1.20.2", Type: "helm", Source: "https://charts.jetstack.io", Overrides: map[string]any{"enabled": false}},
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	if _, err := bundler.Make(ctx, recipeResult, tmpDir); err != nil {
+		t.Fatalf("Make() with disabled depended-upon component error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator")); os.IsNotExist(statErr) {
+		t.Error("expected 001-gpu-operator to be created")
+	}
+	for _, dir := range []string{"cert-manager", "001-cert-manager", "002-cert-manager"} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s directory to NOT be created", dir)
+		}
+	}
+}
+
+// TestMake_UndeclaredDependencyErrors verifies the pruning does not mask a
+// genuinely undeclared dependency: an enabled component depending on a
+// component that does not exist in the recipe must still fail rather than have
+// the bad edge silently erased.
+func TestMake_UndeclaredDependencyErrors(t *testing.T) {
+	// Use the helmfile deployer: it recomputes levels via
+	// ComponentRefsTopologicalLevels, which is where an undeclared dependency
+	// must surface (the default helm deployer sorts by DeploymentOrder and does
+	// not validate edges at bundle time).
+	cfg := config.NewConfig(config.WithDeployer(config.DeployerHelmfile))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1alpha2",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager is neither declared nor disabled — it simply does not exist.
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	_, err = bundler.Make(ctx, recipeResult, tmpDir)
+	if err == nil {
+		t.Fatal("Make() with undeclared dependency expected error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
 func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 	t.Parallel()
 
@@ -357,10 +437,13 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 		expectErr      bool
 	}{
 		{
-			name:           "recipe disabled + --set enabled=true => included",
-			recipeEnabled:  new(bool),
-			setEnabled:     "true",
-			expectIncluded: true,
+			// A component the recipe disabled cannot be re-enabled at bundle
+			// time: doing so would install a conflicting second copy of a
+			// platform-provided component, and there is no authored order for it.
+			name:          "recipe disabled + --set enabled=true => error",
+			recipeEnabled: new(bool),
+			setEnabled:    "true",
+			expectErr:     true,
 		},
 		{
 			name:           "recipe enabled + --set enabled=false => excluded",
@@ -415,7 +498,7 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			}
 
 			recipeResult := &recipe.RecipeResult{
-				APIVersion: "aicr.nvidia.com/v1alpha1",
+				APIVersion: "aicr.run/v1alpha2",
 				Kind:       "Recipe",
 				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 				ComponentRefs: []recipe.ComponentRef{
@@ -431,6 +514,11 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			if tt.expectErr {
 				if makeErr == nil {
 					t.Fatalf("Make() expected error, got nil")
+				}
+				// Pin the structured code: both the re-enable rejection and the
+				// unparseable --set value are invalid-request errors.
+				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
 				}
 				return
 			}
@@ -465,7 +553,7 @@ func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -518,7 +606,7 @@ func TestMake_WithValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -569,7 +657,7 @@ func TestMake_WithTypedValueOverrides(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -627,7 +715,7 @@ func TestMake_TypedOverrideWinsOverSet(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -672,7 +760,7 @@ func TestMake_WithNodeSelectors(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -714,7 +802,7 @@ func TestMake_WithTolerations(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -748,7 +836,7 @@ func TestMake_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -775,7 +863,7 @@ func TestMake_DefaultOutputDir(t *testing.T) {
 	ctx := context.Background()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -818,7 +906,7 @@ func TestMake_ArgoCD(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -894,7 +982,7 @@ func TestMake_Helmfile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -1183,7 +1271,7 @@ func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -1313,6 +1401,74 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 				t.Fatalf("storageClassName present = %v, want %v", ok, tt.wantPresent)
 			}
 			if tt.wantPresent && got != tt.wantValue {
+				t.Errorf("storageClassName = %v, want %q", got, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestApplyNodeSchedulingOverrides_DynamoPlatformStorageClass(t *testing.T) {
+	const scPath = "nats.config.jetstream.fileStore.pvc.storageClassName"
+
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	comp := registry.Get("dynamo-platform")
+	if comp == nil {
+		t.Fatal("registry missing dynamo-platform")
+	}
+	if !slices.Contains(comp.GetStorageClassPaths(), scPath) {
+		t.Fatalf("registry storageClassPaths for dynamo-platform = %v, want %q",
+			comp.GetStorageClassPaths(), scPath)
+	}
+
+	tests := []struct {
+		name          string
+		cfgOpts       []config.Option
+		initialValues map[string]string
+		wantValue     string
+	}{
+		{
+			name:      "global storageClass injected into bundled NATS PVC",
+			cfgOpts:   []config.Option{config.WithStorageClass("my-storage-class")},
+			wantValue: "my-storage-class",
+		},
+		{
+			name: "explicit dynamo --set wins over global --storage-class",
+			cfgOpts: []config.Option{
+				config.WithStorageClass("my-storage-class"),
+				config.WithValueOverrides(map[string]map[string]string{
+					"dynamo": {scPath: "explicit-gp2"},
+				}),
+			},
+			initialValues: map[string]string{scPath: "explicit-gp2"},
+			wantValue:     "explicit-gp2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(tt.cfgOpts...)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			values := map[string]any{}
+			if len(tt.initialValues) > 0 {
+				if applyErr := component.ApplyMapOverrides(values, tt.initialValues); applyErr != nil {
+					t.Fatalf("ApplyMapOverrides() setup error = %v", applyErr)
+				}
+			}
+
+			b.applyNodeSchedulingOverrides("dynamo-platform", values, nil, schedulingPathPolicy{})
+
+			got, ok := component.GetValueByPath(values, scPath)
+			if !ok {
+				t.Fatal("storageClassName not injected")
+			}
+			if got != tt.wantValue {
 				t.Errorf("storageClassName = %v, want %q", got, tt.wantValue)
 			}
 		})
@@ -1613,7 +1769,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 	const nodeSelectorPath = "scheduling.nodeSelector"
 
 	tmpDir := t.TempDir()
-	registryYAML := "apiVersion: aicr.nvidia.com/v1alpha1\n" +
+	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
 		"kind: ComponentRegistry\n" +
 		"components:\n" +
 		"  - name: " + uniqueComponent + "\n" +
@@ -1712,7 +1868,7 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 	//      in the base, so our marker passes through into the emitted bundle).
 	tmpData := t.TempDir()
 
-	registryYAML := []byte("apiVersion: aicr.nvidia.com/v1alpha1\n" +
+	registryYAML := []byte("apiVersion: aicr.run/v1alpha2\n" +
 		"kind: ComponentRegistry\n" +
 		"components: []\n")
 	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
@@ -1915,11 +2071,81 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 	}
 }
 
+func TestWarnMissingStorageClassForPVCs_DynamoPlatformNATS(t *testing.T) {
+	const scPath = "nats.config.jetstream.fileStore.pvc.storageClassName"
+
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{
+			Name:       "dynamo-platform",
+			ValuesFile: "components/dynamo-platform/values.yaml",
+		}},
+	}
+
+	tests := []struct {
+		name        string
+		setupValues func(map[string]any)
+		wantWarning bool
+	}{
+		{
+			name:        "warns when bundled NATS PVC omits storageClassName",
+			wantWarning: true,
+		},
+		{
+			name: "does not warn when bundled NATS PVC has storageClassName",
+			setupValues: func(values map[string]any) {
+				component.SetValueByPath(values, scPath, "gp3")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values, err := recipeResult.GetValuesForComponent("dynamo-platform")
+			if err != nil {
+				t.Fatalf("GetValuesForComponent(dynamo-platform): %v", err)
+			}
+			if tt.setupValues != nil {
+				tt.setupValues(values)
+			}
+
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			err = b.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
+				"dynamo-platform": values,
+			})
+			if err != nil {
+				t.Fatalf("warnMissingStorageClassForPVCs() error = %v", err)
+			}
+
+			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			}
+
+			if tt.wantWarning {
+				warning := b.warnings[0]
+				for _, want := range []string{
+					"Warning: dynamo-platform renders a PVC without storageClassName",
+					scPath,
+					"--storage-class <name>",
+					"--set dynamo-platform:" + scPath + "=<name>",
+				} {
+					if !strings.Contains(warning, want) {
+						t.Errorf("warning = %q, want substring %q", warning, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestAgentgatewayComponentExistsInRegistry locks agentgatewayComponentName to a
-// real registry entry. warnAgentgatewayOpenExposure keys into componentValues by
+// real registry entry. resolveAgentgatewayExposure keys into componentValues by
 // this name; if the "agentgateway" component were renamed in recipes/registry.yaml,
-// the lookup would silently return nil and the open-exposure warning would never
-// fire — with no other test failing. Mirrors the validator-side
+// the lookup would silently return nil and the private-by-default exposure logic
+// would never fire — with no other test failing. Mirrors the validator-side
 // TestEmbeddedCatalog_InferenceGatewayEntryExists guard. See #1160.
 func TestAgentgatewayComponentExistsInRegistry(t *testing.T) {
 	registry, err := recipe.GetComponentRegistry()
@@ -1931,59 +2157,90 @@ func TestAgentgatewayComponentExistsInRegistry(t *testing.T) {
 	}
 }
 
-func TestWarnAgentgatewayOpenExposure(t *testing.T) {
+func TestResolveAgentgatewayExposure(t *testing.T) {
 	tests := []struct {
 		name        string
 		values      map[string]any
 		present     bool
+		wantErr     bool
 		wantWarning bool
+		wantDefault bool // expects allowedSourceRanges defaulted to the RFC1918 set
 	}{
 		{
-			name:        "warns when allowedSourceRanges is unset",
+			name:        "defaults to private ranges when allowedSourceRanges is unset",
 			values:      map[string]any{"fullnameOverride": "agentgateway"},
 			present:     true,
 			wantWarning: true,
+			wantDefault: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an empty list",
+			name:        "defaults to private ranges when allowedSourceRanges is an empty list",
 			values:      map[string]any{"allowedSourceRanges": []any{}},
 			present:     true,
 			wantWarning: true,
+			wantDefault: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is a bare string (mistaken --set)",
-			values:      map[string]any{"allowedSourceRanges": "216.228.127.128/30"},
-			present:     true,
-			wantWarning: true,
+			name:    "errors when allowedSourceRanges is a bare string (mistaken --set)",
+			values:  map[string]any{"allowedSourceRanges": "216.228.127.128/30"},
+			present: true,
+			wantErr: true,
 		},
 		{
-			name:        "does not warn when allowedSourceRanges is a non-empty list",
-			values:      map[string]any{"allowedSourceRanges": []any{"216.228.127.128/30"}},
-			present:     true,
-			wantWarning: false,
+			name:    "errors when allowedSourceRanges contains an invalid CIDR",
+			values:  map[string]any{"allowedSourceRanges": []any{"not-a-cidr"}},
+			present: true,
+			wantErr: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an explicit 0.0.0.0/0",
+			name:    "errors when allowedSourceRanges contains a bare IP (no prefix)",
+			values:  map[string]any{"allowedSourceRanges": []any{"10.0.0.0"}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors when allowedSourceRanges contains a non-canonical CIDR",
+			values:  map[string]any{"allowedSourceRanges": []any{"1.2.3.4/24"}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "passes silently when allowedSourceRanges is a scoped list",
+			values:  map[string]any{"allowedSourceRanges": []any{"216.228.127.128/30"}},
+			present: true,
+		},
+		{
+			name:    "passes silently when allowedSourceRanges is a []string scoped list",
+			values:  map[string]any{"allowedSourceRanges": []string{"216.228.127.128/30"}},
+			present: true,
+		},
+		{
+			name:    "errors when allowedSourceRanges contains a non-string entry",
+			values:  map[string]any{"allowedSourceRanges": []any{"10.0.0.0/8", 123}},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:        "allows but warns on explicit 0.0.0.0/0 opt-in",
 			values:      map[string]any{"allowedSourceRanges": []any{"0.0.0.0/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "warns when allowedSourceRanges is an explicit ::/0",
+			name:        "allows but warns on explicit ::/0 opt-in",
 			values:      map[string]any{"allowedSourceRanges": []any{"::/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "warns when a scoped range is mixed with an any-source CIDR",
+			name:        "allows but warns when a scoped range is mixed with an any-source CIDR",
 			values:      map[string]any{"allowedSourceRanges": []any{"10.0.0.0/8", "0.0.0.0/0"}},
 			present:     true,
 			wantWarning: true,
 		},
 		{
-			name:        "does not warn when agentgateway is absent",
-			present:     false,
-			wantWarning: false,
+			name:    "no-op when agentgateway is absent",
+			present: false,
 		},
 	}
 
@@ -1999,17 +2256,40 @@ func TestWarnAgentgatewayOpenExposure(t *testing.T) {
 				componentValues[agentgatewayComponentName] = tt.values
 			}
 
-			b.warnAgentgatewayOpenExposure(componentValues)
+			gotErr := b.resolveAgentgatewayExposure(componentValues)
+			if (gotErr != nil) != tt.wantErr {
+				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
+			}
+			if tt.wantErr {
+				if !stderrors.Is(gotErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", gotErr)
+				}
+			}
 
 			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
 				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
 			}
 			if tt.wantWarning {
 				warning := b.warnings[0]
-				for _, want := range []string{"inference-gateway", "0.0.0.0/0", "allowedSourceRanges"} {
+				for _, want := range []string{"inference-gateway", "allowedSourceRanges"} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
 					}
+				}
+			}
+
+			if tt.wantDefault {
+				got, ok := componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath].([]any)
+				if !ok {
+					t.Fatalf("allowedSourceRanges = %#v, want defaulted []any",
+						componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath])
+				}
+				want := make([]any, len(agentgatewayDefaultSourceRanges))
+				for i, r := range agentgatewayDefaultSourceRanges {
+					want[i] = r
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("defaulted allowedSourceRanges = %#v, want %#v", got, want)
 				}
 			}
 		})
@@ -2134,7 +2414,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 
 	t.Run("layered provider with --data", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		minimalRegistry := "apiVersion: aicr.nvidia.com/v1alpha1\nkind: ComponentRegistry\ncomponents: []\n"
+		minimalRegistry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
 		if writeErr := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(minimalRegistry), 0600); writeErr != nil {
 			t.Fatalf("write registry.yaml: %v", writeErr)
 		}
@@ -2169,7 +2449,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 // Running Make() twice with the same input should produce identical output.
 func TestMake_Reproducible(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		Criteria: &recipe.Criteria{
 			Service:     "eks",
@@ -2278,7 +2558,7 @@ func TestMake_DynamicValuesUnknownComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -2311,7 +2591,7 @@ func TestMake_DynamicValuesValidComponent(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -2351,7 +2631,7 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
 		ComponentRefs: []recipe.ComponentRef{
@@ -2420,7 +2700,7 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	}
 
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "RecipeResult",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
@@ -2434,6 +2714,215 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	if !strings.Contains(err.Error(), "argocd-helm") {
 		t.Errorf("error should suggest argocd-helm, got: %v", err)
 	}
+}
+
+// TestMake_OCP builds a real OCP inference recipe via BuildFromCriteria,
+// bundles it with --readiness-hooks, and verifies:
+//   - Numbered folder layout: 3 OLM + 3 readiness + 3 CR = 9 directories
+//   - Rendered manifest content: Subscription, OperatorGroup, ClusterPolicy, etc.
+//   - Readiness gate folders with correct gate image
+//   - Deployment ordering: OLM < readiness < CR for each operator
+func TestMake_OCP(t *testing.T) {
+	b := recipe.NewBuilder()
+	criteria := &recipe.Criteria{
+		Service: recipe.CriteriaServiceOCP,
+		Intent:  recipe.CriteriaIntentInference,
+	}
+	result, err := b.BuildFromCriteria(context.Background(), criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+
+	const testVersion = "v0.99.0"
+	cfg := config.NewConfig(
+		config.WithReadinessHooks(true),
+		config.WithVersion(testVersion),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	outDir := t.TempDir()
+	_, err = bundler.Make(context.Background(), result, outDir)
+	if err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+
+	// Collect numbered directories and their sequence numbers.
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	dirByName := map[string]int{} // name (without prefix) -> sequence number
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if len(n) < 4 || n[3] != '-' {
+			continue
+		}
+		var seq int
+		if _, scanErr := fmt.Sscanf(n[:3], "%d", &seq); scanErr != nil {
+			continue
+		}
+		dirByName[n[4:]] = seq
+	}
+
+	// Assert OLM components exist.
+	olmComponents := []string{"nfd-ocp-olm", "gpu-operator-ocp-olm", "network-operator-ocp-olm"}
+	for _, c := range olmComponents {
+		if _, ok := dirByName[c]; !ok {
+			t.Errorf("missing OLM component directory: %s", c)
+		}
+	}
+
+	// Assert CR components exist.
+	crComponents := []string{"nfd-ocp", "gpu-operator-ocp", "network-operator-ocp"}
+	for _, c := range crComponents {
+		if _, ok := dirByName[c]; !ok {
+			t.Errorf("missing CR component directory: %s", c)
+		}
+	}
+
+	// Assert readiness gate directories exist (one per OLM component).
+	for _, olm := range olmComponents {
+		rdnsName := olm + "-readiness"
+		if _, ok := dirByName[rdnsName]; !ok {
+			t.Errorf("missing readiness directory: %s", rdnsName)
+		}
+	}
+
+	// Assert ordering: OLM < readiness < CR for each operator pair.
+	operators := []struct {
+		olm string
+		cr  string
+	}{
+		{"nfd-ocp-olm", "nfd-ocp"},
+		{"gpu-operator-ocp-olm", "gpu-operator-ocp"},
+		{"network-operator-ocp-olm", "network-operator-ocp"},
+	}
+	for _, op := range operators {
+		olmSeq, olmOK := dirByName[op.olm]
+		rdnsSeq, rdnsOK := dirByName[op.olm+"-readiness"]
+		crSeq, crOK := dirByName[op.cr]
+		if !olmOK || !rdnsOK || !crOK {
+			continue // already reported above
+		}
+		if olmSeq >= rdnsSeq {
+			t.Errorf("%s (seq %d) must precede %s-readiness (seq %d)", op.olm, olmSeq, op.olm, rdnsSeq)
+		}
+		if rdnsSeq >= crSeq {
+			t.Errorf("%s-readiness (seq %d) must precede %s (seq %d)", op.olm, rdnsSeq, op.cr, crSeq)
+		}
+	}
+
+	// Assert rendered manifest content — OLM folders must contain Subscription and OperatorGroup.
+	for _, olm := range olmComponents {
+		dir := findNumberedDir(t, outDir, olm)
+		if dir == "" {
+			continue
+		}
+		templates := readTemplateFiles(t, dir)
+		assertKindInTemplates(t, olm, templates, "Subscription")
+		assertKindInTemplates(t, olm, templates, "OperatorGroup")
+	}
+
+	// Assert CR manifest content.
+	crKinds := map[string]string{
+		"gpu-operator-ocp":     "ClusterPolicy",
+		"nfd-ocp":              "NodeFeatureDiscovery",
+		"network-operator-ocp": "NicClusterPolicy",
+	}
+	for comp, kind := range crKinds {
+		dir := findNumberedDir(t, outDir, comp)
+		if dir == "" {
+			continue
+		}
+		templates := readTemplateFiles(t, dir)
+		assertKindInTemplates(t, comp, templates, kind)
+	}
+
+	// Assert readiness gate content — each readiness folder must contain the
+	// gate image reference.
+	wantImage := "ghcr.io/nvidia/aicr-gate:" + testVersion
+	for _, olm := range olmComponents {
+		rdnsDir := findNumberedDir(t, outDir, olm+"-readiness")
+		if rdnsDir == "" {
+			continue
+		}
+		templates := readTemplateFiles(t, rdnsDir)
+		found := false
+		for _, content := range templates {
+			if strings.Contains(content, wantImage) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s-readiness: gate image %q not found in templates", olm, wantImage)
+		}
+	}
+}
+
+// findNumberedDir returns the full path to the numbered directory matching the
+// given suffix name, or "" (with a test error) if not found.
+func findNumberedDir(t *testing.T, outDir, name string) string {
+	t.Helper()
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Errorf("ReadDir %s: %v", outDir, err)
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), "-"+name) {
+			return filepath.Join(outDir, e.Name())
+		}
+	}
+	t.Errorf("numbered directory for %q not found", name)
+	return ""
+}
+
+// readTemplateFiles reads all YAML files under dir/templates/ and returns a
+// map of filename to content.
+func readTemplateFiles(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	templatesDir := filepath.Join(dir, "templates")
+	entries, err := os.ReadDir(templatesDir)
+	if err != nil {
+		t.Errorf("ReadDir %s: %v", templatesDir, err)
+		return nil
+	}
+	result := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(templatesDir, e.Name()))
+		if readErr != nil {
+			t.Errorf("ReadFile %s: %v", e.Name(), readErr)
+			continue
+		}
+		result[e.Name()] = string(data)
+	}
+	return result
+}
+
+// assertKindInTemplates checks that at least one template file contains the
+// given Kubernetes kind.
+func assertKindInTemplates(t *testing.T, component string, templates map[string]string, kind string) {
+	t.Helper()
+	needle := "kind: " + kind
+	for _, content := range templates {
+		if strings.Contains(content, needle) {
+			return
+		}
+	}
+	t.Errorf("%s: kind %q not found in any template file", component, kind)
 }
 
 // computeTestChecksum computes SHA256 hash for test comparison.
@@ -2456,7 +2945,7 @@ func TestMake_PreservesInnerErrorCode(t *testing.T) {
 
 	// "../evil" triggers deployer.IsSafePathComponent → ErrCodeInvalidRequest
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "../evil", Version: "v1.0.0", Type: "helm", Source: "https://example.com"},
@@ -2491,7 +2980,7 @@ func TestMake_PreservesTimeoutFromExtractValues(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
@@ -2531,7 +3020,7 @@ func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
 	//   - Overrides only             → cert-manager (inline only)
 	//   - ValuesFile + Overrides     → network-operator (hybrid merge)
 	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
+		APIVersion: "aicr.run/v1alpha2",
 		Kind:       "Recipe",
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -2616,5 +3105,91 @@ func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
 					ref.Name, adapted, got)
 			}
 		})
+	}
+}
+
+func TestDynamicPathSetFor(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations", "daemonsets.nodeSelector"},
+			"nfd":         {"worker.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	got := b.dynamicPathSetFor("gpu-operator", nil)
+	wantPaths := []string{"daemonsets.tolerations", "daemonsets.nodeSelector"}
+	for _, p := range wantPaths {
+		if _, ok := got[p]; !ok {
+			t.Errorf("dynamicPathSetFor(gpu-operator) missing %q", p)
+		}
+	}
+	if _, ok := got["worker.tolerations"]; ok {
+		t.Errorf("dynamicPathSetFor(gpu-operator) should not contain nfd path worker.tolerations")
+	}
+	if got2 := b.dynamicPathSetFor("cert-manager", nil); got2 != nil {
+		t.Errorf("expected nil for component with no dynamic paths, got %v", got2)
+	}
+}
+
+func TestDynamicTolerationPathExcludedFromBakeIn(t *testing.T) {
+	tol := corev1.Toleration{Key: "reserved-by", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{tol}),
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values := map[string]any{}
+	policy := b.computeSchedulingPathPolicy(
+		&recipe.ComponentRef{Name: "gpu-operator"},
+		nil,
+		nil,
+	)
+	if dynPaths := b.dynamicPathSetFor("gpu-operator", nil); len(dynPaths) > 0 {
+		for path := range dynPaths {
+			policy.optOut[path] = struct{}{}
+		}
+	}
+	b.applyNodeSchedulingOverrides("gpu-operator", values, nil, policy)
+	if val, ok := component.GetValueByPath(values, "daemonsets.tolerations"); ok {
+		t.Errorf("daemonsets.tolerations should not be baked in when declared dynamic, got: %v", val)
+	}
+}
+
+// TestMake_RejectsIncoherentRef verifies the public DefaultBundler.Make entry
+// point rejects an incoherent ref (a Helm component carrying a Kustomize path,
+// which the deployers would silently build as Kustomize) rather than producing
+// a mismatched bundle. Pins issue #1584 at the direct-bundler boundary.
+func TestMake_RejectsIncoherentRef(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Version: "v1", Path: "deploy"},
+		},
+	}
+	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err == nil {
+		t.Fatal("expected Make to reject an incoherent Helm+path ref, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s: %v", se.Code, err)
+	}
+	// The caller's RecipeResult must not have been mutated by validation.
+	if got := recipeResult.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
+		t.Errorf("caller's ref was mutated: type=%q", got)
 	}
 }

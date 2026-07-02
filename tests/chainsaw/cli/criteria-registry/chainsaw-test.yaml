@@ -40,14 +40,14 @@ spec:
 
               # Minimal registry.yaml (required by the data provider).
               cat > "${WORK}/registry.yaml" << 'EOF'
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               kind: ComponentRegistry
               components: []
               EOF
 
               # Overlay declaring an internal-only service value.
               cat > "${WORK}/overlays/ncp-internal-overlay.yaml" << 'EOF'
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               kind: RecipeMetadata
               metadata:
                 name: ncp-internal-h100-training
@@ -62,7 +62,7 @@ spec:
 
               # Overlay declaring a proprietary platform value (e.g., nvmesh).
               cat > "${WORK}/overlays/nvmesh-overlay.yaml" << 'EOF'
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               kind: RecipeMetadata
               metadata:
                 name: eks-h100-nvmesh
@@ -80,7 +80,7 @@ spec:
               # from the --criteria-strict CLI flag).
               cat > "${WORK}/strict-config.yaml" << 'EOF'
               kind: AICRConfig
-              apiVersion: aicr.nvidia.com/v1alpha1
+              apiVersion: aicr.run/v1alpha2
               metadata:
                 name: strict
               spec:

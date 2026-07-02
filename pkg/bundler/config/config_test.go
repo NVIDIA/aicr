@@ -626,7 +626,7 @@ func TestParseValueOverrides(t *testing.T) {
 		}{
 			{
 				name:  "tolerations index",
-				input: "networkoperator:operator.tolerations[2].key=aicr.nvidia.com/kwok-test",
+				input: "networkoperator:operator.tolerations[2].key=aicr.run/kwok-test",
 			},
 			{
 				name:  "env index",

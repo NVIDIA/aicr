@@ -50,11 +50,11 @@ type kustCfg struct {
 func (c component) kind() string {
 	switch {
 	case c.Helm.DefaultRepository != "" || c.Helm.DefaultChart != "":
-		return "helm"
+		return kindHelm
 	case c.Kustomize.DefaultSource != "":
-		return "kustomize"
+		return kindKustomize
 	default:
-		return "manifest"
+		return kindManifest
 	}
 }
 

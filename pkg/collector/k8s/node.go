@@ -92,13 +92,19 @@ func (k *Collector) collectNode(ctx context.Context) (map[string]measurement.Rea
 //   - aws:///us-west-2a/i-0123456789abcdef0 → "eks"
 //   - gce://my-project/us-central1-a/gke-cluster-node → "gke"
 //   - azure:///subscriptions/.../virtualMachines/... → "aks"
-//   - oci://... → "oke"
+//   - ocid1.instance.oc1... → "oke" (OKE emits a raw OCID, no scheme prefix)
+//   - linode://58291 → "lke" (Akamai Cloud / Linode LKE)
 //
 // If the format is unrecognized, it returns the raw provider prefix.
 func parseProvider(providerID string) string {
 	if providerID == "" {
 		slog.Warn("empty providerID string")
 		return ""
+	}
+
+	// OKE nodes set providerID to a raw Oracle OCID (no "://" scheme).
+	if strings.HasPrefix(providerID, "ocid1.") {
+		return "oke"
 	}
 
 	// Split by "://" to get the provider prefix
@@ -116,6 +122,8 @@ func parseProvider(providerID string) string {
 		return "aks"
 	case "oci":
 		return "oke"
+	case "linode":
+		return "lke"
 	default:
 		return provider
 	}

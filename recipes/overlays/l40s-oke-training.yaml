@@ -1,0 +1,76 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: l40s-oke-training
+
+spec:
+  # Inherits from oke-ol-training recipe (OKE + OL + training settings)
+  base: oke-ol-training
+
+  criteria:
+    service: oke
+    os: ol
+    accelerator: l40s
+    intent: training
+
+  # Specific constraints for L40S on OKE training workloads.
+  # L40S is Ada Lovelace (not Hopper/Blackwell) — no IMEX/NVLink ComputeDomain
+  # requirement, so the recipe keeps the OKE training baseline K8s floor.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.30"
+
+  componentRefs:
+    # L40S-specific GPU Operator overrides (inherits valuesFile from oke-training).
+    # Nodewright tuning is omitted: the nodewright-customizations packages do
+    # not target service: oke.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+      overrides:
+        gdrcopy:
+          enabled: true
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  # Validation checks for L40S on OKE training workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  #
+  # The deployment-phase floor (4 standard checks + gpu-operator version pin)
+  # is contributed by the l40s-any cross-cutting overlay and is not duplicated
+  # here, matching the a100-oke-training pattern.
+  #
+  # Performance gating is intentionally omitted until an empirical L40S-on-OCI
+  # NCCL baseline is established, matching the a100-oke-training rationale.
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling

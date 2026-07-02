@@ -82,9 +82,14 @@ export MINISTACK_ENDPOINT
 # Colima shares it into its VM; a /tmp path is not visible inside the container.
 MINISTACK_CERT_DIR="${MINISTACK_CERT_DIR:-${HOME}/.aicr-ministack-e2e-tls}"
 
-# MiniStack accepts any credentials; these match the CI workflow.
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
+# MiniStack accepts any credentials. Force dummy creds and clear any ambient AWS
+# session so a real/expired token in the caller's environment cannot leak into the
+# emulator calls (which otherwise surfaces as a KMS ExpiredTokenException). This
+# runner only ever targets the local emulator, so real creds are never wanted;
+# region stays overridable.
+unset AWS_SESSION_TOKEN AWS_SECURITY_TOKEN AWS_PROFILE
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 
 WORK_DIR="${TMPDIR:-/tmp}/kms-ministack-e2e-$$"

@@ -40,8 +40,8 @@ my-external-data/
 │       └── manifests/
 │           ├── namespace.yaml
 │           └── rbac.yaml
-└── catalog/                  # Optional — validator catalog overrides
-    └── validators-extra.yaml
+└── validators/               # Optional — validator catalog overrides
+    └── catalog.yaml           # merged by validator name with the embedded catalog
 ```
 
 The loader walks the tree recursively (`filepath.WalkDir`), so subdirectories
@@ -65,7 +65,7 @@ Even if your directory only adds overlays (no new components), AICR requires a
 `registry.yaml` at the root. The minimal stub is:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components: []
 ```
@@ -84,7 +84,7 @@ a valid CLI / API input.** No code change, no rebuild.
 Example overlay for an internal NCP:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: RecipeMetadata
 metadata:
   name: ncp-internal-h100-training
@@ -123,7 +123,7 @@ field on a `RecipeMetadata`'s `spec.criteria`.
 `registry.yaml` declares the component's identity and source:
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: my-internal-operator
@@ -145,8 +145,15 @@ components:
       defaultTag: v1.0.0
 ```
 
-A `values.yaml` (Helm) or `kustomization.yaml` (Kustomize) at
-`components/<name>/` is picked up automatically.
+Component values are **not** auto-discovered by filename. For a Helm
+component, a values file under `components/<name>/` is consumed only when a
+an overlay's `componentRef` names it via a
+`valuesFile:` path relative to the data directory (a `componentRef` — and thus
+`valuesFile` — lives on an overlay, not on the `registry.yaml` entry); the merge order is base
+values → `valuesFile` → inline `overrides`. For a Kustomize component, the
+deployable source is built from the registry entry's `defaultSource` /
+`defaultPath` / `defaultTag` (overridable per `componentRef`) — there is no
+implicit `kustomization.yaml` pickup.
 
 Reference the component from an overlay's `componentRefs:` to include it in
 recipes that match the overlay's criteria.
@@ -155,8 +162,9 @@ recipes that match the overlay's criteria.
 
 | Resource | Behavior |
 |---|---|
-| `registry.yaml` | **Merged**: embedded + external. On name collision, external wins. |
-| Files in `components/`, `mixins/`, `overlays/`, `catalog/` | **Replaced**: any external file at the same relative path completely replaces the embedded equivalent. No partial-content merge. |
+| `registry.yaml` | **Merged**: embedded + external component lists. On name collision, external wins. |
+| `validators/catalog.yaml` | **Merged**: embedded + external validator lists, by validator name. A same-named external validator replaces the embedded one; new validators are appended. |
+| Files in `components/`, `mixins/`, `overlays/` | **Replaced**: any external file at the same relative path completely replaces the embedded equivalent. No partial-content merge. |
 
 When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 (`embedded` / `external` / `merged`) for every loaded file.

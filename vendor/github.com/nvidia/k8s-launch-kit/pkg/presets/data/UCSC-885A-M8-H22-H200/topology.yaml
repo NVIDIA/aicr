@@ -1,0 +1,137 @@
+machineType: UCSC-885A-M8-H22
+manufacturer: Cisco Systems, Inc.
+gpuType: NVIDIA-H200
+nicModel: BlueField-3 E-series SuperNIC 400GbE/NDR (ConnectX-7)
+gpuInterconnect: NV18
+numaNodes: 2
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: false
+
+pfs:
+  # --- NUMA 0: GPUs 0-3, CPUs 0-63,128-191 ---
+  - deviceID: a2dc
+    rdmaDevice: rocep9s0f0
+    pciAddress: 0000:09:00.0
+    networkInterface: eth3
+    traffic: east-west
+    rail: 0
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"
+  - deviceID: a2dc
+    rdmaDevice: rocep35s0f0
+    pciAddress: 0000:23:00.0
+    networkInterface: eth7
+    traffic: east-west
+    rail: 1
+    numaNode: 0
+    connectedGPU: GPU1
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"
+  - deviceID: a2dc
+    rdmaDevice: rocep83s0f0
+    pciAddress: 0000:53:00.0
+    networkInterface: eth4
+    traffic: east-west
+    rail: 2
+    numaNode: 0
+    connectedGPU: GPU2
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"
+  - deviceID: a2dc
+    rdmaDevice: rocep105s0f0
+    pciAddress: 0000:69:00.0
+    networkInterface: eth2
+    traffic: east-west
+    rail: 3
+    numaNode: 0
+    connectedGPU: GPU3
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"
+
+  # --- N-S DPU (dual-port, NUMA 0) ---
+  - deviceID: a2dc
+    rdmaDevice: rocep53s0f0
+    pciAddress: 0000:35:00.0
+    networkInterface: eth5
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: 900-9D3B6-00SV-AA0
+    model: "BlueField-3 P-Series DPU 200GbE/NDR200 dual-port QSFP-DD112, PCIe Gen5.0 x16 FHHL, Crypto Disabled, 32GB DDR5, BMC, Tall Bracket"
+  - deviceID: a2dc
+    rdmaDevice: ""
+    pciAddress: 0000:35:00.1
+    networkInterface: eth6
+    traffic: north-south
+    numaNode: 0
+    connectedGPU: ""
+    gpuProximity: NODE
+    psid: ""
+    partNumber: 900-9D3B6-00SV-AA0
+    model: "BlueField-3 P-Series DPU 200GbE/NDR200 dual-port QSFP-DD112, PCIe Gen5.0 x16 FHHL, Crypto Disabled, 32GB DDR5, BMC, Tall Bracket"
+
+  # --- NUMA 1: GPUs 4-7, CPUs 64-127,192-255 ---
+  - deviceID: a2dc
+    rdmaDevice: rocep143s0f0
+    pciAddress: 0000:8f:00.0
+    networkInterface: eth9
+    traffic: east-west
+    rail: 4
+    numaNode: 1
+    connectedGPU: GPU4
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"
+  - deviceID: a2dc
+    rdmaDevice: rocep156s0f0
+    pciAddress: 0000:9c:00.0
+    networkInterface: eth11
+    traffic: east-west
+    rail: 5
+    numaNode: 1
+    connectedGPU: GPU5
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"
+  - deviceID: a2dc
+    rdmaDevice: rocep205s0f0
+    pciAddress: 0000:cd:00.0
+    networkInterface: eth10
+    traffic: east-west
+    rail: 6
+    numaNode: 1
+    connectedGPU: GPU6
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"
+  - deviceID: a2dc
+    rdmaDevice: rocep241s0f0
+    pciAddress: 0000:f1:00.0
+    networkInterface: eth8
+    traffic: east-west
+    rail: 7
+    numaNode: 1
+    connectedGPU: GPU7
+    gpuProximity: PIX
+    psid: ""
+    partNumber: 900-9D3D4-00NN-HA0
+    model: "BlueField-3 E-series SuperNIC 400GbE/NDR single port QSFP112, PCIe Gen5.0 x16, 8 Cores, HHHL, Crypto Disabled, 16GB DDR5, BMC, Tall Bracket"

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
   appliedOverlays:
@@ -51,7 +51,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v25.10.1
+    version: v26.3.2
     valuesFile: components/gpu-operator/values-aks-training.yaml
     overrides:
       cdi:
@@ -91,7 +91,7 @@ componentRefs:
     chart: kube-prometheus-stack
     type: Helm
     source: https://prometheus-community.github.io/helm-charts
-    version: 84.4.0
+    version: 83.7.0
     valuesFile: components/kube-prometheus-stack/values.yaml
     dependencyRefs:
       - prometheus-operator-crds
@@ -126,7 +126,7 @@ componentRefs:
     chart: nvsentinel
     type: Helm
     source: oci://ghcr.io/nvidia
-    version: v1.3.0
+    version: v1.9.0
     valuesFile: components/nvsentinel/values.yaml
     dependencyRefs:
       - cert-manager
@@ -145,7 +145,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.0
+    version: v0.17.1
     valuesFile: components/nodewright-operator/values.yaml
 deploymentOrder:
   - cert-manager

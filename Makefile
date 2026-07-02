@@ -137,7 +137,7 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
 .PHONY: check-docs-mdx
-check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments)
+check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
 
 .PHONY: lint-go
@@ -174,13 +174,23 @@ LICENSE_IGNORES = \
 	-ignore 'dist/**' \
 	-ignore 'vendor/**' \
 	-ignore '**/testdata/**' \
+	-ignore 'recipes/evidence/*.yaml' \
+	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore '.licenses-cache/**'
 
+# The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
+# generated, header-less pointer shapes MarshalPointer emits — the transient
+# flat <recipe>.yaml pending state and the final <recipe>/<source>/sha256-*.yaml
+# (any committed header is stripped on the next publish/sign). They are kept
+# narrow (not a recursive **) so unrelated YAML added under the tree still gets
+# header enforcement. The flat glob also covers the hand-maintained
+# allowlist.yaml, so the license target headers it explicitly below.
 .PHONY: license
 license: ## Add/verify license headers in source files
 	@echo "Ensuring license headers..."
 	@addlicense -f .github/headers/LICENSE $(LICENSE_IGNORES) .
+	@addlicense -f .github/headers/LICENSE recipes/evidence/allowlist.yaml
 
 #### DO NOT CHANGE THIS SET OF ALLOWED LICENSES, DO NOT ADD IGNORES
 license-check: ## Check license is approved
@@ -357,8 +367,8 @@ recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PA
 	if [ ! -f $(HEALTH_DOC_PATH) ]; then \
 	   echo "ERROR: $(HEALTH_DOC_PATH) does not exist; cannot splice." >&2; exit 1; \
 	fi; \
-	if ! grep -q '<!-- BEGIN AICR-HEALTH -->' $(HEALTH_DOC_PATH) || \
-	   ! grep -q '<!-- END AICR-HEALTH -->' $(HEALTH_DOC_PATH); then \
+	if ! grep -qF '{/* BEGIN AICR-HEALTH */}' $(HEALTH_DOC_PATH) || \
+	   ! grep -qF '{/* END AICR-HEALTH */}' $(HEALTH_DOC_PATH); then \
 	   echo "ERROR: $(HEALTH_DOC_PATH) is missing AICR-HEALTH markers." >&2; exit 1; \
 	fi; \
 	TMP="$$(mktemp -d)"; \
@@ -370,9 +380,9 @@ recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PA
 	  -deterministic \
 	  -no-title; \
 	awk -v body="$$TMP/recipe-health.md" ' \
-	  /<!-- BEGIN AICR-HEALTH -->/ { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
-	  /<!-- END AICR-HEALTH -->/   { skip = 0 } \
-	  !skip                        { print } \
+	  index($$0, "{/* BEGIN AICR-HEALTH */}") { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
+	  index($$0, "{/* END AICR-HEALTH */}")   { skip = 0 } \
+	  !skip                                    { print } \
 	' $(HEALTH_DOC_PATH) > "$$TMP/merged.md"; \
 	mv "$$TMP/merged.md" $(HEALTH_DOC_PATH); \
 	echo "Updated $(HEALTH_DOC_PATH) (prose preserved, auto-generated section refreshed)"
@@ -413,6 +423,16 @@ docs: ## Serves Go documentation on http://localhost:6060
 	command -v pkgsite >/dev/null 2>&1 && pkgsite -http=:6060 || \
 	(command -v godoc >/dev/null 2>&1 && godoc -http=:6060 || \
 	(echo "Installing pkgsite..." && go install golang.org/x/pkgsite/cmd/pkgsite@latest && pkgsite -http=:6060))
+
+.PHONY: testgrid-publish
+testgrid-publish: ## Build testgrid-publish binary to ./dist/testgrid-publish
+	@mkdir -p ./dist
+	GOFLAGS="-mod=vendor" go build -o ./dist/testgrid-publish ./tools/testgrid-publish
+
+.PHONY: testgrid-publish-dryrun
+testgrid-publish-dryrun: testgrid-publish ## Dry-run testgrid-publish against BUNDLE_DIR (usage: make testgrid-publish-dryrun BUNDLE_DIR=<path>)
+	@[ -n "$(BUNDLE_DIR)" ] || (echo "usage: make testgrid-publish-dryrun BUNDLE_DIR=<path>"; exit 1)
+	./dist/testgrid-publish --bundle-dir "$(BUNDLE_DIR)" --bucket aicr-testgrid-staging --source-class uat --dry-run
 
 .PHONY: build
 build: ## Builds binaries for the current OS and architecture
@@ -700,8 +720,8 @@ kwok-cluster: ## Creates KWOK cluster for GPU simulation (control-plane only)
 	fi
 	ctlptl apply -f $(CTLPTL_KWOK_CONFIG_FILE)
 	@echo "Installing KWOK controller..."
-	kubectl apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/kwok.yaml"
-	kubectl apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/stage-fast.yaml"
+	curl -fsSL --connect-timeout 10 --max-time 60 "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/kwok.yaml" | kubectl apply --request-timeout=30s -f -
+	curl -fsSL --connect-timeout 10 --max-time 60 "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/stage-fast.yaml" | kubectl apply --request-timeout=30s -f -
 	@echo "Waiting for KWOK controller to be ready..."
 	kubectl wait --for=condition=Available deployment/kwok-controller -n kube-system --timeout=120s
 	@echo "Tainting control-plane to force workloads to KWOK nodes..."
@@ -781,14 +801,14 @@ kwok-test-all: build ## Run all KWOK recipe tests in a shared cluster
 	@bash kwok/scripts/run-all-recipes.sh
 
 .PHONY: kwok-test-deployer
-kwok-test-deployer: build ## Validate scheduling under a specific deployer (RECIPE=… DEPLOYER=helm|argocd-oci|argocd-helm-oci|flux-oci)
+kwok-test-deployer: build ## Validate scheduling under a specific deployer (RECIPE=… DEPLOYER=helm|argocd-oci|argocd-helm-oci|argocd-git|flux-oci|flux-git)
 ifndef RECIPE
 	@echo "Error: RECIPE is required"
 	@echo "Usage: make kwok-test-deployer RECIPE=eks-training DEPLOYER=argocd-oci"
 	@exit 1
 endif
 ifndef DEPLOYER
-	@echo "Error: DEPLOYER is required (helm | argocd-oci | argocd-helm-oci | flux-oci)"
+	@echo "Error: DEPLOYER is required (helm | argocd-oci | argocd-helm-oci | argocd-git | flux-oci | flux-git)"
 	@exit 1
 endif
 	@echo "Validating $(RECIPE) under deployer=$(DEPLOYER)"

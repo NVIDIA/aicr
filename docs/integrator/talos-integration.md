@@ -79,7 +79,7 @@ pod-security.kubernetes.io/warn: privileged
 pod-security.kubernetes.io/warn-version: latest
 app.kubernetes.io/managed-by: aicr
 app.kubernetes.io/component: <component-name>
-aicr.nvidia.com/os: talos
+aicr.run/os: talos
 ```
 
 Setting all three of `enforce`, `audit`, and `warn` to `privileged`

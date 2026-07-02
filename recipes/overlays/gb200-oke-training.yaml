@@ -13,16 +13,17 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-oke-training
 
 spec:
-  # Inherits from oke-training recipe (OKE + training settings)
-  base: oke-training
+  # Inherits from oke-ol-training recipe (OKE + OL + training settings)
+  base: oke-ol-training
 
   criteria:
     service: oke
+    os: ol
     accelerator: gb200
     intent: training
 

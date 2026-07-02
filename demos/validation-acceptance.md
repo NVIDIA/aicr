@@ -10,7 +10,7 @@ brew tap NVIDIA/aicr
 brew install aicr
 
 # Or use the install script
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://get.aicr.run | bash -s --
 ```
 
 ## Snapshot (prior to deploy)
@@ -46,7 +46,7 @@ Expected:
 - Completes in <10s
 - `recipe.yaml` created
 - Criteria matching flags
-- 13 components, 7 overlays
+- 15 components, 8 overlays
 
 ## Bundle
 
@@ -193,8 +193,10 @@ done
 ## Verify (version-locked image tags)
 
 ```shell
-# Check that validator images use the CLI version tag (not :latest)
-VERSION=$(aicr version -s)
+# Check that validator images use the CLI version tag (not :latest).
+# `aicr --version` prints "aicr version <ver> (commit: ..., date: ...)",
+# so field 3 is the bare version the image tag is built from.
+VERSION=$(aicr --version | awk '{print $3}')
 jq -r '.results.tests[] | select(.suite[] == "deployment") | .stdout[]' \
   deployment-report.json 2>/dev/null | grep "deploying.*image=.*:v${VERSION}" || \
   echo "Run deployment test with --debug to verify image tags"

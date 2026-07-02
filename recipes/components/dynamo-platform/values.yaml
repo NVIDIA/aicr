@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values (v1.2.0)
+# Dynamo Platform Helm values (v1.2.1)
 # NVIDIA Dynamo inference serving platform operator.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
@@ -40,6 +40,17 @@ global:
   grove:
     install: false
     enabled: true
+
+nats:
+  config:
+    jetstream:
+      fileStore:
+        pvc:
+          # Mirror the chart default so AICR can warn when no StorageClass is
+          # selected and inject --storage-class into the bundled NATS PVC.
+          enabled: true
+          size: 10Gi
+          storageClassName: ""
 
 dynamo-operator:
   # Upgrade CRDs via the platform chart (no separate dynamo-crds 1.0 chart)

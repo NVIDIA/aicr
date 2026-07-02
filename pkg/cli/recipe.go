@@ -100,9 +100,9 @@ func recipeCmd() *cli.Command {
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
 		Description: `Generate configuration recipe based on specified environment parameters including:
   - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke, bcm)
-  - Accelerator type (e.g. h100, h200, gb200, b200, a100, l40, rtx-pro-6000)
+  - Accelerator type (e.g. h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000)
   - Workload intent (e.g. training, inference)
-  - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux, talos)
+  - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux, ol, talos)
   - Number of GPU nodes in the cluster
 
 The recipe returns a list of components with deployment order based on dependencies.
@@ -145,6 +145,11 @@ Override snapshot-detected criteria:
 			if err != nil {
 				return err
 			}
+
+			// Mode banner: recipe generation reads inputs (criteria, embedded
+			// data, an optional snapshot) and never deploys to or modifies a
+			// live cluster, so make that explicit up front (issue #1383).
+			slog.Info("generating recipe offline — reads inputs only; does not deploy to or modify any cluster")
 
 			// Build a per-command Client bound to the resolved data source
 			// (--data / spec.recipe.data, else embedded). The Client owns its
@@ -227,9 +232,15 @@ Override snapshot-detected criteria:
 				return errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
 			}
 
+			componentNames := make([]string, len(resolved.ComponentRefs))
+			for i, ref := range resolved.ComponentRefs {
+				componentNames[i] = ref.Name
+			}
+
 			slog.Info("recipe generation completed",
 				"output", output,
 				"components", len(resolved.ComponentRefs),
+				"componentNames", strings.Join(componentNames, ", "),
 				"overlays", len(resolved.Metadata.AppliedOverlays))
 
 			return nil

@@ -77,7 +77,7 @@ resolver injects into any `ComponentRef` that leaves the field unset.
 Top-level schema (`ComponentRegistry`):
 
 ```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 kind: ComponentRegistry
 components:
   - name: <component-id>
@@ -111,7 +111,10 @@ not both.
 the live ComponentConfig is the one in `pkg/recipe/components.go`.
 
 Defaults flow into a `ComponentRef` only when the field is empty —
-see [applyRegistryDefaults](#merge-algorithm) below.
+see [applyRegistryDefaults](#merge-algorithm) below. `defaultVersion`
+is the single source of truth for a component's version and a pinned
+overlay must not diverge from it unexpectedly — see
+[Version pinning is single-source](#version-pinning-is-single-source).
 
 ## Overlay (`recipes/overlays/`)
 
@@ -121,7 +124,7 @@ that selects it for matching queries. Overlays live in
 
 ```yaml
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
@@ -149,10 +152,10 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 
 | Field | Type | Wildcard | Static OSS values |
 |---|---|---|---|
-| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `kind`, `lke`, `bcm` |
-| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000` |
+| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm` |
+| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
-| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos` |
+| `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos` |
 | `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
 | `nodes` | int | `0` | any positive int |
 
@@ -203,7 +206,7 @@ every leaf. **Mixins** are composable fragments referenced via
 ```yaml
 # recipes/mixins/os-ubuntu.yaml
 kind: RecipeMixin
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: os-ubuntu
 spec:
@@ -299,16 +302,21 @@ for content genuinely uniform across the wildcard dimension.
 ## Merge Algorithm
 
 The resolver lives in `pkg/recipe/metadata_store.go`. The merge
-proceeds in fixed precedence (low → high):
+proceeds in this temporal order:
 
 ```text
-registry defaults → mixin → base chain → overlay leaf → CLI/API --set
-(lowest priority)                                       (highest priority)
+base chain (root → leaf) → mixins → registry defaults → CLI/API --set
 ```
 
-Each step wins over everything to its left — `--set` overrides the
-overlay leaf, the leaf overrides the base chain, and so on. Read as
-priority, not as temporal order.
+The base inheritance chain is merged first (root → leaf, later
+ancestors override earlier ones on same-named entries). Mixins are
+applied **after** the chain, not before it: `mergeMixins` appends each
+referenced mixin's constraints and componentRefs. A mixin constraint
+whose name already exists in the chain (or in another mixin) is
+**rejected** — constraints have no merge semantic, so a name collision
+is treated as an unambiguous conflict, not resolved by last-wins
+precedence. Registry defaults then fill any still-empty componentRef
+fields, and CLI/API `--set` overrides win last.
 
 Implementation notes:
 
@@ -331,7 +339,13 @@ Implementation notes:
    would fail downstream far from the root cause.
 5. **Topological sort.** `TopologicalSort()` orders components by
    `dependencyRefs` for the final `DeploymentOrder`. Cycles produce
-   `ErrCodeInvalidRequest`.
+   `ErrCodeInvalidRequest`. Components disabled via
+   `overrides.enabled: false` (`ComponentRef.IsEnabled()`) are excluded
+   from the ordering, and an edge pointing at a declared-but-disabled
+   component is treated as satisfied (assumed provided externally) so it
+   does not trigger a false cycle; an edge to an *undeclared* component
+   still surfaces as `ErrCodeInvalidRequest`. `TopologicalLevels()` /
+   `ComponentRefsTopologicalLevels()` apply the same filter.
 
 **Deep-copy semantics.** `deepMergeMap` (`metadata.go`) recurses into
 nested `map[string]any`. Non-map values (scalars *and* `[]any`) are
@@ -462,16 +476,60 @@ when a chart bumps an image inside its own templates without a
 registry pin change on our side. That drift will appear in the BOM
 diff whether you expected it or not.
 
-**Freshness is not gated at merge time.** `make bom-check` verifies
-the committed BOM matches a fresh regen, but it is **opt-in only** —
-not wired into `make qualify`, `make lint`, or the PR gate. Do not
-rely on local qualify or CI to catch a missed regen. Wiring
-`bom-check` into the gate is a desirable follow-up.
+### Version freshness is gated; image drift is not
+
+`TestCommittedBOMVersionsMatchRegistry` (`tools/bom/freshness_test.go`,
+run by `make test` → `make qualify`) checks the committed doc's version
+column against the registry pins with no Helm rendering, so a chart-pin
+bump that forgets `make bom-docs` fails CI. The check treats the doc as
+an *exact* registry projection: it is bidirectional (a component added
+to the registry without a doc row, or a doc row left behind after a
+component is removed, both fail), rejects duplicate rows, and compares
+**every** row — pinned components by their effective type (Helm
+`defaultVersion` or Kustomize `defaultTag`) and unpinned components
+against the `—` sentinel, so a fabricated version on an otherwise
+unpinned row cannot slip through. Because a docs-only PR that edits the committed
+BOM skips the full `tests` job, the `bom-freshness` job in
+`.github/workflows/merge-gate.yaml` runs this same test whenever
+`docs/user/container-images.md` or `recipes/registry.yaml` change, so
+the gate holds for docs-only edits too. It does **not** catch *upstream
+image drift* — a chart bumping an image inside its own templates without
+a pin change on our side. Full `make bom-check` verifies that too by
+re-rendering, but it is **opt-in only** — not wired into `make qualify`,
+`make lint`, or the PR gate. So you still must run `make bom-docs` after
+a values change.
+
+### Version pinning is single-source
+
+The BOM renders each chart at its registry `defaultVersion`, but at
+resolution the registry default is only a *fallback*: a `componentRef`
+that sets `version` (Helm) or `tag` (Kustomize) in `base.yaml`, an
+overlay, or a mixin overrides it. So the BOM reflects what recipes
+actually install **only when no pin diverges from the registry
+default**. A pin that drifts from the default — most dangerously on a
+component whose sole consumer diverges — makes the BOM advertise a
+version no recipe installs (issue #1424; #1418's `aws-efa` bug).
+
+The registry `defaultVersion` is therefore the single source of truth
+for a component's version. `TestOverlayVersionPinsMatchRegistry`
+(`pkg/recipe/version_pin_guard_test.go`, run by `make test` →
+`make qualify`) fails if any `base`/overlay/mixin pin diverges from the
+registry default. A version bump must update the registry default (the
+BOM reads it) **and** every pin that sets it, or CI fails. If an
+overlay must legitimately run a different chart version (e.g. a
+platform validated against an older chart), add an entry to
+`versionPinExemptions` with a justification — a declared divergence is
+not a silent one. Do **not** exempt a component whose only consumer
+diverges; that reinstates the exact fiction the guard prevents.
 
 ## Common Pitfalls
 
-- **Skipping `make bom-docs`** after a chart pin or values change.
-  The diff doesn't surface in qualify; the BOM goes stale silently.
+- **Skipping `make bom-docs`** after a values change that alters
+  rendered images. A stale version *column* now fails CI
+  (`TestCommittedBOMVersionsMatchRegistry`), but *image* drift from a
+  values change without a pin bump does not surface in qualify — the
+  BOM goes stale silently. See
+  [Version freshness is gated; image drift is not](#version-freshness-is-gated-image-drift-is-not).
 - **Mutating in place during merge.** Overlay-derived `map[string]any`
   and `[]any` must be deep-copied, not aliased. `deepMergeMap` does
   this for you; a bespoke helper that recurses into maps but copies
@@ -486,10 +544,17 @@ rely on local qualify or CI to catch a missed regen. Wiring
   every docs page that lists current values, issue templates, the
   `Specificity()` helper. Start from the Go type in `criteria.go`
   and follow the audit list in CLAUDE.md.
-- **Setting identity fields in a mixin componentRef.** A mixin may
-  not set `chart`, `version`, `valuesFile`, etc. — the resolver
-  rejects with the offending field name. Move chart-changing logic
-  to an overlay.
+- **Setting identity fields in a mixin componentRef when overriding
+  an inherited component.** A mixin may not override `chart`,
+  `version`, `valuesFile`, etc. on a component the inheritance chain
+  already carries — the resolver rejects with the offending field
+  name. Move chart-changing logic to an overlay. (A mixin may still
+  *introduce* a new component with these fields.)
+- **Bumping a chart version in only one place.** The registry
+  `defaultVersion` is the single source of truth; an overlay `version`
+  pin that drifts from it makes the BOM advertise a version no recipe
+  installs. `TestOverlayVersionPinsMatchRegistry` fails on undeclared
+  drift — see [Version pinning is single-source](#version-pinning-is-single-source).
 - **Assuming the cluster fingerprint is trustworthy.** The
   fingerprint block persisted in `aicr snapshot` output is
   advisory; trust-bearing consumers recompute via

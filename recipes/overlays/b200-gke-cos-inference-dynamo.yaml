@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   name: b200-gke-cos-inference-dynamo
 
@@ -49,7 +49,7 @@ spec:
     - name: dynamo-platform
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      version: "1.2.0"
+      version: "1.2.1"
       valuesFile: components/dynamo-platform/values.yaml
       dependencyRefs:
         - grove

@@ -48,6 +48,10 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 		timeoutCtx,
 		metav1.ListOptions{
 			FieldSelector: "metadata.name=" + name,
+			// Start the watch from the version observed by the fast-path Get so a
+			// terminal transition landing between the Get and the watch is
+			// replayed rather than missed (matching WaitForJobTerminal).
+			ResourceVersion: current.ResourceVersion,
 		},
 	)
 	if err != nil {

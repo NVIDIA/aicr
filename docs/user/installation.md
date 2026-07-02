@@ -25,13 +25,13 @@ brew install aicr
 Install the latest version using the install script:
 
 ```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://get.aicr.run | bash -s --
 ```
 
 To install to a custom directory instead of the default `/usr/local/bin`:
 
 ```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/bin
+curl -sfL https://get.aicr.run | bash -s -- -d ~/bin
 ```
 
 Optional: if you hit GitHub API rate limits, set `GITHUB_TOKEN` before running the install command. No special repository scope is required for public releases.
@@ -44,7 +44,7 @@ This script:
 - Verifies the installation
 - Uses `GITHUB_TOKEN` environment variable for authenticated API calls (avoids rate limits)
 
-> **Supply Chain Security**: AICR includes SLSA Build Level 3 compliance with signed SBOMs and verifiable attestations. See [SECURITY](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md#supply-chain-security) for verification instructions.
+> **Supply Chain Security**: AICR includes SLSA Build Level 3 image provenance with signed image SBOMs and verifiable attestations. See [SECURITY](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md#supply-chain-security) for verification instructions.
 
 ### Option 3: Manual Installation
 
@@ -60,9 +60,11 @@ Visit the [releases page](https://github.com/NVIDIA/aicr/releases/latest) and do
 2. **Extract and install**
 
 ```shell
-# Example for Linux x86_64
-tar -xzf aicr_linux_amd64.tar.gz
+# Example for Linux x86_64 (substitute the version you downloaded for 0.15.0)
+tar -xzf aicr_0.15.0_linux_amd64.tar.gz
 sudo mv aicr /usr/local/bin/
+# keep the binary attestation beside it so `aicr bundle --attest` works
+[ -f aicr-attestation.sigstore.json ] && sudo mv aicr-attestation.sigstore.json /usr/local/bin/
 sudo chmod +x /usr/local/bin/aicr
 ```
 
@@ -101,7 +103,7 @@ Tab completion for commands and flags is installed automatically by both the Hom
 **Opt out** (install script only): set `AICR_NO_COMPLETIONS=1` before running the script:
 
 ```shell
-AICR_NO_COMPLETIONS=1 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+AICR_NO_COMPLETIONS=1 curl -sfL https://get.aicr.run | bash -s --
 ```
 
 **Manual setup** (build from source or `go install`):
@@ -177,14 +179,13 @@ sudo chmod +x /usr/local/bin/aicr
 
 ### GPU Detection Issues
 
-Snapshot GPU measurements require `nvidia-smi` in PATH:
-
-```shell
-# Verify NVIDIA drivers
-nvidia-smi
-
-# If missing, install NVIDIA drivers for your platform
-```
+Snapshot GPU detection is driver-free: it enumerates PCI devices via sysfs
+(NFD) and resolves the accelerator SKU from the device ID — no `nvidia-smi` or
+NVIDIA driver required. The GPU Operator's `nvidia.com/gpu.product` node label
+is **not** required to collect GPU data; when present (read in-cluster via the
+node topology), it improves SKU accuracy and powers the "GPU placement
+mismatch" warning. If a snapshot reports no GPU on a node you expect to have
+one, confirm the agent landed on the GPU node (it needs host `/sys` access).
 
 ## Uninstall
 

@@ -154,7 +154,7 @@ fi
 # Build a minimal resolved recipe (RecipeResult format, which aicr bundle expects)
 cat > "${WORK_DIR}/recipe.yaml" <<EOF
 kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
+apiVersion: aicr.run/v1alpha2
 metadata:
   version: component-test
 componentRefs:

@@ -96,13 +96,16 @@ telemetry hooks.
 ```go
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
 // returns the resulting Snapshot. cfg is a facade-owned struct that
-// mirrors every field of the underlying pkg/snapshotter.AgentConfig.
+// mirrors most fields of the underlying pkg/snapshotter.AgentConfig
+// (the in-pod network-discovery fields ClusterConfigPath and
+// DiscoverNetwork are not surfaced on the facade).
 snap, err := client.CollectSnapshot(ctx, &aicr.AgentConfig{
 	Kubeconfig:         "/path/to/target-kubeconfig",
 	Namespace:          "aicr-snapshot",
-	Image:              "nvcr.io/nvidia/aicr-agent:v0.11.1",
+	Image:              "ghcr.io/nvidia/aicr:v0.11.1",
 	ServiceAccountName: "aicr-agent",
 	Timeout:            5 * time.Minute,
+	Cleanup:            true,
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
@@ -110,7 +113,7 @@ if err != nil {
 
 // ValidateState runs the validation phases against the resolved recipe +
 // observed snapshot. With no WithValidationPhases option it runs all three
-// phases (Deployment, Performance, Conformance) in canonical order.
+// phases (Deployment, Conformance, Performance) in canonical order.
 results, err := client.ValidateState(ctx, result, snap)
 if err != nil {
 	log.Fatalf("validate state: %v", err)
@@ -133,8 +136,8 @@ results, err := client.ValidateState(ctx, result, snap,
 	aicr.WithValidationPhases(aicr.PhaseDeployment, aicr.PhaseConformance))
 ```
 
-Valid phase values are `PhaseDeployment`, `PhasePerformance`, and
-`PhaseConformance`. An unrecognized phase is rejected with
+Valid phase values are `PhaseDeployment`, `PhaseConformance`, and
+`PhasePerformance` (canonical execution order). An unrecognized phase is rejected with
 `ErrCodeInvalidRequest` before any cluster work, so a typo cannot
 silently degrade to an empty run.
 

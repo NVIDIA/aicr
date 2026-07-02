@@ -70,9 +70,11 @@ Ordering invariants (also documented in source):
 - **Rate limit outside body limit.** A 429 short-circuits before any body-cap setup.
 - **Body limit innermost.** Per-endpoint `http.MaxBytesReader` calls in handlers (recipe = 1 MiB, bundle = 8 MiB) reapply cleanly inside the default cap.
 
-System endpoints — `/`, `/health`, `/ready`, `/metrics` — bypass the
-chain entirely. Only application routes registered via `WithHandler`
-go through it.
+System endpoints — `/health`, `/ready`, `/metrics` — bypass the chain
+entirely. The `/` root route is added to the handlers map by
+`configureRootHandler` (not via `WithHandler`, which installs only
+caller-provided handlers) and is then wrapped by the same middleware loop, so
+it runs the full chain like application routes.
 
 ## Handler Pattern
 
@@ -279,9 +281,12 @@ Pattern reminders from CLAUDE.md:
 - Always check `ctx.Done()` if the handler under test spawns goroutines.
 - Never use a live cluster; the facade with `EmbeddedSource()` is fully in-process.
 
-For end-to-end coverage, the chainsaw suite under
-[`tests/chainsaw/server/`](https://github.com/NVIDIA/aicr/tree/main/tests/chainsaw)
-exercises the server binary against the embedded data set.
+The handlers, middleware chain, and `Server.Run` lifecycle are covered
+by in-process Go tests under
+[`pkg/server`](https://github.com/NVIDIA/aicr/tree/main/pkg/server)
+(`recipe_handler_test.go`, `middleware_test.go`, `serve_test.go`, and
+peers), which drive the facade against the embedded data set without a
+live cluster.
 
 ## References
 

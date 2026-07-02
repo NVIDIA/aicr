@@ -93,9 +93,8 @@ workspace paths. Use local file paths only when explicitly requested.
 ## Git Configuration
 
 - Commit to `main` branch (not `master`)
-- Do use `-S` to cryptographically sign the commit
-- Do NOT add `Co-Authored-By` lines (organization policy)
-- Do not sign-off commits (no `-s` flag); cryptographic signing (`-S`) satisfies DCO for AI-authored commits
+- Sign every commit with both `-S` (cryptographic signature) and `-s` (DCO sign-off), authored as the human (the configured `git config user.name`/`user.email`), not the agent
+- Do NOT add `Co-Authored-By` lines or any agent attribution (e.g. Claude Code, Codex) — organization policy
 
 ## Key Packages
 
@@ -268,7 +267,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 
 **Note:** A component must have either `helm` OR `kustomize` configuration, not both.
 
-**After any change to `recipes/registry.yaml`, a component's values file, or a chart version pin (in registry, overlay, or mixin):** run `make bom-docs` and commit the regenerated `docs/user/container-images.md` in the same PR. The BOM is rendered fresh from each Helm chart's actual templates, so an unbumped pin can still pick up upstream image drift — running it locally is the only reliable way to know whether the doc needs an update. `make bom-check` verifies the committed BOM matches a fresh regen, but it is **opt-in only** — not wired into `make qualify`, `make lint`, or the merge gate today. Do not rely on either to catch a missed regen.
+**After any change to `recipes/registry.yaml`, a component's values file, or a chart version pin (in registry, overlay, or mixin):** run `make bom-docs` and commit the regenerated `docs/user/container-images.md` in the same PR. The BOM is rendered fresh from each Helm chart's actual templates, so an unbumped pin can still pick up upstream image drift — running it locally is the only reliable way to know whether the doc needs an update. The BOM's **version column and component set are gated**: `TestCommittedBOMVersionsMatchRegistry` (run by `make test` → `make qualify`, and by the `bom-freshness` merge-gate job on docs-only PRs) fails CI when a pinned version or the component set drifts from the registry, so a version change that forgets `make bom-docs` is caught. Not gated at PR time is *rendered-image drift* — an unbumped pin picking up a new image inside a chart's templates; `make bom-check` (a full re-render comparison) is its **opt-in** blocking check and is not wired into `make qualify`, `make lint`, or the merge gate, while the scheduled BOM-refresh workflow (`.github/workflows/bom-refresh.yaml`) auto-detects that drift weekly and opens a PR. So still run `make bom-docs` on any chart-touching change.
 
 **Using mixins for shared OS/platform content:**
 ```yaml
@@ -582,7 +581,7 @@ Follow the heading conventions in the `## Documentation Style` section above. Do
 Before pushing a PR that changes Go source, check coverage on affected packages. Set `pkg` to the narrowest changed root — `$pkg/...` includes descendants (e.g. use `pkg=pkg/collector/topology`, not `pkg=pkg/collector`, unless you want a combined delta).
 1. Current: `GOFLAGS="-mod=vendor" go test -coverprofile=cover.out ./$pkg/...` on each changed package.
 2. Baseline (skip for new packages; commit changes first): `(git worktree add $TMPDIR/baseline origin/main && (cd $TMPDIR/baseline && GOFLAGS="-mod=vendor" go test -coverprofile=$TMPDIR/base.out ./$pkg/...); rc=$?; git worktree remove --force $TMPDIR/baseline; return $rc 2>/dev/null || (exit $rc))` — `$TMPDIR/base.out` survives cleanup and `rc` preserves test status. Compare with `go tool cover -func`.
-3. **Block** if `make test-coverage` fails (enforces the project-wide 70% floor from `.settings.yaml`; do not use per-package profiles for this check).
+3. **Block** if `make test-coverage` fails (enforces the project-wide 75% floor from `.settings.yaml`; do not use per-package profiles for this check).
 4. **Flag** any package with per-package decrease > 0.5% (step 1 vs 2).
 5. **Block** if any new exported func/method (`git diff origin/main -- $pkg/`, added uppercase `func` lines) has 0% coverage — add tests first.
 6. Report the delta in the PR's Testing section (e.g. `pkg/recipe: 90.4% → 90.3% (-0.1%)`).

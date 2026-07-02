@@ -14,46 +14,96 @@
 
 name: UAT - GCP
 
+# Reusable per-cloud UAT pipeline — invoked by uat-run.yaml, the shared
+# dispatch surface that owns the per-reservation concurrency lease (#1274,
+# DC1). It is intentionally NOT directly dispatchable or scheduled: the
+# nightly cron lives in uat-nightly-batch.yaml and ad-hoc runs go through
+# uat-run.yaml, so every run on the GCP reservation serializes on the same
+# lease. The filename is kept so the keyless-cosign signing identity (and the
+# EXPECTED_IDENTITY_REGEXP pins) stay `uat-gcp.yaml@…` unchanged.
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      reservation:
+        description: 'Reservation name (lease key) this run targets; used for labeling and the daytime cluster name.'
+        type: string
+        required: true
+      aicr_version:
+        description: 'Released aicr version to install (e.g. v1.2.3); empty = build from source (main tip).'
+        type: string
+        default: ''
+      intent:
+        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml).'
+        type: string
+        default: training
+      lifecycle:
+        description: 'nightly (provision→CUJ→teardown) | daytime-up (provision+deploy+HOLD) | daytime-down (tear down the held daytime cluster).'
+        type: string
+        default: nightly
+      cluster_config_path:
+        description: 'Cluster-config the GKE actuator provisions from (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
+      test_config_dir:
+        description: 'Directory holding the AICRConfig test files (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
       skip_delete:
-        description: 'Skip cluster teardown (manual runs only; schedule always deletes)'
+        description: 'Skip cluster teardown (manual runs only; the nightly batch always deletes).'
         type: boolean
         default: false
       skip_tests:
-        description: 'Skip UAT test execution (manual runs only; schedule always tests)'
+        description: 'Skip UAT test execution (manual runs only; the nightly batch always tests).'
         type: boolean
         default: false
-  schedule:
-    - cron: '0 4 * * *' # daily at midnight PST, runs on default branch only
 
 permissions:
   contents: read
 
-# Long-running cloud provisioning — never cancel mid-teardown.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+# NOTE: the per-reservation concurrency lease is owned by the caller
+# (uat-run.yaml). A reusable workflow must not declare its own concurrency
+# here, or every reservation would serialize against one group instead of
+# queueing per reservation.
 
 jobs:
   uat-gcp:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Covers the uncapped non-UAT steps (build, validator image push, GKE
+    # provisioning, evidence upload) + the UAT phase steps (prep 15 + install 45
+    # + validate 40 + train 25 + verify 5 = 130) + the always()-run Destroy
+    # Cluster teardown. The teardown MUST fit in this budget: a job-level timeout
+    # cancels pending always() steps, so an undersized cap would skip teardown
+    # and leak the GPU node.
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read
       id-token: write
       packages: write
+    outputs:
+      # Digest-pinned OCI ref of the signed evidence bundle, consumed by
+      # the ingest-evidence job below. Empty when no bundle was produced.
+      bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
     env:
       GCP_PROJECT_ID: "eidosx"
       GCP_REGION: "us-central1"
       GCP_WIF_PROVIDER: "projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
       GCP_WIF_SERVICE_ACCOUNT: "github-actions@eidosx.iam.gserviceaccount.com"
-      DEPLOYMENT_ID: "aicr-${{ github.run_id }}"
-      CLUSTER_CONFIG: tests/uat/gcp/cluster-config.yaml
-      TEST_CONFIG: tests/uat/gcp/tests/h100-training-config.yaml
+      # Cluster name (GKE actuator derives it from .deployment.id). The nightly
+      # per-run lifecycle uses a run-scoped name for per-run isolation; the
+      # daytime lifecycles use a STABLE, reservation-tagged name so the evening
+      # teardown (daytime-down) and the nightly pre-batch guard can find the
+      # held cluster. Reservation names are lowercase alnum+hyphen, so the
+      # derived name is a valid GKE cluster name.
+      DEPLOYMENT_ID: >-
+        ${{ (inputs.lifecycle == 'daytime-up' || inputs.lifecycle == 'daytime-down')
+        && format('aicr-day-{0}', inputs.reservation)
+        || format('aicr-{0}', github.run_id) }}
+      CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
+      # DC2 selects the AICRConfig by intent; both intents drive the same
+      # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
       GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:latest"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
@@ -61,9 +111,33 @@ jobs:
     steps:
       # Checkout
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
+
+      # Fail closed on an unrecognized intent/lifecycle before any provisioning:
+      # workflow_dispatch constrains these to a choice, but workflow_call passes
+      # free strings, so a caller typo must surface as a clear error rather than
+      # a missing-file failure deep in a phase. Also assert the per-intent config
+      # exists so a missing sibling config fails here, not mid-run.
+      - name: Validate inputs
+        env:
+          INTENT: ${{ inputs.intent }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+        run: |
+          set -euo pipefail
+          case "${INTENT}" in
+            training|inference) ;;
+            *) echo "::error::unknown intent '${INTENT}' (want training|inference)"; exit 1 ;;
+          esac
+          case "${LIFECYCLE}" in
+            nightly|daytime-up|daytime-down) ;;
+            *) echo "::error::unknown lifecycle '${LIFECYCLE}' (want nightly|daytime-up|daytime-down)"; exit 1 ;;
+          esac
+          if [[ ! -f "${TEST_CONFIG}" ]]; then
+            echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
+          fi
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID}"
 
       # Versions
       - name: Load versions
@@ -72,7 +146,10 @@ jobs:
 
       # Build from source
       - name: Setup Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        # Main cells only: release cells install a prebuilt binary and must not
+        # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -80,19 +157,36 @@ jobs:
             go.sum
             vendor/modules.txt
 
+      # Main cell (aicr_version empty): build the aicr binary from the
+      # checked-out source (tip). Release cells install the released binary
+      # instead (next step). daytime-down tears down the held cluster only — it
+      # builds nothing and pushes no images.
       - name: Build aicr binary
-        if: inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GOFLAGS: -mod=vendor
         run: |
           go build -o ./aicr ./cmd/aicr
           ./aicr --version
 
+      # Release cell (aicr_version set): install the RELEASED aicr binary at that
+      # version instead of building. The released binary self-resolves its own
+      # version's images — validators via pkg/validator/catalog (:latest ->
+      # :<version>) and the snapshot-agent via ghcr.io/nvidia/aicr:<version> — so
+      # the validator/agent build+push steps below are skipped for release cells.
+      - name: Install released aicr
+        if: inputs.aicr_version != '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        uses: ./.github/actions/install-aicr-release
+        with:
+          aicr-version: ${{ inputs.aicr_version }}
+
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login
 
+      # Main cell only: release cells use the released validator images the
+      # released binary self-resolves to (skipped when aicr_version is set).
       - name: Build and push validator images
-        if: inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         run: |
           GO_VERSION="$(cat .go-version)"
           # CHAINSAW_* args dropped in #1236 — the deployment validator
@@ -117,6 +211,49 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
 
+      # GCP capacity posture (#1275, DC2). Unlike AWS, GCP has NO pre-flight
+      # capacity/quota assertion here — the decision (recorded in
+      # docs/contributor/uat.md) is to rely on the GKE actuator failing at
+      # provision time if the reservation is exhausted, rather than adding a
+      # symmetric gcloud reservation check. The reservation lease (uat-run.yaml)
+      # already serializes contending runs, so a provision-time failure means a
+      # genuinely undersized/exhausted reservation, not a race. There is
+      # intentionally no capacity step below.
+
+      # Pre-batch guard (#1275, DC2). The nightly lifecycle refuses to provision
+      # into a reservation that still holds an un-torn-down daytime cluster: a
+      # missed evening teardown must surface as a BLOCKED batch, not as silent
+      # contention. Detect by the stable daytime cluster name
+      # (aicr-day-<reservation>); we already hold the reservation lease
+      # (uat-run.yaml) and are authenticated, so this runs before Bringup and
+      # fails fast rather than racing. Only the nightly lifecycle guards —
+      # daytime-up creates that cluster, daytime-down removes it.
+      - name: Pre-batch guard — refuse if a daytime cluster still holds the reservation
+        id: guard
+        if: inputs.lifecycle == 'nightly'
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+        run: |
+          set -euo pipefail
+          DAYTIME_NAME="aicr-day-${RESERVATION}"
+          set +e
+          OUT=$(gcloud container clusters describe "${DAYTIME_NAME}" \
+            --region "${GCP_REGION}" --project "${GCP_PROJECT_ID}" 2>&1)
+          RC=$?
+          set -e
+          if [[ ${RC} -eq 0 ]]; then
+            echo "::error::daytime cluster ${DAYTIME_NAME} still holds reservation ${RESERVATION}; refusing to start the nightly batch. Tear it down first (uat-run lifecycle=daytime-down)."
+            exit 1
+          fi
+          # Fail closed on anything that is NOT a definitive "does not exist":
+          # a throttle/auth error must not be read as "clear to proceed".
+          if grep -qE 'code=404|Not found|No cluster' <<<"${OUT}"; then
+            echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
+          else
+            echo "::error::could not determine daytime-cluster state for ${DAYTIME_NAME}: ${OUT}"
+            exit 1
+          fi
+
       # Deps
       - name: Install tools
         id: deps
@@ -131,6 +268,34 @@ jobs:
           install_helmfile: 'true'
           helmfile_version: '${{ steps.versions.outputs.helmfile }}'
           helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+          # ko builds the snapshot-agent image (main cells only). Release cells
+          # install a prebuilt binary and build no images, so skip ko — a bad ko
+          # pin or download must not fail a release cell before UAT starts.
+          install_ko: ${{ inputs.aicr_version == '' && inputs.skip_tests != true && 'true' || 'false' }}
+          ko_version: ${{ steps.versions.outputs.ko }}
+
+      # The snapshot agent runs in-cluster as its own image, separate from the
+      # locally-built aicr binary that drives the UAT phases. Left at the
+      # default (ghcr.io/nvidia/aicr:latest), it would be the last *released*
+      # build — so any artifact-schema change in the PR under test (e.g. an
+      # apiVersion bump) produces a snapshot the freshly-built binary rejects.
+      # Build the agent from the PR source and point AICR_IMAGE at it so the
+      # snapshot is stamped by the code under test, not a stale release. Single
+      # arch: the GPU worker (a3-highgpu, H100) is amd64. Lives in the
+      # aicr-validators namespace (not the release ghcr.io/nvidia/aicr repo);
+      # cleaned up below.
+      - name: Build and push snapshot-agent image
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr \
+            --bare \
+            --platform=linux/amd64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${VALIDATOR_TAG}"
 
       # Config
       - name: Update Config
@@ -140,13 +305,14 @@ jobs:
           yq -i '.deployment.id = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
 
-      # Bringup
+      # Bringup — skipped for daytime-down (teardown-only; nothing to provision).
       - name: Bringup Infra
         id: infra
+        if: inputs.lifecycle != 'daytime-down'
         run: |
           set -euox pipefail
           docker run \
-            -e CONFIG_CONTENT="$(base64 < $CLUSTER_CONFIG)" \
+            -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
             -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
             ${{ env.GKE_ACTUATOR_IMAGE }} apply
@@ -184,31 +350,56 @@ jobs:
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
+          # Snapshot agent: main cell = the PR-built image (see "Build and push
+          # snapshot-agent image"); release cell = the released aicr image at that
+          # version. Honored by `aicr snapshot`.
+          AICR_IMAGE: ${{ inputs.aicr_version == '' && format('ghcr.io/nvidia/aicr-validators/agent:{0}', env.VALIDATOR_TAG) || format('ghcr.io/nvidia/aicr:{0}', inputs.aicr_version) }}
         run: ./tests/uat/gcp/run prep "${TEST_CONFIG}"
 
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
-        timeout-minutes: 25
+        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS) + the post-install
+        # readiness gate, which runs `aicr validate --phase deployment` until it
+        # passes (up to READINESS_TIMEOUT_SECONDS, 20m, spanning a nodewright
+        # reboot). Must exceed one helmfile attempt + the gate so the gate's own
+        # fail-closed path runs before GitHub Actions kills the step.
+        timeout-minutes: 45
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run install "${TEST_CONFIG}"
 
-      - name: UAT - conformance (validate + emit signed evidence)
+      # Runs ALL validate phases (deployment + conformance + performance), not
+      # just conformance. The deployment phase polls component health checks
+      # until the GPU stack converges — the readiness barrier the helmfile
+      # bundle lacks (the helm deploy.sh `kubectl wait`s instead). Step id stays
+      # `conformance` so the train/verify gating below is unaffected.
+      # daytime-up provisions and deploys the stack, then HOLDS: the CUJ
+      # (conformance/train/verify + evidence) is a nightly-batch concern, so
+      # daytime-up stops after install and leaves the cluster up for handoff.
+      - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
-        if: steps.install.outcome == 'success'
-        timeout-minutes: 20
+        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
+        # Larger budget than conformance-only: the deployment phase waits out
+        # cold-start GPU bring-up (driver install/migration). (The performance
+        # phase's NCCL benchmark skips on single-GPU-node clusters like this
+        # one, so it is not the long pole here.)
+        timeout-minutes: 40
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run conformance "${TEST_CONFIG}"
 
+      # The TrainJob CUJ is training-intent-specific. For intent=inference the
+      # served-workload CUJ (phase_serve) is owned by DC3 and out of scope here,
+      # so the train step is skipped; verify/evidence still cover the deployed
+      # inference stack.
       - name: UAT - train (TrainJob)
         id: train
-        if: steps.conformance.outcome == 'success'
+        if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
         timeout-minutes: 25
         shell: bash
         env:
@@ -233,12 +424,20 @@ jobs:
           EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-gcp\.yaml@refs/heads/.+$'
         run: ./tests/uat/gcp/run verify "${TEST_CONFIG}"
 
+      # Export the digest-pinned bundle ref for the ingest-evidence job.
+      # Reads the pointer the conformance step wrote; emits empty (job
+      # skips) when no bundle/digest is present.
+      - name: Export evidence bundle ref
+        id: evidence_ref
+        if: steps.conformance.outcome == 'success'
+        uses: ./.github/actions/export-evidence-ref
+
       # Artifacts + summary run BEFORE teardown so a slow or failing
       # `Destroy Cluster` (which can take 10+ min) does not delay or
       # consume the job-timeout budget needed to persist evidence.
       #
       # The signed evidence bundle itself is pushed to OCI by the
-      # conformance step (ghcr.io/nvidia/aicr-uat-gke-h100-training-${{
+      # conformance step (ghcr.io/nvidia/aicr-evidence/h100-gke-cos-training-kubeflow:run-${{
       # github.run_id }}) and is the source of truth; here we attach the
       # lightweight pointer so a reviewer can locate that bundle directly
       # from the Actions UI for up to a year. Failure-debug artifacts are
@@ -272,37 +471,49 @@ jobs:
       # Summary
       - name: Test Summary
         if: always()
+        env:
+          SUMMARY_RESERVATION: ${{ inputs.reservation }}
+          SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
+          SUMMARY_INTENT: ${{ inputs.intent }}
+          SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
         run: |
           {
             echo "## UAT Results (GCP)"
             echo ""
+            printf '**Reservation:** `%s` · **Intent:** `%s` · **Lifecycle:** `%s`\n' \
+              "$SUMMARY_RESERVATION" "$SUMMARY_INTENT" "$SUMMARY_LIFECYCLE"
+            printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
+            printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
             echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
             echo ""
             echo "| Phase | Status |"
             echo "|-------|--------|"
+            echo "| Pre-batch guard | ${{ steps.guard.outcome }} |"
             echo "| Dependencies | ${{ steps.deps.outcome }} |"
             echo "| Config | ${{ steps.config.outcome }} |"
             echo "| Cluster | ${{ steps.infra.outcome }} |"
             echo "| Connection | ${{ steps.client.outcome }} |"
             echo "| Prep | ${{ steps.prep.outcome }} |"
             echo "| Install | ${{ steps.install.outcome }} |"
-            echo "| Conformance | ${{ steps.conformance.outcome }} |"
+            echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
-            if [[ "${{ steps.conformance.outcome }}" == "success" ]]; then
+            if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
-              echo "**Evidence (OCI):** \`ghcr.io/nvidia/aicr-uat-gke-h100-training-${{ github.run_id }}\`"
+              echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Cleanup (after artifacts so a failed cleanup does not lose evidence).
+      # Main cell only — release cells reference shared, permanent released image
+      # tags and must not delete them.
       - name: Cleanup validator image
-        if: always() && inputs.skip_tests != true
+        if: always() && inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete UAT-tagged validator images to avoid GHCR clutter
-          for phase in deployment performance conformance; do
+          # Delete UAT-tagged validator + snapshot-agent images to avoid GHCR clutter
+          for phase in deployment performance conformance agent; do
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
@@ -312,25 +523,80 @@ jobs:
             fi
           done
 
+      # Re-authenticate to GCP immediately before teardown. The WIF credential
+      # file written by the `Authenticate to GCP` step at the top of the job
+      # references a short-lived GitHub OIDC token; the UAT phases can run the
+      # full job timeout before teardown, by which point that token has expired
+      # and the actuator's STS exchange fails. The `id-token: write` permission
+      # is granted for the whole job, so re-running auth mints a fresh token
+      # file. Mirrors the AWS teardown credential refresh.
+      #
+      # Teardown gating (#1275, DC2): tear down for the nightly lifecycle
+      # (unless skip_delete) and for daytime-down (the explicit evening
+      # teardown of the held cluster — daytime-down provisions nothing, so it
+      # does not gate on steps.infra). NEVER for daytime-up, which holds the
+      # cluster for handoff. skip_delete is a nightly-only debugging escape and
+      # is ignored for daytime-down.
+      - name: Re-authenticate to GCP for teardown
+        id: auth_teardown
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
       - name: Destroy Cluster
-        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
         shell: bash
         run: |
           set -euxo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
+          destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
             if docker run \
-              -e CONFIG_CONTENT="$(base64 < $CLUSTER_CONFIG)" \
+              -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
-              -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
+              -e KEY_CONTENT="$(base64 < ${{ steps.auth_teardown.outputs.credentials_file_path }})" \
               ${{ env.GKE_ACTUATOR_IMAGE }} apply; then
               echo "Cluster destroyed successfully"
+              destroyed=true
               break
             fi
             echo "Destroy attempt ${attempt} failed, retrying..."
             sleep 30
           done
+          # Fail the step if every attempt failed; otherwise a genuine destroy
+          # failure exits 0 and the GPU node leaks silently.
+          if [ "$destroyed" != true ]; then
+            echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
+            exit 1
+          fi
+
+  # Ingest the signed UAT evidence bundle into the corroboration bucket.
+  # Runs as its own job (separate runner) only when the run produced a
+  # bundle; the reusable workflow verifies signer + issuer + identity +
+  # registry in a credential-free step before publishing to GCS.
+  ingest-evidence:
+    name: Ingest UAT evidence
+    needs: uat-gcp
+    if: needs.uat-gcp.outputs.bundle_ref != ''
+    permissions:
+      contents: read
+      id-token: write  # WIF for the publish job
+      packages: read   # GHCR pull for the verify job
+    uses: ./.github/workflows/evidence-ingest.yaml
+    with:
+      bundle_ref: ${{ needs.uat-gcp.outputs.bundle_ref }}
+      recipe: gke-h100-${{ inputs.intent }}

@@ -39,15 +39,23 @@ Caption: "Single YAML response with optimal configurations for runtime criteria"
 Visual: File system tree structure showing multiple component folders
 
 ```shell
-bundles/
-├── gpu-operator/
-│   ├── checksums.txt
+bundle/
+├── deploy.sh                     # root automation script (executable)
+├── README.md                     # root deployment guide
+├── checksums.txt                 # SHA256 of the listed bundle files (recipe.yaml is written
+│                                 # afterward and is not yet covered — see issue #1549)
+├── recipe.yaml                   # canonical post-resolution recipe
+├── NNN-cert-manager/             # each folder is prefixed with its NNN deployment-order
+│   ├── install.sh                # index (computed from the dependency graph — e.g. cert-manager
+│   ├── values.yaml               # and NFD sort ahead of gpu-operator, which depends on them)
+│   ├── cluster-values.yaml
+│   └── upstream.env              # CHART/REPO/VERSION (every upstream-helm folder)
+├── NNN-gpu-operator/
+│   ├── install.sh
 │   ├── values.yaml
-│   └── scripts/install.sh
-├── network-operator/
-│   ├── checksums.txt
-│   └── argocd/application.yaml
-└── cert-manager/
+│   ├── cluster-values.yaml
+│   └── upstream.env
+└── NNN-<component>/
     └── ...
 ```
 

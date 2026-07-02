@@ -54,6 +54,12 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
+The `agentgateway` inference-gateway is **private by default**: with no
+`allowedSourceRanges` override, the bundler scopes the LoadBalancer to private
+RFC1918 ranges so it is not exposed to the public internet. Use the override
+above to admit specific clients (e.g. a corporate VPN). See
+[Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
+
 ## Enable or disable components
 
 The special `enabled` key includes or excludes a component at bundle time
@@ -65,6 +71,18 @@ aicr bundle --recipe recipe.yaml \
   --set awsebscsidriver:enabled=false \
   --output ./bundles
 ```
+
+A recipe or overlay can also disable a component by default via
+`overrides.enabled: false` (for example, a platform that ships its own
+cert-manager). Such components are already excluded from the recipe's
+`deploymentOrder`.
+
+`--set <component>:enabled=false` disables a component the recipe leaves on.
+A component the recipe **disabled** cannot be re-enabled at bundle time —
+`--set <component>:enabled=true` on such a component is rejected with an error.
+The recipe author disables a component because the target platform already
+provides it, so re-enabling would install a conflicting second copy. To deploy
+a component the recipe disables, edit the recipe/overlay instead.
 
 ## Pin node scheduling
 

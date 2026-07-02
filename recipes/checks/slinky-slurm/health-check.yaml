@@ -27,7 +27,7 @@ metadata:
   name: slinky-slurm-health-check
 spec:
   timeouts:
-    assert: 10m
+    assert: 7m
   steps:
     - name: validate-controller-cr
       try:

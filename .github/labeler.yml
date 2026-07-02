@@ -17,6 +17,9 @@ area/ci:
       - any-glob-to-any-file:
           - '.github/**'
           - 'tools/coverage/**'
+          - 'tools/evidence-project/**'
+          - 'tools/corroborate/**'
+          - 'tools/uat-broker/**'
 
 area/recipes:
   - changed-files:

@@ -54,6 +54,7 @@ const (
 	CriteriaServiceKind CriteriaServiceType = "kind"
 	CriteriaServiceLKE  CriteriaServiceType = "lke"
 	CriteriaServiceBCM  CriteriaServiceType = "bcm"
+	CriteriaServiceOCP  CriteriaServiceType = "ocp"
 )
 
 // ParseService parses a string into a CriteriaServiceType against this
@@ -83,6 +84,8 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceLKE, nil
 	case "bcm":
 		return CriteriaServiceBCM, nil
+	case "ocp", "openshift":
+		return CriteriaServiceOCP, nil
 	default:
 		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
@@ -96,7 +99,7 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 // across `--data` configurations; for the union of static + registry
 // (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "oke"}
+	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "ocp", "oke"}
 }
 
 // AllServiceTypes returns the union of the static OSS list and values
@@ -117,6 +120,7 @@ const (
 	CriteriaAcceleratorB200       CriteriaAcceleratorType = "b200"
 	CriteriaAcceleratorA100       CriteriaAcceleratorType = "a100"
 	CriteriaAcceleratorL40        CriteriaAcceleratorType = "l40"
+	CriteriaAcceleratorL40S       CriteriaAcceleratorType = "l40s"
 	CriteriaAcceleratorRTXPro6000 CriteriaAcceleratorType = "rtx-pro-6000"
 )
 
@@ -139,6 +143,8 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 		return CriteriaAcceleratorA100, nil
 	case "l40":
 		return CriteriaAcceleratorL40, nil
+	case "l40s":
+		return CriteriaAcceleratorL40S, nil
 	case "rtx-pro-6000":
 		return CriteriaAcceleratorRTXPro6000, nil
 	default:
@@ -153,7 +159,7 @@ func (r *CriteriaRegistry) ParseAccelerator(s string) (CriteriaAcceleratorType, 
 // types sorted alphabetically. For the union of static + registry, use
 // AllCriteriaAcceleratorTypes.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "b200", "gb200", "h100", "h200", "l40", "rtx-pro-6000"}
+	return []string{"a100", "b200", "gb200", "h100", "h200", "l40", "l40s", "rtx-pro-6000"}
 }
 
 // AllAcceleratorTypes returns the union of the static OSS list and values
@@ -216,6 +222,7 @@ const (
 	CriteriaOSRHEL        CriteriaOSType = oskind.RHEL
 	CriteriaOSCOS         CriteriaOSType = oskind.COS
 	CriteriaOSAmazonLinux CriteriaOSType = oskind.AmazonLinux
+	CriteriaOSOracleLinux CriteriaOSType = oskind.OracleLinux
 	CriteriaOSTalos       CriteriaOSType = oskind.Talos
 )
 
@@ -233,6 +240,8 @@ func (r *CriteriaRegistry) ParseOS(s string) (CriteriaOSType, error) {
 		return CriteriaOSCOS, nil
 	case oskind.AmazonLinux, "al2", "al2023":
 		return CriteriaOSAmazonLinux, nil
+	case oskind.OracleLinux:
+		return CriteriaOSOracleLinux, nil
 	case oskind.Talos:
 		return CriteriaOSTalos, nil
 	default:
@@ -343,10 +352,10 @@ func mergeCriteriaTypes(staticTypes, registered []string) []string {
 // Criteria represents the input parameters for recipe matching.
 // All fields are optional and default to "any" if not specified.
 type Criteria struct {
-	// Service is the Kubernetes service type (eks, gke, aks, oke, kind, lke, bcm).
+	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, rtx-pro-6000).
+	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).
@@ -779,7 +788,9 @@ func ParseCriteriaFromValues(values url.Values, reg *CriteriaRegistry) (*Criteri
 const RecipeCriteriaKind = "RecipeCriteria"
 
 // RecipeCriteriaAPIVersion is the API version for RecipeCriteria resources.
-const RecipeCriteriaAPIVersion = "aicr.nvidia.com/v1alpha1"
+// It aliases RecipeAPIVersion (ultimately header.GroupVersion) so every AICR
+// artifact apiVersion has a single source of truth.
+const RecipeCriteriaAPIVersion = RecipeAPIVersion
 
 // RecipeCriteria represents a Kubernetes-style criteria resource.
 // This is the format used in criteria files and API requests.
@@ -787,7 +798,7 @@ const RecipeCriteriaAPIVersion = "aicr.nvidia.com/v1alpha1"
 // Example:
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -799,7 +810,7 @@ type RecipeCriteria struct {
 	// Kind is always "RecipeCriteria".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.nvidia.com/v1alpha1").
+	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -897,7 +908,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec, reg *CriteriaRegistry) (*Cr
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -932,7 +943,7 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.nvidia.com/v1alpha1
+//	apiVersion: aicr.run/v1alpha2
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -1015,7 +1026,7 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *Crite
 //
 //	{
 //	  "kind": "RecipeCriteria",
-//	  "apiVersion": "aicr.nvidia.com/v1alpha1",
+//	  "apiVersion": "aicr.run/v1alpha2",
 //	  "metadata": {"name": "my-criteria"},
 //	  "spec": {"service": "eks", "accelerator": "h100"}
 //	}

@@ -48,8 +48,20 @@ ones) that match the target fabric:
 | Check | Transport | When it's selected |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
+
+The `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
+(e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
+validate` environment to run the NET test over NCCL's built-in IB/verbs
+transport across `roce.networking.k8s.aws` DRA devices instead. The value is
+scoped to the `-net` check only; unset (or `efa`) leaves every existing recipe
+on the EFA path unchanged, and any other value is rejected. The RoCE runtime
+image installs `openssh-server` at startup, so the GPU nodes need apt egress;
+on an air-gapped cluster the RoCE NET test cannot bootstrap. This env override is
+interim — snapshot-based fabric auto-detection (and removing the runtime
+package install once a CUDA-13 image ships sshd) is tracked in
+[NVIDIA/aicr#1413](https://github.com/NVIDIA/aicr/issues/1413).
 
 GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 `-nvls` together rather than the auto-detect variant, because those nodes
@@ -190,12 +202,14 @@ with the `AICR_INFERENCE_PERF_MODEL` / `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU`
 catalog knobs (recipe wins over catalog env wins over default).
 
 `inference-routing-mode` selects the Dynamo 1.2 Kubernetes routing path. The
-default `dynamo-router` mode deploys a Dynamo frontend with KV-cache-aware
-routing (`DYN_ROUTER_MODE=kv`). Normal frontend-to-worker request/response
-traffic uses Dynamo's request plane (Dynamo 1.2 defaults to TCP); AICR does not
-set `DYN_REQUEST_PLANE=nats`. Workers publish local vLLM KV-cache events with
-the vLLM ZMQ publisher and the Dynamo worker runtime relays those events onto
-the NATS-backed event plane for the router to consume. Set it to `gateway-epp`
+default `dynamo-router` mode deploys a Dynamo frontend with load-aware
+least-loaded routing (`DYN_ROUTER_MODE=least-loaded`), which balances by each
+worker's active in-flight load so a transiently-slow worker stops receiving its
+full share (see issue #1197). Normal frontend-to-worker request/response traffic
+uses Dynamo's request plane (Dynamo 1.2 defaults to TCP); AICR does not set
+`DYN_REQUEST_PLANE=nats`. Workers still run the vLLM ZMQ KV-cache event
+publisher relayed onto the NATS event plane, but least-loaded routing does not
+consume those events. Set it to `gateway-epp`
 to exercise GAIE/EPP: the validator deploys an EPP component, worker frontend
 sidecars in direct mode, and an HTTPRoute through the AICR-managed inference
 gateway. The direct-mode sidecars honor EPP routing headers; they are not the
@@ -338,7 +352,7 @@ Valid feature names (from `pkg/evidence/cncf/collector.go`):
 | `ai-service-metrics` | Inference-service metrics via custom-metrics API |
 | `inference-gateway` | Gateway API + Inference Extension installation; also records the gateway `LoadBalancer` network exposure (open `0.0.0.0/0` vs scoped source ranges). Fails on an open gateway only when `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true`. |
 | `robust-operator` | Operator readiness and leader-election posture |
-| `pod-autoscaling` | HPA / custom-metrics-driven pod autoscaling |
+| `pod-autoscaling` | HPA-driven pod autoscaling: external GPU metric + behavioral scale-up/down test (pod-scoped custom metrics collected best-effort — absent for DRA-allocated GPUs, not a failure) |
 | `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
 
 ## Emitting recipe evidence
@@ -375,30 +389,41 @@ After the command finishes:
 ├── pointer.yaml                  # locator; copy into recipes/evidence/
 └── summary-bundle/
     ├── recipe.yaml               # canonical post-resolution recipe
-    ├── snapshot.yaml             # snapshot at validate-time
+    ├── snapshot.yaml             # snapshot at validate-time (minimized by default)
     ├── bom.cdx.json              # CycloneDX BOM (auto-generated from
     │                             #   recipe + validator catalog when
     │                             #   --bom is omitted)
-    ├── ctrf/                     # per-phase test results
+    ├── ctrf/                     # per-phase test results (per-test stdout/message omitted by default)
     ├── manifest.json             # per-file sha256 inventory
     ├── statement.intoto.json     # unsigned in-toto Statement
     └── attestation.intoto.jsonl  # signed (when --push is set)
 ```
 
-Commit `pointer.yaml` to `recipes/evidence/<recipe>.yaml`; the bundle
-itself lives in OCI. Then self-verify before opening the PR — the same
-verifier runs against the committed pointer in the CI gate, so exit 0
+The bundle is **minimized by default**: `snapshot.yaml` keeps only an
+allowlisted set of fields (dropping node names, provider instance IDs, the
+node label/taint set, OS tuning, loaded modules, and systemd config) and the
+CTRF reports omit per-test stdout/message. The signed predicate records the
+applied policy in a `redaction` block, and the bundle self-verifies exactly
+like a full one. Pass `--full` to publish the raw payloads instead.
+
+Commit `pointer.yaml` to its per-source path
+`recipes/evidence/<recipe>/<src>/<digest>.yaml` — the emit output prints
+the exact `copyTo` path, and `<src>` is the slug derived from your signer
+identity (see [Artifact Verification](artifact-verification.md#per-source-pointer-layout-and-the-signer-allowlist)).
+The bundle itself lives in OCI. Then self-verify before opening the PR — the
+same verifier runs against the committed pointer in the CI gate, so exit 0
 locally means the gate will pass:
 
 ```bash
-aicr evidence verify recipes/evidence/<recipe>.yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 ```
 
 **Flag reference:**
 
 | Flag | What it does |
 |------|--------------|
-| `--emit-attestation <dir>` | Write the bundle to `<dir>`. Required to produce evidence. |
+| `--emit-attestation <dir>` | Write the bundle to `<dir>`. Required to produce evidence. The bundle is minimized by default — see `--full`. |
+| `--full` | Emit the full (unredacted) bundle. By default the snapshot is reduced to an allowlisted set of fields and per-test CTRF stdout/message are omitted, keeping node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs out of the published artifact. Minimal bundles record the policy in `predicate.redaction` and self-verify normally. |
 | `--push <oci-ref>` | Sign via cosign keyless OIDC and push to the registry. The digest pins the bundle, so the tag is just a label; omit it and aicr derives a unique per-recipe tag (`<recipe-slug>-<short-fingerprint>`). Pass an explicit tag to override. Without `--push`, the bundle is unsigned (development/self-debug only). |
 | `--bom <path>` | Embed an existing CycloneDX BOM instead of the auto-generated one. Pass `make bom` output for an exhaustive BOM that includes chart-default sub-images. |
 | `--identity-token <token>` | Pre-fetched OIDC identity token, skipping the browser flow. Reads `COSIGN_IDENTITY_TOKEN`. |
@@ -567,18 +592,22 @@ conformance check `ai-service-metrics` can fail non-deterministically with:
 [SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
 ```
 
-The validator orchestrator Job tolerates every taint and has no node-affinity
-toward Prometheus, so the kube-scheduler may place it on any worker node —
-including one whose ENI is in a security group whose ingress to the
-Prometheus-hosting SG is missing or asymmetric. The outcome is **not stable
-across re-runs**: image-locality scoring tends to keep the pod on whatever
-node won the first scheduling decision, so a passing run on a fresh cluster
-does not prove the SG topology is correct.
+The validator orchestrator Job tolerates every taint and sets a *preferred*
+`dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
+Prometheus pod when possible. The preference is best-effort, so on fallback it
+can still land on any worker node — including one whose ENI is in a security
+group whose ingress to the Prometheus-hosting SG is missing or asymmetric. On
+such a fallback the outcome is **not stable across re-runs**: image-locality
+scoring tends to keep the pod on whatever node won the first scheduling
+decision, so a passing run on a fresh cluster does not prove the SG topology is
+correct.
 
 This is a cluster-side prerequisite, not an AICR bug per se — see
 [EKS Dynamo Networking Prerequisites](../integrator/eks-dynamo-networking.md#required-security-group-rules)
-for the SG ingress rules required for Prometheus (`tcp/9090`). The underlying
-issue is tracked at [#933](https://github.com/NVIDIA/aicr/issues/933).
+for the SG ingress rules required for Prometheus (`tcp/9090`). The preferred
+`dependencyAffinity` ([#933](https://github.com/NVIDIA/aicr/issues/933),
+resolved) makes a bad placement far less likely, but the `9090` SG rule remains
+the reliable guarantee since the affinity is best-effort.
 
 Workaround when SG changes are not available: re-run the check until the
 orchestrator lands on a node whose SG can reach Prometheus, then leave the
