@@ -92,20 +92,18 @@ jobs:
               - 'tools/bom/**'
               - 'pkg/bom/**'
             tuning:
-              # Inputs to the committed tuning-status table in
-              # docs/integrator/components/nodewright.md. Mirrors the bom
-              # filter: gate the freshness check on the doc, the recipe
-              # sources the table is derived from (overlays, mixins, registry,
-              # and the nodewright-customizations component + its manifest
-              # pins), and the resolution/generator code — so a PR that
-              # changes any of them cannot merge without a matching
-              # `make tuning-docs`.
+              # Inputs that can change the committed tuning-status table
+              # WITHOUT tripping pkg/tuning's TestCompute_Structure — which runs
+              # in the `tests` job on any non-docs change and already asserts
+              # every row's service, accelerator, profile, setup-name and
+              # tuning-name. That test is version-agnostic, so the only table
+              # changes it misses are a manifest pin version bump, a
+              # renderer/extractor change, or a hand edit of the committed doc.
+              # Structural changes driven by overlays, mixins, registry or
+              # pkg/recipe already fail that test, so they are deliberately NOT
+              # listed here (keeping this gate off unrelated recipe PRs).
               - 'docs/integrator/components/nodewright.md'
-              - 'recipes/overlays/**'
-              - 'recipes/mixins/**'
-              - 'recipes/registry.yaml'
               - 'recipes/components/nodewright-customizations/**'
-              - 'pkg/recipe/**'
               - 'pkg/tuning/**'
               - 'tools/tuning/**'
 
