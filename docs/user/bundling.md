@@ -22,7 +22,7 @@ re-render the same recipe for whatever pipeline you run:
 | `helm` (default) | Per-component Helm values + a `deploy.sh` that installs in dependency order. |
 | `helmfile` | A `helmfile.yaml` release graph. |
 | `argocd` | Argo CD `Application` manifests (app-of-apps), published from a Git repo (`--repo`). |
-| `argocd-helm` | A URL-portable Helm chart app-of-apps; publish location is set at install time. |
+| `argocd-helm` | A Helm chart app-of-apps; `repoURL` defaults to the push-target registry — plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when mirroring. |
 | `flux` | Flux `HelmRelease` and `Kustomization` manifests. |
 
 ```bash
