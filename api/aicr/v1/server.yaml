@@ -986,6 +986,8 @@ paths:
                       version: v25.3.3
                       source: https://helm.ngc.nvidia.com/nvidia
                       chart: gpu-operator
+                  deploymentOrder:
+                    - gpu-operator
       responses:
         "200":
           description: Zip archive containing generated bundles
@@ -1495,7 +1497,26 @@ components:
               path:
                 type: string
                 description: Path within the source to the kustomization (Kustomize)
-          description: List of component references with deployment order
+              patches:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  Unsupported / not applied. No deployer applies patch files, so
+                  an enabled ref that sets `patches` is rejected with 400 rather
+                  than silently producing an unpatched bundle. Do not set. See
+                  issue #1588.
+          description: >-
+            List of component references. Deployment order is not per-ref; it is
+            the top-level `deploymentOrder` array.
+        deploymentOrder:
+          type: array
+          items:
+            type: string
+          description: >-
+            Topologically sorted component names giving the order to deploy in.
+            Preserve this on a GET→POST round trip (POST /v1/bundle accepts this
+            same shape) — dropping it changes deployment sequencing.
         constraints:
           type: object
           description: Deployment constraints (driver versions, etc.)
