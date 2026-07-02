@@ -38,6 +38,12 @@ pkg/health/** @nvidia/aicr-maintainer
 tools/health/** @nvidia/aicr-maintainer
 docs/user/recipe-health.md @nvidia/aicr-maintainer
 
+# NodeWright tuning status (ADR-009 sibling): the generated component tuning
+# coverage table and its extractor/generator.
+pkg/tuning/** @nvidia/aicr-maintainer
+tools/tuning/** @nvidia/aicr-maintainer
+tools/internal/docgen/** @nvidia/aicr-maintainer
+
 # Recipe-quality surfaces (RQ): the CUJ/CLI coverage matrix generator
 tools/coverage/** @nvidia/aicr-maintainer
 
