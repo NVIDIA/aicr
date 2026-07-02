@@ -38,15 +38,15 @@ func TestCompute_Structure(t *testing.T) {
 	}
 	want := []wantRow{
 		{"bcm", "*", "h100", "nvidia-setup", ""},
-		{"bcm", "h100", "–", "nvidia-setup", ""},
+		{"bcm", "h100", "-", "nvidia-setup", ""},
 		{"eks", "a100", "h100", "nvidia-setup", "nvidia-tuned"},
-		{"eks", "gb200", "–", "nvidia-setup", "nvidia-tuned"},
-		{"eks", "h100", "–", "nvidia-setup", "nvidia-tuned"},
+		{"eks", "gb200", "-", "nvidia-setup", "nvidia-tuned"},
+		{"eks", "h100", "-", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "h200", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "rtx-pro-6000", "generic", "", "nvidia-tuned"},
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
-		{"gke", "b200", "–", "", "nvidia-tuning-gke"},
-		{"gke", "h100", "–", "", "nvidia-tuning-gke"},
+		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
+		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
 	}
 	if len(report.Rows) != len(want) {
 		t.Fatalf("got %d rows, want %d: %+v", len(report.Rows), len(want), report.Rows)

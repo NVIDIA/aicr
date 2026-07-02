@@ -37,7 +37,7 @@ const nwcComponent = "nodewright-customizations"
 // equal to the accelerator, or an absent package pin.
 const (
 	anyValue      = "*"
-	notApplicable = "–" // U+2013 en dash
+	notApplicable = "-"
 )
 
 // knownTuningManifests is the set of nodewright-customizations manifest basenames

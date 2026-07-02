@@ -25,9 +25,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/tuning"
 )
 
-// notApplicable renders an absent package pin, matching pkg/tuning's Profile
-// literal (U+2013 en dash).
-const notApplicable = "–"
+// notApplicable renders an absent package pin (a plain ASCII hyphen),
+// matching pkg/tuning's notApplicable literal.
+const notApplicable = "-"
 
 // markdownOptions configures table rendering.
 type markdownOptions struct {
@@ -111,8 +111,8 @@ func pinCell(p tuning.PackagePin) string {
 
 // writeRow renders one Markdown table row, left-justifying (right-padding)
 // each cell to its column width. Width and padding are computed by rune
-// count, not byte length, so multi-byte glyphs (e.g. the U+2013 en dash used
-// by notApplicable) align correctly against ASCII cells.
+// count, not byte length, so any multi-byte glyph in a cell would still
+// align correctly against ASCII cells.
 func writeRow(w io.Writer, cells [5]string, widths [5]int) {
 	fmt.Fprint(w, "|")
 	for i, cell := range cells {

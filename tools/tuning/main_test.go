@@ -29,7 +29,7 @@ func TestRenderTable_Deterministic(t *testing.T) {
 		Rows: []tuning.Row{
 			{Service: "bcm", Accelerator: "*", Profile: "h100",
 				Setup: tuning.PackagePin{Name: "nvidia-setup", Version: "0.3.0"}},
-			{Service: "eks", Accelerator: "h100", Profile: "–",
+			{Service: "eks", Accelerator: "h100", Profile: "-",
 				Setup:  tuning.PackagePin{Name: "nvidia-setup", Version: "0.2.2"},
 				Tuning: tuning.PackagePin{Name: "nvidia-tuned", Version: "0.3.0"}},
 			{Service: "gke", Accelerator: "a100", Profile: "h100",
@@ -43,9 +43,9 @@ func TestRenderTable_Deterministic(t *testing.T) {
 	got := buf.String()
 	want := "| Service | Accelerator | Profile | Setup              | Tuning                  |\n" +
 		"|---------|-------------|---------|--------------------|-------------------------|\n" +
-		"| bcm     | *           | h100    | nvidia-setup 0.3.0 | –                       |\n" +
-		"| eks     | h100        | –       | nvidia-setup 0.2.2 | nvidia-tuned 0.3.0      |\n" +
-		"| gke     | a100        | h100    | –                  | nvidia-tuning-gke 0.1.2 |\n\n"
+		"| bcm     | *           | h100    | nvidia-setup 0.3.0 | -                       |\n" +
+		"| eks     | h100        | -       | nvidia-setup 0.2.2 | nvidia-tuned 0.3.0      |\n" +
+		"| gke     | a100        | h100    | -                  | nvidia-tuning-gke 0.1.2 |\n\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}

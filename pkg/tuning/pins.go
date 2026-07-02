@@ -22,7 +22,7 @@ import (
 )
 
 // PackagePin identifies a pinned nodewright package (by image basename) and its
-// version. The zero value renders as "–" (no package).
+// version. The zero value renders as "-" (no package).
 type PackagePin struct {
 	Name    string
 	Version string
@@ -151,7 +151,7 @@ func indentOf(line string) int {
 // classifyPins maps extracted image→version pins into the Setup and Tuning
 // columns. Setup is the nvidia-setup pin; Tuning is nvidia-tuned or
 // nvidia-tuning-gke (a manifest ships at most one). Unrecognized images yield
-// zero-value pins (rendered "–").
+// zero-value pins (rendered "-").
 func classifyPins(pins map[string]string) (setup, tuning PackagePin) {
 	if v, ok := pins["nvidia-setup"]; ok {
 		setup = PackagePin{Name: "nvidia-setup", Version: v}
