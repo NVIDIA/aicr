@@ -58,7 +58,7 @@ The `lifecycle` input selects one of three cluster lifecycles, all sharing the r
 | Lifecycle | Cluster name | Provisions | Deploys | CUJ | Teardown at job end |
 |-----------|--------------|-----------|---------|-----|---------------------|
 | `nightly` (default) | `aicr-uat-<run_id>` (AWS) / `aicr-<run_id>` (GCP) — run-scoped | yes | yes | yes (prep→install→validate→train/verify) | yes (unless `skip_delete`) |
-| `daytime-up` | `aicr-uat-day-<reservation>` (AWS) / `aicr-day-<reservation>` (GCP) — **stable** | yes | yes (prep→install) | no | **no — holds** |
+| `daytime-up` | `aicr-uat-day-<reservation>` — **stable** | yes | yes (prep→install) | no | **no — holds** |
 | `daytime-down` | same stable name | no | no | no | yes (tears down the held cluster) |
 
 The nightly per-run name isolates concurrent history (OCI tags, Terraform state) per run. The daytime name is **stable and reservation-tagged** so the evening `daytime-down` teardown and the nightly pre-batch guard can find the held cluster without tracking a run id. `skip_delete` is a nightly-only debugging escape and is ignored by the daytime lifecycles.
@@ -110,8 +110,8 @@ Access is **out-of-band by design**: nothing here routes a kubeconfig or endpoin
 # AWS — training cluster (aicr-uat-day-aws-h100)
 aws eks update-kubeconfig --region us-east-1 --name aicr-uat-day-aws-h100
 
-# GCP — inference cluster (aicr-day-gcp-h100)
-gcloud container clusters get-credentials aicr-day-gcp-h100 --region <region>
+# GCP — inference cluster (aicr-uat-day-gcp-h100)
+gcloud container clusters get-credentials aicr-uat-day-gcp-h100 --region <region>
 ```
 
 **Training (AWS).** Submit Kubeflow `TrainJob`s against the held cluster — the same CUJ the nightly `intent=training` run exercises (see `demos/cuj1-training.md`).
@@ -130,7 +130,7 @@ Once DC3's `phase_serve` lands, the served workload is deployed automatically as
 
 ## Pre-batch guard
 
-A missed evening teardown must surface as a **blocked batch, never as silent contention** with the still-running daytime deployment. Before it provisions, every `nightly` run asserts that no daytime cluster (by the stable `aicr-uat-day-<reservation>` / `aicr-day-<reservation>` name) is still up on the target reservation. The check runs *after* the run has acquired the reservation lease and authenticated to the cloud, and *before* Bringup — so it fails fast rather than racing. It fails **closed**: only a definitive "cluster does not exist" (AWS `ResourceNotFoundException`, GCP `code=404`) clears the run to proceed; a throttle or auth error blocks the batch rather than being read as "clear."
+A missed evening teardown must surface as a **blocked batch, never as silent contention** with the still-running daytime deployment. Before it provisions, every `nightly` run asserts that no daytime cluster (by the stable, cross-cloud `aicr-uat-day-<reservation>` name) is still up on the target reservation. The check runs *after* the run has acquired the reservation lease and authenticated to the cloud, and *before* Bringup — so it fails fast rather than racing. It fails **closed**: only a definitive "cluster does not exist" (AWS `ResourceNotFoundException`, GCP `code=404`) clears the run to proceed; a throttle or auth error blocks the batch rather than being read as "clear."
 
 If the guard trips, tear the daytime cluster down with `lifecycle=daytime-down` (which releases the reservation), then re-run the batch.
 

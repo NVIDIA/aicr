@@ -98,8 +98,8 @@ jobs:
       # derived name is a valid GKE cluster name.
       DEPLOYMENT_ID: >-
         ${{ (inputs.lifecycle == 'daytime-up' || inputs.lifecycle == 'daytime-down')
-        && format('aicr-day-{0}', inputs.reservation)
-        || format('aicr-{0}', github.run_id) }}
+        && format('aicr-uat-day-{0}', inputs.reservation)
+        || format('aicr-uat-{0}', github.run_id) }}
       CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
@@ -224,7 +224,7 @@ jobs:
       # into a reservation that still holds an un-torn-down daytime cluster: a
       # missed evening teardown must surface as a BLOCKED batch, not as silent
       # contention. Detect by the stable daytime cluster name
-      # (aicr-day-<reservation>); we already hold the reservation lease
+      # (aicr-uat-day-<reservation>); we already hold the reservation lease
       # (uat-run.yaml) and are authenticated, so this runs before Bringup and
       # fails fast rather than racing. Only the nightly lifecycle guards —
       # daytime-up creates that cluster, daytime-down removes it.
@@ -235,7 +235,7 @@ jobs:
           RESERVATION: ${{ inputs.reservation }}
         run: |
           set -euo pipefail
-          DAYTIME_NAME="aicr-day-${RESERVATION}"
+          DAYTIME_NAME="aicr-uat-day-${RESERVATION}"
           set +e
           OUT=$(gcloud container clusters describe "${DAYTIME_NAME}" \
             --region "${GCP_REGION}" --project "${GCP_PROJECT_ID}" 2>&1)
