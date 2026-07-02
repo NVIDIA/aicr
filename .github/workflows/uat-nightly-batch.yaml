@@ -37,7 +37,7 @@ on:
       previous_n:
         description: 'Previous stable releases below main to run per reservation (0 = main only).'
         type: string
-        default: '2'
+        default: '1'
       deadline_offset_hours:
         description: 'Time-box: hours after batch start to stop dispatching new cells. Keep below the drive job timeout (GitHub caps a hosted job at 6h) so the graceful drop-oldest is reachable.'
         type: string
@@ -143,7 +143,7 @@ jobs:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
           RESERVATION: ${{ matrix.reservation }}
-          PREVIOUS_N: ${{ inputs.previous_n || '2' }}
+          PREVIOUS_N: ${{ inputs.previous_n || '1' }}
           DEADLINE_OFFSET_HOURS: ${{ inputs.deadline_offset_hours || '5' }}
           BATCH_START: ${{ needs.enumerate.outputs.batch_start }}
         run: |
@@ -232,7 +232,13 @@ jobs:
             # --exit-status is intentionally not fatal here; classify the run's
             # conclusion below so we can distinguish a benign superseded run from
             # a real failure without aborting mid-loop.
-            gh run watch "$run_id" --repo "$REPO" --exit-status || true
+            # Output is discarded: in a non-TTY log `gh run watch` APPENDS a full
+            # status render every refresh (no in-place redraw), which flooded the
+            # drive log with tens of thousands of duplicate lines per multi-hour
+            # cell. We only need it to BLOCK until the run finishes; the
+            # conclusion is read from `gh run view` below, so the live render is
+            # redundant. --interval 60 keeps the polling gentle on the API.
+            gh run watch "$run_id" --repo "$REPO" --interval 60 --exit-status >/dev/null 2>&1 || true
 
             conclusion=$(gh run view "$run_id" --repo "$REPO" --json conclusion --jq '.conclusion' 2>/dev/null || echo "")
             njobs=$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs" --jq '.total_count' 2>/dev/null || echo "")
