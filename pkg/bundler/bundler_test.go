@@ -3162,3 +3162,34 @@ func TestDynamicTolerationPathExcludedFromBakeIn(t *testing.T) {
 		t.Errorf("daemonsets.tolerations should not be baked in when declared dynamic, got: %v", val)
 	}
 }
+
+// TestMake_RejectsIncoherentRef verifies the public DefaultBundler.Make entry
+// point rejects an incoherent ref (a Helm component carrying a Kustomize path,
+// which the deployers would silently build as Kustomize) rather than producing
+// a mismatched bundle. Pins issue #1584 at the direct-bundler boundary.
+func TestMake_RejectsIncoherentRef(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Version: "v1", Path: "deploy"},
+		},
+	}
+	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err == nil {
+		t.Fatal("expected Make to reject an incoherent Helm+path ref, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s: %v", se.Code, err)
+	}
+	// The caller's RecipeResult must not have been mutated by validation.
+	if got := recipeResult.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
+		t.Errorf("caller's ref was mutated: type=%q", got)
+	}
+}
