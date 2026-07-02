@@ -935,6 +935,11 @@ func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec 
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to compute deployment order", err)
 	}
 
+	// Canonicalize case-insensitively-matched types before defaulting, so the
+	// exact-type switch in ApplyRegistryDefaults (and downstream deployers) see
+	// the canonical constant. See issue #1584.
+	canonicalizeComponentTypes(mergedSpec.ComponentRefs)
+
 	if err := applyRegistryDefaults(provider, mergedSpec.ComponentRefs); err != nil {
 		return nil, err
 	}
@@ -950,6 +955,16 @@ func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec 
 		provider:        provider,
 	}
 	result.Metadata.AppliedOverlays = appliedOverlays
+
+	// Reject refs whose deployment-shape fields are incoherent (e.g. a Helm ref
+	// that also carries a Kustomize tag/path), after defaults populate Type.
+	// The same check also runs at the load and adopt boundaries (see
+	// RecipeResult.ValidateCoherence callers) so externally-supplied hydrated
+	// RecipeResults — the bundle/validate -r and POST /v1/bundle paths — are
+	// covered too, not only criteria-resolved recipes. See issue #1584.
+	if err := result.ValidateCoherence(); err != nil {
+		return nil, err
+	}
 
 	return result, nil
 }
