@@ -91,7 +91,13 @@ compute:
         - name: gpu-worker
           instanceType: p5.48xlarge
           capacity:
-            desired: 1
+            # Two GPU nodes: activates the multi-node NCCL East-West fabric
+            # check (nccl-all-reduce-bw, which skips on a single GPU node) and
+            # lets the TrainJob (numNodes: 2) span both nodes. Requires the
+            # capacity reservation below to hold >=2 p5.48xlarge instances —
+            # the post-lease capacity assertion in uat-aws.yaml fails closed
+            # otherwise.
+            desired: 2
             reservation:
               preference: capacity-reservations-only
               target: cr-0cbe491320188dfa6

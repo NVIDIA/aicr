@@ -103,9 +103,13 @@ compute:
           zones:
             - us-central1-c
           autoscaling:
+            # Two GPU nodes: activates the multi-node NCCL East-West fabric
+            # check (nccl-all-reduce-bw, which skips on a single GPU node) and
+            # lets the TrainJob (numNodes: 2) span both nodes. Drawn from the
+            # 384-node general-pool reservation below, so no capacity gate.
             enabled: true
-            minNodes: 1
-            maxNodes: 1
+            minNodes: 2
+            maxNodes: 2
           guestAccelerator:
             type: nvidia-h100-mega-80gb
             count: 8

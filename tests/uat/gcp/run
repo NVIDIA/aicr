@@ -282,8 +282,9 @@ phase_conformance() {
   # not-yet-converged cluster and failed. The deployment phase gates that
   # convergence deployer-agnostically. The performance phase's only check,
   # nccl-all-reduce-bw, needs >=2 GPU nodes for its East-West fabric test and
-  # skips gracefully on this single-GPU-node cluster (skip != fail); it
-  # activates automatically if the cluster ever scales to multiple GPU nodes.
+  # is now active: the cluster-config provisions 2 GPU nodes (gpu-worker
+  # autoscaling min/maxNodes: 2). If the pool is ever scaled back to a single
+  # GPU node, the check skips gracefully (skip != fail) rather than failing.
   # Evidence is rendered/attested from the merged multi-phase report, so the
   # signed bundle covers all phases.
   echo "::group::Validate (all phases) + emit signed evidence"
@@ -312,7 +313,7 @@ metadata:
   namespace: ${TRAINJOB_NAMESPACE}
 spec:
   trainer:
-    numNodes: 1
+    numNodes: 2
     image: ${TRAINJOB_IMAGE}
     command:
       - python3
