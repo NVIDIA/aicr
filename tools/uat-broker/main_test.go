@@ -37,6 +37,7 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
+    daytime-intent: training
   - name: gcp-h100
     cloud: gcp
     reservation-id: projects/p/reservations/r
@@ -44,6 +45,7 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/gcp/cluster-config.yaml
     test-config-dir: tests/uat/gcp/tests
+    daytime-intent: inference
 `
 
 func writeRegistry(t *testing.T) string {
@@ -93,6 +95,30 @@ func TestReservationsList(t *testing.T) {
 	}
 }
 
+func TestReservationsDaytime(t *testing.T) {
+	reg := writeRegistry(t)
+	code, stdout, stderr := invoke("", "reservations", "--file", reg, "--daytime")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
+	}
+	var got []uatbroker.DaytimeAssignment
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("--daytime output is not valid JSON: %v\ngot:\n%s", err, stdout)
+	}
+	want := []uatbroker.DaytimeAssignment{
+		{Reservation: "aws-h100", Intent: "training"},
+		{Reservation: "gcp-h100", Intent: "inference"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("--daytime = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("--daytime[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestReservationsExitCodes(t *testing.T) {
 	reg := writeRegistry(t)
 	tests := []struct {
@@ -105,6 +131,8 @@ func TestReservationsExitCodes(t *testing.T) {
 		{"unknown registry file", []string{"reservations", "--file", "/no/such.yaml", "--name", "aws-h100"}, errors.ExitInvalidInput},
 		{"bad flag", []string{"reservations", "--bogus"}, errors.ExitInvalidInput},
 		{"list and name conflict", []string{"reservations", "--file", reg, "--list", "--name", "aws-h100"}, errors.ExitInvalidInput},
+		{"daytime and name conflict", []string{"reservations", "--file", reg, "--daytime", "--name", "aws-h100"}, errors.ExitInvalidInput},
+		{"daytime and list conflict", []string{"reservations", "--file", reg, "--daytime", "--list"}, errors.ExitInvalidInput},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

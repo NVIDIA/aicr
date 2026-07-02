@@ -41,6 +41,16 @@
 #   test-config-dir     directory holding the per-cloud AICRConfig test
 #                       files (the ./tests/uat/<cloud>/run phase runner roots
 #                       one level up, at the cluster-config)
+#   daytime-intent      (optional) opts this reservation into the daytime
+#                       human-access rotation (#1281, DC8) and picks the
+#                       flavor stood up during the working day: training |
+#                       inference. Empty/absent = nightly batch only. This is
+#                       the configurable cloud→flavor split — a data choice,
+#                       not hardcoded in a workflow — defaulting to
+#                       AWS=training, GCP=inference. Only ONE reservation per
+#                       cloud may carry a daytime-intent today: a single
+#                       reservation cannot hold both a long-lived daytime
+#                       cluster and the nightly batch at once.
 reservations:
   - name: aws-h100
     cloud: aws
@@ -49,6 +59,7 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config.yaml
     test-config-dir: tests/uat/aws/tests
+    daytime-intent: training
   - name: gcp-h100
     cloud: gcp
     reservation-id: projects/nv-dgxcloudprod-20240108/reservations/h100-a3-mega-phase-1-general-pool-384-us-c1-reservation
@@ -56,3 +67,4 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/gcp/cluster-config.yaml
     test-config-dir: tests/uat/gcp/tests
+    daytime-intent: inference

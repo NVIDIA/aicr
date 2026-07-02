@@ -68,6 +68,10 @@ func (r *Registry) Validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest, "reservation registry has no reservations")
 	}
 	seen := make(map[string]bool, len(r.Reservations))
+	// daytimeCloud tracks which reservation already claimed each cloud's daytime
+	// slot. At most one reservation per cloud may opt into the daytime rotation
+	// (see below).
+	daytimeCloud := make(map[string]string, len(r.Reservations))
 	for i := range r.Reservations {
 		res := &r.Reservations[i]
 		if strings.TrimSpace(res.Name) == "" {
@@ -96,8 +100,49 @@ func (r *Registry) Validate() error {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("reservation %s has a non-positive gpu-count (%d)", res.Name, res.GPUCount))
 		}
+		// daytime-intent is optional (empty = not in the daytime rotation), but
+		// when set it must be a recognized intent — a typo would otherwise
+		// silently drop the reservation from the daytime rotation or dispatch a
+		// nonexistent per-intent config.
+		if res.DaytimeIntent != "" && !validIntents[res.DaytimeIntent] {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("reservation %s has unknown daytime-intent %q (want %s or %s, or empty to opt out)",
+					res.Name, res.DaytimeIntent, IntentTraining, IntentInference))
+		}
+		// At most one daytime reservation per cloud: a single reservation cannot
+		// host both a held daytime cluster and the nightly batch at once, so two
+		// daytime reservations on one cloud would contend. Enforced here (not just
+		// in a test on the committed file) so every caller of ParseRegistry /
+		// LoadRegistryFile — future tooling, alternate registries — upholds the
+		// invariant the lease/scheduler relies on.
+		if res.DaytimeIntent != "" {
+			if prev, ok := daytimeCloud[res.Cloud]; ok {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("cloud %s has more than one daytime-intent reservation (%s and %s); at most one is allowed",
+						res.Cloud, prev, res.Name))
+			}
+			daytimeCloud[res.Cloud] = res.Name
+		}
 	}
 	return nil
+}
+
+// DaytimeAssignments returns the daytime human-access rotation (#1281, DC8):
+// one entry per reservation that opts in via a non-empty daytime-intent, in
+// registry (document) order. Reservations with an empty daytime-intent are
+// nightly-batch only and omitted.
+func (r *Registry) DaytimeAssignments() []DaytimeAssignment {
+	out := make([]DaytimeAssignment, 0, len(r.Reservations))
+	for i := range r.Reservations {
+		if r.Reservations[i].DaytimeIntent == "" {
+			continue
+		}
+		out = append(out, DaytimeAssignment{
+			Reservation: r.Reservations[i].Name,
+			Intent:      r.Reservations[i].DaytimeIntent,
+		})
+	}
+	return out
 }
 
 // Lookup returns the reservation row with the given name, or an
