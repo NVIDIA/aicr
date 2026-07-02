@@ -251,7 +251,7 @@ scan: ## Scans for vulnerabilities with grype
 	grype dir:. --config .grype.yaml --fail-on high --quiet
 
 .PHONY: qualify
-qualify: test-coverage lint e2e scan license-check ## Qualifies the codebase (test-coverage, lint, e2e, scan)
+qualify: test-coverage lint tuning-check e2e scan license-check ## Qualifies the codebase (test-coverage, lint, tuning-check, e2e, scan)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom
@@ -441,7 +441,7 @@ tuning-docs: ## Regenerates the auto-generated tuning-status table in $(TUNING_D
 	echo "Updated $(TUNING_DOC_PATH) (prose preserved, tuning-status table refreshed)"
 
 .PHONY: tuning-check
-tuning-check: ## Verifies $(TUNING_DOC_PATH) tuning-status table is up to date (advisory; not wired into qualify/lint/merge gate)
+tuning-check: ## Verifies $(TUNING_DOC_PATH) tuning-status table is up to date (run by make qualify and the merge-gate on tuning-relevant PRs)
 	@set -e; \
 	$(MAKE) tuning-docs; \
 	if ! git diff --quiet -- $(TUNING_DOC_PATH); then \
