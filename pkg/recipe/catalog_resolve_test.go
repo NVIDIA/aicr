@@ -66,3 +66,15 @@ func TestResolveLeaves_CanceledContext(t *testing.T) {
 		t.Fatal("expected error on canceled context")
 	}
 }
+
+// TestResolveLeaves_CanceledContextZeroMatchFilter guards the edge case where a
+// filter matches no leaves: the empty-result path must not mask a canceled
+// context by returning (nil, nil).
+func TestResolveLeaves_CanceledContextZeroMatchFilter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	filter := &recipe.Criteria{Service: recipe.CriteriaServiceType("does-not-exist")}
+	if _, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{Filter: filter}); err == nil {
+		t.Fatal("expected error on canceled context with a zero-match filter")
+	}
+}

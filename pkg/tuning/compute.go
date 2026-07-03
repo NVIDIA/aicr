@@ -32,12 +32,13 @@ const SchemaVersion = "1.0.0"
 // whose selected manifest carries the tuning/setup package pins.
 const nwcComponent = "nodewright-customizations"
 
-// anyValue renders an empty criteria dimension; notApplicable renders a Profile
-// equal to the accelerator, or an absent package pin.
-const (
-	anyValue      = "*"
-	notApplicable = "-"
-)
+// anyValue renders an empty criteria dimension.
+const anyValue = "*"
+
+// NotApplicable is the marker for a Profile equal to the accelerator, or for an
+// absent Setup/Tuning package pin. Exported so the renderer (tools/tuning)
+// reuses one definition instead of duplicating the literal.
+const NotApplicable = "-"
 
 // nwcManifestsDir is the data-relative directory holding the
 // nodewright-customizations component's manifests. Any manifest a resolved
@@ -93,7 +94,6 @@ func Compute(ctx context.Context, opts Options) (*Report, error) {
 
 	type groupKey struct{ service, accelerator string }
 	groups := map[groupKey]Row{}
-	var order []groupKey
 
 	for _, leaf := range leaves {
 		if leaf.Err != nil || leaf.Result == nil {
@@ -138,12 +138,11 @@ func Compute(ctx context.Context, opts Options) (*Report, error) {
 			continue
 		}
 		groups[key] = row
-		order = append(order, key)
 	}
 
-	rows := make([]Row, 0, len(order))
-	for _, k := range order {
-		rows = append(rows, groups[k])
+	rows := make([]Row, 0, len(groups))
+	for _, r := range groups {
+		rows = append(rows, r)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Service != rows[j].Service {
@@ -189,11 +188,11 @@ func valueOrAny(v string) string {
 }
 
 // profileCell renders the tuning profile accelerator (the componentRef override)
-// when it differs from the Accelerator column value, else notApplicable.
+// when it differs from the Accelerator column value, else NotApplicable.
 func profileCell(overrides map[string]any, accelCell string) string {
 	p := overrideString(overrides, "accelerator")
 	if p == "" || p == accelCell {
-		return notApplicable
+		return NotApplicable
 	}
 	return p
 }

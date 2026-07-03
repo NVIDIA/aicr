@@ -57,7 +57,7 @@ Uses a set of bash scripts to do the necessary actions to bring an ubuntu worker
 
 Package: [nvidia-setup](https://github.com/NVIDIA/nodewright-packages/blob/main/nvidia-setup)
 
-See the [Tuning status](#tuning-and-setup) table below for the current service + accelerator coverage. Each service must be added explicitly; the documentation for the addition is in the readme for how to make this update.
+See the [Tuning status](#tuning-and-setup) table below for the current service + accelerator coverage. Each service must be added explicitly; the documentation for how to make this update is in the [nvidia-setup README](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-setup).
 
 The [version overview](https://github.com/NVIDIA/nodewright-packages/blob/main/nvidia-setup/VERSION_OVERVIEW.md) has all of the information about what each version for a service + accelerator pair will install or configure.
 
@@ -72,6 +72,7 @@ Setup generally is any configuration needed to make AI workloads work in that se
 The table below is generated from the recipes by `make tuning-docs` — **do not edit it by hand**. **Setup** and **Tuning** are the pinned nodewright package versions applied for each service + accelerator. **Profile** is the tuning profile accelerator when it differs from the selected accelerator (for example, `h200` and `a100` nodes use the `h100` profile), and `-` when identical. In the **Setup** and **Tuning** columns, `-` means no such package is applied for that service + accelerator. `*` means the recipe pins no value for that dimension.
 
 {/* BEGIN AICR-TUNING */}
+
 | Service | Accelerator  | Profile | Setup              | Tuning                  |
 |---------|--------------|---------|--------------------|-------------------------|
 | bcm     | *            | h100    | nvidia-setup 0.3.0 | -                       |

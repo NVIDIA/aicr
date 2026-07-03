@@ -25,10 +25,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/tuning"
 )
 
-// notApplicable renders an absent package pin (a plain ASCII hyphen),
-// matching pkg/tuning's notApplicable literal.
-const notApplicable = "-"
-
 // markdownOptions configures table rendering.
 type markdownOptions struct {
 	AICRVersion   string
@@ -59,8 +55,10 @@ func (s *stickyWriter) Write(p []byte) (int, error) {
 func renderTable(w io.Writer, report *tuning.Report, opts markdownOptions) error {
 	sw := &stickyWriter{w: w}
 
+	preamble := false
 	if !opts.NoTitle {
 		fmt.Fprintf(sw, "# Nodewright Tuning Status\n\n")
+		preamble = true
 	}
 	if !opts.Deterministic {
 		ts := opts.Timestamp
@@ -68,6 +66,13 @@ func renderTable(w io.Writer, report *tuning.Report, opts markdownOptions) error
 			ts = time.Now().UTC().Format(time.RFC3339)
 		}
 		fmt.Fprintf(sw, "_Generated %s for aicr %s._\n\n", ts, opts.AICRVersion)
+		preamble = true
+	}
+	// Ensure a blank line precedes the table so the spliced body is separated
+	// from the marker/preamble above it (markdown MD058: tables must be
+	// surrounded by blank lines). Title/timestamp blocks already end with one.
+	if !preamble {
+		fmt.Fprintln(sw)
 	}
 
 	headers := [5]string{"Service", "Accelerator", "Profile", "Setup", "Tuning"}
@@ -104,7 +109,7 @@ func renderTable(w io.Writer, report *tuning.Report, opts markdownOptions) error
 // pinCell renders a package pin as "name version", or notApplicable when absent.
 func pinCell(p tuning.PackagePin) string {
 	if p.Name == "" {
-		return notApplicable
+		return tuning.NotApplicable
 	}
 	return p.Name + " " + p.Version
 }

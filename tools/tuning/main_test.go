@@ -41,7 +41,7 @@ func TestRenderTable_Deterministic(t *testing.T) {
 		t.Fatalf("renderTable: %v", err)
 	}
 	got := buf.String()
-	want := "| Service | Accelerator | Profile | Setup              | Tuning                  |\n" +
+	want := "\n| Service | Accelerator | Profile | Setup              | Tuning                  |\n" +
 		"|---------|-------------|---------|--------------------|-------------------------|\n" +
 		"| bcm     | *           | h100    | nvidia-setup 0.3.0 | -                       |\n" +
 		"| eks     | h100        | -       | nvidia-setup 0.2.2 | nvidia-tuned 0.3.0      |\n" +

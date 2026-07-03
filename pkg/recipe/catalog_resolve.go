@@ -67,6 +67,14 @@ func ResolveLeaves(ctx context.Context, opts ResolveLeavesOptions) ([]ResolvedLe
 		WithDataProvider(opts.Provider),
 	)
 
+	// Detect cancellation even when the (possibly filtered) catalog yields no
+	// entries; the in-loop check below never runs in that case, so without this
+	// a canceled context could return an empty slice with a nil error.
+	if cerr := ctx.Err(); cerr != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout,
+			"catalog resolution canceled before enumerating the catalog", cerr)
+	}
+
 	var leaves []ResolvedLeaf
 	for _, entry := range store.ListCatalog(opts.Filter) {
 		if cerr := ctx.Err(); cerr != nil {
