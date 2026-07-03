@@ -67,9 +67,18 @@ spec:
       overrides:
         global:
           provider:
-            name: dra
+            name: test
+            params:
+              modelFileName: small-tree.yaml
           engine:
             name: slinky
+        # Disable the node-data-broker in the kind environment.
+        node-data-broker:
+          enabled: false
+        node-observer:
+          topograph:
+            nodeDataBroker:
+              enabled: false
 
     - name: slinky-slurm
       type: Helm

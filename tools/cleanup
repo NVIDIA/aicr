@@ -84,6 +84,8 @@ AICR_NAMESPACES=(
     kueue-system
     kubeflow
     slinky
+    slurm
+    topograph
 )
 
 # CRD API-group suffixes owned by AICR components. Matched as substrings

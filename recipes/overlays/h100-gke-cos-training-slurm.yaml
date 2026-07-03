@@ -85,16 +85,6 @@ spec:
             name: gcp
           engine:
             name: slinky
-        serviceAccount:
-          annotations:
-            # GKE Workload Identity: replace with the GCP service account
-            # bound to this cluster's Workload Identity pool.
-            # Or update it at bundle time by passing the command line argument to `aicr bundle`:
-            # --set-json 'slinkytopograph:serviceAccount.annotations={"iam.gke.io/gcp-service-account":"<sa-name>@<project-id>.iam.gserviceaccount.com"}'
-            # Format: <sa-name>@<project-id>.iam.gserviceaccount.com
-            # The SA needs roles/compute.viewer on the GCP project so
-            # topograph can call the Compute/Topology API.
-            iam.gke.io/gcp-service-account: <gcp-sa>@<project-id>.iam.gserviceaccount.com
 
     - name: slinky-slurm
       type: Helm

@@ -125,6 +125,8 @@ For example, `--platform slurm` leaves inline three `componentRefs`:
 
 This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` leaves. See `recipes/overlays/h100-eks-ubuntu-training-slurm.yaml` for the full example.
 
+### Slinky Slurm Inline Components
+
 Leaves that need topology-aware scheduling can optionally add `slinky-topograph` as a fourth `componentRef`. It must be placed between `slinky-slurm-operator` and `slinky-slurm`, with `slinky-slurm` declaring it as a `dependencyRef`. The `overrides` block supplies the provider and engine that are specific to each leaf:
 
 ```yaml

@@ -26,7 +26,7 @@ Slurm leaves are built from criteria flags (`--service`, `--platform slurm`, …
 
 ## Generate Recipe (Query Mode)
 
-Pick the row that matches your cluster. Each resolves to a slurm leaf with three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`.
+Pick the row that matches your cluster. Each resolves to a slurm leaf with at least three inline Slinky components: `slinky-slurm-operator-crds`, `slinky-slurm-operator`, and `slinky-slurm`. The Kind leaf also includes `slinky-topograph` (topology-aware scheduling, test provider); cloud leaves can opt in to `slinky-topograph` with a real cloud provider.
 
 
 | Cloud    | Command                                                                                                      | Leaf overlay                                               |
@@ -257,13 +257,23 @@ Cluster instance only (keep operator + CRDs):
 helm uninstall slinky-slurm -n slurm
 ```
 
-Full Slurm stack:
+Full Slurm stack (without topograph):
 
 ```shell
 helm uninstall slinky-slurm -n slurm
 helm uninstall slinky-slurm-operator -n slinky
 helm uninstall slinky-slurm-operator-crds -n slinky
 kubectl delete ns slurm slinky --ignore-not-found
+```
+
+Full Slurm stack with topograph:
+
+```shell
+helm uninstall slinky-slurm -n slurm
+helm uninstall slinky-topograph -n topograph
+helm uninstall slinky-slurm-operator -n slinky
+helm uninstall slinky-slurm-operator-crds -n slinky
+kubectl delete ns slurm topograph slinky --ignore-not-found
 ```
 
 Helm does not remove CRDs or PVCs by default; delete manually when you need a clean re-install.

@@ -55,21 +55,18 @@ spec:
               status:
                 (availableReplicas > `0`): true
     - name: validate-node-data-broker-daemonset
-      # node-data-broker is enabled by default (enabled: true in sub-chart
-      # values.yaml). This assertion is always valid unless the operator
-      # explicitly disables it via `node-data-broker.enabled: false` in the
-      # overlay overrides — in which case remove this step from the health check.
+      # node-data-broker is enabled by default. When an overlay sets
+      # node-data-broker.enabled: false the DaemonSet is not deployed and this
+      # step must be skipped rather than retried until timeout. A script step
+      # handles the conditional: if the DaemonSet is absent, exit 0 (skip);
+      # if present, wait for a full rollout before declaring success.
       try:
-        - assert:
-            resource:
-              apiVersion: apps/v1
-              kind: DaemonSet
-              metadata:
-                name: slinky-topograph-node-data-broker
-                namespace: topograph
-              status:
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+        - script:
+            content: |
+              kubectl get daemonset -n topograph slinky-topograph-node-data-broker \
+                >/dev/null 2>&1 || exit 0
+              kubectl rollout status daemonset/slinky-topograph-node-data-broker \
+                -n topograph --timeout=5m
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /
@@ -127,3 +124,26 @@ spec:
                 namespace: topograph
               status:
                 ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    - name: validate-topology-configmap
+      # End-to-end pipeline gate: topograph writes this ConfigMap only after a
+      # successful cloud-provider topology query. The exact content asserts the
+      # full tree from small-tree.yaml (S1→S2/S3, 3 nodes each) was rendered —
+      # not just that the key is non-empty.
+      # ConfigMap name and namespace are set by global.engine.params in
+      # components/slinky-topograph/values.yaml.
+      # Node names (I21, I22, I25, I34-I36) are the instance IDs from the model;
+      # cluset compacts them to I[21-22,25] and I[34-36]. Switch order (S2 before
+      # S3) is deterministic because toTreeTopology does a sorted BFS.
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: slinky-slurm-config-topo
+                namespace: slurm
+              data:
+                topology.conf: |
+                  SwitchName=S1 Switches=S[2-3]
+                  SwitchName=S2 Nodes=I[21-22,25]
+                  SwitchName=S3 Nodes=I[34-36]
