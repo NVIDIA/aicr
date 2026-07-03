@@ -653,3 +653,123 @@ func TestNewUnionTrustedRoot_LoaderErrorPropagates(t *testing.T) {
 		t.Fatalf("expected ErrCodeInvalidRequest, got %v", err)
 	}
 }
+
+// writeFakeBinaryAttestation writes a garbage (unparseable) binary attestation
+// at the standard bundle-relative path. Parsing fails locally in
+// loadSigstoreBundleBytes, before any trusted-root (network) resolution.
+func writeFakeBinaryAttestation(t *testing.T, dir string) {
+	t.Helper()
+	attestPath := filepath.Join(dir, attestation.BinaryAttestationFile)
+	if err := os.MkdirAll(filepath.Dir(attestPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attestPath, []byte(`{"not":"a-valid-sigstore-bundle"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestVerifyBinaryStep is the #1550 regression suite: a binary attestation
+// that is PRESENT but fails verification (or whose binary digest cannot be
+// extracted from the bundle attestation) must degrade to unknown, not
+// attested. Only a MISSING binary attestation is the softer attested
+// (incomplete chain).
+func TestVerifyBinaryStep(t *testing.T) {
+	const validDigestStatement = `{"predicate":{"buildDefinition":{"resolvedDependencies":[{"uri":"file:///usr/local/bin/aicr","digest":{"sha256":"afa80429badccee47ca11075328a0d337af1786223bdae6e32076d042dc26996"}}]}}}`
+	const noDigestStatement = `{"predicate":{"buildDefinition":{"resolvedDependencies":[]}}}`
+
+	tests := []struct {
+		name            string
+		bundleStatement string
+		binaryPresent   bool
+		wantTrust       TrustLevel
+		wantErrSubstr   string
+	}{
+		{
+			name:            "missing binary attestation degrades to attested",
+			bundleStatement: validDigestStatement,
+			binaryPresent:   false,
+			wantTrust:       TrustAttested,
+		},
+		{
+			name:            "present but invalid binary attestation is unknown",
+			bundleStatement: validDigestStatement,
+			binaryPresent:   true,
+			wantTrust:       TrustUnknown,
+			wantErrSubstr:   "binary attestation verification failed",
+		},
+		{
+			name:            "digest extraction failure with binary attestation present is unknown",
+			bundleStatement: noDigestStatement,
+			binaryPresent:   true,
+			wantTrust:       TrustUnknown,
+			wantErrSubstr:   "could not extract binary digest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bundleAttestPath := writeBundleWithStatement(t, tt.bundleStatement)
+			if tt.binaryPresent {
+				writeFakeBinaryAttestation(t, dir)
+			}
+
+			result := &VerifyResult{ChecksumsPassed: true, BundleAttested: true}
+			done, err := verifyBinaryStep(context.Background(), dir, bundleAttestPath, TrustedRepositoryPattern, result)
+			if err != nil {
+				t.Fatalf("verifyBinaryStep() error: %v", err)
+			}
+			if !done {
+				t.Fatal("verifyBinaryStep() done = false, want true (Verify must return the outcome)")
+			}
+			if result.TrustLevel != tt.wantTrust {
+				t.Errorf("TrustLevel = %s, want %s (reason: %s)", result.TrustLevel, tt.wantTrust, result.TrustReason)
+			}
+			if result.BinaryAttested {
+				t.Error("BinaryAttested = true, want false")
+			}
+			if tt.wantErrSubstr == "" {
+				if len(result.Errors) != 0 {
+					t.Errorf("Errors = %v, want none", result.Errors)
+				}
+				return
+			}
+			found := false
+			for _, e := range result.Errors {
+				if strings.Contains(e, tt.wantErrSubstr) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("Errors = %v, want one containing %q", result.Errors, tt.wantErrSubstr)
+			}
+		})
+	}
+}
+
+// TestVerifyBinaryStep_FailedVerifyMaxStaysVerified pins the policy
+// interaction: a failed-verify bundle reports unknown while its max
+// achievable stays verified, so --min-trust-level max fails it.
+func TestVerifyBinaryStep_FailedVerifyMaxStaysVerified(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeBinaryAttestation(t, dir)
+	bundleAttestPath := writeBundleWithStatement(t,
+		`{"predicate":{"buildDefinition":{"resolvedDependencies":[{"digest":{"sha256":"afa80429badccee47ca11075328a0d337af1786223bdae6e32076d042dc26996"}}]}}}`)
+
+	result := &VerifyResult{ChecksumsPassed: true, BundleAttested: true}
+	if _, err := verifyBinaryStep(context.Background(), dir, bundleAttestPath, TrustedRepositoryPattern, result); err != nil {
+		t.Fatalf("verifyBinaryStep() error: %v", err)
+	}
+	if result.TrustLevel != TrustUnknown {
+		t.Fatalf("TrustLevel = %s, want unknown", result.TrustLevel)
+	}
+	if got := result.MaxAchievableTrustLevel(); got != TrustVerified {
+		t.Fatalf("MaxAchievableTrustLevel() = %s, want verified", got)
+	}
+	failure, err := result.CheckPolicy(Policy{MinTrustLevel: "max"})
+	if err != nil {
+		t.Fatalf("CheckPolicy() error: %v", err)
+	}
+	if failure == "" {
+		t.Error("CheckPolicy(max) passed; a failed binary attestation must fail --min-trust-level max")
+	}
+}

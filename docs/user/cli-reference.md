@@ -2521,9 +2521,9 @@ aicr verify <bundle-dir> [flags]
 | Level | Name | Criteria |
 |-------|------|----------|
 | 4 | `verified` | Full chain: checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
-| 3 | `attested` | Bundle attestation verified; binary attestation missing/unverified, or external data (`--data`) used. A *failed* binary attestation also reports attested but exits nonzero (#1550) |
+| 3 | `attested` | Bundle attestation verified; binary attestation missing, or external data (`--data`) used |
 | 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
-| 1 | `unknown` | Missing/invalid checksums, or bundle attestation fails verification |
+| 1 | `unknown` | Missing/invalid checksums, or an attestation (bundle or binary) present but failing verification |
 
 #### Verification steps
 

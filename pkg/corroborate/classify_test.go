@@ -31,7 +31,7 @@ func loadExampleAllowlist(t *testing.T) *Allowlist {
 	return al
 }
 
-func TestClassify(t *testing.T) {
+func TestClassifySigner(t *testing.T) {
 	al := loadExampleAllowlist(t)
 	tests := []struct {
 		name      string
@@ -41,25 +41,25 @@ func TestClassify(t *testing.T) {
 		wantAllow bool
 	}{
 		{
-			name:      "first-party from issuer pin (regex match)",
+			name:      "first-party from identityPattern (aws)",
 			issuer:    ghIssuer,
 			identity:  "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main",
 			wantClass: ClassFirstParty, wantAllow: true,
 		},
 		{
-			name:      "first-party gcp variant (alternation match)",
+			name:      "first-party gcp variant on a non-main branch ref",
 			issuer:    ghIssuer,
-			identity:  "https://github.com/NVIDIA/aicr/.github/workflows/uat-gcp.yaml@refs/heads/main",
+			identity:  "https://github.com/NVIDIA/aicr/.github/workflows/uat-gcp.yaml@refs/heads/uat-fix",
 			wantClass: ClassFirstParty, wantAllow: true,
 		},
 		{
-			name:      "community from allowlist (exact match)",
+			name:      "community from source slug",
 			issuer:    ghIssuer,
 			identity:  "https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main",
 			wantClass: ClassCommunity, wantAllow: true,
 		},
 		{
-			name:      "partner from allowlist",
+			name:      "partner from source slug",
 			issuer:    "https://oidc.coreweave-lab.example",
 			identity:  "https://oidc.coreweave-lab.example/attest",
 			wantClass: ClassPartner, wantAllow: true,
@@ -77,7 +77,7 @@ func TestClassify(t *testing.T) {
 			wantClass: ClassCommunity, wantAllow: false,
 		},
 		{
-			name:      "first-party regex does not match a sibling repo",
+			name:      "first-party pattern does not match a sibling repo",
 			issuer:    ghIssuer,
 			identity:  "https://github.com/NVIDIA/other-repo/.github/workflows/uat-aws.yaml@refs/heads/main",
 			wantClass: ClassCommunity, wantAllow: false,
@@ -85,162 +85,84 @@ func TestClassify(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotClass, gotAllow := al.Classify(tt.issuer, tt.identity)
+			gotClass, gotAllow := classifySigner(al, tt.issuer, tt.identity)
 			if gotClass != tt.wantClass || gotAllow != tt.wantAllow {
-				t.Errorf("Classify(%q,%q) = (%q,%v), want (%q,%v)",
+				t.Errorf("classifySigner(%q,%q) = (%q,%v), want (%q,%v)",
 					tt.issuer, tt.identity, gotClass, gotAllow, tt.wantClass, tt.wantAllow)
 			}
 		})
 	}
 }
 
-func TestAllowlistValidate(t *testing.T) {
-	tests := []struct {
-		name    string
-		al      Allowlist
-		wantErr bool
-	}{
-		{
-			name: "valid disjoint allowlist",
-			al: Allowlist{
-				FirstParty: []AllowlistEntry{{Issuer: ghIssuer, Identity: `^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/main$`}},
-				Community:  []AllowlistEntry{{Issuer: ghIssuer, Identity: "https://github.com/acme/attest"}},
-			},
-		},
-		{
-			name: "over-broad wildcard org/repo is rejected",
-			al: Allowlist{
-				Community: []AllowlistEntry{{Issuer: ghIssuer, Identity: `^https://github\.com/.+/.+/\.github/workflows/attest\.yaml@refs/heads/main$`}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "over-broad .* is rejected",
-			al: Allowlist{
-				Community: []AllowlistEntry{{Issuer: ghIssuer, Identity: `^https://github\.com/acme/.*$`}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "over-broad segment class is rejected",
-			al: Allowlist{
-				Partner: []AllowlistEntry{{Issuer: ghIssuer, Identity: `^https://github\.com/[^/]+/attest$`}},
-			},
-			wantErr: true,
-		},
-		{
-			name:    "empty issuer is rejected",
-			al:      Allowlist{Community: []AllowlistEntry{{Identity: "https://github.com/acme/attest"}}},
-			wantErr: true,
-		},
-		{
-			name:    "empty identity is rejected",
-			al:      Allowlist{Community: []AllowlistEntry{{Issuer: ghIssuer}}},
-			wantErr: true,
-		},
-		{
-			name: "uncompilable regex is rejected",
-			al: Allowlist{
-				Community: []AllowlistEntry{{Issuer: ghIssuer, Identity: "^https://github.com/acme/(attest"}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "duplicate exact identity across classes overlaps",
-			al: Allowlist{
-				Community: []AllowlistEntry{{Issuer: ghIssuer, Identity: "https://github.com/acme/attest"}},
-				Partner:   []AllowlistEntry{{Issuer: ghIssuer, Identity: "https://github.com/acme/attest"}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "exact identity also covered by a foreign regex overlaps",
-			al: Allowlist{
-				FirstParty: []AllowlistEntry{{Issuer: ghIssuer, Identity: `^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/main$`}},
-				Community:  []AllowlistEntry{{Issuer: ghIssuer, Identity: "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "same identity, different issuers do not overlap",
-			al: Allowlist{
-				Community: []AllowlistEntry{{Issuer: ghIssuer, Identity: "https://example.test/attest"}},
-				Partner:   []AllowlistEntry{{Issuer: "https://other.example", Identity: "https://example.test/attest"}},
-			},
-		},
+// TestLoadAllowlist_CanonicalFile is the #1505 acceptance check: GP4's loader
+// must parse the real GP1 allowlist (identityPattern/source schema).
+func TestLoadAllowlist_CanonicalFile(t *testing.T) {
+	al, err := LoadAllowlist(filepath.Join("..", "..", "recipes", "evidence", "allowlist.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAllowlist(recipes/evidence/allowlist.yaml): %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.al.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() err = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+	class, ok := classifySigner(al, ghIssuer,
+		"https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main")
+	if class != ClassFirstParty || !ok {
+		t.Errorf("canonical allowlist classified UAT signer as (%q,%v), want (first-party,true)", class, ok)
 	}
 }
 
 func TestLoadAllowlist(t *testing.T) {
+	writeAllowlist := func(t *testing.T, body string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "allowlist.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name: "valid canonical schema",
+			body: "schemaVersion: \"1.0.0\"\nfirstParty:\n  - issuer: " + ghIssuer +
+				"\n    identityPattern: '^https://github\\.com/NVIDIA/aicr/\\.github/workflows/uat-aws\\.yaml@refs/heads/.+$'\n",
+		},
+		{
+			name:    "malformed yaml fails closed",
+			body:    "firstParty: [::: not yaml",
+			wantErr: true,
+		},
+		{
+			name: "legacy cleartext identity field is rejected",
+			body: "schemaVersion: \"1.0.0\"\ncommunity:\n  - issuer: " + ghIssuer +
+				"\n    identity: https://github.com/acme/attest\n",
+			wantErr: true,
+		},
+		{
+			name: "unsupported schemaVersion is rejected at load",
+			body: "schemaVersion: \"9.9.9\"\ncommunity:\n  - issuer: " + ghIssuer +
+				"\n    source: f1f1cf33e7d868f95ea0f5b7542e6662\n",
+			wantErr: true,
+		},
+		{
+			name: "over-broad identityPattern (wildcard left of @) is rejected",
+			body: "schemaVersion: \"1.0.0\"\nfirstParty:\n  - issuer: " + ghIssuer +
+				"\n    identityPattern: '^https://github\\.com/.+/x\\.yaml@refs/heads/main$'\n",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadAllowlist(writeAllowlist(t, tt.body))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("LoadAllowlist() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+
 	t.Run("missing file", func(t *testing.T) {
 		if _, err := LoadAllowlist(filepath.Join("testdata", "nope.yaml")); err == nil {
 			t.Fatal("expected error for missing file")
 		}
 	})
-	t.Run("malformed yaml", func(t *testing.T) {
-		dir := t.TempDir()
-		p := filepath.Join(dir, "bad.yaml")
-		if err := os.WriteFile(p, []byte("firstParty: [::: not yaml"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := LoadAllowlist(p); err == nil {
-			t.Fatal("expected parse error")
-		}
-	})
-	t.Run("unsupported schemaVersion is rejected at load", func(t *testing.T) {
-		dir := t.TempDir()
-		p := filepath.Join(dir, "future.yaml")
-		body := "schemaVersion: \"9.9.9\"\ncommunity:\n  - issuer: " + ghIssuer + "\n    identity: https://github.com/acme/attest\n"
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := LoadAllowlist(p); err == nil {
-			t.Fatal("expected unsupported-schemaVersion rejection at load")
-		}
-	})
-	t.Run("over-broad file is rejected at load", func(t *testing.T) {
-		dir := t.TempDir()
-		p := filepath.Join(dir, "broad.yaml")
-		body := "schemaVersion: \"1.0.0\"\ncommunity:\n  - issuer: " + ghIssuer + "\n    identity: '^https://github\\.com/.+/.+/x$'\n"
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := LoadAllowlist(p); err == nil {
-			t.Fatal("expected over-broad rejection at load")
-		}
-	})
-}
-
-func TestOverBroadIdentity(t *testing.T) {
-	tests := []struct {
-		pattern string
-		broad   bool
-	}{
-		{"https://github.com/acme/attest", false},                                                           // exact
-		{`^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/main$`, false}, // bounded regex
-		{`^https://github\.com/acme/repo\.yaml{0,3}$`, false},                                               // bounded {n,m}
-		{`^https://github\.com/acme/repos?$`, false},                                                        // ? is bounded
-		{`^https://github\.com/.+/.+/x$`, true},
-		{`^https://github\.com/acme/.*$`, true},
-		{`^https://github\.com/[^/]+/x$`, true},     // char-class +
-		{`^https://github\.com/[^/]*/x$`, true},     // char-class *
-		{`^https://github\.com/\w+/x$`, true},       // perl-class + (missed by a substring scan)
-		{`^https://github\.com/a{2,}/x$`, true},     // open-ended {n,}
-		{`^https://github\.com/(acme|.+)/x$`, true}, // wildcard alternation branch (nested)
-	}
-	for _, tt := range tests {
-		t.Run(tt.pattern, func(t *testing.T) {
-			if _, got := overBroadIdentity(tt.pattern); got != tt.broad {
-				t.Errorf("overBroadIdentity(%q) = %v, want %v", tt.pattern, got, tt.broad)
-			}
-		})
-	}
 }

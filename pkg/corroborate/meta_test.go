@@ -85,7 +85,7 @@ func TestReadBoundedFileSizeLimit(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readBoundedFile(big, maxRunFileBytes); err == nil {
+	if _, err := readBoundedFile(big); err == nil {
 		t.Fatal("expected size-limit rejection")
 	}
 }
@@ -101,14 +101,14 @@ func TestReadBoundedFileRejectsSymlinkAndNonRegular(t *testing.T) {
 		if err := os.Symlink(target, link); err != nil {
 			t.Skipf("symlinks unsupported on this platform: %v", err)
 		}
-		if _, err := readBoundedFile(link, maxRunFileBytes); err == nil {
+		if _, err := readBoundedFile(link); err == nil {
 			t.Fatal("expected symlink rejection")
 		}
 	})
 	t.Run("non-regular file is rejected", func(t *testing.T) {
 		// A directory is non-regular; readBoundedFile must reject it rather than
 		// attempting to read it.
-		if _, err := readBoundedFile(t.TempDir(), maxRunFileBytes); err == nil {
+		if _, err := readBoundedFile(t.TempDir()); err == nil {
 			t.Fatal("expected non-regular-file rejection")
 		}
 	})

@@ -118,14 +118,12 @@ consumer.
 `project.Allowlist.Classify` derives a signer's trust tier from the
 **verified** `(issuer, identity)`, never a raw pointer string:
 
-1. The first matching `--allowlist` entry wins, `allowlisted=true`.
-2. When no allowlist file is loaded — the interim state before GP1 ships
-   `recipes/evidence/allowlist.yaml` — a built-in heuristic admits AICR's
-   own UAT identity (GitHub Actions OIDC + `NVIDIA/aicr`) as `first-party`
-   so it is not mislabeled. Once the file exists this branch is never
-   taken. (Note: GP2 and GP4 do not yet parse the canonical
-   `identityPattern`/`source` schema identically — see the reconciliation note
-   below — so this is the intended end-state, not current full parity.)
+1. With an allowlist loaded, the shared loader (`pkg/evidence/allowlist`,
+   the same one the GP4 consumer `pkg/corroborate` uses) decides: a slug or
+   pattern match wins, `allowlisted=true`.
+2. When no allowlist file is loaded (no `--allowlist` flag), a built-in
+   heuristic admits AICR's own UAT identity (GitHub Actions OIDC +
+   `NVIDIA/aicr`) as `first-party` so it is not mislabeled.
 3. Otherwise `community`, `allowlisted=false` — the fail-closed default.
    Reported, but never counted toward consensus.
 
@@ -149,17 +147,16 @@ partner: []
 ```
 
 `identityPattern` is a `^…$`-anchored regex (full-string match); the loader
-rejects an over-broad regex (unbounded `*`/`+`/`{n,}` that could span an
-org/repo segment) and overlapping entries, so the allowlist cannot itself be
-used to manufacture consensus.
+rejects an over-broad pattern (any wildcard left of the OIDC subject's `@` —
+only the ref may vary) and overlapping entries, so the allowlist cannot
+itself be used to manufacture consensus.
 
-> **Loaders not yet reconciled with the canonical schema.** Neither
-> loader parses the `identityPattern`/`source` allowlist above yet. Both
-> the GP2 ingest loader (`pkg/evidence/project`) and the GP4 consumer
-> (`pkg/corroborate`) still carry a single `Identity` field (and the GP1
-> canonical loader deliberately rejects a cleartext `identity`), so neither
-> can parse the canonical `recipes/evidence/allowlist.yaml`. Reconciling
-> both loaders with the GP1 allowlist schema is still outstanding.
+Both the GP2 ingest loader (`pkg/evidence/project`) and the GP4 consumer
+(`pkg/corroborate`) delegate to the shared canonical loader in
+`pkg/evidence/allowlist` (#1505), so producer and consumer parse the
+identical `identityPattern`/`source` schema and classify a verified signer
+identically. The shared loader rejects a cleartext `identity:` field, so
+personal emails cannot be reintroduced by accident.
 
 ## Forward limitations
 

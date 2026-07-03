@@ -15,9 +15,12 @@
 package project
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -29,24 +32,51 @@ func writeFile(t *testing.T, dir, name, content string) string {
 	return p
 }
 
-const ghaIssuer = "https://token.actions.githubusercontent.com"
+const (
+	ghaIssuer       = "https://token.actions.githubusercontent.com"
+	communityIssuer = "https://github.com/login/oauth"
+	partnerIssuer   = "https://oidc.coreweave-lab.example"
 
-// sampleAllowlist mirrors the GP1 recipes/evidence/allowlist.yaml schema.
-const sampleAllowlist = `schemaVersion: "1.0.0"
+	communityIdentity = "contributor@example.com"
+	partnerIdentity   = "https://oidc.coreweave-lab.example/attest"
+)
+
+// sampleAllowlist renders a fixture in the canonical GP1
+// recipes/evidence/allowlist.yaml schema: first-party CI pinned by an
+// anchored identityPattern, community/partner keyed by the one-way source
+// slug of the signer's (issuer, identity).
+func sampleAllowlist(t *testing.T) string {
+	t.Helper()
+	communitySlug, err := attestation.SourceSlug(communityIssuer, communityIdentity)
+	if err != nil {
+		t.Fatalf("SourceSlug(community): %v", err)
+	}
+	partnerSlug, err := attestation.SourceSlug(partnerIssuer, partnerIdentity)
+	if err != nil {
+		t.Fatalf("SourceSlug(partner): %v", err)
+	}
+	return fmt.Sprintf(`schemaVersion: "1.0.0"
 firstParty:
-  - issuer: https://token.actions.githubusercontent.com
-    identity: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/main$'
+  - label: aicr-uat-aws
+    issuer: %s
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
+  - label: aicr-uat-gcp
+    issuer: %s
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-gcp\.yaml@refs/heads/.+$'
 community:
-  - issuer: https://token.actions.githubusercontent.com
-    identity: https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main
+  - label: acme-contributor
+    issuer: %s
+    source: %s
 partner:
-  - issuer: https://oidc.coreweave-lab.example
-    identity: https://oidc.coreweave-lab.example/attest
-`
+  - label: coreweave-lab
+    issuer: %s
+    source: %s
+`, ghaIssuer, ghaIssuer, communityIssuer, communitySlug, partnerIssuer, partnerSlug)
+}
 
 func TestLoadAllowlistAndClassify(t *testing.T) {
 	dir := t.TempDir()
-	al, err := LoadAllowlist(writeFile(t, dir, "allowlist.yaml", sampleAllowlist))
+	al, err := LoadAllowlist(writeFile(t, dir, "allowlist.yaml", sampleAllowlist(t)))
 	if err != nil {
 		t.Fatalf("LoadAllowlist: %v", err)
 	}
@@ -59,37 +89,37 @@ func TestLoadAllowlistAndClassify(t *testing.T) {
 		wantAllowed bool
 	}{
 		{
-			name:        "first-party regex (aws ref)",
+			name:        "first-party identityPattern (aws ref)",
 			issuer:      ghaIssuer,
 			identity:    "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main",
 			wantClass:   ClassFirstParty,
 			wantAllowed: true,
 		},
 		{
-			name:        "first-party regex (gcp ref)",
+			name:        "first-party identityPattern (gcp, non-main ref)",
 			issuer:      ghaIssuer,
-			identity:    "https://github.com/NVIDIA/aicr/.github/workflows/uat-gcp.yaml@refs/heads/main",
+			identity:    "https://github.com/NVIDIA/aicr/.github/workflows/uat-gcp.yaml@refs/heads/uat-fix",
 			wantClass:   ClassFirstParty,
 			wantAllowed: true,
 		},
 		{
-			name:        "exact community match",
-			issuer:      ghaIssuer,
-			identity:    "https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main",
+			name:        "community source-slug match",
+			issuer:      communityIssuer,
+			identity:    communityIdentity,
 			wantClass:   ClassCommunity,
 			wantAllowed: true,
 		},
 		{
-			name:        "partner on its own issuer",
-			issuer:      "https://oidc.coreweave-lab.example",
-			identity:    "https://oidc.coreweave-lab.example/attest",
+			name:        "partner source-slug match on its own issuer",
+			issuer:      partnerIssuer,
+			identity:    partnerIdentity,
 			wantClass:   ClassPartner,
 			wantAllowed: true,
 		},
 		{
-			name:        "right repo, wrong ref → not first-party",
+			name:        "sibling repo → not first-party",
 			issuer:      ghaIssuer,
-			identity:    "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/dev",
+			identity:    "https://github.com/NVIDIA/other-repo/.github/workflows/uat-aws.yaml@refs/heads/main",
 			wantClass:   ClassCommunity,
 			wantAllowed: false,
 		},
@@ -103,7 +133,7 @@ func TestLoadAllowlistAndClassify(t *testing.T) {
 		{
 			name:        "right identity, wrong issuer",
 			issuer:      "https://evil.example",
-			identity:    "https://oidc.coreweave-lab.example/attest",
+			identity:    partnerIdentity,
 			wantClass:   ClassCommunity,
 			wantAllowed: false,
 		},
@@ -118,8 +148,22 @@ func TestLoadAllowlistAndClassify(t *testing.T) {
 	}
 }
 
-// TestClassify_NilAllowlist covers the interim state before GP1 ships the
-// allowlist file: the built-in first-party heuristic admits AICR's own
+// TestLoadAllowlist_CanonicalFile is the #1505 acceptance check: the GP2
+// producer must parse the real GP1 allowlist (identityPattern/source schema).
+func TestLoadAllowlist_CanonicalFile(t *testing.T) {
+	al, err := LoadAllowlist(filepath.Join("..", "..", "..", "recipes", "evidence", "allowlist.yaml"))
+	if err != nil {
+		t.Fatalf("LoadAllowlist(recipes/evidence/allowlist.yaml): %v", err)
+	}
+	class, ok := al.Classify(ghaIssuer,
+		"https://github.com/NVIDIA/aicr/.github/workflows/uat-gcp.yaml@refs/heads/main")
+	if class != ClassFirstParty || !ok {
+		t.Errorf("canonical allowlist classified UAT signer as (%q,%v), want (first-party,true)", class, ok)
+	}
+}
+
+// TestClassify_NilAllowlist covers the interim state before an allowlist
+// file is passed: the built-in first-party heuristic admits AICR's own
 // UAT identity, everything else fails closed to community.
 func TestClassify_NilAllowlist(t *testing.T) {
 	var al *Allowlist // nil
@@ -133,7 +177,7 @@ func TestClassify_NilAllowlist(t *testing.T) {
 		{"first-party heuristic", ghaIssuer, "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main", ClassFirstParty, true},
 		{"foreign repo is community", ghaIssuer, "https://github.com/evil/aicr/.github/workflows/x.yaml@refs/heads/main", ClassCommunity, false},
 		{"look-alike host not first-party", ghaIssuer, "https://github.com.evil.example/NVIDIA/aicr/x.yaml", ClassCommunity, false},
-		{"community email", "https://github.com/login/oauth", "yuanchen97@gmail.com", ClassCommunity, false},
+		{"community email", communityIssuer, "yuanchen97@gmail.com", ClassCommunity, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -151,13 +195,13 @@ func TestLoadAllowlist_Errors(t *testing.T) {
 		name    string
 		content string
 	}{
-		{"empty issuer", "firstParty:\n  - issuer: \"\"\n    identity: x\n"},
-		{"empty identity", "community:\n  - issuer: a\n    identity: \"\"\n"},
-		{"over-broad unbounded regex", "partner:\n  - issuer: a\n    identity: '^https://github\\.com/.+/attest$'\n"},
-		{"unsampleable char class", "partner:\n  - issuer: a\n    identity: '^https://github\\.com/acme[0-9]/attest$'\n"},
-		{"unsampleable optional", "partner:\n  - issuer: a\n    identity: '^https://github\\.com/acmes?/attest$'\n"},
-		{"bad regexp", "partner:\n  - issuer: a\n    identity: \"^(\"\n"},
-		{"overlapping classes", "firstParty:\n  - issuer: a\n    identity: x\ncommunity:\n  - issuer: a\n    identity: x\n"},
+		{"empty issuer", "schemaVersion: \"1.0.0\"\nfirstParty:\n  - identityPattern: '^x@y$'\n"},
+		{"legacy cleartext identity field", "schemaVersion: \"1.0.0\"\ncommunity:\n  - issuer: a\n    identity: x\n"},
+		{"unsupported schemaVersion", "schemaVersion: \"9.9.9\"\npartner: []\n"},
+		{"over-broad wildcard left of @", "schemaVersion: \"1.0.0\"\nfirstParty:\n  - issuer: a\n    identityPattern: '^https://github\\.com/.+/attest\\.yaml@refs/heads/main$'\n"},
+		{"unanchored pattern", "schemaVersion: \"1.0.0\"\nfirstParty:\n  - issuer: a\n    identityPattern: 'x@y'\n"},
+		{"malformed source slug", "schemaVersion: \"1.0.0\"\ncommunity:\n  - issuer: a\n    source: NOT-A-SLUG\n"},
+		{"duplicate source slug across classes", "schemaVersion: \"1.0.0\"\ncommunity:\n  - issuer: a\n    source: f1f1cf33e7d868f95ea0f5b7542e6662\npartner:\n  - issuer: a\n    source: f1f1cf33e7d868f95ea0f5b7542e6662\n"},
 		{"not yaml", "::: not yaml :::\n\t- x\n"},
 	}
 	for _, tt := range tests {
@@ -174,18 +218,19 @@ func TestLoadAllowlist_Errors(t *testing.T) {
 	}
 }
 
-// TestAllowlist_BoundedAndAnchored guards the anti-sybil matcher: a
-// tightly-bounded regex must full-string match, not substring match.
+// TestAllowlist_AnchoredFullMatch guards the anti-sybil matcher: an anchored
+// identityPattern must full-string match — a probe with extra characters
+// inside the literal segment must not match.
 func TestAllowlist_AnchoredFullMatch(t *testing.T) {
 	dir := t.TempDir()
-	al, err := LoadAllowlist(writeFile(t, dir, "al.yaml", sampleAllowlist))
+	al, err := LoadAllowlist(writeFile(t, dir, "al.yaml", sampleAllowlist(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A trailing suffix beyond the anchored pattern must NOT match.
+	// Extra path bytes between the workflow file and the '@' must NOT match.
 	class, allowed := al.Classify(ghaIssuer,
-		"https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main/extra")
+		"https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml.evil@refs/heads/main")
 	if allowed || class != ClassCommunity {
-		t.Errorf("suffix beyond anchored regex matched: (%s, %v)", class, allowed)
+		t.Errorf("probe beyond anchored pattern matched: (%s, %v)", class, allowed)
 	}
 }
