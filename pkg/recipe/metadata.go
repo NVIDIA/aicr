@@ -95,7 +95,11 @@ type ComponentRef struct {
 	// Merge order: base values → ValuesFile → Overrides (highest precedence).
 	Overrides map[string]any `json:"overrides,omitempty" yaml:"overrides,omitempty"`
 
-	// Patches is a list of patch files to apply (for Kustomize).
+	// Patches is a list of patch files (intended for Kustomize). NOT CURRENTLY
+	// APPLIED by any deployer — an enabled ref that declares patches is rejected
+	// by ValidateCoherence (disabled refs are skipped) rather than silently
+	// producing an unpatched bundle. See #1588 (implement application or drop
+	// the field).
 	Patches []string `json:"patches,omitempty" yaml:"patches,omitempty"`
 
 	// DependencyRefs is a list of component names this component depends on.
@@ -223,27 +227,46 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 // resolution rather than silently deploying as a different type (or producing
 // a signed attestation whose metadata does not match what deploys):
 //
-//   - the deployers do not trust the declared Type — Helm/Helmfile/ArgoCD drop
-//     it, and localformat classifies any ref carrying a Tag or Path as
-//     Kustomize (see pkg/bundler/deployer/localformat classify/write) — so a
-//     Helm ref must not carry Kustomize fields;
-//   - a Kustomize ref needs a Path to build from; and
-//   - a Tag is only meaningful with a Source (git repo / OCI ref).
+//   - the field-classifying deployers (localformat, and the Helm/Helmfile/ArgoCD
+//     generators built on it) do not trust the declared Type — localformat
+//     classifies any ref carrying a Tag or Path as Kustomize (see
+//     pkg/bundler/deployer/localformat classify/write). The Flux generator
+//     differs: it switches on the declared Type. So a Helm ref carrying a
+//     tag/path builds as Kustomize under the field-classifiers but as Helm
+//     under Flux — the same ref deploys differently by deployer — which is why
+//     a Helm ref must not carry Kustomize fields. (An explicitly Kustomize ref,
+//     conversely, is rejected outright by the Helm-only Flux generator — see
+//     #1588.);
+//   - a Kustomize ref needs a Path to build from;
+//   - a Tag is only meaningful with a Source (git repo / OCI ref); and
+//   - no deployer applies ComponentRef.Patches, so a ref that declares patch
+//     files is rejected rather than silently producing an unpatched bundle
+//     (see #1588).
 //
 // Keep these in lockstep with the localformat rules.
 func (ref *ComponentRef) coherenceProblem() string {
+	// Patches are unsupported for every deployment type: the field is carried
+	// through resolution but no deployer applies it (localformat's Component has
+	// no patches field). Fail closed on any type rather than drop it silently.
+	if len(ref.Patches) > 0 {
+		return fmt.Sprintf("component %q declares patches, but no deployer applies patch files; "+
+			"remove `patches` (removing it does not change the generated bundle). See #1588.", ref.Name)
+	}
+
 	hasTag, hasPath := ref.Tag != "", ref.Path != ""
-	// Match the type case-insensitively: the resolver emits the canonical
-	// ComponentType ("Helm"/"Kustomize"), but the REST wire format and
-	// hand-authored recipes may use lowercase (see the /v1/bundle OpenAPI
-	// example), and the deployers classify by tag/path rather than by this
-	// field — so "helm" and "Helm" must be treated the same here.
+	// Match the type case-insensitively: the resolver and the OpenAPI examples
+	// use the canonical ComponentType ("Helm"/"Kustomize"), but lowercase is
+	// accepted as backward-compatible input from hand-authored recipes or older
+	// clients, and the field-classifying deployers key off tag/path (while Flux
+	// switches on Type) — so "helm" and "Helm" must be treated the same.
 	switch {
 	case strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)):
 		if hasTag || hasPath {
 			return fmt.Sprintf("component %q is Helm but carries Kustomize field(s) (tag=%q, path=%q); "+
-				"the deployers classify any ref with a tag or path as Kustomize, so it would deploy as a "+
-				"different type than declared", ref.Name, ref.Tag, ref.Path)
+				"the field-classifying deployers would treat it as Kustomize while the Type-switching Flux "+
+				"deployer would treat it as Helm, so the same ref deploys differently — remove the tag/path, "+
+				"or convert it into a coherent Kustomize ref (which needs a path, and a source if it sets a tag)",
+				ref.Name, ref.Tag, ref.Path)
 		}
 	case strings.EqualFold(string(ref.Type), string(ComponentTypeKustomize)):
 		if !hasPath {
@@ -263,9 +286,10 @@ func (ref *ComponentRef) coherenceProblem() string {
 	default:
 		// After ApplyRegistryDefaults every registry-backed ref has a supported
 		// Type; an empty or unknown Type here means an externally-supplied ref
-		// the registry did not populate. The deployers classify by tag/path, not
-		// by this field, so an unsupported Type would deploy ambiguously — fail
-		// closed rather than silently accept it.
+		// the registry did not populate. The field-classifying deployers key off
+		// tag/path (ignoring this field) while Flux switches on it, so an
+		// unsupported Type would deploy ambiguously or be rejected — fail closed
+		// rather than silently accept it.
 		return fmt.Sprintf("component %q has unsupported type %q; expected %q or %q",
 			ref.Name, ref.Type, ComponentTypeHelm, ComponentTypeKustomize)
 	}

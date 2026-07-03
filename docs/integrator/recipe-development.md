@@ -222,6 +222,11 @@ componentRefs:
 
 A component must have either `helm` OR `kustomize` configuration, not both.
 
+> **`patches` is not supported.** The `componentRefs[].patches` field is not
+> applied by any deployer. An enabled ref that sets `patches` is rejected at
+> recipe resolution (rather than silently producing an unpatched bundle), so do
+> not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
+
 ## Component Configuration
 
 ### Configuration Patterns

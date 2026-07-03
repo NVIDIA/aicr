@@ -82,7 +82,8 @@ func TestComponentRefCoherenceProblem(t *testing.T) {
 			wantBad: true,
 		},
 		{
-			// The REST wire format / OpenAPI example uses lowercase; it must be
+			// Lowercase is accepted as backward-compatible input (hand-authored
+			// recipes / older clients); the canonical form is Helm. It must be
 			// accepted case-insensitively, not rejected as an unsupported type.
 			name: "lowercase helm is accepted",
 			ref:  ComponentRef{Name: "a", Type: ComponentType("helm"), Version: "v1"},
@@ -96,6 +97,18 @@ func TestComponentRefCoherenceProblem(t *testing.T) {
 			// still may not carry Kustomize fields.
 			name:    "lowercase helm still rejects tag",
 			ref:     ComponentRef{Name: "a", Type: ComponentType("helm"), Version: "v1", Tag: "v2"},
+			wantBad: true,
+		},
+		{
+			// Patches are carried through resolution but applied by no deployer;
+			// a ref that declares them is rejected rather than silently dropped.
+			name:    "helm with patches rejected",
+			ref:     ComponentRef{Name: "a", Type: ComponentTypeHelm, Version: "v1", Patches: []string{"p.yaml"}},
+			wantBad: true,
+		},
+		{
+			name:    "kustomize with patches rejected",
+			ref:     ComponentRef{Name: "a", Type: ComponentTypeKustomize, Path: "deploy", Patches: []string{"p.yaml"}},
 			wantBad: true,
 		},
 	}

@@ -1128,7 +1128,13 @@ func (b *blockingReadFileProvider) ReadFile(ctx context.Context, path string) ([
 		default:
 			close(b.readStarted)
 		}
-		<-b.readUnblock
+		// Honor the DataProvider contract: return the context error if canceled
+		// rather than parking forever.
+		select {
+		case <-b.readUnblock:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	return b.underlying.ReadFile(ctx, path)
 }
