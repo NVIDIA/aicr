@@ -495,6 +495,7 @@ componentRefs:
     type: Helm
     version: vXX.Y.Z          # illustrative; see Component Catalog for current pins
     source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
 deploymentOrder:
   - gpu-operator
 constraints:

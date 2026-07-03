@@ -23,12 +23,18 @@
 #
 # Phases:
 #   prep         snapshot + recipe + dry-run validate + bundle
-#   install      helmfile apply (deploys gpu-operator, kubeflow, ...)
+#   install      helmfile apply (deploys gpu-operator, kubeflow/dynamo, ...)
 #   conformance  validate ALL phases (deployment + conformance + performance)
 #                + emit signed evidence bundle
 #   train        submit TrainJob, wait for completion, capture logs
+#                (intent=training CUJ)
+#   serve        deploy a DynamoGraphDeployment, wait for readiness, hit the
+#                OpenAI-compatible endpoint, assert a completion, capture logs
+#                (intent=inference CUJ — the DC3 counterpart of `train`)
 #   verify       aicr evidence verify against the signed bundle
-#   all          run every phase in order (for local reproduction)
+#   all          run every phase in order (for local reproduction); the CUJ
+#                phase is chosen by the config's recipe intent — `train` for
+#                training, `serve` for inference
 #
 # Required env:
 #   AICR_BIN    Path to the aicr binary
@@ -45,7 +51,7 @@ config="${2:-}"
 
 if [[ -z "${phase}" || -z "${config}" ]]; then
   echo "Usage: $0 <phase> <test-config.yaml>" >&2
-  echo "Phases: prep | install | conformance | train | verify | all" >&2
+  echo "Phases: prep | install | conformance | train | serve | verify | all" >&2
   exit 2
 fi
 
@@ -70,6 +76,25 @@ HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
 # p5.48xlarge GPU-operator convergence (driver/toolkit/device-plugin/DCGM) and
 # prometheus-adapter APIService aggregation. Fails closed if exceeded.
 READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1200}" # 20 min
+
+# Inference-serve knobs (phase_serve; overridable for local reproduction). The
+# defaults mirror the served DynamoGraphDeployment in demos/cuj2-inference.md
+# (demos/workloads/inference/vllm-agg.yaml) so CI and the demo stay in lockstep.
+SERVE_NAMESPACE="${SERVE_NAMESPACE:-dynamo-workload}"
+SERVE_NAME="${SERVE_NAME:-vllm-agg}"
+SERVE_QUEUE="${SERVE_QUEUE:-dynamo}"
+SERVE_MODEL="${SERVE_MODEL:-Qwen/Qwen3-0.6B}"
+SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1}"
+# GPU worker placement. The demo pins nodeGroup=gpu-worker; both UAT clusters
+# label their GPU pool the same way (tests/uat/*/cluster-config.yaml), so the
+# default lands the decode worker on the GPU node on either cloud.
+SERVE_GPU_NODE_SELECTOR_KEY="${SERVE_GPU_NODE_SELECTOR_KEY:-nodeGroup}"
+SERVE_GPU_NODE_SELECTOR_VALUE="${SERVE_GPU_NODE_SELECTOR_VALUE:-gpu-worker}"
+SERVE_FRONTEND_PORT="${SERVE_FRONTEND_PORT:-8000}"
+# Readiness budget: image pull of the multi-GB vllm-runtime + model download +
+# engine warmup on a cold GPU node. Generous; fails closed if exceeded.
+SERVE_READY_TIMEOUT_SECONDS="${SERVE_READY_TIMEOUT_SECONDS:-1800}" # 30 min
+SERVE_REQUEST_TIMEOUT_SECONDS="${SERVE_REQUEST_TIMEOUT_SECONDS:-120}" # 2 min
 
 # Per-run OCI tag. The committed config carries the stable per-recipe repo
 # only; we apply a `:run-${RUN_ID}` tag idempotently, stripping any existing
@@ -301,6 +326,35 @@ phase_conformance() {
   fi
   echo "evidence pointer:"
   cat ./evidence/pointer.yaml
+
+  # First-party platform sanity check. The emitted bundle's TestGrid tab
+  # coordinate is derived from the recipe's author-declared `platform`
+  # (inference→dynamo, training→kubeflow) and is NOT captured by the
+  # fingerprint — pkg/fingerprint/match.go treats the platform dimension as
+  # uncaptured — so a mis-declared platform would silently route evidence to
+  # the wrong tab. Cross-check that the platform operator's workload CRD is
+  # actually installed on the cluster the bundle deployed, so the declared
+  # coordinate matches the deployed component set. Unknown/other platforms are
+  # skipped (no false failure), a known platform whose CRD is absent fails closed.
+  echo "::group::Platform coordinate sanity check"
+  local platform crd
+  platform="$(yq -r '.criteria.platform // ""' recipe.yaml)"
+  case "${platform}" in
+    dynamo)   crd="dynamographdeployments.nvidia.com" ;;
+    kubeflow) crd="trainjobs.trainer.kubeflow.org" ;;
+    *)
+      echo "recipe declares platform '${platform}': no workload-CRD cross-check wired for it (skipping)"
+      echo "::endgroup::"
+      return 0
+      ;;
+  esac
+  if ! kubectl get crd "${crd}" >/dev/null 2>&1; then
+    echo "::error::recipe declares platform=${platform} but its workload CRD ${crd} is not installed — the emitted evidence would map to the wrong TestGrid tab" >&2
+    kubectl get crd 2>&1 | head -50 >&2 || true
+    exit 1
+  fi
+  echo "platform=${platform}: workload CRD ${crd} present"
+  echo "::endgroup::"
 }
 
 phase_train() {
@@ -368,6 +422,234 @@ EOF
   echo "::endgroup::"
 }
 
+# serve_debug dumps the served-workload state (DGD, pods, describe, events,
+# logs) into serve-logs/ and the step log so a failed or successful phase_serve
+# is diagnosable from the uploaded artifacts. Best-effort; never fails the run.
+serve_debug() {
+  mkdir -p serve-logs
+  {
+    echo "--- dynamographdeployments ---"
+    kubectl get dynamographdeployments -n "${SERVE_NAMESPACE}" -o yaml 2>&1 || true
+    echo "--- pods ---"
+    kubectl get pods -n "${SERVE_NAMESPACE}" -o wide 2>&1 || true
+    echo "--- describe pods ---"
+    kubectl describe pods -n "${SERVE_NAMESPACE}" 2>&1 || true
+    echo "--- events ---"
+    kubectl get events -n "${SERVE_NAMESPACE}" --sort-by=.lastTimestamp 2>&1 || true
+    echo "--- logs (all pods, all containers, last 200 lines) ---"
+    for p in $(kubectl get pods -n "${SERVE_NAMESPACE}" -o name 2>/dev/null); do
+      echo "=== ${p} ==="
+      kubectl logs -n "${SERVE_NAMESPACE}" "${p#pod/}" --all-containers --tail=200 2>&1 || true
+    done
+  } | tee serve-logs/"${SERVE_NAME}".log
+}
+
+phase_serve() {
+  # Deploy the served inference graph (Dynamo) — the intent=inference CUJ, the
+  # DC3 counterpart of phase_train. Mirrors the DynamoGraphDeployment in
+  # demos/cuj2-inference.md (demos/workloads/inference/vllm-agg.yaml): the KAI
+  # queue, a DRA ResourceClaim, and a two-component (Frontend + decode Worker)
+  # graph serving an OpenAI-compatible endpoint.
+  #
+  # Tolerations are a portable SUPERSET of the taints across BOTH UAT clusters
+  # (AWS and GKE GPU pools use different `dedicated` values; the DRA/gpu-operator
+  # adds nvidia.com/gpu). Tolerating a taint a node does not carry is a no-op, so
+  # one list schedules correctly on either cloud. The Frontend deliberately omits
+  # the nvidia.com/gpu toleration so it stays OFF the scarce GPU nodes.
+  echo "::group::Deploy DynamoGraphDeployment (${SERVE_NAME} in ${SERVE_NAMESPACE})"
+  kubectl apply -f - <<EOF
+apiVersion: scheduling.run.ai/v2
+kind: Queue
+metadata:
+  name: ${SERVE_QUEUE}
+spec:
+  parentQueue: default-parent-queue
+  resources:
+    gpu: {limit: -1, overQuotaWeight: 1, quota: 0}
+    cpu: {limit: -1, overQuotaWeight: 1, quota: 0}
+    memory: {limit: -1, overQuotaWeight: 1, quota: 0}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${SERVE_NAMESPACE}
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: ${SERVE_NAME}-gpu-claim
+  namespace: ${SERVE_NAMESPACE}
+  labels:
+    kai.scheduler/queue: ${SERVE_QUEUE}
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+---
+apiVersion: nvidia.com/v1beta1
+kind: DynamoGraphDeployment
+metadata:
+  name: ${SERVE_NAME}
+  namespace: ${SERVE_NAMESPACE}
+spec:
+  backendFramework: vllm
+  components:
+    - name: Frontend
+      type: frontend
+      replicas: 1
+      podTemplate:
+        spec:
+          tolerations:
+            - {key: dedicated, operator: Equal, value: worker-workload, effect: NoSchedule}
+            - {key: dedicated, operator: Equal, value: worker-workload, effect: NoExecute}
+            - {key: dedicated, operator: Equal, value: gpu-workload, effect: NoSchedule}
+            - {key: dedicated, operator: Equal, value: system-workload, effect: NoSchedule}
+            - {key: dedicated, operator: Equal, value: system-workload, effect: NoExecute}
+          containers:
+            - name: main
+              image: ${SERVE_RUNTIME_IMAGE}
+              env:
+                - {name: SERVED_MODEL_NAME, value: ${SERVE_MODEL}}
+                - {name: DYN_ROUTER_MODE, value: kv}
+    - name: VllmDecodeWorker
+      type: worker
+      replicas: 1
+      sharedMemorySize: 2Gi
+      podTemplate:
+        spec:
+          nodeSelector:
+            ${SERVE_GPU_NODE_SELECTOR_KEY}: ${SERVE_GPU_NODE_SELECTOR_VALUE}
+          tolerations:
+            - {key: dedicated, operator: Equal, value: worker-workload, effect: NoSchedule}
+            - {key: dedicated, operator: Equal, value: worker-workload, effect: NoExecute}
+            - {key: dedicated, operator: Equal, value: gpu-workload, effect: NoSchedule}
+            - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+          resourceClaims:
+            - name: gpu
+              resourceClaimName: ${SERVE_NAME}-gpu-claim
+          containers:
+            - name: main
+              image: ${SERVE_RUNTIME_IMAGE}
+              workingDir: /workspace/examples/backends/vllm
+              command: ["python3", "-m", "dynamo.vllm"]
+              args:
+                - --model
+                - ${SERVE_MODEL}
+                - --kv-events-config
+                - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
+              resources:
+                claims:
+                  - name: gpu
+EOF
+  echo "::endgroup::"
+
+  echo "::group::Wait for DynamoGraphDeployment readiness (timeout ${SERVE_READY_TIMEOUT_SECONDS}s)"
+  local deadline=$(( SECONDS + SERVE_READY_TIMEOUT_SECONDS ))
+  local ready=false pods_json total ready_count
+  while (( SECONDS < deadline )); do
+    pods_json="$(kubectl get pods -n "${SERVE_NAMESPACE}" -o json 2>/dev/null || echo '{}')"
+    # Fail closed as soon as a workload pod is unrecoverable so a bad image or
+    # crash loop surfaces immediately instead of burning the whole readiness
+    # budget. Two cases: a terminal phase=Failed, OR a container wedged in an
+    # image-pull / crash-loop / config-error waiting state — the latter keep the
+    # pod in phase=Running/Pending, so they must be checked explicitly (a
+    # multi-GB vllm-runtime pull that 404s would otherwise wait out the full
+    # SERVE_READY_TIMEOUT_SECONDS).
+    bad="$(echo "${pods_json}" | jq -r '
+      .items[]? as $p
+      | ( [ ($p.status.containerStatuses // [])[]?, ($p.status.initContainerStatuses // [])[]?
+            | .state.waiting.reason // empty ]
+          + (if $p.status.phase == "Failed" then ["phase=Failed"] else [] end) )[]
+      | select(. == "phase=Failed" or . == "ImagePullBackOff" or . == "ErrImagePull"
+               or . == "CrashLoopBackOff" or . == "InvalidImageName"
+               or . == "CreateContainerConfigError")' 2>/dev/null | head -n1)"
+    if [[ -n "${bad}" ]]; then
+      echo "a workload pod is unrecoverable (${bad}); not waiting out the readiness budget" >&2
+      break
+    fi
+    # Ready when at least one pod exists and every pod reports Ready=True.
+    total="$(echo "${pods_json}" | jq '[.items[]?] | length')"
+    ready_count="$(echo "${pods_json}" | jq '[.items[]? | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length')"
+    if [[ "${total}" -gt 0 && "${total}" == "${ready_count}" ]]; then
+      ready=true
+      break
+    fi
+    echo "workload not ready (${ready_count}/${total} pods Ready); retrying in 15s..."
+    sleep 15
+  done
+  echo "::endgroup::"
+
+  if [[ "${ready}" != true ]]; then
+    echo "::error::DynamoGraphDeployment ${SERVE_NAME} did not become ready within ${SERVE_READY_TIMEOUT_SECONDS}s" >&2
+    echo "::group::Serve failure debug"
+    serve_debug
+    echo "::endgroup::"
+    exit 1
+  fi
+
+  echo "::group::Query the OpenAI-compatible endpoint"
+  local svc="${SERVE_NAME}-frontend"
+  if ! kubectl get svc -n "${SERVE_NAMESPACE}" "${svc}" >/dev/null 2>&1; then
+    echo "::error::frontend service ${svc} not found in ${SERVE_NAMESPACE}" >&2
+    kubectl get svc -n "${SERVE_NAMESPACE}" >&2 || true
+    echo "::endgroup::"
+    exit 1
+  fi
+  # Port-forward the frontend and issue a sample chat completion. The forwarder
+  # is a background child; kill it on every exit path so a failing assertion
+  # does not leak the port-forward (belt-and-braces to the script exit, which
+  # would also reap it).
+  kubectl port-forward -n "${SERVE_NAMESPACE}" "svc/${svc}" \
+    "${SERVE_FRONTEND_PORT}:${SERVE_FRONTEND_PORT}" >/dev/null 2>&1 &
+  local pf_pid=$!
+  local up=false resp="" rc=0
+  for _ in $(seq 1 30); do
+    if curl -fsS "http://localhost:${SERVE_FRONTEND_PORT}/v1/models" >/dev/null 2>&1; then
+      up=true
+      break
+    fi
+    sleep 2
+  done
+  if [[ "${up}" == true ]]; then
+    resp="$(curl -sS --max-time "${SERVE_REQUEST_TIMEOUT_SECONDS}" \
+      -X POST "http://localhost:${SERVE_FRONTEND_PORT}/v1/chat/completions" \
+      -H 'Content-Type: application/json' \
+      -d "{\"model\":\"${SERVE_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is Kubernetes?\"}],\"max_tokens\":64}")" || rc=$?
+  fi
+  kill "${pf_pid}" 2>/dev/null || true
+  wait "${pf_pid}" 2>/dev/null || true
+  echo "::endgroup::"
+
+  if [[ "${up}" != true ]]; then
+    echo "::error::frontend endpoint ${svc} did not accept connections within the port-forward window" >&2
+    echo "::group::Serve failure debug"
+    serve_debug
+    echo "::endgroup::"
+    exit 1
+  fi
+  echo "completion response:"
+  echo "${resp}"
+  # Assert a valid, non-empty OpenAI-compatible chat completion.
+  if [[ "${rc}" -ne 0 ]] || \
+     ! echo "${resp}" | jq -e '.choices[0].message.content | type == "string" and (length > 0)' >/dev/null 2>&1; then
+    echo "::error::inference request did not return a valid chat completion (curl rc=${rc})" >&2
+    echo "::group::Serve failure debug"
+    serve_debug
+    echo "::endgroup::"
+    exit 1
+  fi
+  echo "served inference OK: /v1/chat/completions returned a non-empty completion"
+
+  echo "::group::Capture serve logs"
+  serve_debug >/dev/null
+  wc -l serve-logs/"${SERVE_NAME}".log || true
+  echo "::endgroup::"
+}
+
 phase_verify() {
   echo "::group::Bootstrap Sigstore TUF root"
   "${AICR_BIN}" trust update
@@ -404,11 +686,23 @@ case "${phase}" in
   install)     phase_install ;;
   conformance) phase_conformance ;;
   train)       phase_train ;;
+  serve)       phase_serve ;;
   verify)      phase_verify ;;
-  all)         phase_prep; phase_install; phase_conformance; phase_train; phase_verify ;;
+  all)
+    # The CUJ phase is chosen by the config's recipe intent so `run all`
+    # reproduces the right end-to-end flow: serve for inference, train
+    # otherwise. Defaults to training if the intent is unset.
+    phase_prep; phase_install; phase_conformance
+    intent="$(yq -r '.spec.recipe.criteria.intent // "training"' "${config}")"
+    case "${intent}" in
+      inference) phase_serve ;;
+      *)         phase_train ;;
+    esac
+    phase_verify
+    ;;
   *)
     echo "unknown phase: ${phase}" >&2
-    echo "Phases: prep | install | conformance | train | verify | all" >&2
+    echo "Phases: prep | install | conformance | train | serve | verify | all" >&2
     exit 2
     ;;
 esac
