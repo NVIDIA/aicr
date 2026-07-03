@@ -548,7 +548,7 @@ func TestGenerateErrors(t *testing.T) {
 	t.Run("over-broad allowlist rejected", func(t *testing.T) {
 		dir := t.TempDir()
 		p := filepath.Join(dir, "broad.yaml")
-		body := "schemaVersion: \"1.0.0\"\ncommunity:\n  - issuer: " + ghIssuer + "\n    identity: '^https://github\\.com/.+/.+/x$'\n"
+		body := "schemaVersion: \"1.0.0\"\nfirstParty:\n  - issuer: " + ghIssuer + "\n    identityPattern: '^https://github\\.com/.+/x\\.yaml@refs/heads/main$'\n"
 		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}

@@ -228,39 +228,14 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 
 	slog.Debug("bundle attestation verified", "creator", bundleCreator, "toolVersion", result.ToolVersion)
 
-	// Step 4: Check for binary attestation
-	binaryAttestPath, joinErr := deployer.SafeJoin(bundleDir, attestation.BinaryAttestationFile)
-	if joinErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe binary attestation path", joinErr)
+	// Steps 4-5: Check for and verify the binary attestation.
+	done, stepErr := verifyBinaryStep(ctx, bundleDir, bundleAttestPath, identityPattern, result)
+	if stepErr != nil {
+		return nil, stepErr
 	}
-	if _, statErr := os.Stat(binaryAttestPath); os.IsNotExist(statErr) {
-		// Bundle attested but no binary attestation — chain incomplete
-		result.setTrust(TrustAttested, "bundle attested but binary attestation not found (incomplete chain)")
+	if done {
 		return result, nil
 	}
-
-	// Step 5: Verify binary attestation with identity pinning.
-	// Extract the binary digest from the bundle attestation's resolvedDependencies
-	// rather than hashing the running binary — the verifying binary may be a
-	// different version than the one that created the bundle.
-	binaryDigest, err := extractBinaryDigest(bundleAttestPath)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("could not extract binary digest from bundle attestation: %v", err))
-		result.setTrust(TrustAttested, "could not extract binary digest from bundle attestation")
-		return result, nil
-	}
-
-	binaryBuilder, err := VerifyBinaryAttestation(ctx, binaryAttestPath, identityPattern, binaryDigest)
-	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("binary attestation verification failed: %v", err))
-		result.setTrust(TrustAttested, "binary attestation verification failed")
-		return result, nil
-	}
-	result.BinaryAttested = true
-	result.IdentityPinned = true
-	result.BinaryBuilder = binaryBuilder
-
-	slog.Debug("binary attestation verified", "builder", binaryBuilder)
 
 	// Full chain verified — check if external data caps trust at attested
 	dataDir, joinErr := deployer.SafeJoin(bundleDir, "data")
@@ -275,6 +250,55 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 
 	result.setTrust(TrustVerified, "full chain verified: checksums, bundle attestation, binary attestation with NVIDIA CI identity")
 	return result, nil
+}
+
+// verifyBinaryStep runs steps 4-5 of Verify: locate and verify the binary
+// attestation, binding it to the binary digest recorded in the (already
+// verified) bundle attestation at bundleAttestPath. Trust semantics (#1550):
+//
+//   - binary attestation file MISSING → TrustAttested (incomplete chain: the
+//     bundle attestation itself verified, nothing claims more);
+//   - binary attestation PRESENT but its digest cannot be extracted or its
+//     verification FAILS → TrustUnknown (a claim exists and could not be
+//     substantiated — a hard failure, not a degraded success).
+//
+// Returns done=true when Verify should return the populated result as-is
+// (verification outcome, nil error); a non-nil error is a hard fault
+// (unsafe path), for which Verify returns no result.
+func verifyBinaryStep(ctx context.Context, bundleDir, bundleAttestPath, identityPattern string, result *VerifyResult) (bool, error) {
+	binaryAttestPath, joinErr := deployer.SafeJoin(bundleDir, attestation.BinaryAttestationFile)
+	if joinErr != nil {
+		return false, errors.Wrap(errors.ErrCodeInternal, "unsafe binary attestation path", joinErr)
+	}
+	if _, statErr := os.Stat(binaryAttestPath); os.IsNotExist(statErr) {
+		// Bundle attested but no binary attestation — chain incomplete
+		result.setTrust(TrustAttested, "bundle attested but binary attestation not found (incomplete chain)")
+		return true, nil
+	}
+
+	// Verify binary attestation with identity pinning. Extract the binary
+	// digest from the bundle attestation's resolvedDependencies rather than
+	// hashing the running binary — the verifying binary may be a different
+	// version than the one that created the bundle.
+	binaryDigest, err := extractBinaryDigest(bundleAttestPath)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("could not extract binary digest from bundle attestation: %v", err))
+		result.setTrust(TrustUnknown, "binary attestation present but binary digest could not be extracted from bundle attestation")
+		return true, nil
+	}
+
+	binaryBuilder, err := VerifyBinaryAttestation(ctx, binaryAttestPath, identityPattern, binaryDigest)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("binary attestation verification failed: %v", err))
+		result.setTrust(TrustUnknown, "binary attestation present but failed verification")
+		return true, nil
+	}
+	result.BinaryAttested = true
+	result.IdentityPinned = true
+	result.BinaryBuilder = binaryBuilder
+
+	slog.Debug("binary attestation verified", "builder", binaryBuilder)
+	return false, nil
 }
 
 // verifyChecksumStep reads and verifies checksums.txt in a single read (TOCTOU-safe).
