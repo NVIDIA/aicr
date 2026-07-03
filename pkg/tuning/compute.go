@@ -17,7 +17,6 @@ package tuning
 import (
 	"context"
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 
@@ -40,16 +39,12 @@ const (
 	notApplicable = "-"
 )
 
-// knownTuningManifests is the set of nodewright-customizations manifest basenames
-// that carry tuning/setup pins. A componentRef referencing one of these produces
-// a table row; any other manifest (or none) contributes no row.
-var knownTuningManifests = map[string]struct{}{
-	"tuning.yaml":         {},
-	"tuning-generic.yaml": {},
-	"tuning-gke.yaml":     {},
-	"bcm-setup.yaml":      {},
-	"no-op.yaml":          {},
-}
+// nwcManifestsDir is the data-relative directory holding the
+// nodewright-customizations component's manifests. Any manifest a resolved
+// componentRef references from here is treated as its tuning/setup manifest —
+// there is deliberately no hard-coded manifest allowlist, so a newly added
+// manifest is picked up automatically rather than silently skipped.
+const nwcManifestsDir = "components/nodewright-customizations/manifests/"
 
 // Options configures a Compute run.
 type Options struct {
@@ -170,11 +165,15 @@ func findComponentRef(refs []recipe.ComponentRef, name string) (recipe.Component
 	return recipe.ComponentRef{}, false
 }
 
-// selectTuningManifest returns the first manifest file whose basename is a known
-// tuning/setup manifest, or "" if none is referenced.
+// selectTuningManifest returns the first manifest the componentRef references
+// from the nodewright-customizations manifests directory, or "" if none is
+// referenced. The ref is already the nodewright-customizations component, so any
+// manifest it carries from that directory is its tuning/setup manifest — no
+// per-manifest allowlist is needed, and a newly added manifest is picked up
+// automatically.
 func selectTuningManifest(manifestFiles []string) string {
 	for _, m := range manifestFiles {
-		if _, ok := knownTuningManifests[path.Base(m)]; ok {
+		if strings.HasPrefix(m, nwcManifestsDir) {
 			return m
 		}
 	}
