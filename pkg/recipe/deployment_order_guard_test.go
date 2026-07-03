@@ -176,6 +176,30 @@ func TestDeploymentOrderGuards(t *testing.T) {
 			},
 		},
 		{
+			name: "gb200-eks-ubuntu-training-slurm",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformSlurm
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"slinky-slurm-operator": {"cert-manager", "slinky-slurm-operator-crds"},
+				"slinky-slurm":          {"nvidia-dra-driver-gpu", "slinky-slurm-operator", "slinky-slurm-operator-crds"},
+			},
+			requiredOrdering: [][2]string{
+				{"nvidia-dra-driver-gpu", "slinky-slurm"},
+				{"cert-manager", "slinky-slurm-operator"},
+				{"slinky-slurm-operator-crds", "slinky-slurm-operator"},
+				{"slinky-slurm-operator", "slinky-slurm"},
+				{"slinky-slurm-operator-crds", "slinky-slurm"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
 			name: "h100-eks-ubuntu-training-slurm",
 			criteria: func() *Criteria {
 				c := NewCriteria()

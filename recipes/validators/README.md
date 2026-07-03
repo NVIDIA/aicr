@@ -63,6 +63,8 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |
 | `secure-accelerator-access` | Verify secure GPU access via DRA (no host device mounts) | 10m |
+| `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, and job submission health | 5m |
+| `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |
 | `platform-health` | Verify platform component health (conformance diagnostic) | 5m |
 
