@@ -367,7 +367,7 @@ Generate deployment bundles from a recipe.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `bundlers` | string | (all) | Comma-delimited list of bundler types to execute. **Not currently honored — all bundlers run regardless ([#1531](https://github.com/NVIDIA/aicr/issues/1531)).** |
+| `bundlers` | string | (all) | Comma-delimited list of recipe component names to bundle (e.g. `gpu-operator,network-operator`). Whitespace around names is trimmed. Components not listed are skipped as if disabled (their dependency edges are treated as satisfied externally). A name the recipe does not declare, or one that is disabled (by the recipe or a `set` `enabled=false` override), is rejected with HTTP 400. |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. |
 | `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, and `deployer=helmfile`. |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
@@ -386,7 +386,7 @@ The request body is the recipe (RecipeResult) directly. No wrapper object needed
 
 #### Components
 
-These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). (The `bundlers` query parameter that would select a subset is currently ignored — all run regardless, #1531.) The registry is the authoritative source — see the [component catalog](component-catalog.md) for the full, current list with detailed descriptions. The table below is illustrative of commonly used components:
+These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) — the names the `bundlers` query parameter accepts (a request may only name components the recipe declares). The registry is the authoritative source — see the [component catalog](component-catalog.md) for the full, current list with detailed descriptions. The table below is illustrative of commonly used components:
 
 | Component | Description |
 |-----------|-------------|
@@ -436,12 +436,13 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 > a few component fields shown) — use a generated `RecipeResult`, not these
 > literals.
 >
-> The `bundlers` query parameter is **not currently honored** — all bundlers run
-> regardless ([#1531](https://github.com/NVIDIA/aicr/issues/1531)). There is no
-> supported way to bundle a subset via the API today: hand-trimming
-> `componentRefs` is unsafe (it silently drops required dependencies and breaks
-> deployers like Helmfile on dangling `dependencyRefs`). Bundle the full
-> hydrated result.
+> To bundle a subset of the recipe's components, use the `bundlers` query
+> parameter (e.g. `?bundlers=gpu-operator,network-operator`) rather than
+> hand-trimming `componentRefs` — trimming the body silently drops required
+> dependencies and breaks deployers like Helmfile on dangling
+> `dependencyRefs`. The filter prunes those edges safely (a filtered-out
+> dependency is assumed satisfied externally) and rejects unknown or disabled
+> component names with HTTP 400.
 
 ```shell
 # Basic: pipe recipe to bundle

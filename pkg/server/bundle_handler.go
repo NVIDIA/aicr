@@ -52,9 +52,9 @@ func newBundleHandler(client *aicr.Client, allowLists *aicr.AllowLists) *bundleH
 
 // HandleBundles processes bundle generation requests. It accepts a POST
 // request with a JSON body containing the recipe (RecipeResult) and the same
-// query parameters as the legacy pkg/bundler handler (set, dynamic, deployer,
-// node selectors/tolerations, repo, workload-gate, workload-selector, nodes,
-// vendor-charts, app-name). The response is a zip archive of the bundle.
+// query parameters as the legacy pkg/bundler handler (bundlers, set, dynamic,
+// deployer, node selectors/tolerations, repo, workload-gate, workload-selector,
+// nodes, vendor-charts, app-name). The response is a zip archive of the bundle.
 func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	logger := slog.With("requestID", RequestIDFromContext(r.Context()))
 

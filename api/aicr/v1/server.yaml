@@ -742,8 +742,13 @@ paths:
           in: query
           required: false
           description: >
-            Comma-delimited list of bundler types to execute.
-            If not specified, all registered bundlers are executed.
+            Comma-delimited list of recipe component names to bundle.
+            If not specified, all enabled components are bundled.
+            Components not listed are skipped as if disabled (their
+            dependency edges are treated as satisfied externally).
+            A name the recipe does not declare, or one that is disabled
+            (by the recipe or by a "set" parameter enabled=false
+            override), is rejected with HTTP 400.
           schema:
             type: string
           examples:
@@ -1020,7 +1025,7 @@ paths:
                 type: string
                 format: binary
         "400":
-          description: Invalid request (invalid recipe or bundler type)
+          description: Invalid request (invalid recipe or bundlers filter)
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -1037,15 +1042,19 @@ paths:
                     requestId: "550e8400-e29b-41d4-a716-446655440000"
                     timestamp: "2025-01-15T10:30:00Z"
                     retryable: false
-                invalidBundler:
-                  summary: Invalid bundler type
+                unknownBundler:
+                  summary: Bundlers filter names an undeclared component
                   value:
                     code: INVALID_REQUEST
-                    message: "Invalid bundler type"
-                    details:
-                      bundler: "invalid-bundler"
-                      error: "unsupported bundle type: invalid-bundler"
-                      valid: ["gpu-operator", "network-operator", "nodewright-operator", "nvsentinel", "cert-manager", "nvidia-dra-driver-gpu"]
+                    message: 'unknown component "invalid-bundler" in bundlers filter; recipe declares: gpu-operator, network-operator, cert-manager'
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
+                disabledBundler:
+                  summary: Bundlers filter names a disabled component
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'component "cert-manager" is disabled and cannot be selected via the bundlers filter'
                     requestId: "550e8400-e29b-41d4-a716-446655440000"
                     timestamp: "2025-01-15T10:30:00Z"
                     retryable: false
@@ -1554,8 +1563,10 @@ components:
           type: array
           items:
             type: string
-            enum: [gpu-operator, network-operator, nodewright-operator, nvsentinel, cert-manager, nvidia-dra-driver-gpu]
           description: >
-            Optional list of bundler types to execute.
-            If not specified, all registered bundlers are executed.
+            Optional list of recipe component names to bundle.
+            If not specified, all enabled components are bundled.
+            Superseded by the "bundlers" query parameter, which accepts
+            enabled component names the recipe declares; unknown or
+            disabled names are rejected with HTTP 400.
           example: [gpu-operator, network-operator]

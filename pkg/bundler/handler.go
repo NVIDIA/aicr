@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -63,6 +64,7 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 		config.WithRepoURL(params.repoURL),
 		config.WithVendorCharts(params.vendorCharts),
 		config.WithAppName(params.appName),
+		config.WithBundlers(params.bundlers),
 	)
 }
 
@@ -156,6 +158,7 @@ type bundleParams struct {
 	repoURL                    string
 	vendorCharts               bool
 	appName                    string
+	bundlers                   []string
 }
 
 // parseQueryParams extracts and validates all query parameters from the request
@@ -261,6 +264,26 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 			return nil, validateErr
 		}
 		params.appName = v
+	}
+
+	// Parse bundlers (positive filter on recipe component names). Comma
+	// delimited and repeatable; whitespace around names is trimmed and empty
+	// segments are dropped so "a, b," parses as ["a", "b"]. Presence is
+	// keyed on the query map, not query.Get, so an explicit empty value
+	// ("bundlers=" or "bundlers=,,") is rejected rather than silently
+	// bundling everything — only an ABSENT parameter means no filter. See #1531.
+	if values, ok := query["bundlers"]; ok {
+		for _, v := range values {
+			for _, name := range strings.Split(v, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					params.bundlers = append(params.bundlers, name)
+				}
+			}
+		}
+		if len(params.bundlers) == 0 {
+			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				"bundlers must contain at least one component name")
+		}
 	}
 
 	return params, nil

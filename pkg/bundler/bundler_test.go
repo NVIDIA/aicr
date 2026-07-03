@@ -426,6 +426,153 @@ func TestMake_UndeclaredDependencyErrors(t *testing.T) {
 	}
 }
 
+// TestMake_BundlersFilter pins the semantics of the `bundlers` positive
+// component-name filter (POST /v1/bundle ?bundlers=…, config.WithBundlers):
+// a subset selection bundles only the named components, an unknown or
+// disabled name fails with ErrCodeInvalidRequest, and an empty filter
+// preserves current behavior (all enabled components). See #1531.
+func TestMake_BundlersFilter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		bundlers    []string
+		wantDirs    []string
+		wantAbsent  []string
+		wantErr     bool
+		wantErrText string
+	}{
+		{
+			name:       "empty filter bundles all enabled components",
+			bundlers:   nil,
+			wantDirs:   []string{"001-gpu-operator", "002-aws-ebs-csi-driver"},
+			wantAbsent: []string{"cert-manager", "001-cert-manager", "003-cert-manager"},
+		},
+		{
+			name:     "filter selects subset",
+			bundlers: []string{"gpu-operator"},
+			wantDirs: []string{"001-gpu-operator"},
+			wantAbsent: []string{
+				"aws-ebs-csi-driver", "001-aws-ebs-csi-driver", "002-aws-ebs-csi-driver",
+			},
+		},
+		{
+			name:        "unknown name errors",
+			bundlers:    []string{"gpu-operator", "no-such-component"},
+			wantErr:     true,
+			wantErrText: "unknown component",
+		},
+		{
+			name:        "disabled component request errors",
+			bundlers:    []string{"cert-manager"},
+			wantErr:     true,
+			wantErrText: "disabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var bundlerOpts []Option
+			if tt.bundlers != nil {
+				bundlerOpts = append(bundlerOpts,
+					WithConfig(config.NewConfig(config.WithBundlers(tt.bundlers))))
+			}
+			bundler, err := New(bundlerOpts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			recipeResult := &recipe.RecipeResult{
+				APIVersion: "aicr.run/v1alpha2",
+				Kind:       "Recipe",
+				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+					{Name: "aws-ebs-csi-driver", Version: "2.55.0", Type: "helm", Source: "https://kubernetes-sigs.github.io/aws-ebs-csi-driver"},
+					{Name: "cert-manager", Version: "v1.20.2", Type: "helm", Source: "https://charts.jetstack.io", Overrides: map[string]any{"enabled": false}},
+				},
+				DeploymentOrder: []string{"gpu-operator", "aws-ebs-csi-driver"},
+			}
+
+			ctx := context.Background()
+			tmpDir := t.TempDir()
+			_, makeErr := bundler.Make(ctx, recipeResult, tmpDir)
+			if tt.wantErr {
+				if makeErr == nil {
+					t.Fatal("Make() expected error, got nil")
+				}
+				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
+				}
+				if !strings.Contains(makeErr.Error(), tt.wantErrText) {
+					t.Errorf("Make() error = %q, want substring %q", makeErr.Error(), tt.wantErrText)
+				}
+				return
+			}
+			if makeErr != nil {
+				t.Fatalf("Make() error = %v", makeErr)
+			}
+			for _, dir := range tt.wantDirs {
+				if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); os.IsNotExist(statErr) {
+					t.Errorf("expected %s directory to be created", dir)
+				}
+			}
+			for _, dir := range tt.wantAbsent {
+				if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+					t.Errorf("expected %s directory to NOT be created", dir)
+				}
+			}
+		})
+	}
+}
+
+// TestMake_BundlersFilterDependencyPruned verifies that a dependency edge
+// pointing at an enabled-but-filtered-out component is pruned exactly like a
+// disabled one: the helmfile deployer (the only path that recomputes ordering
+// from dependency edges) must not fail with a false circular-dependency error
+// when the depended-upon component is excluded by the bundlers filter. See #1531.
+func TestMake_BundlersFilterDependencyPruned(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerHelmfile),
+		config.WithBundlers([]string{"gpu-operator"}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1alpha2",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager is enabled but excluded by the bundlers filter;
+			// gpu-operator depends on it — assumed satisfied externally.
+			{Name: "cert-manager", Version: "v1.20.2", Type: "helm", Source: "https://charts.jetstack.io"},
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"cert-manager", "gpu-operator"},
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	if _, makeErr := bundler.Make(ctx, recipeResult, tmpDir); makeErr != nil {
+		t.Fatalf("Make() with filtered-out depended-upon component error = %v", makeErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator")); os.IsNotExist(statErr) {
+		t.Error("expected 001-gpu-operator to be created")
+	}
+	for _, dir := range []string{"cert-manager", "001-cert-manager", "002-cert-manager"} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s directory to NOT be created", dir)
+		}
+	}
+}
+
 func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 	t.Parallel()
 
