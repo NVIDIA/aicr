@@ -54,10 +54,10 @@ curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"
 - name: Generate bundles
   # recipe.json is the fully-hydrated RecipeResult from the GET above; the
   # bundle endpoint adopts it as-is and bundles all of its componentRefs.
-  # (The `bundlers` query param is not currently honored — see
-  # https://github.com/NVIDIA/aicr/issues/1531. There is no supported way to
-  # bundle a subset via the API today; hand-trimming componentRefs drops
-  # required dependencies, so bundle the full result.)
+  # To bundle a subset, add the `bundlers` query parameter (comma-delimited
+  # component names, e.g. "?bundlers=gpu-operator,network-operator") rather
+  # than hand-trimming componentRefs, which drops required dependencies.
+  # Unknown or disabled component names are rejected with HTTP 400.
   run: |
     curl -X POST "http://aicrd.aicr.svc/v1/bundle" \
       -H "Content-Type: application/json" \
