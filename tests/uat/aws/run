@@ -69,13 +69,26 @@ TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
-# Budget for the post-install readiness gate, which runs the deployment
-# validation phase until it passes (see phase_install). Generous: it must span
-# nodewright (skyhook) node tuning -- which REBOOTS the GPU node and re-inits the
-# gpu-operator operands after the operator first reports ready -- plus cold-boot
-# p5.48xlarge GPU-operator convergence (driver/toolkit/device-plugin/DCGM) and
-# prometheus-adapter APIService aggregation. Fails closed if exceeded.
-READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1200}" # 20 min
+# Budget for the post-install readiness gate (see phase_install), which runs
+# `aicr validate --phase deployment` until it passes READINESS_CONSECUTIVE_PASSES
+# times in a row. This is the gate window ONLY -- it is entered AFTER helmfile
+# apply returns, so the workflow install step must budget helmfile + this. It
+# must span nodewright (skyhook) node tuning -- which REBOOTS the GPU node and
+# re-inits the gpu-operator operands after the operator first reports ready (each
+# validate run now polls internally, up to GPUReadinessTimeout, to ride through a
+# reboot) -- plus cold-boot p5.48xlarge GPU-operator convergence
+# (driver/toolkit/device-plugin/DCGM) and prometheus-adapter APIService
+# aggregation, across the required consecutive passes. Fails closed if exceeded.
+READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1800}" # 30 min
+# The gate requires the deployment phase to pass this many times CONSECUTIVELY
+# before declaring readiness. A single pass proves "converged at instant T", not
+# "will stay converged": nodewright (skyhook) tuning reboots the GPU node more
+# than once (the tuning packages carry interrupt: reboot) and re-opens
+# status=in_progress after each reboot and for each newly-joined GPU node, so a
+# pass can land in a lull between reboot cycles. Requiring N consecutive passes,
+# spaced by the retry sleep, ensures the reboots have settled before the
+# conformance phase (`--phase all`) runs -- any regression resets the counter.
+READINESS_CONSECUTIVE_PASSES="${READINESS_CONSECUTIVE_PASSES:-2}"
 
 # Inference-serve knobs (phase_serve; overridable for local reproduction). The
 # defaults mirror the served DynamoGraphDeployment in demos/cuj2-inference.md
@@ -221,13 +234,26 @@ phase_install() {
 
   # Retry helmfile apply on transient cluster-API errors (control-plane
   # warmup, throttling, etc.). helmfile is idempotent — re-running on a
-  # partial-install state converges on the desired set. Each attempt has
-  # its own per-attempt HELMFILE_TIMEOUT_SECONDS budget; the workflow's
-  # step `timeout-minutes` bounds total wall time.
-  local success=false
+  # partial-install state converges on the desired set. The 3 attempts SHARE a
+  # single HELMFILE_TIMEOUT_SECONDS wall-clock budget (each attempt is capped at
+  # the remaining budget, like the readiness gate below), not a full budget each:
+  # transient errors fail fast so sharing leaves ample time for retries, while a
+  # genuine hang cannot stretch install to 3x the budget. This bounds worst-case
+  # install (helmfile + gate) within the workflow step's timeout-minutes.
+  local helmfile_deadline=$(( SECONDS + HELMFILE_TIMEOUT_SECONDS ))
+  local success=false helm_remaining
   for attempt in 1 2 3; do
-    echo "::group::helmfile apply attempt ${attempt}/3 (timeout ${HELMFILE_TIMEOUT_SECONDS}s)"
-    if ( cd bundle && timeout "${HELMFILE_TIMEOUT_SECONDS}" helmfile apply --skip-diff-on-install ); then
+    if (( SECONDS >= helmfile_deadline )); then
+      # Distinguish a budget-starved run (a slow-but-progressing apply consumed
+      # the shared window) from a genuine 3-strike failure: log why attempts
+      # 2-3 never launched.
+      echo "helmfile shared ${HELMFILE_TIMEOUT_SECONDS}s budget exhausted after attempt $(( attempt - 1 )); not starting attempt ${attempt}"
+      break
+    fi
+    helm_remaining=$(( helmfile_deadline - SECONDS ))
+    (( helm_remaining < 1 )) && helm_remaining=1
+    echo "::group::helmfile apply attempt ${attempt}/3 (timeout ${helm_remaining}s of ${HELMFILE_TIMEOUT_SECONDS}s shared budget)"
+    if ( cd bundle && timeout "${helm_remaining}" helmfile apply --skip-diff-on-install ); then
       success=true
       echo "::endgroup::"
       break
@@ -251,13 +277,19 @@ phase_install() {
 
   # Readiness gate: run the deployment validation phase -- the authoritative
   # expected-resources / ClusterPolicy / DRA / nodewright checks the later
-  # `--phase all` run gates on -- in a retry loop until it passes. `helmfile
-  # apply` returns before operator-driven convergence, and nodewright (skyhook)
-  # reboots the GPU node AFTER gpu-operator first reports ready, re-initing the
-  # operands; proxy signals (ClusterPolicy=ready, Skyhook status.status) read that
-  # transient state as "done" prematurely, so we gate on the real check. It rides
-  # through the reboot via expected-resources' own poll plus this outer retry.
-  # Fail-closed: the install fails if the phase never passes within the budget.
+  # `--phase all` run gates on -- in a retry loop until it passes
+  # READINESS_CONSECUTIVE_PASSES times in a row. `helmfile apply` returns before
+  # operator-driven convergence, and nodewright (skyhook) reboots the GPU node
+  # AFTER gpu-operator first reports ready, re-initing the operands; proxy
+  # signals (ClusterPolicy=ready, Skyhook status.status) read that transient
+  # state as "done" prematurely, so we gate on the real check. A SINGLE pass only
+  # proves "converged at instant T" -- skyhook tuning reboots the node more than
+  # once and re-opens status=in_progress between cycles, so a lone pass can land
+  # in a lull. Requiring consecutive passes (each spaced by the retry sleep, and
+  # each riding through a transient in_progress via expected-resources' own poll)
+  # ensures the reboots have settled before conformance runs. Any failure resets
+  # the streak. Fail-closed: the install fails if the streak is never reached
+  # within the budget.
   #
   # Run against a copy of the config with spec.validate.evidence stripped so the
   # gate never emits/pushes an evidence bundle -- that is the conformance phase's
@@ -267,30 +299,49 @@ phase_install() {
   gate_log="$(mktemp)"
   yq 'del(.spec.validate.evidence)' "${config}" > "${gate_config}"
   local ready_deadline=$(( SECONDS + READINESS_TIMEOUT_SECONDS ))
-  local attempt=1 ready=false
-  echo "::group::Readiness gate: validate --phase deployment (timeout ${READINESS_TIMEOUT_SECONDS}s)"
+  local attempt=1 streak=0 ready=false remaining
+  echo "::group::Readiness gate: validate --phase deployment x${READINESS_CONSECUTIVE_PASSES} consecutive (timeout ${READINESS_TIMEOUT_SECONDS}s)"
   # Check the deadline BEFORE each attempt so no validation run is launched once
   # the budget is spent (a single run can itself take minutes). The last
   # attempt's output is captured in gate_log for the failure diagnostic rather
   # than re-running validate past the deadline.
   while (( SECONDS < ready_deadline )); do
-    if "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null > "${gate_log}" 2>&1; then
-      ready=true
-      break
+    # Bound each attempt with `timeout` (like the helmfile retry above) so a hung
+    # validate cannot block past the deadline -- the loop only re-checks
+    # ready_deadline between attempts. Cap at the remaining budget so no single
+    # attempt overruns the gate window. Clamp to >= 1: SECONDS is re-read here and
+    # can tick to ready_deadline between the while guard and this line, and
+    # `timeout 0` means "no timeout" (runs forever) -- the exact hang we guard.
+    remaining=$(( ready_deadline - SECONDS ))
+    (( remaining < 1 )) && remaining=1
+    if timeout "${remaining}" "${AICR_BIN}" validate --config "${gate_config}" --phase deployment --output /dev/null > "${gate_log}" 2>&1; then
+      streak=$(( streak + 1 ))
+      echo "deployment phase passed (attempt ${attempt}, streak ${streak}/${READINESS_CONSECUTIVE_PASSES})"
+      if (( streak >= READINESS_CONSECUTIVE_PASSES )); then
+        ready=true
+        break
+      fi
+    else
+      # A regression (e.g. nodewright flipped back to in_progress on a reboot)
+      # invalidates the streak -- start over.
+      if (( streak > 0 )); then
+        echo "deployment phase regressed after ${streak} consecutive pass(es); resetting streak"
+      fi
+      streak=0
+      echo "deployment phase not ready (attempt ${attempt})"
     fi
-    echo "deployment phase not ready (attempt ${attempt}); retrying in 15s..."
     attempt=$(( attempt + 1 ))
     sleep 15
   done
   if [[ "${ready}" != true ]]; then
-    echo "::error::deployment readiness gate did not pass within ${READINESS_TIMEOUT_SECONDS}s; last attempt output:" >&2
+    echo "::error::deployment readiness gate did not reach ${READINESS_CONSECUTIVE_PASSES} consecutive passes within ${READINESS_TIMEOUT_SECONDS}s (last streak ${streak}); last attempt output:" >&2
     cat "${gate_log}" >&2 || true
     rm -f "${gate_config}" "${gate_log}"
     echo "::endgroup::"
     exit 1
   fi
   rm -f "${gate_config}" "${gate_log}"
-  echo "deployment readiness gate passed (attempt ${attempt})"
+  echo "deployment readiness gate passed (${READINESS_CONSECUTIVE_PASSES} consecutive, ${attempt} attempt(s))"
   echo "::endgroup::"
 }
 

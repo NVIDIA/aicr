@@ -15,11 +15,15 @@
 package main
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -59,7 +63,92 @@ var (
 	nodewrightGVR = schema.GroupVersionResource{
 		Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
 	}
+
+	// GPU readiness poll tunables shared by verifyNodewrightReady and
+	// verifyDRAKubeletPluginReady. Package-level (not inline constants) so tests
+	// can shrink them via TestMain — set once before any test runs and never
+	// mutated after, so they stay race-free under t.Parallel. Production seeds
+	// them from pkg/defaults.
+	gpuReadinessPollInterval    = defaults.GPUReadinessPollInterval
+	gpuReadinessStabilityWindow = defaults.GPUReadinessStabilityWindow
+	gpuReadinessTimeout         = defaults.GPUReadinessTimeout
 )
+
+// pollUntilStable repeatedly calls probe until it reports healthy (nil error)
+// continuously for gpuReadinessStabilityWindow, or the budget elapses. It
+// absorbs the non-monotonic flaps a GPU-node reboot introduces (see pkg/defaults
+// GPUReadiness*): a single unhealthy sample no longer fails the deployment
+// phase. On timeout it returns an ErrCodeTimeout error wrapping the last
+// unhealthy state so the gate log and operators see *why*; if the signal became
+// healthy but never held it for the full window before the budget ran out, the
+// ErrCodeTimeout reports the stability-window miss. onStable prints the success
+// line(s).
+//
+// probe MUST be a single-pass, side-effect-free readiness check that returns
+// nil when healthy. The parent check budget (ctx.Ctx) caps the poll even when
+// gpuReadinessTimeout is larger, so the surrounding chainsaw asserts still run.
+func pollUntilStable(ctx *validators.Context, label string, probe func() error, onStable func()) error {
+	deadline := time.Now().Add(gpuReadinessTimeout)
+	if ctxDeadline, ok := ctx.Ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+
+	// timedOut classifies both exit paths as ErrCodeTimeout — deadline-expired
+	// convergence is a timeout, not an internal failure. It preserves the last
+	// observed unhealthy state (cause) so the gate log still shows *why*; when the
+	// signal became healthy but never held it for the full window, cause is nil
+	// and it reports the stability-window miss.
+	timedOut := func(cause error) error {
+		if cause == nil {
+			return errors.New(errors.ErrCodeTimeout,
+				fmt.Sprintf("%s became healthy but did not hold it for the %s stability window within %s (reboot still settling)",
+					label, gpuReadinessStabilityWindow, gpuReadinessTimeout))
+		}
+		return errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("%s not ready within %s", label, gpuReadinessTimeout), cause)
+	}
+
+	var stableSince time.Time
+	var lastErr error
+	for {
+		lastErr = probe()
+		if lastErr == nil {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			if time.Since(stableSince) >= gpuReadinessStabilityWindow {
+				if onStable != nil {
+					onStable()
+				}
+				return nil
+			}
+		} else {
+			// Any regression (a reboot re-opened the unhealthy state) restarts
+			// the dwell.
+			stableSince = time.Time{}
+		}
+
+		if !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Ctx.Done():
+			// Parent check budget (not gpuReadinessTimeout) is the binding
+			// constraint here. When the signal was healthy but hadn't yet held
+			// the window, say so distinctly — timedOut(nil) would misattribute
+			// it to the 8m poll budget in gate logs.
+			if lastErr == nil {
+				return errors.Wrap(errors.ErrCodeTimeout,
+					fmt.Sprintf("%s became healthy but the parent check budget was exhausted before it held the %s stability window",
+						label, gpuReadinessStabilityWindow), ctx.Ctx.Err())
+			}
+			return timedOut(lastErr)
+		case <-time.After(gpuReadinessPollInterval):
+		}
+	}
+
+	return timedOut(lastErr)
+}
 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
@@ -348,41 +437,82 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return err
 	}
 
-	var failures []string
-	for _, name := range expectedNames {
-		verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
-		sk, getErr := dynClient.Resource(nodewrightGVR).Get(verifyCtx, name, metav1.GetOptions{})
-		cancel()
-		if getErr != nil {
-			if apierrors.IsNotFound(getErr) {
-				failures = append(failures, fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name))
-				continue
+	// Poll status.status until every expected Skyhook CR reports "complete"
+	// continuously for the stability window, or the budget elapses. status.status
+	// is non-monotonic during tuning: a reboot (or a newly-joined GPU node)
+	// re-opens it to in_progress, so a single sample is not terminal. Polling
+	// rides through the reboot flaps rather than failing the whole deployment
+	// phase on a transient in_progress. See pkg/defaults GPUReadiness* for sizing.
+	return pollUntilStable(ctx,
+		fmt.Sprintf("%d expected Nodewright(s)", len(expectedNames)),
+		func() error {
+			failures := nodewrightStatusFailures(ctx, dynClient, expectedNames)
+			if len(failures) == 0 {
+				return nil
 			}
-			failures = append(failures, fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr))
-			continue
-		}
-		status, found, statusErr := unstructured.NestedString(sk.Object, "status", "status")
-		if statusErr != nil {
-			failures = append(failures, fmt.Sprintf("Nodewright %s: failed to read status.status: %v", name, statusErr))
-			continue
-		}
-		if !found {
-			failures = append(failures, fmt.Sprintf("Nodewright %s: missing status.status", name))
-			continue
-		}
-		if status != nodewrightCompleteState {
-			failures = append(failures, fmt.Sprintf("Nodewright %s: status=%s (want %s)", name, status, nodewrightCompleteState))
-			continue
-		}
-		fmt.Printf("  Nodewright %s: %s\n", name, nodewrightCompleteState)
-	}
+			return errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("%d of %d expected Nodewright(s) not ready:\n  %s",
+					len(failures), len(expectedNames), strings.Join(failures, "\n  ")))
+		},
+		func() {
+			for _, name := range expectedNames {
+				fmt.Printf("  Nodewright %s: %s (stable ≥%s)\n", name, nodewrightCompleteState, gpuReadinessStabilityWindow)
+			}
+		})
+}
 
-	if len(failures) > 0 {
-		return errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("%d of %d expected Nodewright(s) not ready:\n  %s",
-				len(failures), len(expectedNames), strings.Join(failures, "\n  ")))
+// nodewrightStatusFailures does one pass over the expected Skyhook CRs and
+// returns a human-readable failure string for each that is missing, unreadable,
+// or not yet status.status == "complete". An empty slice means all are complete.
+//
+// The per-name Gets are independent read-only calls, so they fan out
+// concurrently (errgroup) and each keeps its own ResourceVerificationTimeout;
+// results are written to a fixed-index slice to preserve deterministic order.
+func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interface, expectedNames []string) []string {
+	results := make([]string, len(expectedNames))
+	g, gctx := errgroup.WithContext(ctx.Ctx)
+	for i, name := range expectedNames {
+		g.Go(func() error {
+			verifyCtx, cancel := context.WithTimeout(gctx, defaults.ResourceVerificationTimeout)
+			defer cancel()
+			results[i] = nodewrightStatusFailure(verifyCtx, dynClient, name)
+			return nil
+		})
 	}
-	return nil
+	// Goroutines never return an error (failures are recorded per-index), so Wait
+	// only blocks until every Get completes.
+	_ = g.Wait()
+
+	failures := make([]string, 0, len(results))
+	for _, r := range results {
+		if r != "" {
+			failures = append(failures, r)
+		}
+	}
+	return failures
+}
+
+// nodewrightStatusFailure checks one Skyhook CR and returns a failure string, or
+// "" when it is present and status.status == "complete".
+func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interface, name string) string {
+	sk, getErr := dynClient.Resource(nodewrightGVR).Get(verifyCtx, name, metav1.GetOptions{})
+	if getErr != nil {
+		if apierrors.IsNotFound(getErr) {
+			return fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name)
+		}
+		return fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr)
+	}
+	status, found, statusErr := unstructured.NestedString(sk.Object, "status", "status")
+	if statusErr != nil {
+		return fmt.Sprintf("Nodewright %s: failed to read status.status: %v", name, statusErr)
+	}
+	if !found {
+		return fmt.Sprintf("Nodewright %s: missing status.status", name)
+	}
+	if status != nodewrightCompleteState {
+		return fmt.Sprintf("Nodewright %s: status=%s (want %s)", name, status, nodewrightCompleteState)
+	}
+	return ""
 }
 
 // expectedNodewrightNames derives the set of Nodewright CR names that this
@@ -468,12 +598,49 @@ func extractNodewrightNamesFromManifest(content []byte) []string {
 // deployer assumption. If the upstream chart ever renames the component,
 // this constant moves with it.
 func verifyDRAKubeletPluginReady(ctx *validators.Context, namespace string) error {
+	// Upfront structural gate (mirrors verifyNodewrightReady's CRD discovery
+	// gate): fail fast on an AMBIGUOUS suffix match. More than one DaemonSet
+	// carrying the "-kubelet-plugin" role suffix is a deterministic
+	// misconfiguration (a stale DaemonSet from a prior deploy under a different
+	// fullname, or two charts) that retrying for the full poll budget cannot
+	// resolve — so surface it immediately instead of after GPUReadinessTimeout.
+	// Zero-match and not-yet-ready status stay in the polled path below: the
+	// DaemonSet's pods churn to 0/0 across a GPU-node reboot, which the dwell is
+	// there to ride through.
+	matches, _, err := listDRAKubeletPluginDaemonSets(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	if len(matches) > 1 {
+		return ambiguousDRAKubeletPluginError(namespace, matches)
+	}
+
+	// Poll until the kubelet-plugin DaemonSet is fully rolled out continuously
+	// for the stability window, or the budget elapses. See pkg/defaults
+	// GPUReadiness* for sizing.
+	var healthyName string
+	return pollUntilStable(ctx,
+		fmt.Sprintf("DRA kubelet-plugin DaemonSet in namespace %s", namespace),
+		func() error {
+			name, probeErr := draKubeletPluginProbe(ctx, namespace)
+			healthyName = name
+			return probeErr
+		},
+		func() {
+			fmt.Printf("  DaemonSet %s/%s: healthy (stable ≥%s)\n", namespace, healthyName, gpuReadinessStabilityWindow)
+		})
+}
+
+// listDRAKubeletPluginDaemonSets lists DaemonSets in the namespace and returns
+// those whose name carries the chart's "-kubelet-plugin" role suffix, plus the
+// names of every DaemonSet seen (for the not-found diagnostic).
+func listDRAKubeletPluginDaemonSets(ctx *validators.Context, namespace string) ([]appsv1.DaemonSet, []string, error) {
 	verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 
 	dsList, err := ctx.Clientset.AppsV1().DaemonSets(namespace).List(verifyCtx, metav1.ListOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to list DaemonSets in namespace %s", namespace), err)
 	}
 
@@ -485,38 +652,57 @@ func verifyDRAKubeletPluginReady(ctx *validators.Context, namespace string) erro
 			matches = append(matches, ds)
 		}
 	}
+	return matches, seenNames, nil
+}
+
+// ambiguousDRAKubeletPluginError reports more than one DaemonSet matching the
+// kubelet-plugin role suffix — a deterministic misconfiguration, not a transient.
+func ambiguousDRAKubeletPluginError(namespace string, matches []appsv1.DaemonSet) error {
+	matchedNames := make([]string, 0, len(matches))
+	for _, ds := range matches {
+		matchedNames = append(matchedNames, ds.Name)
+	}
+	return errors.New(errors.ErrCodeInternal,
+		fmt.Sprintf("ambiguous: %d DaemonSets in namespace %s match kubelet-plugin role suffix %q: %s",
+			len(matches), namespace, draKubeletPluginSuffix, formatNames(matchedNames)))
+}
+
+// draKubeletPluginProbe does one readiness pass: it locates the kubelet-plugin
+// DaemonSet by name suffix and reports nil (plus the DaemonSet name) when it is
+// fully rolled out, or an error describing the unhealthy/missing state. The
+// ambiguous (>1 match) case is caught fail-fast upstream in
+// verifyDRAKubeletPluginReady; the guard here only fires if a second matching
+// DaemonSet appears mid-poll.
+func draKubeletPluginProbe(ctx *validators.Context, namespace string) (string, error) {
+	matches, seenNames, err := listDRAKubeletPluginDaemonSets(ctx, namespace)
+	if err != nil {
+		return "", err
+	}
 
 	switch len(matches) {
 	case 0:
-		return errors.New(errors.ErrCodeNotFound,
+		return "", errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("no kubelet-plugin DaemonSet (name suffix %q) found in namespace %s (DaemonSets in namespace: %s)",
 				draKubeletPluginSuffix, namespace, formatNames(seenNames)))
 	case 1:
 		// proceed
 	default:
-		matchedNames := make([]string, 0, len(matches))
-		for _, ds := range matches {
-			matchedNames = append(matchedNames, ds.Name)
-		}
-		return errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("ambiguous: %d DaemonSets in namespace %s match kubelet-plugin role suffix %q: %s",
-				len(matches), namespace, draKubeletPluginSuffix, formatNames(matchedNames)))
+		return "", ambiguousDRAKubeletPluginError(namespace, matches)
 	}
 
 	ds := matches[0]
 	if ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady == 0 {
-		return errors.New(errors.ErrCodeInternal,
+		return ds.Name, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DaemonSet %s/%s: no ready kubelet-plugin pods scheduled (%d/%d pods ready)",
 				namespace, ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
 	if ds.Status.NumberReady < ds.Status.DesiredNumberScheduled {
-		return errors.New(errors.ErrCodeInternal,
+		return ds.Name, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DaemonSet %s/%s: not healthy: %d/%d pods ready",
 				namespace, ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
 
-	fmt.Printf("  DaemonSet %s/%s: healthy\n", namespace, ds.Name)
-	return nil
+	return ds.Name, nil
 }
 
 func formatNames(names []string) string {
