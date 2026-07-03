@@ -65,11 +65,11 @@ spec:
   {{- end }}
   # Tuning
   packages:
-    # Check for kernel being >= to 6.14.0-1018 and if not install
+    # Check for kernel being >= to 6.17.0-1019 and if not install
     nvidia-setup-kernel:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.2.2"
-      containerSHA: sha256:76913a5deff9513f348dd4b7d66cbca9ea1dd22df63baa4ac2f6b2fa7e93664e
+      version: "0.4.0"
+      containerSHA: sha256:187c56c6d2104d48c7632c293def79c714b04dd85c587b7793818ceba9d4fb04
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}
@@ -104,13 +104,13 @@ spec:
         service: {{ $cust.service }}
         {{- end }}
       dependsOn:
-        nvidia-setup-kernel: "0.2.2"
+        nvidia-setup-kernel: "0.4.0"
 
     # Full setup after kernel is in place
     nvidia-setup-full:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.2.2"
-      containerSHA: sha256:76913a5deff9513f348dd4b7d66cbca9ea1dd22df63baa4ac2f6b2fa7e93664e
+      version: "0.4.0"
+      containerSHA: sha256:187c56c6d2104d48c7632c293def79c714b04dd85c587b7793818ceba9d4fb04
       interrupt:
         type: reboot
       resources:

@@ -13,7 +13,7 @@ Each reserved GPU pool follows a daily cycle, with every phase acquiring the *sa
 
 The phases are independently scheduled (cron edges), not chained: the per-reservation lease — plus a [pre-batch guard](#pre-batch-guard) — keeps them from overlapping, so a crashed or overrunning phase never orphans the reservation. A hosted GitHub Actions job is capped at the runner's timeout (hours, not a whole working day), so a single lease-holding run cannot span the day; the lease only needs to cover the brief transition windows, and the steady-state daytime cluster's existence is tracked by its stable, reservation-tagged name rather than a continuously held run.
 
-> What ships today is the **night side** (the nightly batch), the **lease + dispatch surface** every phase builds on, DC2's **per-intent selection**, **daytime provision-and-hold / teardown mechanics**, and **pre-batch guard**, and DC8's **day side** — the `uat-daytime.yaml` scheduler that stands up one human-facing deployment per cloud each morning and tears it down each evening. The served-inference *workload* an `intent=inference` cluster runs (`phase_serve`) is still owned by DC3.
+> What ships today is the **night side** (the nightly batch), the **lease + dispatch surface** every phase builds on, DC2's **per-intent selection**, **daytime provision-and-hold / teardown mechanics**, and **pre-batch guard**, DC8's **day side** — the `uat-daytime.yaml` scheduler that stands up one human-facing deployment per cloud each morning and tears it down each evening, and DC3's **served-inference CUJ** — the `phase_serve` step an `intent=inference` run now exercises on the deployed inference stack (deploy a `DynamoGraphDeployment`, hit its OpenAI-compatible endpoint, assert a completion).
 
 ## Requesting a UAT run
 
@@ -47,9 +47,27 @@ The nightly batch and the daytime handoff/teardown call this *same* surface, so 
 
 The `intent` input (`training` — the default — or `inference`) selects both the recipe criteria and the per-intent test config the pipeline consumes: `tests/uat/<cloud>/tests/h100-<intent>-config.yaml`. The two configs are siblings with the same `AICRConfig` shape; they differ only in `spec.recipe.criteria.intent`/`platform` (`training`/`kubeflow` vs `inference`/`dynamo`) and the stable evidence push prefix. Both intents provision from the *same* `cluster-config.yaml` — the GPU pool count comes from the reservation row and the system/CPU pools stay per-run dynamic (GCP autoscales; AWS is fixed at `desired: 3`), so nothing about the cluster shape is hardcoded per intent.
 
-The nightly CUJ steps are intent-aware: the training TrainJob step runs only for `intent=training`. The served-inference workload (`phase_serve`) is owned by DC3 and out of scope here, so an `intent=inference` run stands up and validates the inference stack (Dynamo platform, KAI scheduler, DRA driver) and signs evidence, but does not yet exercise a served endpoint.
+The CUJ phase is intent-selected — exactly one of `phase_train` / `phase_serve` runs, mirroring the runner's intent-aware `run all`:
+
+- **`intent=training` → `phase_train`.** Submits a Kubeflow `TrainJob`, waits for completion, captures logs (`demos/cuj1-training.md`).
+- **`intent=inference` → `phase_serve`** (DC3, #1276). Deploys a Dynamo `DynamoGraphDeployment` (KAI queue + DRA `ResourceClaim` + Frontend/decode-Worker graph) onto the already-validated inference stack, waits for the pods to become ready, port-forwards the frontend, issues a sample OpenAI-compatible `/v1/chat/completions` request, and asserts a non-empty completion — the inference counterpart of `phase_train`, at CUJ1 parity (`demos/cuj2-inference.md`). It **fails closed** (non-zero exit, captured pod logs/events under `serve-logs/`) on a non-ready deployment or an invalid completion, mirroring `phase_train`'s `Failed=True` handling. The served workload's node scheduling and model are overridable via `SERVE_*` env vars; the defaults track `demos/workloads/inference/vllm-agg.yaml`.
+
+In both cases the signed evidence bundle is emitted by the earlier conformance step (which validates the full deployed stack), so the CUJ step exercises the deployment while evidence already covers it. `phase_conformance` also cross-checks that the recipe's declared `platform` matches the deployed component set — the platform operator's workload CRD (`dynamographdeployments.nvidia.com` for `dynamo`, `trainjobs.trainer.kubeflow.org` for `kubeflow`) must be installed — because the emitted bundle's TestGrid tab coordinate is derived from the author-declared platform and is otherwise cluster-unverifiable (the fingerprint does not capture the platform dimension).
 
 An unrecognized `intent` (or a missing sibling config) fails closed in the pipeline's `Validate inputs` step before any provisioning.
+
+### Nightly intent cadence (both intents, both clouds)
+
+The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both intents on every reservation**, so training *and* inference are exercised nightly on both AWS and GCP. The set of intents per reservation is data — the `nightly-intents` list in `infra/uat/reservations.yaml` (empty defaults to `[training]`):
+
+| Reservation | Cloud | `nightly-intents` | Nightly CUJs |
+|-------------|-------|-------------------|--------------|
+| `aws-h100` | AWS | `[training, inference]` | `phase_train` + `phase_serve` |
+| `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` |
+
+**How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown, waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
+
+**Cost / tuning.** Listing both intents roughly **doubles a reservation's nightly cell count** (each version now runs two full cluster lifecycles). If the batch [time-box](#the-version-matrix) is exceeded the oldest cells are dropped first, so `main`+freshest always land; tune `previous_n` (fewer release versions) or `deadline_offset_hours` to fit the window. A released version that predates a platform (e.g. `dynamo`) fails its inference cell's recipe resolution as a genuine regression signal — drop `previous_n` if that coverage is premature. Changing which intents a reservation runs is a registry edit — no workflow change; the `uatbroker` committed-registry test pins the launch set.
 
 ## Cluster lifecycles
 
@@ -57,7 +75,7 @@ The `lifecycle` input selects one of three cluster lifecycles, all sharing the r
 
 | Lifecycle | Cluster name | Provisions | Deploys | CUJ | Teardown at job end |
 |-----------|--------------|-----------|---------|-----|---------------------|
-| `nightly` (default) | `aicr-uat-<run_id>` (AWS) / `aicr-<run_id>` (GCP) — run-scoped | yes | yes | yes (prep→install→validate→train/verify) | yes (unless `skip_delete`) |
+| `nightly` (default) | `aicr-uat-<run_id>` (AWS) / `aicr-<run_id>` (GCP) — run-scoped | yes | yes | yes (prep→install→validate→train\|serve→verify) | yes (unless `skip_delete`) |
 | `daytime-up` | `aicr-uat-day-<reservation>` (AWS) / `aicr-day-<reservation>` (GCP) — **stable** | yes | yes (prep→install) | no | **no — holds** |
 | `daytime-down` | same stable name | no | no | no | yes (tears down the held cluster) |
 
@@ -126,7 +144,7 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model":"<model>","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-Once DC3's `phase_serve` lands, the served workload is deployed automatically as part of `daytime-up`; until then it is a one-command manual apply on the held cluster.
+On the held daytime cluster this served workload is a one-command manual apply (above): `daytime-up` deploys the inference *platform* and holds, so a human drives the serve step by hand. The automated `phase_serve` (DC3) runs in the **nightly** `intent=inference` CUJ, not `daytime-up`, which by design stops after install to hand the cluster off.
 
 ## Pre-batch guard
 
@@ -183,7 +201,6 @@ The values in this file are identifiers, **not secrets** — a reservation-id gr
 
 ## Roadmap
 
-What ships now is the lease, the data-driven dispatch surface, the time-boxed nightly version matrix (`main` + previous-N stable releases, release cells installing released artifacts), superseded-run surfacing (the controller flags a dropped cell inline; the `uat-superseded-notice.yaml` observer catches ad-hoc dropped runs), per-intent selection, the daytime provision-and-hold / teardown / pre-batch-guard mechanics, and the DC8 [daytime human-access scheduler](#daytime-human-access-deployment) (`uat-daytime.yaml`) — one held deployment per cloud each working day, torn down before the batch, with out-of-band access. Still to come:
+What ships now is the lease, the data-driven dispatch surface, the time-boxed nightly version matrix (`main` + previous-N stable releases, release cells installing released artifacts), superseded-run surfacing (the controller flags a dropped cell inline; the `uat-superseded-notice.yaml` observer catches ad-hoc dropped runs), per-intent selection, the DC3 [served-inference CUJ](#selecting-the-intent) (`phase_serve` — deploys a `DynamoGraphDeployment` and asserts a served completion; both training and inference run nightly on both clouds, serialized as extra version-matrix cells under the one cron), the daytime provision-and-hold / teardown / pre-batch-guard mechanics, and the DC8 [daytime human-access scheduler](#daytime-human-access-deployment) (`uat-daytime.yaml`) — one held deployment per cloud each working day, torn down before the batch, with out-of-band access. Still to come:
 
-- **Served-inference CUJ (DC3).** The `phase_serve` step an `intent=inference` run — nightly *and* the daytime inference cluster — will exercise on the deployed inference stack, deploying the served `DynamoGraphDeployment` automatically instead of the current manual apply.
 - **Both flavors per cloud during the day.** Blocked on capacity — one reservation cannot hold both a daytime cluster and the nightly batch at once. Pulls once more infra lands.
