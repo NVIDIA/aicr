@@ -131,6 +131,16 @@ const (
 	HealthComputeTimeout = 5 * time.Minute
 )
 
+// Tuning status computation timeouts.
+const (
+	// TuningComputeTimeout is the upper bound for a single tuning.Compute run
+	// across the whole recipe catalog when the caller's context has no deadline.
+	// Like health computation it is hermetic and in-memory (no network, no
+	// cluster); the ceiling absorbs a cold metadata-store load plus a manifest
+	// read per leaf.
+	TuningComputeTimeout = 5 * time.Minute
+)
+
 // Server timeouts for HTTP server configuration.
 const (
 	// ServerReadTimeout is the maximum duration for reading request headers.

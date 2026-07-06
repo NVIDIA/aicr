@@ -43,6 +43,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/health"
+	"github.com/NVIDIA/aicr/tools/internal/docgen"
 )
 
 // matrixFile is the basename of the rendered Markdown matrix written under
@@ -83,7 +84,7 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 	}
 
 	mdPath := filepath.Join(outDir, matrixFile)
-	if err := writeRendered(mdPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, func(w io.Writer) error {
+	if err := docgen.WriteRendered(mdPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, func(w io.Writer) error {
 		return renderMatrix(w, report, markdownOptions{
 			AICRVersion:   aicrVersion,
 			Deterministic: deterministic,
@@ -97,7 +98,7 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 	// point -summary-out at $GITHUB_STEP_SUMMARY, which earlier steps may have
 	// already written to, matching the file's documented append (`>>`) contract.
 	if summaryOut != "" {
-		if err := writeRendered(summaryOut, os.O_CREATE|os.O_APPEND|os.O_WRONLY, func(w io.Writer) error {
+		if err := docgen.WriteRendered(summaryOut, os.O_CREATE|os.O_APPEND|os.O_WRONLY, func(w io.Writer) error {
 			return renderDetail(w, report)
 		}); err != nil {
 			return err
@@ -105,25 +106,5 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 	}
 
 	fmt.Printf("health: wrote %s (%d recipes)\n", mdPath, len(report.Combos))
-	return nil
-}
-
-// writeRendered opens path with the given flags and invokes render against it,
-// checking the writable Close() error per the repo's file-handle rule. A
-// render error is returned as-is (renderMatrix/renderDetail already return a
-// structured ErrCodeInternal error, so re-wrapping would double-code it).
-func writeRendered(path string, flag int, render func(io.Writer) error) error {
-	f, err := os.OpenFile(path, flag, 0o644) //nolint:gosec // path is a trusted operator flag or runner-supplied ($GITHUB_STEP_SUMMARY), never attacker-controlled
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "open "+path, err)
-	}
-	renderErr := render(f)
-	closeErr := f.Close()
-	if renderErr != nil {
-		return renderErr
-	}
-	if closeErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "close "+path, closeErr)
-	}
 	return nil
 }

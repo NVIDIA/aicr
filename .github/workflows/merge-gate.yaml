@@ -54,6 +54,7 @@ jobs:
       deps: ${{ steps.changes.outputs.deps }}
       renovate: ${{ steps.changes.outputs.renovate }}
       bom: ${{ steps.changes.outputs.bom }}
+      tuning: ${{ steps.changes.outputs.tuning }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -90,6 +91,21 @@ jobs:
               - 'recipes/registry.yaml'
               - 'tools/bom/**'
               - 'pkg/bom/**'
+            tuning:
+              # Inputs that can change the committed tuning-status table
+              # WITHOUT tripping pkg/tuning's TestCompute_Structure — which runs
+              # in the `tests` job on any non-docs change and already asserts
+              # every row's service, accelerator, profile, setup-name and
+              # tuning-name. That test is version-agnostic, so the only table
+              # changes it misses are a manifest pin version bump, a
+              # renderer/extractor change, or a hand edit of the committed doc.
+              # Structural changes driven by overlays, mixins, registry or
+              # pkg/recipe already fail that test, so they are deliberately NOT
+              # listed here (keeping this gate off unrelated recipe PRs).
+              - 'docs/integrator/components/nodewright.md'
+              - 'recipes/components/nodewright-customizations/**'
+              - 'pkg/tuning/**'
+              - 'tools/tuning/**'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.
       #
@@ -379,6 +395,43 @@ jobs:
       - run: echo "No BOM/registry changes — BOM freshness check not required"
 
   # ---------------------------------------------------------------------------
+  # Tuning-status doc freshness — ensures the committed tuning table in
+  # docs/integrator/components/nodewright.md matches the recipe catalog and the
+  # nodewright package pins, on PRs touching its inputs (mirrors bom-freshness).
+  # ---------------------------------------------------------------------------
+
+  tuning-freshness:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.tuning == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+      - name: Verify committed tuning-status table is up to date
+        env:
+          GOFLAGS: -mod=vendor
+        # `make tuning-check` regenerates the table into a temp dir and splices
+        # it into the doc, then fails if the working tree differs — so a stale
+        # committed table (or missing splice markers) fails closed here.
+        run: make tuning-check
+
+  tuning-freshness-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.tuning != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No tuning-status inputs changed — freshness check not required"
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — the single required status check
   # ---------------------------------------------------------------------------
 
@@ -400,6 +453,8 @@ jobs:
       - verify-renovate-skip
       - bom-freshness
       - bom-freshness-skip
+      - tuning-freshness
+      - tuning-freshness-skip
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
