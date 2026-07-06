@@ -1,0 +1,49 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Version-pin exemptions: componentRefs whose overlay/mixin version pin is
+# INTENTIONALLY different from the component's registry defaultVersion.
+#
+# This file is repository-only policy data, deliberately NOT embedded into
+# the aicr binary (see recipes/data.go) and not part of the runtime recipe
+# data model. It is loaded and validated by internal/versionpins and
+# consumed from a repository checkout by dev/CI tooling: the version-pin
+# guard test (pkg/recipe/version_pin_guard_test.go) and, once #1611 wires
+# it, the BOM generator (tools/bom) — which must read this policy and
+# recipes/registry.yaml from the same checkout.
+#
+# Add an entry ONLY when an overlay must legitimately run a different chart
+# version than the registry default (e.g. a platform validated against an
+# older chart). Do NOT exempt a component whose only consumer diverges —
+# that leaves the registry default (and therefore the BOM,
+# docs/user/container-images.md) advertising a version no recipe installs,
+# the precise failure the guard exists to prevent.
+#
+# expectedPin/expectedDefault bind an exemption to ONE specific divergence:
+# if either the recipe's pin or the registry default later moves, the guard
+# fails so the divergence is re-reviewed and re-justified rather than a
+# new, unvetted version silently inheriting the old blessing. reason must
+# explain why the divergence is intentional and cite an issue/PR.
+apiVersion: aicr.run/v1alpha2
+kind: VersionPinExemptions
+exemptions:
+  - source: aks
+    component: kube-prometheus-stack
+    expectedPin: "83.7.0"
+    expectedDefault: "84.4.0"
+    reason: >-
+      AKS is pinned to chart 83.7.0 to match its validated working cluster
+      state (#700); the registry default (84.4.0) tracks the base/EKS/GKE
+      line and is installed by every non-AKS recipe, so the BOM's default
+      is not fictional.

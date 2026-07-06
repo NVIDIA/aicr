@@ -17,8 +17,11 @@ package recipe
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/NVIDIA/aicr/internal/versionpins"
 )
 
 // TestOverlayVersionPinsMatchRegistry guards the version-management model so
@@ -42,11 +45,16 @@ import (
 //
 // The invariant enforced here: every overlay/mixin componentRefs version/tag
 // MUST equal the component's registry defaultVersion/defaultTag, unless the
-// divergence is explicitly declared in versionPinExemptions with a reason.
-// This makes the registry default the single source of truth: a component
-// bump must update the registry default (which the BOM reads) and every
-// overlay that pins it, or CI fails. Undeclared drift is a hard failure;
-// declared divergences are, by definition, not silent.
+// divergence is explicitly declared in recipes/version-pin-exemptions.yaml
+// with a reason. This makes the registry default the single source of truth:
+// a component bump must update the registry default (which the BOM reads) and
+// every overlay that pins it, or CI fails. Undeclared drift is a hard
+// failure; declared divergences are, by definition, not silent.
+//
+// The exemption table is loaded (and statically validated — required fields,
+// duplicates, pin != default) by internal/versionpins from the shared
+// declarative file, so tools/bom can consume the same policy once #1611
+// wires it into the BOM.
 func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 	ctx := context.Background()
 
@@ -59,31 +67,21 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 		t.Fatalf("loadMetadataStore: %v", err)
 	}
 
+	// The test binary runs with the package directory as cwd, so the
+	// repository's recipes/ tree is two levels up.
+	exemptions, err := versionpins.Load(ctx, filepath.Join("..", "..", "recipes", versionpins.FileName))
+	if err != nil {
+		t.Fatalf("versionpins.Load: %v", err)
+	}
+
 	// Track which exemptions actually fire so a stale entry (e.g. after a pin
-	// is re-aligned) fails the test instead of silently rotting.
-	usedExemption := make(map[pinKey]bool, len(versionPinExemptions))
-	exemptByKey := make(map[pinKey]versionPinExemption, len(versionPinExemptions))
-	for _, e := range versionPinExemptions {
-		k := pinKey{source: e.source, component: e.component}
-		if _, dup := exemptByKey[k]; dup {
-			t.Errorf("duplicate versionPinExemptions entry for source=%q component=%q",
-				e.source, e.component)
-		}
-		if e.reason == "" {
-			t.Errorf("versionPinExemptions entry for source=%q component=%q has no reason",
-				e.source, e.component)
-		}
-		if e.expectedPin == "" || e.expectedDefault == "" {
-			t.Errorf("versionPinExemptions entry for source=%q component=%q must set both "+
-				"expectedPin and expectedDefault so drift within the exemption is caught",
-				e.source, e.component)
-		}
-		if e.expectedPin == e.expectedDefault {
-			t.Errorf("versionPinExemptions entry for source=%q component=%q has expectedPin == "+
-				"expectedDefault (%q); an exemption documents a DIVERGENCE — delete it instead",
-				e.source, e.component, e.expectedPin)
-		}
-		exemptByKey[k] = e
+	// is re-aligned) fails the test instead of silently rotting. Static
+	// validation (duplicates, empty fields, pin == default) already happened
+	// in versionpins.Load.
+	usedExemption := make(map[pinKey]bool, len(exemptions))
+	exemptByKey := make(map[pinKey]versionpins.Exemption, len(exemptions))
+	for _, e := range exemptions {
+		exemptByKey[pinKey{source: e.Source, component: e.Component}] = e
 	}
 
 	checked := 0
@@ -140,16 +138,16 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 				// no longer describes reality — fail so the author re-reviews
 				// (and re-cites) rather than letting a new divergence ride the
 				// old exemption.
-				if pin != e.expectedPin || def != e.expectedDefault {
-					t.Errorf("out-of-date versionPinExemptions entry for %s/%s: exemption "+
+				if pin != e.ExpectedPin || def != e.ExpectedDefault {
+					t.Errorf("out-of-date exemption entry for %s/%s: recipes/%s "+
 						"blesses pin=%q vs default=%q, but the recipe now has %s=%q vs default=%q.\n"+
 						"  Update the exemption's expectedPin/expectedDefault and re-justify the "+
 						"divergence, or re-align the pin. See issue #1424.",
-						source, ref.Name, e.expectedPin, e.expectedDefault, field, pin, def)
+						source, ref.Name, versionpins.FileName, e.ExpectedPin, e.ExpectedDefault, field, pin, def)
 					continue
 				}
 				t.Logf("exempted divergence: %s/%s pins %s=%q vs registry default %q — %s",
-					source, ref.Name, field, pin, def, e.reason)
+					source, ref.Name, field, pin, def, e.Reason)
 				continue
 			}
 
@@ -158,8 +156,8 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 				"  The BOM (docs/user/container-images.md) renders the registry default, so it would\n"+
 				"  advertise %q while this recipe installs %q. Re-align the pin to the registry default\n"+
 				"  (or bump both together). If the divergence is intentional, add an entry to\n"+
-				"  versionPinExemptions in version_pin_guard_test.go with a justification. See issue #1424.",
-				source, ref.Name, field, pin, def, ref.Name, def, pin)
+				"  recipes/%s with a justification. See issue #1424.",
+				source, ref.Name, field, pin, def, ref.Name, def, pin, versionpins.FileName)
 		}
 	}
 
@@ -184,8 +182,8 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 	}
 	sort.Strings(stale)
 	for _, s := range stale {
-		t.Errorf("stale versionPinExemptions entry %q: the pin now matches the registry "+
-			"default (or was removed). Delete the exemption.", s)
+		t.Errorf("stale exemption entry %q in recipes/%s: the pin now matches the registry "+
+			"default (or was removed). Delete the exemption.", s, versionpins.FileName)
 	}
 
 	// Sole-consumer enforcement: an exemption is only safe if the registry
@@ -194,8 +192,8 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 	// recipe installs — the exact fiction the guard exists to prevent, merely
 	// made explicit rather than fixed. Resolve every overlay once and require
 	// each exemption's registry default to appear, enabled, in some result.
-	if len(versionPinExemptions) > 0 {
-		assertExemptionDefaultsInstalled(ctx, t, store, reg)
+	if len(exemptions) > 0 {
+		assertExemptionDefaultsInstalled(ctx, t, store, reg, exemptions)
 	}
 
 	// A registry/overlay refactor that stops surfacing any pinned refs would
@@ -205,7 +203,7 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 			"verify loadMetadataStore and the recipes/overlays/ directory")
 	}
 	t.Logf("verified %d pinned componentRefs against registry defaults (%d declared exemptions)",
-		checked, len(versionPinExemptions))
+		checked, len(exemptions))
 }
 
 // assertExemptionDefaultsInstalled resolves every overlay with criteria and
@@ -214,7 +212,10 @@ func TestOverlayVersionPinsMatchRegistry(t *testing.T) {
 // "do NOT exempt a component whose only consumer diverges" policy: if the
 // diverging overlay were the sole consumer, the registry default — which the
 // BOM advertises — would be installed by zero recipes.
-func assertExemptionDefaultsInstalled(ctx context.Context, t *testing.T, store *MetadataStore, reg *ComponentRegistry) {
+func assertExemptionDefaultsInstalled(
+	ctx context.Context, t *testing.T, store *MetadataStore, reg *ComponentRegistry, exemptions []versionpins.Exemption,
+) {
+
 	t.Helper()
 
 	// Resolve every overlay carrying criteria once; reuse across exemptions.
@@ -234,8 +235,8 @@ func assertExemptionDefaultsInstalled(ctx context.Context, t *testing.T, store *
 			"policy; verify recipes/overlays/")
 	}
 
-	for _, e := range versionPinExemptions {
-		cfg := reg.Get(e.component)
+	for _, e := range exemptions {
+		cfg := reg.Get(e.Component)
 		if cfg == nil {
 			continue // unknown component is reported elsewhere
 		}
@@ -254,7 +255,7 @@ func assertExemptionDefaultsInstalled(ctx context.Context, t *testing.T, store *
 
 		installed := false
 		for _, r := range results {
-			ref := r.GetComponentRef(e.component)
+			ref := r.GetComponentRef(e.Component)
 			if ref == nil || !ref.IsEnabled() {
 				continue
 			}
@@ -289,11 +290,11 @@ func assertExemptionDefaultsInstalled(ctx context.Context, t *testing.T, store *
 			}
 		}
 		if !installed {
-			t.Errorf("unsafe versionPinExemptions entry for %s/%s: the registry default %q is "+
+			t.Errorf("unsafe exemption entry for %s/%s in recipes/%s: the registry default %q is "+
 				"installed by no resolved recipe, so the BOM advertises a version nothing installs.\n"+
 				"  Either re-align the pin (delete the exemption) or move the registry default to a "+
 				"version some recipe actually runs. See issue #1424.",
-				e.source, e.component, def)
+				e.Source, e.Component, versionpins.FileName, def)
 		}
 	}
 }
@@ -303,37 +304,4 @@ func assertExemptionDefaultsInstalled(ctx context.Context, t *testing.T, store *
 type pinKey struct {
 	source    string
 	component string
-}
-
-// versionPinExemption documents a componentRef whose overlay/mixin version pin
-// is INTENTIONALLY different from the component's registry defaultVersion.
-//
-// Add an entry ONLY when an overlay must legitimately run a different chart
-// version than the registry default (e.g. a platform validated against an
-// older chart). Do NOT exempt a component whose only consumer diverges — that
-// leaves the registry default (and therefore the BOM) advertising a version no
-// recipe installs, the precise failure this guard exists to prevent.
-//
-// expectedPin/expectedDefault bind the exemption to ONE specific divergence:
-// if either the recipe's pin or the registry default later moves, the guard
-// fails so the divergence is re-reviewed and re-justified rather than a new,
-// unvetted version silently inheriting the old blessing.
-type versionPinExemption struct {
-	source          string // overlay/mixin metadata.name that declares the pin
-	component       string // componentRef name
-	expectedPin     string // the exact divergent version/tag this exemption blesses
-	expectedDefault string // the registry default at the time the exemption was written
-	reason          string // why the divergence is intentional (cite an issue/PR)
-}
-
-var versionPinExemptions = []versionPinExemption{
-	{
-		source:          "aks",
-		component:       "kube-prometheus-stack",
-		expectedPin:     "83.7.0",
-		expectedDefault: "84.4.0",
-		reason: "AKS is pinned to chart 83.7.0 to match its validated working cluster " +
-			"state (#700); the registry default (84.4.0) tracks the base/EKS/GKE line and " +
-			"is installed by every non-AKS recipe, so the BOM's default is not fictional.",
-	},
 }

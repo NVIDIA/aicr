@@ -518,8 +518,10 @@ registry default. A version bump must update the registry default (the
 BOM reads it) **and** every pin that sets it, or CI fails. If an
 overlay must legitimately run a different chart version (e.g. a
 platform validated against an older chart), add an entry to
-`versionPinExemptions` with a justification — a declared divergence is
-not a silent one. Do **not** exempt a component whose only consumer
+`recipes/version-pin-exemptions.yaml` with a justification — a declared
+divergence is not a silent one. The file is loaded and validated by
+`internal/versionpins`, the shared source consumed by the guard test
+today and by `tools/bom` once #1611 lands. Do **not** exempt a component whose only consumer
 diverges; that reinstates the exact fiction the guard prevents.
 
 ## Common Pitfalls

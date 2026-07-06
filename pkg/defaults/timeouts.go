@@ -742,6 +742,14 @@ const (
 	// swaps a file between walk-time validation and the read at
 	// consumption time.
 	MaxExternalDataFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
+
+	// MaxVersionPinExemptionsBytes caps the size of the repository's
+	// version-pin exemption file (recipes/version-pin-exemptions.yaml) read
+	// by internal/versionpins. The file holds a handful of small entries — 1 MiB
+	// is generous headroom while bounding the read (the loader takes an
+	// arbitrary path, e.g. via tools/bom -repo-root) before the bytes are
+	// allocated into memory.
+	MaxVersionPinExemptionsBytes int64 = 1 * 1024 * 1024 // 1 MiB
 )
 
 // Server-wide handler defaults.

@@ -1,6 +1,6 @@
 # Recipe Data Directory
 
-Recipe metadata and component configurations for the AICR bundler. Files in this directory are embedded into the CLI binary and API server at compile time.
+Recipe metadata and component configurations for the AICR bundler. Runtime recipe data is embedded into the CLI binary and API server at compile time — the embed patterns in `data.go` explicitly select what ships (overlays, mixins, the registry, the validator catalog, component values/manifests, and checks). Repository-only files sit deliberately outside those patterns and never ship: `version-pin-exemptions.yaml` (dev/CI version-pin policy) and `evidence/` (published recipe-evidence pointers).
 
 ## Quick Reference
 
@@ -16,6 +16,8 @@ Recipe metadata and component configurations for the AICR bundler. Files in this
 ```
 recipes/
 ├── registry.yaml                  # Component registry (Helm & Kustomize configs)
+├── version-pin-exemptions.yaml    # Blessed overlay/mixin version divergences (NOT embedded; dev/CI only)
+├── evidence/                      # Published recipe-evidence pointers (NOT embedded)
 ├── overlays/                      # Recipe overlays (including base.yaml as root)
 ├── mixins/                        # Composable mixin fragments
 │   ├── os-ubuntu.yaml             # Ubuntu OS constraints
