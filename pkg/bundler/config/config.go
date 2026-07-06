@@ -256,6 +256,15 @@ type Config struct {
 	// that Helm/Argo CD/Flux cannot assess natively. Off by default so
 	// existing bundle output is unchanged; opt-in via --readiness-hooks. See #904.
 	readinessHooks bool
+
+	// bundlers is a positive filter on recipe component names (the
+	// `bundlers` query parameter on POST /v1/bundle): when non-empty, only
+	// the named components are bundled; every other enabled component is
+	// skipped as if disabled (its dependency edges are treated as satisfied
+	// externally). Empty means all enabled components. A name the recipe
+	// does not declare, or one the recipe/--set disabled, is rejected with
+	// ErrCodeInvalidRequest at bundle time. See #1531.
+	bundlers []string
 }
 
 // Getter methods for read-only access
@@ -470,6 +479,17 @@ func (c *Config) AppName() string {
 // opt-in via --readiness-hooks on the CLI. See #904.
 func (c *Config) ReadinessHooks() bool {
 	return c.readinessHooks
+}
+
+// Bundlers returns a copy of the positive component-name filter. Empty means
+// all enabled components are bundled. See #1531.
+func (c *Config) Bundlers() []string {
+	if c.bundlers == nil {
+		return nil
+	}
+	result := make([]string, len(c.bundlers))
+	copy(result, c.bundlers)
+	return result
 }
 
 // Validate checks if the Config has valid settings.
@@ -747,6 +767,23 @@ func WithAppName(name string) Option {
 func WithReadinessHooks(enabled bool) Option {
 	return func(c *Config) {
 		c.readinessHooks = enabled
+	}
+}
+
+// WithBundlers sets the positive component-name filter: only recipe
+// components named here are bundled; every other enabled component is
+// skipped exactly like a disabled one, so its dependency edges are pruned
+// as satisfied externally. Empty (or nil) means all enabled components.
+// Names that the recipe does not declare, or that are disabled by the
+// recipe or --set, are rejected with ErrCodeInvalidRequest at bundle time
+// rather than silently ignored. See #1531.
+func WithBundlers(names []string) Option {
+	return func(c *Config) {
+		if len(names) == 0 {
+			return
+		}
+		c.bundlers = make([]string, len(names))
+		copy(c.bundlers, names)
 	}
 }
 

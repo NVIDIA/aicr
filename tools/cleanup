@@ -66,7 +66,8 @@ has_tools kubectl
 
 # AICR-managed namespaces. Sourced from `defaultNamespace` entries in
 # recipes/registry.yaml plus child namespaces created at runtime by some
-# operators (e.g. kai-resource-reservation by kai-scheduler).
+# operators (e.g. kai-resource-reservation by kai-scheduler), and the
+# privileged-* variants Talos recipes install into (recipes/mixins/os-talos.yaml).
 AICR_NAMESPACES=(
     node-feature-discovery
     gpu-operator
@@ -84,6 +85,11 @@ AICR_NAMESPACES=(
     kueue-system
     kubeflow
     slinky
+    privileged-gpu-operator
+    privileged-network-operator
+    privileged-nvsentinel
+    privileged-nvidia-dra-driver-gpu
+    privileged-nodewright-operator
 )
 
 # CRD API-group suffixes owned by AICR components. Matched as substrings
@@ -113,6 +119,67 @@ ctx="$(kubectl config current-context 2>/dev/null || echo unknown)"
 msg "Target cluster context: ${ctx}"
 if $DRY_RUN; then
     msg "DRY-RUN mode — no changes will be applied."
+fi
+
+# Detect whether gpu-operator manages the NVIDIA kernel driver on this
+# cluster (driver.enabled=true — e.g. EKS; GKE COS is host-managed and
+# unaffected). The primary signal is the nvidia-driver-daemonset: it is the
+# concrete artifact of driver-managed mode, needs no extra tooling, and is
+# robust to release-name drift. Helm computed values (driver.enabled) are a
+# fallback for the window where the DaemonSet is not (yet) listable. Both
+# probes are read-only, so detection also runs under --dry-run. Fail-open:
+# if detection errors (no cluster access, apiserver timeout) the mode stays
+# unknown and cleanup proceeds without the warning. See #1553.
+DRIVER_MANAGED=false
+detect_driver_managed() {
+    local ds_ns rel_ns values
+    # Search cluster-wide by DaemonSet name (same discovery deploy.sh.tmpl
+    # uses): the operator namespace is not fixed — Talos recipes install
+    # gpu-operator into privileged-gpu-operator, not gpu-operator.
+    ds_ns="$(kubectl get daemonset -A \
+        -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' \
+        --request-timeout=15s 2>/dev/null | awk '{print $1}' || true)"
+    if [[ -n "$ds_ns" ]]; then
+        DRIVER_MANAGED=true
+        return 0
+    fi
+    command -v helm >/dev/null 2>&1 || return 0
+    # Resolve the gpu-operator release namespace dynamically for the same reason.
+    rel_ns="$(helm list -A 2>/dev/null | awk '$1 == "gpu-operator" {print $2; exit}' || true)"
+    [[ -z "$rel_ns" ]] && return 0
+    values="$(helm get values gpu-operator -n "$rel_ns" -a 2>/dev/null || true)"
+    [[ -z "$values" ]] && return 0
+    if command -v yq >/dev/null 2>&1; then
+        [[ "$(echo "$values" | yq '.driver.enabled' 2>/dev/null)" == "true" ]] && DRIVER_MANAGED=true
+    else
+        # No yq: accept `enabled: true` only at the first nesting level under a
+        # top-level `driver:` block (helm renders values with 2-space indents),
+        # so nested keys like driver.rdma.enabled cannot false-positive.
+        if echo "$values" | awk '/^driver:/{d=1; next} /^[^[:space:]]/{d=0} d && /^  enabled:[[:space:]]*true[[:space:]]*$/{found=1; exit} {next} END{exit !found}'; then
+            DRIVER_MANAGED=true
+        fi
+    fi
+    return 0
+}
+detect_driver_managed
+
+# Operator guidance for driver-managed clusters: uninstalling gpu-operator
+# can leave the nvidia_uvm kernel module wedged mid-unload on GPU nodes,
+# which breaks the NEXT install (driver validation Init:CrashLoopBackOff,
+# "failed to create device node nvidia-uvm") until the nodes are rebooted.
+# Automated cordon/drain/reboot is cloud-specific and out of scope. See #1553.
+print_driver_managed_guidance() {
+    log_warning "DRIVER-MANAGED cluster detected: gpu-operator installs the NVIDIA kernel driver (driver.enabled=true)."
+    log_warning "Uninstalling gpu-operator can leave the nvidia_uvm kernel module wedged mid-unload on GPU nodes."
+    log_warning "A subsequent install then fails driver validation (Init:CrashLoopBackOff, 'failed to create device node nvidia-uvm')."
+    log_warning "After cleanup, reboot the GPU nodes BEFORE reinstalling:"
+    log_warning "  1. kubectl cordon <gpu-node>   # each GPU node"
+    log_warning "  2. reboot the instances        # e.g. 'aws ec2 reboot-instances' on EKS, or your platform's mechanism"
+    log_warning "  3. wait for Ready, then: kubectl uncordon <gpu-node>"
+}
+
+if $DRIVER_MANAGED; then
+    print_driver_managed_guidance
 fi
 
 if ! $ASSUME_YES && ! $DRY_RUN; then
@@ -264,4 +331,8 @@ if $DRY_RUN; then
     msg "(dry-run — no changes applied)"
 else
     msg "Verify: 'kubectl get ns' and 'helm ls -A' should show no AICR remnants."
+fi
+if $DRIVER_MANAGED; then
+    msg "ACTION REQUIRED before reinstalling on this driver-managed cluster:"
+    print_driver_managed_guidance
 fi

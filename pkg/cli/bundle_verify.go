@@ -44,7 +44,7 @@ Trust levels:
   verified    Full chain verified: checksums, bundle attestation, binary attestation with NVIDIA CI identity
   attested    Chain verified but binary attestation missing or external data used
   unverified  Checksums valid, no attestation files (--attest was not used)
-  unknown     Missing checksums or attestation files
+  unknown     Missing/invalid checksums, or an attestation present but failing verification
 
 Examples:
 

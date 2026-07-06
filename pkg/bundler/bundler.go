@@ -798,7 +798,8 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 }
 
 // filterEnabledComponents resolves the set of components to bundle by applying
-// recipe-level overrides.enabled and bundle-time --set enabled toggles, then
+// recipe-level overrides.enabled, bundle-time --set enabled toggles, and the
+// positive bundlers component-name filter (config.WithBundlers, #1531), then
 // returns the enabled refs (with dangling dependency edges pruned) alongside
 // the deployment order filtered to those refs.
 //
@@ -843,6 +844,46 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 		}
 		enabledRefs = append(enabledRefs, ref)
 		enabledSet[ref.Name] = struct{}{}
+	}
+
+	// Apply the positive component-name filter (POST /v1/bundle ?bundlers=…,
+	// config.WithBundlers). Requested names must be declared AND enabled —
+	// an unknown name is a typo the operator needs to hear about, and a
+	// disabled one mirrors the --set re-enable rejection above (the recipe
+	// author disabled it because the platform provides it). Enabled
+	// components outside the requested set are skipped exactly like
+	// disabled ones, so the dependency-edge pruning below treats them as
+	// satisfied externally. See #1531.
+	if b.Config != nil {
+		if requested := b.Config.Bundlers(); len(requested) > 0 {
+			requestedSet := make(map[string]struct{}, len(requested))
+			for _, name := range requested {
+				if _, declared := declaredSet[name]; !declared {
+					declaredNames := make([]string, 0, len(recipeResult.ComponentRefs))
+					for _, ref := range recipeResult.ComponentRefs {
+						declaredNames = append(declaredNames, ref.Name)
+					}
+					return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"unknown component %q in bundlers filter; recipe declares: %s",
+						name, strings.Join(declaredNames, ", ")))
+				}
+				if _, enabled := enabledSet[name]; !enabled {
+					return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"component %q is disabled and cannot be selected via the bundlers filter", name))
+				}
+				requestedSet[name] = struct{}{}
+			}
+			kept := make([]recipe.ComponentRef, 0, len(requestedSet))
+			for _, ref := range enabledRefs {
+				if _, ok := requestedSet[ref.Name]; !ok {
+					slog.Info("skipping component excluded by bundlers filter", "component", ref.Name)
+					delete(enabledSet, ref.Name)
+					continue
+				}
+				kept = append(kept, ref)
+			}
+			enabledRefs = kept
+		}
 	}
 
 	if len(enabledRefs) == 0 {

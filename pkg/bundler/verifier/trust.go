@@ -27,7 +27,10 @@ import (
 type TrustLevel string
 
 const (
-	// TrustUnknown indicates missing attestation or checksum files.
+	// TrustUnknown indicates missing checksum files, or an attestation
+	// (bundle or binary) that is present but fails verification. A present
+	// binary attestation whose digest cannot be extracted, or that does not
+	// verify, is a hard failure — unknown, never a degraded attested (#1550).
 	TrustUnknown TrustLevel = "unknown"
 
 	// TrustUnverified indicates checksums are valid but no attestation files exist
@@ -202,8 +205,13 @@ func (r *VerifyResult) CheckPolicy(p Policy) (string, error) {
 // that verification reached the expected level:
 //   - verified: standard bundle with both attestations, no external data
 //   - attested: external data present (caps trust regardless of attestation chain)
-//   - unverified: no attestation files (--attest not used was used)
+//   - unverified: no attestation files (bundle created without --attest)
 //   - unknown: checksums failed or missing
+//
+// Note the max is computed from what the bundle CONTAINS, not what verified:
+// a bundle whose binary attestation is present but fails verification reports
+// TrustUnknown while its max achievable stays verified, so
+// --min-trust-level max correctly fails it.
 func (r *VerifyResult) MaxAchievableTrustLevel() TrustLevel {
 	if r == nil || !r.ChecksumsPassed {
 		return TrustUnknown

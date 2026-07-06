@@ -121,14 +121,16 @@ jobs:
           # (the generator carries no clock/random). A drift here means a
           # non-reproducible build — fail loudly rather than publish it.
           #
-          # No -allowlist: each source's class is already re-derived from its
-          # VERIFIED signer at GP2 ingest time and baked into meta.json, which
-          # is the trust gate. The generator's own -allowlist re-derivation is
-          # deferred until its loader (pkg/corroborate) is reconciled with the
-          # GP1 allowlist schema (recipes/evidence/allowlist.yaml uses
-          # identityPattern/source; the loader still expects identity).
-          ./bin/corroborate -in evidence -out _site
-          ./bin/corroborate -in evidence -out _site_check
+          # -allowlist re-derives each source's class from its VERIFIED signer
+          # against the in-tree GP1 allowlist — defense in depth on top of the
+          # class GP2 baked into meta.json at ingest time. The generator's
+          # loader (pkg/corroborate) delegates to the shared
+          # pkg/evidence/allowlist parser, so it reads the canonical
+          # identityPattern/source schema directly (#1505).
+          ./bin/corroborate -in evidence -out _site \
+            -allowlist recipes/evidence/allowlist.yaml
+          ./bin/corroborate -in evidence -out _site_check \
+            -allowlist recipes/evidence/allowlist.yaml
           if ! diff -r _site _site_check; then
             echo "::error::corroborate output is not reproducible (determinism gate failed)"
             exit 1
