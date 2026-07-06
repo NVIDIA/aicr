@@ -68,10 +68,10 @@ type RunMetaSigner struct {
 	Allowlisted bool   `json:"allowlisted"`
 }
 
-// readBoundedFile opens path and reads up to maxBytes, rejecting larger files
-// instead of allocating them (os.ReadFile would OOM on an attacker-influenced
-// path such as a /proc symlink or a network mount). Shared by the meta/CTRF
-// readers and the allowlist loader.
+// readBoundedFile opens path and reads up to maxRunFileBytes, rejecting
+// larger files instead of allocating them (os.ReadFile would OOM on an
+// attacker-influenced path such as a /proc symlink or a network mount).
+// Shared by the meta/CTRF readers.
 //
 // It refuses to follow symlinks and to read non-regular files (FIFOs, devices,
 // sockets): a hostile input tree could otherwise point a meta.json at /proc or
@@ -81,7 +81,7 @@ type RunMetaSigner struct {
 // the regular-file check then validates the opened descriptor itself, not the
 // path. It preserves the open error classification (not-found vs symlink vs
 // permission/other) so callers can tell a missing run apart from an I/O failure.
-func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+func readBoundedFile(path string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) //nolint:gosec // O_NOFOLLOW rejects symlinks atomically; descriptor validated below; operator-supplied input tree / allowlist
 	if err != nil {
 		switch {
@@ -104,11 +104,11 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, path+" is not a regular file")
 	}
 
-	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, int64(maxRunFileBytes)+1))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "read "+path, err)
 	}
-	if int64(len(data)) > maxBytes {
+	if int64(len(data)) > maxRunFileBytes {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, path+" exceeds size limit")
 	}
 	return data, nil
@@ -116,7 +116,7 @@ func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
 
 // readRunMeta parses a meta.json file.
 func readRunMeta(path string) (*RunMeta, error) {
-	data, err := readBoundedFile(path, maxRunFileBytes)
+	data, err := readBoundedFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func readRunMeta(path string) (*RunMeta, error) {
 
 // readCTRF parses a ctrf/<phase>.json file.
 func readCTRF(path string) (*ctrf.Report, error) {
-	data, err := readBoundedFile(path, maxRunFileBytes)
+	data, err := readBoundedFile(path)
 	if err != nil {
 		return nil, err
 	}

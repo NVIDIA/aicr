@@ -263,8 +263,9 @@ func loadRun(metaPath string, allowlist *Allowlist) (*signerRun, error) {
 		return nil, err
 	}
 	// Schema gate, fail-closed on an incompatible major — symmetric with
-	// LoadAllowlist (classify.go), which rejects an unsupported allowlist
-	// schemaVersion because a future schema may change the trust semantics. A
+	// LoadAllowlist (the shared pkg/evidence/allowlist loader), which rejects an
+	// unsupported allowlist schemaVersion because a future schema may change the
+	// trust semantics. A
 	// meta/v2 that repurposes a field (e.g. signer/allowlisted) must not be parsed
 	// under v1 assumptions, so a different major is skipped (errSkipRun) rather
 	// than aborting the whole dashboard. An empty version is tolerated by design
@@ -283,7 +284,7 @@ func loadRun(metaPath string, allowlist *Allowlist) (*signerRun, error) {
 	class := Class(meta.Signer.Class)
 	allowlisted := meta.Signer.Allowlisted
 	if allowlist != nil {
-		derived, ok := allowlist.Classify(meta.Signer.Issuer, meta.Signer.Identity)
+		derived, ok := classifySigner(allowlist, meta.Signer.Issuer, meta.Signer.Identity)
 		if (derived != class || ok != allowlisted) && meta.Signer.Class != "" {
 			slog.Warn("meta.json signer class disagrees with allowlist; using allowlist",
 				"signer", meta.Signer.Identity, "metaClass", meta.Signer.Class,

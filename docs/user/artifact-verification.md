@@ -30,9 +30,9 @@ each one subsumes the guarantees of the levels beneath it.
 | Level | Name | What it guarantees |
 |-------|------|--------------------|
 | 4 | `verified` | Checksums valid, bundle attestation verified, binary attestation verified with identity pinned to NVIDIA CI, and no external data |
-| 3 | `attested` | Bundle attestation cryptographically verified, but the chain is incomplete — the binary attestation is missing or external `--data` was used. A binary attestation that *fails* verification also reports `attested` diagnostically but makes `aicr verify` exit nonzero |
+| 3 | `attested` | Bundle attestation cryptographically verified, but the chain is incomplete — the binary attestation is missing or external `--data` was used |
 | 2 | `unverified` | Checksums valid, but no attestation files exist (the bundle was created without `--attest`) |
-| 1 | `unknown` | Checksums are missing/invalid, or the bundle attestation fails verification |
+| 1 | `unknown` | Checksums are missing/invalid, or an attestation (bundle or binary) is present but *fails* verification — a present binary attestation that does not verify is a hard failure, not a degraded `attested` |
 
 The ordering matters for enforcement: `verified` > `attested` > `unverified` >
 `unknown`. A bundle that uses external data can never exceed `attested`, and a

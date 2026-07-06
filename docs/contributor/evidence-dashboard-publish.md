@@ -80,12 +80,12 @@ in `merge-gate.yaml`.
   the repository attribute). It is least-privilege on the resource side
   (`objectViewer` on one bucket); GP3's `infra/evidence-dashboard` may tighten
   the subject condition further.
-- The build does not pass `-allowlist` to the generator. Each source's class
-  is already re-derived from its verified signer at GP2 ingest time and baked
-  into `meta.json` (the trust gate); the generator's own allowlist
-  re-derivation is deferred until `pkg/corroborate`'s loader is reconciled with
-  the GP1 allowlist schema (`recipes/evidence/allowlist.yaml` uses
-  `identityPattern`/`source`; the loader still expects an `identity` field).
+- The build passes `-allowlist recipes/evidence/allowlist.yaml` to the
+  generator, re-deriving each source's class from its verified signer against
+  the in-tree GP1 allowlist — defense in depth on top of the class GP2 baked
+  into `meta.json` at ingest time. `pkg/corroborate`'s loader delegates to
+  the shared `pkg/evidence/allowlist` parser, so it reads the canonical
+  `identityPattern`/`source` schema directly (#1505).
 - The Pages site is served at the custom domain `validation.aicr.run`: the
   publish workflow reasserts it on every run by writing a `CNAME` file into
   the site artifact (a deploy whose artifact omits `CNAME` would otherwise
