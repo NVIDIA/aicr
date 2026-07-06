@@ -81,11 +81,10 @@ func extractPackagePins(manifest []byte) (map[string]string, error) {
 	if entryIndent < 0 {
 		return nil, errors.New(errors.ErrCodeInternal, "packages: block has no entries")
 	}
-	// Assumes a 2-space YAML indent step (true for all current nodewright
-	// manifests). A violation is caught fail-loud: a recognized image whose
-	// version: line is missed at this offset errors in flush rather than
-	// silently blanking the pin.
-	fieldIndent := entryIndent + 2
+	// fieldIndent — the entry's direct-child indent — is detected from the first
+	// field line encountered rather than assuming a fixed step, so a manifest
+	// using any indent width still parses instead of silently yielding no pins.
+	fieldIndent := -1
 
 	pins := map[string]string{}
 	var curImage, curVersion string
@@ -129,6 +128,16 @@ func extractPackagePins(manifest []byte) (map[string]string, error) {
 			curImage, curVersion = "", ""
 			continue
 		}
+		if ind <= entryIndent {
+			continue
+		}
+		// A line deeper than the entry key belongs to the current entry. The
+		// first such line fixes the direct-child indent; image/version are read
+		// only there, so nested sub-blocks (dependsOn/configMap/…), which are
+		// deeper still, are ignored regardless of the manifest's indent width.
+		if fieldIndent == -1 {
+			fieldIndent = ind
+		}
 		if ind == fieldIndent {
 			if v, ok := strings.CutPrefix(t, "image:"); ok {
 				curImage = strings.TrimSpace(v)
@@ -150,17 +159,23 @@ func indentOf(line string) int {
 
 // classifyPins maps extracted image→version pins into the Setup and Tuning
 // columns. Setup is the nvidia-setup pin; Tuning is nvidia-tuned or
-// nvidia-tuning-gke (a manifest ships at most one). Unrecognized images yield
-// zero-value pins (rendered "-").
-func classifyPins(pins map[string]string) (setup, tuning PackagePin) {
+// nvidia-tuning-gke. A manifest carrying both tuning packages is ambiguous and
+// errors (fail-loud, matching the rest of this package) rather than letting one
+// silently win. Unrecognized images yield zero-value pins (rendered "-").
+func classifyPins(pins map[string]string) (setup, tuning PackagePin, err error) {
 	if v, ok := pins["nvidia-setup"]; ok {
 		setup = PackagePin{Name: "nvidia-setup", Version: v}
 	}
-	if v, ok := pins["nvidia-tuned"]; ok {
-		tuning = PackagePin{Name: "nvidia-tuned", Version: v}
+	tunedVer, hasTuned := pins["nvidia-tuned"]
+	gkeVer, hasGKE := pins["nvidia-tuning-gke"]
+	switch {
+	case hasTuned && hasGKE:
+		return PackagePin{}, PackagePin{}, errors.New(errors.ErrCodeInternal,
+			"manifest carries both nvidia-tuned and nvidia-tuning-gke; expected at most one tuning package")
+	case hasTuned:
+		tuning = PackagePin{Name: "nvidia-tuned", Version: tunedVer}
+	case hasGKE:
+		tuning = PackagePin{Name: "nvidia-tuning-gke", Version: gkeVer}
 	}
-	if v, ok := pins["nvidia-tuning-gke"]; ok {
-		tuning = PackagePin{Name: "nvidia-tuning-gke", Version: v}
-	}
-	return setup, tuning
+	return setup, tuning, nil
 }

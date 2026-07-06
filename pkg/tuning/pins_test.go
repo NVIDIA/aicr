@@ -48,6 +48,20 @@ func TestExtractPackagePins_Synthetic(t *testing.T) {
 			want: map[string]string{"nvidia-setup": "0.2.2", "nvidia-tuned": "0.3.0"},
 		},
 		{
+			// Regression: a 4-space indent step must still parse (image/version
+			// are at entryIndent+4, not +2) and must still ignore dependsOn.
+			name: "four-space indent step still parses and ignores dependsOn",
+			manifest: `spec:
+    packages:
+        nvidia-tuned:
+            image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+            version: "0.3.0"
+            dependsOn:
+                nvidia-setup: "9.9.9"
+{{- end }}`,
+			want: map[string]string{"nvidia-tuned": "0.3.0"},
+		},
+		{
 			name: "gke tuning key with gke image",
 			manifest: `spec:
   packages:
@@ -150,18 +164,27 @@ func TestClassifyPins(t *testing.T) {
 		pins       map[string]string
 		wantSetup  PackagePin
 		wantTuning PackagePin
+		wantErr    bool
 	}{
-		{"full", map[string]string{"nvidia-setup": "0.2.2", "nvidia-tuned": "0.3.0"},
-			PackagePin{"nvidia-setup", "0.2.2"}, PackagePin{"nvidia-tuned", "0.3.0"}},
+		{"full", map[string]string{"nvidia-setup": "0.4.0", "nvidia-tuned": "0.3.0"},
+			PackagePin{"nvidia-setup", "0.4.0"}, PackagePin{"nvidia-tuned", "0.3.0"}, false},
 		{"gke", map[string]string{"nvidia-tuning-gke": "0.1.2"},
-			PackagePin{}, PackagePin{"nvidia-tuning-gke", "0.1.2"}},
+			PackagePin{}, PackagePin{"nvidia-tuning-gke", "0.1.2"}, false},
 		{"bcm", map[string]string{"nvidia-setup": "0.3.0"},
-			PackagePin{"nvidia-setup", "0.3.0"}, PackagePin{}},
-		{"noop", map[string]string{"shellscript": "1.1.1"}, PackagePin{}, PackagePin{}},
+			PackagePin{"nvidia-setup", "0.3.0"}, PackagePin{}, false},
+		{"noop", map[string]string{"shellscript": "1.1.1"}, PackagePin{}, PackagePin{}, false},
+		{"both tuning packages error", map[string]string{"nvidia-tuned": "0.3.0", "nvidia-tuning-gke": "0.1.2"},
+			PackagePin{}, PackagePin{}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s, tu := classifyPins(tt.pins)
+			s, tu, err := classifyPins(tt.pins)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
 			if s != tt.wantSetup || tu != tt.wantTuning {
 				t.Errorf("got (%+v, %+v), want (%+v, %+v)", s, tu, tt.wantSetup, tt.wantTuning)
 			}

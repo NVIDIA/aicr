@@ -117,7 +117,11 @@ func Compute(ctx context.Context, opts Options) (*Report, error) {
 			return nil, errors.PropagateOrWrap(perr,
 				errors.ErrCodeInternal, "failed to extract pins from "+manifestPath)
 		}
-		setup, tuning := classifyPins(pins)
+		setup, tuning, clsErr := classifyPins(pins)
+		if clsErr != nil {
+			return nil, errors.PropagateOrWrap(clsErr,
+				errors.ErrCodeInternal, "failed to classify pins from "+manifestPath)
+		}
 
 		accelCell := valueOrAny(string(leaf.Entry.Criteria.Accelerator))
 		row := Row{
