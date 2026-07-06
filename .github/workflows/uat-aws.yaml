@@ -105,10 +105,12 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      # v0.4.23 — required for the .eks-nested cluster-config schema; the
-      # prior pin (v0.2.6) read .compute.nodeGroups.* directly and failed
+      # v0.4.27 — required for node-group taints in the cluster-config schema
+      # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
+      # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
+      # support; v0.2.6 read .compute.nodeGroups.* directly and failed
       # Terraform parse with "object with 1 attribute eks".
-      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:57fd2bf77055f8e0090bd7b8e099e7f11fd874f0b5764057439d11f1cd32a8b1"
+      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
