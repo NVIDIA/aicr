@@ -21,7 +21,7 @@ build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
   goreleaser: 'v2.16.0'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
-  ko: 'v0.19.0'
+  ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
   crane: 'v0.21.7'
   # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
