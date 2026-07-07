@@ -15,7 +15,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -59,6 +61,51 @@ func TestGKETCPXOPreflightApplies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := gkeTCPXOPreflightApplies(tt.variant, tt.accelerator, tt.service); got != tt.want {
 				t.Errorf("gkeTCPXOPreflightApplies() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEmitDiagnosticBlock(t *testing.T) {
+	tests := []struct {
+		name         string
+		label        string
+		block        string
+		wantLines    int // number of "diagnostics" records emitted
+		wantContains []string
+	}{
+		{
+			name:         "multi-line block emits one record per line",
+			label:        "worker diagnostics",
+			block:        "line one\nline two\nline three",
+			wantLines:    3,
+			wantContains: []string{"line one", "line two", "line three", "worker diagnostics"},
+		},
+		{
+			name:         "empty block emits a single (empty) marker",
+			label:        "launcher logs",
+			block:        "   \n  ",
+			wantLines:    1,
+			wantContains: []string{"(empty)", "launcher logs"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})))
+			defer slog.SetDefault(prev)
+
+			emitDiagnosticBlock(tt.label, tt.block)
+
+			out := buf.String()
+			if got := strings.Count(out, "msg=diagnostics"); got != tt.wantLines {
+				t.Errorf("emitted %d diagnostic records, want %d\noutput:\n%s", got, tt.wantLines, out)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(out, want) {
+					t.Errorf("output missing %q\noutput:\n%s", want, out)
+				}
 			}
 		})
 	}
