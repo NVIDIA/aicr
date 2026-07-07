@@ -41,6 +41,11 @@ func newFakeFetcher() *fakeFetcher {
 	}
 }
 
+// addGet mirrors ResourceFetcher.Fetch(apiVersion, ...); only Deployments
+// (apps/v1) are fetched by name in the current corpus, so apiVersion never
+// varies today — keep it for interface parity.
+//
+//nolint:unparam // apiVersion is constant today; retained for Fetch parity.
 func (f *fakeFetcher) addGet(apiVersion, kind, namespace, name string, obj map[string]any) {
 	key := apiVersion + "/" + kind + "/" + namespace + "/" + name
 	f.gets[key] = obj
@@ -143,6 +148,20 @@ func pod(name, phase string, labels map[string]any) map[string]any {
 	}
 }
 
+// terminating marks a pod fixture as being garbage-collected by setting a
+// deletionTimestamp, turning it into an orphan a negative assertion must skip.
+func terminating(p map[string]any) map[string]any {
+	p["metadata"].(map[string]any)["deletionTimestamp"] = "2026-07-07T19:30:00Z"
+	return p
+}
+
+// nodeLost marks a pod fixture as NodeLost — the state the node controller
+// assigns after a pod's node goes unreachable.
+func nodeLost(p map[string]any) map[string]any {
+	p["status"].(map[string]any)["reason"] = "NodeLost"
+	return p
+}
+
 // TestRunChainsawTestInProcess covers the three load-bearing paths of the
 // in-process executor: a healthy fixture passes both steps; a missing
 // resource fails the assert; a forbidden shape (a Pending pod) fires the
@@ -195,6 +214,41 @@ func TestRunChainsawTestInProcess(t *testing.T) {
 				})
 			},
 			wantPassed: true,
+		},
+		{
+			name: "error skips terminating ghost pod",
+			yaml: readinessYAML,
+			setup: func(f *fakeFetcher) {
+				f.addGet("apps/v1", "Deployment", "ns", "foo", healthyDeployment())
+				f.addList("v1", "Pod", "ns", []map[string]any{
+					terminating(pod("ghost", "Pending", nil)),
+				})
+			},
+			wantPassed: true,
+		},
+		{
+			name: "error skips NodeLost ghost pod",
+			yaml: readinessYAML,
+			setup: func(f *fakeFetcher) {
+				f.addGet("apps/v1", "Deployment", "ns", "foo", healthyDeployment())
+				f.addList("v1", "Pod", "ns", []map[string]any{
+					nodeLost(pod("ghost", "Pending", nil)),
+				})
+			},
+			wantPassed: true,
+		},
+		{
+			name: "error still fires on a live pod beside a ghost",
+			yaml: readinessYAML,
+			setup: func(f *fakeFetcher) {
+				f.addGet("apps/v1", "Deployment", "ns", "foo", healthyDeployment())
+				f.addList("v1", "Pod", "ns", []map[string]any{
+					terminating(pod("ghost", "Pending", nil)),
+					pod("live", "Pending", nil),
+				})
+			},
+			wantPassed: false,
+			wantErr:    true,
 		},
 	}
 	for _, tt := range tests {
@@ -381,6 +435,70 @@ spec:
 			if elapsed >= defaults.AssertRetryInterval {
 				t.Fatalf("terminal eval error was retried (took %s >= AssertRetryInterval %s) — #1252 regression",
 					elapsed, defaults.AssertRetryInterval)
+			}
+		})
+	}
+}
+
+// TestIsTerminatingOrLost covers the orphan-pod filter that keeps a negative
+// assertion from firing on ghosts left behind by node churn (#uat-aws).
+func TestIsTerminatingOrLost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		obj  map[string]any
+		want bool
+	}{
+		{"live running pod", pod("p", "Running", nil), false},
+		{"live pending pod", pod("p", "Pending", nil), false},
+		{"terminating pod", terminating(pod("p", "Pending", nil)), true},
+		{"node-lost pod", nodeLost(pod("p", "Unknown", nil)), true},
+		{"empty deletionTimestamp is not terminating", func() map[string]any {
+			p := pod("p", "Running", nil)
+			p["metadata"].(map[string]any)["deletionTimestamp"] = ""
+			return p
+		}(), false},
+		{"no metadata or status", map[string]any{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isTerminatingOrLost(tt.obj); got != tt.want {
+				t.Errorf("isTerminatingOrLost = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDescribePodStatus verifies the diagnostic suffix appended to a
+// "forbidden shape matched" failure so operators can triage from the report.
+func TestDescribePodStatus(t *testing.T) {
+	t.Parallel()
+	waitingPod := map[string]any{
+		"status": map[string]any{
+			"phase": "Running",
+			"containerStatuses": []any{
+				map[string]any{"state": map[string]any{"running": map[string]any{}}},
+				map[string]any{"state": map[string]any{"waiting": map[string]any{"reason": "CrashLoopBackOff"}}},
+			},
+		},
+		"spec": map[string]any{"nodeName": "gpu-node-1"},
+	}
+	tests := []struct {
+		name string
+		obj  map[string]any
+		want string
+	}{
+		{"phase only", pod("p", "Pending", nil), " (phase=Pending)"},
+		{"phase, waiting reason and node", waitingPod, " (phase=Running, waiting=CrashLoopBackOff, node=gpu-node-1)"},
+		{"non-pod resource yields no suffix", healthyDeployment(), ""},
+		{"empty object yields empty suffix", map[string]any{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := describePodStatus(tt.obj); got != tt.want {
+				t.Errorf("describePodStatus = %q, want %q", got, tt.want)
 			}
 		})
 	}

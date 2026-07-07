@@ -24,6 +24,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -136,6 +137,9 @@ func checkTCPXOOnNode(ctx context.Context, clientset kubernetes.Interface, names
 		Spec: corev1.PodSpec{
 			NodeName:      nodeName,
 			RestartPolicy: corev1.RestartPolicyNever,
+			// The probe only reads a hostPath and never calls the Kubernetes API,
+			// so don't mount an API token onto it (defense-in-depth with the hostPath).
+			AutomountServiceAccountToken: ptr.To(false),
 			// Tolerate whatever taints the GPU nodes carry. The probe is cheap
 			// (busybox + test) so we accept wherever scheduler places us on the
 			// target node.
