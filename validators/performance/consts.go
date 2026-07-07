@@ -22,4 +22,11 @@ const (
 	versionV1beta1           = "v1beta1"
 	keyName                  = "name"
 	checkNameNCCLAllReduceBW = "nccl-all-reduce-bw"
+
+	// nodeJobName is the name of both the NCCL worker replicatedJob and its
+	// primary container in testdata/{accelerator}/{service}/runtime.yaml.
+	// Referenced when locating the worker job to inject scheduling and when
+	// fetching worker container logs for failure diagnostics — keep in sync
+	// with the "node" replicatedJob/container in those templates.
+	nodeJobName = "node"
 )
