@@ -178,71 +178,41 @@ type Report struct {
 // Compute enumerates every leaf recipe in the catalog and scores each against
 // the structural signals, returning a deterministic Report.
 //
-// Enumeration uses MetadataStore.ListCatalog filtered to leaf overlays.
-// Resolution runs through a single shared recipe.Builder so the owner-stamp
-// invariant holds identically across combos. The returned Report carries
-// map-typed fields; callers serializing it must use
-// serializer.MarshalYAMLDeterministic.
+// Enumeration and hermetic resolution are delegated to recipe.ResolveLeaves,
+// which returns leaves sorted deterministically; Compute then grades each.
+// The returned Report carries map-typed fields; callers serializing it must
+// use serializer.MarshalYAMLDeterministic.
 func Compute(ctx context.Context, opts Options) (*Report, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaults.HealthComputeTimeout)
 	defer cancel()
 
-	store, err := recipe.LoadMetadataStoreFor(ctx, opts.Provider)
+	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{
+		Provider: opts.Provider,
+		Version:  opts.Version,
+		Filter:   opts.Filter,
+	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err,
-			errors.ErrCodeInternal, "failed to load recipe catalog for health computation")
+			errors.ErrCodeInternal, "failed to resolve recipe catalog for health computation")
 	}
-
-	// A single shared builder bound to the same provider used for enumeration,
-	// so every combo resolves against one consistent metadata store and carries
-	// the same owner stamp.
-	builder := recipe.NewBuilder(
-		recipe.WithVersion(opts.Version),
-		recipe.WithDataProvider(opts.Provider),
-	)
 
 	report := &Report{SchemaVersion: SchemaVersion}
-	for _, entry := range store.ListCatalog(opts.Filter) {
-		// Fail loud on cancellation rather than emitting a truncated report:
-		// once ctx is done, every remaining BuildFromCriteria short-circuits to
-		// ErrCodeTimeout (graded unknown), so a partial run would otherwise look
-		// byte-for-byte like a healthy catalog with transient unknowns.
-		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout,
-				"health computation canceled before completing the catalog", err)
-		}
-		if !entry.IsLeaf {
-			continue
-		}
-		report.Combos = append(report.Combos, computeCombo(ctx, builder, entry))
+	for _, leaf := range leaves {
+		report.Combos = append(report.Combos, computeCombo(leaf.Entry, leaf.Result, leaf.Err))
 	}
-
-	sort.Slice(report.Combos, func(i, j int) bool {
-		ci, cj := report.Combos[i].Criteria.String(), report.Combos[j].Criteria.String()
-		if ci != cj {
-			return ci < cj
-		}
-		return report.Combos[i].LeafOverlay < report.Combos[j].LeafOverlay
-	})
-
+	// ResolveLeaves already sorts by criteria string then leaf name — the exact
+	// order Compute produced before — so no re-sort is needed here.
 	return report, nil
 }
 
-// computeCombo scores a single leaf overlay's structural health.
-func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.CatalogEntry) ComboHealth {
+// computeCombo scores a single leaf overlay's structural health from an
+// already-resolved leaf (see recipe.ResolveLeaves).
+func computeCombo(entry recipe.CatalogEntry, result *recipe.RecipeResult, err error) ComboHealth {
 	structure := StructureHealth{
 		Dimensions: make(map[string]string),
 		Detail:     make(map[string]string),
 	}
 
-	// Resolve through the constraint-aware path with a hermetic satisfied stub.
-	// With every constraint reported satisfied this merges exactly the overlays
-	// BuildFromCriteria would (no cluster-dependent exclusions), so the resolves
-	// grade is unchanged — but the result additionally carries the merged
-	// Constraints and any ConstraintWarnings/ExcludedOverlays the constraint-aware
-	// path surfaces, which the constraints_wellformed signal reads. One build,
-	// no snapshot, no cluster.
-	result, err := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, satisfiedEvaluator)
 	state, detail := classifyResolve(err)
 	structure.Dimensions[DimResolves] = state
 	if detail != "" {
@@ -337,15 +307,6 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 	return StatusPass, ""
 }
 
-// satisfiedEvaluator is the hermetic stub fed to BuildFromCriteriaWithEvaluator
-// so the constraint-aware resolution path executes offline. It reports every
-// constraint satisfied, so no overlay is excluded and no ConstraintWarning is
-// emitted — the resolution exercises the merge/compose machinery without any
-// snapshot measurement, which is all the parse-only signal needs.
-func satisfiedEvaluator(recipe.Constraint) recipe.ConstraintEvalResult {
-	return recipe.ConstraintEvalResult{Passed: true}
-}
-
 // classifyConstraintsWellformed grades the constraints_wellformed dimension
 // hermetically — no snapshot, no cluster.
 //
@@ -368,8 +329,9 @@ func satisfiedEvaluator(recipe.Constraint) recipe.ConstraintEvalResult {
 // ConstraintWarnings or ExcludedOverlays, the dimension warns. NOTE: these
 // fields are populated only when the injected evaluator reports a constraint
 // failed or errored (see metadata_store.evaluateOverlayConstraints /
-// evaluateMixinConstraints). satisfiedEvaluator never does, so under the
-// current hermetic resolution the warn branch does not fire — composition
+// evaluateMixinConstraints). The always-satisfied evaluator used by
+// recipe.ResolveLeaves never does, so under the current hermetic resolution
+// the warn branch does not fire — composition
 // problems surface instead as resolve errors. The branch is retained because it
 // is the correct reading of a resolved result and is forward-compatible with a
 // future evaluator wired into this path; it is exercised by unit tests via

@@ -261,7 +261,7 @@ func TestClassifyConstraintsWellformed(t *testing.T) {
 			StatusFail, "bogus",
 		},
 		// The two warn cases below inject Metadata.ConstraintWarnings /
-		// ExcludedOverlays directly: with the production satisfiedEvaluator no
+		// ExcludedOverlays directly: with the always-satisfied evaluator no
 		// constraint fails, so these fields are never populated through Compute
 		// (see classifyConstraintsWellformed). Direct injection is the only way
 		// to exercise the warn branch, by design.
