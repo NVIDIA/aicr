@@ -20,6 +20,14 @@ run:
   timeout: 5m
   tests: true
   modules-download-mode: readonly
+  # Queue behind golangci-lint's machine-wide lock instead of failing with
+  # "parallel golangci-lint is running". With multiple concurrent sessions on
+  # one dev machine (e.g. several AI coding agents linting different
+  # worktrees), the fail-fast default aborts whole `make qualify` runs over a
+  # transient lock. Runs stay strictly serialized — same mutual exclusion,
+  # same cache safety — the second run just waits its turn. Inert in CI,
+  # where each job has an isolated runner.
+  allow-serial-runners: true
 
 # Output configuration
 output:
