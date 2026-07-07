@@ -39,6 +39,19 @@ const (
 	StatusOther = "other"
 )
 
+// IsFailingStatus reports whether a check or phase status must block progress
+// — i.e., fail a readiness gate or trip cross-phase fail-fast.
+//
+// Both StatusFailed and StatusOther are blocking. StatusOther means the check
+// could not be executed to a verdict (crash, OOM, timeout, or a Job that
+// reached a terminal Failed state with no inspectable pod). For a gate, an
+// inconclusive outcome must fail closed: treating it as non-blocking lets a
+// not-yet-ready cluster masquerade as passing. StatusSkipped stays
+// non-blocking (a legitimately inapplicable check, e.g. no GPU nodes present).
+func IsFailingStatus(status string) bool {
+	return status == StatusFailed || status == StatusOther
+}
+
 // Report is the top-level CTRF document.
 type Report struct {
 	// ReportFormat is the document format identifier. Always "CTRF".
