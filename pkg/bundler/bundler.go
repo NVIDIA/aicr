@@ -386,6 +386,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			VendorCharts:           b.Config.VendorCharts(),
 			ChartName:              b.Config.BundleChartName(),
 			AppName:                b.Config.AppName(),
+			OCIParentNamespace:     b.Config.OCIParentNamespace(),
 		}, nil
 
 	case config.DeployerArgoCD:

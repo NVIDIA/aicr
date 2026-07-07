@@ -1868,8 +1868,7 @@ bundles/
 
 Manifest-only components and mixed-component raw manifests are supported by `--deployer argocd-helm` via the path-based Application shape.
 
-**The bundle is URL-portable.** No `--repo` flag is needed (and is ignored if passed with `--deployer argocd-helm`). The same generated bundle bytes can be pushed to any chart-source backend the user chooses — Argo CD pulls from whichever URL the user supplies at install time via `helm install --set repoURL=...`. The publish location is *not* baked into the bundle artifact.
-
+**The bundle's `repoURL` defaults to the registry it was pushed to.** No `--repo` flag is needed (and is ignored if passed with `--deployer argocd-helm`). When pushed to an OCI registry, the parent namespace is baked into `values.yaml` as the default `repoURL` — a plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when deploying from a different registry.
 **Recommended deploy flow:**
 
 ```shell

@@ -104,3 +104,7 @@ compute:
           labels:
             nodeGroup: gpu-worker
             dedicated: user-workload
+          taints:
+            - key: skyhook.nvidia.com
+              value: runtime-required
+              effect: NoSchedule
