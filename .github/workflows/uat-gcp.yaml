@@ -69,15 +69,16 @@ jobs:
   uat-gcp:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    # Covers the uncapped non-UAT steps (build, validator image push, GKE
-    # provisioning, evidence upload) + the UAT phase steps (prep 15 + install 45
+    # Budget = uncapped non-UAT steps (build, validator image push, GKE
+    # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 60
     # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
-    # = up to 145) + the always()-run Destroy Cluster teardown. Only one of
-    # train/serve runs per intent, so the budget counts the larger (serve).
-    # The teardown MUST fit in this budget: a job-level timeout
-    # cancels pending always() steps, so an undersized cap would skip teardown
-    # and leak the GPU node.
-    timeout-minutes: 180
+    # = up to 160) + the always()-run Destroy Cluster teardown (3 retries, ~10m
+    # each = up to ~40m). Only one of train/serve runs per intent, so the budget
+    # counts the larger (serve). The teardown MUST fit in this budget: a job-level
+    # timeout cancels pending always() steps, so an undersized cap would skip
+    # teardown and leak the GPU node. 160 UAT + ~30 setup + ~40 teardown = ~230,
+    # so 240 leaves the teardown headroom even on a worst-case phase run.
+    timeout-minutes: 240
     permissions:
       contents: read
       actions: read
@@ -413,12 +414,13 @@ jobs:
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
-        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS) + the post-install
+        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS, 20m) + the post-install
         # readiness gate, which runs `aicr validate --phase deployment` until it
-        # passes (up to READINESS_TIMEOUT_SECONDS, 20m, spanning a nodewright
-        # reboot). Must exceed one helmfile attempt + the gate so the gate's own
+        # passes READINESS_CONSECUTIVE_PASSES times (up to READINESS_TIMEOUT_SECONDS,
+        # 30m, spanning nodewright reboots). Sized to exceed one helmfile attempt +
+        # the full gate window (20 + 30 = 50, + margin) so the gate's own
         # fail-closed path runs before GitHub Actions kills the step.
-        timeout-minutes: 45
+        timeout-minutes: 60
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr

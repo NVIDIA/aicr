@@ -335,6 +335,42 @@ const (
 	EvidenceIngestTimeout = 15 * time.Minute
 )
 
+// GPU deployment-readiness poll configuration. The deployment-phase Go checks
+// verifyNodewrightReady (Skyhook status.status == "complete") and
+// verifyDRAKubeletPluginReady (DRA kubelet-plugin DaemonSet fully rolled out)
+// poll their signal until it is healthy *continuously* for the stability
+// window, or the timeout elapses.
+//
+// Rationale: Skyhook node tuning reboots the GPU node one or more times (the
+// tuning packages carry interrupt: reboot) and re-opens status=in_progress
+// after each reboot and for each newly-joined GPU node. While a GPU node is
+// draining/rebooting/rejoining, the DRA kubelet-plugin DaemonSet also churns:
+// DesiredNumberScheduled drops to 0 (no schedulable GPU node) and NumberReady
+// lags on rejoin. Both signals are therefore non-monotonic during rollout, so a
+// single Get sample can land in a transient unhealthy window (e.g. mid-reboot)
+// and fail the whole deployment phase even though the node converges moments
+// later. The former one-shot Gets did exactly that; polling with a dwell rides
+// through the reboot the way the components' chainsaw health-check siblings
+// (retry-until-timeout, 5m) already do, hardened with a continuous-pass window
+// so a check cannot pass on a momentary lull between reboots.
+const (
+	// GPUReadinessPollInterval is the sleep between readiness-signal samples.
+	GPUReadinessPollInterval = 10 * time.Second
+
+	// GPUReadinessStabilityWindow is how long a signal must report healthy
+	// continuously before the check passes, absorbing the flaps a reboot
+	// introduces.
+	GPUReadinessStabilityWindow = 60 * time.Second
+
+	// GPUReadinessTimeout bounds a single check's poll loop. Sized to ride
+	// through a single tuning reboot (GPU node down + rejoin + kubelet ready,
+	// ~5m) plus the stability window, with margin — while staying well under
+	// CheckExecutionTimeout so the subsequent chainsaw asserts still fit the
+	// phase budget. Convergence spanning multiple reboots is absorbed by the
+	// UAT readiness gate's outer retry loop, which re-runs the phase.
+	GPUReadinessTimeout = 8 * time.Minute
+)
+
 // Chainsaw assertion configuration for component health checks.
 const (
 	// ChainsawAssertTimeout is the fallback per-Test budget for the
