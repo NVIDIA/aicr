@@ -1287,7 +1287,20 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 	sections := make([]string, len(pods.Items))
 	g, gctx := errgroup.WithContext(diagCtx)
 	g.SetLimit(perNodeFanoutConcurrency)
+enqueue:
 	for i := range pods.Items {
+		// Stop scheduling once the diagnostic budget (diagCtx) expires so a
+		// large failed job returns promptly instead of queuing work that would
+		// only run against an already-canceled context; note the shortfall in
+		// the remaining sections so the truncation is visible, not silent.
+		select {
+		case <-gctx.Done():
+			for j := i; j < len(pods.Items); j++ {
+				sections[j] = fmt.Sprintf("worker %s: diagnostics skipped: %v\n", pods.Items[j].Name, gctx.Err())
+			}
+			break enqueue
+		default:
+		}
 		p := &pods.Items[i]
 		g.Go(func() error {
 			sections[i] = workerPodDiagnostics(gctx, clientset, namespace, p)
