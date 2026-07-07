@@ -19,12 +19,9 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"slices"
 	"strings"
-	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,12 +52,6 @@ func parseNVregFromParams(content string) bool {
 }
 
 const (
-	// preflightNodeConcurrency caps the number of in-flight per-node probe
-	// Pods. Large enough to keep wall-clock low on the typical (<=64 node)
-	// GB200 cluster while bounding apiserver and scheduler pressure on
-	// larger clusters.
-	preflightNodeConcurrency = 16
-
 	// preflightPodNamePrefix is the generateName seed for the per-node probe
 	// pods. Short so the full name (including node hash + rand suffix) fits
 	// inside the 63-character DNS-1123 label limit on all realistic node
@@ -100,35 +91,12 @@ func preflightGB200NetNVregFlag(ctx *validators.Context, nodes []corev1.Node) er
 	slog.Info("NET preflight: checking NVreg_GrdmaPciTopoCheckOverride on GPU nodes",
 		"nodes", len(nodes))
 
-	var (
-		mu      sync.Mutex
-		missing []string
-	)
-	g, gctx := errgroup.WithContext(ctx.Ctx)
-	g.SetLimit(preflightNodeConcurrency)
-	for _, n := range nodes {
-		nodeName := n.Name
-		g.Go(func() error {
-			ok, err := checkNVregOnNode(gctx, ctx.Clientset, ctx.Namespace, nodeName)
-			if err != nil {
-				return aicrErrors.WrapWithContext(aicrErrors.ErrCodeInternal,
-					"NVreg preflight probe failed", err,
-					map[string]interface{}{"node": nodeName})
-			}
-			if !ok {
-				mu.Lock()
-				missing = append(missing, nodeName)
-				mu.Unlock()
-			}
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
+	missing, err := runPerNodeProbe(ctx, nodes, "NVreg", checkNVregOnNode)
+	if err != nil {
 		return err
 	}
 
 	if len(missing) > 0 {
-		slices.Sort(missing)
 		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("NVreg_GrdmaPciTopoCheckOverride=1 missing on GPU nodes: %s. %s",
 				strings.Join(missing, ", "), nvregDocsHint))
@@ -165,7 +133,7 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 			Containers: []corev1.Container{{
 				Name:    "probe",
 				Image:   defaults.ProbeImage,
-				Command: []string{"/bin/sh", "-c"},
+				Command: []string{shellBin, "-c"},
 				Args: []string{
 					"grep '" + grdmaPciTopoCheckOverridePattern + "' /host-proc-nvidia/params",
 				},

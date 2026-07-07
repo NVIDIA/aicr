@@ -26,8 +26,11 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	k8spod "github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -297,6 +300,19 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// and NCCL silently falls back to Socket.
 	if fabric == fabricEFA && gb200NetPreflightApplies(variant, accelerator, service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
+			return "", false, pfErr
+		}
+	}
+
+	// On GKE H100, the worker pods depend on GPUDirect-TCPXO host artifacts
+	// (nccl-env-profile.sh + FastRak libraries) laid down by the
+	// nccl-tcpxo-installer DaemonSet. On freshly provisioned nodes that
+	// DaemonSet may not have finished when this check runs; without the
+	// artifacts the workers never start sshd and the launcher mpirun fails
+	// with an opaque "pod failed" minutes later. Fail fast with an actionable
+	// error naming the unready nodes instead.
+	if gkeTCPXOPreflightApplies(variant, accelerator, service) {
+		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
 	}
@@ -1073,7 +1089,7 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 			continue
 		}
 		name, _, _ := unstructured.NestedString(jobMap, "name")
-		if name != "node" {
+		if name != nodeJobName {
 			continue
 		}
 		nodeJobFound = true
@@ -1164,9 +1180,24 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 	// Wait for pod to complete using helper method
 	err = podHelper.WaitForPodSuccess(ctx.Ctx, launcherPod, defaults.NCCLTrainJobTimeout)
 	if err != nil {
-		// Get logs even if pod failed for debugging
+		// Get logs even if pod failed for debugging. Surface (not discard) a
+		// log-fetch error: an empty launcher log with no explanation is exactly
+		// what makes a launcher "pod failed" impossible to root-cause after the
+		// fact. When the launcher log itself is empty/unreadable (mpirun aborted
+		// before writing, or the pod was torn down), the true cause is usually on
+		// the worker side (sshd never came up, TCPXO sidecar crashed), so pull
+		// worker diagnostics too and fold everything into the returned output.
 		slog.Info("Pod did not succeed, retrieving logs for debugging...")
-		logs, _ := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
+		logs, logErr := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
+		if logErr != nil {
+			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
+			logs = fmt.Sprintf("<launcher logs unavailable: %v>\n", logErr)
+		} else {
+			// Tail to the same cap as worker diagnostics — a verbose launcher
+			// (mpirun + NCCL debug) would otherwise balloon the failure payload.
+			logs = tailLines(strings.TrimSpace(logs), maxDiagLogLines) + "\n"
+		}
+		logs += collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
 		return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "pod failed to complete successfully", err)
 	}
 
@@ -1178,6 +1209,128 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 	}
 
 	return logs, nil
+}
+
+// maxDiagLogLines bounds how many trailing log lines are kept per worker
+// container in the failure diagnostics. The fatal error is almost always near
+// the end, so the tail is what matters; the cap keeps a verbose worker
+// (apt-get + NCCL debug output) from ballooning the returned failure payload.
+const maxDiagLogLines = 100
+
+// tailLines returns the last n lines of s (or all of s when it has n or fewer).
+func tailLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// collectNCCLWorkerDiagnostics gathers a compact, best-effort summary of the
+// NCCL worker pods to explain a launcher failure. Called only on the failure
+// path; every step is best-effort and never returns an error (a diagnostic
+// helper must not mask the original failure). It reports, per worker pod:
+// phase, each container's terminal state (reason/exitCode/message) or waiting
+// reason, and the tail of each container's logs. The
+// most common root cause — worker sshd never started (slow apt-get, missing
+// TCPXO env profile) or the tcpxo-daemon sidecar crashing — shows up here even
+// when the launcher's own log is empty.
+func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Interface, namespace string) string {
+	diagCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	selector := fmt.Sprintf("jobset.sigs.k8s.io/jobset-name=%s,jobset.sigs.k8s.io/replicatedjob-name=%s", ncclTrainJobName, nodeJobName)
+	pods, err := clientset.CoreV1().Pods(namespace).List(diagCtx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		slog.Warn("failed to list NCCL worker pods for diagnostics", "error", err)
+		return fmt.Sprintf("\n--- worker diagnostics unavailable: %v ---\n", err)
+	}
+	if len(pods.Items) == 0 {
+		return "\n--- no NCCL worker pods found (workers may never have been scheduled) ---\n"
+	}
+
+	// Fetch each worker's diagnostics concurrently with bounded concurrency:
+	// sequential per-pod log fetches would share the single DiagnosticTimeout,
+	// so on a large job later workers could exhaust it and lose diagnostics.
+	// Order is preserved via an indexed result slice; workerPodDiagnostics is
+	// best-effort and never errors, so g.Wait never cancels the group early.
+	sections := make([]string, len(pods.Items))
+	g, gctx := errgroup.WithContext(diagCtx)
+	g.SetLimit(perNodeFanoutConcurrency)
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		g.Go(func() error {
+			sections[i] = workerPodDiagnostics(gctx, clientset, namespace, p)
+			return nil
+		})
+	}
+	_ = g.Wait()
+
+	var b strings.Builder
+	b.WriteString("\n--- NCCL worker pod diagnostics ---\n")
+	for _, s := range sections {
+		b.WriteString(s)
+	}
+	return b.String()
+}
+
+// workerPodDiagnostics renders the diagnostic section for a single worker pod:
+// phase, each container's terminal/waiting/running state, and the tail of each
+// container's logs. Best-effort — never errors — so it
+// is safe to run under an errgroup that must not cancel on a single pod's log
+// fetch failing.
+func workerPodDiagnostics(ctx context.Context, clientset kubernetes.Interface, namespace string, p *v1.Pod) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "worker %s: phase=%s\n", p.Name, p.Status.Phase)
+	// Combine init (native sidecars like tcpxo-daemon) and main container
+	// statuses into a fresh slice — appending into p.Status.InitContainerStatuses
+	// directly could mutate the pod's backing array.
+	statuses := make([]v1.ContainerStatus, 0, len(p.Status.InitContainerStatuses)+len(p.Status.ContainerStatuses))
+	statuses = append(statuses, p.Status.InitContainerStatuses...)
+	statuses = append(statuses, p.Status.ContainerStatuses...)
+	for _, cs := range statuses {
+		switch {
+		case cs.State.Terminated != nil:
+			t := cs.State.Terminated
+			fmt.Fprintf(&b, "  container %s: terminated reason=%s exitCode=%d %s\n",
+				cs.Name, t.Reason, t.ExitCode, strings.TrimSpace(t.Message))
+		case cs.State.Waiting != nil:
+			w := cs.State.Waiting
+			fmt.Fprintf(&b, "  container %s: waiting reason=%s %s\n",
+				cs.Name, w.Reason, strings.TrimSpace(w.Message))
+		case cs.State.Running != nil:
+			fmt.Fprintf(&b, "  container %s: running (ready=%t)\n", cs.Name, cs.Ready)
+		}
+	}
+	// Best-effort container logs for every container in the pod spec (init
+	// sidecars like GKE's tcpxo-daemon plus the main "node" worker). Deriving
+	// the names from the spec — rather than hardcoding "node"/"tcpxo-daemon" —
+	// keeps this correct on every platform's launcher-failure path: a non-GKE
+	// worker has no tcpxo-daemon, so a hardcoded list would emit a spurious
+	// "container not found" line, and a template that renames its sidecar would
+	// silently lose that log. GetPodLogs streams the full log — a verbose
+	// NCCL/apt-get worker can emit thousands of lines — so tail each container
+	// to the last maxDiagLogLines. The tail (not the head) is kept because the
+	// fatal error is almost always the last output.
+	containers := make([]string, 0, len(p.Spec.InitContainers)+len(p.Spec.Containers))
+	for _, c := range p.Spec.InitContainers {
+		containers = append(containers, c.Name)
+	}
+	for _, c := range p.Spec.Containers {
+		containers = append(containers, c.Name)
+	}
+	for _, container := range containers {
+		logs, logErr := k8spod.GetPodLogs(ctx, clientset, namespace, p.Name, container)
+		if logErr != nil {
+			fmt.Fprintf(&b, "  [%s logs unavailable: %v]\n", container, logErr)
+			continue
+		}
+		if trimmed := strings.TrimSpace(logs); trimmed != "" {
+			fmt.Fprintf(&b, "  --- %s/%s logs (last %d lines) ---\n%s\n",
+				p.Name, container, maxDiagLogLines, tailLines(trimmed, maxDiagLogLines))
+		}
+	}
+	return b.String()
 }
 
 // waitForTrainingRuntime waits until the TrainingRuntime is visible via the

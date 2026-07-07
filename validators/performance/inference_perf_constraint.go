@@ -2044,7 +2044,7 @@ echo '%s'`,
 							// in the script so a value with shell metacharacters
 							// can't be command-substituted (see script above).
 							Env:     []v1.EnvVar{{Name: "AICR_MODEL", Value: model}},
-							Command: []string{"/bin/sh", "-c"},
+							Command: []string{shellBin, "-c"},
 							Args:    []string{script},
 						},
 					},

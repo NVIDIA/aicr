@@ -87,7 +87,22 @@ spec:
                   - --allow-run-as-root
                   - --mca
                   - plm_rsh_args
-                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  # Worker "node" pods install openssh-server and source the
+                  # TCPXO env profile at container start before sshd comes up,
+                  # so on freshly provisioned nodes sshd can lag the launcher by
+                  # minutes. mpirun's rsh IS the retry loop here: while sshd is
+                  # not listening the port is refused, so ssh retries ~1s apart
+                  # (ConnectTimeout only bounds the unreachable-IP case, not a
+                  # refusal), making the real ceiling ~= ConnectionAttempts
+                  # seconds. Size it to ~5 min so a slow worker bring-up retries
+                  # instead of aborting the launcher. Note: if a worker IP is
+                  # instead unreachable (never scheduled, NetworkPolicy drop),
+                  # each attempt burns the full ConnectTimeout (~11s), so 300
+                  # attempts could run ~55 min — but the outer NCCLTrainJobTimeout
+                  # (30 min) bounds that path, which then surfaces as a wait
+                  # timeout rather than an mpirun abort. Keep the two timeouts in
+                  # mind together before changing either.
+                  - -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ConnectionAttempts=300
                   # Restrict MPI OOB and UCX to control NIC — without hostNetwork,
                   # eth0 is the default/control NIC, eth1-eth8 are GPU NICs.
                   - --mca
