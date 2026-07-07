@@ -240,6 +240,12 @@ type Config struct {
 	// targetRevision` triple resolves against the real artifact. See #1019.
 	bundleChartName string
 
+	// ociParentNamespace is the OCI registry + repository path with the chart-name
+	// segment stripped (e.g. "oci://ghcr.io/nvidia" for "oci://ghcr.io/nvidia/my-bundle:v1").
+	// Baked into the argocd-helm bundle's root values.yaml as the default repoURL.
+	// Empty when --output targets a local directory. See #1342.
+	ociParentNamespace string
+
 	// appName overrides the parent Argo Application's `metadata.name` for
 	// the argocd-helm and argocd deployers. Empty means each deployer
 	// applies its own default ("aicr-stack" / "nvidia-stack"). When two
@@ -466,6 +472,12 @@ func (c *Config) OCISourceName() string {
 // deployer. Empty means "use the deployer's default". See #1019.
 func (c *Config) BundleChartName() string {
 	return c.bundleChartName
+}
+
+// OCIParentNamespace returns the OCI parent namespace baked into the
+// argocd-helm bundle's root values.yaml as the default repoURL. See #1342.
+func (c *Config) OCIParentNamespace() string {
+	return c.ociParentNamespace
 }
 
 // AppName returns the parent Application name override for the argocd-helm
@@ -744,6 +756,15 @@ func WithFluxNamespace(ns string) Option {
 func WithBundleChartName(name string) Option {
 	return func(c *Config) {
 		c.bundleChartName = name
+	}
+}
+
+// WithOCIParentNamespace sets the OCI parent namespace (registry + repo path
+// without the chart segment) baked into the argocd-helm bundle's values.yaml
+// as the default repoURL. Empty keeps repoURL as "" (local output). See #1342.
+func WithOCIParentNamespace(ns string) Option {
+	return func(c *Config) {
+		c.ociParentNamespace = ns
 	}
 }
 

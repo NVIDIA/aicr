@@ -416,7 +416,7 @@ func TestPrintArgoCDHelmOCIInstructions(t *testing.T) {
 			},
 			wantContain: []string{
 				"oci://ghcr.io/nvidia/aicr-bundle:v1.0.0",
-				"--set repoURL=oci://ghcr.io/nvidia",
+				"# repoURL defaults to oci://ghcr.io/nvidia",
 				"--namespace argocd",
 			},
 		},
@@ -430,7 +430,7 @@ func TestPrintArgoCDHelmOCIInstructions(t *testing.T) {
 			},
 			wantContain: []string{
 				"oci://registry.example.com/team/platform/aicr-bundle:0.42.0",
-				"--set repoURL=oci://registry.example.com/team/platform",
+				"# repoURL defaults to oci://registry.example.com/team/platform",
 			},
 		},
 		{
@@ -443,7 +443,7 @@ func TestPrintArgoCDHelmOCIInstructions(t *testing.T) {
 			},
 			wantContain: []string{
 				"oci://localhost:5000/aicr-bundle:dev",
-				"--set repoURL=oci://localhost:5000",
+				"# repoURL defaults to oci://localhost:5000",
 			},
 		},
 		{
