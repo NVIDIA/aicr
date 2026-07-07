@@ -135,6 +135,21 @@ data "aws_iam_policy_document" "github_actions_permissions" {
     ]
   }
 
+  # Read SSO-provisioned roles so the EKS actuator can resolve the SSO admin
+  # role and wire it into cluster access (EKS access entries / aws-auth). This
+  # was previously applied out-of-band to the live policy; codified here so the
+  # Terraform source is authoritative and `terraform apply` does not revert it.
+  statement {
+    sid    = "IAMReadSSORoles"
+    effect = "Allow"
+    actions = [
+      "iam:GetRole",
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-reserved/sso.amazonaws.com/*",
+    ]
+  }
+
   # Deny privilege escalation paths
   statement {
     sid    = "DenyPrivilegeEscalation"
@@ -177,6 +192,27 @@ data "aws_iam_policy_document" "github_actions_permissions" {
     effect = "Allow"
     actions = [
       "ec2:*",
+    ]
+    resources = ["*"]
+  }
+
+  # Elastic Load Balancing (classic ELB / ELBv1) — the in-tree Kubernetes AWS
+  # cloud provider provisions a classic ELB + k8s-elb-* SG for a Service
+  # type=LoadBalancer OUTSIDE Terraform state. The UAT teardown sweep
+  # (.github/scripts/uat-aws-cleanup-lb.sh, #1617) reaps that orphaned ELB
+  # before DeleteVpc so the VPC does not leak. Terraform never manages these, so
+  # neither the EKS nor the EC2 statement above grants ELB access. Only the
+  # three actions the sweep calls (aws elb describe-load-balancers /
+  # describe-tags / delete-load-balancer) are granted. DescribeLoadBalancers and
+  # DescribeTags do not support resource-level scoping, so this statement uses
+  # "*" like the EC2/EKS statements above.
+  statement {
+    sid    = "ELBTeardownSweepPermissions"
+    effect = "Allow"
+    actions = [
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeTags",
+      "elasticloadbalancing:DeleteLoadBalancer",
     ]
     resources = ["*"]
   }

@@ -44,6 +44,7 @@ terraform apply -var="aws_region=us-west-2"
 
 - **EKS**: `eks:*` — full cluster, node group, addon lifecycle
 - **EC2**: `ec2:*` — VPC, subnets, security groups, instances
+- **Elastic Load Balancing**: `DescribeLoadBalancers`, `DescribeTags`, `DeleteLoadBalancer` — teardown sweep of the classic ELB the in-tree cloud provider creates for `Service type=LoadBalancer` outside Terraform state ([#1617](https://github.com/NVIDIA/aicr/issues/1617))
 - **IAM**: scoped to `aicr-*` roles/profiles/policies; allows EKS service-linked roles under `aws-service-role/*`
 - **Auto Scaling, CloudFormation**: `*` (for EKS-managed stacks and node groups)
 - **STS**: `GetCallerIdentity`, `AssumeRole`, `TagSession`
