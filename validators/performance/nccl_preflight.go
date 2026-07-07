@@ -28,10 +28,12 @@ import (
 )
 
 const (
-	// preflightNodeConcurrency caps the number of in-flight per-node probe
-	// Pods. Large enough to keep wall-clock low on the typical (<=64 node)
-	// cluster while bounding apiserver and scheduler pressure on larger ones.
-	preflightNodeConcurrency = 16
+	// perNodeFanoutConcurrency caps the number of in-flight per-node operations
+	// fanned out across a cluster's GPU nodes — probe Pods in the preflights and
+	// log fetches in the failure diagnostics. Large enough to keep wall-clock
+	// low on the typical (<=64 node) cluster while bounding apiserver and
+	// scheduler pressure on larger ones.
+	perNodeFanoutConcurrency = 16
 
 	// shellBin is the shell used by probe pods (busybox provides /bin/sh).
 	shellBin = "/bin/sh"
@@ -57,7 +59,7 @@ func runPerNodeProbe(
 		missing []string
 	)
 	g, gctx := errgroup.WithContext(ctx.Ctx)
-	g.SetLimit(preflightNodeConcurrency)
+	g.SetLimit(perNodeFanoutConcurrency)
 	for _, n := range nodes {
 		nodeName := n.Name
 		g.Go(func() error {

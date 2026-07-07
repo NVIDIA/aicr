@@ -1231,7 +1231,7 @@ func tailLines(s string, n int) string {
 // path; every step is best-effort and never returns an error (a diagnostic
 // helper must not mask the original failure). It reports, per worker pod:
 // phase, each container's terminal state (reason/exitCode/message) or waiting
-// reason, and the tail of the "node" and "tcpxo-daemon" container logs. The
+// reason, and the tail of each container's logs. The
 // most common root cause — worker sshd never started (slow apt-get, missing
 // TCPXO env profile) or the tcpxo-daemon sidecar crashing — shows up here even
 // when the launcher's own log is empty.
@@ -1256,7 +1256,7 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 	// best-effort and never errors, so g.Wait never cancels the group early.
 	sections := make([]string, len(pods.Items))
 	g, gctx := errgroup.WithContext(diagCtx)
-	g.SetLimit(preflightNodeConcurrency)
+	g.SetLimit(perNodeFanoutConcurrency)
 	for i := range pods.Items {
 		p := &pods.Items[i]
 		g.Go(func() error {
@@ -1275,8 +1275,8 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 }
 
 // workerPodDiagnostics renders the diagnostic section for a single worker pod:
-// phase, each container's terminal/waiting/running state, and the tail of the
-// "node" and "tcpxo-daemon" container logs. Best-effort — never errors — so it
+// phase, each container's terminal/waiting/running state, and the tail of each
+// container's logs. Best-effort — never errors — so it
 // is safe to run under an errgroup that must not cancel on a single pod's log
 // fetch failing.
 func workerPodDiagnostics(ctx context.Context, clientset kubernetes.Interface, namespace string, p *v1.Pod) string {
@@ -1302,13 +1302,24 @@ func workerPodDiagnostics(ctx context.Context, clientset kubernetes.Interface, n
 			fmt.Fprintf(&b, "  container %s: running (ready=%t)\n", cs.Name, cs.Ready)
 		}
 	}
-	// Best-effort container logs. "node" is the worker itself (sshd + NCCL);
-	// "tcpxo-daemon" is the FastRak sidecar whose failure also downs the run.
-	// GetPodLogs streams the full log — a verbose NCCL/apt-get worker can emit
-	// thousands of lines — so tail each container to the last maxDiagLogLines
-	// before appending, keeping the failure payload bounded. The tail (not the
-	// head) is kept because the fatal error is almost always the last output.
-	for _, container := range []string{nodeJobName, "tcpxo-daemon"} {
+	// Best-effort container logs for every container in the pod spec (init
+	// sidecars like GKE's tcpxo-daemon plus the main "node" worker). Deriving
+	// the names from the spec — rather than hardcoding "node"/"tcpxo-daemon" —
+	// keeps this correct on every platform's launcher-failure path: a non-GKE
+	// worker has no tcpxo-daemon, so a hardcoded list would emit a spurious
+	// "container not found" line, and a template that renames its sidecar would
+	// silently lose that log. GetPodLogs streams the full log — a verbose
+	// NCCL/apt-get worker can emit thousands of lines — so tail each container
+	// to the last maxDiagLogLines. The tail (not the head) is kept because the
+	// fatal error is almost always the last output.
+	containers := make([]string, 0, len(p.Spec.InitContainers)+len(p.Spec.Containers))
+	for _, c := range p.Spec.InitContainers {
+		containers = append(containers, c.Name)
+	}
+	for _, c := range p.Spec.Containers {
+		containers = append(containers, c.Name)
+	}
+	for _, container := range containers {
 		logs, logErr := k8spod.GetPodLogs(ctx, clientset, namespace, p.Name, container)
 		if logErr != nil {
 			fmt.Fprintf(&b, "  [%s logs unavailable: %v]\n", container, logErr)

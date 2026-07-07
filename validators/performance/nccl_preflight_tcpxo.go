@@ -64,6 +64,10 @@ const (
 		`docs/integrator/gke-tcpxo-networking.md.`
 )
 
+// hostPathDirOrCreate is the addressable HostPath type for the preflight probe
+// volume (HostPathVolumeSource.Type is a *HostPathType).
+var hostPathDirOrCreate = corev1.HostPathDirectoryOrCreate
+
 // gkeTCPXOPreflightApplies reports whether the TCPXO readiness preflight should
 // run for the given (variant, accelerator, service) tuple. Mirrors
 // gb200NetPreflightApplies to keep the call site in validateNcclAllReduceBw
@@ -158,6 +162,15 @@ func checkTCPXOOnNode(ctx context.Context, clientset kubernetes.Interface, names
 				VolumeSource: corev1.VolumeSource{
 					HostPath: &corev1.HostPathVolumeSource{
 						Path: tcpxoHostNvidiaPath,
+						// DirectoryOrCreate (what containerd does implicitly) so the
+						// exact case this preflight exists to catch — the installer
+						// DaemonSet never ran, so the dir is absent — deterministically
+						// yields an empty dir the probe reports as not-ready, rather
+						// than a mount failure that hangs the pod in ContainerCreating
+						// until DiagnosticTimeout and aborts the fan-out as an internal
+						// error. The empty dir is harmless: the installer owns its
+						// contents and populates it when it runs.
+						Type: &hostPathDirOrCreate,
 					},
 				},
 			}},
