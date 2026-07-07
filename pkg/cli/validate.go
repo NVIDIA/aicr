@@ -37,6 +37,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
@@ -326,7 +327,7 @@ func runValidation(
 			"phase", pr.Phase,
 			"status", pr.Status,
 			"duration", pr.Duration)
-		if pr.Status == "failed" {
+		if ctrf.IsFailingStatus(pr.Status) {
 			anyFailed = true
 		}
 	}

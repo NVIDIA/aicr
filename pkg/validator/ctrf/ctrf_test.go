@@ -461,6 +461,27 @@ func TestMergeReportsEnvironmentFromLast(t *testing.T) {
 	}
 }
 
+func TestIsFailingStatus(t *testing.T) {
+	tests := []struct {
+		status string
+		want   bool
+	}{
+		{StatusFailed, true},
+		{StatusOther, true},
+		{StatusPassed, false},
+		{StatusSkipped, false},
+		{StatusPending, false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			if got := IsFailingStatus(tt.status); got != tt.want {
+				t.Errorf("IsFailingStatus(%q) = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuilderStdoutNotCapturedWhenEmpty(t *testing.T) {
 	b := NewBuilder("aicr", "1.0.0", testPhase)
 	b.AddResult(&ValidatorResult{

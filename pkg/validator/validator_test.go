@@ -484,6 +484,32 @@ func TestRunPhases_FailFast_StopsAfterFirstFailure(t *testing.T) {
 	}
 }
 
+func TestRunPhases_FailFast_OtherPhaseGates(t *testing.T) {
+	// A phase whose status is "other" (checks could not be executed to a
+	// verdict — e.g. the deployment readiness gate's pods never ran during a
+	// node reboot) must trip fail-fast just like "failed". Otherwise a
+	// not-ready cluster masquerades as passing and later phases run against it.
+	v := New(WithVersion("1.0.0"), WithFailFast(true))
+	cat := loadEmbeddedCatalog(t)
+
+	calls := 0
+	results, err := v.runPhases(context.Background(), newFakeRunner(ctrf.StatusOther, &calls), cat, PhaseOrder)
+	if err != nil {
+		t.Fatalf("runPhases() error = %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("runner called %d times, want 1 (fail-fast after first \"other\" phase)", calls)
+	}
+	if results[0].Status != ctrf.StatusOther {
+		t.Errorf("results[0].Status = %q, want %q", results[0].Status, ctrf.StatusOther)
+	}
+	for _, pr := range results[1:] {
+		if pr.Status != ctrf.StatusSkipped {
+			t.Errorf("phase %q status = %q, want %q (skipped by fail-fast)", pr.Phase, pr.Status, ctrf.StatusSkipped)
+		}
+	}
+}
+
 func TestRunPhases_FailFast_PassedPhaseDoesNotGate(t *testing.T) {
 	// Phase[0]=passed, Phase[1]=failed → Phase[2] skipped; runner called twice.
 	v := New(WithVersion("1.0.0"), WithFailFast(true))

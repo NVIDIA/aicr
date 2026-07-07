@@ -245,7 +245,7 @@ func (v *Validator) runPhases(
 		}
 		results = append(results, pr)
 
-		if pr.Status == ctrf.StatusFailed {
+		if ctrf.IsFailingStatus(pr.Status) {
 			anyFailed = true
 		}
 	}
