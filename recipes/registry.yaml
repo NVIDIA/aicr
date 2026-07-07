@@ -619,7 +619,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
-      defaultVersion: "1.1.0"
+      defaultVersion: "1.2.0"
       defaultNamespace: slinky
 
   - name: slinky-slurm-operator
@@ -641,21 +641,13 @@ components:
       # `crds.enabled: false` still match the chart defaults. The values
       # file mirrors the chart defaults explicitly for documentation, but
       # an upstream default flip would otherwise pass through unnoticed.
-      defaultVersion: "1.1.0"
+      defaultVersion: "1.2.0"
       defaultNamespace: slinky
     nodeScheduling:
       system:
-        # slurm-operator chart v1.1.0 templates only render
-        # operator.{affinity,tolerations} and webhook.{affinity,tolerations}.
-        # Setting operator.nodeSelector / webhook.nodeSelector is silently
-        # dropped by the chart, so AICR's --system-node-selector flag is a
-        # no-op for this component until a chart release that includes
-        # https://github.com/SlinkyProject/slurm-operator/pull/187 lands.
-        # Once that PR merges and a new chart is published, add
-        # `nodeSelectorPaths: [operator.nodeSelector, webhook.nodeSelector]`
-        # here and bump defaultVersion above. Workaround in the meantime:
-        # pin nodes via valuesFile overrides on
-        # operator.affinity.nodeAffinity / webhook.affinity.nodeAffinity.
+        nodeSelectorPaths:
+          - operator.nodeSelector
+          - webhook.nodeSelector
         tolerationPaths:
           - operator.tolerations
           - webhook.tolerations
@@ -673,11 +665,11 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm
-      # When bumping defaultVersion, re-verify the `slinky` default
-      # map-keys for nodesets/loginsets still exist (the cross-check in
+      # Chart v1.2.0 no longer supplies default nodesets/loginsets. AICR's
+      # component values define the `slinky` map keys, and the cross-check in
       # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
-      # enforces this, but the chart change must come first).
-      defaultVersion: "1.1.0"
+      # enforces their alignment with the scheduling paths below.
+      defaultVersion: "1.2.0"
       defaultNamespace: slurm
     nodeScheduling:
       system:

@@ -98,7 +98,7 @@ func WaitForPodSucceeded(ctx context.Context, client kubernetes.Interface, names
 				}
 				return errors.NewWithContext(errors.ErrCodeUnavailable,
 					"pod watch closed before pod reached terminal state",
-					map[string]any{keyNamespace: namespace, keyName: name, "phase": string(current.Status.Phase)})
+					watchClosedContext(namespace, name, current))
 			}
 
 			watchedPod, ok := event.Object.(*corev1.Pod)
@@ -106,13 +106,59 @@ func WaitForPodSucceeded(ctx context.Context, client kubernetes.Interface, names
 				continue
 			}
 
-			slog.Info("pod current phase", "name", watchedPod.Name, "status", watchedPod.Status.Phase)
+			logPodPhase(watchedPod)
 
 			if done, checkErr := checkPodPhase(watchedPod); done {
 				return checkErr
 			}
 		}
 	}
+}
+
+// podWaitingReason returns the reason and message of the first container (init
+// or regular) stuck in a Waiting state, or empty strings when none is waiting.
+// Surfacing this alongside the pod phase turns an opaque run of "status=Pending"
+// log lines into an actionable signal — e.g. an ImagePullBackOff on a mistagged
+// image reads as the cause rather than being masked by a generic wait timeout.
+func podWaitingReason(p *corev1.Pod) (reason, message string) {
+	statuses := make([]corev1.ContainerStatus, 0,
+		len(p.Status.InitContainerStatuses)+len(p.Status.ContainerStatuses))
+	statuses = append(statuses, p.Status.InitContainerStatuses...)
+	statuses = append(statuses, p.Status.ContainerStatuses...)
+	for _, cs := range statuses {
+		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
+			return cs.State.Waiting.Reason, cs.State.Waiting.Message
+		}
+	}
+	return "", ""
+}
+
+// logPodPhase logs the pod's current phase, appending the first waiting
+// container's reason/message when present so a stuck pull/create is visible in
+// the periodic wait log rather than only after a post-mortem.
+func logPodPhase(p *corev1.Pod) {
+	attrs := []any{keyName, p.Name, "status", p.Status.Phase}
+	if reason, message := podWaitingReason(p); reason != "" {
+		attrs = append(attrs, "waitingReason", reason)
+		if message != "" {
+			attrs = append(attrs, "waitingMessage", message)
+		}
+	}
+	slog.Info("pod current phase", attrs...)
+}
+
+// watchClosedContext builds the structured-error context for a watch-closed /
+// still-pending pod, carrying the phase and any container waiting reason so the
+// returned error itself explains why the pod never terminated.
+func watchClosedContext(namespace, name string, p *corev1.Pod) map[string]any {
+	ctxMap := map[string]any{keyNamespace: namespace, keyName: name, "phase": string(p.Status.Phase)}
+	if reason, message := podWaitingReason(p); reason != "" {
+		ctxMap[keyReason] = reason
+		if message != "" {
+			ctxMap[keyMessage] = message
+		}
+	}
+	return ctxMap
 }
 
 // checkPodPhase returns (true, nil) for Succeeded, (true, error) for Failed,
@@ -285,12 +331,13 @@ func WaitForPodReady(ctx context.Context, client kubernetes.Interface, namespace
 				}
 				return errors.NewWithContext(errors.ErrCodeUnavailable,
 					"pod watch closed before pod was ready",
-					map[string]any{keyNamespace: namespace, keyName: name, "phase": string(current.Status.Phase)})
+					watchClosedContext(namespace, name, current))
 			}
 			watchedPod, isPod := event.Object.(*corev1.Pod)
 			if !isPod {
 				continue
 			}
+			logPodPhase(watchedPod)
 			if done, checkErr := checkPodReady(watchedPod); done {
 				return checkErr
 			}
