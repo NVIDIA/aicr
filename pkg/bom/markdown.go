@@ -46,12 +46,27 @@ func (s *stickyWriter) Write(p []byte) (int, error) {
 // WriteMarkdown emits a human-readable summary of a component-level BOM
 // suitable for embedding in docs.
 func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error {
+	return writeMarkdownDoc(w, meta, results, nil)
+}
+
+// writeMarkdownDoc is the shared writer behind WriteMarkdown (nil variants:
+// legacy output, byte-identical) and WriteMarkdownWithVariants.
+func writeMarkdownDoc(w io.Writer, meta Metadata, results []ComponentResult, variants []VariantResult) error {
 	// Copy before sorting so callers don't observe their input reordered.
 	sorted := append([]ComponentResult(nil), results...)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Name < sorted[j].Name
 	})
 	results = sorted
+
+	sortedVariants := append([]VariantResult(nil), variants...)
+	sort.Slice(sortedVariants, func(i, j int) bool {
+		if sortedVariants[i].Name != sortedVariants[j].Name {
+			return sortedVariants[i].Name < sortedVariants[j].Name
+		}
+		return sortedVariants[i].Version < sortedVariants[j].Version
+	})
+	variants = sortedVariants
 
 	var (
 		totalImages     int
@@ -60,6 +75,15 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 	)
 	for _, r := range results {
 		for _, img := range r.Images {
+			if _, dup := uniqueImages[img]; !dup {
+				uniqueImages[img] = struct{}{}
+				totalImages++
+				totalRegistries[ParseImageRef(img).Registry] = struct{}{}
+			}
+		}
+	}
+	for _, v := range variants {
+		for _, img := range v.Images {
 			if _, dup := uniqueImages[img]; !dup {
 				uniqueImages[img] = struct{}{}
 				totalImages++
@@ -97,6 +121,15 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 	sort.Strings(regs)
 	fmt.Fprintf(sw, "Registries: %s\n\n", strings.Join(quoteAll(regs), ", "))
 
+	// State the rendering fidelity when the producer supplies one (the
+	// CycloneDX metadata carries the same note for JSON consumers). The
+	// value goes in a code span so a literal placeholder like <name> renders
+	// as text instead of being swallowed as raw HTML. Legacy callers never
+	// set the field, so their output is unchanged.
+	if meta.RenderFidelity != "" {
+		fmt.Fprintf(sw, "_Rendering fidelity:_ `%s`\n\n", meta.RenderFidelity)
+	}
+
 	fmt.Fprintf(sw, "## Components\n\n")
 	fmt.Fprintln(sw, "| Component | Type | Chart | Pinned Version | Images |")
 	fmt.Fprintln(sw, "|-----------|------|-------|----------------|--------|")
@@ -113,26 +146,54 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 			r.Name, r.Type, chart, ver, len(r.Images))
 	}
 
+	// Version variants: a separate table (with distinct column headers) so
+	// the one-row-per-registry-component Components table — and its
+	// freshness gate — remains intact. Omitted entirely when no divergent
+	// pins exist.
+	if len(variants) > 0 {
+		fmt.Fprintf(sw, "\n## Version variants\n\n")
+		fmt.Fprintln(sw, "These versions are explicitly pinned by the listed sources and differ")
+		fmt.Fprintln(sw, "from the component's registry default above.")
+		fmt.Fprintln(sw)
+		fmt.Fprintln(sw, "| Component | Variant Version | Declared By | Images |")
+		fmt.Fprintln(sw, "|-----------|-----------------|-------------|--------|")
+		for _, v := range variants {
+			srcs := append([]string(nil), v.Sources...)
+			sort.Strings(srcs)
+			fmt.Fprintf(sw, "| %s | %s | %s | %d |\n",
+				v.Name, v.Version, strings.Join(srcs, ", "), len(v.Images))
+		}
+	}
+
 	fmt.Fprintf(sw, "\n## Images by component\n\n")
 	for _, r := range results {
-		fmt.Fprintf(sw, "### %s\n\n", r.Name)
-		for _, warn := range r.Warnings {
-			fmt.Fprintf(sw, "> Warning: %s\n\n", warn)
-		}
-		if len(r.Images) == 0 {
-			fmt.Fprintln(sw, "_No images extracted._")
-		} else {
-			for _, img := range r.Images {
-				fmt.Fprintf(sw, "- `%s`\n", img)
-			}
-		}
-		fmt.Fprintln(sw)
+		writeImageSection(sw, r.Name, r.Warnings, r.Images)
+	}
+	for _, v := range variants {
+		writeImageSection(sw, v.Name+"@"+v.Version+" (variant)", v.Warnings, v.Images)
 	}
 
 	if sw.err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write markdown BOM", sw.err)
 	}
 	return nil
+}
+
+// writeImageSection renders one "### <heading>" block with its warnings and
+// image list; shared by default components and version variants.
+func writeImageSection(sw *stickyWriter, heading string, warnings, images []string) {
+	fmt.Fprintf(sw, "### %s\n\n", heading)
+	for _, warn := range warnings {
+		fmt.Fprintf(sw, "> Warning: %s\n\n", warn)
+	}
+	if len(images) == 0 {
+		fmt.Fprintln(sw, "_No images extracted._")
+	} else {
+		for _, img := range images {
+			fmt.Fprintf(sw, "- `%s`\n", img)
+		}
+	}
+	fmt.Fprintln(sw)
 }
 
 func titleFor(m Metadata) string {

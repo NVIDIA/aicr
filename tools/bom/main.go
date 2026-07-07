@@ -112,6 +112,25 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		results = append(results, surveyComponent(ctx, repoRoot, c, renderer, skipHelm))
 	}
 
+	// Version variants: explicit base/overlay/mixin Helm pins that differ
+	// from the registry default, derived from the recipe data itself and
+	// rendered at catalog parity (issue #1611).
+	sources, err := loadRecipeSources(ctx, repoRoot)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load recipe sources")
+	}
+	byName := make(map[string]component, len(reg.Components))
+	for _, c := range reg.Components {
+		byName[c.Name] = c
+	}
+	variants, err := deriveVariants(reg, sources)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "derive variants")
+	}
+	for i, v := range variants {
+		variants[i] = surveyVariant(ctx, repoRoot, v, byName[v.Name], renderer, skipHelm)
+	}
+
 	if strict {
 		var hardErrs []string
 		for _, r := range results {
@@ -130,6 +149,11 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 				hardErrs = append(hardErrs, r.Name+": "+w)
 			}
 		}
+		for _, v := range variants {
+			for _, w := range v.Warnings {
+				hardErrs = append(hardErrs, v.Name+"@"+v.Version+": "+w)
+			}
+		}
 		if len(hardErrs) > 0 {
 			sort.Strings(hardErrs)
 			for _, e := range hardErrs {
@@ -140,13 +164,17 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		}
 	}
 
-	doc := bom.BuildBOM(bom.Metadata{
-		Name:        "aicr",
-		Version:     aicrVersion,
-		Description: "NVIDIA AI Cluster Runtime",
-		ToolName:    "aicr-bom",
-		ToolVersion: aicrVersion,
-	}, results)
+	doc, err := bom.BuildBOMWithVariants(bom.Metadata{
+		Name:           "aicr",
+		Version:        aicrVersion,
+		Description:    "NVIDIA AI Cluster Runtime",
+		ToolName:       "aicr-bom",
+		ToolVersion:    aicrVersion,
+		RenderFidelity: bom.RenderFidelityCatalogParity,
+	}, results, variants)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "build cyclonedx bom")
+	}
 
 	jsonPath := filepath.Join(outDir, "bom.cdx.json")
 	jf, err := os.Create(jsonPath) //nolint:gosec // outDir is operator-supplied
@@ -169,13 +197,14 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "create "+mdPath, err)
 	}
-	mdErr := bom.WriteMarkdown(mf, bom.Metadata{
-		Name:          "aicr",
-		Version:       aicrVersion,
-		Description:   "NVIDIA AI Cluster Runtime",
-		Deterministic: deterministic,
-		NoTitle:       noTitle,
-	}, results)
+	mdErr := bom.WriteMarkdownWithVariants(mf, bom.Metadata{
+		Name:           "aicr",
+		Version:        aicrVersion,
+		Description:    "NVIDIA AI Cluster Runtime",
+		Deterministic:  deterministic,
+		NoTitle:        noTitle,
+		RenderFidelity: bom.RenderFidelityCatalogParity,
+	}, results, variants)
 	closeErr = mf.Close()
 	if mdErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "render markdown", mdErr)
@@ -188,8 +217,11 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	for _, r := range results {
 		totalImages += len(r.Images)
 	}
-	fmt.Printf("bom: wrote %s and %s (%d components, %d image refs)\n",
-		jsonPath, mdPath, len(results), totalImages)
+	for _, v := range variants {
+		totalImages += len(v.Images)
+	}
+	fmt.Printf("bom: wrote %s and %s (%d components, %d variants, %d image refs)\n",
+		jsonPath, mdPath, len(results), len(variants), totalImages)
 	return nil
 }
 

@@ -15,6 +15,7 @@
 package bom
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +23,8 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/google/uuid"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 const (
@@ -76,6 +79,13 @@ type Metadata struct {
 	// auto-generated middle of docs/user/container-images.md, where the
 	// title and surrounding prose are hand-edited).
 	NoTitle bool
+
+	// RenderFidelity, when non-empty, is stated in the Markdown header and
+	// attached to the CycloneDX metadata as an aicr:render:fidelity
+	// property. Producers set it to describe HOW image sets were obtained
+	// (tools/bom sets RenderFidelityCatalogParity); producers with a
+	// different story leave it empty rather than stamp a false claim.
+	RenderFidelity string
 }
 
 // ComponentResult is the per-component image survey input to BuildBOM.
@@ -101,8 +111,20 @@ type ComponentResult struct {
 //	  └─ each ComponentResult as an `application` (bom-ref: "<name>/<comp>")
 //	       └─ each unique image as a `container` (bom-ref: "img:<ref>")
 //
-// Image entries are de-duplicated across components.
+// Image entries are de-duplicated across components. For a BOM that also
+// carries per-source version variants — with fail-closed bom-ref uniqueness —
+// use BuildBOMWithVariants; this legacy entry point is preserved unchanged
+// for existing importers.
 func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
+	doc, _ := buildBOMDoc(meta, results, nil, false) // unchecked mode cannot error
+	return doc
+}
+
+// buildBOMDoc is the shared builder behind BuildBOM (checked=false: legacy
+// semantics, duplicate component refs are emitted as-is and no variants) and
+// BuildBOMWithVariants (checked=true: every bom-ref claims through a global
+// identity set and collisions fail closed).
+func buildBOMDoc(meta Metadata, results []ComponentResult, variants []VariantResult, checked bool) (*cdx.BOM, error) {
 	if meta.Name == "" {
 		meta.Name = defaultRootName
 	}
@@ -135,6 +157,11 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 			},
 		},
 	}
+	if meta.RenderFidelity != "" {
+		bom.Metadata.Properties = &[]cdx.Property{
+			{Name: "aicr:render:fidelity", Value: meta.RenderFidelity},
+		}
+	}
 
 	// Copy before sorting so callers (e.g., pkg/bundler when it consumes
 	// this) don't observe their input slice reordered.
@@ -143,55 +170,21 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 		return sorted[i].Name < sorted[j].Name
 	})
 
+	claims := newRefClaims(meta.Name, checked)
 	var (
 		comps []cdx.Component
 		deps  []cdx.Dependency
-		seen  = map[string]struct{}{}
 	)
-	rootChildren := make([]string, 0, len(sorted))
+	rootChildren := make([]string, 0, len(sorted)+len(variants))
 
 	for _, r := range sorted {
 		compRef := meta.Name + "/" + r.Name
+		if err := claims.claimRef(compRef); err != nil {
+			return nil, err
+		}
 		rootChildren = append(rootChildren, compRef)
 
-		// Name the deployment properties by effective component type so a
-		// Kustomize component's Git source and tag are not mislabeled as a Helm
-		// repository/version (the CycloneDX doc already declares
-		// aicr:component:type). Helm and manifest components keep the
-		// aicr:helm:* names. Chart is Helm-only and omitted for Kustomize.
-		kustomize := strings.EqualFold(r.Type, TypeKustomize)
-		props := []cdx.Property{
-			{Name: "aicr:component:type", Value: r.Type},
-		}
-		if r.Repository != "" {
-			name := "aicr:helm:repository"
-			if kustomize {
-				name = "aicr:kustomize:source"
-			}
-			props = append(props, cdx.Property{Name: name, Value: r.Repository})
-		}
-		if r.Chart != "" && !kustomize {
-			props = append(props, cdx.Property{Name: "aicr:helm:chart", Value: r.Chart})
-		}
-		if r.Version != "" {
-			name := "aicr:helm:version"
-			if kustomize {
-				name = "aicr:kustomize:tag"
-			}
-			props = append(props, cdx.Property{Name: name, Value: r.Version})
-		}
-		if r.Namespace != "" {
-			name := "aicr:helm:namespace"
-			if kustomize {
-				name = "aicr:kustomize:namespace"
-			}
-			props = append(props, cdx.Property{Name: name, Value: r.Namespace})
-		}
-		props = append(props, cdx.Property{Name: "aicr:version:pinned", Value: strconv.FormatBool(r.Pinned)})
-		for _, w := range r.Warnings {
-			props = append(props, cdx.Property{Name: "aicr:render:warning", Value: w})
-		}
-
+		props := componentProperties(r)
 		comps = append(comps, cdx.Component{
 			BOMRef:      compRef,
 			Type:        cdx.ComponentTypeApplication,
@@ -200,34 +193,33 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 			Version:     r.Version,
 			Properties:  &props,
 		})
-
-		var imgRefs []string
-		for _, img := range r.Images {
-			ref := ParseImageRef(img)
-			imgRef := "img:" + img
-			if _, ok := seen[imgRef]; !ok {
-				seen[imgRef] = struct{}{}
-				comps = append(comps, cdx.Component{
-					BOMRef:     imgRef,
-					Type:       cdx.ComponentTypeContainer,
-					Name:       ref.Registry + "/" + ref.Repository,
-					Version:    versionOrTag(ref),
-					PackageURL: ref.PURL(),
-					Properties: &[]cdx.Property{
-						{Name: "aicr:image:registry", Value: ref.Registry},
-						{Name: "aicr:image:repository", Value: ref.Repository},
-						{Name: "aicr:image:tag", Value: ref.Tag},
-						{Name: "aicr:image:digest", Value: ref.Digest},
-					},
-				})
-			}
-			imgRefs = append(imgRefs, imgRef)
+		var err error
+		comps, deps, err = appendImageEntries(claims, comps, deps, compRef, r.Images)
+		if err != nil {
+			return nil, err
 		}
-		if len(imgRefs) > 0 {
-			deps = append(deps, cdx.Dependency{
-				Ref:          compRef,
-				Dependencies: refList(imgRefs),
-			})
+	}
+
+	// Variants (checked mode only): version-qualified refs so default
+	// entries stay untouched, sorted by (name, version) for determinism.
+	sortedVariants := append([]VariantResult(nil), variants...)
+	sort.Slice(sortedVariants, func(i, j int) bool {
+		if sortedVariants[i].Name != sortedVariants[j].Name {
+			return sortedVariants[i].Name < sortedVariants[j].Name
+		}
+		return sortedVariants[i].Version < sortedVariants[j].Version
+	})
+	for _, v := range sortedVariants {
+		compRef := meta.Name + "/" + v.Name + "@" + v.Version
+		if err := claims.claimRef(compRef); err != nil {
+			return nil, err
+		}
+		rootChildren = append(rootChildren, compRef)
+		comps = append(comps, variantComponent(compRef, v))
+		var err error
+		comps, deps, err = appendImageEntries(claims, comps, deps, compRef, v.Images)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -237,7 +229,143 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 
 	bom.Components = &comps
 	bom.Dependencies = &deps
-	return bom
+	return bom, nil
+}
+
+// refClaims tracks bom-ref identity across a document build. refs is the
+// global identity set used in checked mode: root, components, variants, and
+// images all pass through it (CycloneDX requires unique bom-refs). The value
+// records whether the ref is an image — images legitimately repeat across
+// components (a repeat is a dedup, not a collision), any other reuse fails
+// closed. Unchecked (legacy) mode keeps the historical behavior: no claims,
+// image-level dedup only via seen.
+type refClaims struct {
+	checked bool
+	seen    map[string]struct{}
+	refs    map[string]bool
+}
+
+func newRefClaims(rootRef string, checked bool) *refClaims {
+	return &refClaims{
+		checked: checked,
+		seen:    map[string]struct{}{},
+		refs:    map[string]bool{rootRef: false},
+	}
+}
+
+// claimRef claims a component/variant identity; a duplicate fails closed in
+// checked mode.
+func (c *refClaims) claimRef(ref string) error {
+	if !c.checked {
+		return nil
+	}
+	if _, dup := c.refs[ref]; dup {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"duplicate bom-ref %q: component and variant identities must be unique "+
+				"(CycloneDX requires unique bom-refs and the dependency graph would be ambiguous)", ref))
+	}
+	c.refs[ref] = false
+	return nil
+}
+
+// claimImage claims an image ref, reporting whether it is fresh (needs an
+// entry). A repeat of another image is a cross-component dedup; colliding
+// with a non-image identity fails closed in checked mode.
+func (c *refClaims) claimImage(ref string) (bool, error) {
+	if _, dup := c.seen[ref]; dup {
+		return false, nil
+	}
+	if c.checked {
+		if isImage, exists := c.refs[ref]; exists && !isImage {
+			return false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"duplicate bom-ref %q: an image reference collides with a component identity", ref))
+		}
+		c.refs[ref] = true
+	}
+	c.seen[ref] = struct{}{}
+	return true, nil
+}
+
+// appendImageEntries claims each image under compRef, appends container
+// entries for fresh images, and records the compRef→images dependency edge.
+func appendImageEntries(claims *refClaims, comps []cdx.Component, deps []cdx.Dependency, compRef string, images []string) ([]cdx.Component, []cdx.Dependency, error) {
+	imgRefs := make([]string, 0, len(images))
+	for _, img := range images {
+		fresh, err := claims.claimImage("img:" + img)
+		if err != nil {
+			return nil, nil, err
+		}
+		if fresh {
+			comps = append(comps, imageComponent(img))
+		}
+		imgRefs = append(imgRefs, "img:"+img)
+	}
+	if len(imgRefs) > 0 {
+		deps = append(deps, cdx.Dependency{
+			Ref:          compRef,
+			Dependencies: refList(imgRefs),
+		})
+	}
+	return comps, deps, nil
+}
+
+// componentProperties names the deployment properties by effective component
+// type so a Kustomize component's Git source and tag are not mislabeled as a
+// Helm repository/version (the CycloneDX doc already declares
+// aicr:component:type). Helm and manifest components keep the aicr:helm:*
+// names. Chart is Helm-only and omitted for Kustomize.
+func componentProperties(r ComponentResult) []cdx.Property {
+	kustomize := strings.EqualFold(r.Type, TypeKustomize)
+	props := []cdx.Property{
+		{Name: "aicr:component:type", Value: r.Type},
+	}
+	if r.Repository != "" {
+		name := "aicr:helm:repository"
+		if kustomize {
+			name = "aicr:kustomize:source"
+		}
+		props = append(props, cdx.Property{Name: name, Value: r.Repository})
+	}
+	if r.Chart != "" && !kustomize {
+		props = append(props, cdx.Property{Name: "aicr:helm:chart", Value: r.Chart})
+	}
+	if r.Version != "" {
+		name := "aicr:helm:version"
+		if kustomize {
+			name = "aicr:kustomize:tag"
+		}
+		props = append(props, cdx.Property{Name: name, Value: r.Version})
+	}
+	if r.Namespace != "" {
+		name := "aicr:helm:namespace"
+		if kustomize {
+			name = "aicr:kustomize:namespace"
+		}
+		props = append(props, cdx.Property{Name: name, Value: r.Namespace})
+	}
+	props = append(props, cdx.Property{Name: "aicr:version:pinned", Value: strconv.FormatBool(r.Pinned)})
+	for _, w := range r.Warnings {
+		props = append(props, cdx.Property{Name: "aicr:render:warning", Value: w})
+	}
+	return props
+}
+
+// imageComponent renders one image reference as a CycloneDX container entry.
+func imageComponent(img string) cdx.Component {
+	ref := ParseImageRef(img)
+	return cdx.Component{
+		BOMRef:     "img:" + img,
+		Type:       cdx.ComponentTypeContainer,
+		Name:       ref.Registry + "/" + ref.Repository,
+		Version:    versionOrTag(ref),
+		PackageURL: ref.PURL(),
+		Properties: &[]cdx.Property{
+			{Name: "aicr:image:registry", Value: ref.Registry},
+			{Name: "aicr:image:repository", Value: ref.Repository},
+			{Name: "aicr:image:tag", Value: ref.Tag},
+			{Name: "aicr:image:digest", Value: ref.Digest},
+		},
+	}
 }
 
 // bomSerialNumber picks a SerialNumber for the BOM based on Metadata. The
