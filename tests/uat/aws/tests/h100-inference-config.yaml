@@ -49,6 +49,11 @@ spec:
         - dedicated=worker-workload:NoSchedule
         - dedicated=worker-workload:NoExecute
         - nvidia.com/gpu=present:NoSchedule
+        # The GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule
+        # (cluster-config.yaml) until NodeWright finishes tuning + reboot. The
+        # snapshot runs pre-deployment, so this taint is still present and the
+        # agent — pinned to the GPU pool above — must tolerate it to schedule.
+        - skyhook.nvidia.com=runtime-required:NoSchedule
 
   recipe:
     criteria:
