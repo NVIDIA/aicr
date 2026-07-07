@@ -39,13 +39,6 @@ const (
 	shellBin = "/bin/sh"
 )
 
-// probeNoAutomountSAToken is the addressable false used to disable
-// ServiceAccount-token automounting on the per-node probe pods
-// (PodSpec.AutomountServiceAccountToken is a *bool). The probes only read a
-// hostPath mount and never call the Kubernetes API, so mounting an API token
-// onto them — especially alongside a hostPath — is an unnecessary credential.
-var probeNoAutomountSAToken = false
-
 // runPerNodeProbe fans out a boolean readiness probe across the target nodes
 // with bounded concurrency and returns the sorted list of nodes for which the
 // probe reported false (not-ready). A probe error (schedule/image-pull/log
