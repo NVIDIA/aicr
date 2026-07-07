@@ -987,6 +987,53 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 	}
 }
 
+// TestBundleGolden_OCI_BakesRepoURL verifies that when OCIParentNamespace is
+// set the bundle's root values.yaml contains the parent namespace as the
+// repoURL default, not an empty string. See #1342.
+func TestBundleGolden_OCI_BakesRepoURL(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.20.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager"}
+
+	const wantNamespace = "oci://ghcr.io/myorg"
+
+	g := &Generator{
+		RecipeResult:       rr,
+		ComponentValues:    map[string]map[string]any{"cert-manager": {"replicaCount": 1}},
+		Version:            "v0.0.0-golden",
+		TargetRevision:     "v1.0.0",
+		OCIParentNamespace: wantNamespace,
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	valuesBytes, err := os.ReadFile(filepath.Join(outputDir, "values.yaml"))
+	if err != nil {
+		t.Fatalf("read values.yaml: %v", err)
+	}
+	values := string(valuesBytes)
+
+	if !strings.Contains(values, `repoURL: `+wantNamespace) {
+		t.Errorf("values.yaml missing baked repoURL; got:\n%s", values)
+	}
+	if strings.Contains(values, "repoURL: \"\"") {
+		t.Errorf("values.yaml should not contain empty repoURL when OCIParentNamespace is set; got:\n%s", values)
+	}
+}
+
 // TestBundleGolden_ReadinessGate freezes the argocd-helm bundle output when a
 // component ships a readiness gate. The delegated argocd.Generator emits a
 // 002-<name>-readiness/ local-helm folder after the primary; the argocdhelm

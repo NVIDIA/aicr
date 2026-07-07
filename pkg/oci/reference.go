@@ -164,6 +164,20 @@ func (r *Reference) ChartName() string {
 	return base
 }
 
+// ParentNamespace returns the OCI registry + repository path with the
+// chart-name segment (last path element) stripped, prefixed with the
+// oci:// scheme. Returns "" for non-OCI references. See #1342.
+func (r *Reference) ParentNamespace() string {
+	if !r.IsOCI || r.Repository == "" {
+		return ""
+	}
+	parentPath := path.Dir(r.Repository)
+	if parentPath == "." || parentPath == "/" {
+		return URIScheme + r.Registry
+	}
+	return URIScheme + r.Registry + "/" + parentPath
+}
+
 // WithTag returns a copy of the reference with the specified tag.
 // For non-OCI references, returns the same reference unchanged.
 func (r *Reference) WithTag(tag string) *Reference {
