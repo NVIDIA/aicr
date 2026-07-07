@@ -59,9 +59,9 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
-| slinky-slurm | helm | slurm | 1.1.0 | 5 |
-| slinky-slurm-operator | helm | slurm-operator | 1.1.0 | 2 |
-| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.1.0 | 0 |
+| slinky-slurm | helm | slurm | 1.2.0 | 5 |
+| slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
 
 ## Images by component
 
@@ -109,7 +109,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:24.04@sha256:786a8b558f7be160c6c8c4a54f9a57274f3b4fb1491cf65146521ae77ff1dc54`
+- `ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -241,15 +241,15 @@ _No images extracted._
 ### slinky-slurm
 
 - `docker.io/library/alpine:3.23.3`
-- `ghcr.io/slinkyproject/login:25.11-ubuntu24.04`
-- `ghcr.io/slinkyproject/slurmctld:25.11-ubuntu24.04`
-- `ghcr.io/slinkyproject/slurmd:25.11-ubuntu24.04`
-- `ghcr.io/slinkyproject/slurmrestd:25.11-ubuntu24.04`
+- `ghcr.io/slinkyproject/login:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/slurmctld:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/slurmd:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/slurmrestd:26.05-ubuntu26.04`
 
 ### slinky-slurm-operator
 
-- `ghcr.io/slinkyproject/slurm-operator-webhook:1.1.0`
-- `ghcr.io/slinkyproject/slurm-operator:1.1.0`
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.0`
+- `ghcr.io/slinkyproject/slurm-operator:1.2.0`
 
 ### slinky-slurm-operator-crds
 
