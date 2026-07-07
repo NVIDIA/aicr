@@ -123,8 +123,17 @@ spec:
                   # set explicitly for compatibility with non-privileged environments.
                   - -x
                   - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64
+                  # INFO (was WARN) so a failed run surfaces the exact NCCL/FastRak
+                  # init path — with WARN we only saw the shim's config-checker
+                  # warnings, not the fatal abort. Scoped to INIT,NET,ENV,GRAPH to
+                  # keep the volume manageable within the launcher log tail while
+                  # covering the FastRak/TCPXO transport bring-up where the failure
+                  # occurs. Rank stdout streams back through mpirun to the launcher,
+                  # so this lands in the captured launcher diagnostics.
                   - -x
-                  - NCCL_DEBUG=WARN
+                  - NCCL_DEBUG=INFO
+                  - -x
+                  - NCCL_DEBUG_SUBSYS=INIT,NET,ENV,GRAPH
                   - -x
                   - NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY=/dev/aperture_devices
                   - -x
