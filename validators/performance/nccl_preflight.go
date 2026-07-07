@@ -39,6 +39,13 @@ const (
 	shellBin = "/bin/sh"
 )
 
+// probeNoAutomountSAToken is the addressable false used to disable
+// ServiceAccount-token automounting on the per-node probe pods
+// (PodSpec.AutomountServiceAccountToken is a *bool). The probes only read a
+// hostPath mount and never call the Kubernetes API, so mounting an API token
+// onto them — especially alongside a hostPath — is an unnecessary credential.
+var probeNoAutomountSAToken = false
+
 // runPerNodeProbe fans out a boolean readiness probe across the target nodes
 // with bounded concurrency and returns the sorted list of nodes for which the
 // probe reported false (not-ready). A probe error (schedule/image-pull/log
@@ -61,13 +68,23 @@ func runPerNodeProbe(
 	g, gctx := errgroup.WithContext(ctx.Ctx)
 	g.SetLimit(perNodeFanoutConcurrency)
 	for _, n := range nodes {
+		// Stop scheduling once the group context is canceled — a sibling probe's
+		// hard failure or a parent-context deadline — rather than queuing work
+		// that would only run against an already-canceled context. Any nodes not
+		// yet probed are irrelevant: g.Wait below returns the cancellation error,
+		// so the partial missing-list is never consumed.
+		if gctx.Err() != nil {
+			break
+		}
 		nodeName := n.Name
 		g.Go(func() error {
 			ok, err := probe(gctx, ctx.Clientset, ctx.Namespace, nodeName)
 			if err != nil {
-				return aicrErrors.WrapWithContext(aicrErrors.ErrCodeInternal,
-					probeLabel+" preflight probe failed", err,
-					map[string]interface{}{"node": nodeName})
+				// Preserve the probe's structured code (e.g. ErrCodeTimeout from
+				// the phase wait) instead of flattening every failure to Internal;
+				// only genuinely uncoded errors get the fallback classification.
+				return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
+					probeLabel+" preflight probe failed on node "+nodeName)
 			}
 			if !ok {
 				mu.Lock()

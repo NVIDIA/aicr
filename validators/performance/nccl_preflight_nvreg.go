@@ -124,8 +124,9 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 			},
 		},
 		Spec: corev1.PodSpec{
-			NodeName:      nodeName,
-			RestartPolicy: corev1.RestartPolicyNever,
+			NodeName:                     nodeName,
+			RestartPolicy:                corev1.RestartPolicyNever,
+			AutomountServiceAccountToken: &probeNoAutomountSAToken,
 			// Tolerate whatever taints the GPU nodes carry. The preflight
 			// is cheap (busybox + grep) so we accept wherever scheduler
 			// places us on the target node.

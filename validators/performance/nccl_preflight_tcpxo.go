@@ -134,8 +134,9 @@ func checkTCPXOOnNode(ctx context.Context, clientset kubernetes.Interface, names
 			},
 		},
 		Spec: corev1.PodSpec{
-			NodeName:      nodeName,
-			RestartPolicy: corev1.RestartPolicyNever,
+			NodeName:                     nodeName,
+			RestartPolicy:                corev1.RestartPolicyNever,
+			AutomountServiceAccountToken: &probeNoAutomountSAToken,
 			// Tolerate whatever taints the GPU nodes carry. The probe is cheap
 			// (busybox + test) so we accept wherever scheduler places us on the
 			// target node.
