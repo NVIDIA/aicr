@@ -1188,16 +1188,29 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// the worker side (sshd never came up, TCPXO sidecar crashed), so pull
 		// worker diagnostics too and fold everything into the returned output.
 		slog.Info("Pod did not succeed, retrieving logs for debugging...")
-		logs, logErr := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
+		launcherLogs, logErr := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
 		if logErr != nil {
 			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
-			logs = fmt.Sprintf("<launcher logs unavailable: %v>\n", logErr)
+			launcherLogs = fmt.Sprintf("<launcher logs unavailable: %v>", logErr)
 		} else {
 			// Tail to the same cap as worker diagnostics — a verbose launcher
 			// (mpirun + NCCL debug) would otherwise balloon the failure payload.
-			logs = tailLines(strings.TrimSpace(logs), maxDiagLogLines) + "\n"
+			launcherLogs = tailLines(strings.TrimSpace(launcherLogs), maxDiagLogLines)
 		}
-		logs += collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
+		workerDiag := collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
+
+		// Surface the diagnostics via slog, not just the return value: every
+		// caller on this error path (runNCCLTrainJob, validateNcclAllReduceBw,
+		// checkNCCLAllReduceBWVariant) discards the returned logs string, so
+		// logging is the only way the launcher/worker failure detail reaches the
+		// check's captured stdout (report.json). emitDiagnosticBlock logs each
+		// line individually so multi-line output stays readable there instead of
+		// collapsing into a single logfmt value.
+		slog.Error("NCCL launcher pod failed; dumping diagnostics", "launcherPod", launcherPod.Name)
+		emitDiagnosticBlock("launcher "+launcherPod.Name+" logs", launcherLogs)
+		emitDiagnosticBlock("worker diagnostics", workerDiag)
+
+		logs := launcherLogs + "\n" + workerDiag
 		return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "pod failed to complete successfully", err)
 	}
 
@@ -1216,6 +1229,23 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 // the end, so the tail is what matters; the cap keeps a verbose worker
 // (apt-get + NCCL debug output) from ballooning the returned failure payload.
 const maxDiagLogLines = 100
+
+// emitDiagnosticBlock writes a labeled, multi-line diagnostic blob to the log
+// one line at a time. The check's stdout (captured into report.json) is a
+// stream of slog lines, so logging the blob as a single attribute would
+// collapse it into one unreadable logfmt value; emitting per line keeps it
+// greppable alongside the other progress lines. A blank/whitespace-only block
+// is logged as "(empty)" so the absence of output is itself visible.
+func emitDiagnosticBlock(label, block string) {
+	trimmed := strings.TrimSpace(block)
+	if trimmed == "" {
+		slog.Error("diagnostics", "section", label, "line", "(empty)")
+		return
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		slog.Error("diagnostics", "section", label, "line", line)
+	}
+}
 
 // tailLines returns the last n lines of s (or all of s when it has n or fewer).
 func tailLines(s string, n int) string {
@@ -1257,7 +1287,20 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 	sections := make([]string, len(pods.Items))
 	g, gctx := errgroup.WithContext(diagCtx)
 	g.SetLimit(perNodeFanoutConcurrency)
+enqueue:
 	for i := range pods.Items {
+		// Stop scheduling once the diagnostic budget (diagCtx) expires so a
+		// large failed job returns promptly instead of queuing work that would
+		// only run against an already-canceled context; note the shortfall in
+		// the remaining sections so the truncation is visible, not silent.
+		select {
+		case <-gctx.Done():
+			for j := i; j < len(pods.Items); j++ {
+				sections[j] = fmt.Sprintf("worker %s: diagnostics skipped: %v\n", pods.Items[j].Name, gctx.Err())
+			}
+			break enqueue
+		default:
+		}
 		p := &pods.Items[i]
 		g.Go(func() error {
 			sections[i] = workerPodDiagnostics(gctx, clientset, namespace, p)
