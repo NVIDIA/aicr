@@ -646,6 +646,30 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-UAT-AICR-Teardown
 
+      # Pre-destroy LoadBalancer cleanup (#1617). A test cluster that creates a
+      # Service type=LoadBalancer makes the in-tree AWS cloud provider provision
+      # a classic ELB + a k8s-elb-* SG OUTSIDE Terraform state. Those are only
+      # reaped when the Service is deleted gracefully; an abrupt teardown leaves
+      # the orphaned SG as a VPC dependency, so `terraform destroy` fails at
+      # DeleteVpc with DependencyViolation and the VPC leaks. Delete the LB
+      # Services and wait for the cloud controller to reap the ELB + SG before
+      # destroy. Best-effort (the sweep inside Destroy Cluster is the backstop):
+      # the script refreshes its own kubeconfig, so this also covers daytime-down
+      # (which never ran Connect to Cluster).
+      - name: Delete LoadBalancer Services (pre-teardown)
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
+        # Bounded so a hung API server (or many LB Services) can never starve the
+        # always()-run Destroy Cluster of the job-timeout budget it needs — a
+        # cancelled teardown would re-leak the GPU node. The script's own
+        # per-svc/per-API-call timeouts stay well under this cap.
+        timeout-minutes: 8
+        shell: bash
+        run: ./.github/scripts/uat-aws-cleanup-lb.sh graceful "${DEPLOYMENT_ID}"
+
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
       #
@@ -662,6 +686,16 @@ jobs:
       # in an `if` condition does not trip `set -e`, so without the explicit
       # post-loop guard a genuine destroy failure (e.g. orphaned ENIs/SGs
       # blocking VPC deletion) would exit 0 and re-leak silently.
+      #
+      # Between failed attempts, sweep orphaned k8s-elb-* SGs and their classic
+      # ELBs (#1617). By the time a destroy attempt fails at DeleteVpc, Terraform
+      # has already deleted the EKS cluster/nodes, so only the out-of-band LB SG
+      # remains as a VPC dependency; force-deleting it lets the NEXT attempt's
+      # DeleteVpc succeed. The sweep is scoped to this cluster's ownership tag
+      # and is best-effort — the retry is the source of truth. Only sweep (and
+      # sleep) when another attempt will actually run: a sweep after the final
+      # attempt would delete the SG but leave the VPC (no retry follows), so it
+      # is skipped there.
       - name: Destroy Cluster
         if: >-
           always() && (
@@ -674,7 +708,8 @@ jobs:
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
           destroyed=false
-          for attempt in 1 2 3; do
+          attempts=3
+          for attempt in $(seq 1 "${attempts}"); do
             echo "Destroy attempt ${attempt}..."
             if docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
@@ -687,8 +722,15 @@ jobs:
               destroyed=true
               break
             fi
-            echo "Destroy attempt ${attempt} failed, retrying..."
-            sleep 30
+            # Only sweep + back off when another attempt follows: a sweep after
+            # the final attempt would strip the SG but never re-run DeleteVpc.
+            if [ "${attempt}" -lt "${attempts}" ]; then
+              echo "Destroy attempt ${attempt} failed; sweeping orphaned LB resources before retry..."
+              ./.github/scripts/uat-aws-cleanup-lb.sh sweep "${DEPLOYMENT_ID}" || true
+              sleep 30
+            else
+              echo "Destroy attempt ${attempt} failed (final attempt; no sweep/retry follows)"
+            fi
           done
           if [ "$destroyed" != true ]; then
             echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
