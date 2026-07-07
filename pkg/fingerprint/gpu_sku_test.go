@@ -44,6 +44,10 @@ func TestParseGPUSKU(t *testing.T) {
 		{"GB200 bare", "NVIDIA GB200", "gb200"},
 		{"GB200 NVL72", "NVIDIA GB200 NVL72", "gb200"},
 		{"GB200 Grace Blackwell", "NVIDIA GB200 Grace Blackwell Superchip", "gb200"},
+		// GB300 variants ("GB300" is distinct from "GB200" — no collision).
+		{"GB300 bare", "NVIDIA GB300", "gb300"},
+		{"GB300 NVL", "NVIDIA GB300 NVL", "gb300"},
+		{"label GB300 NVL", "NVIDIA-GB300-NVL", "gb300"},
 		// L40 / L40S.
 		{"L40 bare", "NVIDIA L40", "l40"},
 		{"L40S", "NVIDIA L40S", "l40s"},

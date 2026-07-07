@@ -35,6 +35,7 @@ var gpuSKURegistry = []struct {
 	tokens []string
 	sku    string
 }{
+	{[]string{"GB300"}, "gb300"},
 	{[]string{"GB200"}, "gb200"},
 	{[]string{"B200"}, "b200"},
 	{[]string{"H100"}, "h100"},

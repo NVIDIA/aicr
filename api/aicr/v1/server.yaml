@@ -112,7 +112,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
             default: any
         - name: accelerator
           in: query
@@ -120,7 +120,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -128,7 +128,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -485,7 +485,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
             default: any
         - name: accelerator
           in: query
@@ -493,7 +493,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -501,7 +501,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -1280,12 +1280,12 @@ components:
         service:
           type: string
           description: Kubernetes service type
-          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
+          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
           example: eks
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any]
+          enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
           example: h100
         intent:
           type: string
