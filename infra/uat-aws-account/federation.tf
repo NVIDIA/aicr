@@ -135,6 +135,21 @@ data "aws_iam_policy_document" "github_actions_permissions" {
     ]
   }
 
+  # Read SSO-provisioned roles so the EKS actuator can resolve the SSO admin
+  # role and wire it into cluster access (EKS access entries / aws-auth). This
+  # was previously applied out-of-band to the live policy; codified here so the
+  # Terraform source is authoritative and `terraform apply` does not revert it.
+  statement {
+    sid    = "IAMReadSSORoles"
+    effect = "Allow"
+    actions = [
+      "iam:GetRole",
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-reserved/sso.amazonaws.com/*",
+    ]
+  }
+
   # Deny privilege escalation paths
   statement {
     sid    = "DenyPrivilegeEscalation"
