@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Slinky Slurm Operator Helm values (chart v1.1.0)
+# Slinky Slurm Operator Helm values (chart v1.2.0)
 # Deploys the SchedMD Slinky Slurm operator and its admission webhook into
 # the `slinky` namespace. Manages the lifecycle of Slurm clusters declared
 # via the Controller / NodeSet / LoginSet / Accounting / RestApi / Token
@@ -20,6 +20,9 @@
 #
 # The operator depends on cert-manager for serving the admission webhook
 # certificate (Issuer + Certificate resources are rendered by the chart).
+# AICR injects system node selectors and tolerations into both the operator
+# and webhook through recipes/registry.yaml. Affinity remains a chart-specific
+# override through valuesFile, --set-json, or --dynamic.
 
 # CRDs are managed by the separate slinky-slurm-operator-crds component
 # to keep CRD lifecycle independent from operator upgrades.
