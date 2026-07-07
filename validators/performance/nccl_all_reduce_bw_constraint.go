@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	k8spod "github.com/NVIDIA/aicr/pkg/k8s/pod"
@@ -1190,6 +1192,10 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		if logErr != nil {
 			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
 			logs = fmt.Sprintf("<launcher logs unavailable: %v>\n", logErr)
+		} else {
+			// Tail to the same cap as worker diagnostics — a verbose launcher
+			// (mpirun + NCCL debug) would otherwise balloon the failure payload.
+			logs = tailLines(strings.TrimSpace(logs), maxDiagLogLines) + "\n"
 		}
 		logs += collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
 		return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "pod failed to complete successfully", err)
@@ -1243,47 +1249,74 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 		return "\n--- no NCCL worker pods found (workers may never have been scheduled) ---\n"
 	}
 
-	var b strings.Builder
-	b.WriteString("\n--- NCCL worker pod diagnostics ---\n")
+	// Fetch each worker's diagnostics concurrently with bounded concurrency:
+	// sequential per-pod log fetches would share the single DiagnosticTimeout,
+	// so on a large job later workers could exhaust it and lose diagnostics.
+	// Order is preserved via an indexed result slice; workerPodDiagnostics is
+	// best-effort and never errors, so g.Wait never cancels the group early.
+	sections := make([]string, len(pods.Items))
+	g, gctx := errgroup.WithContext(diagCtx)
+	g.SetLimit(preflightNodeConcurrency)
 	for i := range pods.Items {
 		p := &pods.Items[i]
-		fmt.Fprintf(&b, "worker %s: phase=%s\n", p.Name, p.Status.Phase)
-		// Combine init (native sidecars like tcpxo-daemon) and main container
-		// statuses into a fresh slice — appending into p.Status.InitContainerStatuses
-		// directly could mutate the pod's backing array.
-		statuses := make([]v1.ContainerStatus, 0, len(p.Status.InitContainerStatuses)+len(p.Status.ContainerStatuses))
-		statuses = append(statuses, p.Status.InitContainerStatuses...)
-		statuses = append(statuses, p.Status.ContainerStatuses...)
-		for _, cs := range statuses {
-			switch {
-			case cs.State.Terminated != nil:
-				t := cs.State.Terminated
-				fmt.Fprintf(&b, "  container %s: terminated reason=%s exitCode=%d %s\n",
-					cs.Name, t.Reason, t.ExitCode, strings.TrimSpace(t.Message))
-			case cs.State.Waiting != nil:
-				w := cs.State.Waiting
-				fmt.Fprintf(&b, "  container %s: waiting reason=%s %s\n",
-					cs.Name, w.Reason, strings.TrimSpace(w.Message))
-			case cs.State.Running != nil:
-				fmt.Fprintf(&b, "  container %s: running (ready=%t)\n", cs.Name, cs.Ready)
-			}
+		g.Go(func() error {
+			sections[i] = workerPodDiagnostics(gctx, clientset, namespace, p)
+			return nil
+		})
+	}
+	_ = g.Wait()
+
+	var b strings.Builder
+	b.WriteString("\n--- NCCL worker pod diagnostics ---\n")
+	for _, s := range sections {
+		b.WriteString(s)
+	}
+	return b.String()
+}
+
+// workerPodDiagnostics renders the diagnostic section for a single worker pod:
+// phase, each container's terminal/waiting/running state, and the tail of the
+// "node" and "tcpxo-daemon" container logs. Best-effort — never errors — so it
+// is safe to run under an errgroup that must not cancel on a single pod's log
+// fetch failing.
+func workerPodDiagnostics(ctx context.Context, clientset kubernetes.Interface, namespace string, p *v1.Pod) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "worker %s: phase=%s\n", p.Name, p.Status.Phase)
+	// Combine init (native sidecars like tcpxo-daemon) and main container
+	// statuses into a fresh slice — appending into p.Status.InitContainerStatuses
+	// directly could mutate the pod's backing array.
+	statuses := make([]v1.ContainerStatus, 0, len(p.Status.InitContainerStatuses)+len(p.Status.ContainerStatuses))
+	statuses = append(statuses, p.Status.InitContainerStatuses...)
+	statuses = append(statuses, p.Status.ContainerStatuses...)
+	for _, cs := range statuses {
+		switch {
+		case cs.State.Terminated != nil:
+			t := cs.State.Terminated
+			fmt.Fprintf(&b, "  container %s: terminated reason=%s exitCode=%d %s\n",
+				cs.Name, t.Reason, t.ExitCode, strings.TrimSpace(t.Message))
+		case cs.State.Waiting != nil:
+			w := cs.State.Waiting
+			fmt.Fprintf(&b, "  container %s: waiting reason=%s %s\n",
+				cs.Name, w.Reason, strings.TrimSpace(w.Message))
+		case cs.State.Running != nil:
+			fmt.Fprintf(&b, "  container %s: running (ready=%t)\n", cs.Name, cs.Ready)
 		}
-		// Best-effort container logs. "node" is the worker itself (sshd + NCCL);
-		// "tcpxo-daemon" is the FastRak sidecar whose failure also downs the run.
-		// GetPodLogs streams the full log — a verbose NCCL/apt-get worker can emit
-		// thousands of lines — so tail each container to the last maxDiagLogLines
-		// before appending, keeping the failure payload bounded. The tail (not the
-		// head) is kept because the fatal error is almost always the last output.
-		for _, container := range []string{nodeJobName, "tcpxo-daemon"} {
-			logs, logErr := k8spod.GetPodLogs(diagCtx, clientset, namespace, p.Name, container)
-			if logErr != nil {
-				fmt.Fprintf(&b, "  [%s logs unavailable: %v]\n", container, logErr)
-				continue
-			}
-			if trimmed := strings.TrimSpace(logs); trimmed != "" {
-				fmt.Fprintf(&b, "  --- %s/%s logs (last %d lines) ---\n%s\n",
-					p.Name, container, maxDiagLogLines, tailLines(trimmed, maxDiagLogLines))
-			}
+	}
+	// Best-effort container logs. "node" is the worker itself (sshd + NCCL);
+	// "tcpxo-daemon" is the FastRak sidecar whose failure also downs the run.
+	// GetPodLogs streams the full log — a verbose NCCL/apt-get worker can emit
+	// thousands of lines — so tail each container to the last maxDiagLogLines
+	// before appending, keeping the failure payload bounded. The tail (not the
+	// head) is kept because the fatal error is almost always the last output.
+	for _, container := range []string{nodeJobName, "tcpxo-daemon"} {
+		logs, logErr := k8spod.GetPodLogs(ctx, clientset, namespace, p.Name, container)
+		if logErr != nil {
+			fmt.Fprintf(&b, "  [%s logs unavailable: %v]\n", container, logErr)
+			continue
+		}
+		if trimmed := strings.TrimSpace(logs); trimmed != "" {
+			fmt.Fprintf(&b, "  --- %s/%s logs (last %d lines) ---\n%s\n",
+				p.Name, container, maxDiagLogLines, tailLines(trimmed, maxDiagLogLines))
 		}
 	}
 	return b.String()

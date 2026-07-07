@@ -64,6 +64,28 @@ func TestGKETCPXOPreflightApplies(t *testing.T) {
 	}
 }
 
+func TestTailLines(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"fewer than n", "a\nb", 5, "a\nb"},
+		{"exactly n", "a\nb\nc", 3, "a\nb\nc"},
+		{"more than n keeps tail", "a\nb\nc\nd", 2, "c\nd"},
+		{"single line", "only", 3, "only"},
+		{"empty", "", 3, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tailLines(tt.in, tt.n); got != tt.want {
+				t.Errorf("tailLines(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCollectNCCLWorkerDiagnostics(t *testing.T) {
 	const ns = "aicr-test"
 
