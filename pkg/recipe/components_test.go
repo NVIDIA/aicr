@@ -263,6 +263,67 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	}
 }
 
+func TestComponentRegistry_SlinkySlurmOperator_NodeSchedulingPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	slurmOperator := registry.Get("slinky-slurm-operator")
+	if slurmOperator == nil {
+		t.Fatal("slinky-slurm-operator not found in registry")
+	}
+
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{
+			name: "system node selectors",
+			got:  slurmOperator.GetSystemNodeSelectorPaths(),
+			want: []string{"operator.nodeSelector", "webhook.nodeSelector"},
+		},
+		{
+			name: "system tolerations",
+			got:  slurmOperator.GetSystemTolerationPaths(),
+			want: []string{"operator.tolerations", "webhook.tolerations"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !slices.Equal(tt.got, tt.want) {
+				t.Errorf("slinky-slurm-operator %s = %v, want %v", tt.name, tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComponentRegistry_SlinkySlurmChartVersions(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	const wantVersion = "1.2.0"
+	for _, name := range []string{
+		"slinky-slurm-operator-crds",
+		"slinky-slurm-operator",
+		"slinky-slurm",
+	} {
+		t.Run(name, func(t *testing.T) {
+			component := registry.Get(name)
+			if component == nil {
+				t.Fatalf("%s not found in registry", name)
+			}
+			if component.Helm.DefaultVersion != wantVersion {
+				t.Errorf("%s chart version = %q, want %q", name, component.Helm.DefaultVersion, wantVersion)
+			}
+		})
+	}
+}
+
 // Pins the `slinky` map-key choice for slinky-slurm on both sides:
 // the registry's nodeScheduling paths AND components/slinky-slurm/
 // values.yaml must reference the same key, or injected tolerations

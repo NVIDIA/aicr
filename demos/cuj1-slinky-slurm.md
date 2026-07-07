@@ -54,7 +54,7 @@ AICR injects placement from bundle flags using each component's registry paths:
 
 **Registry default for `slinky-slurm`:** `controller`, `restapi`, and `loginsets.slinky` use the **system** paths; `nodesets.slinky` uses **accelerated** paths. On split clusters (system pool + GPU pool), override the control plane onto the pool you want with `--set-json` (runs **after** selector injection and wins on those paths).
 
-**Operator note:** slurm-operator chart v1.1.0 ignores `nodeSelector`; it schedules from **tolerations** only. On EKS, include **both** `NoSchedule` and `NoExecute` for each taint key — nodes often carry both effects.
+**Operator note:** slurm-operator chart v1.2.0 honors `nodeSelector`, `tolerations`, and `affinity` for both the operator and webhook. AICR's `--system-node-selector` and `--system-node-toleration` flags fan out to both deployments. Set affinity through `--set-json slurmoperator:operator.affinity=...` and `--set-json slurmoperator:webhook.affinity=...`. On EKS, include **both** `NoSchedule` and `NoExecute` for each taint key — nodes often carry both effects.
 
 **Override aliases:** `slinkyslurm`, `slurmcluster` (cluster chart); `slurm`, `slurmoperator` (operator chart). See `valueOverrideKeys` in `recipes/registry.yaml`.
 
@@ -276,4 +276,3 @@ Helm does not remove CRDs or PVCs by default; delete manually when you need a cl
 - On GPU leaves, `srun --gres=gpu:8 nvidia-smi -L` reaches all GPUs per node.
 
 > Multi-node NCCL via `srun` + Pyxis/Enroot is the natural Slurm-native performance path; it is out of scope for this smoke CUJ and not covered by `aicr validate --phase performance` today.
-
