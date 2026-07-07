@@ -1205,6 +1205,21 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 	return logs, nil
 }
 
+// maxDiagLogLines bounds how many trailing log lines are kept per worker
+// container in the failure diagnostics. The fatal error is almost always near
+// the end, so the tail is what matters; the cap keeps a verbose worker
+// (apt-get + NCCL debug output) from ballooning the returned failure payload.
+const maxDiagLogLines = 100
+
+// tailLines returns the last n lines of s (or all of s when it has n or fewer).
+func tailLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
 // collectNCCLWorkerDiagnostics gathers a compact, best-effort summary of the
 // NCCL worker pods to explain a launcher failure. Called only on the failure
 // path; every step is best-effort and never returns an error (a diagnostic
@@ -1218,7 +1233,7 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 	diagCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 
-	selector := fmt.Sprintf("jobset.sigs.k8s.io/jobset-name=%s,jobset.sigs.k8s.io/replicatedjob-name=node", ncclTrainJobName)
+	selector := fmt.Sprintf("jobset.sigs.k8s.io/jobset-name=%s,jobset.sigs.k8s.io/replicatedjob-name=%s", ncclTrainJobName, nodeJobName)
 	pods, err := clientset.CoreV1().Pods(namespace).List(diagCtx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
 		slog.Warn("failed to list NCCL worker pods for diagnostics", "error", err)
@@ -1255,6 +1270,10 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 		}
 		// Best-effort container logs. "node" is the worker itself (sshd + NCCL);
 		// "tcpxo-daemon" is the FastRak sidecar whose failure also downs the run.
+		// GetPodLogs streams the full log — a verbose NCCL/apt-get worker can emit
+		// thousands of lines — so tail each container to the last maxDiagLogLines
+		// before appending, keeping the failure payload bounded. The tail (not the
+		// head) is kept because the fatal error is almost always the last output.
 		for _, container := range []string{nodeJobName, "tcpxo-daemon"} {
 			logs, logErr := k8spod.GetPodLogs(diagCtx, clientset, namespace, p.Name, container)
 			if logErr != nil {
@@ -1262,7 +1281,8 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 				continue
 			}
 			if trimmed := strings.TrimSpace(logs); trimmed != "" {
-				fmt.Fprintf(&b, "  --- %s/%s logs ---\n%s\n", p.Name, container, trimmed)
+				fmt.Fprintf(&b, "  --- %s/%s logs (last %d lines) ---\n%s\n",
+					p.Name, container, maxDiagLogLines, tailLines(trimmed, maxDiagLogLines))
 			}
 		}
 	}

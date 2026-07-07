@@ -90,10 +90,13 @@ spec:
                   # Worker "node" pods install openssh-server and source the
                   # TCPXO env profile at container start before sshd comes up,
                   # so on freshly provisioned nodes sshd can lag the launcher by
-                  # minutes. Give mpirun's rsh a bounded reachability budget
-                  # (ConnectTimeout 10s x ConnectionAttempts 60 ~= 10 min) so a
-                  # slow worker bring-up retries instead of aborting the launcher.
-                  - -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ConnectionAttempts=60
+                  # minutes. mpirun's rsh IS the retry loop here: while sshd is
+                  # not listening the port is refused, so ssh retries ~1s apart
+                  # (ConnectTimeout only bounds the unreachable-IP case, not a
+                  # refusal), making the real ceiling ~= ConnectionAttempts
+                  # seconds. Size it to ~5 min so a slow worker bring-up retries
+                  # instead of aborting the launcher.
+                  - -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ConnectionAttempts=300
                   # Restrict MPI OOB and UCX to control NIC — without hostNetwork,
                   # eth0 is the default/control NIC, eth1-eth8 are GPU NICs.
                   - --mca
