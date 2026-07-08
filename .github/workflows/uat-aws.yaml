@@ -494,10 +494,10 @@ jobs:
         run: ./tests/uat/aws/run conformance "${TEST_CONFIG}"
 
       # The CUJ phase is intent-selected, mirroring the runner's intent-aware
-      # `all`: training runs the Kubeflow TrainJob; inference runs the served
-      # DynamoGraphDeployment (phase_serve, DC3) — deploy, wait for readiness,
-      # hit the OpenAI-compatible endpoint, assert a completion. Exactly one
-      # fires per run; verify/evidence cover the deployed stack either way.
+      # `all`: training runs the Kubeflow TrainJob; inference would run the
+      # served DynamoGraphDeployment (phase_serve, DC3). For training, the
+      # TrainJob fires; for inference the serve step is currently disabled (see
+      # below), so verify/evidence cover the deployed stack either way.
       - name: UAT - train (TrainJob)
         id: train
         if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
@@ -508,18 +508,31 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run train "${TEST_CONFIG}"
 
-      - name: UAT - serve (DynamoGraphDeployment + endpoint)
-        id: serve
-        if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
-        # Larger budget than train: a cold pull of the multi-GB vllm-runtime
-        # image + model download + engine warmup precedes the first served
-        # token (phase_serve's SERVE_READY_TIMEOUT_SECONDS is 30m).
-        timeout-minutes: 40
-        shell: bash
-        env:
-          AICR_BIN: ${{ github.workspace }}/aicr
-          RUN_ID: ${{ github.run_id }}
-        run: ./tests/uat/aws/run serve "${TEST_CONFIG}"
+      # TEMPORARILY DISABLED (step commented out below). The vLLM workload run is
+      # excluded from UAT for now because the Frontend component pulls the full
+      # ~12GB vllm-runtime image on a fresh (non-GPU) node and never finishes
+      # within the 30m readiness budget: the decode worker reuses the GPU node's
+      # cached image (`already present on machine`), but the Frontend lands on a
+      # different node and pulls from scratch, wedging in ContainerCreating until
+      # the phase times out. The inference STACK (dynamo + KAI scheduler + DRA
+      # driver) is still stood up and validated by prep/install/conformance/verify;
+      # only the served-workload run is skipped (the Serve summary row is a static
+      # `disabled`). Re-enable by uncommenting the step once the pull is addressed
+      # (pre-pull/image cache, or pin the Frontend to the GPU node so it reuses
+      # the cached image). Kept in lockstep with uat-gcp.yaml. Tracked by #1644.
+      #
+      # - name: UAT - serve (DynamoGraphDeployment + endpoint)
+      #   id: serve
+      #   if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
+      #   # Larger budget than train: a cold pull of the multi-GB vllm-runtime
+      #   # image + model download + engine warmup precedes the first served
+      #   # token (phase_serve's SERVE_READY_TIMEOUT_SECONDS is 30m).
+      #   timeout-minutes: 40
+      #   shell: bash
+      #   env:
+      #     AICR_BIN: ${{ github.workspace }}/aicr
+      #     RUN_ID: ${{ github.run_id }}
+      #   run: ./tests/uat/aws/run serve "${TEST_CONFIG}"
 
       - name: UAT - verify (evidence verify)
         id: verify
@@ -610,7 +623,7 @@ jobs:
             echo "| Install | ${{ steps.install.outcome }} |"
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
-            echo "| Serve | ${{ steps.serve.outcome }} |"
+            echo "| Serve | disabled (vLLM excluded from UAT) |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
