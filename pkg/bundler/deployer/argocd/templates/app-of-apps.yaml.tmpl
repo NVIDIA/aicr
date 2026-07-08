@@ -3,6 +3,10 @@ kind: Application
 metadata:
   name: {{ printf "%q" .AppName }}
   namespace: argocd
+{{- if .CascadeDelete }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+{{- end }}
 spec:
   project: default
   source:

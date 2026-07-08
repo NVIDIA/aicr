@@ -3,13 +3,13 @@ kind: Application
 metadata:
     annotations:
         argocd.argoproj.io/sync-wave: "0"
-    name: cert-manager
+    name: '{{ (.Values.deployer | default dict).namePrefix | default "" }}cert-manager'
     namespace: argocd
 spec:
     destination:
         namespace: cert-manager
-        server: https://kubernetes.default.svc
-    project: default
+        server: '{{ (.Values.deployer | default dict).destinationServer | default "https://kubernetes.default.svc" }}'
+    project: '{{ (.Values.deployer | default dict).project | default "default" }}'
     source:
         chart: cert-manager
         helm:

@@ -16,6 +16,7 @@ package argocd
 
 import (
 	"context"
+	stderrors "errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -31,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1948,5 +1950,112 @@ func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
 	}
 	if string(got) != string(want) {
 		t.Errorf("%s differs from golden:\n--- got ---\n%s\n--- want ---\n%s", relPath, got, want)
+	}
+}
+
+// newTestGenerator returns a minimal single-component (gpu-operator)
+// Generator fixture shared by the deployer-options tests. gpu-operator is
+// the sole component so its child Application lands at
+// 001-gpu-operator/application.yaml.
+func newTestGenerator(t *testing.T) *Generator {
+	t.Helper()
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+	return &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v0.9.0",
+	}
+}
+
+// readBundleFile reads relPath under outputDir, failing the test on error.
+func readBundleFile(t *testing.T, outputDir, relPath string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(outputDir, relPath))
+	if err != nil {
+		t.Fatalf("read %s: %v", relPath, err)
+	}
+	return content
+}
+
+// TestGenerate_DeployerOptions verifies the four deployer: options land in
+// the generated manifests: namePrefix, destinationServer, and project apply
+// to child Applications only, while cascadeDelete adds the resources
+// finalizer to both the parent and children. See #1625 and #1628.
+func TestGenerate_DeployerOptions(t *testing.T) {
+	outputDir := t.TempDir()
+	g := newTestGenerator(t)
+	g.NamePrefix = "tenant-a-"
+	g.DestinationServer = "https://remote.example.com:6443"
+	g.Project = "tenant-a"
+	g.CascadeDelete = true
+
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	appYAML := readBundleFile(t, outputDir, "001-gpu-operator/application.yaml")
+	for _, want := range []string{
+		"name: tenant-a-gpu-operator",
+		"server: https://remote.example.com:6443",
+		"project: tenant-a",
+		"- resources-finalizer.argocd.argoproj.io",
+	} {
+		if !strings.Contains(string(appYAML), want) {
+			t.Errorf("child application.yaml missing %q\n%s", want, appYAML)
+		}
+	}
+
+	parentYAML := readBundleFile(t, outputDir, "app-of-apps.yaml")
+	// Parent: finalizer YES (cascadeDelete covers parent), but name prefix,
+	// destination, and project must NOT apply — control-plane stays put.
+	if !strings.Contains(string(parentYAML), "- resources-finalizer.argocd.argoproj.io") {
+		t.Error("parent app-of-apps.yaml missing finalizer")
+	}
+	for _, reject := range []string{"tenant-a-", "remote.example.com"} {
+		if strings.Contains(string(parentYAML), reject) {
+			t.Errorf("parent app-of-apps.yaml unexpectedly contains %q", reject)
+		}
+	}
+	if !strings.Contains(string(parentYAML), "project: default") {
+		t.Error("parent app-of-apps.yaml project changed; must stay default")
+	}
+}
+
+// TestGenerate_DeployerOptions_InvalidRejected verifies the deployer
+// boundary rejects malformed option values with ErrCodeInvalidRequest even
+// when callers bypass CLI/API validation (direct library use).
+func TestGenerate_DeployerOptions_InvalidRejected(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Generator)
+	}{
+		{"combined child name too long", func(g *Generator) { g.NamePrefix = strings.Repeat("a", 254) + "-" }},
+		{"http destination", func(g *Generator) { g.DestinationServer = "http://insecure" }},
+		{"invalid project", func(g *Generator) { g.Project = "Not_Valid" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newTestGenerator(t)
+			tt.mutate(g)
+			_, err := g.Generate(context.Background(), t.TempDir())
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
 	}
 }

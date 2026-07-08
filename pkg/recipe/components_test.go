@@ -1128,3 +1128,25 @@ func TestGetComponentRegistryFor_NilProviderFallsBack(t *testing.T) {
 		t.Fatal("expected non-nil registry for nil provider fallback")
 	}
 }
+
+// TestRegistryReservesDeployerKey guards the --set deployer: reserved
+// prefix (#1625): a component named "deployer" or using "deployer" as a
+// valueOverrideKey would make `--set deployer:...` ambiguous between
+// component Helm values and deployer-level Argo options.
+func TestRegistryReservesDeployerKey(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	for _, comp := range registry.Components {
+		if comp.Name == "deployer" {
+			t.Errorf("component name %q collides with the reserved --set deployer: prefix", comp.Name)
+		}
+		for _, key := range comp.ValueOverrideKeys {
+			if key == "deployer" {
+				t.Errorf("component %q uses reserved override key %q", comp.Name, key)
+			}
+		}
+	}
+}

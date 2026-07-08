@@ -5,8 +5,12 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "{{ .SyncWave }}"
+{{- if .CascadeDelete }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+{{- end }}
 spec:
-  project: default
+  project: {{ .Project }}
 {{- if .IsLocalChart }}
   source:
     repoURL: '{{ .RepoURL }}'
@@ -33,7 +37,7 @@ spec:
       ref: values
 {{- end }}
   destination:
-    server: https://kubernetes.default.svc
+    server: {{ .DestinationServer }}
     namespace: {{ .Namespace }}
   syncPolicy:
     automated:

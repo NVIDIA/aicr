@@ -368,7 +368,7 @@ Generate deployment bundles from a recipe.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of recipe component names to bundle (e.g. `gpu-operator,network-operator`). Whitespace around names is trimmed. Components not listed are skipped as if disabled (their dependency edges are treated as satisfied externally). A name the recipe does not declare, or one that is disabled (by the recipe or a `set` `enabled=false` override), is rejected with HTTP 400. |
-| `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. |
+| `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. The reserved prefix `deployer:` carries Argo CD Application options for `deployer=argocd` and `deployer=argocd-helm` (`namePrefix`, `destinationServer`, `project`, `cascadeDelete`), e.g. `set=deployer:namePrefix=tenant-a-`. Unknown `deployer:` keys — or the prefix with any other deployer — are rejected with HTTP 400. See the CLI reference's [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) for full semantics. |
 | `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, and `deployer=helmfile`. |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |

@@ -1901,3 +1901,174 @@ func TestWriteChartYAML_QuotesYAMLReservedScalarsAsName(t *testing.T) {
 		})
 	}
 }
+
+// newTestHelmGenerator returns a minimal single-Helm-component Generator
+// fixture for deployer-option tests. Callers set the deployer option
+// fields (NamePrefix, DestinationServer, Project, CascadeDelete) before
+// calling Generate.
+func newTestHelmGenerator(t *testing.T) *Generator {
+	t.Helper()
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+			Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+			Source: "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+	return &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version: "v0.0.0-test",
+	}
+}
+
+// readBundleFile reads a bundle-relative file, failing the test on error.
+func readBundleFile(t *testing.T, outputDir, rel string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(outputDir, rel))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return data
+}
+
+func TestGenerate_DeployerValuesInChart(t *testing.T) {
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	g.NamePrefix = "tenant-a-"
+	g.DestinationServer = "https://remote.example.com:6443"
+	g.Project = "tenant-a"
+	g.CascadeDelete = true
+
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	values := readBundleFile(t, outputDir, "values.yaml")
+	for _, want := range []string{"deployer:", "namePrefix: tenant-a-",
+		"destinationServer: https://remote.example.com:6443", "project: tenant-a"} {
+		if !strings.Contains(string(values), want) {
+			t.Errorf("values.yaml missing %q\n%s", want, values)
+		}
+	}
+	if strings.Contains(string(values), "cascadeDelete") {
+		t.Error("cascadeDelete must not appear in values.yaml (bundle-time only)")
+	}
+
+	child := readBundleFile(t, outputDir, "templates/gpu-operator.yaml")
+	for _, want := range []string{
+		`{{ (.Values.deployer | default dict).namePrefix | default "" }}gpu-operator`,
+		`(.Values.deployer | default dict).destinationServer`,
+		`(.Values.deployer | default dict).project`,
+		"resources-finalizer.argocd.argoproj.io",
+	} {
+		if !strings.Contains(string(child), want) {
+			t.Errorf("child template missing %q\n%s", want, child)
+		}
+	}
+
+	parent := readBundleFile(t, outputDir, "templates/aicr-stack.yaml")
+	if !strings.Contains(string(parent), "resources-finalizer.argocd.argoproj.io") {
+		t.Error("parent template missing finalizer when CascadeDelete set")
+	}
+	for _, reject := range []string{"tenant-a-", "remote.example.com"} {
+		if strings.Contains(string(parent), reject) {
+			t.Errorf("parent template unexpectedly contains %q", reject)
+		}
+	}
+}
+
+func TestGenerate_DeployerDefaults_NoOptions(t *testing.T) {
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	values := readBundleFile(t, outputDir, "values.yaml")
+	// Defaults documented in values.yaml even without overrides.
+	for _, want := range []string{"destinationServer: https://kubernetes.default.svc", "project: default"} {
+		if !strings.Contains(string(values), want) {
+			t.Errorf("values.yaml missing default %q\n%s", want, values)
+		}
+	}
+	parent := readBundleFile(t, outputDir, "templates/aicr-stack.yaml")
+	if strings.Contains(string(parent), "finalizers") {
+		t.Error("parent template must not carry finalizers by default")
+	}
+}
+
+// TestHelmTemplate_DeployerNamePrefixOverride is the live-render check for
+// the install-time deployer.* vocabulary: `helm template --set
+// deployer.namePrefix=t-` must render the child Application's
+// metadata.name as `t-gpu-operator`, and project / destinationServer
+// overrides must land on the child spec. Skipped when helm is not on PATH.
+func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+		"--set", "repoURL=oci://example.test/myorg",
+		"--set", "targetRevision=v1.0.0",
+		"--set", "deployer.namePrefix=t-",
+		"--set", "deployer.project=tenant-a",
+		"--set", "deployer.destinationServer=https://remote.example.com:6443",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+	}
+
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	type appLite struct {
+		Kind     string                `yaml:"kind"`
+		Metadata struct{ Name string } `yaml:"metadata"`
+		Spec     struct {
+			Project     string `yaml:"project"`
+			Destination struct {
+				Server string `yaml:"server"`
+			} `yaml:"destination"`
+		} `yaml:"spec"`
+	}
+	found := map[string]appLite{}
+	for {
+		var a appLite
+		decErr := dec.Decode(&a)
+		if errors.Is(decErr, io.EOF) {
+			break
+		}
+		if decErr != nil {
+			t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
+		}
+		if a.Kind == "Application" && a.Metadata.Name != "" {
+			found[a.Metadata.Name] = a
+		}
+	}
+
+	child, ok := found["t-gpu-operator"]
+	if !ok {
+		t.Fatalf("rendered output missing prefixed child 't-gpu-operator'\noutput:\n%s", out)
+	}
+	if child.Spec.Project != "tenant-a" {
+		t.Errorf("child spec.project: got %q, want %q", child.Spec.Project, "tenant-a")
+	}
+	if child.Spec.Destination.Server != "https://remote.example.com:6443" {
+		t.Errorf("child destination.server: got %q, want %q", child.Spec.Destination.Server, "https://remote.example.com:6443")
+	}
+
+	// Parent Application stays unprefixed and on the control-plane cluster.
+	if _, ok := found[DefaultAppName]; !ok {
+		t.Errorf("rendered output missing unprefixed parent %q", DefaultAppName)
+	}
+}

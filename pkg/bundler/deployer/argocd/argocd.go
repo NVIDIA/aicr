@@ -95,6 +95,19 @@ type ApplicationData struct {
 	IsLocalChart   bool   // true → path-based single-source; false → multi-source upstream-helm
 	InlineValues   bool   // KindUpstreamHelm + OCI → single-source with helm.valuesObject inlined
 	ValuesYAML     string // Pre-indented YAML (8 spaces) for helm.valuesObject; used when InlineValues
+
+	// DestinationServer is the spec.destination.server value; populated
+	// from Generator.DestinationServer with DefaultDestinationServer as
+	// the fallback. See #1625.
+	DestinationServer string
+
+	// Project is the spec.project value; populated from Generator.Project
+	// with DefaultProject as the fallback. See #1625.
+	Project string
+
+	// CascadeDelete adds ResourcesFinalizer to the rendered Application.
+	// See #1628.
+	CascadeDelete bool
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -107,6 +120,11 @@ type AppOfAppsData struct {
 	// is baked into app-of-apps.yaml and is not overridable at apply time.
 	// Defaults to DefaultAppName ("nvidia-stack"). See issue #1011.
 	AppName string
+
+	// CascadeDelete adds ResourcesFinalizer to the parent Application so
+	// deleting it prunes the child Applications and their resources.
+	// See #1628.
+	CascadeDelete bool
 }
 
 // DefaultAppName is the parent App-of-Apps `metadata.name` written into
@@ -115,6 +133,22 @@ type AppOfAppsData struct {
 // names so their parent Applications do not overwrite each other —
 // see issue #1011.
 const DefaultAppName = "nvidia-stack"
+
+// DefaultDestinationServer is the in-cluster API server URL written into
+// generated Application destinations when no deployer destinationServer
+// override is supplied.
+const DefaultDestinationServer = "https://kubernetes.default.svc"
+
+// DefaultProject is the Argo CD project written into generated
+// Applications when no deployer project override is supplied.
+const DefaultProject = "default"
+
+// ResourcesFinalizer is Argo CD's cascading-deletion finalizer. When
+// CascadeDelete is set it is added to the parent and every child
+// Application so `kubectl delete` on the parent prunes managed
+// resources. See #1628 and
+// https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/
+const ResourcesFinalizer = "resources-finalizer.argocd.argoproj.io"
 
 // ReadmeData contains data for rendering the README.
 type ReadmeData struct {
@@ -216,6 +250,27 @@ type Generator struct {
 	// so the choice cannot be deferred to apply time. See issue #1011.
 	AppName string
 
+	// NamePrefix is prepended to every child Application metadata.name.
+	// The parent Application name is covered by AppName. Composed names
+	// are validated as DNS-1123 subdomains at generation time. See #1625.
+	NamePrefix string
+
+	// DestinationServer overrides spec.destination.server on child
+	// Applications only; empty falls back to DefaultDestinationServer.
+	// The parent stays on the control-plane cluster — Application CRs are
+	// reconciled only from the cluster running Argo CD. See #1625.
+	DestinationServer string
+
+	// Project overrides spec.project on child Applications only; empty
+	// falls back to DefaultProject. The parent stays in "default" — a
+	// project able to create Applications in the Argo CD namespace is
+	// effectively admin. See #1625.
+	Project string
+
+	// CascadeDelete adds ResourcesFinalizer to the parent and every child
+	// Application. Baked at bundle time. See #1628.
+	CascadeDelete bool
+
 	// InlineUpstreamValues replaces the multi-source $values pattern for
 	// KindUpstreamHelm Applications with a single source whose helm.valuesObject
 	// is inlined from ComponentValues. Required when RepoURL is OCI because
@@ -261,6 +316,24 @@ func (g *Generator) appName() string {
 		return DefaultAppName
 	}
 	return g.AppName
+}
+
+// destinationServer returns the effective child-Application destination,
+// applying the DefaultDestinationServer fallback when unset.
+func (g *Generator) destinationServer() string {
+	if g.DestinationServer == "" {
+		return DefaultDestinationServer
+	}
+	return g.DestinationServer
+}
+
+// project returns the effective child-Application project, applying the
+// DefaultProject fallback when unset.
+func (g *Generator) project() string {
+	if g.Project == "" {
+		return DefaultProject
+	}
+	return g.Project
 }
 
 // resolveRepoSettings returns the effective repoURL and targetRevision,
@@ -351,6 +424,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// produce a manifest that fails at apiserver admission. Empty is
 	// accepted and resolves to DefaultAppName via appName().
 	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
+		return nil, err
+	}
+	if err := bundlercfg.ValidateHTTPSURL("deployer destinationServer", g.DestinationServer); err != nil {
+		return nil, err
+	}
+	if err := bundlercfg.ValidateAppName(g.Project); err != nil {
 		return nil, err
 	}
 
@@ -458,6 +537,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		if err != nil {
 			return nil, err
 		}
+		appData.Name = g.NamePrefix + appData.Name
+		if err := bundlercfg.ValidateAppName(appData.Name); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("deployer namePrefix produces invalid child Application name %q", appData.Name), err)
+		}
+		appData.DestinationServer = g.destinationServer()
+		appData.Project = g.project()
+		appData.CascadeDelete = g.CascadeDelete
 		appDataList = append(appDataList, appData)
 
 		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)
@@ -481,6 +568,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		TargetRevision: targetRevision,
 		Path:           ".",
 		AppName:        appName,
+		CascadeDelete:  g.CascadeDelete,
 	}
 	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
 	if err != nil {
