@@ -260,6 +260,15 @@ jobs:
           done
 
       # Auth
+      #
+      # Mints the action-default 1h STS session. kubectl and `aicr validate`
+      # reach EKS through the `aws eks get-token` exec plugin, which signs each
+      # token with these ambient env credentials — so once the session expires
+      # (build + bringup + install + validate can exceed 1h) those get-token
+      # calls fail with ExpiredToken. The per-stage refresh steps below re-mint a
+      # fresh 1h session at each long phase boundary so no single phase runs on
+      # an expiring token; the role's max_session_duration is left at the STS
+      # default, so we deliberately do NOT set role-duration-seconds here.
       - name: Configure AWS credentials
         id: auth
         uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
@@ -455,6 +464,22 @@ jobs:
           AICR_IMAGE: ${{ inputs.aicr_version == '' && format('ghcr.io/nvidia/aicr-validators/agent:{0}', env.VALIDATOR_TAG) || format('ghcr.io/nvidia/aicr:{0}', inputs.aicr_version) }}
         run: ./tests/uat/aws/run prep "${TEST_CONFIG}"
 
+      # Per-stage credential refresh. Re-mint a fresh 1h session at each long
+      # phase boundary so no single phase runs on an expiring token — the UAT
+      # chain (build + bringup + install + validate + CUJ) outlives one STS
+      # session, and kubectl/`aicr validate` sign every EKS get-token with the
+      # ambient session credentials. `id-token: write` is granted for the whole
+      # job, so configure-aws-credentials can re-assume here. Keyed to prep
+      # success so it is skipped in the skip_tests / daytime-up-with-no-prep
+      # paths, matching the install step's own gate.
+      - name: Refresh AWS credentials before install
+        if: steps.prep.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Install
+
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
@@ -479,6 +504,14 @@ jobs:
       # daytime-up provisions and deploys the stack, then HOLDS: the CUJ
       # (conformance/train/verify + evidence) is a nightly-batch concern, so
       # daytime-up stops after install and leaves the cluster up for handoff.
+      - name: Refresh AWS credentials before validate
+        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Validate
+
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
         if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
@@ -498,6 +531,19 @@ jobs:
       # served DynamoGraphDeployment (phase_serve, DC3). For training, the
       # TrainJob fires; for inference the serve step is currently disabled (see
       # below), so verify/evidence cover the deployed stack either way.
+
+      # One refresh before the intent-selected CUJ — currently the training
+      # TrainJob (the inference serve step is disabled above). Gates on
+      # conformance success, matching the CUJ step it precedes; if serve is
+      # re-enabled it shares this same gate, so exactly one CUJ runs per intent.
+      - name: Refresh AWS credentials before CUJ
+        if: steps.conformance.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-CUJ
+
       - name: UAT - train (TrainJob)
         id: train
         if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
@@ -652,15 +698,13 @@ jobs:
             fi
           done
 
-      # Re-assume the role immediately before teardown. The `Configure AWS
-      # credentials` step at the top of the job mints a 1-hour session (the
-      # action's default with no role-duration-seconds), but the UAT phases
-      # (prep + install + conformance + train + verify) can run the full job
-      # timeout before teardown, so by the time `Destroy Cluster` runs the
-      # original session token has expired. Passing that stale token into the
-      # actuator made every retry fail with ExpiredToken and leaked the GPU
-      # node. The `id-token: write` permission is granted for the whole job,
-      # so configure-aws-credentials can mint a fresh session here.
+      # Re-assume the role immediately before teardown. Every auth step mints a
+      # 1h session, but the UAT phases before teardown can run the full job
+      # timeout, so by the time `Destroy Cluster` runs the last phase's session
+      # has expired. Passing a stale token into the actuator makes every retry
+      # fail with ExpiredToken and leaks the GPU node. The `id-token: write`
+      # permission is granted for the whole job, so configure-aws-credentials can
+      # mint a fresh session here.
       #
       # Teardown gating (#1275, DC2): tear down for the nightly lifecycle
       # (unless skip_delete) and for daytime-down (the explicit evening
