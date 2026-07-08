@@ -12,17 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# DRA ResourceClaimTemplate for the inference benchmark workload (DRA wiring
-# mode only). One instance is allocated per worker pod (1 GPU each) by the
-# Dynamo operator when a pod references the claim via
-# podTemplate.spec.resourceClaims.
-# ${CLAIM_API_VERSION} is the SERVED resource.k8s.io version detected by the
-# allocmode probe — v1 or v1beta2, which share the `exactly:` request shape.
-# v1beta1 uses the inline request shape: see
-# resource-claim-template-v1beta1.yaml.
+# resource.k8s.io/v1beta1 variant of resource-claim-template.yaml, for
+# clusters whose newest served DRA version is v1beta1 (K8s 1.32/1.33 with
+# custom validation catalogs; built-in recipes floor K8s 1.34). v1beta1's
+# DeviceRequest carries deviceClassName/allocationMode/count INLINE — the
+# `exactly:` wrapper exists only in v1beta2/v1.
 # Must stay in sync with inferenceClaimTemplateName in inference_perf_constraint.go.
 
-apiVersion: resource.k8s.io/${CLAIM_API_VERSION}
+apiVersion: resource.k8s.io/v1beta1
 kind: ResourceClaimTemplate
 metadata:
   name: ${CLAIM_TEMPLATE_NAME}
@@ -32,7 +29,6 @@ spec:
     devices:
       requests:
         - name: gpu
-          exactly:
-            deviceClassName: gpu.nvidia.com
-            allocationMode: ExactCount
-            count: 1
+          deviceClassName: gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1

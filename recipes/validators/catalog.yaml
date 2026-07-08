@@ -203,7 +203,7 @@ validators:
     env: []
   - name: secure-accelerator-access
     phase: conformance
-    description: "Verify secure GPU access via DRA (no host device mounts)"
+    description: "Verify secure GPU access via DRA or device plugin (no host device mounts)"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 10m
     args: ["secure-accelerator-access"]
