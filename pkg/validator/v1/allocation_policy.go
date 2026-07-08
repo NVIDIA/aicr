@@ -82,6 +82,10 @@ const (
 	// valuePathDevicePluginEnabled is the GPU operator's device-plugin
 	// toggle (the whole-GPU extended-resource advertiser).
 	valuePathDevicePluginEnabled = "devicePlugin.enabled"
+	// valuePathComputeDomainsEnabled is the DRA driver's ComputeDomain/IMEX
+	// toggle. Not a policy input — pinned true in every allocation policy
+	// (load-bearing for GB200/MNNVL); the catalog sweep guards the pin.
+	valuePathComputeDomainsEnabled = "resources.computeDomains.enabled"
 )
 
 // ResolveGPUAllocationPolicy resolves the whole-GPU allocation policy from
@@ -111,13 +115,14 @@ const (
 //   - no whole-GPU advertiser: gpus.enabled explicitly false (or the DRA
 //     component absent/disabled) AND no usable device-plugin advertiser
 //     (devicePlugin.enabled=false, or no enabled GPU operator component).
-//
-// Transitional warnings (slog.Warn, never an error — today's stock recipes
-// are dual-advertised; a later PR promotes these to errors):
-//   - gpus.enabled=true with devicePlugin.enabled=true: dual advertisement;
-//     still resolves dra-resource-claim (that is what schedules under kai).
+//   - gpus.enabled=true with devicePlugin.enabled=true: dual advertisement —
+//     both mechanisms advertising whole GPUs on the same nodes risks GPU
+//     over-admission; exactly one advertiser is required. (Transitional
+//     warning until the production-default flip; an error since.)
 //   - gpus.enabled=false with gpuResourcesEnabledOverride=true: the inert
-//     waiver disarms the chart-guard tripwire.
+//     waiver disarms the chart-guard tripwire that protects the
+//     device-plugin default. (Transitional warning until the
+//     production-default flip; an error since.)
 //
 // A nil RecipeResult (no recipe context) resolves to
 // GPUAllocationPolicyUnspecified. When the DRA component is ENABLED,
@@ -180,6 +185,10 @@ func ResolveGPUAllocationPolicy(parent context.Context, r *recipe.RecipeResult) 
 	// row-6 gate below fails closed when DRA is not the configured
 	// mechanism either.
 	devicePluginEnabled := false
+	// operatorName feeds diagnostics: on OpenShift recipes the advertiser is
+	// gpu-operator-ocp, and error guidance must name the component actually
+	// carrying devicePlugin.enabled.
+	operatorName := gpuOperatorComponentName
 	opRef := enabledComponentRef(r, gpuOperatorComponentName)
 	if ocpRef := enabledComponentRef(r, gpuOperatorOCPComponentName); ocpRef != nil {
 		if opRef != nil {
@@ -187,6 +196,7 @@ func ResolveGPUAllocationPolicy(parent context.Context, r *recipe.RecipeResult) 
 				"preferred", gpuOperatorComponentName, "ignored", gpuOperatorOCPComponentName)
 		} else {
 			opRef = ocpRef
+			operatorName = gpuOperatorOCPComponentName
 		}
 	}
 	if opRef != nil {
@@ -209,12 +219,13 @@ func ResolveGPUAllocationPolicy(parent context.Context, r *recipe.RecipeResult) 
 				draDriverGPUComponentName, valuePathGPUsEnabled, valuePathGPUsEnabledOverride))
 		}
 		if devicePluginEnabled {
-			// TODO(#1327 follow-up): promote to an error after the
-			// production-default flip lands.
-			slog.Warn("transitional GPU allocation configuration: both full-GPU DRA and the device plugin are enabled — dual advertisement risks GPU over-admission; resolving policy to dra-resource-claim (that is what schedules under kai-scheduler)",
-				"policy", GPUAllocationPolicyDRAResourceClaim,
-				draDriverGPUComponentName, valuePathGPUsEnabled+"=true",
-				gpuOperatorComponentName, valuePathDevicePluginEnabled+"=true")
+			return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"invalid GPU allocation configuration: dual advertisement — %s %s=true and %s %s=true both advertise whole GPUs, risking GPU over-admission; exactly one advertiser is required. For the production default set %s=false (with %s=false); for the experimental DRA opt-in flip all three values together: %s=true, %s=true, and %s %s=false (issue #1327)",
+				draDriverGPUComponentName, valuePathGPUsEnabled,
+				operatorName, valuePathDevicePluginEnabled,
+				valuePathGPUsEnabled, valuePathGPUsEnabledOverride,
+				valuePathGPUsEnabled, valuePathGPUsEnabledOverride,
+				operatorName, valuePathDevicePluginEnabled))
 		}
 		return GPUAllocationPolicyDRAResourceClaim, nil
 	}
@@ -228,11 +239,12 @@ func ResolveGPUAllocationPolicy(parent context.Context, r *recipe.RecipeResult) 
 	}
 
 	if draRef != nil && overrideWaiver {
-		// TODO(#1327 follow-up): promote to an error after the
-		// production-default flip lands.
-		slog.Warn("transitional GPU allocation configuration: gpuResourcesEnabledOverride=true with resources.gpus.enabled=false is an inert waiver that disarms the upstream chart's install-guard tripwire; resolving policy to device-plugin-extended-resource",
-			"policy", GPUAllocationPolicyDevicePluginExtendedResource,
-			"component", draDriverGPUComponentName)
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"invalid GPU allocation configuration: %s %s=true with %s=false is an inert waiver that disarms the upstream chart's install-guard tripwire protecting the device-plugin default; set %s=false for the production default, or — for the experimental DRA opt-in — flip all three values together: %s=true, %s=true, and %s %s=false (issue #1327)",
+			draDriverGPUComponentName, valuePathGPUsEnabledOverride, valuePathGPUsEnabled,
+			valuePathGPUsEnabledOverride,
+			valuePathGPUsEnabled, valuePathGPUsEnabledOverride,
+			operatorName, valuePathDevicePluginEnabled))
 	}
 	return GPUAllocationPolicyDevicePluginExtendedResource, nil
 }

@@ -60,6 +60,9 @@ func TestResolveGPUAllocationPolicy(t *testing.T) {
 		recipe  *recipe.RecipeResult
 		want    string
 		wantErr bool
+		// wantMsg, when non-empty, must appear in the error text — pins the
+		// actionable guidance on the promoted rejection rows.
+		wantMsg string
 	}{
 		{
 			// Row 1: production default.
@@ -70,7 +73,9 @@ func TestResolveGPUAllocationPolicy(t *testing.T) {
 			want: GPUAllocationPolicyDevicePluginExtendedResource,
 		},
 		{
-			// Row 2: DRA-only opt-in.
+			// Row 2: the three-part experimental DRA opt-in (gpus.enabled=true
+			// + waiver=true + devicePlugin.enabled=false) still resolves
+			// dra-resource-claim cleanly after the row-3/5 promotion.
 			name: "gpus enabled, waiver on, device plugin off: dra-resource-claim",
 			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
 				draDriverRef(true, true), gpuOperatorRef(false),
@@ -78,12 +83,14 @@ func TestResolveGPUAllocationPolicy(t *testing.T) {
 			want: GPUAllocationPolicyDRAResourceClaim,
 		},
 		{
-			// Row 3: transitional dual advertisement — warns, resolves DRA.
-			name: "gpus enabled, waiver on, device plugin on: dra-resource-claim (dual warn)",
+			// Row 3: dual advertisement — rejected since the
+			// production-default flip (was a transitional warning).
+			name: "gpus enabled, waiver on, device plugin on: invalid (dual advertisement)",
 			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
 				draDriverRef(true, true), gpuOperatorRef(true),
 			}},
-			want: GPUAllocationPolicyDRAResourceClaim,
+			wantErr: true,
+			wantMsg: "dual advertisement",
 		},
 		{
 			// Row 4: the upstream chart install guard rejects this.
@@ -94,12 +101,14 @@ func TestResolveGPUAllocationPolicy(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// Row 5: transitional inert waiver — warns, resolves device plugin.
-			name: "gpus disabled with inert waiver, device plugin on: device-plugin policy",
+			// Row 5: inert waiver — rejected since the production-default
+			// flip (was a transitional warning).
+			name: "gpus disabled with inert waiver, device plugin on: invalid (inert waiver)",
 			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
 				draDriverRef(false, true), gpuOperatorRef(true),
 			}},
-			want: GPUAllocationPolicyDevicePluginExtendedResource,
+			wantErr: true,
+			wantMsg: "inert waiver",
 		},
 		{
 			// Row 6: no whole-GPU advertiser at all.
@@ -337,6 +346,9 @@ func TestResolveGPUAllocationPolicy(t *testing.T) {
 			if tt.wantErr {
 				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.wantMsg)
 				}
 				return
 			}

@@ -72,7 +72,7 @@
   │  ──▶ agentgateway ──▶ ... ──▶ gpu-operator ──▶ dynamo-platform ──▶ ... │
   │                                                                        │
   │  Result: Fully configured GPU cluster                                  │
-  │    • 8x H100 GPUs advertised via DRA                                   │
+  │    • 8x H100 GPUs via device plugin (nvidia.com/gpu)                   │
   │    • Gang scheduling (KAI Scheduler)                                   │
   │    • Inference gateway (agentgateway)                                  │
   │    • GPU metrics (DCGM → Prometheus → HPA)                             │

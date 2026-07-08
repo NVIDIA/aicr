@@ -16,13 +16,9 @@
 #   - KAI Scheduler installed (provides default-parent-queue)
 #   - Dynamo platform deployed (dynamo-crds + dynamo-platform)
 #
-# NOTE (#1327 / PR 3 scope): this manifest deliberately KEEPS DRA
-# ResourceClaims. It is a user-facing static entry point applied as-is, and
-# today's default (dual-advertised) clusters schedule it through kai, which
-# rejects scalar device-plugin GPU requests on nodes bearing raw node-local GPU ResourceSlices —
-# a scalar conversion would break it there, while keeping main's DRA form is
-# zero regression in either direction. Its device-plugin conversion lands
-# atomically with PR 3's recipe flip (ComputeDomain-only default).
+# GPUs are requested as scalar nvidia.com/gpu limits — the device-plugin
+# production default (#1327). The experimental DRA-only opt-in needs a
+# ResourceClaim form instead; see docs/integrator/aks-gpu-setup.md.
 
 ---
 # KAI Scheduler queue for Dynamo workloads
@@ -51,25 +47,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: dynamo-workload
-
----
-# DRA ResourceClaim for GPU allocation (required on DRA-only clusters).
-# The kai.scheduler/queue label is required for KAI scheduler to manage the claim.
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: vllm-gpu-claim
-  namespace: dynamo-workload
-  labels:
-    kai.scheduler/queue: dynamo
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
 
 ---
 apiVersion: nvidia.com/v1beta1
@@ -124,9 +101,6 @@ spec:
             - key: nvidia.com/gpu
               operator: Exists
               effect: NoSchedule
-          resourceClaims:
-            - name: gpu
-              resourceClaimName: vllm-gpu-claim
           containers:
             - name: main
               image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
@@ -138,5 +112,5 @@ spec:
                 - --kv-events-config
                 - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
               resources:
-                claims:
-                  - name: gpu
+                limits:
+                  nvidia.com/gpu: 1

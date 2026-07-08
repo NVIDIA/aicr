@@ -12,17 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# NOTE (#1327 / PR 3 scope): this manifest deliberately KEEPS DRA
-# ResourceClaims. It is a user-facing static entry point applied as-is, and
-# today's default (dual-advertised) clusters schedule it through kai, which
-# rejects scalar device-plugin GPU requests on nodes bearing raw node-local GPU ResourceSlices —
-# a scalar conversion would break it there, while keeping main's DRA form is
-# zero regression in either direction. Its device-plugin conversion lands
-# atomically with PR 3's recipe flip (ComputeDomain-only default).
-
-# Gang scheduling test with PodGroup, DRA ResourceClaims, and KAI scheduler.
+# Gang scheduling test with PodGroup, device-plugin GPU requests, and KAI
+# scheduler. GPUs are requested as scalar nvidia.com/gpu limits — the
+# device-plugin production default (#1327).
 # Demonstrates all-or-nothing scheduling: both pods must be scheduled together.
-# Requires: KAI scheduler with PodGroup CRD, DRA driver (gpu.nvidia.com)
+# Requires: KAI scheduler with PodGroup CRD, NVIDIA device plugin (nvidia.com/gpu)
 # Usage: kubectl apply -f pkg/evidence/cncf/scripts/manifests/gang-scheduling-test.yaml
 ---
 apiVersion: v1
@@ -38,38 +32,6 @@ metadata:
 spec:
   minMember: 2
   queue: default-queue
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-0
-  namespace: gang-scheduling-test
-  labels:
-    kai.scheduler/queue: default-queue
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-1
-  namespace: gang-scheduling-test
-  labels:
-    kai.scheduler/queue: default-queue
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
 ---
 apiVersion: v1
 kind: Pod
@@ -88,9 +50,6 @@ spec:
       type: RuntimeDefault
   tolerations:
     - operator: Exists
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-0
   containers:
     - name: worker
       image: nvidia/cuda:12.9.0-base-ubuntu24.04
@@ -98,8 +57,8 @@ spec:
       securityContext:
         allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
+        limits:
+          nvidia.com/gpu: 1
 ---
 apiVersion: v1
 kind: Pod
@@ -118,9 +77,6 @@ spec:
       type: RuntimeDefault
   tolerations:
     - operator: Exists
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-1
   containers:
     - name: worker
       image: nvidia/cuda:12.9.0-base-ubuntu24.04
@@ -128,5 +84,5 @@ spec:
       securityContext:
         allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
+        limits:
+          nvidia.com/gpu: 1
