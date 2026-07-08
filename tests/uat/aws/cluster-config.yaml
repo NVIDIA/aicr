@@ -100,7 +100,7 @@ compute:
             desired: 2
             reservation:
               preference: capacity-reservations-only
-              target: cr-0cbe491320188dfa6
+              target: cr-0e16ad417f9a5bf69
           labels:
             nodeGroup: gpu-worker
             dedicated: user-workload
