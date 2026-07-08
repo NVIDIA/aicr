@@ -13,7 +13,7 @@ spec:
     path: 002-my-kustomize-app
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: my-app
+    namespace: "my-app"
   syncPolicy:
     automated:
       prune: true

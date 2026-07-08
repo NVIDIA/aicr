@@ -13,7 +13,7 @@ spec:
     path: 001-gpu-operator-pre
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: privileged-gpu-operator
+    namespace: "privileged-gpu-operator"
   syncPolicy:
     automated:
       prune: true

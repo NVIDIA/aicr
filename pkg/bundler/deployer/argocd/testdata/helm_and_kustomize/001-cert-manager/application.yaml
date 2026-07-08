@@ -19,7 +19,7 @@ spec:
       ref: values
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: cert-manager
+    namespace: "cert-manager"
   syncPolicy:
     automated:
       prune: true

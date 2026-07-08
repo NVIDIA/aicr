@@ -38,7 +38,7 @@ spec:
 {{- end }}
   destination:
     server: {{ printf "%q" .DestinationServer }}
-    namespace: {{ .Namespace }}
+    namespace: {{ printf "%q" .Namespace }}
   syncPolicy:
     automated:
       prune: true

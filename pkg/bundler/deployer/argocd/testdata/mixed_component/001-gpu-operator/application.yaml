@@ -19,7 +19,7 @@ spec:
       ref: values
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: gpu-operator
+    namespace: "gpu-operator"
   syncPolicy:
     automated:
       prune: true

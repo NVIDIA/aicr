@@ -13,7 +13,7 @@ spec:
     path: 002-nodewright-customizations
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: skyhook
+    namespace: "skyhook"
   syncPolicy:
     automated:
       prune: true
