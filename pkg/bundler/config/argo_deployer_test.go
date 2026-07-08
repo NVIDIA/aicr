@@ -52,6 +52,8 @@ func TestParseArgoDeployerOptions(t *testing.T) {
 		{"http destinationServer rejected", map[string]string{"destinationServer": "http://insecure:6443"}, nil, true, "destinationServer"},
 		{"destinationServer with credentials rejected", map[string]string{"destinationServer": "https://u:p@host:6443"}, nil, true, "destinationServer"},
 		{"destinationServer port without hostname rejected", map[string]string{"destinationServer": "https://:6443"}, nil, true, "destinationServer"},
+		{"destinationServer uppercase scheme rejected", map[string]string{"destinationServer": "HTTPS://host:6443"}, nil, true, "destinationServer"},
+		{"destinationServer at-sign in path rejected", map[string]string{"destinationServer": "https://host/path@thing"}, nil, true, "destinationServer"},
 		{"destinationServer with apostrophe rejected", map[string]string{"destinationServer": "https://host/o'brien:6443"}, nil, true, "must not contain quotes"},
 		{"destinationServer with double quote rejected", map[string]string{"destinationServer": `https://host/a"b:6443`}, nil, true, "must not contain quotes"},
 		// Sorted key iteration makes multi-error reporting deterministic:

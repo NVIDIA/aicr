@@ -2321,6 +2321,13 @@ func TestValidationContractParity(t *testing.T) {
 			// gates fail it closed (ValidateHTTPSURL checks u.Hostname(),
 			// the schema pattern forbids ':' right after https://).
 			{"destinationServer port without hostname", "destinationServer", "https://:6443", false},
+			// url.Parse lowercases the scheme, so only an explicit prefix
+			// check keeps the Go validator aligned with the case-sensitive
+			// schema pattern.
+			{"destinationServer uppercase scheme", "destinationServer", "HTTPS://host:6443", false},
+			// '@' is rejected anywhere (not just userinfo) because the
+			// schema regex cannot distinguish authority from path.
+			{"destinationServer at-sign in path", "destinationServer", "https://host/path@thing", false},
 			{"project valid dotted subdomain", "project", "team-a.prod", true},
 			{"project empty label", "project", "a..b", false},
 			{"project 64-char label", "project", strings.Repeat("a", 64), false},

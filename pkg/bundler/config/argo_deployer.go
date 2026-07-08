@@ -78,9 +78,19 @@ func ValidateDestinationServer(raw string) error {
 	if err := ValidateHTTPSURL("deployer destinationServer", raw); err != nil {
 		return err
 	}
-	if strings.ContainsAny(raw, `'" `) || strings.ContainsFunc(raw, unicode.IsControl) {
+	// Mirror the install-time values.schema.json pattern exactly so the two
+	// gates cannot drift (see the validation-contract parity test in
+	// pkg/bundler/deployer/argocdhelm): the scheme must be lowercase
+	// (url.Parse lowercases it, so ValidateHTTPSURL alone would accept
+	// "HTTPS://..."), and "@" is rejected anywhere — not just as userinfo —
+	// because the schema regex cannot distinguish authority from path.
+	if raw != "" && !strings.HasPrefix(raw, "https://") {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid deployer destinationServer %q: must not contain quotes, spaces, or control characters", raw))
+			fmt.Sprintf("invalid deployer destinationServer %q: scheme must be lowercase https://", raw))
+	}
+	if strings.ContainsAny(raw, `'" @`) || strings.ContainsFunc(raw, unicode.IsControl) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid deployer destinationServer %q: must not contain quotes, spaces, control characters, or '@'", raw))
 	}
 	return nil
 }
