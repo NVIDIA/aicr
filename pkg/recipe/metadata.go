@@ -366,8 +366,10 @@ func (r *RecipeResult) backfillComponentTypes() error {
 }
 
 // PrepareAndValidate normalizes a RecipeResult's component refs and rejects
-// incoherent ones, in the required order: back-fill missing types on enabled
-// refs from the registry, canonicalize the type casing, then validate
+// incoherent ones, in the required order: reject refs named with the reserved
+// deployer override key (all refs, enabled or disabled), back-fill missing
+// types on enabled refs from the registry, canonicalize the type casing, then
+// validate
 // coherence (which itself only inspects enabled refs). Boundaries
 // that produce a RecipeResult WITHOUT running ApplyRegistryDefaults — file load
 // (LoadFromFileWithProvider) and external adoption (client adoptRecipe) — call
@@ -379,6 +381,20 @@ func (r *RecipeResult) backfillComponentTypes() error {
 func (r *RecipeResult) PrepareAndValidate() error {
 	if r == nil {
 		return nil
+	}
+	// Fail closed on the reserved deployer key BEFORE anything else, and
+	// for ALL refs including disabled ones: registry loads are guarded
+	// (see loadComponentRegistryFor), but a hand-authored recipe passed
+	// to `aicr bundle -r` or POST /v1/bundle can carry a componentRef
+	// named "deployer", which would make `--set deployer:*` ambiguous
+	// between component Helm values and deployer-level Argo options. A
+	// disabled ref must be rejected too — `--set deployer:enabled=...`
+	// style toggles would still collide with the reserved prefix. See #1625.
+	for i := range r.ComponentRefs {
+		if r.ComponentRefs[i].Name == ReservedDeployerKey {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("recipe component %q uses the reserved deployer override key as its name; %q is reserved for --set deployer:<key> Argo deployer options", r.ComponentRefs[i].Name, ReservedDeployerKey))
+		}
 	}
 	if err := r.backfillComponentTypes(); err != nil {
 		return err

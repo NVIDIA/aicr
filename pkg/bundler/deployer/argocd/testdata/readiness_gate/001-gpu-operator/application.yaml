@@ -1,12 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: gpu-operator
+  name: "gpu-operator"
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 spec:
-  project: default
+  project: "default"
   sources:
     - repoURL: https://helm.ngc.nvidia.com/nvidia
       chart: gpu-operator
@@ -18,8 +18,8 @@ spec:
       targetRevision: main
       ref: values
   destination:
-    server: https://kubernetes.default.svc
-    namespace: gpu-operator
+    server: "https://kubernetes.default.svc"
+    namespace: "gpu-operator"
   syncPolicy:
     automated:
       prune: true

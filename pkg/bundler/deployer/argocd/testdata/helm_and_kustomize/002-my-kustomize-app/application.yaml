@@ -1,19 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: my-kustomize-app
+  name: "my-kustomize-app"
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  project: default
+  project: "default"
   source:
     repoURL: 'https://github.com/example/aicr-bundles.git'
     targetRevision: main
     path: 002-my-kustomize-app
   destination:
-    server: https://kubernetes.default.svc
-    namespace: my-app
+    server: "https://kubernetes.default.svc"
+    namespace: "my-app"
   syncPolicy:
     automated:
       prune: true

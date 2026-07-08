@@ -246,3 +246,60 @@ func TestPrepareAndValidate_BackfillLoopSkipsDisabled(t *testing.T) {
 		t.Errorf("disabled type-less ref should be left untouched, got type %q", got)
 	}
 }
+
+// TestPrepareAndValidate_RejectsReservedDeployerName verifies the common
+// validation boundary fails closed on a hand-authored componentRef named
+// with the reserved deployer override key. Registry loads are guarded
+// separately, but a recipe passed to `aicr bundle -r` or POST /v1/bundle
+// bypasses the registry guard — and a component named "deployer" would
+// make `--set deployer:*` ambiguous between component Helm values and
+// deployer-level Argo options. Disabled refs are rejected too. See #1625.
+func TestPrepareAndValidate_RejectsReservedDeployerName(t *testing.T) {
+	tests := []struct {
+		name    string
+		refs    []ComponentRef
+		wantErr bool
+	}{
+		{
+			name: "enabled deployer ref rejected",
+			refs: []ComponentRef{
+				{Name: ReservedDeployerKey, Type: ComponentTypeHelm, Version: "v1",
+					Source: "https://charts.example.com", Chart: "deployer"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "disabled deployer ref rejected",
+			refs: []ComponentRef{
+				{Name: "gpu-operator", Type: ComponentTypeHelm, Version: "v1"},
+				{Name: ReservedDeployerKey, Overrides: map[string]any{"enabled": false}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non-reserved names pass",
+			refs: []ComponentRef{
+				{Name: "gpu-operator", Type: ComponentTypeHelm, Version: "v1"},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &RecipeResult{ComponentRefs: tt.refs}
+			err := r.PrepareAndValidate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("PrepareAndValidate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "reserved") {
+				t.Errorf("error should mention the reservation, got: %v", err)
+			}
+		})
+	}
+}

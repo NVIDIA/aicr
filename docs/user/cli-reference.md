@@ -1462,6 +1462,46 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
+#### Argo CD Deployer Options
+
+The `deployer` prefix is reserved: with `--deployer argocd` or `--deployer argocd-helm`, `--set deployer:<key>=<value>` configures the generated Argo CD Applications instead of component chart values. Unknown `deployer:` keys are rejected, and the prefix is rejected entirely with any other `--deployer` type (`helm`, `flux`, `helmfile`).
+
+| Key | Applies to | Default | Example |
+|-----|------------|---------|---------|
+| `namePrefix` | Child Application names | (none) | `--set deployer:namePrefix=tenant-a-` |
+| `destinationServer` | Child Applications' `spec.destination.server` | `https://kubernetes.default.svc` | `--set deployer:destinationServer=https://prod.example.com:6443` |
+| `project` | Child Applications' `spec.project` | `default` | `--set deployer:project=gpu-infra` |
+| `cascadeDelete` | Parent and child Applications | `false` | `--set deployer:cascadeDelete=true` |
+
+**Child Applications only:** `namePrefix`, `destinationServer`, and `project` affect the per-component child Applications, not the parent app-of-apps. Application CRs are reconciled only from the cluster running Argo CD, so the parent stays on the control-plane cluster in project `default` — see the Argo CD [cluster bootstrapping guide](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/). The parent's name is set with [`--app-name`](#aicr-bundle).
+
+**Prerequisites for remote destinations:** AICR only writes `deployer:destinationServer` and `deployer:project` into the generated Applications — it does not configure Argo CD. The destination cluster must already be registered with Argo CD (`argocd cluster add <context>` or a [declarative cluster Secret](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/#clusters)), and the [Argo CD project](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) referenced by `deployer:project` must permit the emitted destinations and source repositories; otherwise the child Applications fail to sync with a permission or unknown-cluster error.
+
+**Name limits:** the composed child Application name (`namePrefix` + component name) must be at most 53 characters — Argo CD uses the Application name as the Helm release name, which Helm caps at 53 — and must not equal the parent Application's name (set with `--app-name`). Both violations are rejected at bundle time, and argocd-helm bundles re-check them at `helm template`/`helm install` time for install-time `--set deployer.namePrefix=...` overrides.
+
+**Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the three string keys ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (note the dot, not colon). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. `cascadeDelete` is bundle-time only — it adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
+
+**Use `--set-string` for values Helm would type-infer:** the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
+
+```shell
+# Deploy child Applications to a remote cluster under a tenant prefix
+aicr bundle -r recipe.yaml --deployer argocd \
+  --set deployer:namePrefix=tenant-a- \
+  --set deployer:destinationServer=https://prod.example.com:6443 \
+  --set deployer:project=gpu-infra \
+  -o ./bundles
+
+# Enable cascading deletion on the app-of-apps and its children
+aicr bundle -r recipe.yaml --deployer argocd-helm \
+  --set deployer:cascadeDelete=true \
+  -o ./bundle
+
+# argocd-helm: override the shipped defaults at install time instead
+helm install aicr-stack ./bundle \
+  --set deployer.namePrefix=tenant-a- \
+  --set deployer.project=gpu-infra
+```
+
 #### List and Object Value Overrides
 
 `--set` is scalar-only: it cannot express a list or object value. Pointing it
@@ -2361,11 +2401,16 @@ the full flag reference.
 ##### argocd
 
 Delete the parent `Application` that owns the bundle's child Applications
-(app-of-apps). AICR does **not** set the
+(app-of-apps). By default AICR does **not** set the
 `resources-finalizer.argocd.argoproj.io` finalizer on generated
 Applications, so a plain `kubectl delete` removes only the Application CR
-and leaves the managed resources running. Use one of the cascade-aware
-flows instead:
+and leaves the managed resources running. Bundles generated with
+`--set deployer:cascadeDelete=true` (see
+[Argo CD Deployer Options](#argo-cd-deployer-options)) are the exception:
+the finalizer is baked onto the parent and every child Application, so a
+plain `kubectl delete` on the parent already cascades to the managed
+resources. For default bundles, use one of the cascade-aware flows
+instead:
 
 ```bash
 # Argo CD CLI — cascade is the default; foreground waits for resources

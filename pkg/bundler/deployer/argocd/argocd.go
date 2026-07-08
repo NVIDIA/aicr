@@ -95,6 +95,19 @@ type ApplicationData struct {
 	IsLocalChart   bool   // true → path-based single-source; false → multi-source upstream-helm
 	InlineValues   bool   // KindUpstreamHelm + OCI → single-source with helm.valuesObject inlined
 	ValuesYAML     string // Pre-indented YAML (8 spaces) for helm.valuesObject; used when InlineValues
+
+	// DestinationServer is the spec.destination.server value; populated
+	// from Generator.DestinationServer with DefaultDestinationServer as
+	// the fallback. See #1625.
+	DestinationServer string
+
+	// Project is the spec.project value; populated from Generator.Project
+	// with DefaultProject as the fallback. See #1625.
+	Project string
+
+	// CascadeDelete adds ResourcesFinalizer to the rendered Application.
+	// See #1628.
+	CascadeDelete bool
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -107,6 +120,11 @@ type AppOfAppsData struct {
 	// is baked into app-of-apps.yaml and is not overridable at apply time.
 	// Defaults to DefaultAppName ("nvidia-stack"). See issue #1011.
 	AppName string
+
+	// CascadeDelete adds ResourcesFinalizer to the parent Application so
+	// deleting it prunes the child Applications and their resources.
+	// See #1628.
+	CascadeDelete bool
 }
 
 // DefaultAppName is the parent App-of-Apps `metadata.name` written into
@@ -115,6 +133,30 @@ type AppOfAppsData struct {
 // names so their parent Applications do not overwrite each other —
 // see issue #1011.
 const DefaultAppName = "nvidia-stack"
+
+// DefaultDestinationServer is the in-cluster API server URL written into
+// generated Application destinations when no deployer destinationServer
+// override is supplied.
+const DefaultDestinationServer = "https://kubernetes.default.svc"
+
+// DefaultProject is the Argo CD project written into generated
+// Applications when no deployer project override is supplied.
+const DefaultProject = "default"
+
+// HelmReleaseNameMaxLen is Helm's release-name length cap. Argo CD
+// defaults the Helm release name to the Application's metadata.name
+// (https://argo-cd.readthedocs.io/en/stable/user-guide/helm/#helm-release-name),
+// so composed child names longer than this generate Applications that
+// pass DNS-1123 validation but fail at sync with Helm's
+// "release name exceeds max length of 53" error.
+const HelmReleaseNameMaxLen = 53
+
+// ResourcesFinalizer is Argo CD's cascading-deletion finalizer. When
+// CascadeDelete is set it is added to the parent and every child
+// Application so `kubectl delete` on the parent prunes managed
+// resources. See #1628 and
+// https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/
+const ResourcesFinalizer = "resources-finalizer.argocd.argoproj.io"
 
 // ReadmeData contains data for rendering the README.
 type ReadmeData struct {
@@ -216,6 +258,27 @@ type Generator struct {
 	// so the choice cannot be deferred to apply time. See issue #1011.
 	AppName string
 
+	// NamePrefix is prepended to every child Application metadata.name.
+	// The parent Application name is covered by AppName. Composed names
+	// are validated as DNS-1123 subdomains at generation time. See #1625.
+	NamePrefix string
+
+	// DestinationServer overrides spec.destination.server on child
+	// Applications only; empty falls back to DefaultDestinationServer.
+	// The parent stays on the control-plane cluster — Application CRs are
+	// reconciled only from the cluster running Argo CD. See #1625.
+	DestinationServer string
+
+	// Project overrides spec.project on child Applications only; empty
+	// falls back to DefaultProject. The parent stays in "default" — a
+	// project able to create Applications in the Argo CD namespace is
+	// effectively admin. See #1625.
+	Project string
+
+	// CascadeDelete adds ResourcesFinalizer to the parent and every child
+	// Application. Baked at bundle time. See #1628.
+	CascadeDelete bool
+
 	// InlineUpstreamValues replaces the multi-source $values pattern for
 	// KindUpstreamHelm Applications with a single source whose helm.valuesObject
 	// is inlined from ComponentValues. Required when RepoURL is OCI because
@@ -261,6 +324,24 @@ func (g *Generator) appName() string {
 		return DefaultAppName
 	}
 	return g.AppName
+}
+
+// destinationServer returns the effective child-Application destination,
+// applying the DefaultDestinationServer fallback when unset.
+func (g *Generator) destinationServer() string {
+	if g.DestinationServer == "" {
+		return DefaultDestinationServer
+	}
+	return g.DestinationServer
+}
+
+// project returns the effective child-Application project, applying the
+// DefaultProject fallback when unset.
+func (g *Generator) project() string {
+	if g.Project == "" {
+		return DefaultProject
+	}
+	return g.Project
 }
 
 // resolveRepoSettings returns the effective repoURL and targetRevision,
@@ -353,6 +434,18 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
 		return nil, err
 	}
+	if err := bundlercfg.ValidateNamePrefix(g.NamePrefix); err != nil {
+		return nil, err
+	}
+	if err := bundlercfg.ValidateDestinationServer(g.DestinationServer); err != nil {
+		return nil, err
+	}
+	// ValidateProject also enforces the per-label 63-character cap so the
+	// generated project value stays within what Argo CD / the argocd-helm
+	// install-time schema accept (see pkg/bundler/config.ValidateProject).
+	if err := bundlercfg.ValidateProject(g.Project); err != nil {
+		return nil, err
+	}
 
 	// Reject DynamicValues at the library boundary unless the caller
 	// explicitly opts in. The strip-pass below removes cluster-values.yaml
@@ -436,6 +529,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// NNN-<name>/ directory. Branching on FolderKind selects the Application
 	// shape (path-based single-source vs multi-source upstream-helm).
 	appDataList := make([]ApplicationData, 0, len(folders))
+	appName := g.appName()
 	for i, f := range folders {
 		select {
 		case <-ctx.Done():
@@ -458,6 +552,30 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		if err != nil {
 			return nil, err
 		}
+		appData.Name = g.NamePrefix + appData.Name
+		if err := bundlercfg.ValidateAppName(appData.Name); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("deployer namePrefix produces invalid child Application name %q", appData.Name), err)
+		}
+		// Argo CD derives the Helm release name from the Application name
+		// for Helm-rendered children, so a composed name over Helm's cap
+		// passes DNS-1123 validation but fails at sync time. The cap is
+		// applied uniformly to ALL children (including non-Helm ones) to
+		// keep a single invariant rather than branching on folder kind.
+		// Reject at bundle time instead.
+		if len(appData.Name) > HelmReleaseNameMaxLen {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("deployer namePrefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", appData.Name, len(appData.Name), HelmReleaseNameMaxLen))
+		}
+		// A child that composes to the parent's name would overwrite the
+		// parent Application CR in the argocd namespace.
+		if appData.Name == appName {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("child Application name %q collides with the parent Application name; choose a different --app-name or deployer namePrefix", appData.Name))
+		}
+		appData.DestinationServer = g.destinationServer()
+		appData.Project = g.project()
+		appData.CascadeDelete = g.CascadeDelete
 		appDataList = append(appDataList, appData)
 
 		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)
@@ -475,12 +593,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	// Generate app-of-apps.yaml
-	appName := g.appName()
 	appOfAppsData := AppOfAppsData{
 		RepoURL:        repoURL,
 		TargetRevision: targetRevision,
 		Path:           ".",
 		AppName:        appName,
+		CascadeDelete:  g.CascadeDelete,
 	}
 	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
 	if err != nil {

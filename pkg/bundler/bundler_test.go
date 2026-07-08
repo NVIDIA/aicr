@@ -31,6 +31,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -3339,4 +3341,125 @@ func TestMake_RejectsIncoherentRef(t *testing.T) {
 	if got := recipeResult.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
 		t.Errorf("caller's ref was mutated: type=%q", got)
 	}
+}
+
+func TestCreateDeployer_DeployerOptions(t *testing.T) {
+	mk := func(t *testing.T, dep config.DeployerType, set map[string]string) *DefaultBundler {
+		t.Helper()
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithDeployer(dep),
+			config.WithValueOverrides(map[string]map[string]string{
+				config.DeployerOverrideKey: set,
+			}),
+		)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return b
+	}
+	rr := &recipe.RecipeResult{}
+	set := map[string]string{
+		"namePrefix":        "t-",
+		"destinationServer": "https://edge.example.com:6443",
+		"project":           "tenant-a",
+		"cascadeDelete":     "true",
+	}
+
+	t.Run("rejected for helm deployer", func(t *testing.T) {
+		b := mk(t, config.DeployerHelm, map[string]string{"namePrefix": "t-"})
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("expected error for deployer options with --deployer helm")
+		}
+		var se *errors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != errors.ErrCodeInvalidRequest {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "argocd") {
+			t.Errorf("error should mention argocd deployers, got %v", err)
+		}
+	})
+
+	t.Run("unknown option key rejected", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCD, map[string]string{"bogusKey": "x"})
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("expected error for unknown deployer option")
+		}
+		if !strings.Contains(err.Error(), "unknown deployer option") {
+			t.Errorf("error should mention unknown deployer option, got %v", err)
+		}
+	})
+
+	t.Run("typed overrides rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithDeployer(config.DeployerArgoCD),
+			config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: config.DeployerOverrideKey, Path: "cascadeDelete", Value: true},
+			}),
+		)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("expected error for typed deployer overrides")
+		}
+		var se *errors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != errors.ErrCodeInvalidRequest {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "--set") {
+			t.Errorf("error should point at --set deployer:<key>=<value>, got %v", err)
+		}
+	})
+
+	t.Run("argocd generator receives options", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCD, set)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocd.Generator)
+		if !ok {
+			t.Fatalf("want *argocd.Generator, got %T", d)
+		}
+		if g.NamePrefix != "t-" || g.DestinationServer != "https://edge.example.com:6443" ||
+			g.Project != "tenant-a" || !g.CascadeDelete {
+
+			t.Errorf("options not wired: %+v", g)
+		}
+	})
+
+	t.Run("argocd-helm generator receives options", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCDHelm, set)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocdhelm.Generator)
+		if !ok {
+			t.Fatalf("want *argocdhelm.Generator, got %T", d)
+		}
+		if g.NamePrefix != "t-" || g.DestinationServer != "https://edge.example.com:6443" ||
+			g.Project != "tenant-a" || !g.CascadeDelete {
+
+			t.Errorf("options not wired: %+v", g)
+		}
+	})
+
+	t.Run("no options leaves zero values", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCD, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocd.Generator)
+		if !ok {
+			t.Fatalf("want *argocd.Generator, got %T", d)
+		}
+		if g.NamePrefix != "" || g.DestinationServer != "" || g.Project != "" || g.CascadeDelete {
+			t.Errorf("expected zero-value options, got %+v", g)
+		}
+	})
 }

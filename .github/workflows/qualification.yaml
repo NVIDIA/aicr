@@ -63,6 +63,7 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           coverage_report: ${{ inputs.coverage_report }}
           coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
+          helm_version: ${{ steps.versions.outputs.helm }}
 
   lint:
     name: Lint

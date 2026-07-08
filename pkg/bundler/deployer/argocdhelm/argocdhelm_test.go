@@ -16,6 +16,7 @@ package argocdhelm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -33,12 +35,29 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // update regenerates goldens under testdata/ when set via `go test -update`.
 // Same convention as helm and localformat deployer test suites.
 var update = flag.Bool("update", false, "update golden files")
+
+// requireHelm gates the live-render tests on a helm binary. In CI (the
+// standard CI=true environment variable set by GitHub Actions) a missing
+// helm is a hard failure: the go-test action installs the version pinned
+// in .settings.yaml, so an absent binary means the pipeline silently
+// stopped exercising the live-render coverage. Locally the tests keep
+// skipping so dev environments without helm are not broken.
+func requireHelm(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("helm"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("helm is required in CI but not on PATH; the go-test action must install the pinned version from .settings.yaml (testing_tools.helm)")
+		}
+		t.Skip("helm not available; skipping live-render test")
+	}
+}
 
 func newRecipeResult(version string, refs []recipe.ComponentRef) *recipe.RecipeResult {
 	r := &recipe.RecipeResult{
@@ -908,6 +927,7 @@ func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
 	for _, rel := range []string{
 		"Chart.yaml",
 		"values.yaml",
+		"values.schema.json",        // install-time deployer.* schema gate
 		"templates/aicr-stack.yaml", // parent App, Helm-templated
 		"templates/cert-manager.yaml",
 		"templates/nodewright-customizations.yaml",
@@ -1099,9 +1119,7 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 // Skipped when helm is not on PATH so unit-test environments without
 // helm aren't broken by it.
 func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -1245,9 +1263,7 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 // installation from ChartMuseum / GitHub Pages-style repos is the
 // supported use case. See PR #1051's Codex P2 review.
 func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	ctx := context.Background()
 	outputDir := t.TempDir()
@@ -1343,9 +1359,7 @@ func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
 // `<namespace>/<chart>:<targetRevision>` resolves against the actual
 // published artifact instead of the literal `aicr-bundle`.
 func TestGenerate_CustomChartName(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	const customName = "my-custom-bundle"
 	outputDir := t.TempDir()
@@ -1429,9 +1443,7 @@ func TestGenerate_CustomChartName(t *testing.T) {
 // Application's metadata.name was the literal "aicr-stack" and the
 // second bundle silently overwrote the first.
 func TestHelmTemplate_AppNameOverride(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	tests := []struct {
 		name              string
@@ -1458,6 +1470,17 @@ func TestHelmTemplate_AppNameOverride(t *testing.T) {
 			name:           "install-time --set appName works without a bundle-time default",
 			installTimeSet: "tenant-a",
 			wantParentName: "tenant-a",
+		},
+		{
+			// Helm's plain --set type inference: appName=true arrives as a
+			// bool. The parent template pipes through `quote` and every
+			// child template's collision guard coerces via `toString`, so
+			// the render must succeed with the parent named "true" —
+			// previously the guard's `eq` crashed with "incompatible types
+			// for comparison".
+			name:           "install-time --set appName=true (type-inferred bool) renders",
+			installTimeSet: "true",
+			wantParentName: "true",
 		},
 	}
 
@@ -1569,6 +1592,72 @@ func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
 	}
 }
 
+// TestGenerate_InnerParentCollisionUsesEffectiveAppName verifies the
+// effective parent name is forwarded to the delegated argocd.Generator so
+// its parent-collision check tests children against THIS deployer's parent
+// ("aicr-stack" or --app-name), not argocd's own "nvidia-stack" default.
+// Without the forward, a component legitimately named "nvidia-stack"
+// (possible via an external --data registry) was falsely rejected as an
+// internal error.
+func TestGenerate_InnerParentCollisionUsesEffectiveAppName(t *testing.T) {
+	t.Run("component named nvidia-stack bundles under the default parent", func(t *testing.T) {
+		// External registry declaring a component named "nvidia-stack" —
+		// the embedded registry has no such component, and the inner
+		// argocd generator's own default parent name is exactly
+		// "nvidia-stack".
+		dataDir := t.TempDir()
+		registryYAML := `apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components:
+  - name: nvidia-stack
+    displayName: Nvidia Stack
+    valueOverrideKeys:
+      - nvidiastack
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/nvidia-stack
+`
+		if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registryYAML), 0o600); err != nil {
+			t.Fatalf("WriteFile registry.yaml: %v", err)
+		}
+		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+		layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: dataDir})
+		if err != nil {
+			t.Fatalf("NewLayeredDataProvider: %v", err)
+		}
+
+		rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+			{
+				Name: "nvidia-stack", Namespace: "nvidia-stack", Chart: "nvidia-stack",
+				Version: "v1.0.0", Type: recipe.ComponentTypeHelm,
+				Source: "https://charts.example.com",
+			},
+		})
+		rr.DeploymentOrder = []string{"nvidia-stack"}
+		rr.BindDataProvider(layered)
+		g := &Generator{
+			RecipeResult:    rr,
+			ComponentValues: map[string]map[string]any{"nvidia-stack": {}},
+			Version:         "v0.0.0-test",
+		}
+		if _, genErr := g.Generate(context.Background(), t.TempDir()); genErr != nil {
+			t.Fatalf("Generate() error = %v; a component named \"nvidia-stack\" must not collide with THIS deployer's parent %q", genErr, DefaultAppName)
+		}
+	})
+
+	t.Run("forwarded AppName is load-bearing for the collision check", func(t *testing.T) {
+		g := newTestHelmGenerator(t)
+		g.AppName = "gpu-operator" // collides with the recipe's only component
+		_, err := g.Generate(context.Background(), t.TempDir())
+		if err == nil {
+			t.Fatal("expected collision error, got nil")
+		}
+		if !strings.Contains(err.Error(), "collides") {
+			t.Errorf("error %q does not mention the parent-name collision", err.Error())
+		}
+	})
+}
+
 // TestHelmTemplate_MixedComponentPreChildResolvesFromOCI is the live-render
 // regression test for issue #1018: a recipe with a Helm component AND
 // ComponentPreManifests for that same component (the gke-cos / EKS GB200
@@ -1587,9 +1676,7 @@ func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
 // (`gpu-operator`) is also asserted to confirm its `repoURL` stays as
 // the upstream Helm chart registry (not templated from .Values.repoURL).
 func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -1716,9 +1803,7 @@ func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
 // is the safety net that prevents users from accidentally publishing a
 // chart whose Application would point at an empty URL.
 func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -1900,4 +1985,514 @@ func TestWriteChartYAML_QuotesYAMLReservedScalarsAsName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newTestHelmGenerator returns a minimal single-Helm-component Generator
+// fixture for deployer-option tests. Callers set the deployer option
+// fields (NamePrefix, DestinationServer, Project, CascadeDelete) before
+// calling Generate.
+func newTestHelmGenerator(t *testing.T) *Generator {
+	t.Helper()
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+			Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+			Source: "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+	return &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version: "v0.0.0-test",
+	}
+}
+
+// readBundleFile reads a bundle-relative file, failing the test on error.
+func readBundleFile(t *testing.T, outputDir, rel string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(outputDir, rel))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return data
+}
+
+func TestGenerate_DeployerValuesInChart(t *testing.T) {
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	g.NamePrefix = "tenant-a-"
+	g.DestinationServer = "https://remote.example.com:6443"
+	g.Project = "tenant-a"
+	g.CascadeDelete = true
+
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	values := readBundleFile(t, outputDir, "values.yaml")
+	for _, want := range []string{"deployer:", "namePrefix: tenant-a-",
+		"destinationServer: https://remote.example.com:6443", "project: tenant-a"} {
+		if !strings.Contains(string(values), want) {
+			t.Errorf("values.yaml missing %q\n%s", want, values)
+		}
+	}
+	// Key form only — the doc header comment deliberately mentions
+	// cascadeDelete to explain that it is bundle-time only.
+	if strings.Contains(string(values), "cascadeDelete:") {
+		t.Error("cascadeDelete key must not appear in values.yaml (bundle-time only)")
+	}
+
+	child := readBundleFile(t, outputDir, "templates/gpu-operator.yaml")
+	for _, want := range []string{
+		`{{ (.Values.deployer | default dict).namePrefix | default "" }}gpu-operator`,
+		`(.Values.deployer | default dict).destinationServer`,
+		`(.Values.deployer | default dict).project`,
+		"resources-finalizer.argocd.argoproj.io",
+	} {
+		if !strings.Contains(string(child), want) {
+			t.Errorf("child template missing %q\n%s", want, child)
+		}
+	}
+
+	parent := readBundleFile(t, outputDir, "templates/aicr-stack.yaml")
+	if !strings.Contains(string(parent), "resources-finalizer.argocd.argoproj.io") {
+		t.Error("parent template missing finalizer when CascadeDelete set")
+	}
+	for _, reject := range []string{"tenant-a-", "remote.example.com"} {
+		if strings.Contains(string(parent), reject) {
+			t.Errorf("parent template unexpectedly contains %q", reject)
+		}
+	}
+}
+
+func TestGenerate_DeployerDefaults_NoOptions(t *testing.T) {
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	values := readBundleFile(t, outputDir, "values.yaml")
+	// Defaults documented in values.yaml even without overrides.
+	for _, want := range []string{"destinationServer: https://kubernetes.default.svc", "project: default"} {
+		if !strings.Contains(string(values), want) {
+			t.Errorf("values.yaml missing default %q\n%s", want, values)
+		}
+	}
+	parent := readBundleFile(t, outputDir, "templates/aicr-stack.yaml")
+	if strings.Contains(string(parent), "finalizers") {
+		t.Error("parent template must not carry finalizers by default")
+	}
+}
+
+// TestHelmTemplate_DeployerNamePrefixOverride is the live-render check for
+// the install-time deployer.* vocabulary: `helm template --set
+// deployer.namePrefix=t-` must render the child Application's
+// metadata.name as `t-gpu-operator`, and project / destinationServer
+// overrides must land on the child spec. Skipped when helm is not on PATH.
+func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
+	requireHelm(t)
+
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+		"--set", "repoURL=oci://example.test/myorg",
+		"--set", "targetRevision=v1.0.0",
+		"--set", "deployer.namePrefix=t-",
+		"--set", "deployer.project=tenant-a",
+		"--set", "deployer.destinationServer=https://remote.example.com:6443",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+	}
+
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	type appLite struct {
+		Kind     string                `yaml:"kind"`
+		Metadata struct{ Name string } `yaml:"metadata"`
+		Spec     struct {
+			Project     string `yaml:"project"`
+			Destination struct {
+				Server string `yaml:"server"`
+			} `yaml:"destination"`
+		} `yaml:"spec"`
+	}
+	found := map[string]appLite{}
+	for {
+		var a appLite
+		decErr := dec.Decode(&a)
+		if errors.Is(decErr, io.EOF) {
+			break
+		}
+		if decErr != nil {
+			t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
+		}
+		if a.Kind == "Application" && a.Metadata.Name != "" {
+			found[a.Metadata.Name] = a
+		}
+	}
+
+	child, ok := found["t-gpu-operator"]
+	if !ok {
+		t.Fatalf("rendered output missing prefixed child 't-gpu-operator'\noutput:\n%s", out)
+	}
+	if child.Spec.Project != "tenant-a" {
+		t.Errorf("child spec.project: got %q, want %q", child.Spec.Project, "tenant-a")
+	}
+	if child.Spec.Destination.Server != "https://remote.example.com:6443" {
+		t.Errorf("child destination.server: got %q, want %q", child.Spec.Destination.Server, "https://remote.example.com:6443")
+	}
+
+	// Parent Application stays unprefixed and on the control-plane cluster.
+	if _, ok := found[DefaultAppName]; !ok {
+		t.Errorf("rendered output missing unprefixed parent %q", DefaultAppName)
+	}
+}
+
+// TestGenerate_ChildNameLimits verifies the bundle-time guards for
+// composed child Application names in the argocd-helm path: names over
+// Helm's 53-character release-name cap and names colliding with the
+// parent Application are rejected with ErrCodeInvalidRequest. The
+// install-time equivalents are covered by
+// TestHelmTemplate_ChildNameGuards below.
+func TestGenerate_ChildNameLimits(t *testing.T) {
+	tests := []struct {
+		name      string
+		mutate    func(*Generator)
+		errSubstr string
+	}{
+		{
+			name:      "composed name exceeds Helm release-name cap",
+			mutate:    func(g *Generator) { g.NamePrefix = strings.Repeat("a", 49) + "-" },
+			errSubstr: "53",
+		},
+		{
+			name: "child name collides with parent app name",
+			mutate: func(g *Generator) {
+				g.AppName = "tenant-gpu-operator"
+				g.NamePrefix = "tenant-"
+			},
+			errSubstr: "collides",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newTestHelmGenerator(t)
+			tt.mutate(g)
+			_, err := g.Generate(context.Background(), t.TempDir())
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
+			}
+		})
+	}
+}
+
+// TestGenerate_NamePrefixValidatedUpfront verifies the boundary check
+// rejects a malformed NamePrefix even when the recipe produces no
+// NNN-folders (the per-folder validation in processFolders never runs).
+func TestGenerate_NamePrefixValidatedUpfront(t *testing.T) {
+	rr := newRecipeResult("v1.0.0", nil)
+	g := &Generator{
+		RecipeResult: rr,
+		Version:      "v0.0.0-test",
+		NamePrefix:   "-Bad_Prefix",
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "namePrefix") {
+		t.Errorf("error %q does not mention namePrefix", err.Error())
+	}
+}
+
+// TestHelmTemplate_ChildNameGuards is the install-time counterpart to
+// TestGenerate_ChildNameLimits: the bundle bakes valid deployer defaults,
+// but `helm template --set deployer.namePrefix=...` can still compose a
+// child name over Helm's release-name cap or one that collides with the
+// parent Application. The guard block prepended to every child template
+// must fail the render. Skipped when helm is not on PATH.
+func TestHelmTemplate_ChildNameGuards(t *testing.T) {
+	requireHelm(t)
+
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		extraSets []string
+		errSubstr string
+	}{
+		{
+			name:      "namePrefix over release-name cap fails render",
+			extraSets: []string{"--set", "deployer.namePrefix=" + strings.Repeat("a", 49) + "-"},
+			errSubstr: "53",
+		},
+		{
+			name: "child name colliding with parent appName fails render",
+			extraSets: []string{
+				"--set", "deployer.namePrefix=tenant-",
+				"--set", "appName=tenant-gpu-operator",
+			},
+			errSubstr: "collides",
+		},
+		{
+			name:      "unknown deployer key fails schema validation",
+			extraSets: []string{"--set", "deployer.destinationSever=https://x"},
+			errSubstr: "destinationSever",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"template", "test-release", outputDir,
+				"--set", "repoURL=oci://example.test/myorg",
+				"--set", "targetRevision=v1.0.0",
+			}
+			args = append(args, tt.extraSets...)
+			cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(cmdCtx, "helm", args...) //nolint:gosec // controlled args
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("expected helm template to fail, but it succeeded:\n%s", out)
+			}
+			if !strings.Contains(string(out), tt.errSubstr) {
+				t.Errorf("helm error output does not mention %q:\n%s", tt.errSubstr, out)
+			}
+		})
+	}
+}
+
+// TestValuesSchemaPatterns compiles the values.schema.json regex patterns
+// with Go's regexp package and verifies they align with the bundle-time Go
+// validators: destinationServer must reject embedded credentials, and
+// project must enforce per-label DNS-1123 subdomain rules (no empty labels,
+// labels capped at 63 chars).
+func TestValuesSchemaPatterns(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := writeValuesSchema(dir); err != nil {
+		t.Fatalf("writeValuesSchema() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "values.schema.json"))
+	if err != nil {
+		t.Fatalf("read values.schema.json: %v", err)
+	}
+	var schema valuesSchema
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("unmarshal values.schema.json: %v", err)
+	}
+	props := schema.Properties.Deployer.Properties
+
+	// Pin the fail-closed shape independent of the golden fixtures and the
+	// (skippable) live helm test: without additionalProperties: false, an
+	// unknown deployer.* key would silently pass install-time validation.
+	// The raw-bytes check matters — a future `omitempty` on the struct field
+	// would drop the key entirely (JSON Schema then defaults to allowing
+	// unknown properties), and an unmarshal-based check could not see that.
+	if schema.Properties.Deployer.AdditionalProperties {
+		t.Error("deployer.additionalProperties must be false to fail unknown keys closed")
+	}
+	if !strings.Contains(string(data), `"additionalProperties": false`) {
+		t.Error(`values.schema.json must emit "additionalProperties": false explicitly; omitting it fails open`)
+	}
+
+	tests := []struct {
+		name    string
+		pattern string
+		input   string
+		match   bool
+	}{
+		{"destinationServer accepts plain https host", props.DestinationServer.Pattern, "https://kubernetes.default.svc", true},
+		{"destinationServer accepts explicit empty (reset to baked default)", props.DestinationServer.Pattern, "", true},
+		{"destinationServer accepts host with port", props.DestinationServer.Pattern, "https://api.example.com:6443", true},
+		{"destinationServer rejects embedded credentials", props.DestinationServer.Pattern, "https://u:p@host:6443", false},
+		{"destinationServer rejects port without hostname", props.DestinationServer.Pattern, "https://:6443", false},
+		{"destinationServer rejects path without hostname", props.DestinationServer.Pattern, "https:///path", false},
+		{"project accepts single label", props.Project.Pattern, "default", true},
+		{"project accepts dotted subdomain", props.Project.Pattern, "team-a.prod", true},
+		{"project rejects empty label", props.Project.Pattern, "a..b", false},
+		// Per-label caps are deliberately NOT enforced: IsDNS1123Subdomain
+		// only caps the total length, and a 64+-char label is a legal
+		// Kubernetes object name — an AppProject with a 70-char name can
+		// exist, so rejecting the reference would be a false positive.
+		{"project accepts 70-char label (legal k8s object name)", props.Project.Pattern, strings.Repeat("a", 70), true},
+		{"project accepts 63-char label", props.Project.Pattern, strings.Repeat("a", 63), true},
+		{"project accepts explicit empty (reset to baked default)", props.Project.Pattern, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re, err := regexp.Compile(tt.pattern)
+			if err != nil {
+				t.Fatalf("pattern %q does not compile: %v", tt.pattern, err)
+			}
+			if got := re.MatchString(tt.input); got != tt.match {
+				t.Errorf("pattern %q match(%q) = %v, want %v", tt.pattern, tt.input, got, tt.match)
+			}
+		})
+	}
+}
+
+// TestValidationContractParity is the live contract test between the two
+// independent validation gates for deployer.* options:
+//
+//   - bundle time: the Go validators behind config.ParseArgoDeployerOptions
+//     (ValidateNamePrefix, ValidateDestinationServer, ValidateProject).
+//   - install time: values.schema.json patterns enforced by
+//     `helm template` (plus the template guards).
+//
+// The two have repeatedly drifted (see #1625/#1628 follow-ups); this test
+// closes the class by running BOTH gates against the same value and
+// asserting each equals an explicit wantValid — merely asserting the gates
+// agree would let a case where both wrongly accept a bad value pass.
+func TestValidationContractParity(t *testing.T) {
+	requireHelm(t)
+
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// helmTemplate renders the generated bundle with one extra deployer.*
+	// assignment (setFlag is --set-string for byte-identical string parity,
+	// or --set for Helm's type-inference cases) and reports render output
+	// and success. Bounded by an exec timeout like the other live tests.
+	helmTemplate := func(t *testing.T, setFlag, key, value string) (string, bool) {
+		t.Helper()
+		cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+			"--set", "repoURL=oci://example.test/myorg",
+			"--set", "targetRevision=v1.0.0",
+			setFlag, "deployer."+key+"="+value,
+		)
+		out, err := cmd.CombinedOutput()
+		if cmdCtx.Err() != nil {
+			t.Fatalf("helm template timed out: %v\noutput:\n%s", err, out)
+		}
+		return string(out), err == nil
+	}
+
+	t.Run("string values", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			key       string
+			value     string
+			wantValid bool
+		}{
+			{"destinationServer valid https URL", "destinationServer", "https://api.example.com:6443", true},
+			{"destinationServer embedded credentials", "destinationServer", "https://u:p@host:6443", false},
+			// Port with no hostname is never a usable API endpoint; both
+			// gates fail it closed (ValidateHTTPSURL checks u.Hostname(),
+			// the schema pattern forbids ':' right after https://).
+			{"destinationServer port without hostname", "destinationServer", "https://:6443", false},
+			// url.Parse lowercases the scheme, so only an explicit prefix
+			// check keeps the Go validator aligned with the case-sensitive
+			// schema pattern.
+			{"destinationServer uppercase scheme", "destinationServer", "HTTPS://host:6443", false},
+			// '@' is rejected anywhere (not just userinfo) because the
+			// schema regex cannot distinguish authority from path.
+			{"destinationServer at-sign in path", "destinationServer", "https://host/path@thing", false},
+			{"project valid dotted subdomain", "project", "team-a.prod", true},
+			{"project empty label", "project", "a..b", false},
+			// Both gates mirror IsDNS1123Subdomain exactly: a 64-char
+			// label is a legal Kubernetes object name (only the 253-char
+			// total is capped), so both gates must accept it.
+			{"project 64-char label", "project", strings.Repeat("a", 64), true},
+			{"namePrefix valid trailing hyphen", "namePrefix", "tenant-a-", true},
+			{"namePrefix uppercase", "namePrefix", "Tenant-", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				// Bundle-time gate: single-key override map through the same
+				// entry point the CLI/API use for --set deployer:<key>=<value>.
+				_, err := config.ParseArgoDeployerOptions(map[string]string{tt.key: tt.value})
+				if goValid := err == nil; goValid != tt.wantValid {
+					t.Errorf("bundle-time Go validator: valid=%v, want %v (err=%v)", goValid, tt.wantValid, err)
+				}
+				// Install-time gate: --set-string keeps the value a string so
+				// both gates judge the identical bytes.
+				out, helmValid := helmTemplate(t, "--set-string", tt.key, tt.value)
+				if helmValid != tt.wantValid {
+					t.Errorf("install-time helm template: valid=%v, want %v\noutput:\n%s", helmValid, tt.wantValid, out)
+				}
+			})
+		}
+	})
+
+	// Helm's plain --set type-inference: `--set deployer.project=true`
+	// delivers a bool (not the string "true") to schema validation. The
+	// schema's `type: string` must reject every inferred non-string —
+	// otherwise a value the bundle-time gate could never even see (its
+	// overrides are always strings) slips through at install time.
+	t.Run("helm type inference rejected by schema", func(t *testing.T) {
+		for _, value := range []string{"true", "false", "123", "0"} {
+			t.Run("project="+value, func(t *testing.T) {
+				out, helmValid := helmTemplate(t, "--set", "project", value)
+				if helmValid {
+					t.Errorf("helm template accepted --set deployer.project=%s; schema type:string must reject the inferred non-string\noutput:\n%s", value, out)
+				}
+			})
+		}
+	})
+
+	// `--set deployer.project=null` is different: Helm deletes the key from
+	// the coalesced values instead of passing a null, so the schema never
+	// sees a value and the child template's `| default "default"` fallback
+	// renders the baked default. That render success is acceptable — the
+	// user gets the chart default, not a malformed project — so this case
+	// intentionally expects success and pins the fallback value.
+	t.Run("project=null deletes key and falls back to baked default", func(t *testing.T) {
+		out, helmValid := helmTemplate(t, "--set", "project", "null")
+		if !helmValid {
+			t.Fatalf("helm template failed for --set deployer.project=null; expected key deletion + default fallback\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "project: 'default'") {
+			t.Errorf("rendered output should fall back to the baked default project after null deletes the key; got:\n%s", out)
+		}
+	})
+
+	// An explicit-empty install-time value passes the schema's `^$|`
+	// alternative and resets to the baked default via the child
+	// template's `| default` fallback. The CLI cannot produce this case
+	// (ParseArgoDeployerOptions rejects an empty project, and the
+	// component-path parser rejects empty values), so it is install-time
+	// only — pin the fallback rendering here.
+	t.Run("explicit-empty project renders baked default", func(t *testing.T) {
+		out, helmValid := helmTemplate(t, "--set-string", "project", "")
+		if !helmValid {
+			t.Fatalf("helm template failed for --set-string deployer.project=\"\"; expected schema to accept empty and template to fall back\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "project: 'default'") {
+			t.Errorf("rendered output should fall back to the baked default project for an explicit-empty value; got:\n%s", out)
+		}
+	})
+
+	t.Run("explicit-empty destinationServer renders in-cluster default", func(t *testing.T) {
+		out, helmValid := helmTemplate(t, "--set-string", "destinationServer", "")
+		if !helmValid {
+			t.Fatalf("helm template failed for --set-string deployer.destinationServer=\"\"; expected schema to accept empty and template to fall back\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "server: 'https://kubernetes.default.svc'") {
+			t.Errorf("rendered output should fall back to the in-cluster destination server for an explicit-empty value; got:\n%s", out)
+		}
+	})
 }
