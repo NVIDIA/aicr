@@ -55,7 +55,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 5 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
-| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1-rc.1 | 1 |
+| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
@@ -219,7 +219,7 @@ _No images extracted._
 
 ### nvidia-dra-driver-gpu
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1-rc.1`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1`
 
 ### nvsentinel
 
@@ -355,9 +355,9 @@ Component: nvidia-dra-driver-gpu (1 images)
 Presence-only check: does NOT verify publisher trust/identity.
 Y = artifact attached, - = artifact absent, ? = could not probe.
 
-  Image                                                                Sig  SBOM  Prov  Notes
-  -------------------------------------------------------------------  ---  ----  ----  -----
-  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1-rc.1  Y    -     -
+  Image                                                           Sig  SBOM  Prov  Notes
+  --------------------------------------------------------------  ---  ----  ----  -----
+  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1  Y    -     -
 
 Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
 ```

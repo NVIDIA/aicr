@@ -286,12 +286,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
-      # TEMPORARY: pinned to 0.4.1-rc.1 to pick up the fix for the duplicate
-      # pod-template label key that 0.4.0 emits with our values (invalid YAML
-      # that breaks strict consumers — Argo CD/Flux/kustomize/yq). Bump to the
-      # 0.4.1 GA release once it lands (scheduled week of 2026-06-29).
-      # See https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/issues/1184
-      defaultVersion: "0.4.1-rc.1"
+      defaultVersion: "0.4.1"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
