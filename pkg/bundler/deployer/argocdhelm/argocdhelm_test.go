@@ -16,6 +16,7 @@ package argocdhelm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1956,8 +1958,10 @@ func TestGenerate_DeployerValuesInChart(t *testing.T) {
 			t.Errorf("values.yaml missing %q\n%s", want, values)
 		}
 	}
-	if strings.Contains(string(values), "cascadeDelete") {
-		t.Error("cascadeDelete must not appear in values.yaml (bundle-time only)")
+	// Key form only — the doc header comment deliberately mentions
+	// cascadeDelete to explain that it is bundle-time only.
+	if strings.Contains(string(values), "cascadeDelete:") {
+		t.Error("cascadeDelete key must not appear in values.yaml (bundle-time only)")
 	}
 
 	child := readBundleFile(t, outputDir, "templates/gpu-operator.yaml")
@@ -2195,6 +2199,54 @@ func TestHelmTemplate_ChildNameGuards(t *testing.T) {
 			}
 			if !strings.Contains(string(out), tt.errSubstr) {
 				t.Errorf("helm error output does not mention %q:\n%s", tt.errSubstr, out)
+			}
+		})
+	}
+}
+
+// TestValuesSchemaPatterns compiles the values.schema.json regex patterns
+// with Go's regexp package and verifies they align with the bundle-time Go
+// validators: destinationServer must reject embedded credentials, and
+// project must enforce per-label DNS-1123 subdomain rules (no empty labels,
+// labels capped at 63 chars).
+func TestValuesSchemaPatterns(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := writeValuesSchema(dir); err != nil {
+		t.Fatalf("writeValuesSchema() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "values.schema.json"))
+	if err != nil {
+		t.Fatalf("read values.schema.json: %v", err)
+	}
+	var schema valuesSchema
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("unmarshal values.schema.json: %v", err)
+	}
+	props := schema.Properties.Deployer.Properties
+
+	tests := []struct {
+		name    string
+		pattern string
+		input   string
+		match   bool
+	}{
+		{"destinationServer accepts plain https host", props.DestinationServer.Pattern, "https://kubernetes.default.svc", true},
+		{"destinationServer accepts host with port", props.DestinationServer.Pattern, "https://api.example.com:6443", true},
+		{"destinationServer rejects embedded credentials", props.DestinationServer.Pattern, "https://u:p@host:6443", false},
+		{"project accepts single label", props.Project.Pattern, "default", true},
+		{"project accepts dotted subdomain", props.Project.Pattern, "team-a.prod", true},
+		{"project rejects empty label", props.Project.Pattern, "a..b", false},
+		{"project rejects 70-char label", props.Project.Pattern, strings.Repeat("a", 70), false},
+		{"project accepts 63-char label", props.Project.Pattern, strings.Repeat("a", 63), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re, err := regexp.Compile(tt.pattern)
+			if err != nil {
+				t.Fatalf("pattern %q does not compile: %v", tt.pattern, err)
+			}
+			if got := re.MatchString(tt.input); got != tt.match {
+				t.Errorf("pattern %q match(%q) = %v, want %v", tt.pattern, tt.input, got, tt.match)
 			}
 		})
 	}

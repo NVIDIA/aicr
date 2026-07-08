@@ -19,6 +19,10 @@
 #                                Applications (default in-cluster).
 #   deployer.project             Argo CD project for child Applications.
 #
+#   deployer.cascadeDelete is intentionally NOT an install-time value —
+#   it is bundle-time only (aicr bundle --set deployer:cascadeDelete=true);
+#   helm --set deployer.cascadeDelete=... fails the values schema.
+#
 ---
 certmanager:
   replicaCount: 1

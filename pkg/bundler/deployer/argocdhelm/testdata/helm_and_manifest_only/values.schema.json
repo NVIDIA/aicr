@@ -12,11 +12,11 @@
         },
         "destinationServer": {
           "type": "string",
-          "pattern": "^https://[^'\"\\s]+$"
+          "pattern": "^https://[^'\"\\s@]+$"
         },
         "project": {
           "type": "string",
-          "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+          "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$",
           "maxLength": 253
         }
       }

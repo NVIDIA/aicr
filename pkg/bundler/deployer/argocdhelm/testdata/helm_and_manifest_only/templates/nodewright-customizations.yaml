@@ -1,5 +1,5 @@
 {{- $childName := printf "%s%s" ((.Values.deployer | default dict).namePrefix | default "") "nodewright-customizations" -}}
-{{- if gt (len $childName) 53 }}{{ fail (printf "deployer.namePrefix produces child Application name %q (%d chars): Argo CD uses the Application name as the Helm release name, which is capped at 53 characters" $childName (len $childName)) }}{{ end -}}
+{{- if gt (len $childName) 53 }}{{ fail (printf "deployer.namePrefix produces child Application name %q (%d chars): child Application names are capped at 53 characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children" $childName (len $childName)) }}{{ end -}}
 {{- if eq $childName (.Values.appName | default "aicr-stack") }}{{ fail (printf "child Application name %q collides with the parent Application name: choose a different deployer.namePrefix or appName" $childName) }}{{ end -}}
 apiVersion: argoproj.io/v1alpha1
 kind: Application

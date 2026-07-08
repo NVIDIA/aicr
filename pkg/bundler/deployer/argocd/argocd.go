@@ -554,12 +554,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("deployer namePrefix produces invalid child Application name %q", appData.Name), err)
 		}
-		// Argo CD uses the Application name as the Helm release name, so
-		// a composed name over Helm's cap passes DNS-1123 validation but
-		// fails at sync time. Reject at bundle time instead.
+		// Argo CD derives the Helm release name from the Application name
+		// for Helm-rendered children, so a composed name over Helm's cap
+		// passes DNS-1123 validation but fails at sync time. The cap is
+		// applied uniformly to ALL children (including non-Helm ones) to
+		// keep a single invariant rather than branching on folder kind.
+		// Reject at bundle time instead.
 		if len(appData.Name) > HelmReleaseNameMaxLen {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("deployer namePrefix produces child Application name %q (%d chars); Argo CD uses the Application name as the Helm release name, which is capped at %d characters", appData.Name, len(appData.Name), HelmReleaseNameMaxLen))
+				fmt.Sprintf("deployer namePrefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", appData.Name, len(appData.Name), HelmReleaseNameMaxLen))
 		}
 		// A child that composes to the parent's name would overwrite the
 		// parent Application CR in the argocd namespace.
