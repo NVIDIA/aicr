@@ -2224,6 +2224,19 @@ func TestValuesSchemaPatterns(t *testing.T) {
 	}
 	props := schema.Properties.Deployer.Properties
 
+	// Pin the fail-closed shape independent of the golden fixtures and the
+	// (skippable) live helm test: without additionalProperties: false, an
+	// unknown deployer.* key would silently pass install-time validation.
+	// The raw-bytes check matters — a future `omitempty` on the struct field
+	// would drop the key entirely (JSON Schema then defaults to allowing
+	// unknown properties), and an unmarshal-based check could not see that.
+	if schema.Properties.Deployer.AdditionalProperties {
+		t.Error("deployer.additionalProperties must be false to fail unknown keys closed")
+	}
+	if !strings.Contains(string(data), `"additionalProperties": false`) {
+		t.Error(`values.schema.json must emit "additionalProperties": false explicitly; omitting it fails open`)
+	}
+
 	tests := []struct {
 		name    string
 		pattern string
