@@ -274,7 +274,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateDestinationServer(g.DestinationServer); err != nil {
 		return nil, err
 	}
-	if err := bundlercfg.ValidateAppName(g.Project); err != nil {
+	// ValidateProject (not ValidateAppName) is load-bearing: it also
+	// enforces the per-label 63-character cap the install-time
+	// values.schema.json pattern applies, so a baked Project default can
+	// never make the generated bundle fail its own schema at install time.
+	if err := bundlercfg.ValidateProject(g.Project); err != nil {
 		return nil, err
 	}
 
@@ -627,8 +631,11 @@ func writeValuesSchema(outputDir string) (string, int64, error) {
 						Type: schemaTypeString,
 						// `@` is forbidden to match the bundle-time Go
 						// validator, which rejects embedded credentials
-						// (https://u:p@host).
-						Pattern: `^https://[^'"\s@]+$`,
+						// (https://u:p@host). The first character after
+						// https:// must not be `:` or `/` so a hostname-less
+						// URL (https://:6443, https:///path) fails closed,
+						// matching ValidateHTTPSURL's Hostname() check.
+						Pattern: `^https://[^'"\s@:/][^'"\s@]*$`,
 					},
 					Project: valuesSchemaProperty{
 						Type: schemaTypeString,

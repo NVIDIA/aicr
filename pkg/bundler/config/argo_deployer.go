@@ -85,6 +85,31 @@ func ValidateDestinationServer(raw string) error {
 	return nil
 }
 
+// ValidateProject reports whether value is a usable child Application
+// spec.project. Empty is allowed (means "use the default project").
+// IsDNS1123Subdomain caps the total length at 253 characters but does NOT
+// enforce the per-label 63-character cap from RFC 1123 — a 64-character
+// single-label value passes it. The install-time values.schema.json
+// pattern enforces the per-label cap, so enforce it here too to keep the
+// bundle-time and install-time gates aligned (see the validation-contract
+// parity test in pkg/bundler/deployer/argocdhelm).
+func ValidateProject(value string) error {
+	if value == "" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Subdomain(value); len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid deployer project %q: %s", value, errs[0]))
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) > validation.DNS1123LabelMaxLength {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid deployer project %q: label %q exceeds %d characters", value, label, validation.DNS1123LabelMaxLength))
+		}
+	}
+	return nil
+}
+
 // ArgoDeployerOptions carries the deployer-level Argo Application options
 // supplied via `--set deployer:<key>=<value>`. All fields apply to the
 // generated child Applications only, except CascadeDelete which also
@@ -140,9 +165,15 @@ func ParseArgoDeployerOptions(overrides map[string]string) (*ArgoDeployerOptions
 			}
 			opts.DestinationServer = value
 		case deployerKeyProject:
-			if errs := validation.IsDNS1123Subdomain(value); len(errs) > 0 {
+			// An explicit empty value is a user error at parse time (the
+			// generator boundary allows empty as "use the default", but an
+			// explicit `--set deployer:project=` must fail closed).
+			if value == "" {
 				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid deployer project %q: %s", value, errs[0]))
+					`invalid deployer project "": must not be empty`)
+			}
+			if err := ValidateProject(value); err != nil {
+				return nil, err
 			}
 			opts.Project = value
 		case deployerKeyCascadeDelete:

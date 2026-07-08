@@ -51,12 +51,20 @@ func TestParseArgoDeployerOptions(t *testing.T) {
 		{"namePrefix leading hyphen rejected", map[string]string{"namePrefix": "-a"}, nil, true, "namePrefix"},
 		{"http destinationServer rejected", map[string]string{"destinationServer": "http://insecure:6443"}, nil, true, "destinationServer"},
 		{"destinationServer with credentials rejected", map[string]string{"destinationServer": "https://u:p@host:6443"}, nil, true, "destinationServer"},
+		{"destinationServer port without hostname rejected", map[string]string{"destinationServer": "https://:6443"}, nil, true, "destinationServer"},
 		{"destinationServer with apostrophe rejected", map[string]string{"destinationServer": "https://host/o'brien:6443"}, nil, true, "must not contain quotes"},
 		{"destinationServer with double quote rejected", map[string]string{"destinationServer": `https://host/a"b:6443`}, nil, true, "must not contain quotes"},
 		// Sorted key iteration makes multi-error reporting deterministic:
 		// with two invalid keys, the alphabetically-first one is reported.
 		{"multiple unknown keys report the first sorted key", map[string]string{"zzz": "1", "aaa": "1"}, nil, true, `"aaa"`},
 		{"invalid project rejected", map[string]string{"project": "Tenant_A"}, nil, true, "project"},
+		{"empty project rejected", map[string]string{"project": ""}, nil, true, "must not be empty"},
+		// IsDNS1123Subdomain alone accepts a 64-char single label (it only
+		// caps total length at 253); ValidateProject adds the per-label
+		// 63-char cap to stay aligned with the install-time schema pattern.
+		{"project 64-char label rejected", map[string]string{"project": strings.Repeat("a", 64)}, nil, true, "exceeds 63"},
+		{"project dotted labels each within cap", map[string]string{"project": strings.Repeat("a", 63) + "." + strings.Repeat("b", 63)},
+			&ArgoDeployerOptions{Project: strings.Repeat("a", 63) + "." + strings.Repeat("b", 63)}, false, ""},
 		{"non-bool cascadeDelete rejected", map[string]string{"cascadeDelete": "yes-please"}, nil, true, "cascadeDelete"},
 	}
 	for _, tt := range tests {

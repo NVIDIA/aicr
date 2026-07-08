@@ -43,6 +43,22 @@ import (
 // Same convention as helm and localformat deployer test suites.
 var update = flag.Bool("update", false, "update golden files")
 
+// requireHelm gates the live-render tests on a helm binary. In CI (the
+// standard CI=true environment variable set by GitHub Actions) a missing
+// helm is a hard failure: the go-test action installs the version pinned
+// in .settings.yaml, so an absent binary means the pipeline silently
+// stopped exercising the live-render coverage. Locally the tests keep
+// skipping so dev environments without helm are not broken.
+func requireHelm(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("helm"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("helm is required in CI but not on PATH; the go-test action must install the pinned version from .settings.yaml (testing_tools.helm)")
+		}
+		t.Skip("helm not available; skipping live-render test")
+	}
+}
+
 func newRecipeResult(version string, refs []recipe.ComponentRef) *recipe.RecipeResult {
 	r := &recipe.RecipeResult{
 		ComponentRefs: refs,
@@ -1103,9 +1119,7 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 // Skipped when helm is not on PATH so unit-test environments without
 // helm aren't broken by it.
 func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -1249,9 +1263,7 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 // installation from ChartMuseum / GitHub Pages-style repos is the
 // supported use case. See PR #1051's Codex P2 review.
 func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	ctx := context.Background()
 	outputDir := t.TempDir()
@@ -1347,9 +1359,7 @@ func TestHelmTemplate_RendersWithHelmRepoRepoURL(t *testing.T) {
 // `<namespace>/<chart>:<targetRevision>` resolves against the actual
 // published artifact instead of the literal `aicr-bundle`.
 func TestGenerate_CustomChartName(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	const customName = "my-custom-bundle"
 	outputDir := t.TempDir()
@@ -1433,9 +1443,7 @@ func TestGenerate_CustomChartName(t *testing.T) {
 // Application's metadata.name was the literal "aicr-stack" and the
 // second bundle silently overwrote the first.
 func TestHelmTemplate_AppNameOverride(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	tests := []struct {
 		name              string
@@ -1591,9 +1599,7 @@ func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
 // (`gpu-operator`) is also asserted to confirm its `repoURL` stays as
 // the upstream Helm chart registry (not templated from .Values.repoURL).
 func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -1720,9 +1726,7 @@ func TestHelmTemplate_MixedComponentPreChildResolvesFromOCI(t *testing.T) {
 // is the safety net that prevents users from accidentally publishing a
 // chart whose Application would point at an empty URL.
 func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
@@ -2012,9 +2016,7 @@ func TestGenerate_DeployerDefaults_NoOptions(t *testing.T) {
 // metadata.name as `t-gpu-operator`, and project / destinationServer
 // overrides must land on the child spec. Skipped when helm is not on PATH.
 func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	g := newTestHelmGenerator(t)
@@ -2149,9 +2151,7 @@ func TestGenerate_NamePrefixValidatedUpfront(t *testing.T) {
 // parent Application. The guard block prepended to every child template
 // must fail the render. Skipped when helm is not on PATH.
 func TestHelmTemplate_ChildNameGuards(t *testing.T) {
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not available; skipping live-render test")
-	}
+	requireHelm(t)
 
 	outputDir := t.TempDir()
 	g := newTestHelmGenerator(t)
@@ -2246,6 +2246,8 @@ func TestValuesSchemaPatterns(t *testing.T) {
 		{"destinationServer accepts plain https host", props.DestinationServer.Pattern, "https://kubernetes.default.svc", true},
 		{"destinationServer accepts host with port", props.DestinationServer.Pattern, "https://api.example.com:6443", true},
 		{"destinationServer rejects embedded credentials", props.DestinationServer.Pattern, "https://u:p@host:6443", false},
+		{"destinationServer rejects port without hostname", props.DestinationServer.Pattern, "https://:6443", false},
+		{"destinationServer rejects path without hostname", props.DestinationServer.Pattern, "https:///path", false},
 		{"project accepts single label", props.Project.Pattern, "default", true},
 		{"project accepts dotted subdomain", props.Project.Pattern, "team-a.prod", true},
 		{"project rejects empty label", props.Project.Pattern, "a..b", false},
@@ -2263,4 +2265,115 @@ func TestValuesSchemaPatterns(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidationContractParity is the live contract test between the two
+// independent validation gates for deployer.* options:
+//
+//   - bundle time: the Go validators behind config.ParseArgoDeployerOptions
+//     (ValidateNamePrefix, ValidateDestinationServer, ValidateProject).
+//   - install time: values.schema.json patterns enforced by
+//     `helm template` (plus the template guards).
+//
+// The two have repeatedly drifted (see #1625/#1628 follow-ups); this test
+// closes the class by running BOTH gates against the same value and
+// asserting each equals an explicit wantValid — merely asserting the gates
+// agree would let a case where both wrongly accept a bad value pass.
+func TestValidationContractParity(t *testing.T) {
+	requireHelm(t)
+
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// helmTemplate renders the generated bundle with one extra deployer.*
+	// assignment (setFlag is --set-string for byte-identical string parity,
+	// or --set for Helm's type-inference cases) and reports render output
+	// and success. Bounded by an exec timeout like the other live tests.
+	helmTemplate := func(t *testing.T, setFlag, key, value string) (string, bool) {
+		t.Helper()
+		cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+			"--set", "repoURL=oci://example.test/myorg",
+			"--set", "targetRevision=v1.0.0",
+			setFlag, "deployer."+key+"="+value,
+		)
+		out, err := cmd.CombinedOutput()
+		if cmdCtx.Err() != nil {
+			t.Fatalf("helm template timed out: %v\noutput:\n%s", err, out)
+		}
+		return string(out), err == nil
+	}
+
+	t.Run("string values", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			key       string
+			value     string
+			wantValid bool
+		}{
+			{"destinationServer valid https URL", "destinationServer", "https://api.example.com:6443", true},
+			{"destinationServer embedded credentials", "destinationServer", "https://u:p@host:6443", false},
+			// Port with no hostname is never a usable API endpoint; both
+			// gates fail it closed (ValidateHTTPSURL checks u.Hostname(),
+			// the schema pattern forbids ':' right after https://).
+			{"destinationServer port without hostname", "destinationServer", "https://:6443", false},
+			{"project valid dotted subdomain", "project", "team-a.prod", true},
+			{"project empty label", "project", "a..b", false},
+			{"project 64-char label", "project", strings.Repeat("a", 64), false},
+			{"namePrefix valid trailing hyphen", "namePrefix", "tenant-a-", true},
+			{"namePrefix uppercase", "namePrefix", "Tenant-", false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				// Bundle-time gate: single-key override map through the same
+				// entry point the CLI/API use for --set deployer:<key>=<value>.
+				_, err := config.ParseArgoDeployerOptions(map[string]string{tt.key: tt.value})
+				if goValid := err == nil; goValid != tt.wantValid {
+					t.Errorf("bundle-time Go validator: valid=%v, want %v (err=%v)", goValid, tt.wantValid, err)
+				}
+				// Install-time gate: --set-string keeps the value a string so
+				// both gates judge the identical bytes.
+				out, helmValid := helmTemplate(t, "--set-string", tt.key, tt.value)
+				if helmValid != tt.wantValid {
+					t.Errorf("install-time helm template: valid=%v, want %v\noutput:\n%s", helmValid, tt.wantValid, out)
+				}
+			})
+		}
+	})
+
+	// Helm's plain --set type-inference: `--set deployer.project=true`
+	// delivers a bool (not the string "true") to schema validation. The
+	// schema's `type: string` must reject every inferred non-string —
+	// otherwise a value the bundle-time gate could never even see (its
+	// overrides are always strings) slips through at install time.
+	t.Run("helm type inference rejected by schema", func(t *testing.T) {
+		for _, value := range []string{"true", "false", "123", "0"} {
+			t.Run("project="+value, func(t *testing.T) {
+				out, helmValid := helmTemplate(t, "--set", "project", value)
+				if helmValid {
+					t.Errorf("helm template accepted --set deployer.project=%s; schema type:string must reject the inferred non-string\noutput:\n%s", value, out)
+				}
+			})
+		}
+	})
+
+	// `--set deployer.project=null` is different: Helm deletes the key from
+	// the coalesced values instead of passing a null, so the schema never
+	// sees a value and the child template's `| default "default"` fallback
+	// renders the baked default. That render success is acceptable — the
+	// user gets the chart default, not a malformed project — so this case
+	// intentionally expects success and pins the fallback value.
+	t.Run("project=null deletes key and falls back to baked default", func(t *testing.T) {
+		out, helmValid := helmTemplate(t, "--set", "project", "null")
+		if !helmValid {
+			t.Fatalf("helm template failed for --set deployer.project=null; expected key deletion + default fallback\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "project: 'default'") {
+			t.Errorf("rendered output should fall back to the baked default project after null deletes the key; got:\n%s", out)
+		}
+	})
 }

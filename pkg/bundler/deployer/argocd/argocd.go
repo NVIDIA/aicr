@@ -440,7 +440,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateDestinationServer(g.DestinationServer); err != nil {
 		return nil, err
 	}
-	if err := bundlercfg.ValidateAppName(g.Project); err != nil {
+	// ValidateProject also enforces the per-label 63-character cap so the
+	// generated project value stays within what Argo CD / the argocd-helm
+	// install-time schema accept (see pkg/bundler/config.ValidateProject).
+	if err := bundlercfg.ValidateProject(g.Project); err != nil {
 		return nil, err
 	}
 
