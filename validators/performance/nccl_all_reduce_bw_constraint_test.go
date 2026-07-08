@@ -101,35 +101,51 @@ func TestLauncherTerminationTail(t *testing.T) {
 			Status:     corev1.PodStatus{ContainerStatuses: cs},
 		}
 	}
+	terminated := func(msg string) corev1.ContainerState {
+		return corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: msg}}
+	}
 
-	t.Run("returns terminated message", func(t *testing.T) {
-		p := pod("launcher-a", []corev1.ContainerStatus{{
-			Name:  "node",
-			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "  mpirun: ORTE failed\n"}},
-		}})
-		client := fake.NewClientset(p)
-		if got := launcherTerminationTail(context.Background(), client, ns, "launcher-a"); got != "mpirun: ORTE failed" {
-			t.Errorf("got %q, want trimmed termination message", got)
-		}
-	})
-
-	t.Run("empty when no terminated message", func(t *testing.T) {
-		p := pod("launcher-b", []corev1.ContainerStatus{{
-			Name:  "node",
-			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
-		}})
-		client := fake.NewClientset(p)
-		if got := launcherTerminationTail(context.Background(), client, ns, "launcher-b"); got != "" {
-			t.Errorf("got %q, want empty", got)
-		}
-	})
-
-	t.Run("empty when pod missing", func(t *testing.T) {
-		client := fake.NewClientset()
-		if got := launcherTerminationTail(context.Background(), client, ns, "nope"); got != "" {
-			t.Errorf("got %q, want empty", got)
-		}
-	})
+	tests := []struct {
+		name    string
+		pods    []runtime.Object
+		podName string
+		want    string
+	}{
+		{
+			name:    "returns trimmed terminated message of node container",
+			pods:    []runtime.Object{pod("launcher-a", []corev1.ContainerStatus{{Name: nodeJobName, State: terminated("  mpirun: ORTE failed\n")}})},
+			podName: "launcher-a",
+			want:    "mpirun: ORTE failed",
+		},
+		{
+			name:    "empty when node container still running",
+			pods:    []runtime.Object{pod("launcher-b", []corev1.ContainerStatus{{Name: nodeJobName, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}})},
+			podName: "launcher-b",
+			want:    "",
+		},
+		{
+			name: "ignores non-node container messages",
+			pods: []runtime.Object{pod("launcher-c", []corev1.ContainerStatus{
+				{Name: "sidecar", State: terminated("sidecar noise")},
+			})},
+			podName: "launcher-c",
+			want:    "",
+		},
+		{
+			name:    "empty when pod missing",
+			pods:    nil,
+			podName: "nope",
+			want:    "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset(tt.pods...)
+			if got := launcherTerminationTail(context.Background(), client, ns, tt.podName); got != tt.want {
+				t.Errorf("launcherTerminationTail = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestTailLines(t *testing.T) {

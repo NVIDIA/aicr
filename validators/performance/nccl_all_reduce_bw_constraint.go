@@ -1293,11 +1293,15 @@ func launcherTerminationTail(ctx context.Context, clientset kubernetes.Interface
 		slog.Warn("failed to re-get launcher pod for termination message", "pod", podName, "error", err)
 		return ""
 	}
+	// Match the launcher's main container by name (nodeJobName). The pod also
+	// has a fix-ssh-perms init container; keying by name avoids picking up an
+	// unrelated container's message if the status ordering ever changes.
 	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != nodeJobName {
+			continue
+		}
 		if cs.State.Terminated != nil {
-			if m := strings.TrimSpace(cs.State.Terminated.Message); m != "" {
-				return m
-			}
+			return strings.TrimSpace(cs.State.Terminated.Message)
 		}
 	}
 	return ""
