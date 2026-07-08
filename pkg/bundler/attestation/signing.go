@@ -43,8 +43,39 @@ type SignOptions struct {
 	FulcioURL string
 
 	// RekorURL is the Rekor transparency log URL. Empty falls back to
-	// defaults.SigstoreRekorURL.
+	// defaults.SigstoreRekorURL. Ignored when SigningConfigPath or
+	// UseTUFSigningConfig is set (both take precedence).
 	RekorURL string
+
+	// SigningConfigPath, when non-empty, is the path to a Sigstore SigningConfig
+	// JSON file (e.g. the TUF-distributed signing_config_rekor_v2 target written
+	// to disk). It takes precedence over UseTUFSigningConfig and RekorURL and
+	// drives transparency-log and timestamp-authority selection via
+	// root.SelectServices — this is how AICR targets Rekor v2. See #1650.
+	SigningConfigPath string
+
+	// UseTUFSigningConfig selects the Rekor v2 signing config from the local TUF
+	// cache (populated by "aicr trust update"). It is the preferred, rotation-safe
+	// way to target Rekor v2 — the endpoint set is Sigstore-maintained and nothing
+	// is hardcoded. Ignored when SigningConfigPath is set. See #1650.
+	UseTUFSigningConfig bool
+}
+
+// SignOptionsFromResolve maps a resolved OIDC token plus the signing-target
+// fields of a ResolveOptions into SignOptions. It is the single source of that
+// mapping, shared by the keyless attester and the evidence signing paths so a
+// new signing field (e.g. SigningConfigPath / UseTUFSigningConfig) cannot be
+// silently dropped by one caller — the drift that would otherwise leave a path
+// signing to the wrong Rekor. OIDC source selection is already resolved into
+// token, so only the transparency-target fields are copied.
+func SignOptionsFromResolve(token string, o ResolveOptions) SignOptions {
+	return SignOptions{
+		OIDCToken:           token,
+		FulcioURL:           o.FulcioURL,
+		RekorURL:            o.RekorURL,
+		SigningConfigPath:   o.SigningConfigPath,
+		UseTUFSigningConfig: o.UseTUFSigningConfig,
+	}
 }
 
 // SignedAttestation is the result of SignStatement: a Sigstore bundle
@@ -101,8 +132,41 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "OIDC token is required for keyless signing")
 	}
 	id := NewKeylessIdentity(opts.OIDCToken, opts.FulcioURL)
-	tlog := NewRekorPolicy(opts.RekorURL)
+	tlog, err := transparencyForOptions(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
 	return SignStatementWith(ctx, statementJSON, id, tlog)
+}
+
+// transparencyForOptions selects the transparency policy from SignOptions,
+// in precedence order: an explicit SigningConfig file, then the TUF-distributed
+// Rekor v2 signing config, then the single Rekor v1 URL policy. The first two
+// are SigningConfig-driven (Rekor v2 + timestamp authority). ctx bounds the TUF
+// fetch the v2 path may perform on a cold cache.
+func transparencyForOptions(ctx context.Context, opts SignOptions) (TransparencyPolicy, error) {
+	switch {
+	case opts.SigningConfigPath != "":
+		return NewSigningConfigPolicyFromPath(opts.SigningConfigPath)
+	case opts.UseTUFSigningConfig:
+		// Bound the Rekor v2 signing-config resolution (cache read plus a
+		// possible network TUF fetch on a cold cache) so an unbounded caller
+		// context cannot hang here, before SignStatementWith applies its own
+		// sign deadline. Shared by keyless SignStatement and KMSAttester.Attest.
+		//
+		// Budget note: when the caller ctx already carries a sign deadline (the
+		// evidence path passes EvidenceBundleSignTimeout), a cold-cache fetch here
+		// draws from that same budget before SignStatementWith's retry loop, so a
+		// first-ever cold sign has less than the full retry budget (see
+		// TestSigstoreRetryBudgetInvariant). It fails closed, and release CI
+		// pre-warms the cache via `aicr trust update`, so the retry loop keeps its
+		// budget in practice; only cold ad-hoc signing is affected.
+		tufCtx, cancel := context.WithTimeout(ctx, defaults.SigstoreSignTimeout)
+		defer cancel()
+		return NewSigningConfigPolicyFromTUF(tufCtx)
+	default:
+		return NewRekorPolicy(opts.RekorURL), nil
+	}
 }
 
 // SignStatementWith DSSE-wraps an in-toto Statement and signs it using the
@@ -145,6 +209,7 @@ func SignStatementWith(ctx context.Context, statementJSON []byte, id SigningIden
 			CertificateProvider:        certProvider,
 			CertificateProviderOptions: certOpts,
 			TransparencyLogs:           tlog.Logs(),
+			TimestampAuthorities:       tlog.TimestampAuthorities(),
 			Context:                    attemptCtx,
 		})
 	})

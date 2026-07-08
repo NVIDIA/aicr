@@ -55,6 +55,19 @@ type ResolveOptions struct {
 	FulcioURL string
 	RekorURL  string
 
+	// SigningConfigPath points keyless signing at a Sigstore SigningConfig JSON
+	// file (e.g. the TUF-distributed signing_config_rekor_v2 target) instead of a
+	// single Rekor URL. It takes precedence over UseTUFSigningConfig and RekorURL
+	// and is how release signing targets Rekor v2. Honored by both keyless and
+	// KMS signing. See issue #1650.
+	SigningConfigPath string
+
+	// UseTUFSigningConfig points signing at the Rekor v2 signing config in the
+	// local TUF cache (populated by "aicr trust update"). Preferred, rotation-safe
+	// way to target Rekor v2. Honored by both keyless and KMS signing. See issue
+	// #1650.
+	UseTUFSigningConfig bool
+
 	// SigningKey selects KMS-backed (key-based) signing instead of keyless OIDC.
 	// When non-empty it is a cosign-style KMS URI (awskms:// | gcpkms:// |
 	// azurekms://) and takes precedence over all OIDC source fields, which are
@@ -154,13 +167,13 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 		return NewNoOpAttester(), nil
 	}
 	if opts.SigningKey != "" {
-		return NewKMSAttester(opts.SigningKey, opts.RekorURL), nil
+		return NewKMSAttester(opts.SigningKey, SignOptionsFromResolve("", opts)), nil
 	}
 	token, err := ResolveOIDCToken(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	return NewKeylessAttester(token, opts.FulcioURL, opts.RekorURL), nil
+	return NewKeylessAttester(token, opts.FulcioURL, opts.RekorURL, opts.SigningConfigPath, opts.UseTUFSigningConfig), nil
 }
 
 // ResolveAttesterLazy is the deferred-token variant of ResolveAttester.
@@ -176,13 +189,13 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 // ResolveAttester exactly so callers can swap entry points without
 // changing the test surface.
 //
-//nolint:unparam // error return mirrors ResolveAttester so callers can swap entry points; reserved for future construction-time validation.
+//nolint:unparam // error return mirrors ResolveAttester so callers can swap entry points; the token-resolution error is deferred to Attest.
 func ResolveAttesterLazy(_ context.Context, opts ResolveOptions) (Attester, error) {
 	if !opts.Attest {
 		return NewNoOpAttester(), nil
 	}
 	if opts.SigningKey != "" {
-		return NewKMSAttester(opts.SigningKey, opts.RekorURL), nil
+		return NewKMSAttester(opts.SigningKey, SignOptionsFromResolve("", opts)), nil
 	}
 	return NewLazyKeylessAttester(opts), nil
 }
@@ -222,7 +235,7 @@ func (l *LazyKeylessAttester) Attest(ctx context.Context, subject AttestSubject)
 			l.mu.Unlock()
 			return nil, err
 		}
-		l.inner = NewKeylessAttester(token, l.opts.FulcioURL, l.opts.RekorURL)
+		l.inner = NewKeylessAttester(token, l.opts.FulcioURL, l.opts.RekorURL, l.opts.SigningConfigPath, l.opts.UseTUFSigningConfig)
 	}
 	inner := l.inner
 	l.mu.Unlock()

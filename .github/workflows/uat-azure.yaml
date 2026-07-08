@@ -236,6 +236,7 @@ jobs:
         uses: ./.github/actions/install-aicr-release
         with:
           aicr-version: ${{ inputs.aicr_version }}
+          cosign_version: ${{ steps.versions.outputs.cosign }}
 
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login

@@ -777,6 +777,13 @@ const (
 	// OOM the process the way os.ReadFile would.
 	MaxTrustedRootBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
+	// MaxSigningConfigBytes caps the size of a user-supplied Sigstore
+	// signing_config.json passed to `aicr bundle --signing-config` (#1650). A
+	// real signing config is a few KB; 1 MiB is generous headroom while bounding
+	// an attacker-influenced path (a /proc symlink, an NFS mount) so it cannot
+	// OOM the process the way sigstore-go's bare os.ReadFile would.
+	MaxSigningConfigBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxExternalDataFileBytes caps the size of recipe/registry data files
 	// read from the external data directory by LayeredDataProvider. This is
 	// the single source of truth for the external-data size limit:

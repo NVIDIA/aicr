@@ -30,16 +30,32 @@ var _ Attester = (*KMSAttester)(nil)
 type KMSAttester struct {
 	keyURI   string
 	identity SigningIdentity
-	tlog     TransparencyPolicy
+
+	// target carries the transparency-target fields (RekorURL, SigningConfigPath,
+	// UseTUFSigningConfig; OIDC/Fulcio fields are unused for KMS). It is built by
+	// the shared SignOptionsFromResolve mapper — the same single mapping the
+	// keyless and evidence paths use — so a new signing-target field cannot be
+	// silently dropped on the KMS path (guarded by TestSignOptionsFromResolve).
+	target SignOptions
+
+	// tlog, when non-nil, overrides the transparency policy that Attest would
+	// otherwise compute from target. Used to inject a no-tlog policy for offline
+	// testing, and reserved for a future --tlog-upload=false opt-out (#409).
+	tlog TransparencyPolicy
 }
 
-// NewKMSAttester returns a KMSAttester for keyURI. Empty rekorURL falls back to
-// the Sigstore public-good Rekor default.
-func NewKMSAttester(keyURI, rekorURL string) *KMSAttester {
+// NewKMSAttester returns a KMSAttester for keyURI. Like keyless signing, KMS
+// signs to Rekor v2 by default (via the TUF-distributed signing config, which
+// also supplies the timestamp authority v2 requires) unless target opts out to a
+// Rekor v1 URL or a custom signing config. target is produced by
+// SignOptionsFromResolve so the KMS path shares the keyless path's signing-target
+// mapping. The transparency-log entry carries public-key verification material
+// (no Fulcio certificate). See #1650.
+func NewKMSAttester(keyURI string, target SignOptions) *KMSAttester {
 	return &KMSAttester{
 		keyURI:   keyURI,
 		identity: NewKMSIdentity(keyURI),
-		tlog:     NewRekorPolicy(rekorURL),
+		target:   target,
 	}
 }
 
@@ -55,7 +71,15 @@ func (k *KMSAttester) Attest(ctx context.Context, subject AttestSubject) ([]byte
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to build attestation statement")
 	}
 
-	res, err := SignStatementWith(ctx, statementJSON, k.identity, k.tlog)
+	tlog := k.tlog
+	if tlog == nil {
+		tlog, err = transparencyForOptions(ctx, k.target)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	res, err := SignStatementWith(ctx, statementJSON, k.identity, tlog)
 	if err != nil {
 		return nil, err
 	}
@@ -69,10 +93,11 @@ func (k *KMSAttester) Attest(ctx context.Context, subject AttestSubject) ([]byte
 // Identity returns the KMS key URI used for signing.
 func (k *KMSAttester) Identity() string { return k.keyURI }
 
-// HasRekorEntry reports whether produced attestations include a Rekor entry,
-// derived from the configured transparency policy. KMS signing uses Rekor by
-// default; this returns false only when paired with the no-tlog policy (the
-// offline/air-gapped path, #409).
+// HasRekorEntry reports whether produced attestations include a Rekor entry.
+// KMS signing records one by default (Rekor v2, or v1 via --rekor-url); it is
+// false only when an explicit no-tlog policy override is set (the offline path,
+// #409). A nil override (the production default) computes a real Rekor policy at
+// Attest time, so this correctly reports true.
 func (k *KMSAttester) HasRekorEntry() bool {
 	_, noTLog := k.tlog.(noTLogPolicy)
 	return !noTLog

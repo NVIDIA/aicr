@@ -64,8 +64,13 @@ Keyless OIDC signing uses the same precedence chain as 'aicr bundle --attest':
 			},
 			&cli.StringFlag{
 				Name:    flagRekorURL,
-				Usage:   "Override the Rekor transparency-log URL (defaults to public-good).",
+				Usage:   "Sign to Rekor v1 at this URL instead of the Rekor v2 default (e.g. a private v1 instance, or the public-good v1 URL).",
 				Sources: cli.EnvVars("AICR_REKOR_URL"),
+			},
+			&cli.StringFlag{
+				Name:    flagSigningConfig,
+				Usage:   "Path to a Sigstore signing config JSON to sign with, instead of the default Rekor v2 config (advanced).",
+				Sources: cli.EnvVars("AICR_SIGNING_CONFIG"),
 			},
 		},
 		Action: runRecipeSignCatalogCmd,
@@ -75,15 +80,26 @@ Keyless OIDC signing uses the same precedence chain as 'aicr bundle --attest':
 func runRecipeSignCatalogCmd(ctx context.Context, cmd *cli.Command) error {
 	output := cmd.String("output")
 
+	rekorURL := cmd.String(flagRekorURL)
+	signingConfig := cmd.String(flagSigningConfig)
+	// Shared with bundle --attest: derive the Rekor v2 default and enforce the
+	// --rekor-url / --signing-config exclusivity in one place.
+	useV2, err := signingTargetFromFlags(rekorURL, signingConfig)
+	if err != nil {
+		return err
+	}
+
 	attester, err := attestation.ResolveAttesterLazy(ctx, attestation.ResolveOptions{
-		Attest:        true,
-		IdentityToken: cmd.String(flagIdentityToken),
-		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-		DeviceFlow:    cmd.Bool(flagOIDCDeviceFlow),
-		FulcioURL:     cmd.String(flagFulcioURL),
-		RekorURL:      cmd.String(flagRekorURL),
-		PromptWriter:  os.Stderr,
+		Attest:              true,
+		IdentityToken:       cmd.String(flagIdentityToken),
+		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+		DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
+		FulcioURL:           cmd.String(flagFulcioURL),
+		RekorURL:            rekorURL,
+		SigningConfigPath:   signingConfig,
+		UseTUFSigningConfig: useV2,
+		PromptWriter:        os.Stderr,
 	})
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeUnauthorized, "could not resolve OIDC attester")

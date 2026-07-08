@@ -108,6 +108,8 @@ navigation:
         path: contributor/skills.md
       - page: Maintaining AICR
         path: contributor/maintaining.md
+      - page: Rekor v2 Signing
+        path: contributor/rekor-v2-signing.md
       - page: Publishing Recipe Evidence
         path: contributor/evidence-publishing.md
       - page: UAT Day/Night Cycle

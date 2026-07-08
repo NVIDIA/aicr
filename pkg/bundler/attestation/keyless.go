@@ -25,10 +25,12 @@ import (
 // KeylessAttester signs bundle content using Sigstore keyless OIDC signing
 // (Fulcio for certificates, Rekor for transparency logging).
 type KeylessAttester struct {
-	oidcToken string
-	fulcioURL string
-	rekorURL  string
-	identity  string
+	oidcToken           string
+	fulcioURL           string
+	rekorURL            string
+	signingConfigPath   string
+	useTUFSigningConfig bool
+	identity            string
 }
 
 // NewKeylessAttester returns a new KeylessAttester targeting the given Fulcio
@@ -36,7 +38,14 @@ type KeylessAttester struct {
 // public-good default, so callers that do not run private infrastructure pass
 // "" for both. Non-empty values point signing at a private Sigstore instance
 // (issue #408).
-func NewKeylessAttester(oidcToken, fulcioURL, rekorURL string) *KeylessAttester {
+//
+// signingConfigPath, when non-empty, is the path to a Sigstore SigningConfig
+// (e.g. the TUF-distributed signing_config_rekor_v2 target) that drives
+// transparency-log and timestamp-authority selection; it takes precedence over
+// useTUFSigningConfig and rekorURL. useTUFSigningConfig selects the Rekor v2
+// signing config from the local TUF cache instead. Both are how signing targets
+// Rekor v2 (issue #1650).
+func NewKeylessAttester(oidcToken, fulcioURL, rekorURL, signingConfigPath string, useTUFSigningConfig bool) *KeylessAttester {
 	if fulcioURL == "" {
 		fulcioURL = defaults.SigstoreFulcioURL
 	}
@@ -44,9 +53,11 @@ func NewKeylessAttester(oidcToken, fulcioURL, rekorURL string) *KeylessAttester 
 		rekorURL = defaults.SigstoreRekorURL
 	}
 	return &KeylessAttester{
-		oidcToken: oidcToken,
-		fulcioURL: fulcioURL,
-		rekorURL:  rekorURL,
+		oidcToken:           oidcToken,
+		fulcioURL:           fulcioURL,
+		rekorURL:            rekorURL,
+		signingConfigPath:   signingConfigPath,
+		useTUFSigningConfig: useTUFSigningConfig,
 	}
 }
 
@@ -66,11 +77,12 @@ func (k *KeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to build attestation statement", err)
 	}
 
-	res, err := SignStatement(ctx, statementJSON, SignOptions{
-		OIDCToken: k.oidcToken,
-		FulcioURL: k.fulcioURL,
-		RekorURL:  k.rekorURL,
-	})
+	res, err := SignStatement(ctx, statementJSON, SignOptionsFromResolve(k.oidcToken, ResolveOptions{
+		FulcioURL:           k.fulcioURL,
+		RekorURL:            k.rekorURL,
+		SigningConfigPath:   k.signingConfigPath,
+		UseTUFSigningConfig: k.useTUFSigningConfig,
+	}))
 	if err != nil {
 		return nil, err
 	}

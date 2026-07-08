@@ -35,8 +35,13 @@ builds:
       -X github.com/NVIDIA/aicr/pkg/cli.date={{.Date}}
     hooks:
       post:
-        ## cosign v1 attestation with slsa provenance v1.
+        ## cosign attestation (Rekor v2) with slsa provenance v1.
         ## NOTE: below aicrd currently attests via github attestation
+        ##
+        ## Signs to Rekor v2 via the SigningConfig fetched from TUF into
+        ## $AICR_SIGNING_CONFIG by the go-build-release action (see #1650).
+        ## Rekor v2 emits no inline signed timestamp, so the config also
+        ## carries a timestamp authority the bundle uses for trusted time.
         ##
         ## Wrap cosign in a 3-attempt bash retry loop with 5s/10s backoffs
         ## (no sleep after the final failed attempt — that would just
@@ -50,10 +55,12 @@ builds:
         ## See issue #1249.
         - cmd: >-
             bash -c '[ -z "${SLSA_PREDICATE:-}" ] && exit 0;
+            [ -z "${AICR_SIGNING_CONFIG:-}" ] && { echo "AICR_SIGNING_CONFIG unset while signing; refusing to fall back to Rekor v1" >&2; exit 1; };
             for n in 1 2 3; do
             cosign attest-blob
             --predicate "${SLSA_PREDICATE}"
             --type https://slsa.dev/provenance/v1
+            --signing-config "${AICR_SIGNING_CONFIG}"
             --bundle "$(dirname "{{ .Path }}")/aicr-attestation.sigstore.json"
             --yes "{{ .Path }}" && exit 0;
             echo "cosign attest-blob attempt $n failed; retrying" >&2;
@@ -74,7 +81,9 @@ builds:
         - cmd: >-
             bash -c 'if [ "{{ .Os }}/{{ .Arch }}" != "linux/amd64" ]; then exit 0; fi;
             if [ -z "${SLSA_PREDICATE:-}" ]; then exit 0; fi;
+            if [ -z "${AICR_SIGNING_CONFIG:-}" ]; then echo "AICR_SIGNING_CONFIG unset while signing; refusing to fall back to Rekor v1" >&2; exit 1; fi;
             "{{ .Path }}" recipe sign-catalog
+            --signing-config "${AICR_SIGNING_CONFIG}"
             --output "$(dirname "{{ .Path }}")/recipe-catalog.sigstore.json"'
           output: true
     goos:

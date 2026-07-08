@@ -24,7 +24,7 @@ import (
 
 func TestKMSAttesterContract(t *testing.T) {
 	var _ Attester = (*KMSAttester)(nil)
-	a := NewKMSAttester("gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k", "")
+	a := NewKMSAttester("gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k", SignOptions{UseTUFSigningConfig: true})
 	if !a.HasRekorEntry() {
 		t.Error("default KMS attester uploads to Rekor")
 	}

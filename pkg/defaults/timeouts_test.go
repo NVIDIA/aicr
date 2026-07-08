@@ -108,6 +108,12 @@ func TestJobEnvelopeMarginInvariant(t *testing.T) {
 // sum of backoffs between attempts, and that total must not exceed
 // SigstoreSignTimeout — otherwise the inner retry loop would race the
 // outer deadline. See issue #1249.
+//
+// Caveat: the Rekor v2 signing path (attestation.transparencyForOptions) may
+// prepend a cold-cache TUF signing-config fetch that draws from the same caller
+// budget before this retry loop runs, so a first-ever cold sign has less than
+// the full budget asserted here. It fails closed and release CI pre-warms the
+// cache via `aicr trust update`; see the budget note in transparencyForOptions.
 func TestSigstoreRetryBudgetInvariant(t *testing.T) {
 	if SigstoreRetryBudget <= 0 {
 		t.Fatalf("SigstoreRetryBudget must be > 0; got %d", SigstoreRetryBudget)

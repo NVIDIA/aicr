@@ -52,3 +52,30 @@ runs:
         }
         EOF
         echo "SLSA_PREDICATE=${PREDICATE}" >> "$GITHUB_ENV"
+
+        # AICR signs release attestations to Rekor v2 (NVIDIA/aicr#1650). Fetch
+        # the TUF-distributed v2 SigningConfig (Rekor v2 endpoint + timestamp
+        # authority) so the goreleaser cosign + sign-catalog hooks can point
+        # --signing-config at it. Co-located with SLSA_PREDICATE so the invariant
+        # "signing enabled (SLSA_PREDICATE set) => signing config present" holds
+        # for every signing workflow, not just the release. go run compiles aicr
+        # from source (the built binaries do not exist yet). Requires Go, which
+        # every caller sets up before this action.
+        SC="${RUNNER_TEMP}/aicr-signing-config.json"
+        # Retry the TUF fetch (3 attempts, 5s/10s backoff) to absorb transient
+        # Sigstore TUF CDN blips, mirroring the goreleaser cosign hook — this is a
+        # hard prerequisite for the whole signing flow, which fails closed if the
+        # config is missing. The `-s` check treats an exit-0-but-empty-file result
+        # as a failure so a truncated write is retried, not silently exported.
+        for n in 1 2 3; do
+          GOFLAGS=-mod=vendor go run ./cmd/aicr trust update --emit-signing-config "${SC}" && [ -s "${SC}" ] && break
+          if [ "$n" -lt 3 ]; then
+            echo "trust update attempt $n failed; retrying" >&2
+            sleep $((n * 5))
+          else
+            echo "trust update failed after 3 attempts" >&2
+            exit 1
+          fi
+        done
+        echo "AICR_SIGNING_CONFIG=${SC}" >> "$GITHUB_ENV"
+        echo "Rekor v2 signing config written to ${SC}"

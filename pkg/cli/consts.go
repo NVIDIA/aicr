@@ -46,14 +46,16 @@ const criteriaAny = "any"
 // (goconst flags a string repeated ≥3 times across the package) and the
 // flag wiring stays consistent across the commands that sign+push.
 const (
-	flagIdentityToken  = "identity-token"
-	flagOIDCDeviceFlow = "oidc-device-flow"
-	flagFulcioURL      = "fulcio-url"
-	flagRekorURL       = "rekor-url"
-	flagSigningKey     = "signing-key"
-	flagInsecureTLS    = "insecure-tls"
-	flagPlainHTTP      = "plain-http"
-	flagPush           = "push"
+	flagIdentityToken     = "identity-token"
+	flagOIDCDeviceFlow    = "oidc-device-flow"
+	flagFulcioURL         = "fulcio-url"
+	flagRekorURL          = "rekor-url"
+	flagSigningConfig     = "signing-config"
+	flagEmitSigningConfig = "emit-signing-config"
+	flagSigningKey        = "signing-key"
+	flagInsecureTLS       = "insecure-tls"
+	flagPlainHTTP         = "plain-http"
+	flagPush              = "push"
 	// flagNoSign pushes an unsigned evidence bundle and writes a pointer whose
 	// attestation has a nil Signer (the unsigned state — distinct from a
 	// signed-without-Rekor pointer, which has a Signer with a nil

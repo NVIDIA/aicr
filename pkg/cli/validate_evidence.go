@@ -85,15 +85,22 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 // oidcResolveOptionsFromFlags builds the keyless-signing OIDC resolution
 // options from the shared --identity-token / --oidc-device-flow flag pair
 // plus the GitHub Actions ambient-OIDC env vars. Shared by every command
-// that signs an evidence bundle (`validate --push`, `evidence publish`) so
-// the source-precedence wiring stays in one place.
+// that signs an evidence bundle (`validate --push`, `evidence publish`,
+// `evidence sign`) so the source-precedence wiring stays in one place.
+//
+// Evidence signing targets Rekor v2 (UseTUFSigningConfig), matching bundle and
+// catalog signing so all AICR keyless signatures land in the same log. Evidence
+// commands expose no Rekor-v1 override today, so this is unconditional; add the
+// bundle command's --rekor-url / --signing-config opt-outs here if a private
+// evidence-signing use case appears. See #1650.
 func oidcResolveOptionsFromFlags(cmd *cli.Command) bundleattest.ResolveOptions {
 	return bundleattest.ResolveOptions{
-		IdentityToken: cmd.String(flagIdentityToken),
-		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-		DeviceFlow:    cmd.Bool(flagOIDCDeviceFlow),
-		PromptWriter:  os.Stderr,
+		IdentityToken:       cmd.String(flagIdentityToken),
+		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+		DeviceFlow:          cmd.Bool(flagOIDCDeviceFlow),
+		UseTUFSigningConfig: true,
+		PromptWriter:        os.Stderr,
 	}
 }
 

@@ -16,6 +16,18 @@ the [GitHub CLI](https://cli.github.com/) (`gh`), `crane` (recommended; `docker 
 `jq`, and — for in-cluster enforcement — `kubectl`. Binary and bundle
 verification (`aicr verify`) need only the `aicr` binary.
 
+**Cosign version.** AICR release signatures (the binary attestation and the
+signed recipe catalog) are recorded in **Rekor v2** as of the v2 cutover (see the
+release notes for the exact version). Verifying those bundles **with Cosign**
+requires **Cosign v3.0.1+**: older Cosign cannot parse a Rekor v2
+inclusion proof or its RFC3161 timestamp. `aicr verify` needs only the `aicr`
+binary and verifies both v1 and v2 transparently, so the Cosign floor does not
+apply to it. Releases published before the cutover are in Rekor v1 and verify
+with any recent Cosign. The verification *commands* are identical either way: a
+bundle self-describes which log it is in, so nothing in your workflow changes
+beyond the Cosign version. For why AICR signs to Rekor v2 and how the signing
+path works, see [Rekor v2 Signing](../contributor/rekor-v2-signing.md).
+
 Export the following variables once; the rest of this guide reuses them.
 Tags are mutable and can be repointed to a different image, so resolve the
 tag to an immutable `@sha256:` digest and verify against the digest.

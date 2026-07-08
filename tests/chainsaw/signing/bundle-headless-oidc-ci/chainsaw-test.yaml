@@ -83,6 +83,17 @@ spec:
               test -s "${WORK}/b-flag/attestation/bundle-attestation.sigstore.json"
               test -s "${WORK}/b-flag/attestation/aicr-attestation.sigstore.json"
               test -s "${WORK}/b-flag/checksums.txt"
+
+              # The freshly signed bundle attestation must land in a Rekor v2
+              # shard (log<YEAR>-<rev>.rekor.sigstore.dev), not v1
+              # (rekor.sigstore.dev). Guards against the signing default silently
+              # reverting to Rekor v1. The regex is rotation-safe across yearly
+              # shards; validated against log2025-1.rekor.sigstore.dev. If a
+              # future shard adopts a non-numeric revision suffix, widen it here.
+              # See NVIDIA/aicr#1650.
+              ORIGIN="$(jq -r '.verificationMaterial.tlogEntries[0].inclusionProof.checkpoint.envelope' \
+                "${WORK}/b-flag/attestation/bundle-attestation.sigstore.json" | head -1)"
+              echo "${ORIGIN}" | grep -qE '^log[0-9]{4}-[0-9]+\.rekor\.sigstore\.dev'
             check:
               ($error == null): true
 
@@ -112,6 +123,13 @@ spec:
 
               test -s "${WORK}/b-env/attestation/bundle-attestation.sigstore.json"
               test -s "${WORK}/b-env/attestation/aicr-attestation.sigstore.json"
+
+              # Same v2-shard guard as the b-flag step: the env-sourced token path
+              # is the same default signing code path, so assert it also lands in a
+              # Rekor v2 shard (log<YEAR>-<rev>.rekor.sigstore.dev), not v1.
+              ORIGIN="$(jq -r '.verificationMaterial.tlogEntries[0].inclusionProof.checkpoint.envelope' \
+                "${WORK}/b-env/attestation/bundle-attestation.sigstore.json" | head -1)"
+              echo "${ORIGIN}" | grep -qE '^log[0-9]{4}-[0-9]+\.rekor\.sigstore\.dev'
             check:
               ($error == null): true
 

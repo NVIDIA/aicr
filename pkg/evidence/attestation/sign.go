@@ -111,11 +111,11 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 
 	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer signCancel()
-	signRes, err := bundleattest.SignStatement(signCtx, artifactStmt, bundleattest.SignOptions{
-		OIDCToken: token,
-		FulcioURL: opts.OIDCResolve.FulcioURL,
-		RekorURL:  opts.OIDCResolve.RekorURL,
-	})
+	// Shared mapper keeps evidence signing in lockstep with bundle/catalog: the
+	// Rekor v2 signing-config selection (ResolveOptions.UseTUFSigningConfig) is
+	// carried through, not just the Fulcio/Rekor endpoints.
+	signRes, err := bundleattest.SignStatement(signCtx, artifactStmt,
+		bundleattest.SignOptionsFromResolve(token, opts.OIDCResolve))
 	if err != nil {
 		return err
 	}
