@@ -33,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -908,6 +909,7 @@ func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
 	for _, rel := range []string{
 		"Chart.yaml",
 		"values.yaml",
+		"values.schema.json",        // install-time deployer.* schema gate
 		"templates/aicr-stack.yaml", // parent App, Helm-templated
 		"templates/cert-manager.yaml",
 		"templates/nodewright-customizations.yaml",
@@ -2070,5 +2072,130 @@ func TestHelmTemplate_DeployerNamePrefixOverride(t *testing.T) {
 	// Parent Application stays unprefixed and on the control-plane cluster.
 	if _, ok := found[DefaultAppName]; !ok {
 		t.Errorf("rendered output missing unprefixed parent %q", DefaultAppName)
+	}
+}
+
+// TestGenerate_ChildNameLimits verifies the bundle-time guards for
+// composed child Application names in the argocd-helm path: names over
+// Helm's 53-character release-name cap and names colliding with the
+// parent Application are rejected with ErrCodeInvalidRequest. The
+// install-time equivalents are covered by
+// TestHelmTemplate_ChildNameGuards below.
+func TestGenerate_ChildNameLimits(t *testing.T) {
+	tests := []struct {
+		name      string
+		mutate    func(*Generator)
+		errSubstr string
+	}{
+		{
+			name:      "composed name exceeds Helm release-name cap",
+			mutate:    func(g *Generator) { g.NamePrefix = strings.Repeat("a", 49) + "-" },
+			errSubstr: "53",
+		},
+		{
+			name: "child name collides with parent app name",
+			mutate: func(g *Generator) {
+				g.AppName = "tenant-gpu-operator"
+				g.NamePrefix = "tenant-"
+			},
+			errSubstr: "collides",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newTestHelmGenerator(t)
+			tt.mutate(g)
+			_, err := g.Generate(context.Background(), t.TempDir())
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
+			}
+		})
+	}
+}
+
+// TestGenerate_NamePrefixValidatedUpfront verifies the boundary check
+// rejects a malformed NamePrefix even when the recipe produces no
+// NNN-folders (the per-folder validation in processFolders never runs).
+func TestGenerate_NamePrefixValidatedUpfront(t *testing.T) {
+	rr := newRecipeResult("v1.0.0", nil)
+	g := &Generator{
+		RecipeResult: rr,
+		Version:      "v0.0.0-test",
+		NamePrefix:   "-Bad_Prefix",
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "namePrefix") {
+		t.Errorf("error %q does not mention namePrefix", err.Error())
+	}
+}
+
+// TestHelmTemplate_ChildNameGuards is the install-time counterpart to
+// TestGenerate_ChildNameLimits: the bundle bakes valid deployer defaults,
+// but `helm template --set deployer.namePrefix=...` can still compose a
+// child name over Helm's release-name cap or one that collides with the
+// parent Application. The guard block prepended to every child template
+// must fail the render. Skipped when helm is not on PATH.
+func TestHelmTemplate_ChildNameGuards(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	outputDir := t.TempDir()
+	g := newTestHelmGenerator(t)
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		extraSets []string
+		errSubstr string
+	}{
+		{
+			name:      "namePrefix over release-name cap fails render",
+			extraSets: []string{"--set", "deployer.namePrefix=" + strings.Repeat("a", 49) + "-"},
+			errSubstr: "53",
+		},
+		{
+			name: "child name colliding with parent appName fails render",
+			extraSets: []string{
+				"--set", "deployer.namePrefix=tenant-",
+				"--set", "appName=tenant-gpu-operator",
+			},
+			errSubstr: "collides",
+		},
+		{
+			name:      "unknown deployer key fails schema validation",
+			extraSets: []string{"--set", "deployer.destinationSever=https://x"},
+			errSubstr: "destinationSever",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"template", "test-release", outputDir,
+				"--set", "repoURL=oci://example.test/myorg",
+				"--set", "targetRevision=v1.0.0",
+			}
+			args = append(args, tt.extraSets...)
+			cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(cmdCtx, "helm", args...) //nolint:gosec // controlled args
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("expected helm template to fail, but it succeeded:\n%s", out)
+			}
+			if !strings.Contains(string(out), tt.errSubstr) {
+				t.Errorf("helm error output does not mention %q:\n%s", tt.errSubstr, out)
+			}
+		})
 	}
 }

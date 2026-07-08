@@ -17,7 +17,10 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -46,6 +49,41 @@ const (
 // shape); the composed <prefix><child> name is additionally validated as
 // a full DNS-1123 subdomain at generation time.
 var namePrefixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ValidateNamePrefix reports whether prefix is a usable child-name
+// prefix. Empty is allowed (means "no prefix"); non-empty values must
+// be lowercase alphanumeric with hyphens, starting with an alphanumeric
+// character (trailing hyphen allowed — the idiomatic "tenant-a-" shape).
+func ValidateNamePrefix(prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+	if !namePrefixPattern.MatchString(prefix) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid deployer namePrefix %q: must be lowercase alphanumeric with hyphens, starting with an alphanumeric character", prefix))
+	}
+	return nil
+}
+
+// ValidateDestinationServer reports whether raw is a usable child
+// Application spec.destination.server value. Beyond the https:// shape
+// enforced by ValidateHTTPSURL, the value must not contain quotes,
+// spaces, or control characters: the argocd-helm child templates render
+// the value inside fixed single quotes, so an embedded quote (e.g.
+// https://host/o'brien:6443 — accepted by url.Parse) would produce
+// invalid YAML at `helm template` time. Cluster API URLs never contain
+// such characters, so rejecting them at validation time is safe.
+// Empty is allowed (means "use the in-cluster default").
+func ValidateDestinationServer(raw string) error {
+	if err := ValidateHTTPSURL("deployer destinationServer", raw); err != nil {
+		return err
+	}
+	if strings.ContainsAny(raw, `'" `) || strings.ContainsFunc(raw, unicode.IsControl) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid deployer destinationServer %q: must not contain quotes, spaces, or control characters", raw))
+	}
+	return nil
+}
 
 // ArgoDeployerOptions carries the deployer-level Argo Application options
 // supplied via `--set deployer:<key>=<value>`. All fields apply to the
@@ -81,23 +119,30 @@ func ParseArgoDeployerOptions(overrides map[string]string) (*ArgoDeployerOptions
 		return nil, nil
 	}
 	opts := &ArgoDeployerOptions{}
-	for key, value := range overrides {
+	// Iterate keys in sorted order so error reporting is deterministic
+	// when multiple entries are invalid (Go map order is randomized).
+	keys := make([]string, 0, len(overrides))
+	for key := range overrides {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := overrides[key]
 		switch key {
 		case deployerKeyNamePrefix:
-			if !namePrefixPattern.MatchString(value) {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid deployer namePrefix %q: must be lowercase alphanumeric with hyphens, starting with an alphanumeric character", value))
+			if err := ValidateNamePrefix(value); err != nil {
+				return nil, err
 			}
 			opts.NamePrefix = value
 		case deployerKeyDestinationServer:
-			if err := ValidateHTTPSURL("deployer destinationServer", value); err != nil {
+			if err := ValidateDestinationServer(value); err != nil {
 				return nil, err
 			}
 			opts.DestinationServer = value
 		case deployerKeyProject:
 			if errs := validation.IsDNS1123Subdomain(value); len(errs) > 0 {
 				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid deployer project %q: must be a DNS-1123 subdomain", value))
+					fmt.Sprintf("invalid deployer project %q: %s", value, errs[0]))
 			}
 			opts.Project = value
 		case deployerKeyCascadeDelete:

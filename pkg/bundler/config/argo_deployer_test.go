@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 func TestParseArgoDeployerOptions(t *testing.T) {
@@ -50,6 +51,11 @@ func TestParseArgoDeployerOptions(t *testing.T) {
 		{"namePrefix leading hyphen rejected", map[string]string{"namePrefix": "-a"}, nil, true, "namePrefix"},
 		{"http destinationServer rejected", map[string]string{"destinationServer": "http://insecure:6443"}, nil, true, "destinationServer"},
 		{"destinationServer with credentials rejected", map[string]string{"destinationServer": "https://u:p@host:6443"}, nil, true, "destinationServer"},
+		{"destinationServer with apostrophe rejected", map[string]string{"destinationServer": "https://host/o'brien:6443"}, nil, true, "must not contain quotes"},
+		{"destinationServer with double quote rejected", map[string]string{"destinationServer": `https://host/a"b:6443`}, nil, true, "must not contain quotes"},
+		// Sorted key iteration makes multi-error reporting deterministic:
+		// with two invalid keys, the alphabetically-first one is reported.
+		{"multiple unknown keys report the first sorted key", map[string]string{"zzz": "1", "aaa": "1"}, nil, true, `"aaa"`},
 		{"invalid project rejected", map[string]string{"project": "Tenant_A"}, nil, true, "project"},
 		{"non-bool cascadeDelete rejected", map[string]string{"cascadeDelete": "yes-please"}, nil, true, "cascadeDelete"},
 	}
@@ -78,5 +84,16 @@ func TestParseArgoDeployerOptions(t *testing.T) {
 				t.Errorf("got %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestReservedDeployerKeyConstantsMatch pins the layering contract:
+// pkg/recipe cannot import pkg/bundler/config, so the registry-load
+// guard uses its own recipe.ReservedDeployerKey constant. This test is
+// the single place that asserts the two constants stay equal.
+func TestReservedDeployerKeyConstantsMatch(t *testing.T) {
+	if recipe.ReservedDeployerKey != DeployerOverrideKey {
+		t.Errorf("recipe.ReservedDeployerKey = %q, config.DeployerOverrideKey = %q; the reserved --set deployer: prefix must be identical in both packages",
+			recipe.ReservedDeployerKey, DeployerOverrideKey)
 	}
 }

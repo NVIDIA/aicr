@@ -2007,9 +2007,9 @@ func TestGenerate_DeployerOptions(t *testing.T) {
 
 	appYAML := readBundleFile(t, outputDir, "001-gpu-operator/application.yaml")
 	for _, want := range []string{
-		"name: tenant-a-gpu-operator",
-		"server: https://remote.example.com:6443",
-		"project: tenant-a",
+		`name: "tenant-a-gpu-operator"`,
+		`server: "https://remote.example.com:6443"`,
+		`project: "tenant-a"`,
 		"- resources-finalizer.argocd.argoproj.io",
 	} {
 		if !strings.Contains(string(appYAML), want) {
@@ -2055,6 +2055,87 @@ func TestGenerate_DeployerOptions_InvalidRejected(t *testing.T) {
 			}
 			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestGenerate_ProjectReservedScalarQuoted verifies the template quotes
+// spec.project (and the other deployer-controlled scalars) so a project
+// named after a YAML reserved scalar ("true", "null", "on", ...) renders
+// as a string instead of being reinterpreted as a boolean/null by YAML
+// consumers. "true" passes DNS-1123 validation, so quoting in the
+// template is the only line of defense.
+func TestGenerate_ProjectReservedScalarQuoted(t *testing.T) {
+	outputDir := t.TempDir()
+	g := newTestGenerator(t)
+	g.Project = "true"
+
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	appYAML := readBundleFile(t, outputDir, "001-gpu-operator/application.yaml")
+	if !strings.Contains(string(appYAML), `project: "true"`) {
+		t.Errorf("application.yaml missing quoted project scalar\n%s", appYAML)
+	}
+
+	var app struct {
+		Spec struct {
+			Project any `yaml:"project"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(appYAML, &app); err != nil {
+		t.Fatalf("unmarshal application.yaml: %v", err)
+	}
+	proj, ok := app.Spec.Project.(string)
+	if !ok {
+		t.Fatalf("spec.project decoded as %T (%v), want string — reserved scalar leaked as non-string", app.Spec.Project, app.Spec.Project)
+	}
+	if proj != "true" {
+		t.Errorf("spec.project = %q, want %q", proj, "true")
+	}
+}
+
+// TestGenerate_ChildNameLimits verifies the bundle-time guards for
+// composed child Application names: names over Helm's 53-character
+// release-name cap and names that collide with the parent Application
+// are rejected with ErrCodeInvalidRequest.
+func TestGenerate_ChildNameLimits(t *testing.T) {
+	tests := []struct {
+		name      string
+		mutate    func(*Generator)
+		errSubstr string
+	}{
+		{
+			// prefix (50) + "gpu-operator" (12) = 62 > 53, but each label
+			// stays DNS-1123-valid so only the release-name cap fires.
+			name:      "composed name exceeds Helm release-name cap",
+			mutate:    func(g *Generator) { g.NamePrefix = strings.Repeat("a", 49) + "-" },
+			errSubstr: "53",
+		},
+		{
+			name: "child name collides with parent app name",
+			mutate: func(g *Generator) {
+				g.AppName = "tenant-gpu-operator"
+				g.NamePrefix = "tenant-"
+			},
+			errSubstr: "collides",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := newTestGenerator(t)
+			tt.mutate(g)
+			_, err := g.Generate(context.Background(), t.TempDir())
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
 			}
 		})
 	}

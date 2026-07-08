@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ .Name }}
+  name: {{ printf "%q" .Name }}
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "{{ .SyncWave }}"
@@ -10,7 +10,7 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 {{- end }}
 spec:
-  project: {{ .Project }}
+  project: {{ printf "%q" .Project }}
 {{- if .IsLocalChart }}
   source:
     repoURL: '{{ .RepoURL }}'
@@ -37,7 +37,7 @@ spec:
       ref: values
 {{- end }}
   destination:
-    server: {{ .DestinationServer }}
+    server: {{ printf "%q" .DestinationServer }}
     namespace: {{ .Namespace }}
   syncPolicy:
     automated:

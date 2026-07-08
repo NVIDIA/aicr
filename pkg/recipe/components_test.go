@@ -1150,3 +1150,53 @@ func TestRegistryReservesDeployerKey(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadRegistry_RejectsReservedDeployerKey verifies the registry
+// loader fails closed for EVERY loaded registry — including external
+// --data registries that bypass the embedded-registry guard test above —
+// when a component claims the reserved "deployer" name or override key.
+// See #1625.
+func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		registryYAML string
+		errSubstr    string
+	}{
+		{
+			name: "component named deployer rejected",
+			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+				"kind: ComponentRegistry\n" +
+				"components:\n" +
+				"  - name: deployer\n" +
+				"    displayName: Deployer\n",
+			errSubstr: "reserved",
+		},
+		{
+			name: "component aliasing deployer via valueOverrideKeys rejected",
+			registryYAML: "apiVersion: aicr.run/v1alpha2\n" +
+				"kind: ComponentRegistry\n" +
+				"components:\n" +
+				"  - name: my-operator\n" +
+				"    displayName: My Operator\n" +
+				"    valueOverrideKeys: [deployer]\n",
+			errSubstr: `"my-operator"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dp := newInMemoryProvider("reserved-"+tt.name, map[string][]byte{
+				"registry.yaml": []byte(tt.registryYAML),
+			})
+			_, err := GetComponentRegistryFor(dp)
+			if err == nil {
+				t.Fatal("expected registry load to fail on reserved deployer key, got nil error")
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
+			}
+			if !strings.Contains(err.Error(), ReservedDeployerKey) {
+				t.Errorf("error %q does not name the reserved key %q", err.Error(), ReservedDeployerKey)
+			}
+		})
+	}
+}
