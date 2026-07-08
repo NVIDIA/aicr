@@ -1189,9 +1189,14 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// worker diagnostics too and fold everything into the returned output.
 		slog.Info("Pod did not succeed, retrieving logs for debugging...")
 		launcherLogs, logErr := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
+		// fetchNote records why the direct fetch was unusable so it survives into
+		// the emitted diagnostic payload (not just slog) when the termination-tail
+		// fallback is also empty — otherwise the reader sees no reason at all.
+		var fetchNote string
 		switch {
 		case logErr != nil:
 			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
+			fetchNote = fmt.Sprintf("direct log fetch failed: %v", logErr)
 			launcherLogs = ""
 		case launcherLogsUnavailable(launcherLogs):
 			// kubelet returned its placeholder ("unable to retrieve container
@@ -1199,6 +1204,7 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 			// before this post-mortem fetch — the JobSet tears the launcher down
 			// within ~150ms of failure. Treat as unavailable and fall back below.
 			slog.Warn("launcher container logs already GC'd; falling back to termination message", "pod", launcherPod.Name)
+			fetchNote = "direct logs unavailable (container GC'd before fetch)"
 			launcherLogs = ""
 		default:
 			// Tail to the same cap as worker diagnostics — a verbose launcher
@@ -1211,12 +1217,13 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// terminationMessagePolicy: FallbackToLogsOnError, so kubelet captures
 		// the tail of its output into pod status on non-zero exit — that lives in
 		// the pod object and survives the container GC that GetPodLogs loses to.
+		// Either way the fetchNote reason is preserved in the payload.
 		if launcherLogs == "" {
 			if term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, ctx.Namespace, launcherPod.Name); term != "" {
-				launcherLogs = "<direct logs unavailable — container termination-message tail>\n" +
-					tailLines(term, maxDiagLogLines)
+				launcherLogs = fmt.Sprintf("<%s; container termination-message tail follows>\n%s",
+					fetchNote, tailLines(term, maxDiagLogLines))
 			} else {
-				launcherLogs = "<launcher logs unavailable and no termination message captured>"
+				launcherLogs = fmt.Sprintf("<%s; no termination message captured>", fetchNote)
 			}
 		}
 		workerDiag := collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
