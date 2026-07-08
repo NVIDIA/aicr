@@ -1121,7 +1121,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "status": "passed",
         "duration": 8000,
         "suite": ["conformance"],
-        "stdout": ["DRA GPU allocation successful"]
+        "stdout": ["DRA support verified (driver healthy, ResourceSlices validated)"]
       },
       {
         "name": "cluster-autoscaling",

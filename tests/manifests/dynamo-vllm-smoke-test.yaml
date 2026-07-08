@@ -11,6 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# NOTE (#1327 / PR 3 scope): this manifest deliberately KEEPS DRA
+# ResourceClaims. It is a user-facing static entry point applied as-is, and
+# today's default (dual-advertised) clusters schedule it through kai, which
+# rejects scalar device-plugin GPU requests on nodes bearing raw node-local GPU ResourceSlices —
+# a scalar conversion would break it there, while keeping main's DRA form is
+# zero regression in either direction. Its device-plugin conversion lands
+# atomically with PR 3's recipe flip (ComputeDomain-only default).
 
 # Dynamo vLLM smoke test — minimal aggregated inference deployment.
 # Deploys a Frontend (API gateway) and a single vLLM decode worker

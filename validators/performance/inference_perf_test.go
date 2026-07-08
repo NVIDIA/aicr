@@ -32,15 +32,23 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/internal/allocmode"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	resourcev1beta1 "k8s.io/api/resource/v1beta1"
+	resourcev1beta2 "k8s.io/api/resource/v1beta2"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 )
 
 func TestHasDynamoPlatform(t *testing.T) {
@@ -473,72 +481,152 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 		}}
 	}
 
-	config := &inferenceWorkloadConfig{
-		gpuCount:        4,
-		gpuNodeSelector: map[string]string{"nodeGroup": "gpu-worker"},
-		gpuTolerations: []v1.Toleration{
-			{Key: "dedicated", Operator: v1.TolerationOpEqual, Value: "worker-workload", Effect: v1.TaintEffectNoSchedule},
+	// Table over the two worker GPU wiring modes (allocmode dispatch): DRA
+	// resourceClaims when full-GPU DRA is usable, device-plugin limits
+	// otherwise. nodeSelector/toleration/frontend behavior is mode-independent
+	// and asserted in both cases.
+	tests := []struct {
+		name string
+		mode *allocmode.Mode
+		// draWiring is the NODE-LOCAL wiring decision buildInferenceConfig
+		// stores on the config (chosen node ∈ Mode.DRANodes).
+		draWiring bool
+		// wantDRAWiring: worker carries podSpec.resourceClaims + container
+		// resources.claims and NO scalar GPU limit; inverted otherwise.
+		wantDRAWiring bool
+	}{
+		{
+			name:          "device-plugin wiring (full-GPU DRA not usable)",
+			mode:          &allocmode.Mode{DevicePluginUsable: true},
+			draWiring:     false,
+			wantDRAWiring: false,
+		},
+		{
+			name:          "zero-value config falls back to device-plugin wiring",
+			mode:          nil,
+			draWiring:     false,
+			wantDRAWiring: false,
+		},
+		{
+			name:          "DRA wiring (chosen node advertises usable DRA devices)",
+			mode:          &allocmode.Mode{DRAUsable: true, APIVersion: "v1", DRANodes: []string{"node1"}},
+			draWiring:     true,
+			wantDRAWiring: true,
+		},
+		{
+			name: "global DRA usable but chosen node is device-plugin-only: plugin wiring",
+			mode: &allocmode.Mode{DRAUsable: true, DevicePluginUsable: true,
+				APIVersion: "v1", DRANodes: []string{"other-node"}},
+			draWiring:     false,
+			wantDRAWiring: false,
 		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &inferenceWorkloadConfig{
+				gpuCount:        4,
+				gpuNodeSelector: map[string]string{"nodeGroup": "gpu-worker"},
+				gpuTolerations: []v1.Toleration{
+					{Key: "dedicated", Operator: v1.TolerationOpEqual, Value: "worker-workload", Effect: v1.TaintEffectNoSchedule},
+				},
+				gpuAllocMode:    tt.mode,
+				draWorkerWiring: tt.draWiring,
+			}
 
-	obj := newObj()
-	if err := applyInferenceWorkerScheduling(obj, config); err != nil {
-		t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
-	}
+			obj := newObj()
+			if err := applyInferenceWorkerScheduling(obj, config); err != nil {
+				t.Fatalf("applyInferenceWorkerScheduling() error: %v", err)
+			}
 
-	// Worker must have nodeSelector, tolerations, and resourceClaims.
-	worker := componentPodSpec(t, obj, "VllmDecodeWorker")
-	if worker == nil {
-		t.Fatal("VllmDecodeWorker podTemplate.spec not set")
-	}
-	ns, _, _ := unstructured.NestedMap(worker, "nodeSelector")
-	if ns["nodeGroup"] != "gpu-worker" {
-		t.Errorf("worker nodeSelector = %v, want nodeGroup=gpu-worker", ns)
-	}
-	tols, _, _ := unstructured.NestedSlice(worker, "tolerations")
-	if len(tols) != 1 {
-		t.Fatalf("worker tolerations count = %d, want 1", len(tols))
-	}
-	tol := tols[0].(map[string]interface{})
-	if tol["key"] != "dedicated" || tol["value"] != "worker-workload" || tol["effect"] != "NoSchedule" {
-		t.Errorf("worker toleration = %v, unexpected fields", tol)
-	}
-	claims, _, _ := unstructured.NestedSlice(worker, "resourceClaims")
-	if len(claims) != 1 {
-		t.Fatalf("worker resourceClaims count = %d, want 1", len(claims))
-	}
-	claim := claims[0].(map[string]interface{})
-	if claim["name"] != "gpu" || claim["resourceClaimTemplateName"] != inferenceClaimTemplateName {
-		t.Errorf("worker resourceClaim = %v, want name=gpu + template=%s", claim, inferenceClaimTemplateName)
-	}
-	containerClaims := mainContainerResourceClaims(t, worker)
-	if len(containerClaims) != 1 {
-		t.Fatalf("worker main container resource claims count = %d, want 1", len(containerClaims))
-	}
-	containerClaim := containerClaims[0].(map[string]interface{})
-	if containerClaim["name"] != "gpu" {
-		t.Errorf("worker main container resource claim = %v, want name=gpu", containerClaim)
-	}
+			// Worker must have nodeSelector and tolerations in every mode.
+			worker := componentPodSpec(t, obj, "VllmDecodeWorker")
+			if worker == nil {
+				t.Fatal("VllmDecodeWorker podTemplate.spec not set")
+			}
+			ns, _, _ := unstructured.NestedMap(worker, "nodeSelector")
+			if ns["nodeGroup"] != "gpu-worker" {
+				t.Errorf("worker nodeSelector = %v, want nodeGroup=gpu-worker", ns)
+			}
+			tols, _, _ := unstructured.NestedSlice(worker, "tolerations")
+			if len(tols) != 1 {
+				t.Fatalf("worker tolerations count = %d, want 1", len(tols))
+			}
+			tol := tols[0].(map[string]interface{})
+			if tol["key"] != "dedicated" || tol["value"] != "worker-workload" || tol["effect"] != "NoSchedule" {
+				t.Errorf("worker toleration = %v, unexpected fields", tol)
+			}
 
-	// Frontend must have tolerations AND the same nodeSelector as worker —
-	// they co-locate on the GPU node cohort so cross-namespace traffic stays
-	// inside a single node-group Security Group on EKS. Frontend does NOT get
-	// a ResourceClaim (it's CPU-only).
-	frontend := componentPodSpec(t, obj, "Frontend")
-	if frontend == nil {
-		t.Fatal("Frontend podTemplate.spec not set")
+			claims, claimsFound, _ := unstructured.NestedSlice(worker, "resourceClaims")
+			gpuLimit := mainContainerGPULimit(t, worker)
+			if tt.wantDRAWiring {
+				// DRA wiring: pod-level resourceClaims bound to the template,
+				// container resources.claims referencing it, NO scalar limit.
+				if !claimsFound || len(claims) != 1 {
+					t.Fatalf("worker resourceClaims = %v (found=%t), want exactly one DRA claim binding", claims, claimsFound)
+				}
+				binding := claims[0].(map[string]interface{})
+				if binding["resourceClaimTemplateName"] != inferenceClaimTemplateName {
+					t.Errorf("claim binding template = %v, want %s", binding["resourceClaimTemplateName"], inferenceClaimTemplateName)
+				}
+				if gpuLimit != nil {
+					t.Errorf("worker main container carries %s limit %v in DRA mode — must allocate via the claim only", gpuResourceName, gpuLimit)
+				}
+				if refs := mainContainerResourceClaims(t, worker); len(refs) != 1 {
+					t.Errorf("worker main container resources.claims = %v, want exactly one reference", refs)
+				}
+			} else {
+				// Device-plugin wiring: scalar limit, no claims anywhere.
+				if claimsFound {
+					t.Error("worker resourceClaims should not be set — GPUs are requested via device-plugin limits (#1327)")
+				}
+				if gpuLimit != "1" {
+					t.Errorf("worker main container %s limit = %v, want \"1\"", gpuResourceName, gpuLimit)
+				}
+				if refs := mainContainerResourceClaims(t, worker); len(refs) != 0 {
+					t.Errorf("worker main container resources.claims = %v, want none in device-plugin mode", refs)
+				}
+			}
+
+			// Frontend must have tolerations AND the same nodeSelector as
+			// worker — they co-locate on the GPU node cohort so cross-namespace
+			// traffic stays inside a single node-group Security Group on EKS.
+			// Frontend gets NO GPU wiring in either mode (it's CPU-only).
+			frontend := componentPodSpec(t, obj, "Frontend")
+			if frontend == nil {
+				t.Fatal("Frontend podTemplate.spec not set")
+			}
+			frontTols, _, _ := unstructured.NestedSlice(frontend, "tolerations")
+			if len(frontTols) != 1 {
+				t.Errorf("frontend tolerations count = %d, want 1", len(frontTols))
+			}
+			frontNS, _, _ := unstructured.NestedMap(frontend, "nodeSelector")
+			if frontNS["nodeGroup"] != "gpu-worker" {
+				t.Errorf("frontend nodeSelector should match worker for SG co-location: got %v", frontNS)
+			}
+			if got := mainContainerGPULimit(t, frontend); got != nil {
+				t.Errorf("frontend main container should not carry a GPU limit — only worker needs GPU allocation; got %v", got)
+			}
+			if _, found, _ := unstructured.NestedSlice(frontend, "resourceClaims"); found {
+				t.Error("frontend resourceClaims should never be set — only worker needs GPU allocation")
+			}
+		})
 	}
-	frontTols, _, _ := unstructured.NestedSlice(frontend, "tolerations")
-	if len(frontTols) != 1 {
-		t.Errorf("frontend tolerations count = %d, want 1", len(frontTols))
+}
+
+// mainContainerResourceClaims returns the main container's resources.claims
+// entries (nil when absent).
+func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) []interface{} {
+	t.Helper()
+	containers, _, _ := unstructured.NestedSlice(podSpec, "containers")
+	for _, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		if !ok || container[keyName] != mainContainerName {
+			continue
+		}
+		claims, _, _ := unstructured.NestedSlice(container, "resources", "claims")
+		return claims
 	}
-	frontNS, _, _ := unstructured.NestedMap(frontend, "nodeSelector")
-	if frontNS["nodeGroup"] != "gpu-worker" {
-		t.Errorf("frontend nodeSelector should match worker for SG co-location: got %v", frontNS)
-	}
-	if _, found, _ := unstructured.NestedSlice(frontend, "resourceClaims"); found {
-		t.Error("frontend resourceClaims should not be set — only worker needs GPU allocation")
-	}
+	return nil
 }
 
 func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
@@ -551,13 +639,13 @@ func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
 	}
 }
 
-func TestEnsureMainContainerResourceClaims_AppendsMainWhenMissing(t *testing.T) {
+func TestEnsureMainContainerGPULimit_AppendsMainWhenMissing(t *testing.T) {
 	podSpec := map[string]interface{}{
 		"containers": []interface{}{
 			map[string]interface{}{keyName: "sidecar-frontend"},
 		},
 	}
-	ensureMainContainerResourceClaims(podSpec, []interface{}{map[string]interface{}{keyName: "gpu"}})
+	ensureMainContainerGPULimit(podSpec, 1)
 
 	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
 	if err != nil {
@@ -570,19 +658,50 @@ func TestEnsureMainContainerResourceClaims_AppendsMainWhenMissing(t *testing.T) 
 	if sidecar[keyName] != "sidecar-frontend" {
 		t.Fatalf("first container = %v, want original sidecar preserved", sidecar)
 	}
-	if _, found, _ := unstructured.NestedSlice(sidecar, "resources", "claims"); found {
-		t.Fatal("sidecar unexpectedly received GPU resource claims")
+	if _, found, _ := unstructured.NestedString(sidecar, "resources", "limits", gpuResourceName); found {
+		t.Fatal("sidecar unexpectedly received a GPU limit")
 	}
 	main := containers[1].(map[string]interface{})
 	if main[keyName] != mainContainerName {
 		t.Fatalf("appended container name = %v, want %s", main[keyName], mainContainerName)
 	}
-	claims, _, err := unstructured.NestedSlice(main, "resources", "claims")
-	if err != nil {
-		t.Fatalf("read appended main resources.claims: %v", err)
+	limit, found, err := unstructured.NestedString(main, "resources", "limits", gpuResourceName)
+	if err != nil || !found {
+		t.Fatalf("read appended main resources.limits[%s]: found=%v err=%v", gpuResourceName, found, err)
 	}
-	if len(claims) != 1 {
-		t.Fatalf("appended main resource claims count = %d, want 1", len(claims))
+	if limit != "1" {
+		t.Fatalf("appended main GPU limit = %q, want \"1\"", limit)
+	}
+}
+
+// TestEnsureMainContainerGPULimit_PreservesExistingResources verifies the GPU
+// limit is merged into an existing resources block (e.g. a template-supplied
+// memory limit) rather than replacing it.
+func TestEnsureMainContainerGPULimit_PreservesExistingResources(t *testing.T) {
+	podSpec := map[string]interface{}{
+		"containers": []interface{}{
+			map[string]interface{}{
+				keyName: mainContainerName,
+				"resources": map[string]interface{}{
+					"limits": map[string]interface{}{"memory": "2Gi"},
+				},
+			},
+		},
+	}
+	ensureMainContainerGPULimit(podSpec, 1)
+
+	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
+	if err != nil || len(containers) != 1 {
+		t.Fatalf("read containers: err=%v count=%d", err, len(containers))
+	}
+	main := containers[0].(map[string]interface{})
+	mem, found, err := unstructured.NestedString(main, "resources", "limits", "memory")
+	if err != nil || !found || mem != "2Gi" {
+		t.Errorf("existing memory limit lost: %q found=%v err=%v", mem, found, err)
+	}
+	gpu, found, err := unstructured.NestedString(main, "resources", "limits", gpuResourceName)
+	if err != nil || !found || gpu != "1" {
+		t.Errorf("GPU limit = %q found=%v err=%v, want \"1\"", gpu, found, err)
 	}
 }
 
@@ -607,7 +726,10 @@ func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string)
 	return nil
 }
 
-func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) []interface{} {
+// mainContainerGPULimit returns the main container's
+// resources.limits["nvidia.com/gpu"] value, or nil when the limit (or the
+// main container's resources block) is absent.
+func mainContainerGPULimit(t *testing.T, podSpec map[string]interface{}) interface{} {
 	t.Helper()
 	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
 	if err != nil {
@@ -618,11 +740,14 @@ func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) [
 		if !ok || container[keyName] != mainContainerName {
 			continue
 		}
-		claims, _, err := unstructured.NestedSlice(container, "resources", "claims")
+		limits, found, err := unstructured.NestedMap(container, "resources", "limits")
 		if err != nil {
-			t.Fatalf("read main container resources.claims: %v", err)
+			t.Fatalf("read main container resources.limits: %v", err)
 		}
-		return claims
+		if !found {
+			return nil
+		}
+		return limits[gpuResourceName]
 	}
 	t.Fatal("main container not found")
 	return nil
@@ -1549,6 +1674,68 @@ func TestNodesMatchingSelector(t *testing.T) {
 	}
 }
 
+// countUsedGPUsByNodeMerged folds the per-ledger maps back into the
+// aggregate view the pre-split table cases assert; the scalar/DRA split
+// itself is pinned by TestCountUsedGPUsByNode_LedgerSplit.
+func countUsedGPUsByNodeMerged(ctx context.Context, clientset kubernetes.Interface, poolNodes map[string]string) (map[string]int, error) {
+	scalar, dra, err := countUsedGPUsByNode(ctx, clientset, poolNodes)
+	if err != nil {
+		return nil, err
+	}
+	merged := make(map[string]int, len(scalar)+len(dra))
+	for k, v := range scalar {
+		merged[k] += v
+	}
+	for k, v := range dra {
+		merged[k] += v
+	}
+	return merged, nil
+}
+
+// TestCountUsedGPUsByNode_LedgerSplit pins the per-allocator separation the
+// cross-ledger fix depends on (#1620 review): scalar device-plugin requests
+// and DRA allocations on the same node land in DIFFERENT maps, so
+// selectWorkerNode can reject DRA candidates with scalar occupancy instead
+// of subtracting counts across ledgers.
+func TestCountUsedGPUsByNode_LedgerSplit(t *testing.T) {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "scalar-holder", Namespace: "default"},
+		Spec: v1.PodSpec{NodeName: "node-a", Containers: []v1.Container{{
+			Name: "main",
+			Resources: v1.ResourceRequirements{Limits: v1.ResourceList{
+				v1.ResourceName(gpuResourceName): *resource.NewQuantity(1, resource.DecimalSI),
+			}},
+		}}},
+		Status: v1.PodStatus{Phase: v1.PodRunning},
+	}
+	claim := &resourcev1.ResourceClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "dra-holder", Namespace: "default"},
+		Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
+			Requests: []resourcev1.DeviceRequest{{
+				Name:    "r0",
+				Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: gpuDRADriverName},
+			}},
+		}},
+		Status: resourcev1.ResourceClaimStatus{Allocation: &resourcev1.AllocationResult{
+			Devices: resourcev1.DeviceAllocationResult{Results: []resourcev1.DeviceRequestAllocationResult{
+				{Request: "r0", Device: "gpu-0", Driver: gpuDRADriverName, Pool: "node-a"},
+			}},
+		}},
+	}
+	client := fake.NewClientset(pod, claim)
+	scalar, dra, err := countUsedGPUsByNode(context.Background(), client,
+		map[string]string{"node-a": "node-a"})
+	if err != nil {
+		t.Fatalf("countUsedGPUsByNode() unexpected error: %v", err)
+	}
+	if scalar["node-a"] != 1 {
+		t.Errorf("scalarUsed[node-a] = %d, want 1 (device-plugin pod request)", scalar["node-a"])
+	}
+	if dra["node-a"] != 1 {
+		t.Errorf("draUsed[node-a] = %d, want 1 (DRA allocation)", dra["node-a"])
+	}
+}
+
 func TestCountUsedGPUsByNode(t *testing.T) {
 	makeClaim := func(ns, name string, results []resourcev1.DeviceRequestAllocationResult) *resourcev1.ResourceClaim {
 		c := &resourcev1.ResourceClaim{
@@ -1561,25 +1748,85 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		}
 		return c
 	}
+	// withClaimClasses appends one exactly-form device request per class to
+	// the claim's spec — the shape the class screen reads (kai classifies
+	// claim demand by these names).
+	withClaimClasses := func(c *resourcev1.ResourceClaim, classes ...string) *resourcev1.ResourceClaim {
+		for i, class := range classes {
+			c.Spec.Devices.Requests = append(c.Spec.Devices.Requests, resourcev1.DeviceRequest{
+				Name:    fmt.Sprintf("r%d", i),
+				Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: class},
+			})
+		}
+		return c
+	}
+	// makePod builds a pod bound to node (empty = unscheduled) in the given
+	// phase, whose single container requests gpus GPUs via limits — the
+	// device-plugin form manifests actually carry (requests defaulted from
+	// limits by the API server; countUsedGPUsByNode must fall back to limits).
+	makePod := func(name, node string, phase v1.PodPhase, gpus int64) *v1.Pod {
+		container := v1.Container{Name: "main"}
+		if gpus > 0 {
+			container.Resources = v1.ResourceRequirements{
+				Limits: v1.ResourceList{
+					v1.ResourceName(gpuResourceName): *resource.NewQuantity(gpus, resource.DecimalSI),
+				},
+			}
+		}
+		return &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec:       v1.PodSpec{NodeName: node, Containers: []v1.Container{container}},
+			Status:     v1.PodStatus{Phase: phase},
+		}
+	}
+
+	// Slice-derived pool → node attribution map (see scanGPUSliceTopology):
+	// in the supported NVIDIA layout each node publishes one pool named
+	// after itself, which this default mirrors. Cases override it to pin
+	// non-node-named pools and unknown-pool rejection.
+	defaultPoolNodes := map[string]string{"node-a": "node-a", "node-b": "node-b"}
 
 	tests := []struct {
-		name   string
-		claims []*resourcev1.ResourceClaim
-		want   map[string]int
+		name string
+		objs []runtime.Object
+		// poolNodes overrides the slice-derived pool → node map
+		// (defaultPoolNodes when nil).
+		poolNodes map[string]string
+		want      map[string]int
+		// wantErr, when non-empty, asserts countUsedGPUsByNode fails and the
+		// error message contains this substring (fail-fast rejected state).
+		wantErr string
 	}{
 		{
-			name: "one GPU on one node",
-			claims: []*resourcev1.ResourceClaim{
-				makeClaim("dynamo", "c1", []resourcev1.DeviceRequestAllocationResult{
-					{Device: "gpu-3", Driver: "gpu.nvidia.com", Pool: "node-a", Request: "gpu"},
-				}),
+			name: "device-plugin pods only — running pods summed per node",
+			objs: []runtime.Object{
+				makePod("w0", "node-a", v1.PodRunning, 4),
+				makePod("w1", "node-a", v1.PodRunning, 2),
+				makePod("w2", "node-b", v1.PodRunning, 8),
 			},
-			want: map[string]int{"node-a": 1},
+			want: map[string]int{"node-a": 6, "node-b": 8},
 		},
 		{
-			name: "multiple results on same claim accumulate per pool",
-			claims: []*resourcev1.ResourceClaim{
-				makeClaim("ns", "c1", []resourcev1.DeviceRequestAllocationResult{
+			name: "terminal and unbound pods do not count",
+			objs: []runtime.Object{
+				makePod("done", "node-a", v1.PodSucceeded, 8),
+				makePod("crashed", "node-a", v1.PodFailed, 8),
+				makePod("queued", "", v1.PodPending, 8),
+				makePod("cpu-only", "node-a", v1.PodRunning, 0),
+			},
+			want: map[string]int{},
+		},
+		{
+			name: "bound pending pod counts — device is committed before Running",
+			objs: []runtime.Object{
+				makePod("starting", "node-a", v1.PodPending, 2),
+			},
+			want: map[string]int{"node-a": 2},
+		},
+		{
+			name: "DRA-only allocations counted per pool",
+			objs: []runtime.Object{
+				makeClaim("dynamo", "c1", []resourcev1.DeviceRequestAllocationResult{
 					{Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
 					{Device: "gpu-1", Driver: "gpu.nvidia.com", Pool: "node-a"},
 					{Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-b"},
@@ -1588,8 +1835,8 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 			want: map[string]int{"node-a": 2, "node-b": 1},
 		},
 		{
-			name: "non-GPU drivers are ignored",
-			claims: []*resourcev1.ResourceClaim{
+			name: "non-GPU DRA drivers are ignored",
+			objs: []runtime.Object{
 				makeClaim("ns", "c1", []resourcev1.DeviceRequestAllocationResult{
 					{Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
 					{Device: "tpu-0", Driver: "tpu.google.com", Pool: "node-a"},
@@ -1599,25 +1846,237 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 		},
 		{
 			name: "unallocated claim — nothing counted",
-			claims: []*resourcev1.ResourceClaim{
+			objs: []runtime.Object{
 				makeClaim("ns", "pending", nil),
 			},
 			want: map[string]int{},
 		},
 		{
-			name:   "no claims at all",
-			claims: nil,
-			want:   map[string]int{},
+			name: "device-plugin and DRA usage combine on the same node",
+			objs: []runtime.Object{
+				makePod("w0", "node-a", v1.PodRunning, 3),
+				makeClaim("dynamo", "c1", []resourcev1.DeviceRequestAllocationResult{
+					{Device: "gpu-6", Driver: "gpu.nvidia.com", Pool: "node-a"},
+					{Device: "gpu-7", Driver: "gpu.nvidia.com", Pool: "node-a"},
+				}),
+				makePod("w1", "node-b", v1.PodRunning, 1),
+			},
+			want: map[string]int{"node-a": 5, "node-b": 1},
+		},
+		{
+			// KEP-5004 (DRAExtendedResource): the pod's nvidia.com/gpu request
+			// is satisfied by DRA via a scheduler-generated ResourceClaim, so
+			// the same 4 devices appear as both the pod request and the
+			// claim's allocation. Status.ExtendedResourceClaimStatus maps the
+			// nvidia.com/gpu request to a request in the generated claim;
+			// that request's allocation must be skipped — counted once.
+			name: "KEP-5004 extended-resource claim not double-counted",
+			objs: []runtime.Object{
+				func() *v1.Pod {
+					p := makePod("erc-pod", "node-a", v1.PodRunning, 4)
+					p.Status.ExtendedResourceClaimStatus = &v1.PodExtendedResourceClaimStatus{
+						ResourceClaimName: "erc-pod-gpu-claim",
+						RequestMappings: []v1.ContainerExtendedResourceRequest{
+							{ContainerName: "main", ResourceName: gpuResourceName, RequestName: "container-main-gpu"},
+						},
+					}
+					return p
+				}(),
+				makeClaim("default", "erc-pod-gpu-claim", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "container-main-gpu", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+					{Request: "container-main-gpu", Device: "gpu-1", Driver: "gpu.nvidia.com", Pool: "node-a"},
+					{Request: "container-main-gpu", Device: "gpu-2", Driver: "gpu.nvidia.com", Pool: "node-a"},
+					{Request: "container-main-gpu", Device: "gpu-3", Driver: "gpu.nvidia.com", Pool: "node-a"},
+				}),
+			},
+			want: map[string]int{"node-a": 4},
+		},
+		{
+			// A single generated claim can back MULTIPLE extended resources
+			// (one RequestMapping per backed resource). Only the requests
+			// mapped to nvidia.com/gpu are deduped; allocation results for the
+			// other DRA-backed resource in the SAME claim must still count.
+			name: "KEP-5004 mixed-resource claim — only gpu-mapped requests deduped",
+			objs: []runtime.Object{
+				func() *v1.Pod {
+					p := makePod("mixed-pod", "node-a", v1.PodRunning, 2)
+					p.Status.ExtendedResourceClaimStatus = &v1.PodExtendedResourceClaimStatus{
+						ResourceClaimName: "mixed-pod-claim",
+						RequestMappings: []v1.ContainerExtendedResourceRequest{
+							{ContainerName: "main", ResourceName: gpuResourceName, RequestName: "container-main-gpu"},
+							{ContainerName: "main", ResourceName: "nvidia.com/other", RequestName: "container-main-other"},
+						},
+					}
+					return p
+				}(),
+				makeClaim("default", "mixed-pod-claim", []resourcev1.DeviceRequestAllocationResult{
+					// nvidia.com/gpu-mapped request — already attributed via
+					// the pod-request sum, must be skipped.
+					{Request: "container-main-gpu", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+					{Request: "container-main-gpu", Device: "gpu-1", Driver: "gpu.nvidia.com", Pool: "node-a"},
+					// Other DRA-backed resource served by the same driver —
+					// not covered by the pod's nvidia.com/gpu request, counts.
+					{Request: "container-main-other", Device: "gpu-2", Driver: "gpu.nvidia.com", Pool: "node-a"},
+				}),
+			},
+			want: map[string]int{"node-a": 3},
+		},
+		{
+			// The KEP-5004 skip-set is keyed namespace/name: an unrelated claim
+			// that merely shares the generated claim's name (and request name)
+			// in another namespace must still be counted.
+			name: "KEP-5004 skip is namespace-scoped",
+			objs: []runtime.Object{
+				func() *v1.Pod {
+					p := makePod("erc-pod", "node-a", v1.PodRunning, 2)
+					p.Status.ExtendedResourceClaimStatus = &v1.PodExtendedResourceClaimStatus{
+						ResourceClaimName: "shared-claim-name",
+						RequestMappings: []v1.ContainerExtendedResourceRequest{
+							{ContainerName: "main", ResourceName: gpuResourceName, RequestName: "container-main-gpu"},
+						},
+					}
+					return p
+				}(),
+				makeClaim("default", "shared-claim-name", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "container-main-gpu", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+					{Request: "container-main-gpu", Device: "gpu-1", Driver: "gpu.nvidia.com", Pool: "node-a"},
+				}),
+				makeClaim("other", "shared-claim-name", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "container-main-gpu", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-b"},
+				}),
+			},
+			want: map[string]int{"node-a": 2, "node-b": 1},
+		},
+		{
+			// firstAvailable subrequest results carry Request in the
+			// "<main request>/<subrequest>" form; the KEP-5004 mapping names
+			// the main request, so the prefix must match for dedup.
+			name: "KEP-5004 subrequest-form Request deduped by main-request prefix",
+			objs: []runtime.Object{
+				func() *v1.Pod {
+					p := makePod("sub-pod", "node-a", v1.PodRunning, 1)
+					p.Status.ExtendedResourceClaimStatus = &v1.PodExtendedResourceClaimStatus{
+						ResourceClaimName: "sub-pod-claim",
+						RequestMappings: []v1.ContainerExtendedResourceRequest{
+							{ContainerName: "main", ResourceName: gpuResourceName, RequestName: "container-main-gpu"},
+						},
+					}
+					return p
+				}(),
+				makeClaim("default", "sub-pod-claim", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "container-main-gpu/sub-0", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+				}),
+			},
+			want: map[string]int{"node-a": 1},
+		},
+		{
+			// AdminAccess allocations (DRAAdminAccess) grant monitoring or
+			// administrative access to devices that stay allocatable to real
+			// workloads — they hold no capacity and must not count as
+			// occupancy, even when they cover every GPU on the node.
+			name: "admin-access allocations are not occupancy",
+			objs: []runtime.Object{
+				makeClaim("monitoring", "admin-claim", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "all-gpus", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a", AdminAccess: ptr.To(true)},
+					{Request: "all-gpus", Device: "gpu-1", Driver: "gpu.nvidia.com", Pool: "node-a", AdminAccess: ptr.To(true)},
+					{Request: "all-gpus", Device: "gpu-2", Driver: "gpu.nvidia.com", Pool: "node-a", AdminAccess: ptr.To(true)},
+					{Request: "all-gpus", Device: "gpu-3", Driver: "gpu.nvidia.com", Pool: "node-a", AdminAccess: ptr.To(true)},
+				}),
+			},
+			want: map[string]int{},
+		},
+		{
+			// AdminAccess=false (explicitly set) is a real allocation.
+			name: "explicit AdminAccess=false still counts",
+			objs: []runtime.Object{
+				makeClaim("ns", "c1", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "r0", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a", AdminAccess: ptr.To(false)},
+				}),
+			},
+			want: map[string]int{"node-a": 1},
+		},
+		{
+			name: "no pods or claims at all",
+			objs: nil,
+			want: map[string]int{},
+		},
+		{
+			// Rejected state (#1652): a gpu.nvidia.com allocation from a pool
+			// no node-local slice publishes cannot be attributed to a node.
+			// Occupancy attribution would be a guess — fail fast instead.
+			name: "unknown-pool allocation fails fast",
+			objs: []runtime.Object{
+				makeClaim("dynamo", "c1", []resourcev1.DeviceRequestAllocationResult{
+					{Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "rack-7-shared"},
+				}),
+			},
+			wantErr: `pool "rack-7-shared", which no node-local gpu.nvidia.com ResourceSlice publishes`,
+		},
+		{
+			// The K8s API does not require pool names to be node names: a
+			// pool named "node-b" can be published by node-a's slices. The
+			// slice-derived map must win over name equality — attributing by
+			// pool name would charge the wrong (existing!) node.
+			name: "pool named after a DIFFERENT node attributes via the slice map",
+			objs: []runtime.Object{
+				makeClaim("dynamo", "c1", []resourcev1.DeviceRequestAllocationResult{
+					{Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-b"},
+					{Device: "gpu-1", Driver: "gpu.nvidia.com", Pool: "node-b"},
+				}),
+			},
+			poolNodes: map[string]string{"node-b": "node-a"},
+			want:      map[string]int{"node-a": 2},
+		},
+		{
+			// Rejected state (#1652): kai classifies claim demand by the
+			// REQUEST's DeviceClass name (lowercase-contains "gpu"), so an
+			// allocated claim for a foreign "gpu"-named class consumes kai's
+			// GPU capacity even when its allocation's DRIVER carries no
+			// "gpu" substring (which the result loop would skip) — fail fast.
+			name: "allocated claim for a foreign gpu-named DeviceClass fails fast",
+			objs: []runtime.Object{
+				withClaimClasses(makeClaim("dynamo", "c1", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "r0", Device: "acc-0", Driver: "accelerator.vendor.example", Pool: "shelf-1"},
+				}), "gpu.vendor.example"),
+			},
+			wantErr: `requests DeviceClass "gpu.vendor.example"`,
+		},
+		{
+			// Supported classes pass the screen: gpu.nvidia.com counts
+			// normally and a ComputeDomain claim (no "gpu" in the class) is
+			// ignored by both the class screen and the driver filter.
+			name: "nvidia and compute-domain class claims unaffected by the class screen",
+			objs: []runtime.Object{
+				withClaimClasses(makeClaim("dynamo", "c1", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "r0", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+				}), "gpu.nvidia.com"),
+				withClaimClasses(makeClaim("dynamo", "cd", []resourcev1.DeviceRequestAllocationResult{
+					{Request: "r0", Device: "ch-0", Driver: "compute-domain.nvidia.com", Pool: "cd-pool"},
+				}), "compute-domain.nvidia.com"),
+			},
+			want: map[string]int{"node-a": 1},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			objs := make([]runtime.Object, 0, len(tt.claims))
-			for _, c := range tt.claims {
-				objs = append(objs, c)
+			poolNodes := tt.poolNodes
+			if poolNodes == nil {
+				poolNodes = defaultPoolNodes
 			}
-			client := fake.NewClientset(objs...)
-			got := countUsedGPUsByNode(context.Background(), client)
+			client := fake.NewClientset(tt.objs...)
+			got, err := countUsedGPUsByNodeMerged(context.Background(), client, poolNodes)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("countUsedGPUsByNode() = %v, want error containing %q", got, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("countUsedGPUsByNode() error = %v, want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("countUsedGPUsByNode() unexpected error: %v", err)
+			}
 			if len(got) != len(tt.want) {
 				t.Fatalf("countUsedGPUsByNode() size = %d (%v), want %d (%v)",
 					len(got), got, len(tt.want), tt.want)
@@ -1629,86 +2088,498 @@ func TestCountUsedGPUsByNode(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("pod list failure fails closed", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, stderrors.New("pods list denied")
+		})
+		got, err := countUsedGPUsByNodeMerged(context.Background(), client, defaultPoolNodes)
+		if err == nil {
+			t.Fatalf("countUsedGPUsByNode() = %v, want error — a list failure must not report GPUs as free", got)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+			t.Errorf("error code = %v, want ErrCodeInternal", err)
+		}
+	})
+
+	t.Run("DRA claim list failure fails closed", func(t *testing.T) {
+		client := fake.NewClientset(makePod("w0", "node-a", v1.PodRunning, 2))
+		client.PrependReactor("list", "resourceclaims", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Group: "resource.k8s.io", Resource: "resourceclaims"}, "", stderrors.New("RBAC denied"))
+		})
+		got, err := countUsedGPUsByNodeMerged(context.Background(), client, defaultPoolNodes)
+		if err == nil {
+			t.Fatalf("countUsedGPUsByNode() = %v, want error — an ambiguous DRA lookup must not be treated as zero usage", got)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+			t.Errorf("error code = %v, want ErrCodeInternal", err)
+		}
+	})
+
+	// Context cancellation / deadline exhaustion during either List is a
+	// deadline condition, not an infrastructure fault: both paths must wrap
+	// as ErrCodeTimeout, not ErrCodeInternal. The fake clientset does not
+	// honor the request context, so each reactor surfaces ctx.Err() the way
+	// a real client would.
+	t.Run("canceled or deadline-exceeded context maps to ErrCodeTimeout", func(t *testing.T) {
+		canceledCtx := func(t *testing.T) context.Context {
+			t.Helper()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}
+		expiredCtx := func(t *testing.T) context.Context {
+			t.Helper()
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Minute))
+			t.Cleanup(cancel)
+			return ctx
+		}
+		cases := []struct {
+			name     string
+			resource string
+			makeCtx  func(*testing.T) context.Context
+		}{
+			{"pod list with canceled context", "pods", canceledCtx},
+			{"pod list with exceeded deadline", "pods", expiredCtx},
+			{"claim list with canceled context", "resourceclaims", canceledCtx},
+			{"claim list with exceeded deadline", "resourceclaims", expiredCtx},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx := tc.makeCtx(t)
+				client := fake.NewClientset()
+				client.PrependReactor("list", tc.resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, ctx.Err()
+				})
+				got, err := countUsedGPUsByNodeMerged(ctx, client, defaultPoolNodes)
+				if err == nil {
+					t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan must not report GPUs as free", got)
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+					t.Errorf("error code = %v, want ErrCodeTimeout for %v", err, ctx.Err())
+				}
+			})
+		}
+	})
+
+	t.Run("DRA API not served — device-plugin counts still returned", func(t *testing.T) {
+		client := fake.NewClientset(makePod("w0", "node-a", v1.PodRunning, 2))
+		client.PrependReactor("list", "resourceclaims", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewNotFound(
+				schema.GroupResource{Group: "resource.k8s.io", Resource: "resourceclaims"}, "")
+		})
+		got, err := countUsedGPUsByNodeMerged(context.Background(), client, defaultPoolNodes)
+		if err != nil {
+			t.Fatalf("countUsedGPUsByNode() unexpected error when DRA API is absent: %v", err)
+		}
+		if got["node-a"] != 2 {
+			t.Errorf("countUsedGPUsByNode()[node-a] = %d, want 2 (device-plugin usage must survive missing DRA API)", got["node-a"])
+		}
+	})
+
+	// A cancellation landing AFTER List returns must still abort the scan —
+	// the normalization loop checks ctx per claim, so a canceled occupancy
+	// scan cannot masquerade as a successful (possibly empty) result.
+	t.Run("cancellation during claim normalization maps to ErrCodeTimeout", func(t *testing.T) {
+		cctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		client := fake.NewClientset(makeClaim("ns", "c1", []resourcev1.DeviceRequestAllocationResult{
+			{Request: "r0", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+		}))
+		client.PrependReactor("list", "resourceclaims", func(k8stesting.Action) (bool, runtime.Object, error) {
+			cancel() // cancel between the List returning and normalization
+			return false, nil, nil
+		})
+		got, err := countUsedGPUsByNodeMerged(cctx, client, defaultPoolNodes)
+		if err == nil {
+			t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan must not report success", got)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Errorf("error code = %v, want ErrCodeTimeout", err)
+		}
+	})
+
+	// An empty claim list must not bypass the cancellation check: with no
+	// items the per-item checks never run, so the post-List check has to
+	// catch a cancellation that landed after List returned.
+	t.Run("cancellation with an empty claim list still maps to ErrCodeTimeout", func(t *testing.T) {
+		cctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		client := fake.NewClientset() // no claims at all
+		client.PrependReactor("list", "resourceclaims", func(k8stesting.Action) (bool, runtime.Object, error) {
+			cancel() // cancel between the (empty) List returning and normalization
+			return false, nil, nil
+		})
+		got, err := countUsedGPUsByNodeMerged(cctx, client, defaultPoolNodes)
+		if err == nil {
+			t.Fatalf("countUsedGPUsByNode() = %v, want error — a canceled scan with an empty List must not report success", got)
+		}
+		if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+			t.Errorf("error code = %v, want ErrCodeTimeout", err)
+		}
+	})
+
+	// Beta-only clusters (K8s 1.32/1.33) serve resource.k8s.io at v1beta2 or
+	// v1beta1 only. Their DRA allocations are just as real — the claim list
+	// must fall back through the served versions instead of flattening a v1
+	// NotFound into "no DRA allocations" and over-admitting.
+	t.Run("v1beta2-only cluster — beta claims still counted", func(t *testing.T) {
+		client := fake.NewClientset(
+			makePod("w0", "node-a", v1.PodRunning, 1),
+			&resourcev1beta2.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "dynamo"},
+				Status: resourcev1beta2.ResourceClaimStatus{
+					Allocation: &resourcev1beta2.AllocationResult{
+						Devices: resourcev1beta2.DeviceAllocationResult{
+							Results: []resourcev1beta2.DeviceRequestAllocationResult{
+								{Request: "r0", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+								{Request: "r0", Device: "gpu-1", Driver: "gpu.nvidia.com", Pool: "node-b"},
+							},
+						},
+					},
+				},
+			},
+		)
+		client.PrependReactor("list", "resourceclaims", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			if action.GetResource().Version == "v1" {
+				return true, nil, apierrors.NewNotFound(
+					schema.GroupResource{Group: "resource.k8s.io", Resource: "resourceclaims"}, "")
+			}
+			return false, nil, nil // fall through to the tracker at beta versions
+		})
+		got, err := countUsedGPUsByNodeMerged(context.Background(), client, defaultPoolNodes)
+		if err != nil {
+			t.Fatalf("countUsedGPUsByNode() unexpected error on a v1beta2-only cluster: %v", err)
+		}
+		if got["node-a"] != 2 || got["node-b"] != 1 {
+			t.Errorf("countUsedGPUsByNode() = %v, want node-a:2 (1 pod + 1 DRA) node-b:1 — beta claims must count", got)
+		}
+	})
+
+	t.Run("v1beta1-only cluster — beta claims still counted", func(t *testing.T) {
+		client := fake.NewClientset(
+			&resourcev1beta1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "c1", Namespace: "dynamo"},
+				Status: resourcev1beta1.ResourceClaimStatus{
+					Allocation: &resourcev1beta1.AllocationResult{
+						Devices: resourcev1beta1.DeviceAllocationResult{
+							Results: []resourcev1beta1.DeviceRequestAllocationResult{
+								{Request: "r0", Device: "gpu-0", Driver: "gpu.nvidia.com", Pool: "node-a"},
+							},
+						},
+					},
+				},
+			},
+		)
+		client.PrependReactor("list", "resourceclaims", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			if v := action.GetResource().Version; v == "v1" || v == "v1beta2" {
+				return true, nil, apierrors.NewNotFound(
+					schema.GroupResource{Group: "resource.k8s.io", Resource: "resourceclaims"}, "")
+			}
+			return false, nil, nil // fall through to the tracker at v1beta1
+		})
+		got, err := countUsedGPUsByNodeMerged(context.Background(), client, defaultPoolNodes)
+		if err != nil {
+			t.Fatalf("countUsedGPUsByNode() unexpected error on a v1beta1-only cluster: %v", err)
+		}
+		if got["node-a"] != 1 {
+			t.Errorf("countUsedGPUsByNode()[node-a] = %d, want 1 — v1beta1 claims must count", got["node-a"])
+		}
+	})
 }
 
-func TestPickCandidateWithMostFreeGPUs(t *testing.T) {
-	n8 := func(name string) v1.Node {
-		return v1.Node{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Status: v1.NodeStatus{Allocatable: v1.ResourceList{
-				"nvidia.com/gpu": resource.MustParse("8"),
-			}},
-		}
-	}
+func TestPodEffectiveGPURequest(t *testing.T) {
+	gpu := v1.ResourceName(gpuResourceName)
+	qty := func(n int64) resource.Quantity { return *resource.NewQuantity(n, resource.DecimalSI) }
+	always := v1.ContainerRestartPolicyAlways
 
 	tests := []struct {
-		name            string
-		candidates      []v1.Node
-		used            map[string]int
-		wantNode        string
-		wantAllocatable int
-		wantFree        int
+		name string
+		pod  *v1.Pod
+		want int
 	}{
 		{
-			name:            "no in-use DRA allocations — first candidate, full capacity",
-			candidates:      []v1.Node{n8("a"), n8("b")},
-			used:            nil,
-			wantNode:        "a",
-			wantAllocatable: 8,
-			wantFree:        8,
+			name: "regular containers sum",
+			pod: &v1.Pod{Spec: v1.PodSpec{Containers: []v1.Container{
+				{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(2)}}},
+				{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(1)}}},
+			}}},
+			want: 3,
 		},
 		{
-			name:            "first candidate saturated — picks second with more free",
-			candidates:      []v1.Node{n8("a"), n8("b")},
-			used:            map[string]int{"a": 8},
-			wantNode:        "b",
-			wantAllocatable: 8,
-			wantFree:        8,
+			name: "requests absent — falls back to limits",
+			pod: &v1.Pod{Spec: v1.PodSpec{Containers: []v1.Container{
+				{Resources: v1.ResourceRequirements{Limits: v1.ResourceList{gpu: qty(4)}}},
+			}}},
+			want: 4,
 		},
 		{
-			name:            "first candidate partially used — still wins if second is more used",
-			candidates:      []v1.Node{n8("a"), n8("b")},
-			used:            map[string]int{"a": 1, "b": 5},
-			wantNode:        "a",
-			wantAllocatable: 8,
-			wantFree:        7,
+			name: "one-shot init container floors the effective request",
+			pod: &v1.Pod{Spec: v1.PodSpec{
+				InitContainers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(8)}}},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(2)}}},
+				},
+			}},
+			want: 8,
 		},
 		{
-			name:            "all saturated — returns zero free (caller decides to fail)",
-			candidates:      []v1.Node{n8("a"), n8("b")},
-			used:            map[string]int{"a": 8, "b": 8},
-			wantNode:        "a", // ties break on original order
-			wantAllocatable: 8,
-			wantFree:        0,
+			name: "sidecar init container adds to the sum",
+			pod: &v1.Pod{Spec: v1.PodSpec{
+				InitContainers: []v1.Container{
+					{RestartPolicy: &always, Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(1)}}},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(2)}}},
+				},
+			}},
+			want: 3,
 		},
 		{
-			name:            "negative free clamped to 0 (stale/mismatched claim)",
-			candidates:      []v1.Node{n8("a")},
-			used:            map[string]int{"a": 99},
-			wantNode:        "a",
-			wantAllocatable: 8,
-			wantFree:        0,
+			// The sidecar (1) is already running when the one-shot init (4)
+			// runs, so the init phase demands 1+4=5, above the steady state
+			// of 1 (sidecar) + 2 (regular) = 3. Comparing the one-shot init
+			// alone (4) would undercount.
+			name: "one-shot init after sidecar stacks on the sidecar's request",
+			pod: &v1.Pod{Spec: v1.PodSpec{
+				InitContainers: []v1.Container{
+					{RestartPolicy: &always, Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(1)}}},
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(4)}}},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(2)}}},
+				},
+			}},
+			want: 5,
 		},
 		{
-			name:            "empty candidates — safe zero return (caller already guards)",
-			candidates:      nil,
-			used:            map[string]int{"a": 5},
-			wantNode:        "",
-			wantAllocatable: 0,
-			wantFree:        0,
+			// Order matters: the one-shot init (4) completes before the
+			// sidecar (1) starts, so they never overlap — the init phase
+			// peaks at 4, the steady state at 1+2=3.
+			name: "sidecar after one-shot init does not stack",
+			pod: &v1.Pod{Spec: v1.PodSpec{
+				InitContainers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(4)}}},
+					{RestartPolicy: &always, Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(1)}}},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(2)}}},
+				},
+			}},
+			want: 4,
+		},
+		{
+			// Multiple sidecars accumulate: both (1+2=3) are running when the
+			// one-shot init (4) runs → init peak 7; steady state 3+2=5.
+			name: "multiple sidecars accumulate under a later one-shot init",
+			pod: &v1.Pod{Spec: v1.PodSpec{
+				InitContainers: []v1.Container{
+					{RestartPolicy: &always, Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(1)}}},
+					{RestartPolicy: &always, Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(2)}}},
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(4)}}},
+				},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(2)}}},
+				},
+			}},
+			want: 7,
+		},
+		{
+			name: "no GPU resources — zero",
+			pod: &v1.Pod{Spec: v1.PodSpec{Containers: []v1.Container{
+				{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{"cpu": qty(4)}}},
+			}}},
+			want: 0,
+		},
+		{
+			// Kubernetes adds pod spec.overhead (RuntimeClass) AFTER
+			// max(steadyState, initMax), so it always increases the demand.
+			name: "RuntimeClass overhead added on top of container requests",
+			pod: &v1.Pod{Spec: v1.PodSpec{
+				Overhead: v1.ResourceList{gpu: qty(1)},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{gpu: qty(1)}}},
+				},
+			}},
+			want: 2,
+		},
+		{
+			name: "overhead-only pod counts the overhead",
+			pod: &v1.Pod{Spec: v1.PodSpec{
+				Overhead: v1.ResourceList{gpu: qty(1)},
+				Containers: []v1.Container{
+					{Resources: v1.ResourceRequirements{Requests: v1.ResourceList{"cpu": qty(4)}}},
+				},
+			}},
+			want: 1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			chosen, alloc, free := pickCandidateWithMostFreeGPUs(tt.candidates, tt.used)
+			if got := podEffectiveGPURequest(tt.pod); got != tt.want {
+				t.Errorf("podEffectiveGPURequest() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSelectWorkerNode pins the capacity-first (node, mechanism) pair
+// scoring: the pair with the most FREE GPUs wins (documented contract), ties
+// prefer DRA then lexicographic node name, DRA capacity comes from
+// Mode.DRANodeDevices (never scalar allocatable), and eligibility is
+// TOCTOU-guarded by the fresh node Ready condition plus the probe's sets.
+func TestSelectWorkerNode(t *testing.T) {
+	node := func(name string, scalar string, ready bool) v1.Node {
+		status := v1.ConditionTrue
+		if !ready {
+			status = v1.ConditionFalse
+		}
+		return v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: v1.NodeStatus{
+				Allocatable: v1.ResourceList{"nvidia.com/gpu": resource.MustParse(scalar)},
+				Conditions:  []v1.NodeCondition{{Type: v1.NodeReady, Status: status}},
+			},
+		}
+	}
+	draNode := node("dra-node", "8", true)
+	pluginNode := node("plugin-node", "8", true)
+	pluginNodeB := node("plugin-node-b", "8", true)
+	notReadyPlugin := node("notready-plugin", "8", false)
+	dualNode := node("dual-node", "4", true) // scalar says 4, DRA-usable says 2
+	dualMode := &allocmode.Mode{
+		DRAUsable: true, DevicePluginUsable: true, APIVersion: "v1",
+		DRANodes:          []string{"dra-node", "dual-node"},
+		DRANodeDevices:    map[string]int{"dra-node": 8, "dual-node": 2},
+		DevicePluginNodes: []string{"dra-node", "dual-node", "plugin-node", "plugin-node-b", "notready-plugin"},
+		// Dual-advertised nodes carry node-local slices kai counts raw.
+		NodeLocalGPUSliceDevices: map[string]int{"dra-node": 8, "dual-node": 2},
+	}
+
+	tests := []struct {
+		name       string
+		candidates []v1.Node
+		mode       *allocmode.Mode
+		used       map[string]int // DRA-ledger occupancy (draUsed)
+		scalarUsed map[string]int // device-plugin-ledger occupancy
+		wantOK     bool
+		wantNode   string
+		wantDRA    bool
+		wantAlloc  int
+		wantFree   int
+	}{
+		{
+			// Cross-ledger regression (#1620 review): the device plugin's
+			// physical device assignments are invisible to the DRA
+			// allocator, so a DRA candidate carrying ANY scalar occupancy
+			// must be skipped — never sized "around" the scalar count.
+			name:       "DRA candidate with scalar GPU occupancy is skipped; clean plugin node wins",
+			candidates: []v1.Node{draNode, pluginNode},
+			mode:       dualMode,
+			scalarUsed: map[string]int{"dra-node": 1}, // 8 DRA devices, 1 plugin-held GPU
+			wantOK:     true, wantNode: "plugin-node", wantDRA: false, wantAlloc: 8, wantFree: 8,
+		},
+		{
+			name:       "DRA candidate with scalar GPU occupancy and no clean alternative: not eligible",
+			candidates: []v1.Node{draNode},
+			mode:       dualMode,
+			scalarUsed: map[string]int{"dra-node": 1},
+			wantOK:     false,
+		},
+		{
+			name:       "DRA candidate subtracts same-ledger DRA occupancy normally",
+			candidates: []v1.Node{draNode},
+			mode:       dualMode,
+			used:       map[string]int{"dra-node": 3}, // DRA allocations only
+			wantOK:     true, wantNode: "dra-node", wantDRA: true, wantAlloc: 8, wantFree: 5,
+		},
+		{
+			name:       "idle plugin node beats nearly-saturated DRA node: plugin wiring (most free wins)",
+			candidates: []v1.Node{draNode, pluginNode},
+			mode:       dualMode,
+			used:       map[string]int{"dra-node": 7}, // 1 free DRA vs 8 free plugin
+			wantOK:     true, wantNode: "plugin-node", wantDRA: false, wantAlloc: 8, wantFree: 8,
+		},
+		{
+			name:       "equal free capacity: DRA wins the tie",
+			candidates: []v1.Node{pluginNode, draNode}, // both 8 free
+			mode:       dualMode,
+			wantOK:     true, wantNode: "dra-node", wantDRA: true, wantAlloc: 8, wantFree: 8,
+		},
+		{
+			name:       "same-mechanism tie: lexicographic node name",
+			candidates: []v1.Node{pluginNodeB, pluginNode}, // both plugin, both 8 free
+			mode: &allocmode.Mode{DevicePluginUsable: true,
+				DevicePluginNodes: []string{"plugin-node", "plugin-node-b"}},
+			wantOK: true, wantNode: "plugin-node", wantDRA: false, wantAlloc: 8, wantFree: 8,
+		},
+		{
+			name:       "--node-selector forced plugin-only node while DRA exists elsewhere: plugin wiring",
+			candidates: []v1.Node{pluginNode}, // post-selector-filter pool
+			mode:       dualMode,
+			wantOK:     true, wantNode: "plugin-node", wantDRA: false, wantAlloc: 8, wantFree: 8,
+		},
+		{
+			name:       "dual node sizes from usable DRA devices, not scalar (no oversizing)",
+			candidates: []v1.Node{dualNode},
+			mode:       dualMode,
+			wantOK:     true, wantNode: "dual-node", wantDRA: true, wantAlloc: 2, wantFree: 2,
+		},
+		{
+			name:       "TOCTOU: probe says Ready but fresh node object is NotReady — excluded",
+			candidates: []v1.Node{notReadyPlugin}, // in DevicePluginNodes, currently NotReady
+			mode:       dualMode,
+			wantOK:     false,
+		},
+		{
+			name:       "nil mode: plugin wiring from fresh Ready nodes",
+			candidates: []v1.Node{notReadyPlugin, pluginNode},
+			mode:       nil,
+			wantOK:     true, wantNode: "plugin-node", wantDRA: false, wantAlloc: 8, wantFree: 8,
+		},
+		{
+			name:       "probe ran but candidate absent from its sets: excluded",
+			candidates: []v1.Node{node("unknown-node", "8", true)},
+			mode:       dualMode,
+			wantOK:     false,
+		},
+		{
+			name:       "stale over-allocation clamps free at 0, never negative",
+			candidates: []v1.Node{dualNode},
+			mode:       dualMode,
+			used:       map[string]int{"dual-node": 5}, // > DRA capacity 2
+			wantOK:     true, wantNode: "dual-node", wantDRA: true, wantAlloc: 2, wantFree: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			used := tt.used
+			if used == nil {
+				used = map[string]int{}
+			}
+			scalarUsed := tt.scalarUsed
+			if scalarUsed == nil {
+				scalarUsed = map[string]int{}
+			}
+			chosen, draWiring, alloc, free, ok := selectWorkerNode(tt.candidates, tt.mode, scalarUsed, used)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %t, want %t", ok, tt.wantOK)
+			}
+			if !tt.wantOK {
+				return
+			}
 			if chosen.Name != tt.wantNode {
 				t.Errorf("chosen = %q, want %q", chosen.Name, tt.wantNode)
 			}
-			if alloc != tt.wantAllocatable {
-				t.Errorf("allocatable = %d, want %d", alloc, tt.wantAllocatable)
+			if draWiring != tt.wantDRA {
+				t.Errorf("draWiring = %t, want %t", draWiring, tt.wantDRA)
 			}
-			if free != tt.wantFree {
-				t.Errorf("free = %d, want %d", free, tt.wantFree)
+			if alloc != tt.wantAlloc || free != tt.wantFree {
+				t.Errorf("alloc/free = %d/%d, want %d/%d", alloc, free, tt.wantAlloc, tt.wantFree)
 			}
 		})
 	}
@@ -1917,5 +2788,237 @@ func TestWaitForEndpointReady_TimesOutWhenAlwaysEmpty(t *testing.T) {
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
 		t.Errorf("error code = %v, want ErrCodeTimeout (err=%v)", err, err)
+	}
+}
+
+// TestApplyWorkerClaimTemplate_VersionDispatch pins the served-version
+// handling of the DRA worker ResourceClaimTemplate: the object is created at
+// the allocmode probe's detected resource.k8s.io version, with the
+// version-appropriate request shape — `exactly:`-wrapped for v1/v1beta2,
+// inline fields for v1beta1 (whose DeviceRequest has no `exactly` wrapper).
+func TestApplyWorkerClaimTemplate_VersionDispatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		version     string
+		wantExactly bool
+	}{
+		{name: "v1 uses the exactly wrapper", version: "v1", wantExactly: true},
+		{name: "v1beta2 uses the exactly wrapper", version: "v1beta2", wantExactly: true},
+		{name: "v1beta1 uses inline request fields", version: "v1beta1", wantExactly: false},
+		{name: "empty version defaults to v1", version: "", wantExactly: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			effective := tt.version
+			if effective == "" {
+				effective = "v1"
+			}
+			scheme := runtime.NewScheme()
+			dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+				map[schema.GroupVersionResource]string{
+					allocmode.GVRAt(effective, "resourceclaimtemplates"): "ResourceClaimTemplateList",
+				})
+			ctx := &validators.Context{Ctx: context.Background(), DynamicClient: dynClient}
+			config := &inferenceWorkloadConfig{
+				namespace:    "test-ns",
+				gpuAllocMode: &allocmode.Mode{DRAUsable: true, APIVersion: tt.version},
+			}
+
+			if err := applyWorkerClaimTemplate(ctx, config, map[string]string{
+				"NAMESPACE":           config.namespace,
+				"CLAIM_TEMPLATE_NAME": inferenceClaimTemplateName,
+			}); err != nil {
+				t.Fatalf("applyWorkerClaimTemplate() error = %v", err)
+			}
+
+			created, err := dynClient.Resource(allocmode.GVRAt(effective, "resourceclaimtemplates")).
+				Namespace("test-ns").Get(context.Background(), inferenceClaimTemplateName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("template not created at resource.k8s.io/%s: %v", effective, err)
+			}
+			if got := created.GetAPIVersion(); got != "resource.k8s.io/"+effective {
+				t.Errorf("apiVersion = %q, want resource.k8s.io/%s", got, effective)
+			}
+			requests, found, _ := unstructured.NestedSlice(created.Object, "spec", "spec", "devices", "requests")
+			if !found || len(requests) != 1 {
+				t.Fatalf("spec.spec.devices.requests = %v (found=%t), want exactly one request", requests, found)
+			}
+			req := requests[0].(map[string]interface{})
+			_, hasExactly := req["exactly"]
+			if hasExactly != tt.wantExactly {
+				t.Errorf("request has exactly wrapper = %t, want %t (version %s)", hasExactly, tt.wantExactly, effective)
+			}
+			fields := req
+			if tt.wantExactly {
+				fields = req["exactly"].(map[string]interface{})
+			}
+			if fields["deviceClassName"] != "gpu.nvidia.com" {
+				t.Errorf("deviceClassName = %v, want gpu.nvidia.com", fields["deviceClassName"])
+			}
+		})
+	}
+}
+
+// TestSelectWorkerNode_KaiCompatibilityGuard pins the kai raw-slice guard: a
+// node bearing raw node-local gpu.nvidia.com ResourceSlices that AICR could
+// NOT validate (not in DRANodes) is ineligible for device-plugin wiring —
+// kai-scheduler would reject scalar GPU pods there — and when that leaves no
+// eligible pair, the fail-fast message names the offending node.
+// (Non-node-local gpu.nvidia.com topologies never reach selection — they are
+// rejected earlier by rejectUnsupportedGPUTopology; see #1652.)
+func TestSelectWorkerNode_KaiCompatibilityGuard(t *testing.T) {
+	node := func(name string) v1.Node {
+		return v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: v1.NodeStatus{
+				Allocatable: v1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")},
+				Conditions:  []v1.NodeCondition{{Type: v1.NodeReady, Status: v1.ConditionTrue}},
+			},
+		}
+	}
+	badSliceNode := node("bad-slice-node")
+
+	t.Run("unvalidatable raw slices block plugin wiring entirely + fail-fast names the node", func(t *testing.T) {
+		mode := &allocmode.Mode{
+			DevicePluginUsable: true,
+			DevicePluginNodes:  []string{"bad-slice-node"},
+			// NOT in DRANodes: AICR could not validate the slices...
+			DRANodes: nil, DRANodeDevices: map[string]int{},
+			// ...but kai counts them raw.
+			NodeLocalGPUSliceDevices: map[string]int{"bad-slice-node": 4},
+		}
+		_, _, _, _, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, map[string]int{}, map[string]int{})
+		if ok {
+			t.Fatal("ok = true, want false — kai would reject scalar pods on the raw-slice node")
+		}
+		msg := describeNoEligibleWorkerNode([]v1.Node{badSliceNode}, mode, nil)
+		for _, want := range []string{"bad-slice-node", "4 raw device(s)", "kai-scheduler counts but AICR cannot validate", "fix the ResourceSlices or free a different node"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("fail-fast message missing %q:\n%s", want, msg)
+			}
+		}
+	})
+
+	t.Run("DRA-capable raw-slice node stays DRA-eligible (guard only blocks plugin wiring)", func(t *testing.T) {
+		mode := &allocmode.Mode{
+			DRAUsable: true, DevicePluginUsable: true,
+			DRANodes:                 []string{"bad-slice-node"},
+			DRANodeDevices:           map[string]int{"bad-slice-node": 4},
+			DevicePluginNodes:        []string{"bad-slice-node"},
+			NodeLocalGPUSliceDevices: map[string]int{"bad-slice-node": 4},
+		}
+		chosen, draWiring, _, free, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, map[string]int{}, map[string]int{})
+		if !ok || !draWiring || chosen.Name != "bad-slice-node" || free != 4 {
+			t.Errorf("got (node=%s dra=%t free=%d ok=%t), want DRA wiring with 4 free", chosen.Name, draWiring, free, ok)
+		}
+	})
+
+	t.Run("scalar-occupied DRA node names the cross-ledger cause in the fail-fast message", func(t *testing.T) {
+		mode := &allocmode.Mode{
+			DRAUsable: true, DevicePluginUsable: true,
+			DRANodes:                 []string{"bad-slice-node"},
+			DRANodeDevices:           map[string]int{"bad-slice-node": 8},
+			DevicePluginNodes:        []string{"bad-slice-node"},
+			NodeLocalGPUSliceDevices: map[string]int{"bad-slice-node": 8},
+		}
+		scalarUsed := map[string]int{"bad-slice-node": 1}
+		_, _, _, _, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, scalarUsed, map[string]int{})
+		if ok {
+			t.Fatal("ok = true, want false — a DRA candidate with scalar occupancy must be skipped")
+		}
+		msg := describeNoEligibleWorkerNode([]v1.Node{badSliceNode}, mode, scalarUsed)
+		for _, want := range []string{"bad-slice-node", "1 scalar GPU(s) in use", "DRA allocator cannot see or avoid"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("fail-fast message missing %q:\n%s", want, msg)
+			}
+		}
+	})
+}
+
+// TestRejectUnsupportedGPUTopology pins the fail-fast gate for GPU DRA
+// configurations outside AICR's supported matrix (#1327): foreign gpu-named
+// DRA drivers, non-node-local gpu.nvidia.com slice topologies, and pools
+// published by multiple nodes are rejected with ErrCodeInvalidRequest and
+// actionable messages citing #1652, before any workload is built. The two
+// supported states pass through untouched.
+func TestRejectUnsupportedGPUTopology(t *testing.T) {
+	tests := []struct {
+		name string
+		mode *allocmode.Mode
+		// wantErr lists substrings the rejection message must contain;
+		// empty means the configuration is accepted.
+		wantErr []string
+	}{
+		{
+			name: "nil mode (probe unavailable) is accepted",
+			mode: nil,
+		},
+		{
+			name: "supported: node-local NVIDIA slices only",
+			mode: &allocmode.Mode{
+				DRAUsable:                true,
+				DRANodes:                 []string{"node-a"},
+				DRANodeDevices:           map[string]int{"node-a": 8},
+				NodeLocalGPUSliceDevices: map[string]int{"node-a": 8},
+			},
+		},
+		{
+			name: "supported: ComputeDomain-only / no full-GPU slices",
+			mode: &allocmode.Mode{DevicePluginUsable: true, DevicePluginNodes: []string{"node-a"}},
+		},
+		{
+			name: "rejected: foreign gpu-named DRA driver",
+			mode: &allocmode.Mode{
+				DevicePluginUsable:     true,
+				ForeignGPUSliceDrivers: []string{"gpu.amd.com"},
+			},
+			wantErr: []string{"gpu.amd.com", "non-NVIDIA GPU driver", "#1327", "#1652"},
+		},
+		{
+			name: "rejected: non-node-local gpu.nvidia.com topology",
+			mode: &allocmode.Mode{
+				DRAUsable:             true,
+				NonNodeLocalGPUSlices: []string{"gpu-slice-selector"},
+			},
+			wantErr: []string{"gpu-slice-selector", "non-node-local topologies", "#1327", "#1652"},
+		},
+		{
+			name: "rejected: both present — foreign driver reported first",
+			mode: &allocmode.Mode{
+				ForeignGPUSliceDrivers: []string{"gpu.amd.com", "xpu.intel.com/gpu"},
+				NonNodeLocalGPUSlices:  []string{"gpu-slice-selector"},
+			},
+			wantErr: []string{"gpu.amd.com, xpu.intel.com/gpu", "non-NVIDIA GPU driver"},
+		},
+		{
+			name: "rejected: pool published by multiple nodes (ambiguous attribution)",
+			mode: &allocmode.Mode{
+				DRAUsable:         true,
+				AmbiguousGPUPools: []string{"pool-dup"},
+			},
+			wantErr: []string{"pool-dup", "published by node-local slices of multiple nodes", "#1327", "#1652"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := rejectUnsupportedGPUTopology(tt.mode)
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("rejectUnsupportedGPUTopology() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("rejectUnsupportedGPUTopology() = nil, want fail-fast error")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("rejection message missing %q:\n%v", want, err)
+				}
+			}
+		})
 	}
 }

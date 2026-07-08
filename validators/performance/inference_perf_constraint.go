@@ -37,8 +37,12 @@ import (
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
+	"github.com/NVIDIA/aicr/validators/internal/allocmode"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
+	resourcev1beta1 "k8s.io/api/resource/v1beta1"
+	resourcev1beta2 "k8s.io/api/resource/v1beta2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -188,10 +192,6 @@ const (
 	// Passed to the template via ${QUEUE_NAME}.
 	inferenceQueueName = "aicr-inference-perf"
 
-	// inferenceClaimTemplateName is the DRA ResourceClaimTemplate name used to
-	// allocate one GPU per worker pod. Passed to the template via ${CLAIM_TEMPLATE_NAME}.
-	inferenceClaimTemplateName = "aicr-inference-gpu-claim"
-
 	// hfTokenSecretName / hfTokenSecretKey name the optional Secret that carries
 	// a Hugging Face token. The deploy template references it via an optional
 	// secretKeyRef on each container, so when the Secret is absent (no token)
@@ -224,14 +224,36 @@ const (
 	// a namespace and can't tear down each other's resources mid-benchmark.
 	inferenceWorkloadNamespacePrefix = "aicr-inference-perf"
 
-	// gpuDRADriverName is the NVIDIA GPU DRA driver identifier, used to filter
+	// gpuDRADriverName is the NVIDIA GPU DRA driver identifier. Used to filter
 	// ResourceClaim allocation results when computing in-use GPU count per
-	// node. Matches the `driver` field the NVIDIA DRA driver stamps on every
-	// DeviceRequestAllocationResult it produces.
+	// node (matching the `driver` field the NVIDIA DRA driver stamps on every
+	// DeviceRequestAllocationResult), and as the DeviceClass the worker
+	// ResourceClaimTemplate binds to when the DRA wiring mode is selected.
 	gpuDRADriverName = "gpu.nvidia.com"
 
+	// gpuResourceName is the device-plugin GPU resource name. Worker GPU
+	// wiring is MODE-DISPATCHED (see allocmode.Detect in
+	// validateInferencePerf): when full-GPU DRA is usable the workers bind a
+	// DRA ResourceClaimTemplate (required on clusters whose kai-scheduler
+	// treats nodes bearing raw node-local GPU ResourceSlices as DRA-only and rejects scalar GPU
+	// requests — kai v0.14.1 node_info.go:310); otherwise they request GPUs
+	// through resources.limits[gpuResourceName], which works on clusters
+	// without the gpu.nvidia.com DeviceClass (issue #1327).
+	gpuResourceName = "nvidia.com/gpu"
+
+	// inferenceClaimTemplateName is the DRA ResourceClaimTemplate name used to
+	// allocate one GPU per worker pod in DRA wiring mode. Passed to the
+	// template via ${CLAIM_TEMPLATE_NAME}.
+	inferenceClaimTemplateName = "aicr-inference-gpu-claim"
+
+	// inferenceWorkerGPUCount is the number of GPUs each worker pod requests.
+	// Worker replicas scale with the free GPU count (one data-parallel worker
+	// per GPU), so each pod requests exactly one device — in both wiring
+	// modes (device-plugin limit of 1, or ExactCount=1 on the claim).
+	inferenceWorkerGPUCount = 1
+
 	// mainContainerName is the v1beta1 Dynamo container name that receives
-	// operator defaults and GPU DRA resource claims.
+	// operator defaults and the injected nvidia.com/gpu limit.
 	mainContainerName = "main"
 )
 
@@ -315,6 +337,29 @@ type inferenceWorkloadConfig struct {
 	modelCacheSize         string // PVC size (e.g. "100Gi") enabling the model-weights cache; empty = disabled
 	modelCacheStorageClass string // StorageClass for the cache PVC; empty = cluster default
 	routingMode            inferenceRoutingMode
+
+	// gpuAllocMode is the cluster's detected GPU allocation capability
+	// (allocmode.Detect), probed once per run. Carried for evidence output
+	// and for the served resource.k8s.io API version the DRA wiring creates
+	// its ResourceClaimTemplate at.
+	gpuAllocMode *allocmode.Mode
+	// draWorkerWiring selects the worker GPU wiring, decided NODE-LOCALLY in
+	// buildInferenceConfig from the chosen node's membership in the probe's
+	// DRA node set (not from the cluster-global DRAUsable flag): DRA
+	// ResourceClaimTemplate when true, device-plugin limits otherwise.
+	draWorkerWiring bool
+}
+
+// useDRAWorkerClaims reports whether worker GPUs are wired via the DRA
+// ResourceClaimTemplate path. Decided node-locally in buildInferenceConfig:
+// true when the CHOSEN worker node advertises usable full-GPU DRA devices —
+// on such nodes kai-scheduler (v0.14.1) rejects scalar device-plugin GPU
+// requests outright (pkg/scheduler/api/node_info/node_info.go:310), so the
+// claim path is the only schedulable wiring there. On device-plugin-only
+// nodes the limits path applies — it needs no gpu.nvidia.com DeviceClass
+// (issue #1327).
+func (c *inferenceWorkloadConfig) useDRAWorkerClaims() bool {
+	return c.draWorkerWiring
 }
 
 // validateInferencePerf orchestrates the full inference performance pipeline:
@@ -351,10 +396,39 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// return pkg/errors StructuredError values with meaningful codes
 	// (ErrCodeInternal for infra/config problems, ErrCodeTimeout for deadline
 	// exhaustion, etc.); propagate as-is to preserve the classification.
-	config, err := buildInferenceConfig(ctx)
+	// Probe the cluster's GPU allocation capability ONCE — the same detector
+	// the conformance checks use (validators/internal/allocmode) — BEFORE
+	// sizing: buildInferenceConfig decides the worker node, wiring, and GPU
+	// count node-locally from this probe. DRA wiring is mandatory on nodes
+	// advertising full-GPU DRA: kai-scheduler treats nodes bearing raw
+	// node-local GPU ResourceSlices as DRA-only and rejects scalar
+	// nvidia.com/gpu requests, so
+	// device-plugin wiring would leave every worker Pending (observed live on
+	// dual-mode GB200/EKS; kai v0.14.1 node_info.go:310).
+	mode, err := allocmode.Detect(ctx.Ctx, ctx.Clientset, ctx.DynamicClient)
 	if err != nil {
 		return nil, err
 	}
+
+	// Fail fast on GPU DRA configurations outside AICR's supported
+	// validation matrix (#1652) — before any sizing or resource creation.
+	if rejErr := rejectUnsupportedGPUTopology(mode); rejErr != nil {
+		return nil, rejErr
+	}
+
+	config, err := buildInferenceConfig(ctx, mode)
+	if err != nil {
+		return nil, err
+	}
+	wiring := "device plugin (resources.limits nvidia.com/gpu)"
+	if config.useDRAWorkerClaims() {
+		wiring = "DRA (gpu.nvidia.com ResourceClaimTemplate)"
+	}
+	slog.Info("GPU allocation mode detected",
+		"draUsable", mode.DRAUsable, "devicePluginUsable", mode.DevicePluginUsable,
+		"workerGPUWiring", wiring, "chosenNode", config.gpuNodeSelector["kubernetes.io/hostname"])
+	fmt.Printf("--- GPU allocation mode (worker GPU wiring) ---\n%s\nworker GPU wiring: %s (node-local decision for %s)\n",
+		mode.Summary(), wiring, config.gpuNodeSelector["kubernetes.io/hostname"])
 
 	// Always defer cleanup — covers both successful deploy and partial failure.
 	// cleanupInferenceWorkload is a no-op if deployedByUs is false.
@@ -476,7 +550,7 @@ func dynamoCRDInstalled(ctx *validators.Context) (bool, error) {
 // workload would be sized for the wrong pool. We instead restrict the
 // candidate node pool to nodes matching the user selector, then derive all
 // sizing and scheduling details from within that pool.
-func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, error) {
+func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*inferenceWorkloadConfig, error) {
 	slog.Info("Analyzing GPU node configuration...")
 
 	gpuNodes, err := helper.FindSchedulableGpuNodes(ctx.Ctx, ctx.Clientset)
@@ -502,29 +576,39 @@ func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, er
 			"selector", ctx.NodeSelector, "matched", len(candidates))
 	}
 
-	// Enumerate existing DRA ResourceClaim allocations so we can subtract
-	// per-node in-use GPUs from the allocatable count. Status.Allocatable
-	// ("nvidia.com/gpu") reflects the device-plugin view and does NOT shrink
-	// when the DRA driver allocates devices to another workload — so on a
-	// shared cluster the "first candidate with full allocatable count" can
-	// already be saturated, leaving the benchmark pending until timeout.
-	// We pick the candidate with the most free GPUs and size the workload
-	// to that count.
-	usedByNode := countUsedGPUsByNode(ctx.Ctx, ctx.Clientset)
+	// Enumerate existing GPU allocations — device-plugin pod requests AND DRA
+	// ResourceClaim allocations — so we can subtract per-node in-use GPUs from
+	// the allocatable count. Status.Allocatable ("nvidia.com/gpu") reflects
+	// device capacity and does NOT shrink when devices are allocated to other
+	// workloads — so on a shared cluster the "first candidate with full
+	// allocatable count" can already be saturated, leaving the benchmark
+	// pending until timeout. We pick the candidate with the most free GPUs and
+	// size the workload to that count.
+	var gpuPoolNodes map[string]string
+	if mode != nil {
+		gpuPoolNodes = mode.GPUPoolNodes
+	}
+	scalarUsed, draUsed, err := countUsedGPUsByNode(ctx.Ctx, ctx.Clientset, gpuPoolNodes)
+	if err != nil {
+		return nil, err
+	}
 
-	chosen, gpuCountPerNode, freeGPUs := pickCandidateWithMostFreeGPUs(candidates, usedByNode)
+	chosen, draWiring, gpuCountPerNode, freeGPUs, ok := selectWorkerNode(candidates, mode, scalarUsed, draUsed)
+	if !ok {
+		return nil, errors.New(errors.ErrCodeInternal, describeNoEligibleWorkerNode(candidates, mode, scalarUsed))
+	}
 	if freeGPUs <= 0 {
 		return nil, errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("no candidate GPU node has free GPUs — all %d matched node(s) are saturated by existing DRA ResourceClaim allocations; free GPUs or pass --node-selector kubernetes.io/hostname=<empty-node>",
+			fmt.Sprintf("no eligible candidate GPU node has free GPUs (%d matched; eligible candidates are saturated by existing workloads in the selected mechanism's ledger — nodes excluded as NotReady, probe-ineligible, kai-blocked, or DRA-wired-but-scalar-occupied are not counted); free GPUs or pass --node-selector kubernetes.io/hostname=<empty-node>",
 				len(candidates)))
 	}
 	if gpuCountPerNode == 0 {
 		return nil, errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("candidate GPU node %q reports 0 nvidia.com/gpu allocatable", chosen.Name))
+			fmt.Sprintf("candidate GPU node %q reports 0 usable GPUs for the selected wiring (draWiring=%t)", chosen.Name, draWiring))
 	}
 	gpuCount := freeGPUs
 	if freeGPUs < gpuCountPerNode {
-		slog.Info("Candidate node has GPUs already allocated via DRA; sizing benchmark to free GPUs only",
+		slog.Info("Candidate node has GPUs already in use by existing workloads; sizing benchmark to free GPUs only",
 			"node", chosen.Name, "allocatable", gpuCountPerNode, "inUse", gpuCountPerNode-freeGPUs, "free", freeGPUs)
 	}
 
@@ -566,6 +650,8 @@ func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, er
 		modelCacheSize:         cacheSize,
 		modelCacheStorageClass: strings.TrimSpace(os.Getenv(envModelCacheStorageClass)),
 		routingMode:            routingMode,
+		gpuAllocMode:           mode,
+		draWorkerWiring:        draWiring,
 	}
 
 	// Pin every worker to the specific chosen node via kubernetes.io/hostname
@@ -609,70 +695,645 @@ func buildInferenceConfig(ctx *validators.Context) (*inferenceWorkloadConfig, er
 	return config, nil
 }
 
-// countUsedGPUsByNode returns a map of nodeName → in-use GPU count derived
-// from existing DRA ResourceClaim allocations with driver == gpuDRADriverName
-// ("gpu.nvidia.com"). The NVIDIA DRA driver sets each DeviceRequestAllocation
-// Result.Pool to the host node name, so the pool key is the node.
+// countUsedGPUsByNode returns two maps of nodeName → in-use GPU count, one
+// per allocation source a shared cluster can mix (issue #1327). The counts
+// are kept SEPARATE because the two allocators keep independent ledgers:
+// scalar occupancy shrinks a DRA candidate's usable device COUNT, but DRA
+// claim placement cannot avoid the specific physical devices the device
+// plugin assigned — so a DRA-wired benchmark sized "around" scalar usage
+// could still double-book a plugin-held GPU. selectWorkerNode therefore
+// rejects DRA candidates carrying any scalar occupancy instead of
+// subtracting across ledgers. The two sources:
 //
-// Returns an empty map on any lookup failure (DRA API not enabled, RBAC denied,
-// timeout). The caller then falls back to allocatable-only sizing — which is
-// safe on clusters without DRA-allocating workloads, and is the behavior
-// before this helper was introduced.
-func countUsedGPUsByNode(ctx context.Context, clientset kubernetes.Interface) map[string]int {
+//  1. Device-plugin allocations: the effective nvidia.com/gpu request of every
+//     scheduled, non-terminal pod, summed per pod.Spec.NodeName. Terminal pods
+//     (Succeeded/Failed) have released their devices and are skipped; a
+//     terminating-but-running pod still holds its devices, so it is counted —
+//     under-counting would size the benchmark onto a saturated node.
+//  2. DRA allocations: existing ResourceClaim allocations with driver ==
+//     gpuDRADriverName ("gpu.nvidia.com"), attributed to nodes through the
+//     slice-derived gpuPoolNodes map (pool name → the spec.nodeName of the
+//     node-local slices publishing that pool). The K8s API documents that a
+//     pool name "is often the node name, but this is not required", so name
+//     equality would mis-attribute a pool named after a DIFFERENT existing
+//     node; an allocation from a pool no node-local gpu.nvidia.com slice
+//     publishes fails fast (#1652) rather than being silently guessed. Kept
+//     even though the benchmark itself requests GPUs via the device plugin —
+//     a shared cluster may still run full-GPU DRA workloads that shrink the
+//     free pool. Allocated claims whose device requests name a "gpu"-named
+//     DeviceClass other than gpu.nvidia.com also fail fast (#1652):
+//     kai-scheduler v0.14.1 classifies claim demand by the Exactly
+//     request's DeviceClass name (IsGPUDeviceClass via
+//     countGPUDevicesFromClaim, dra.go:164-184), so such claims consume
+//     kai's GPU capacity vector through a driver this accounting would
+//     otherwise skip. AICR also screens firstAvailable subrequest classes,
+//     which kai skips — a deliberately conservative AICR policy, not kai
+//     behavior. The screen checks class NAMES only: inference validation
+//     assumes the driver-provided gpu.nvidia.com DeviceClass retains its
+//     NVIDIA selector (device.driver == "gpu.nvidia.com", per the shipped
+//     chart template) — an admin-replaced class with foreign selectors is
+//     outside the supported matrix (known limitation, #1652).
+//
+// AdminAccess divergence (known, accepted — see #1652): kai-scheduler counts
+// AdminAccess claim requests in its GPU demand vector, while this accounting
+// correctly excludes them from physical occupancy (they hold no capacity) —
+// a cluster running admin-access monitoring claims can therefore look busier
+// to kai than to this count; a legitimate monitoring claim must not fail
+// validation, so this is documented rather than rejected.
+//
+// Invariant: every allocated device is counted exactly once. A pod allocated
+// via an explicit DRA claim carries no nvidia.com/gpu container request, and a
+// device-plugin pod holds no gpu.nvidia.com ResourceClaim allocation — but
+// under KEP-5004 (DRAExtendedResource) the scheduler can satisfy a plain
+// nvidia.com/gpu extended-resource request from DRA capacity, in which case
+// the same devices appear in BOTH sources: the pod-request sum and the
+// scheduler-generated ResourceClaim's allocation. Such a pod advertises the
+// generated claim in Status.ExtendedResourceClaimStatus. A single generated
+// claim can back MULTIPLE extended resources, so the dedup is per claim
+// REQUEST, not per claim: Status.ExtendedResourceClaimStatus.RequestMappings
+// names, for each backed extended resource, the request in the generated
+// claim that serves it. Only allocation results whose request is mapped to
+// nvidia.com/gpu are excluded (already attributed on the pod-request side);
+// results for other DRA-backed resources in the same claim still count.
+//
+// AdminAccess allocations (DRAAdminAccess feature gate) grant administrative
+// or monitoring access to devices that remain allocatable to real workloads —
+// they coexist with normal allocations and hold no capacity, so they are
+// never counted as occupancy.
+//
+// Fails closed: a pod List failure propagates as an error rather than
+// treating the cluster's GPUs as free (which would size the benchmark onto a
+// possibly-saturated node and burn the check deadline pending). The DRA
+// ResourceClaim list walks the served resource.k8s.io versions newest-first
+// (v1, then v1beta2, then v1beta1 — beta-only K8s 1.32/1.33 clusters carry
+// real DRA allocations too) and tolerates exactly one condition — NO version
+// of the API being served — because that deterministically means "no DRA
+// allocations"; every other failure (RBAC denied, timeout) propagates.
+func countUsedGPUsByNode(ctx context.Context, clientset kubernetes.Interface, gpuPoolNodes map[string]string) (scalarUsed, draUsed map[string]int, err error) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 
-	claims, err := clientset.ResourceV1().ResourceClaims("").List(listCtx, metav1.ListOptions{})
-	if err != nil {
-		slog.Debug("DRA ResourceClaim list failed; falling back to allocatable-only sizing",
-			"error", err)
-		return map[string]int{}
-	}
+	scalarUsed = make(map[string]int)
+	draUsed = make(map[string]int)
 
-	used := make(map[string]int)
-	for i := range claims.Items {
-		claim := &claims.Items[i]
-		if claim.Status.Allocation == nil {
+	// Per-claim sets (keyed namespace/name) of generated-claim REQUEST names
+	// whose allocations are already accounted for by a counted pod's
+	// nvidia.com/gpu extended-resource request (KEP-5004) — those requests'
+	// allocation results are skipped in the DRA loop below to keep the
+	// count-once invariant. Other requests in the same claim (backing other
+	// extended resources) still count.
+	skipClaimRequests := make(map[string]map[string]struct{})
+
+	// Server-side filter sheds terminal pods before transfer. Fake clients
+	// ignore field selectors, and older apiservers could too, so the in-code
+	// terminal-phase filter below stays authoritative — the selector is an
+	// optimization only.
+	pods, err := clientset.CoreV1().Pods("").List(listCtx, metav1.ListOptions{
+		FieldSelector: "status.phase!=" + string(v1.PodSucceeded) + ",status.phase!=" + string(v1.PodFailed),
+	})
+	if err != nil {
+		return nil, nil, errors.Wrap(occupancyListErrCode(err),
+			"failed to list pods for GPU occupancy accounting", err)
+	}
+	for i := range pods.Items {
+		if ctxErr := listCtx.Err(); ctxErr != nil {
+			return nil, nil, errors.Wrap(errors.ErrCodeTimeout,
+				"GPU occupancy pod scan canceled", ctxErr)
+		}
+		pod := &pods.Items[i]
+		if pod.Spec.NodeName == "" {
+			// Not bound to a node — holds no device yet.
 			continue
 		}
-		for _, r := range claim.Status.Allocation.Devices.Results {
-			if r.Driver != gpuDRADriverName {
+		if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+			// Terminal — devices already released back to the device plugin.
+			continue
+		}
+		if n := podEffectiveGPURequest(pod); n > 0 {
+			scalarUsed[pod.Spec.NodeName] += n
+			// KEP-5004: this pod's extended-resource request may be satisfied
+			// by DRA via a scheduler-generated ResourceClaim. Record which of
+			// that claim's requests map to nvidia.com/gpu so the DRA loop can
+			// exclude exactly those allocation results — their devices are
+			// already covered by the pod-request sum just added.
+			if ercs := pod.Status.ExtendedResourceClaimStatus; ercs != nil && ercs.ResourceClaimName != "" {
+				key := pod.Namespace + "/" + ercs.ResourceClaimName
+				for _, m := range ercs.RequestMappings {
+					if m.ResourceName != gpuResourceName {
+						continue
+					}
+					if skipClaimRequests[key] == nil {
+						skipClaimRequests[key] = make(map[string]struct{})
+					}
+					skipClaimRequests[key][m.RequestName] = struct{}{}
+				}
+			}
+		}
+	}
+
+	claims, err := listGPUClaimAllocations(listCtx, clientset)
+	if err != nil {
+		return nil, nil, errors.Wrap(occupancyListErrCode(err),
+			"failed to list DRA ResourceClaims for GPU occupancy accounting", err)
+	}
+	for i := range claims {
+		if ctxErr := listCtx.Err(); ctxErr != nil {
+			return nil, nil, errors.Wrap(errors.ErrCodeTimeout,
+				"GPU occupancy ResourceClaim scan canceled", ctxErr)
+		}
+		claim := &claims[i]
+		// kai-scheduler v0.14.1 classifies claim demand by the Exactly
+		// request's DeviceClass name (lowercase-contains "gpu"),
+		// independent of the backing driver — so an allocated claim for a
+		// foreign "gpu"-named class consumes kai's GPU capacity vector even
+		// when its allocation results carry a non-"gpu" driver name that
+		// the loop below would skip. AICR screens firstAvailable subrequest
+		// classes too, which kai skips (countGPUDevicesFromClaim,
+		// dra.go:164-184) — a deliberately conservative AICR policy, not
+		// kai behavior. Outside AICR's supported matrix: fail fast.
+		for _, class := range claim.deviceClassNames {
+			if strings.Contains(strings.ToLower(class), "gpu") && class != gpuDRADriverName {
+				return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"unsupported GPU DRA configuration: allocated ResourceClaim %s/%s requests DeviceClass %q — kai-scheduler classifies any \"gpu\"-named DeviceClass as GPU demand, but AICR's supported validation matrix covers only %s; see #1327, generalization tracked in #1652",
+					claim.namespace, claim.name, class, gpuDRADriverName))
+			}
+		}
+		skipRequests := skipClaimRequests[claim.namespace+"/"+claim.name]
+		for _, r := range claim.results {
+			if r.driver != gpuDRADriverName {
 				continue
 			}
-			used[r.Pool]++
+			if r.adminAccess {
+				// Administrative/monitoring access — coexists with real
+				// allocations and holds no capacity, so it is not occupancy.
+				continue
+			}
+			// For a firstAvailable subrequest the result's Request is
+			// "<main request>/<subrequest>"; the KEP-5004 mapping names the
+			// main request, so compare against the main-request prefix.
+			mainRequest, _, _ := strings.Cut(r.request, "/")
+			if _, counted := skipRequests[mainRequest]; counted {
+				// Already attributed via the owning pod's nvidia.com/gpu
+				// request (KEP-5004 extended-resource claim) — counting the
+				// allocation too would double-count the same devices.
+				continue
+			}
+			node, mapped := gpuPoolNodes[r.pool]
+			if !mapped {
+				return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"unsupported GPU DRA configuration: allocated ResourceClaim %s/%s has a %s allocation from pool %q, which no node-local %s ResourceSlice publishes — AICR's occupancy accounting attributes pools to nodes through the slices' spec.nodeName (the K8s API does not require pool names to be node names); see #1327, generalization tracked in #1652",
+					claim.namespace, claim.name, gpuDRADriverName, r.pool, gpuDRADriverName))
+			}
+			draUsed[node]++
 		}
 	}
-	return used
+	return scalarUsed, draUsed, nil
 }
 
-// pickCandidateWithMostFreeGPUs scans the candidate node list and returns the
-// node with the largest (allocatable − in-use) GPU count, along with the
-// node's allocatable and free counts. Ties break on the node list's original
-// order (deterministic; no randomness across repeated runs on the same
-// cluster state). An empty candidate list returns a zero Node and 0/0 — the
-// caller is expected to have rejected the empty case earlier, but the guard
-// keeps this function safe to call in isolation.
-func pickCandidateWithMostFreeGPUs(candidates []v1.Node, usedByNode map[string]int) (chosen v1.Node, allocatable, free int) {
-	if len(candidates) == 0 {
-		return v1.Node{}, 0, 0
-	}
-	bestIdx := -1
-	for i, n := range candidates {
-		total := nodeGPUCount(n)
-		nFree := total - usedByNode[n.Name]
-		if nFree < 0 {
-			// Possible if a claim's pool value doesn't match exactly or an
-			// allocation is stale; treat as 0 free rather than negative.
-			nFree = 0
+// gpuClaimAllocation is a version-normalized view of an ALLOCATED
+// ResourceClaim, carrying only the fields GPU occupancy accounting reads.
+// The resource.k8s.io allocation-result shape is field-compatible across
+// v1beta1, v1beta2, and v1, so one struct serves all served versions.
+type gpuClaimAllocation struct {
+	namespace string
+	name      string
+	// deviceClassNames lists every DeviceClass the claim's spec device
+	// requests reference (v1/v1beta2 exactly + firstAvailable shapes;
+	// v1beta1 direct field + firstAvailable). kai-scheduler v0.14.1
+	// classifies claim demand by the Exactly request's class name only
+	// (countGPUDevicesFromClaim skips request.Exactly == nil,
+	// dra.go:164-184); occupancy accounting screens firstAvailable
+	// classes too — a deliberately conservative AICR policy, not kai
+	// behavior — for unsupported "gpu"-named classes (#1652).
+	deviceClassNames []string
+	results          []gpuClaimAllocationResult
+}
+
+type gpuClaimAllocationResult struct {
+	request     string
+	driver      string
+	pool        string
+	adminAccess bool
+}
+
+// claimClassNamesV1 collects every DeviceClass name the claim's spec device
+// requests reference at resource.k8s.io/v1 (exactly + firstAvailable forms
+// — kai v0.14.1 reads only the exactly form; including firstAvailable is
+// AICR's deliberately conservative screen policy). Occupancy accounting
+// screens these for unsupported "gpu"-named classes (#1652).
+func claimClassNamesV1(c *resourcev1.ResourceClaim) []string {
+	var classes []string
+	for _, req := range c.Spec.Devices.Requests {
+		if req.Exactly != nil {
+			classes = append(classes, req.Exactly.DeviceClassName)
 		}
-		if bestIdx == -1 || nFree > free {
-			bestIdx = i
-			chosen = n
-			allocatable = total
-			free = nFree
+		for _, sub := range req.FirstAvailable {
+			classes = append(classes, sub.DeviceClassName)
 		}
 	}
-	return chosen, allocatable, free
+	return classes
+}
+
+// claimClassNamesV1beta2 is claimClassNamesV1 at resource.k8s.io/v1beta2
+// (identical exactly + firstAvailable shapes).
+func claimClassNamesV1beta2(c *resourcev1beta2.ResourceClaim) []string {
+	var classes []string
+	for _, req := range c.Spec.Devices.Requests {
+		if req.Exactly != nil {
+			classes = append(classes, req.Exactly.DeviceClassName)
+		}
+		for _, sub := range req.FirstAvailable {
+			classes = append(classes, sub.DeviceClassName)
+		}
+	}
+	return classes
+}
+
+// claimClassNamesV1beta1 is the v1beta1 form: the class sits on the request
+// itself (empty when the prioritized-list form is used) plus firstAvailable
+// subrequests.
+func claimClassNamesV1beta1(c *resourcev1beta1.ResourceClaim) []string {
+	var classes []string
+	for _, req := range c.Spec.Devices.Requests {
+		if req.DeviceClassName != "" {
+			classes = append(classes, req.DeviceClassName)
+		}
+		for _, sub := range req.FirstAvailable {
+			classes = append(classes, sub.DeviceClassName)
+		}
+	}
+	return classes
+}
+
+// listGPUClaimAllocations lists cluster-wide ResourceClaims at the newest
+// SERVED resource.k8s.io version — v1, then v1beta2, then v1beta1 — and
+// returns the allocated claims in version-normalized form. Only NotFound
+// advances the fallback (that version is not served); any other error
+// propagates (fail closed). Each normalization loop checks ctx so a
+// cancellation that lands after List returns still aborts the scan instead
+// of reporting a (possibly empty) result as success. When NO version is
+// served it returns (nil, nil): "no DRA API" deterministically means "no DRA
+// allocations".
+func listGPUClaimAllocations(ctx context.Context, clientset kubernetes.Interface) ([]gpuClaimAllocation, error) {
+	v1Claims, err := clientset.ResourceV1().ResourceClaims("").List(ctx, metav1.ListOptions{})
+	if err == nil {
+		// Check ctx immediately after the successful List too: with an empty
+		// result the per-item checks below never run, and a canceled scan
+		// must not masquerade as success.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		out := make([]gpuClaimAllocation, 0, len(v1Claims.Items))
+		for i := range v1Claims.Items {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			c := &v1Claims.Items[i]
+			if c.Status.Allocation == nil {
+				continue
+			}
+			alloc := gpuClaimAllocation{
+				namespace: c.Namespace, name: c.Name,
+				deviceClassNames: claimClassNamesV1(c),
+			}
+			for _, r := range c.Status.Allocation.Devices.Results {
+				alloc.results = append(alloc.results, gpuClaimAllocationResult{
+					request: r.Request, driver: r.Driver, pool: r.Pool,
+					adminAccess: r.AdminAccess != nil && *r.AdminAccess,
+				})
+			}
+			out = append(out, alloc)
+		}
+		return out, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+
+	b2Claims, err := clientset.ResourceV1beta2().ResourceClaims("").List(ctx, metav1.ListOptions{})
+	if err == nil {
+		// Check ctx immediately after the successful List too: with an empty
+		// result the per-item checks below never run, and a canceled scan
+		// must not masquerade as success.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		out := make([]gpuClaimAllocation, 0, len(b2Claims.Items))
+		for i := range b2Claims.Items {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			c := &b2Claims.Items[i]
+			if c.Status.Allocation == nil {
+				continue
+			}
+			alloc := gpuClaimAllocation{
+				namespace: c.Namespace, name: c.Name,
+				deviceClassNames: claimClassNamesV1beta2(c),
+			}
+			for _, r := range c.Status.Allocation.Devices.Results {
+				alloc.results = append(alloc.results, gpuClaimAllocationResult{
+					request: r.Request, driver: r.Driver, pool: r.Pool,
+					adminAccess: r.AdminAccess != nil && *r.AdminAccess,
+				})
+			}
+			out = append(out, alloc)
+		}
+		return out, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+
+	b1Claims, err := clientset.ResourceV1beta1().ResourceClaims("").List(ctx, metav1.ListOptions{})
+	if err == nil {
+		// Check ctx immediately after the successful List too: with an empty
+		// result the per-item checks below never run, and a canceled scan
+		// must not masquerade as success.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		out := make([]gpuClaimAllocation, 0, len(b1Claims.Items))
+		for i := range b1Claims.Items {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			c := &b1Claims.Items[i]
+			if c.Status.Allocation == nil {
+				continue
+			}
+			alloc := gpuClaimAllocation{
+				namespace: c.Namespace, name: c.Name,
+				deviceClassNames: claimClassNamesV1beta1(c),
+			}
+			for _, r := range c.Status.Allocation.Devices.Results {
+				alloc.results = append(alloc.results, gpuClaimAllocationResult{
+					request: r.Request, driver: r.Driver, pool: r.Pool,
+					adminAccess: r.AdminAccess != nil && *r.AdminAccess,
+				})
+			}
+			out = append(out, alloc)
+		}
+		return out, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+
+	slog.Debug("no resource.k8s.io ResourceClaim API version served; counting device-plugin GPU requests only")
+	return nil, nil
+}
+
+// occupancyListErrCode classifies a K8s List failure during GPU occupancy
+// accounting: every timeout form the shared allocmode classifier recognizes
+// (context sentinels, apiserver Timeout/ServerTimeout, transport timeouts,
+// the client-go rate-limiter's deadline message) is a deadline condition
+// (ErrCodeTimeout), not an infrastructure fault — anything else is
+// ErrCodeInternal. Keeping the codes distinct lets callers report "the
+// occupancy scan ran out of time" separately from "the apiserver refused the
+// scan".
+func occupancyListErrCode(err error) errors.ErrorCode {
+	if allocmode.IsK8sTimeoutErr(err) {
+		return errors.ErrCodeTimeout
+	}
+	return errors.ErrCodeInternal
+}
+
+// podEffectiveGPURequest returns the pod's effective nvidia.com/gpu request,
+// following Kubernetes' pod resource-accounting rules (mirrors the
+// k8s.io/component-helpers resource helpers): init containers are walked in
+// declaration order while a cumulative sum of restartable-init (sidecar)
+// requests is maintained — a sidecar started earlier keeps running while
+// later init containers run, so a one-shot init's effective value is that
+// cumulative sum plus its own request, and a sidecar raises the running init
+// maximum by the new cumulative sum itself. The pod's effective request is
+// max(steady-state sum over regular containers plus all sidecars, init
+// maximum), plus any pod spec.overhead (RuntimeClass overhead) — Kubernetes
+// adds overhead AFTER taking the max, so it always increases the scheduled
+// demand. Extended resources require requests == limits when both are set,
+// so reading requests (with a limits fallback for specs that set only limits
+// — the API server defaults requests from limits) is exact.
+func podEffectiveGPURequest(pod *v1.Pod) int {
+	gpu := v1.ResourceName(gpuResourceName)
+	containerGPUs := func(c *v1.Container) int64 {
+		if q, ok := c.Resources.Requests[gpu]; ok {
+			return q.Value()
+		}
+		q := c.Resources.Limits[gpu]
+		return q.Value()
+	}
+	var restartableSum, initMax int64
+	for i := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[i]
+		if c.RestartPolicy != nil && *c.RestartPolicy == v1.ContainerRestartPolicyAlways {
+			// Sidecar init container: runs for the pod's lifetime, alongside
+			// every init container declared after it.
+			restartableSum += containerGPUs(c)
+			if restartableSum > initMax {
+				initMax = restartableSum
+			}
+			continue
+		}
+		// One-shot init container: runs to completion while all sidecars
+		// declared before it are already running, so its effective demand is
+		// the cumulative sidecar sum plus its own request.
+		if n := restartableSum + containerGPUs(c); n > initMax {
+			initMax = n
+		}
+	}
+	sum := restartableSum
+	for i := range pod.Spec.Containers {
+		sum += containerGPUs(&pod.Spec.Containers[i])
+	}
+	effective := sum
+	if initMax > effective {
+		effective = initMax
+	}
+	// Pod overhead (RuntimeClass) is added on top of max(steadyState, initMax),
+	// mirroring k8s.io/component-helpers resource accounting.
+	if q, ok := pod.Spec.Overhead[gpu]; ok {
+		effective += q.Value()
+	}
+	return int(effective)
+}
+
+// selectWorkerNode picks the (node, mechanism) pair with the most FREE GPUs —
+// matching the documented contract (docs/user/validation.md: the validator
+// "picks the candidate with the most free GPUs") while keeping the wiring
+// NODE-LOCAL:
+//
+//   - Eligibility (TOCTOU-guarded): a candidate must be Ready on the FRESH
+//     node object — the allocmode probe's node sets were captured earlier,
+//     so a node Ready at probe time but NotReady now is excluded — AND, when
+//     the probe ran, appear in the probe's Ready/schedulable sets.
+//   - Mechanism per node: DRA where the node advertises usable full-GPU DRA
+//     devices (kai-scheduler rejects scalar device-plugin GPU requests on
+//     nodes bearing raw node-local GPU ResourceSlices — node_info.go:310 — so plugin wiring is
+//     not eligible there); device plugin otherwise.
+//   - Capacity: Mode.DRANodeDevices for DRA pairs (scalar allocatable can
+//     differ on dual-advertised nodes and would oversize); scalar
+//     allocatable for plugin pairs.
+//   - Ledger isolation: a DRA candidate carrying ANY scalar nvidia.com/gpu
+//     occupancy is skipped outright — the device plugin's physical device
+//     assignments are invisible to the DRA allocator, so claims sized
+//     "around" the scalar count can still double-book a plugin-held GPU
+//     (VRAM contention corrupts the benchmark). Subtraction across ledgers
+//     is never safe; only same-ledger occupancy is subtracted.
+//   - Score: free = capacity − same-ledger occupancy (clamped at 0; a stale
+//     or mismatched allocation must not go negative). Max free wins; ties
+//     prefer DRA, then the lexicographically smaller node name — fully
+//     deterministic for equal inputs.
+//
+// ok is false when no candidate is eligible at all.
+func selectWorkerNode(candidates []v1.Node, mode *allocmode.Mode, scalarUsed, draUsed map[string]int) (chosen v1.Node, draWiring bool, allocatable, free int, ok bool) {
+	draCapable := map[string]bool{}
+	pluginBacked := map[string]bool{}
+	if mode != nil {
+		for _, n := range mode.DRANodes {
+			draCapable[n] = true
+		}
+		for _, n := range mode.DevicePluginNodes {
+			pluginBacked[n] = true
+		}
+	}
+	for _, n := range candidates {
+		// TOCTOU guard: current Ready condition, not just probe-time state.
+		if !nodeReadyForScheduling(n) {
+			continue
+		}
+		var capacity int
+		var dra bool
+		var occupancy int
+		switch {
+		case mode != nil && draCapable[n.Name]:
+			// Supported full-GPU DRA state: the NVIDIA driver publishes
+			// node-local per-node pools, so validated devices ARE the
+			// kai-attributable devices — size from the validated count.
+			// (Non-node-local gpu.nvidia.com topologies fail fast before
+			// selection — see rejectUnsupportedGPUTopology / #1652.)
+			if scalarUsed[n.Name] > 0 {
+				// Ledger isolation: the device plugin assigned specific
+				// physical devices this node's DRA allocator cannot see or
+				// avoid — DRA claims here can double-book a plugin-held
+				// GPU. Skip rather than subtract across ledgers.
+				slog.Info("skipping DRA candidate: scalar nvidia.com/gpu occupancy is invisible to the DRA allocator",
+					"node", n.Name, "scalarGPUsInUse", scalarUsed[n.Name])
+				continue
+			}
+			dra, capacity, occupancy = true, mode.DRANodeDevices[n.Name], draUsed[n.Name]
+		case mode != nil && mode.NodeLocalGPUSliceDevices[n.Name] > 0:
+			// kai-compatibility guard: the node carries RAW gpu.nvidia.com
+			// ResourceSlices that kai-scheduler counts (no pool/taint
+			// validation) and therefore rejects scalar device-plugin GPU
+			// pods on (node_info.go:310) — plugin wiring can never schedule
+			// here. Not DRA-capable either (AICR could not validate the
+			// slices), so the node is ineligible entirely.
+			continue
+		case mode == nil || pluginBacked[n.Name]:
+			// Plugin-backed nodes carry no attributable gpu.nvidia.com
+			// allocations (no node-local slices → no pool attribution), so
+			// draUsed is normally 0 here; summing keeps the count honest if
+			// that invariant ever changes.
+			dra, capacity = false, nodeGPUCount(n)
+			occupancy = scalarUsed[n.Name] + draUsed[n.Name]
+		default:
+			continue // not in the probe's Ready/schedulable sets
+		}
+		f := capacity - occupancy
+		if f < 0 {
+			f = 0
+		}
+		better := !ok || f > free ||
+			(f == free && dra && !draWiring) ||
+			(f == free && dra == draWiring && n.Name < chosen.Name)
+		if better {
+			chosen, draWiring, allocatable, free, ok = n, dra, capacity, f, true
+		}
+	}
+	if ok {
+		slog.Info("selected worker node by most free GPUs",
+			"node", chosen.Name, "draWiring", draWiring, "allocatable", allocatable, "free", free)
+	}
+	return chosen, draWiring, allocatable, free, ok
+}
+
+// rejectUnsupportedGPUTopology fails fast (ErrCodeInvalidRequest) on GPU DRA
+// configurations that AICR's inference validation deliberately does not
+// model — the validator validates AICR's supported configurations rather
+// than emulating kai-scheduler's general capacity model (#1327 scope
+// decision; generalization is tracked as #1652):
+//   - ResourceSlices from "gpu"-named drivers other than gpu.nvidia.com
+//     (mixed GPU DRA drivers — kai counts them into its shared GPU vector);
+//   - gpu.nvidia.com full-GPU slices with non-node-local topologies
+//     (nodeSelector/allNodes/perDeviceNodeSelection — kai cannot
+//     node-attribute them while the DRA driver can still bind them);
+//   - gpu.nvidia.com pools published by node-local slices of multiple nodes
+//     (pool → node attribution would be ambiguous; the NVIDIA driver
+//     publishes one pool per node).
+func rejectUnsupportedGPUTopology(mode *allocmode.Mode) error {
+	if mode == nil {
+		return nil
+	}
+	if len(mode.ForeignGPUSliceDrivers) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"unsupported GPU DRA configuration: ResourceSlices from non-NVIDIA GPU driver(s) [%s] are present — mixed GPU DRA drivers are outside AICR's supported validation matrix (see #1327; generalized driver support is tracked in #1652). Remove the foreign driver's slices or validate on a cluster with only gpu.nvidia.com full-GPU DRA",
+			strings.Join(mode.ForeignGPUSliceDrivers, ", ")))
+	}
+	if len(mode.NonNodeLocalGPUSlices) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"unsupported GPU DRA configuration: gpu.nvidia.com ResourceSlice(s) [%s] use non-node-local topologies (nodeSelector/allNodes/perDeviceNodeSelection) — kai-scheduler cannot node-attribute them, and AICR's inference validation supports only the NVIDIA driver's node-local per-node pools (see #1327; generalized topology support is tracked in #1652)",
+			strings.Join(mode.NonNodeLocalGPUSlices, ", ")))
+	}
+	if len(mode.AmbiguousGPUPools) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"unsupported GPU DRA configuration: gpu.nvidia.com ResourceSlice pool(s) [%s] are published by node-local slices of multiple nodes — pool → node attribution is ambiguous, and AICR's inference validation supports only the NVIDIA driver's one-pool-per-node layout (see #1327; generalized topology support is tracked in #1652)",
+			strings.Join(mode.AmbiguousGPUPools, ", ")))
+	}
+	return nil
+}
+
+// describeNoEligibleWorkerNode builds the fail-fast message for
+// selectWorkerNode returning no eligible (node, mechanism) pair, naming any
+// candidates blocked by the kai-compatibility guard or by the cross-ledger
+// scalar-occupancy skip so the operator can act on the actual cause instead
+// of a generic "no nodes".
+func describeNoEligibleWorkerNode(candidates []v1.Node, mode *allocmode.Mode, scalarUsed map[string]int) string {
+	msg := fmt.Sprintf("no eligible GPU node among %d candidate(s) — every candidate is NotReady, absent from the allocation-capability probe's Ready/schedulable node sets, blocked for device-plugin wiring by kai-visible gpu.nvidia.com ResourceSlices, or DRA-capable but carrying scalar nvidia.com/gpu workloads", len(candidates))
+	if mode == nil {
+		return msg
+	}
+	draCapable := make(map[string]bool, len(mode.DRANodes))
+	for _, n := range mode.DRANodes {
+		draCapable[n] = true
+	}
+	var offenders []string
+	var scalarOccupied []string
+	for _, n := range candidates {
+		if raw := mode.NodeLocalGPUSliceDevices[n.Name]; raw > 0 && !draCapable[n.Name] {
+			offenders = append(offenders, fmt.Sprintf("%s (%d raw device(s))", n.Name, raw))
+		}
+		if draCapable[n.Name] && scalarUsed[n.Name] > 0 {
+			scalarOccupied = append(scalarOccupied, fmt.Sprintf("%s (%d scalar GPU(s) in use)", n.Name, scalarUsed[n.Name]))
+		}
+	}
+	if len(offenders) > 0 {
+		msg += fmt.Sprintf(". Node(s) %s carry gpu.nvidia.com ResourceSlices that kai-scheduler counts but AICR cannot validate (incomplete pool, tainted devices, or unreachable node) — fix the ResourceSlices or free a different node", strings.Join(offenders, ", "))
+	}
+	if len(scalarOccupied) > 0 {
+		msg += fmt.Sprintf(". DRA-capable node(s) %s hold GPUs through device-plugin nvidia.com/gpu requests, which the DRA allocator cannot see or avoid — free those workloads or pass --node-selector kubernetes.io/hostname=<clean-node>", strings.Join(scalarOccupied, ", "))
+	}
+	return msg
+}
+
+// nodeReadyForScheduling reports whether the node's Ready condition is True
+// on the CURRENT node object — the freshness guard against probe-time state.
+func nodeReadyForScheduling(node v1.Node) bool {
+	for _, cond := range node.Status.Conditions {
+		if cond.Type == v1.NodeReady {
+			return cond.Status == v1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // nodesMatchingSelector returns nodes whose Labels match every key=value pair
@@ -702,7 +1363,7 @@ func nodesMatchingSelector(nodes []v1.Node, selector map[string]string) []v1.Nod
 // nodeGPUCount returns the node's allocatable nvidia.com/gpu count, or 0 if
 // the resource is absent.
 func nodeGPUCount(node v1.Node) int {
-	q := node.Status.Allocatable[v1.ResourceName("nvidia.com/gpu")]
+	q := node.Status.Allocatable[v1.ResourceName(gpuResourceName)]
 	return int(q.Value())
 }
 
@@ -760,9 +1421,14 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 	return tolerations
 }
 
-// deployInferenceWorkload deploys the ResourceClaimTemplate, KAI Queue,
-// DynamoGraphDeployment, and any routing-mode-specific Gateway API resources.
-// Sets config.deployedByUs = true as soon as any resource is created, so the
+// deployInferenceWorkload deploys the KAI Queue, DynamoGraphDeployment, and
+// any routing-mode-specific Gateway API resources. Worker GPU wiring is
+// MODE-DISPATCHED (config.useDRAWorkerClaims): in DRA mode a
+// ResourceClaimTemplate is applied and workers bind it via
+// podTemplate.spec.resourceClaims; in device-plugin mode no claim template is
+// applied and workers carry nvidia.com/gpu limits, so the workload schedules
+// on clusters without the gpu.nvidia.com DeviceClass (issue #1327). Sets
+// config.deployedByUs = true as soon as any resource is created, so the
 // deferred cleanup in the caller always runs — even if later steps fail.
 func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	// Create namespace (idempotent).
@@ -798,15 +1464,6 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		"CLAIM_TEMPLATE_NAME": inferenceClaimTemplateName,
 	}
 
-	// Apply ResourceClaimTemplate (one claim per worker pod, for DRA GPU
-	// allocation). Required because target overlays are DRA-only.
-	claimPath := filepath.Join("testdata", "inference", "resource-claim-template.yaml")
-	if err := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR,
-		config.namespace, claimPath, templateData, nil); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to apply ResourceClaimTemplate", err)
-	}
-	slog.Info("Applied ResourceClaimTemplate", "name", inferenceClaimTemplateName)
-
 	// Apply KAI Queue (best-effort; KAI scheduler may not be installed).
 	queuePath := filepath.Join("testdata", "inference", "queue.yaml")
 	if err := createOrUpdateFromTemplate(ctx, kaiQueueGVR,
@@ -814,6 +1471,16 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		slog.Info("Failed to apply KAI Queue (scheduler may not be installed)", "error", err)
 	} else {
 		slog.Info("Applied KAI Queue", "name", inferenceQueueName)
+	}
+
+	// DRA wiring mode: apply the ResourceClaimTemplate the worker pods bind
+	// (one claim, ExactCount=1 GPU, per worker). Device-plugin mode skips it —
+	// the template requires the gpu.nvidia.com DeviceClass, which is exactly
+	// what such clusters lack.
+	if config.useDRAWorkerClaims() {
+		if err := applyWorkerClaimTemplate(ctx, config, templateData); err != nil {
+			return err
+		}
 	}
 
 	// Apply DynamoGraphDeployment with programmatic pod-scheduling injection.
@@ -859,8 +1526,43 @@ func inferenceHTTPRouteName() string {
 	return inferenceDeploymentName + "-route"
 }
 
-// applyInferenceWorkerScheduling injects nodeSelector, tolerations, and DRA
-// resourceClaims into each v1beta1 component's podTemplate. Operating on the
+// applyWorkerClaimTemplate creates (or updates) the DRA ResourceClaimTemplate
+// the workers bind, AT THE SERVED resource.k8s.io version the allocmode probe
+// detected (Mode.APIVersion — v1, v1beta2, or v1beta1). v1 and v1beta2 share
+// the `exactly:` request shape and use the parametrized shared template;
+// v1beta1 carries the request fields inline and has its own template file.
+// Built-in recipes floor K8s 1.34 (v1), so the beta paths are reachable only
+// through custom validation catalogs on 1.32/1.33 clusters.
+func applyWorkerClaimTemplate(ctx *validators.Context, config *inferenceWorkloadConfig, templateData map[string]string) error {
+	version := "v1"
+	if config.gpuAllocMode != nil && config.gpuAllocMode.APIVersion != "" {
+		version = config.gpuAllocMode.APIVersion
+	}
+	templateFile := "resource-claim-template.yaml"
+	if version == "v1beta1" {
+		templateFile = "resource-claim-template-v1beta1.yaml"
+	}
+	data := make(map[string]string, len(templateData)+1)
+	for k, v := range templateData {
+		data[k] = v
+	}
+	data["CLAIM_API_VERSION"] = version
+
+	claimPath := filepath.Join("testdata", "inference", templateFile)
+	if err := createOrUpdateFromTemplate(ctx, allocmode.GVRAt(version, "resourceclaimtemplates"),
+		config.namespace, claimPath, data, nil); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to apply ResourceClaimTemplate", err)
+	}
+	slog.Info("Applied ResourceClaimTemplate",
+		"name", inferenceClaimTemplateName, "apiVersion", "resource.k8s.io/"+version)
+	return nil
+}
+
+// applyInferenceWorkerScheduling injects nodeSelector, tolerations, and the
+// mode-dispatched worker GPU wiring into each v1beta1 component's podTemplate:
+// DRA resourceClaims (bound to the applied ResourceClaimTemplate) when
+// config.useDRAWorkerClaims(), device-plugin GPU limits
+// (resources.limits["nvidia.com/gpu"]) otherwise. Operating on the
 // unstructured object (rather than text-substituting into the YAML template)
 // keeps taint values safe from YAML special characters.
 func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
@@ -871,7 +1573,7 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 		return errors.New(errors.ErrCodeInternal, "spec.components not found in DynamoGraphDeployment")
 	}
 
-	// Bind the worker pod to the DRA ResourceClaimTemplate.
+	// DRA wiring: bind the worker pod to the per-run ResourceClaimTemplate.
 	claimBindings := []interface{}{map[string]interface{}{
 		keyName:                     "gpu",
 		"resourceClaimTemplateName": inferenceClaimTemplateName,
@@ -914,9 +1616,17 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 			podSpec["nodeSelector"] = ns
 		}
 
+		// Worker GPU wiring, mode-dispatched: DRA resourceClaims where
+		// full-GPU DRA is usable (kai-scheduler rejects scalar GPU requests
+		// on nodes bearing raw node-local GPU ResourceSlices), device-plugin limits everywhere
+		// else — no gpu.nvidia.com DeviceClass required (#1327).
 		if isInferenceGPUComponent(componentName, componentType) {
-			podSpec["resourceClaims"] = claimBindings
-			ensureMainContainerResourceClaims(podSpec, containerClaimRefs)
+			if config.useDRAWorkerClaims() {
+				podSpec["resourceClaims"] = claimBindings
+				ensureMainContainerResourceClaims(podSpec, containerClaimRefs)
+			} else {
+				ensureMainContainerGPULimit(podSpec, inferenceWorkerGPUCount)
+			}
 		}
 
 		// When the model-weights cache is enabled, mount the pre-populated PVC
@@ -965,6 +1675,10 @@ func isInferenceGPUComponent(componentName, componentType string) bool {
 	}
 }
 
+// ensureMainContainerResourceClaims sets resources.claims on the pod spec's
+// main container (DRA wiring mode), appending a bare named entry when the
+// container is absent — the Dynamo operator merges its defaults into it.
+// Sidecar/auxiliary containers are left untouched.
 func ensureMainContainerResourceClaims(podSpec map[string]interface{}, claims []interface{}) {
 	containers, _ := podSpec["containers"].([]interface{})
 	if len(containers) == 0 {
@@ -992,6 +1706,52 @@ func ensureMainContainerResourceClaims(podSpec map[string]interface{}, claims []
 		resources = map[string]interface{}{}
 	}
 	resources["claims"] = claims
+	container["resources"] = resources
+	containers[mainIdx] = container
+	podSpec["containers"] = containers
+}
+
+// ensureMainContainerGPULimit sets resources.limits["nvidia.com/gpu"] on the
+// pod spec's main container, appending a bare named entry when the container
+// is absent (the Dynamo operator merges its defaults into it). Only the limit
+// is set: for extended resources the API server defaults requests from limits
+// and rejects requests != limits, so the limit alone is the canonical
+// device-plugin GPU request. Sidecar/auxiliary containers are left untouched.
+func ensureMainContainerGPULimit(podSpec map[string]interface{}, count int) {
+	containers, _ := podSpec["containers"].([]interface{})
+	if len(containers) == 0 {
+		containers = []interface{}{map[string]interface{}{keyName: mainContainerName}}
+	}
+	mainIdx := -1
+	for i, raw := range containers {
+		container, ok := raw.(map[string]interface{})
+		if ok && container[keyName] == mainContainerName {
+			mainIdx = i
+			break
+		}
+	}
+	if mainIdx == -1 {
+		mainIdx = len(containers)
+		containers = append(containers, map[string]interface{}{keyName: mainContainerName})
+	}
+
+	container, ok := containers[mainIdx].(map[string]interface{})
+	if !ok {
+		container = map[string]interface{}{keyName: mainContainerName}
+	}
+	resources, _ := container["resources"].(map[string]interface{})
+	if resources == nil {
+		resources = map[string]interface{}{}
+	}
+	limits, _ := resources["limits"].(map[string]interface{})
+	if limits == nil {
+		limits = map[string]interface{}{}
+	}
+	// Quantity as a string — the canonical YAML/JSON form for resource
+	// quantities; an int would also decode, but the string matches what a
+	// hand-written manifest carries.
+	limits[gpuResourceName] = strconv.Itoa(count)
+	resources["limits"] = limits
 	container["resources"] = resources
 	containers[mainIdx] = container
 	podSpec["containers"] = containers
@@ -1528,14 +2288,6 @@ func cleanupInferenceWorkload(ctx *validators.Context, config *inferenceWorkload
 		slog.Debug("Failed to delete KAI Queue", "error", err)
 	}
 
-	// Delete ResourceClaimTemplate.
-	err = ctx.DynamicClient.Resource(resourceClaimTemplateGVR).
-		Namespace(config.namespace).
-		Delete(cleanupCtx, inferenceClaimTemplateName, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		slog.Debug("Failed to delete ResourceClaimTemplate", "error", err)
-	}
-
 	// Delete namespace (cascades all remaining resources).
 	err = ctx.Clientset.CoreV1().Namespaces().Delete(cleanupCtx, config.namespace, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -1545,7 +2297,9 @@ func cleanupInferenceWorkload(ctx *validators.Context, config *inferenceWorkload
 	}
 }
 
-// inferServicePort returns port 8000 from the service if present, otherwise the first port.
+// inferServicePort returns port 8000 from the service if present, then a
+// port named "http", then the first port; defaults to 8000 when the service
+// exposes no ports.
 func inferServicePort(svc v1.Service) int32 {
 	for _, p := range svc.Spec.Ports {
 		if p.Port == 8000 {

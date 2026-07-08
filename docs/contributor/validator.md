@@ -101,10 +101,15 @@ per run. Per-phase containers are built from
 | `performance` | Cluster meets perf thresholds | NCCL bandwidth, AIPerf TTFT p99 |
 
 Performance runs **last** on purpose: its inference-perf benchmark saturates
-every GPU on the node and tears the DynamoGraphDeployment (and its DRA
-ResourceClaims) down asynchronously. Running it before conformance starved
-conformance's GPU-needing checks (notably `dra-support`, whose 1-GPU test pod
-failed to schedule with "cannot allocate all claims" on single-node clusters).
+every GPU on the node and tears the DynamoGraphDeployment (and, in DRA
+wiring mode, its DRA ResourceClaims) down asynchronously. Running it before
+conformance starved conformance's GPU-needing checks (historically
+`dra-support`, whose 1-GPU test pod failed to schedule with "cannot allocate
+all claims" on single-node clusters; since #1620 that behavioral subtest runs
+only where full-GPU DRA is usable — the GPU allocation checks are
+capability-driven via the shared `validators/internal/allocmode` probe, with
+inference-perf's worker wiring mode-dispatched per chosen node — but the
+saturation-ordering rationale stands for every GPU-needing check).
 
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is

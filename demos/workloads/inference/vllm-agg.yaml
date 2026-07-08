@@ -15,6 +15,14 @@
 # Prerequisites:
 #   - KAI Scheduler installed (provides default-parent-queue)
 #   - Dynamo platform deployed (dynamo-crds + dynamo-platform)
+#
+# NOTE (#1327 / PR 3 scope): this manifest deliberately KEEPS DRA
+# ResourceClaims. It is a user-facing static entry point applied as-is, and
+# today's default (dual-advertised) clusters schedule it through kai, which
+# rejects scalar device-plugin GPU requests on nodes bearing raw node-local GPU ResourceSlices —
+# a scalar conversion would break it there, while keeping main's DRA form is
+# zero regression in either direction. Its device-plugin conversion lands
+# atomically with PR 3's recipe flip (ComputeDomain-only default).
 
 ---
 # KAI Scheduler queue for Dynamo workloads

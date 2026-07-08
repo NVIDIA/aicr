@@ -124,9 +124,9 @@ func ScriptSection(feature string) string {
 
 // FeatureDescriptions maps feature names to human-readable descriptions.
 var FeatureDescriptions = map[string]string{
-	featureDRASupport:         "DRA GPU allocation test",
+	featureDRASupport:         "DRA support test (submission collector deploys a gpu.nvidia.com ResourceClaim pod — requires full-GPU DRA; mode-aware collection: #1629)",
 	featureGangScheduling:     "Gang scheduling co-scheduling test",
-	featureSecureAccess:       "Secure accelerator access verification",
+	featureSecureAccess:       "Secure accelerator access verification (submission collector exercises DRA ResourceClaim isolation — requires full-GPU DRA; device-plugin-mode collection: #1629)",
 	featureAcceleratorMetrics: "Accelerator metrics (DCGM exporter)",
 	featureAIServiceMetrics:   "AI service metrics (Prometheus ServiceMonitor discovery)",
 	featureInferenceGateway:   "Inference API gateway conditions",
