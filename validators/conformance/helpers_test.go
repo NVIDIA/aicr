@@ -15,12 +15,115 @@
 package main
 
 import (
+	"context"
+	stderrors "errors"
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+// fakeNetTimeoutError implements net.Error with Timeout() == true, standing in
+// for a transport-level timeout as wrapped by *url.Error.
+type fakeNetTimeoutError struct{}
+
+func (fakeNetTimeoutError) Error() string   { return "dial tcp: i/o timeout" }
+func (fakeNetTimeoutError) Timeout() bool   { return true }
+func (fakeNetTimeoutError) Temporary() bool { return true }
+
+// TestClassifyK8sReadError pins the shared read-error classifier used by BOTH
+// claim-read sites (secure-access validateDRAPatterns and dra-support
+// validateDRAAllocation): NotFound → ErrCodeNotFound; context, apiserver,
+// transport (*url.Error/net.Error), and rate-limiter-deadline timeouts →
+// ErrCodeTimeout; RBAC and generic errors → ErrCodeInternal.
+func TestClassifyK8sReadError(t *testing.T) {
+	claimsGR := schema.GroupResource{Group: "resource.k8s.io", Resource: "resourceclaims"}
+	tests := []struct {
+		name       string
+		err        error
+		wantTarget error
+		wantMsg    string
+	}{
+		{
+			name:       "NotFound",
+			err:        k8serrors.NewNotFound(claimsGR, "c"),
+			wantTarget: errors.New(errors.ErrCodeNotFound, ""),
+			wantMsg:    "not found",
+		},
+		{
+			name:       "Forbidden (RBAC) stays Internal",
+			err:        k8serrors.NewForbidden(claimsGR, "c", stderrors.New("rbac denied")),
+			wantTarget: errors.New(errors.ErrCodeInternal, ""),
+			wantMsg:    "failed to read",
+		},
+		{
+			name:       "generic error stays Internal",
+			err:        stderrors.New("apiserver hiccup"),
+			wantTarget: errors.New(errors.ErrCodeInternal, ""),
+			wantMsg:    "failed to read",
+		},
+		{
+			name:       "context canceled",
+			err:        context.Canceled,
+			wantTarget: errors.New(errors.ErrCodeTimeout, ""),
+			wantMsg:    "timed out reading",
+		},
+		{
+			name:       "context deadline exceeded",
+			err:        context.DeadlineExceeded,
+			wantTarget: errors.New(errors.ErrCodeTimeout, ""),
+			wantMsg:    "timed out reading",
+		},
+		{
+			name:       "apiserver Timeout",
+			err:        k8serrors.NewTimeoutError("request did not complete", 1),
+			wantTarget: errors.New(errors.ErrCodeTimeout, ""),
+			wantMsg:    "timed out reading",
+		},
+		{
+			name:       "apiserver ServerTimeout",
+			err:        k8serrors.NewServerTimeout(claimsGR, "get", 1),
+			wantTarget: errors.New(errors.ErrCodeTimeout, ""),
+			wantMsg:    "timed out reading",
+		},
+		{
+			name: "transport timeout via *url.Error wrapping net.Error",
+			err: &url.Error{
+				Op: "Get", URL: "https://10.0.0.1:6443/apis/resource.k8s.io/v1",
+				Err: fakeNetTimeoutError{},
+			},
+			wantTarget: errors.New(errors.ErrCodeTimeout, ""),
+			wantMsg:    "timed out reading",
+		},
+		{
+			name: "client-go rate limiter deadline (plain-string chain)",
+			err: fmt.Errorf("client rate limiter Wait returned an error: %w",
+				stderrors.New("rate: Wait(n=1) would exceed context deadline")),
+			wantTarget: errors.New(errors.ErrCodeTimeout, ""),
+			wantMsg:    "timed out reading",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyK8sReadError(tt.err, "ResourceClaim c")
+			if got == nil {
+				t.Fatal("classifyK8sReadError() = nil, want an error")
+			}
+			if !stderrors.Is(got, tt.wantTarget) {
+				t.Errorf("error = %v, want code %v to match", got, tt.wantTarget)
+			}
+			if !strings.Contains(got.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want message containing %q", got, tt.wantMsg)
+			}
+		})
+	}
+}
 
 func TestFirstContainerImage(t *testing.T) {
 	tests := []struct {

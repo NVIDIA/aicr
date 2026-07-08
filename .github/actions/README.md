@@ -311,6 +311,7 @@ jobs:
       - uses: ./.github/actions/go-test
         with:
           go_version: ${{ steps.versions.outputs.go }}
+          helm_version: ${{ steps.versions.outputs.helm }}
           coverage_report: 'true'
       - uses: ./.github/actions/go-lint
         with:
@@ -331,6 +332,7 @@ jobs:
       - uses: ./.github/actions/go-test
         with:
           go_version: ${{ steps.versions.outputs.go }}
+          helm_version: ${{ steps.versions.outputs.helm }}
       - uses: ./.github/actions/go-build-release
         id: release
         with:
@@ -395,5 +397,6 @@ To use these actions in other repositories:
 - uses: NVIDIA/aicr/.github/actions/go-test@main
   with:
     go_version: '1.26'
+    helm_version: 'v4.2.2'
     coverage_report: 'true'
 ```

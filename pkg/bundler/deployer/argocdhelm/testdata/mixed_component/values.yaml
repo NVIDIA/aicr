@@ -13,7 +13,21 @@
 #                    Defaults to .Chart.Version when unset at install time.
 #                    Example: --set targetRevision=v1.0.0
 #
+#   deployer.namePrefix          Prefix prepended to every child Application
+#                                name (multi-tenant collision avoidance).
+#   deployer.destinationServer   Target cluster API URL for child
+#                                Applications (default in-cluster).
+#   deployer.project             Argo CD project for child Applications.
+#
+#   deployer.cascadeDelete is intentionally NOT an install-time value —
+#   it is bundle-time only (aicr bundle --set deployer:cascadeDelete=true);
+#   helm --set deployer.cascadeDelete=... fails the values schema.
+#
 ---
+deployer:
+  destinationServer: https://kubernetes.default.svc
+  namePrefix: ""
+  project: default
 gpuoperator:
   driver:
     version: "580"

@@ -41,10 +41,12 @@ and `resourceslices`.
 
 ## Dynamic Resource Allocation (DRA)
 
-All AICR recipes include the `nvidia-dra-driver-gpu` component, which advertises
-GPUs via the Kubernetes DRA API instead of the legacy device plugin. DRA provides
-structured GPU device advertisement, claim-based allocation, and integration with
-gang scheduling.
+All AICR recipes include the `nvidia-dra-driver-gpu` component, which exposes
+GPU resources via the Kubernetes DRA API. In the supported configuration,
+whole-GPU allocation goes through the device plugin (`nvidia.com/gpu` limits),
+while DRA serves ComputeDomain/IMEX channels and other structured resources —
+claim-based allocation, structured device advertisement, and gang-scheduling
+integration.
 
 ### Feature Gate Details
 
@@ -78,18 +80,29 @@ per node**. Using both concurrently causes GPU over-admission — both systems
 advertise all GPUs independently, so the scheduler may admit more GPU pods than
 physical GPUs available.
 
-For DRA-only (recommended):
-
-```shell
-aicr bundle -r recipe.yaml --set gpuoperator:devicePlugin.enabled=false
-```
-
-For device-plugin-only (legacy):
+For device-plugin whole-GPU allocation (recommended — matches the NVIDIA DRA
+driver's supported configuration; the DRA driver stays active for
+ComputeDomain/IMEX and other non-GPU resources, only its full-GPU
+advertisement is disabled):
 
 ```shell
 aicr bundle -r recipe.yaml \
   --set dradriver:gpuResourcesEnabledOverride=false \
   --set dradriver:resources.gpus.enabled=false
+```
+
+For DRA-only (not currently supported by AICR validation — the
+inference-perf validator's worker wiring is capability-driven and can bind
+DRA claims, but its GPU-capacity discovery requires scalar device-plugin
+`nvidia.com/gpu` allocatable, which is absent when the device plugin is
+disabled; the one device-plugin-converted demo manifest,
+`vllm-metrics-test.yaml`, is likewise unschedulable there. See the full-GPU
+DRA opt-in discussion on issue
+[#1327](https://github.com/NVIDIA/aicr/issues/1327) for the KEP-5004 path
+that will lift this):
+
+```shell
+aicr bundle -r recipe.yaml --set gpuoperator:devicePlugin.enabled=false
 ```
 
 ## GPU Driver Setup

@@ -742,8 +742,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 
 		// Create-or-update (not plain Create) so a stale claim left by a prior
 		// run that was hard-killed before its deferred cleanup ran is reclaimed
-		// rather than failing the apply with AlreadyExists. Matches the shared
-		// resourceClaimTemplateGVR pattern in inference_perf_constraint.go.
+		// rather than failing the apply with AlreadyExists. The RoCE NET path
+		// legitimately still deploys a DRA ResourceClaimTemplate (per-GPU NIC
+		// claims via the shared resourceClaimTemplateGVR in dra_gvr.go).
 		claimPath := filepath.Join("testdata", string(fabricRoCE), string(service), "roce-claim.yaml")
 		if cerr := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, config.Namespace, claimPath, templateData, nil); cerr != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply RoCE ResourceClaimTemplate", cerr)

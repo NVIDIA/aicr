@@ -243,18 +243,53 @@ inference-perf pod, like `HF_TOKEN`), not from the catalog. Debug-only: you must
 delete the `aicr-inference-perf-<suffix>` namespace manually afterward, or it
 keeps GPU workers running.
 
-Expected flow (~5–7 min on H100): readiness pre-flight → deploy
-`ResourceClaimTemplate` + `DynamoGraphDeployment` in a per-run namespace
+Expected flow (~5–7 min on H100): readiness pre-flight → deploy a
+`DynamoGraphDeployment` in a per-run namespace
 `aicr-inference-perf-<8-hex-suffix>` → wait for `state=successful` (image pull
-+ model load) → `/health` probe → AIPerf benchmark Job parses throughput +
-TTFT p99 → compare to recipe constraints (10 % tolerance) → cleanup.
++ model load) → endpoint readiness via a real `/v1/chat/completions` inference
+request (stricter than a `/health` probe, which returns 200 before the model
+can actually serve) → AIPerf benchmark Job parses throughput +
+TTFT p99 → compare to recipe constraints (10 % tolerance) → cleanup. Worker
+GPU wiring is **capability-driven** (the same probe the conformance checks
+use) and supports exactly two GPU allocation configurations: (1) nodes
+publishing **node-local `gpu.nvidia.com` ResourceSlices** (full-GPU DRA — i.e.
+dual-advertised clusters, today's AICR default), where workers bind a DRA
+`ResourceClaimTemplate` sized from the validated per-node device count —
+kai-scheduler treats nodes bearing raw node-local GPU ResourceSlices as
+DRA-only and rejects scalar GPU requests, so the claim path is the only
+schedulable wiring there;
+and (2) **ComputeDomain-only / no full-GPU slices** (device-plugin nodes),
+where workers request GPUs via `nvidia.com/gpu` limits, which need no
+`gpu.nvidia.com` DeviceClass. Anything outside those two states fails fast
+with an actionable error instead of guessing: full-GPU ResourceSlices from a
+non-NVIDIA GPU driver, allocated `ResourceClaim`s requesting a non-NVIDIA
+"gpu"-named DeviceClass, `gpu.nvidia.com` slices using non-node-local
+topologies (`nodeSelector`/`allNodes`/per-device node selection), pools
+published by node-local slices of multiple nodes, and allocated
+`ResourceClaim`s from pools no node-local slice publishes (occupancy is
+attributed to nodes through the slices' `spec.nodeName` — the K8s API does
+not require pool names to be node names) are all rejected —
+these are outside the NVIDIA DRA driver's supported configuration
+([#1327](https://github.com/NVIDIA/aicr/issues/1327)); generalized
+topology/driver support is tracked in
+[#1652](https://github.com/NVIDIA/aicr/issues/1652). Pure DRA-only clusters
+(device plugin disabled) remain unsupported: candidate GPU-node discovery
+requires scalar `nvidia.com/gpu` allocatable (see the AKS setup guide's
+DRA-only note). The chosen node and wiring mode are recorded in the check's
+evidence output.
 
 All Dynamo Frontend and worker pods pin to a single GPU node via
 `kubernetes.io/hostname` for a stable per-node baseline. On a shared cluster
-where some GPUs on a candidate node are already held by another workload's
-DRA `ResourceClaim`, the validator picks the candidate with the most free
-GPUs and sizes the benchmark to that count — so the check does not need an
-explicit hostname override to avoid saturated nodes. The `inference-throughput`
+where some GPUs on a candidate node are already in use by other workloads,
+the validator picks the candidate with the most free GPUs *within the
+node's own allocation ledger* and sizes the benchmark to that count: DRA
+`ResourceClaim` allocations subtract from DRA capacity, and device-plugin
+`nvidia.com/gpu` occupancy from device-plugin capacity. A DRA-wired
+candidate carrying **any** scalar `nvidia.com/gpu` workload is skipped
+entirely — the device plugin's physical device assignments are invisible to
+the DRA allocator, so claims placed there could double-book a plugin-held
+GPU. The check therefore does not need an explicit hostname override to
+avoid saturated nodes. The `inference-throughput`
 gate is a full-node baseline, so when the benchmark runs on fewer than the
 node's full GPU count the gate is scaled down by the same `freeGPUs / nodeGPUs`
 fraction (throughput scales ~linearly at fixed concurrency-per-GPU) — a healthy
@@ -562,7 +597,7 @@ aicr validate \
   --toleration dedicated=worker-workload:NoExecute
 ```
 
-These flags affect the inner benchmark pods that run on GPU nodes (NCCL workers, Dynamo workers), not the validator orchestrator Job itself. For `inference-perf` specifically, `--node-selector` narrows the pool of candidate GPU nodes — the validator then picks the candidate with the most free GPUs (after accounting for in-use DRA allocations) and pins all Dynamo Frontend + worker pods to that node via `kubernetes.io/hostname`. The AIPerf benchmark runner pod is CPU-only, uses a tolerate-all / no-nodeSelector pod spec, and is unaffected by these flags.
+These flags affect the inner benchmark pods that run on GPU nodes (NCCL workers, Dynamo workers), not the validator orchestrator Job itself. For `inference-perf` specifically, `--node-selector` narrows the pool of candidate GPU nodes — the validator then picks the candidate with the most free GPUs (subtracting same-ledger occupancy only — DRA allocations from DRA capacity, device-plugin requests from device-plugin capacity — and skipping DRA candidates that carry scalar `nvidia.com/gpu` workloads) and pins all Dynamo Frontend + worker pods to that node via `kubernetes.io/hostname`. The AIPerf benchmark runner pod is CPU-only, uses a tolerate-all / no-nodeSelector pod spec, and is unaffected by these flags.
 
 ### A check reports `skipped` unexpectedly
 
@@ -629,24 +664,32 @@ kubectl -n aicr-validation get jobs | grep -E 'aicr-inference-perf-|aicr-aiperf-
 kubectl -n aicr-validation logs -l job-name=aicr-inference-perf-<hash> --tail=200
 kubectl -n aicr-validation logs -l job-name=aicr-aiperf-<run-id-hash>  --tail=200
 
-# the Dynamo workload (DynamoGraphDeployment, Frontend, worker pods,
-# ResourceClaimTemplate) lives in a separate per-run namespace:
+# the Dynamo workload (DynamoGraphDeployment, Frontend, worker pods)
+# lives in a separate per-run namespace:
 kubectl get ns | grep aicr-inference-perf-
-kubectl -n aicr-inference-perf-<suffix> get dynamographdeployments,pods,svc
+# (resourceclaimtemplates is populated in DRA wiring mode; empty in
+# device-plugin mode — both are normal)
+kubectl -n aicr-inference-perf-<suffix> get dynamographdeployments,pods,svc,resourceclaimtemplates
 ```
 
 Common causes: image pull throttling, vLLM model load slowness, and every
-candidate GPU node being fully saturated by existing DRA (`ResourceClaim`)
-allocations. In the saturated case the validator fails fast with a message
-like `no candidate GPU node has free GPUs — all N matched node(s) are
-saturated by existing DRA ResourceClaim allocations`; the fix is to free
-GPUs on one of the candidate nodes, or to pass
+eligible candidate GPU node being saturated by existing workloads. In the
+saturated case the validator fails fast with a message like `no eligible
+candidate GPU node has free GPUs (N matched; eligible candidates are
+saturated by existing workloads in the selected mechanism's ledger ...)`.
+Occupancy is subtracted per allocation ledger (DRA allocations from DRA
+capacity, device-plugin requests from device-plugin capacity), and nodes
+excluded for other reasons — NotReady, probe-ineligible, kai-blocked raw
+slices, or DRA-capable but carrying scalar `nvidia.com/gpu` workloads — are
+not counted as saturated;
+the fix is to free GPUs on one of the candidate nodes, or to pass
 `--node-selector kubernetes.io/hostname=<node>` to target a specific node
-you know is free. On clusters where the DRA API is not installed or the
-validator's service account cannot list `resourceclaims`, the check falls
-back to sizing purely from `Status.Allocatable["nvidia.com/gpu"]` — which
-does not account for in-use DRA devices and can leave the benchmark
-Pending until timeout on a partially-occupied node.
+you know is free. GPU-occupancy accounting fails closed rather than treating
+GPUs as free: a pod list failure always fails the check, and so does any
+error listing DRA `resourceclaims` (e.g. RBAC denied, timeout) — with one
+exception: when the `resource.k8s.io` API is not served at all (NotFound),
+which deterministically means zero DRA usage, the validator proceeds with
+device-plugin pod requests alone.
 
 ## Related
 
