@@ -775,9 +775,15 @@ func TestValidateState_ThreadsClientVersion(t *testing.T) {
 	// validator.WithVersion(c.version).
 	client := newClientForBundleTest(t)
 	client.version = "v9.9.9"
+	// gpu-operator is included so GPU allocation-policy resolution (#1327)
+	// finds a whole-GPU advertiser — a recipe with neither gpu-operator[-ocp]
+	// nor the DRA opt-in fails ValidateState at conversion by design (row 6).
 	rec := newRecipeResultForBundleTest(client,
-		[]recipe.ComponentRef{{Name: "c1", Type: recipe.ComponentTypeHelm}},
-		[]ComponentRef{{Name: "c1", Kind: "Helm"}},
+		[]recipe.ComponentRef{
+			{Name: "c1", Type: recipe.ComponentTypeHelm},
+			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},
+		},
+		[]ComponentRef{{Name: "c1", Kind: "Helm"}, {Name: "gpu-operator", Kind: "Helm"}},
 	)
 	results, err := client.ValidateState(t.Context(), rec, &Snapshot{},
 		WithValidationNoCluster(true))
