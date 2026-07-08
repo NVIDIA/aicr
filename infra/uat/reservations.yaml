@@ -71,7 +71,7 @@
 reservations:
   - name: aws-h100
     cloud: aws
-    reservation-id: cr-0cbe491320188dfa6
+    reservation-id: cr-0e16ad417f9a5bf69
     accelerator: h100
     gpu-count: 8
     cluster-config-path: tests/uat/aws/cluster-config.yaml
