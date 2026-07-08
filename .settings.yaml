@@ -64,14 +64,14 @@ testing_tools:
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
   helm_diff: 'v3.15.10'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.6.0'
+  helmfile: 'v1.7.0'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: '44c617bc12b5f7f1ca1da5333ccbd3865b314c132168b4ce1127f47e756008dc'
-    linux_arm64: '9f29b29ff017af7dc6feca632f9a683a6c8c5a0dc5a96dd1a2df3f1016c14823'
-    darwin_amd64: '6a1b197e43262de2ab2c08ff532764693345bc522d7b2eedc7bf8bfd2fe08780'
-    darwin_arm64: '49bb9f88bf264f0c004213971cd308925676f6e5200bb940498f5acbc06107fc'
+    linux_amd64: 'cac1f5f851ba5d3aa4ad06373752a69132c0ad70171bc45275ec4c014877c8a3'
+    linux_arm64: '2b674b68ed5a6ff628c4800cd369051176bf98dffe596d6db426422916d4195d'
+    darwin_amd64: 'cdf782db13a0dcd5c17973796e03d0d2068433b09d78511fb79976b238718f77'
+    darwin_arm64: 'cadabe6b7df68366ac43edc17145d9bd55d0934428d064b8bb671d845f0df715'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
