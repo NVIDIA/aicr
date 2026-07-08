@@ -61,11 +61,13 @@ func TestParseArgoDeployerOptions(t *testing.T) {
 		{"multiple unknown keys report the first sorted key", map[string]string{"zzz": "1", "aaa": "1"}, nil, true, `"aaa"`},
 		{"invalid project rejected", map[string]string{"project": "Tenant_A"}, nil, true, "project"},
 		{"empty project rejected", map[string]string{"project": ""}, nil, true, "must not be empty"},
-		// IsDNS1123Subdomain alone accepts a 64-char single label (it only
-		// caps total length at 253); ValidateProject adds the per-label
-		// 63-char cap to stay aligned with the install-time schema pattern.
-		{"project 64-char label rejected", map[string]string{"project": strings.Repeat("a", 64)}, nil, true, "exceeds 63"},
-		{"project dotted labels each within cap", map[string]string{"project": strings.Repeat("a", 63) + "." + strings.Repeat("b", 63)},
+		// ValidateProject mirrors IsDNS1123Subdomain exactly: a 64-char
+		// label is a legal Kubernetes object name (only the 253-char total
+		// is capped), so an AppProject with such a name can exist and the
+		// reference must be accepted — matching the install-time schema.
+		{"project 64-char label accepted", map[string]string{"project": strings.Repeat("a", 64)},
+			&ArgoDeployerOptions{Project: strings.Repeat("a", 64)}, false, ""},
+		{"project dotted labels accepted", map[string]string{"project": strings.Repeat("a", 63) + "." + strings.Repeat("b", 63)},
 			&ArgoDeployerOptions{Project: strings.Repeat("a", 63) + "." + strings.Repeat("b", 63)}, false, ""},
 		{"non-bool cascadeDelete rejected", map[string]string{"cascadeDelete": "yes-please"}, nil, true, "cascadeDelete"},
 	}

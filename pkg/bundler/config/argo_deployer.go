@@ -97,12 +97,13 @@ func ValidateDestinationServer(raw string) error {
 
 // ValidateProject reports whether value is a usable child Application
 // spec.project. Empty is allowed (means "use the default project").
-// IsDNS1123Subdomain caps the total length at 253 characters but does NOT
-// enforce the per-label 63-character cap from RFC 1123 — a 64-character
-// single-label value passes it. The install-time values.schema.json
-// pattern enforces the per-label cap, so enforce it here too to keep the
-// bundle-time and install-time gates aligned (see the validation-contract
-// parity test in pkg/bundler/deployer/argocdhelm).
+// Bundle-time and install-time (values.schema.json) gates both mirror
+// IsDNS1123Subdomain exactly: total length capped at 253 characters,
+// per-label caps deliberately NOT enforced — Kubernetes object names
+// don't enforce them, so an AppProject with a 64+-character label is a
+// legal object and rejecting a reference to it would be a false positive
+// with no workaround (see the validation-contract parity test in
+// pkg/bundler/deployer/argocdhelm).
 func ValidateProject(value string) error {
 	if value == "" {
 		return nil
@@ -110,12 +111,6 @@ func ValidateProject(value string) error {
 	if errs := validation.IsDNS1123Subdomain(value); len(errs) > 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid deployer project %q: %s", value, errs[0]))
-	}
-	for _, label := range strings.Split(value, ".") {
-		if len(label) > validation.DNS1123LabelMaxLength {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid deployer project %q: label %q exceeds %d characters", value, label, validation.DNS1123LabelMaxLength))
-		}
 	}
 	return nil
 }

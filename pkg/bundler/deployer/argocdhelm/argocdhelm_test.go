@@ -1471,6 +1471,17 @@ func TestHelmTemplate_AppNameOverride(t *testing.T) {
 			installTimeSet: "tenant-a",
 			wantParentName: "tenant-a",
 		},
+		{
+			// Helm's plain --set type inference: appName=true arrives as a
+			// bool. The parent template pipes through `quote` and every
+			// child template's collision guard coerces via `toString`, so
+			// the render must succeed with the parent named "true" —
+			// previously the guard's `eq` crashed with "incompatible types
+			// for comparison".
+			name:           "install-time --set appName=true (type-inferred bool) renders",
+			installTimeSet: "true",
+			wantParentName: "true",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1579,6 +1590,72 @@ func TestGenerate_AppNameValidatedAtBoundary(t *testing.T) {
 	if !strings.Contains(err.Error(), "DNS-1123") {
 		t.Errorf("error should mention DNS-1123 validation, got: %v", err)
 	}
+}
+
+// TestGenerate_InnerParentCollisionUsesEffectiveAppName verifies the
+// effective parent name is forwarded to the delegated argocd.Generator so
+// its parent-collision check tests children against THIS deployer's parent
+// ("aicr-stack" or --app-name), not argocd's own "nvidia-stack" default.
+// Without the forward, a component legitimately named "nvidia-stack"
+// (possible via an external --data registry) was falsely rejected as an
+// internal error.
+func TestGenerate_InnerParentCollisionUsesEffectiveAppName(t *testing.T) {
+	t.Run("component named nvidia-stack bundles under the default parent", func(t *testing.T) {
+		// External registry declaring a component named "nvidia-stack" —
+		// the embedded registry has no such component, and the inner
+		// argocd generator's own default parent name is exactly
+		// "nvidia-stack".
+		dataDir := t.TempDir()
+		registryYAML := `apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components:
+  - name: nvidia-stack
+    displayName: Nvidia Stack
+    valueOverrideKeys:
+      - nvidiastack
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/nvidia-stack
+`
+		if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registryYAML), 0o600); err != nil {
+			t.Fatalf("WriteFile registry.yaml: %v", err)
+		}
+		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+		layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: dataDir})
+		if err != nil {
+			t.Fatalf("NewLayeredDataProvider: %v", err)
+		}
+
+		rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+			{
+				Name: "nvidia-stack", Namespace: "nvidia-stack", Chart: "nvidia-stack",
+				Version: "v1.0.0", Type: recipe.ComponentTypeHelm,
+				Source: "https://charts.example.com",
+			},
+		})
+		rr.DeploymentOrder = []string{"nvidia-stack"}
+		rr.BindDataProvider(layered)
+		g := &Generator{
+			RecipeResult:    rr,
+			ComponentValues: map[string]map[string]any{"nvidia-stack": {}},
+			Version:         "v0.0.0-test",
+		}
+		if _, genErr := g.Generate(context.Background(), t.TempDir()); genErr != nil {
+			t.Fatalf("Generate() error = %v; a component named \"nvidia-stack\" must not collide with THIS deployer's parent %q", genErr, DefaultAppName)
+		}
+	})
+
+	t.Run("forwarded AppName is load-bearing for the collision check", func(t *testing.T) {
+		g := newTestHelmGenerator(t)
+		g.AppName = "gpu-operator" // collides with the recipe's only component
+		_, err := g.Generate(context.Background(), t.TempDir())
+		if err == nil {
+			t.Fatal("expected collision error, got nil")
+		}
+		if !strings.Contains(err.Error(), "collides") {
+			t.Errorf("error %q does not mention the parent-name collision", err.Error())
+		}
+	})
 }
 
 // TestHelmTemplate_MixedComponentPreChildResolvesFromOCI is the live-render
@@ -2244,6 +2321,7 @@ func TestValuesSchemaPatterns(t *testing.T) {
 		match   bool
 	}{
 		{"destinationServer accepts plain https host", props.DestinationServer.Pattern, "https://kubernetes.default.svc", true},
+		{"destinationServer accepts explicit empty (reset to baked default)", props.DestinationServer.Pattern, "", true},
 		{"destinationServer accepts host with port", props.DestinationServer.Pattern, "https://api.example.com:6443", true},
 		{"destinationServer rejects embedded credentials", props.DestinationServer.Pattern, "https://u:p@host:6443", false},
 		{"destinationServer rejects port without hostname", props.DestinationServer.Pattern, "https://:6443", false},
@@ -2251,8 +2329,13 @@ func TestValuesSchemaPatterns(t *testing.T) {
 		{"project accepts single label", props.Project.Pattern, "default", true},
 		{"project accepts dotted subdomain", props.Project.Pattern, "team-a.prod", true},
 		{"project rejects empty label", props.Project.Pattern, "a..b", false},
-		{"project rejects 70-char label", props.Project.Pattern, strings.Repeat("a", 70), false},
+		// Per-label caps are deliberately NOT enforced: IsDNS1123Subdomain
+		// only caps the total length, and a 64+-char label is a legal
+		// Kubernetes object name — an AppProject with a 70-char name can
+		// exist, so rejecting the reference would be a false positive.
+		{"project accepts 70-char label (legal k8s object name)", props.Project.Pattern, strings.Repeat("a", 70), true},
 		{"project accepts 63-char label", props.Project.Pattern, strings.Repeat("a", 63), true},
+		{"project accepts explicit empty (reset to baked default)", props.Project.Pattern, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2330,7 +2413,10 @@ func TestValidationContractParity(t *testing.T) {
 			{"destinationServer at-sign in path", "destinationServer", "https://host/path@thing", false},
 			{"project valid dotted subdomain", "project", "team-a.prod", true},
 			{"project empty label", "project", "a..b", false},
-			{"project 64-char label", "project", strings.Repeat("a", 64), false},
+			// Both gates mirror IsDNS1123Subdomain exactly: a 64-char
+			// label is a legal Kubernetes object name (only the 253-char
+			// total is capped), so both gates must accept it.
+			{"project 64-char label", "project", strings.Repeat("a", 64), true},
 			{"namePrefix valid trailing hyphen", "namePrefix", "tenant-a-", true},
 			{"namePrefix uppercase", "namePrefix", "Tenant-", false},
 		}
@@ -2381,6 +2467,32 @@ func TestValidationContractParity(t *testing.T) {
 		}
 		if !strings.Contains(out, "project: 'default'") {
 			t.Errorf("rendered output should fall back to the baked default project after null deletes the key; got:\n%s", out)
+		}
+	})
+
+	// An explicit-empty install-time value passes the schema's `^$|`
+	// alternative and resets to the baked default via the child
+	// template's `| default` fallback. The CLI cannot produce this case
+	// (ParseArgoDeployerOptions rejects an empty project, and the
+	// component-path parser rejects empty values), so it is install-time
+	// only — pin the fallback rendering here.
+	t.Run("explicit-empty project renders baked default", func(t *testing.T) {
+		out, helmValid := helmTemplate(t, "--set-string", "project", "")
+		if !helmValid {
+			t.Fatalf("helm template failed for --set-string deployer.project=\"\"; expected schema to accept empty and template to fall back\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "project: 'default'") {
+			t.Errorf("rendered output should fall back to the baked default project for an explicit-empty value; got:\n%s", out)
+		}
+	})
+
+	t.Run("explicit-empty destinationServer renders in-cluster default", func(t *testing.T) {
+		out, helmValid := helmTemplate(t, "--set-string", "destinationServer", "")
+		if !helmValid {
+			t.Fatalf("helm template failed for --set-string deployer.destinationServer=\"\"; expected schema to accept empty and template to fall back\noutput:\n%s", out)
+		}
+		if !strings.Contains(out, "server: 'https://kubernetes.default.svc'") {
+			t.Errorf("rendered output should fall back to the in-cluster destination server for an explicit-empty value; got:\n%s", out)
 		}
 	})
 }

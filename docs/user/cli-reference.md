@@ -1481,6 +1481,8 @@ The `deployer` prefix is reserved: with `--deployer argocd` or `--deployer argoc
 
 **Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the three string keys ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (note the dot, not colon). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. `cascadeDelete` is bundle-time only — it adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
 
+**Use `--set-string` for values Helm would type-infer:** the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
+
 ```shell
 # Deploy child Applications to a remote cluster under a tenant prefix
 aicr bundle -r recipe.yaml --deployer argocd \
@@ -2399,11 +2401,16 @@ the full flag reference.
 ##### argocd
 
 Delete the parent `Application` that owns the bundle's child Applications
-(app-of-apps). AICR does **not** set the
+(app-of-apps). By default AICR does **not** set the
 `resources-finalizer.argocd.argoproj.io` finalizer on generated
 Applications, so a plain `kubectl delete` removes only the Application CR
-and leaves the managed resources running. Use one of the cascade-aware
-flows instead:
+and leaves the managed resources running. Bundles generated with
+`--set deployer:cascadeDelete=true` (see
+[Argo CD Deployer Options](#argo-cd-deployer-options)) are the exception:
+the finalizer is baked onto the parent and every child Application, so a
+plain `kubectl delete` on the parent already cascades to the managed
+resources. For default bundles, use one of the cascade-aware flows
+instead:
 
 ```bash
 # Argo CD CLI — cascade is the default; foreground waits for resources

@@ -72,6 +72,7 @@
 package argocdhelm
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -274,10 +275,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateDestinationServer(g.DestinationServer); err != nil {
 		return nil, err
 	}
-	// ValidateProject (not ValidateAppName) is load-bearing: it also
-	// enforces the per-label 63-character cap the install-time
-	// values.schema.json pattern applies, so a baked Project default can
-	// never make the generated bundle fail its own schema at install time.
+	// ValidateProject (not ValidateAppName) is load-bearing: it mirrors
+	// IsDNS1123Subdomain exactly, matching the install-time
+	// values.schema.json pattern, so a baked Project default can never
+	// make the generated bundle fail its own schema at install time.
 	if err := bundlercfg.ValidateProject(g.Project); err != nil {
 		return nil, err
 	}
@@ -317,7 +318,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
 		VendorCharts:           g.VendorCharts,
-		// Forward ONLY CascadeDelete: child finalizers survive the YAML
+		// Forward the effective parent name so the inner generator's
+		// parent-collision check tests against THIS deployer's parent
+		// ("aicr-stack" or --app-name), not argocd's own "nvidia-stack"
+		// default. The inner app-of-apps.yaml is discarded, so the only
+		// observable effect is a correct collision baseline.
+		AppName: cmp.Or(g.AppName, DefaultAppName),
+		// Forward CascadeDelete too: child finalizers survive the YAML
 		// round-trip in transformApplication untouched. NamePrefix /
 		// DestinationServer / Project are NOT forwarded — those fields
 		// are rewritten into `.Values.deployer.*` template expressions
@@ -635,13 +642,23 @@ func writeValuesSchema(outputDir string) (string, int64, error) {
 						// https:// must not be `:` or `/` so a hostname-less
 						// URL (https://:6443, https:///path) fails closed,
 						// matching ValidateHTTPSURL's Hostname() check.
-						Pattern: `^https://[^'"\s@:/][^'"\s@]*$`,
+						// The `^$|` alternative allows an explicit-empty
+						// install-time value: the child template's
+						// `| default` fallback then renders the baked
+						// in-cluster default.
+						Pattern: `^$|^https://[^'"\s@:/][^'"\s@]*$`,
 					},
 					Project: valuesSchemaProperty{
 						Type: schemaTypeString,
-						// Exact per-label DNS-1123 subdomain form: each
-						// label <= 63 chars, no empty labels (a..b).
-						Pattern:   `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$`,
+						// Mirrors IsDNS1123Subdomain exactly (total length
+						// capped at 253 via maxLength; per-label caps are
+						// deliberately NOT enforced because Kubernetes
+						// object names don't enforce them — a 64+-char
+						// label is a legal AppProject name). The `^$|`
+						// alternative allows an explicit-empty install-time
+						// value to reset to the baked default via the child
+						// template's `| default` fallback.
+						Pattern:   `^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`,
 						MaxLength: 253,
 					},
 				},
@@ -1063,11 +1080,16 @@ func transformApplication(srcDir, templatesDir, folderName, componentName, overr
 // are Helm template control flow that renders to nothing; Helm template
 // files need not be valid YAML pre-render. The appName fallback MUST
 // mirror parentAppTemplate's `.Values.appName | default "aicr-stack"`.
+// The `toString` coercion is load-bearing: a plain `--set appName=true`
+// (or `=123`) arrives as a bool/int64 through Helm's type inference, and
+// `eq` fails with "incompatible types for comparison" against the string
+// $childName. The parent template survives the same input because it
+// pipes through `quote`; the guard must coerce likewise.
 func childNameGuard(componentName string) string {
 	return fmt.Sprintf(
 		`{{- $childName := printf "%%s%%s" ((.Values.deployer | default dict).namePrefix | default "") %q -}}
 {{- if gt (len $childName) %d }}{{ fail (printf "deployer.namePrefix produces child Application name %%q (%%d chars): child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children" $childName (len $childName)) }}{{ end -}}
-{{- if eq $childName (.Values.appName | default %q) }}{{ fail (printf "child Application name %%q collides with the parent Application name: choose a different deployer.namePrefix or appName" $childName) }}{{ end -}}
+{{- if eq $childName (.Values.appName | default %q | toString) }}{{ fail (printf "child Application name %%q collides with the parent Application name: choose a different deployer.namePrefix or appName" $childName) }}{{ end -}}
 `, componentName, argocd.HelmReleaseNameMaxLen, argocd.HelmReleaseNameMaxLen, DefaultAppName)
 }
 
