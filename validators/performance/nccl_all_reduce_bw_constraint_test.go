@@ -72,6 +72,66 @@ func TestEmitDiagnosticBlock(t *testing.T) {
 	}
 }
 
+func TestLauncherLogsUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		logs string
+		want bool
+	}{
+		{"empty", "", true},
+		{"whitespace only", "  \n\t ", true},
+		{"kubelet GC placeholder", "unable to retrieve container logs for containerd://abc123", true},
+		{"placeholder amid text", "line1\nunable to retrieve container logs for containerd://x\n", true},
+		{"real logs", "NCCL INFO Bootstrap : Using eth0\nsome output", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := launcherLogsUnavailable(tt.logs); got != tt.want {
+				t.Errorf("launcherLogsUnavailable(%q) = %v, want %v", tt.logs, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLauncherTerminationTail(t *testing.T) {
+	const ns = "aicr-test"
+	pod := func(name string, cs []corev1.ContainerStatus) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Status:     corev1.PodStatus{ContainerStatuses: cs},
+		}
+	}
+
+	t.Run("returns terminated message", func(t *testing.T) {
+		p := pod("launcher-a", []corev1.ContainerStatus{{
+			Name:  "node",
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "  mpirun: ORTE failed\n"}},
+		}})
+		client := fake.NewClientset(p)
+		if got := launcherTerminationTail(context.Background(), client, ns, "launcher-a"); got != "mpirun: ORTE failed" {
+			t.Errorf("got %q, want trimmed termination message", got)
+		}
+	})
+
+	t.Run("empty when no terminated message", func(t *testing.T) {
+		p := pod("launcher-b", []corev1.ContainerStatus{{
+			Name:  "node",
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		}})
+		client := fake.NewClientset(p)
+		if got := launcherTerminationTail(context.Background(), client, ns, "launcher-b"); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("empty when pod missing", func(t *testing.T) {
+		client := fake.NewClientset()
+		if got := launcherTerminationTail(context.Background(), client, ns, "nope"); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+}
+
 func TestTailLines(t *testing.T) {
 	tests := []struct {
 		name string
