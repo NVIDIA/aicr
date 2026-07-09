@@ -1,0 +1,221 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL All-Reduce TrainingRuntime — AKS ND-series H100 InfiniBand fabric.
+#
+# Derived from the EKS H100 template (testdata/h100/eks/runtime.yaml) with the
+# transport swapped from EFA/Libfabric to NCCL's built-in IB/verbs:
+#   - Fabric: 8x 400Gb NDR InfiniBand HCAs per node (mlx5), exposed to pods by
+#     the network-operator rdma-shared-device-plugin. Workers request one unit
+#     of ${RDMA_RESOURCE_*} (rdma/hca_shared_devices_a — a shared pool, one
+#     unit mounts every /dev/infiniband device).
+#   - Transport: NCCL_NET_PLUGIN=none bypasses the aws-ofi-nccl (EFA/Libfabric)
+#     plugin bundled in this image so NCCL's built-in IB transport binds the
+#     mlx5 HCAs directly; no FI_* / EFA env. NCCL_IB_HCA is deliberately not
+#     pinned — NCCL auto-detects the HCAs and skips ports without active link.
+#   - IPC_LOCK stays: NCCL's IB transport registers pinned (memlocked) buffers
+#     via ibverbs, same requirement the EFA path has.
+# Everything else (image, MPI bootstrap, SSH wiring, resource shape) is kept
+# in lockstep with the EKS template. The image ships sshd, nccl-tests, and
+# rdma-core (EFA itself is an ibverbs device), so it runs IB unmodified.
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      # Mount the SSH secret to /tmp/mpi-keys (not /root/.ssh) so that init containers
+      # can copy the private key to /root/.ssh with chmod 600. Kubernetes secret volumes
+      # default to 0644, and SSH refuses to use a private key with permissions > 0600.
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        # Required: JobSet sets spec.subdomain on pods and creates the headless service
+        # that makes pod FQDNs (e.g. nccl-all-reduce-tj-node-0-0.nccl-all-reduce-tj) resolvable.
+        enableDNSHostnames: true
+        # Required: publish DNS records for pods not yet Ready so mpirun can resolve
+        # workers before they finish initialization.
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: launcher
+        replicas: 1
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                # Fix SSH key permissions: the MPI plugin mounts the secret at /tmp/mpi-keys
+                # with default 0644 permissions. SSH refuses to use id_rsa with > 0600.
+                # This init container copies the key to a writable emptyDir (/root/.ssh)
+                # with correct permissions before mpirun starts.
+                - name: fix-ssh-perms
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  # mpi-ssh-auth is injected by the MPI plugin into the pod volumes list
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                # Container must be named "node" — the MPI plugin only processes containers
+                # with this name (constants.Node) to inject: SSH auth mount, hostfile mount,
+                # and OpenMPI env vars (OMPI_MCA_orte_default_hostfile, OMPI_MCA_plm_rsh_args,
+                # OMPI_MCA_orte_default_slots, OMPI_MCA_orte_keep_fqdn_hostnames).
+                - name: node
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  env:
+                  # Unlike the EKS template, /opt/amazon/ofi-nccl/... is omitted:
+                  # with NCCL_NET_PLUGIN=none the aws-ofi-nccl plugin must not be
+                  # discoverable, so NCCL's built-in IB transport is used.
+                  # mpirun propagates this path to workers via -x LD_LIBRARY_PATH below.
+                  - name: LD_LIBRARY_PATH
+                    value: "/opt/amazon/openmpi/lib:/opt/nccl/build/lib:/usr/local/nvidia/lib"
+                  - name: PATH
+                    value: "$PATH:/usr/bin"
+                  command:
+                  - /opt/amazon/openmpi/bin/mpirun
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - -bind-to
+                  - none
+                  - --mca
+                  - plm_rsh_agent
+                  - ssh
+                  # Override plm_rsh_args to suppress host-key checking (known_hosts is empty
+                  # on fresh pods) and include retry count so mpirun waits for worker sshd.
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  - -x
+                  - LD_LIBRARY_PATH
+                  - -x
+                  - PATH
+                  - -x
+                  - NCCL_DEBUG=WARN
+                  # Use NCCL's built-in IB/verbs transport over the ND-series
+                  # InfiniBand HCAs; disable the bundled aws-ofi-nccl (EFA) plugin.
+                  - -x
+                  - NCCL_NET_PLUGIN=none
+                  - -x
+                  - NCCL_IB_DISABLE=0
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  - -x
+                  - NCCL_IGNORE_DISABLED_P2P=1
+                  - /opt/nccl-tests/build/${TEST_TYPE}
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  # ssh-config emptyDir holds the chmod-fixed keys from the init container.
+                  # The plugin will also mount mpi-ssh-auth at /tmp/mpi-keys on this container.
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      # This replicatedJob must be named "node" — the MPI plugin identifies the training
+      # workers by constants.Node ("node") to override replicas from TrainJob.spec.trainer.numNodes
+      # and to mount SSH auth credentials so the launcher can SSH in.
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                initContainers:
+                # Fix authorized_keys permissions so sshd accepts incoming connections.
+                # The MPI plugin mounts the secret at /tmp/mpi-keys with 0644; sshd
+                # with StrictModes requires authorized_keys to not be group/world writable,
+                # and requires the .ssh directory to be 0700.
+                - name: fix-ssh-perms
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                # Container must be named "node" for the MPI plugin to mount SSH auth volume.
+                - name: node
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  # Run sshd in foreground so the launcher can SSH in and run the NCCL test.
+                  command: ["/usr/sbin/sshd", "-De"]
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+${RDMA_RESOURCE_LIMITS}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+${RDMA_RESOURCE_REQUESTS}
+                  securityContext:
+                    capabilities:
+                      # NCCL's IB transport registers pinned (memlocked) GPU/host
+                      # buffers via ibverbs — IPC_LOCK lifts RLIMIT_MEMLOCK.
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  # ssh-config holds the chmod-fixed authorized_keys from the init container.
+                  # The plugin will also mount mpi-ssh-auth at /tmp/mpi-keys on this container.
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher
