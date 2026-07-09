@@ -25,7 +25,7 @@
 # GO_VERSION and CHAINSAW_VERSION are declared before the first FROM so both are
 # global build args usable in the FROM lines below (an ARG declared between
 # stages is not visible to the next FROM).
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.26.5
 ARG CHAINSAW_VERSION=v0.2.15
 
 FROM ghcr.io/kyverno/chainsaw:${CHAINSAW_VERSION} AS chainsaw
