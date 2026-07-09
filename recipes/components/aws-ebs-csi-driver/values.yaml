@@ -54,6 +54,34 @@ node:
     rollingUpdate:
       maxUnavailable: "10%"
 
+# Sidecar memory limits. The chart defaults (32Mi) are too tight for the node
+# DaemonSet's livenessProbe / node-driver-registrar containers on high-core
+# instances (e.g. p5.48xlarge, 192 vCPU). The Go binary's resident set alone is
+# ~24Mi (file-rss); adding per-P runtime overhead (Go sizes runtime structures
+# by GOMAXPROCS, which defaults to the host core count) pushes the working set
+# to ~31.7Mi during cold start under bringup load, cgroup-OOM-killing
+# livenessProbe (observed: CONSTRAINT_MEMCG, RSS 31.7Mi vs 32Mi). Killing the
+# livenessProbe removes the /healthz endpoint the ebs-plugin livenessProbe
+# depends on, so kubelet restarts ebs-plugin -> CrashLoopBackOff -> the
+# aws-ebs-csi-driver health check trips -> expected-resources (deployment
+# validation) fails. 128Mi gives headroom above the observed peak and is
+# independent of instance core count.
+sidecars:
+  nodeDriverRegistrar:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 40Mi
+      limits:
+        memory: 128Mi
+  livenessProbe:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 40Mi
+      limits:
+        memory: 128Mi
+
 storageClasses: []
 
 # Provision a cluster-default StorageClass (ebs-csi-default-sc: gp3,
