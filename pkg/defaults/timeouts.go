@@ -571,6 +571,14 @@ const (
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
 	// standard HTTPClientTimeout is appropriate.
 	NCCLTrainerArchiveDownloadTimeout = 5 * time.Minute
+
+	// TrainJobAdmissionRetryTimeout bounds retrying the NCCL TrainJob create when the
+	// Kubeflow Trainer validating webhook rejects it because the webhook's informer cache
+	// has not yet observed the just-created TrainingRuntime. waitForTrainingRuntime already
+	// confirms the runtime is visible at the API server, but the webhook validates runtimeRef
+	// against a separate lister that lags that strongly-consistent read — a freshness the
+	// client cannot observe. This bounds how long we let the webhook cache catch up.
+	TrainJobAdmissionRetryTimeout = 1 * time.Minute
 )
 
 // Inference performance validation timeouts.
@@ -910,6 +918,11 @@ const (
 	// TrainingRuntimePollInterval is the retry interval when waiting
 	// for a TrainingRuntime resource to become visible via the API.
 	TrainingRuntimePollInterval = 500 * time.Millisecond
+
+	// TrainJobAdmissionRetryInterval is the backoff between NCCL TrainJob create
+	// attempts while the Kubeflow Trainer validating webhook's informer cache
+	// catches up to a freshly-created TrainingRuntime.
+	TrainJobAdmissionRetryInterval = 500 * time.Millisecond
 )
 
 // Termination and truncation limits for validator output.
