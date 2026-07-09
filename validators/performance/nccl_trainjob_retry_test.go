@@ -129,6 +129,30 @@ func TestApplyTrainJobWithRetry_PropagatesNonRaceError(t *testing.T) {
 	}
 }
 
+func TestApplyTrainJobWithRetry_TimeoutClassifiedWhenBudgetExpiresMidCreate(t *testing.T) {
+	// Simulates the retry budget elapsing while createUnstructured is in flight:
+	// the aborted create returns a non-race error, but because retryCtx is
+	// already done the result must be classified as ErrCodeTimeout rather than
+	// leaking that incidental error (CodeRabbit finding on the non-race return).
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), ncclGVRListKinds)
+	client.PrependReactor("create", "trainjobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(stderrors.New("apiserver hiccup"))
+	})
+	data := map[string]string{"NAMESPACE": "aicr-validation", "WORKER_COUNT": "2"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // budget already exhausted before the first create returns
+
+	err := applyTrainJobWithRetry(ctx, client, "aicr-validation",
+		filepath.Join("testdata", "trainjob.yaml"), data)
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+		t.Errorf("expected ErrCodeTimeout when the retry budget expired, got %v", err)
+	}
+}
+
 func TestApplyTrainJobWithRetry_TimesOutWhenWebhookNeverCatchesUp(t *testing.T) {
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), ncclGVRListKinds)
 	client.PrependReactor("create", "trainjobs", func(k8stesting.Action) (bool, runtime.Object, error) {

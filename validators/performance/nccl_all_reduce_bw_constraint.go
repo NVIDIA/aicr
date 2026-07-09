@@ -830,6 +830,15 @@ func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface
 			}
 			return nil
 		}
+		// If the retry budget expired — including while createUnstructured was in
+		// flight — classify as timeout rather than leaking whatever error the
+		// aborted create returned (which is not the webhook race and would
+		// otherwise fall through to the non-race return below with ErrCodeInternal).
+		if retryCtx.Err() != nil {
+			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
+				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
+				createErr, map[string]interface{}{"attempts": attempt})
+		}
 		if !isTrainingRuntimeNotYetVisible(createErr) {
 			// A real failure (or a genuinely missing runtime) — do not mask it.
 			return createErr
@@ -839,7 +848,7 @@ func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface
 		select {
 		case <-retryCtx.Done():
 			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
-				"TrainJob rejected by Trainer webhook (TrainingRuntime not yet visible to webhook cache) after retries",
+				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
 				createErr, map[string]interface{}{"attempts": attempt})
 		case <-time.After(defaults.TrainJobAdmissionRetryInterval):
 		}
