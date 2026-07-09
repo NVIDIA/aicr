@@ -108,6 +108,27 @@ type ComponentConfig struct {
 	// templates create a ClusterPolicy CR of the ClusterPolicy CRD it
 	// ships in `crds/`. See https://github.com/NVIDIA/aicr/issues/914.
 	HasSelfRefCRDs bool `yaml:"hasSelfRefCRDs,omitempty"`
+
+	// ManifestsUseChartCRDs signals that the component's attached
+	// manifestFiles (wrapped by the bundler into an injected -post
+	// local-helm release) instantiate CRs whose CRDs this component's
+	// own chart installs at apply time. The -post wrapper shares the
+	// parent's DAG level, so the stratified sub-helmfile layout (see
+	// HasSelfRefCRDs above) does not help: helmfile diffs every
+	// release in a level before applying any of them, and the `needs:`
+	// edge orders apply, not diff — on a fresh cluster the wrapper's
+	// helm-diff REST-mapper check can therefore never pass. This flag
+	// instructs the helmfile deployer to emit `disableValidation: true`
+	// on the release whose folder carries the post-phase manifests —
+	// the injected -post wrapper, or the collapsed single folder under
+	// --vendor-charts (mixed components do not split there). Releases
+	// without post manifests and -pre wrappers keep the mapper check;
+	// see issue #929. Canonical examples: network-operator (the AKS
+	// overlay attaches a NicClusterPolicy CR whose CRD the chart
+	// installs) and kubeflow-trainer (platform-kubeflow attaches a
+	// ClusterTrainingRuntime CR of the CRD shipped in the chart's
+	// crds/).
+	ManifestsUseChartCRDs bool `yaml:"manifestsUseChartCRDs,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.

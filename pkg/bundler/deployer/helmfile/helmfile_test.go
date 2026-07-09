@@ -542,6 +542,122 @@ func TestBuildHelmfile_DisableValidationPrimaryOnly(t *testing.T) {
 	}
 }
 
+// TestBuildHelmfile_DisableValidationPostManifests asserts that the
+// registry flag ManifestsUseChartCRDs emits `disableValidation: true`
+// on the release whose folder carries the post-phase manifests
+// (Folder.CarriesPostManifests) — not the primary, not the -pre
+// wrapper. The manifests instantiate CRs whose CRDs the parent chart
+// installs at apply time; because the folder shares the parent's DAG
+// level, helm-diff runs its REST-mapper check before the parent has
+// applied, so on a fresh cluster the check can never pass
+// (network-operator's NicClusterPolicy on AKS is the canonical case).
+// The primary keeps validation: its own chart renders no CRs of
+// unregistered CRDs, and #929's typo-check argument still holds for
+// -pre wrappers, whose manifests apply before the chart and therefore
+// cannot depend on its CRDs.
+func TestBuildHelmfile_DisableValidationPostManifests(t *testing.T) {
+	folders := []localformat.Folder{
+		{Index: 1, Dir: "001-network-operator-pre", Kind: localformat.KindLocalHelm,
+			Name: "network-operator-pre", Parent: "network-operator"},
+		{Index: 2, Dir: "002-network-operator", Kind: localformat.KindUpstreamHelm,
+			Name: "network-operator", Parent: "network-operator",
+			Upstream: &localformat.Upstream{Chart: "network-operator", Repo: "https://helm.ngc.nvidia.com/nvidia", Version: "26.1.1"}},
+		{Index: 3, Dir: "003-network-operator-post", Kind: localformat.KindLocalHelm,
+			Name: "network-operator-post", Parent: "network-operator",
+			CarriesPostManifests: true},
+	}
+	ns := map[string]string{"network-operator": "nvidia-network-operator"}
+	flags := map[string]componentFlags{"network-operator": {ManifestsUseChartCRDs: true}}
+	doc, err := buildHelmfile(folders, ns, nil, flags)
+	if err != nil {
+		t.Fatalf("buildHelmfile() error = %v", err)
+	}
+	if len(doc.Releases) != 3 {
+		t.Fatalf("expected 3 releases (pre + primary + post), got %d", len(doc.Releases))
+	}
+	if doc.Releases[0].DisableValidation {
+		t.Error("release[0] (network-operator-pre) DisableValidation = true, want false — " +
+			"-pre manifests apply before the chart and cannot depend on its CRDs")
+	}
+	if doc.Releases[1].DisableValidation {
+		t.Error("release[1] (network-operator) DisableValidation = true, want false — " +
+			"the primary chart has no self-referencing CRDs; only the post-manifest folder needs the bypass")
+	}
+	if !doc.Releases[2].DisableValidation {
+		t.Error("release[2] (network-operator-post) DisableValidation = false, want true — " +
+			"the wrapper's CRs reference CRDs the parent installs after the wrapper's diff runs")
+	}
+}
+
+// TestBuildHelmfile_DisableValidationVendoredMixed pins the vendored
+// layout: under --vendor-charts a mixed component collapses into ONE
+// folder (Name == Parent, no -post split) whose templates/ embed the
+// post-phase manifests as post-install hooks, so a release-name-suffix
+// check would silently skip the bypass there. The marker travels with
+// the manifests instead: the collapsed folder gets disableValidation
+// when the flag is set, and a vendored pure-Helm sibling (no post
+// manifests, no marker) keeps the mapper check.
+func TestBuildHelmfile_DisableValidationVendoredMixed(t *testing.T) {
+	folders := []localformat.Folder{
+		{Index: 1, Dir: "001-network-operator", Kind: localformat.KindLocalHelm,
+			Name: "network-operator", Parent: "network-operator",
+			CarriesPostManifests: true},
+		{Index: 2, Dir: "002-nfd", Kind: localformat.KindLocalHelm,
+			Name: "nfd", Parent: "nfd"},
+	}
+	ns := map[string]string{"network-operator": "nvidia-network-operator", "nfd": "node-feature-discovery"}
+	flags := map[string]componentFlags{"network-operator": {ManifestsUseChartCRDs: true}}
+	doc, err := buildHelmfile(folders, ns, nil, flags)
+	if err != nil {
+		t.Fatalf("buildHelmfile() error = %v", err)
+	}
+	if len(doc.Releases) != 2 {
+		t.Fatalf("expected 2 releases, got %d", len(doc.Releases))
+	}
+	if !doc.Releases[0].DisableValidation {
+		t.Error("release[0] (vendored mixed network-operator) DisableValidation = false, want true — " +
+			"the collapsed vendored folder carries the CRD-dependent post manifests as hook templates")
+	}
+	if doc.Releases[1].DisableValidation {
+		t.Error("release[1] (vendored pure-Helm nfd) DisableValidation = true, want false — " +
+			"no post manifests, the mapper check must stay on")
+	}
+}
+
+// TestBuildHelmfile_DisableValidationBothFlags pins the kubeflow-trainer
+// shape: hasSelfRefCRDs covers the primary (its templates create CRs of
+// CRDs in its own crds/, #914) while manifestsUseChartCRDs covers the
+// injected -post wrapper (platform-kubeflow attaches a
+// ClusterTrainingRuntime CR as manifestFiles). Both releases need the
+// helm-diff bypass; each flag stays scoped to its own release.
+func TestBuildHelmfile_DisableValidationBothFlags(t *testing.T) {
+	folders := []localformat.Folder{
+		{Index: 1, Dir: "001-kubeflow-trainer", Kind: localformat.KindUpstreamHelm,
+			Name: "kubeflow-trainer", Parent: "kubeflow-trainer",
+			Upstream: &localformat.Upstream{Chart: "trainer", Repo: "oci://ghcr.io/kubeflow/charts", Version: "v2.1.0"}},
+		{Index: 2, Dir: "002-kubeflow-trainer-post", Kind: localformat.KindLocalHelm,
+			Name: "kubeflow-trainer-post", Parent: "kubeflow-trainer",
+			CarriesPostManifests: true},
+	}
+	ns := map[string]string{"kubeflow-trainer": "kubeflow-system"}
+	flags := map[string]componentFlags{"kubeflow-trainer": {HasSelfRefCRDs: true, ManifestsUseChartCRDs: true}}
+	doc, err := buildHelmfile(folders, ns, nil, flags)
+	if err != nil {
+		t.Fatalf("buildHelmfile() error = %v", err)
+	}
+	if len(doc.Releases) != 2 {
+		t.Fatalf("expected 2 releases (primary + post), got %d", len(doc.Releases))
+	}
+	if !doc.Releases[0].DisableValidation {
+		t.Error("release[0] (kubeflow-trainer) DisableValidation = false, want true — " +
+			"hasSelfRefCRDs covers the primary's own CR templates (#914)")
+	}
+	if !doc.Releases[1].DisableValidation {
+		t.Error("release[1] (kubeflow-trainer-post) DisableValidation = false, want true — " +
+			"manifestsUseChartCRDs covers the wrapper's ClusterTrainingRuntime manifest")
+	}
+}
+
 // TestGenerate_NamespaceOwningPreManifest is the integration counterpart:
 // a pre-manifest containing a Namespace resource flows end-to-end through
 // localformat.Write → buildHelmfile and surfaces as `createNamespace: false`

@@ -83,6 +83,9 @@ func TestWrite_VendorCharts_PureHelm(t *testing.T) {
 	if !strings.HasPrefix(want, "001-") {
 		t.Errorf("dir prefix = %q, want 001-", want)
 	}
+	if folders[0].CarriesPostManifests {
+		t.Error("folders[0].CarriesPostManifests = true, want false — pure-Helm vendored folder has no post manifests")
+	}
 
 	// Wrapper Chart.yaml present and references the vendored subchart.
 	chartYAML, err := os.ReadFile(filepath.Join(outDir, folders[0].Dir, "Chart.yaml"))
@@ -154,6 +157,10 @@ func TestWrite_VendorCharts_Mixed(t *testing.T) {
 	}
 	if len(recs) != 1 {
 		t.Fatalf("got %d vendor records, want 1", len(recs))
+	}
+	if !folders[0].CarriesPostManifests {
+		t.Error("folders[0].CarriesPostManifests = false, want true — the collapsed vendored folder " +
+			"embeds the post manifests as hook templates and deployers key the helm-diff bypass off this marker")
 	}
 
 	// Manifest in templates/ has post-install hook annotation.

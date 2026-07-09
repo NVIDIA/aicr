@@ -190,6 +190,11 @@ func writeVendoredHelmFolder(
 		// render; the chart-owns-Namespace detection does not apply
 		// here. Default to true to match the upstream-helm path.
 		CreateNamespace: true,
+		// Mixed components collapse into this single folder under
+		// VendorCharts, so the post-phase manifests live in its
+		// templates/ as post-install hooks (see writeMixedManifests
+		// above) — the marker travels with them.
+		CarriesPostManifests: len(manifests) > 0,
 	}, rec, nil
 }
 

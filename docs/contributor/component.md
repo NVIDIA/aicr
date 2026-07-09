@@ -85,7 +85,7 @@ operator:
 - `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
 - `storageClassPaths:` — where `--storage-class` is injected
 - `podScheduling.workload.workloadSelectorPaths` — for workload-pod placement
-- `gkeCriticalPriority`, `hasSelfRefCRDs` — narrow service-specific quirks (see godoc on `ComponentConfig` for when these apply)
+- `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` — narrow service-specific quirks (see godoc on `ComponentConfig` for when these apply)
 
 **4. Run `make bom-docs`** and commit the regenerated
 `docs/user/container-images.md` in the same PR. CLAUDE.md treats this
@@ -137,7 +137,7 @@ One-liner per field:
 | `storageClassPaths` | Where `--storage-class` is written |
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
-| `gkeCriticalPriority`, `hasSelfRefCRDs` | Narrow service-specific flags (see godoc) |
+| `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
 ## `nodeScheduling.system` vs `accelerated`
 

@@ -295,6 +295,12 @@ metadata:
 	if folders[1].Name != "gpu-operator-post" {
 		t.Errorf("folders[1].Name = %q, want gpu-operator-post", folders[1].Name)
 	}
+	if folders[0].CarriesPostManifests {
+		t.Error("folders[0].CarriesPostManifests = true, want false — primary carries no post manifests")
+	}
+	if !folders[1].CarriesPostManifests {
+		t.Error("folders[1].CarriesPostManifests = false, want true — deployers key the helm-diff bypass off this marker")
+	}
 
 	// Primary has NO Chart.yaml (upstream-helm)
 	if _, err := os.Stat(filepath.Join(outDir, "001-gpu-operator", "Chart.yaml")); !os.IsNotExist(err) {

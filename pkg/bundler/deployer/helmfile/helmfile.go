@@ -417,12 +417,14 @@ func writeTopHelmfile(outputDir string, subPaths []string) (string, int64, error
 
 // componentFlags captures the registry-derived behavioral flags that
 // affect how a component's release is rendered in the generated
-// helmfile. Today only HasSelfRefCRDs is consumed (it drives
-// disableValidation: true per release); the struct exists as a
-// gathering point so future per-release knobs can be added without
-// changing call signatures.
+// helmfile. HasSelfRefCRDs drives disableValidation: true on the
+// primary release; ManifestsUseChartCRDs drives it on the injected
+// -post wrapper release. The struct exists as a gathering point so
+// future per-release knobs can be added without changing call
+// signatures.
 type componentFlags struct {
-	HasSelfRefCRDs bool
+	HasSelfRefCRDs        bool
+	ManifestsUseChartCRDs bool
 }
 
 // componentFlagsByName returns a per-component map of registry flags
@@ -446,7 +448,8 @@ func componentFlagsByName(refs []recipe.ComponentRef, provider recipe.DataProvid
 			continue
 		}
 		out[ref.Name] = componentFlags{
-			HasSelfRefCRDs: cfg.HasSelfRefCRDs,
+			HasSelfRefCRDs:        cfg.HasSelfRefCRDs,
+			ManifestsUseChartCRDs: cfg.ManifestsUseChartCRDs,
 		}
 	}
 	return out, nil

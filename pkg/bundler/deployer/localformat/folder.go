@@ -67,4 +67,14 @@ type Folder struct {
 	// --create-namespace because that namespace lacks the release's
 	// ownership annotations.
 	CreateNamespace bool
+	// CarriesPostManifests is true when this folder's chart contains the
+	// component's post-phase raw manifests: the injected "<name>-post"
+	// wrapper for non-vendored mixed components, or the single vendored
+	// wrapper whose templates/ embed the manifests as post-install hooks
+	// (VendorCharts collapses mixed components into one folder). Deployers
+	// key manifest-specific per-release behavior off this marker (e.g.
+	// helmfile's disableValidation for ManifestsUseChartCRDs components)
+	// instead of re-deriving the folder shape from release-name suffixes,
+	// which the vendored layout does not carry.
+	CarriesPostManifests bool
 }
