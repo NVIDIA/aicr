@@ -68,3 +68,17 @@ driver:
 #   serviceMonitor:
 #     additionalLabels:
 #       release: kube-prometheus  # Must match kube-prometheus-stack Helm release name
+
+# AKS Ubuntu 24.04 GPU nodes run containerd 2.x (2.3 on current node
+# images) with a version=2 root config at /etc/containerd/config.toml. The container-toolkit's default
+# config source ("command" = `containerd config dump`) returns the
+# MIGRATED effective config (version=4), so the generated
+# /etc/containerd/conf.d/99-nvidia.toml declares a higher version than
+# the root file and containerd refuses to start ("drop-in config
+# version 4 higher than root config version 2"), taking the node
+# NotReady. Reading the on-disk file instead emits a matching
+# version=2 drop-in. See issue #1688.
+toolkit:
+  env:
+    - name: RUNTIME_CONFIG_SOURCE
+      value: file
