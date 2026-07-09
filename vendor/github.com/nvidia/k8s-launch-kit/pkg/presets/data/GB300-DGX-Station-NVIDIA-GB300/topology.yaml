@@ -1,0 +1,46 @@
+machineType: GB300-DGX-Station
+manufacturer: NVIDIA
+gpuType: NVIDIA-GB300
+nicModel: Nvidia ConnectX-8 for Galaxy GB300 -Prime (ConnectX-8)
+gpuInterconnect: ""
+numaNodes: 9
+
+capabilities:
+  nodes:
+    sriov: true
+    rdma: true
+    ib: true
+
+# GB300 DGX Station (Galaxy GB300 -Prime), single-Grace-CPU workstation:
+#   - 1× Grace CPU exposing 9 NUMA nodes (Grace UCM die-affinity layout).
+#   - 1× NVIDIA GB300 GPU (no NVLink — single-GPU box, gpuInterconnect empty).
+#   - 1× ConnectX-8 dual-port NIC on PCIe path 0001:00 → 0001:01 → 0001:02 → 0001:03.
+#     The platform wires the upstream root port at Gen5 x8 (kernel reports
+#     "252 Gb/s available PCIe bandwidth, limited by 32.0 GT/s PCIe x8");
+#     even though the NIC silicon advertises Gen6 x16 to its closest parent,
+#     the SoC root limits aggregate host throughput to ~252 Gb/s. Single-port
+#     ib_write_bw on this NIC tops out around 206 Gb/s.
+#
+# Layout (collapsed: one rail per NIC, master function only — matches l8k
+# discover with --collapse-nic-rails=true, the default):
+#   rail 0 @ 0001:03:00.0 → mlx5_0 → connectedGPU: GPU0
+#
+# Classification rationale: nvidia-smi topo -m reports every NIC ↔ GPU0 as
+# SYS (no PIX, no NODE) because the NIC and GPU live behind separate root
+# complexes on the GB300 SoC. The skill's NODE-fallback rule applies: the
+# NIC's numaNode (0) overlaps with the GPU's NUMA Affinity (0-8), so the
+# NIC is east-west tied to GPU0 with gpuProximity: NODE.
+
+pfs:
+  - deviceID: "1023"
+    rdmaDevice: mlx5_0
+    pciAddress: "0001:03:00.0"
+    networkInterface: enP1p3s0f0np0
+    traffic: east-west
+    rail: 0
+    numaNode: 0
+    connectedGPU: GPU0
+    gpuProximity: NODE
+    psid: nvd0000000110
+    partNumber: MLX000717
+    model: Nvidia ConnectX-8 for Galaxy GB300 -Prime

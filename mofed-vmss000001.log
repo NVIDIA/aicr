@@ -1,0 +1,216 @@
+2026-07-08T20:59:51.092504830Z [08-Jul-26_20:59:51] NVIDIA driver container exec start
+2026-07-08T20:59:51.214363075Z [08-Jul-26_20:59:51] Updating system CA certificates (Ubuntu)...
+2026-07-08T20:59:51.931953328Z Updating certificates in /etc/ssl/certs...
+2026-07-08T20:59:51.931972968Z 0 added, 0 removed; done.
+2026-07-08T20:59:51.931975246Z Running hooks in /etc/ca-certificates/update.d...
+2026-07-08T20:59:51.931977174Z done.
+2026-07-08T20:59:52.015805301Z [08-Jul-26_20:59:52] Container full version: 25.10-1.2.8.0-2
+2026-07-08T20:59:52.018003514Z [08-Jul-26_20:59:52] Verifying loaded modules will not prevent future driver restart
+2026-07-08T20:59:52.069433628Z [08-Jul-26_20:59:52] Executing driver sources container
+2026-07-08T20:59:52.076743181Z [08-Jul-26_20:59:52] Drivers inventory path is set: /mnt/drivers-inventory
+2026-07-08T20:59:52.079555863Z [08-Jul-26_20:59:52] Unsetting driver ready state
+2026-07-08T20:59:52.081372744Z 
+2026-07-08T20:59:52.127552077Z [08-Jul-26_20:59:52] Query VFs info from [1] devices
+2026-07-08T20:59:52.130304006Z [08-Jul-26_20:59:52] Query representors info from [1] devices
+2026-07-08T20:59:52.144127213Z 
+2026-07-08T20:59:55.501205296Z Get:1 http://archive.ubuntu.com/ubuntu noble InRelease [256 kB]
+2026-07-08T20:59:55.501226698Z Get:2 http://security.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+2026-07-08T20:59:55.501228829Z Get:3 http://archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+2026-07-08T20:59:55.501230561Z Get:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+2026-07-08T20:59:55.501232129Z Get:5 http://archive.ubuntu.com/ubuntu noble/multiverse amd64 Packages [331 kB]
+2026-07-08T20:59:55.501235629Z Get:6 http://archive.ubuntu.com/ubuntu noble/restricted amd64 Packages [117 kB]
+2026-07-08T20:59:55.501237408Z Get:7 http://archive.ubuntu.com/ubuntu noble/main amd64 Packages [1808 kB]
+2026-07-08T20:59:55.501239241Z Get:8 http://security.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1417 kB]
+2026-07-08T20:59:55.501244868Z Get:9 http://archive.ubuntu.com/ubuntu noble/universe amd64 Packages [19.3 MB]
+2026-07-08T20:59:55.501246342Z Get:10 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [2112 kB]
+2026-07-08T20:59:55.501247873Z Get:11 http://archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1490 kB]
+2026-07-08T20:59:55.501249612Z Get:12 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1343 kB]
+2026-07-08T20:59:55.501251098Z Get:13 http://archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Packages [49.5 kB]
+2026-07-08T20:59:55.501252712Z Get:14 http://archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [35.9 kB]
+2026-07-08T20:59:55.501254386Z Get:15 http://archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Packages [671 B]
+2026-07-08T20:59:55.501255869Z Get:16 http://archive.ubuntu.com/ubuntu noble-backports/main amd64 Packages [48.9 kB]
+2026-07-08T20:59:55.501257345Z Get:17 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1490 kB]
+2026-07-08T20:59:55.501258653Z Get:18 http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages [1022 kB]
+2026-07-08T20:59:55.501260044Z Get:19 http://security.ubuntu.com/ubuntu noble-security/multiverse amd64 Packages [43.8 kB]
+2026-07-08T20:59:55.501261741Z Fetched 31.3 MB in 2s (13.5 MB/s)
+2026-07-08T20:59:55.501263460Z Reading package lists...
+2026-07-08T20:59:58.260718293Z debconf: unable to initialize frontend: Dialog
+2026-07-08T20:59:58.260742924Z debconf: (TERM is not set, so the dialog frontend is not usable.)
+2026-07-08T20:59:58.260745156Z debconf: falling back to frontend: Readline
+2026-07-08T20:59:58.267238907Z debconf: unable to initialize frontend: Readline
+2026-07-08T20:59:58.267256184Z debconf: (This frontend requires a controlling tty.)
+2026-07-08T20:59:58.267258001Z debconf: falling back to frontend: Teletype
+2026-07-08T20:59:58.271306749Z dpkg-preconfigure: unable to re-open stdin: 
+2026-07-08T21:00:01.039587144Z Reading package lists...
+2026-07-08T21:00:01.039607159Z Building dependency tree...
+2026-07-08T21:00:01.039608905Z Reading state information...
+2026-07-08T21:00:01.039610802Z pkg-config is already the newest version (1.8.1-2build1).
+2026-07-08T21:00:01.039613246Z The following NEW packages will be installed:
+2026-07-08T21:00:01.039615008Z   linux-azure-headers-6.8.0-1059 linux-headers-6.8.0-1059-azure
+2026-07-08T21:00:01.039616645Z 0 upgraded, 2 newly installed, 0 to remove and 134 not upgraded.
+2026-07-08T21:00:01.039618180Z Need to get 16.7 MB of archives.
+2026-07-08T21:00:01.039620068Z After this operation, 114 MB of additional disk space will be used.
+2026-07-08T21:00:01.039621951Z Get:1 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 linux-azure-headers-6.8.0-1059 all 6.8.0-1059.65 [13.5 MB]
+2026-07-08T21:00:01.039623768Z Get:2 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 linux-headers-6.8.0-1059-azure amd64 6.8.0-1059.65 [3207 kB]
+2026-07-08T21:00:01.039625457Z Fetched 16.7 MB in 1s (12.7 MB/s)
+2026-07-08T21:00:01.039626880Z Selecting previously unselected package linux-azure-headers-6.8.0-1059.
+2026-07-08T21:00:01.039629174Z (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 52376 files and directories currently installed.)
+2026-07-08T21:00:01.039634928Z Preparing to unpack .../linux-azure-headers-6.8.0-1059_6.8.0-1059.65_all.deb ...
+2026-07-08T21:00:01.039636384Z Unpacking linux-azure-headers-6.8.0-1059 (6.8.0-1059.65) ...
+2026-07-08T21:00:01.039638530Z Selecting previously unselected package linux-headers-6.8.0-1059-azure.
+2026-07-08T21:00:01.039640475Z Preparing to unpack .../linux-headers-6.8.0-1059-azure_6.8.0-1059.65_amd64.deb ...
+2026-07-08T21:00:01.039642127Z Unpacking linux-headers-6.8.0-1059-azure (6.8.0-1059.65) ...
+2026-07-08T21:00:01.039643839Z Setting up linux-azure-headers-6.8.0-1059 (6.8.0-1059.65) ...
+2026-07-08T21:00:01.039645396Z Setting up linux-headers-6.8.0-1059-azure (6.8.0-1059.65) ...
+2026-07-08T21:00:01.039647266Z /etc/kernel/header_postinst.d/dkms:
+2026-07-08T21:00:01.039648997Z  * dkms: running auto installation service for kernel 6.8.0-1059-azure
+2026-07-08T21:00:01.039650448Z  * dkms: autoinstall for kernel 6.8.0-1059-azure
+2026-07-08T21:00:01.039652171Z    ...done.
+2026-07-08T21:00:01.042512292Z [08-Jul-26_21:00:01] Starting driver build
+2026-07-08T21:00:01.338573450Z Logs dir: /tmp/OFED.1076.logs
+2026-07-08T21:00:01.338591764Z General log file: /tmp/OFED.1076.logs/general.log
+2026-07-08T21:01:39.395957945Z [33mUnsupported package: kmp[0m
+2026-07-08T21:01:39.395984548Z [32m
+2026-07-08T21:01:39.395992577Z Below is the list of OFED packages that you have chosen
+2026-07-08T21:01:39.395995665Z 	(some may have been added by the installer due to package dependencies):
+2026-07-08T21:01:39.395998476Z [0m
+2026-07-08T21:01:39.396001464Z mlnx-tools
+2026-07-08T21:01:39.396005083Z mlnx-ofed-kernel-utils
+2026-07-08T21:01:39.396007669Z mlnx-ofed-kernel-modules
+2026-07-08T21:01:39.396019813Z xpmem
+2026-07-08T21:01:39.396021503Z xpmem-modules
+2026-07-08T21:01:39.396022800Z 
+2026-07-08T21:01:39.396024352Z This program will install the OFED package on your machine.
+2026-07-08T21:01:39.396026396Z Note that all other Mellanox, OEM, OFED, RDMA or Distribution IB packages will be removed.
+2026-07-08T21:01:39.396028565Z Those packages are removed due to conflicts with OFED, do not reinstall them.
+2026-07-08T21:01:39.396029946Z 
+2026-07-08T21:01:39.396031381Z Installing new packages
+2026-07-08T21:01:39.396033010Z Building DEB for mlnx-tools-2510.0.14 (mlnx-tools)...
+2026-07-08T21:01:39.396034672Z Running  /usr/bin/dpkg-buildpackage -us -uc 
+2026-07-08T21:01:39.396036204Z Building DEB for mlnx-ofed-kernel-utils-25.10.OFED.25.10.1.2.2.1 (mlnx-ofed-kernel)...
+2026-07-08T21:01:39.396037712Z 
+2026-07-08T21:01:39.396039268Z -W- --with-mlx5-ipsec is enabled
+2026-07-08T21:01:39.396041257Z Running  /usr/bin/dpkg-buildpackage -us -uc  -Pmodules
+2026-07-08T21:01:39.396042865Z Extracting mlnx-ofed-kernel sources to /var/tmp/ofed_src ...
+2026-07-08T21:01:39.396059011Z dpkg -x '/run/mellanox/src/MLNX_OFED_SRC-25.10-1.2.8.0/DEBS/ubuntu24.04/x86_64/mlnx-ofed-kernel-modules_25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure_amd64.deb' /var/tmp/ofed_src >/dev/null 
+2026-07-08T21:01:39.396061252Z Building DEB for xpmem-2510.0.16 (xpmem)...
+2026-07-08T21:01:39.396063024Z Running  /usr/bin/dpkg-buildpackage -us -uc  -Pmodules
+2026-07-08T21:01:39.396064696Z [32mBuild passed successfully[0m
+2026-07-08T21:01:39.400341612Z 
+2026-07-08T21:01:39.403191118Z [08-Jul-26_21:01:39] Stored driver packages at /mnt/drivers-inventory/6.8.0-1059-azure/25.10-1.2.8.0
+2026-07-08T21:01:39.417567619Z [08-Jul-26_21:01:39] Storing the check sum for build artifacts at /mnt/drivers-inventory/6.8.0-1059-azure/25.10-1.2.8.0.checksum, check sum: ec535b704de5a51a470c55225199cd4c
+2026-07-08T21:01:39.420009617Z 
+2026-07-08T21:01:39.421714785Z 
+2026-07-08T21:01:44.842685208Z debconf: unable to initialize frontend: Dialog
+2026-07-08T21:01:44.842703915Z debconf: (TERM is not set, so the dialog frontend is not usable.)
+2026-07-08T21:01:44.842706110Z debconf: falling back to frontend: Readline
+2026-07-08T21:01:44.849769367Z debconf: unable to initialize frontend: Readline
+2026-07-08T21:01:44.849773889Z debconf: (This frontend requires a controlling tty.)
+2026-07-08T21:01:44.849775735Z debconf: falling back to frontend: Teletype
+2026-07-08T21:01:44.855736361Z dpkg-preconfigure: unable to re-open stdin: 
+2026-07-08T21:01:47.679281573Z Hit:1 http://archive.ubuntu.com/ubuntu noble InRelease
+2026-07-08T21:01:47.679304223Z Hit:2 http://archive.ubuntu.com/ubuntu noble-updates InRelease
+2026-07-08T21:01:47.679307418Z Hit:3 http://security.ubuntu.com/ubuntu noble-security InRelease
+2026-07-08T21:01:47.679309891Z Hit:4 http://archive.ubuntu.com/ubuntu noble-backports InRelease
+2026-07-08T21:01:47.679312826Z Reading package lists...
+2026-07-08T21:01:47.679315624Z Package: linux-modules-extra-6.8.0-1059-azure
+2026-07-08T21:01:47.679318573Z Filename: pool/main/l/linux-azure/linux-modules-extra-6.8.0-1059-azure_6.8.0-1059.65_amd64.deb
+2026-07-08T21:01:47.679321222Z Reading package lists...
+2026-07-08T21:01:47.679323763Z Building dependency tree...
+2026-07-08T21:01:47.679326012Z Reading state information...
+2026-07-08T21:01:47.679328215Z The following additional packages will be installed:
+2026-07-08T21:01:47.679330608Z   linux-base-sgx linux-modules-6.8.0-1059-azure wireless-regdb
+2026-07-08T21:01:47.679332798Z The following NEW packages will be installed:
+2026-07-08T21:01:47.679334976Z   linux-base-sgx linux-modules-6.8.0-1059-azure
+2026-07-08T21:01:47.679337481Z   linux-modules-extra-6.8.0-1059-azure wireless-regdb
+2026-07-08T21:01:47.679349888Z 0 upgraded, 4 newly installed, 0 to remove and 134 not upgraded.
+2026-07-08T21:01:47.679351541Z Need to get 81.4 MB of archives.
+2026-07-08T21:01:47.679353719Z After this operation, 82.1 MB of additional disk space will be used.
+2026-07-08T21:01:47.679355871Z Get:1 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 linux-base-sgx all 4.5ubuntu9+24.04.2 [3674 B]
+2026-07-08T21:01:47.679357879Z Get:2 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 linux-modules-6.8.0-1059-azure amd64 6.8.0-1059.65 [34.5 MB]
+2026-07-08T21:01:47.679359391Z Get:3 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 wireless-regdb all 2025.10.07-0ubuntu1~24.04.1 [7542 B]
+2026-07-08T21:01:47.679361333Z Get:4 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 linux-modules-extra-6.8.0-1059-azure amd64 6.8.0-1059.65 [46.9 MB]
+2026-07-08T21:01:47.679363037Z Fetched 81.4 MB in 2s (32.9 MB/s)
+2026-07-08T21:01:47.679364456Z Selecting previously unselected package linux-base-sgx.
+2026-07-08T21:01:47.679366926Z (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 78406 files and directories currently installed.)
+2026-07-08T21:01:47.679369304Z Preparing to unpack .../linux-base-sgx_4.5ubuntu9+24.04.2_all.deb ...
+2026-07-08T21:01:47.679370797Z Unpacking linux-base-sgx (4.5ubuntu9+24.04.2) ...
+2026-07-08T21:01:47.679372733Z Selecting previously unselected package linux-modules-6.8.0-1059-azure.
+2026-07-08T21:01:47.679374295Z Preparing to unpack .../linux-modules-6.8.0-1059-azure_6.8.0-1059.65_amd64.deb ...
+2026-07-08T21:01:47.679375896Z Unpacking linux-modules-6.8.0-1059-azure (6.8.0-1059.65) ...
+2026-07-08T21:01:47.679377370Z Selecting previously unselected package wireless-regdb.
+2026-07-08T21:01:47.679378791Z Preparing to unpack .../wireless-regdb_2025.10.07-0ubuntu1~24.04.1_all.deb ...
+2026-07-08T21:01:47.679380254Z Unpacking wireless-regdb (2025.10.07-0ubuntu1~24.04.1) ...
+2026-07-08T21:01:47.679381639Z Selecting previously unselected package linux-modules-extra-6.8.0-1059-azure.
+2026-07-08T21:01:47.679383154Z Preparing to unpack .../linux-modules-extra-6.8.0-1059-azure_6.8.0-1059.65_amd64.deb ...
+2026-07-08T21:01:47.679384533Z Unpacking linux-modules-extra-6.8.0-1059-azure (6.8.0-1059.65) ...
+2026-07-08T21:01:47.679385956Z Setting up wireless-regdb (2025.10.07-0ubuntu1~24.04.1) ...
+2026-07-08T21:01:47.679387620Z Setting up linux-base-sgx (4.5ubuntu9+24.04.2) ...
+2026-07-08T21:01:47.679388966Z Setting up linux-modules-6.8.0-1059-azure (6.8.0-1059.65) ...
+2026-07-08T21:01:47.679390467Z Setting up linux-modules-extra-6.8.0-1059-azure (6.8.0-1059.65) ...
+2026-07-08T21:01:47.679391911Z Processing triggers for man-db (2.12.0-4build2) ...
+2026-07-08T21:01:48.701225732Z debconf: unable to initialize frontend: Dialog
+2026-07-08T21:01:48.701242781Z debconf: (TERM is not set, so the dialog frontend is not usable.)
+2026-07-08T21:01:48.701245017Z debconf: falling back to frontend: Readline
+2026-07-08T21:01:48.708075173Z debconf: unable to initialize frontend: Readline
+2026-07-08T21:01:48.708080096Z debconf: (This frontend requires a controlling tty.)
+2026-07-08T21:01:48.708081706Z debconf: falling back to frontend: Teletype
+2026-07-08T21:01:48.712838088Z dpkg-preconfigure: unable to re-open stdin: 
+2026-07-08T21:01:51.339237681Z Reading package lists...
+2026-07-08T21:01:51.339261272Z Building dependency tree...
+2026-07-08T21:01:51.339263434Z Reading state information...
+2026-07-08T21:01:51.339265899Z The following NEW packages will be installed:
+2026-07-08T21:01:51.339268795Z   mlnx-ofed-kernel-modules mlnx-ofed-kernel-utils mlnx-tools xpmem
+2026-07-08T21:01:51.339270980Z   xpmem-modules
+2026-07-08T21:01:51.339272947Z 0 upgraded, 5 newly installed, 0 to remove and 134 not upgraded.
+2026-07-08T21:01:51.339274819Z Need to get 0 B/3319 kB of archives.
+2026-07-08T21:01:51.339276384Z After this operation, 22.9 MB of additional disk space will be used.
+2026-07-08T21:01:51.339278412Z Get:1 /mnt/drivers-inventory/6.8.0-1059-azure/25.10-1.2.8.0/mlnx-tools_2510.0.14-1_amd64.deb mlnx-tools amd64 2510.0.14-1 [75.3 kB]
+2026-07-08T21:01:51.339284023Z Get:2 /mnt/drivers-inventory/6.8.0-1059-azure/25.10-1.2.8.0/mlnx-ofed-kernel-utils_25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure_amd64.deb mlnx-ofed-kernel-utils amd64 25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure [29.2 kB]
+2026-07-08T21:01:51.339285994Z Get:3 /mnt/drivers-inventory/6.8.0-1059-azure/25.10-1.2.8.0/mlnx-ofed-kernel-modules_25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure_amd64.deb mlnx-ofed-kernel-modules amd64 25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure [2728 kB]
+2026-07-08T21:01:51.339288610Z Get:4 /mnt/drivers-inventory/6.8.0-1059-azure/25.10-1.2.8.0/xpmem_2510.0.16-1.kver.6.8.0-1059-azure_all.deb xpmem all 2510.0.16-1.kver.6.8.0-1059-azure [1836 B]
+2026-07-08T21:01:51.339291539Z Get:5 /mnt/drivers-inventory/6.8.0-1059-azure/25.10-1.2.8.0/xpmem-modules_2510.0.16-1.kver.6.8.0-1059-azure_amd64.deb xpmem-modules amd64 2510.0.16-1.kver.6.8.0-1059-azure [484 kB]
+2026-07-08T21:01:51.339293671Z Selecting previously unselected package mlnx-tools.
+2026-07-08T21:01:51.339296729Z (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 81946 files and directories currently installed.)
+2026-07-08T21:01:51.339299543Z Preparing to unpack .../mlnx-tools_2510.0.14-1_amd64.deb ...
+2026-07-08T21:01:51.339301153Z Unpacking mlnx-tools (2510.0.14-1) ...
+2026-07-08T21:01:51.339302748Z Selecting previously unselected package mlnx-ofed-kernel-utils.
+2026-07-08T21:01:51.339304935Z Preparing to unpack .../mlnx-ofed-kernel-utils_25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure_amd64.deb ...
+2026-07-08T21:01:51.339306816Z Unpacking mlnx-ofed-kernel-utils (25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339308483Z Selecting previously unselected package mlnx-ofed-kernel-modules.
+2026-07-08T21:01:51.339310088Z Preparing to unpack .../mlnx-ofed-kernel-modules_25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure_amd64.deb ...
+2026-07-08T21:01:51.339311906Z Unpacking mlnx-ofed-kernel-modules (25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339313552Z Selecting previously unselected package xpmem.
+2026-07-08T21:01:51.339315017Z Preparing to unpack .../xpmem_2510.0.16-1.kver.6.8.0-1059-azure_all.deb ...
+2026-07-08T21:01:51.339316763Z Unpacking xpmem (2510.0.16-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339318079Z Selecting previously unselected package xpmem-modules:amd64.
+2026-07-08T21:01:51.339319391Z Preparing to unpack .../xpmem-modules_2510.0.16-1.kver.6.8.0-1059-azure_amd64.deb ...
+2026-07-08T21:01:51.339332140Z Unpacking xpmem-modules:amd64 (2510.0.16-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339333907Z Setting up mlnx-tools (2510.0.14-1) ...
+2026-07-08T21:01:51.339335583Z Setting up xpmem (2510.0.16-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339336981Z Setting up xpmem-modules:amd64 (2510.0.16-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339338593Z Setting up mlnx-ofed-kernel-utils (25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339340400Z Configured /etc/security/limits.conf
+2026-07-08T21:01:51.339343148Z Setting up mlnx-ofed-kernel-modules (25.10.OFED.25.10.1.2.2.1-1.kver.6.8.0-1059-azure) ...
+2026-07-08T21:01:51.339344629Z update-alternatives: using /usr/src/ofa_kernel/x86_64/6.8.0-1059-azure to provide /usr/src/ofa_kernel/default (ofa_kernel_headers) in auto mode
+2026-07-08T21:01:51.339346792Z Processing triggers for man-db (2.12.0-4build2) ...
+2026-07-08T21:01:51.920124487Z 
+2026-07-08T21:01:51.928593043Z 
+2026-07-08T21:01:51.931205944Z 
+2026-07-08T21:01:51.936381006Z 
+2026-07-08T21:01:51.939725841Z 
+2026-07-08T21:01:51.942610942Z [08-Jul-26_21:01:51] Apply blacklisted mofed modules file to host (/host/etc/modprobe.d/blacklist-ofed-modules.conf)
+2026-07-08T21:01:51.942833527Z Function: generate_ofed_modules_blacklist
+2026-07-08T21:02:03.756945402Z Unloading HCA driver:[60G[  [1;32mOK[0;39m  ]
+2026-07-08T21:02:03.756969584Z Loading HCA driver and Access Layer:[60G[  [1;32mOK[0;39m  ]
+2026-07-08T21:02:03.763250493Z [08-Jul-26_21:02:03] Remove blacklisted mofed modules file from host
+2026-07-08T21:02:03.796279511Z [08-Jul-26_21:02:03] Current mlx5_core driver version: 25.10-1.2.2
+2026-07-08T21:02:03.800933760Z [08-Jul-26_21:02:03] Mounting Mellanox OFED driver container shared kernel headers
+2026-07-08T21:02:03.813336578Z 
+2026-07-08T21:02:03.815731574Z 
+2026-07-08T21:02:03.822026143Z 
+2026-07-08T21:02:03.824767086Z 
+2026-07-08T21:02:03.827927034Z [08-Jul-26_21:02:03] Setting driver ready state
+2026-07-08T21:02:03.830224712Z 
+2026-07-08T21:02:03.835655279Z 
+2026-07-08T21:02:03.839149040Z [08-Jul-26_21:02:03] NVIDIA driver container exec end, sleeping

@@ -1,0 +1,357 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: "2026-07-08T20:59:38Z"
+  generateName: mofed-ubuntu24.04-58957d6569-ds-
+  generation: 1
+  labels:
+    app: mofed-ubuntu24.04-58957d6569
+    controller-revision-hash: 68996d5747
+    kernel: 6.8.0-1059-azure
+    nvidia.com/ofed-driver: ""
+    pod-template-generation: "1"
+    topology.kubernetes.io/region: westus
+    topology.kubernetes.io/zone: "0"
+  name: mofed-ubuntu24.04-58957d6569-ds-dd4kk
+  namespace: nvidia-network-operator
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: DaemonSet
+    name: mofed-ubuntu24.04-58957d6569-ds
+    uid: 322f0d29-de44-4f3a-a230-900fb9289708
+  resourceVersion: "16064"
+  uid: 5a844e68-b2f6-477e-933d-64c344c46f7d
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchFields:
+          - key: metadata.name
+            operator: In
+            values:
+            - aks-gpuworker1-72833017-vmss000001
+  containers:
+  - env:
+    - name: OFED_BLACKLIST_MODULES_FILE
+      value: /host/etc/modprobe.d/blacklist-ofed-modules.conf
+    - name: CREATE_IFNAMES_UDEV
+      value: "true"
+    - name: NVIDIA_NIC_DRIVERS_INVENTORY_PATH
+      value: /mnt/drivers-inventory
+    image: nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64
+    imagePullPolicy: IfNotPresent
+    livenessProbe:
+      exec:
+        command:
+        - sh
+        - -c
+        - lsmod | grep mlx5_core
+      failureThreshold: 1
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      successThreshold: 1
+      timeoutSeconds: 10
+    name: mofed-container
+    readinessProbe:
+      exec:
+        command:
+        - sh
+        - -c
+        - lsmod | grep mlx5_core
+      failureThreshold: 1
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      successThreshold: 1
+      timeoutSeconds: 10
+    resources: {}
+    securityContext:
+      privileged: true
+      seLinuxOptions:
+        level: s0
+    startupProbe:
+      exec:
+        command:
+        - sh
+        - -c
+        - ls /run/mellanox/drivers/.driver-ready
+      failureThreshold: 60
+      initialDelaySeconds: 10
+      periodSeconds: 20
+      successThreshold: 1
+      timeoutSeconds: 10
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /run/mellanox/drivers
+      mountPropagation: Bidirectional
+      name: run-mlnx-ofed
+    - mountPath: /etc/network
+      name: etc-network
+    - mountPath: /host/etc
+      name: host-etc
+    - mountPath: /host/usr
+      name: host-usr
+    - mountPath: /host/lib/udev
+      name: host-udev
+    - mountPath: /run/udev
+      name: host-run-udev
+      readOnly: true
+    - mountPath: /host/lib/modules
+      name: host-lib-modules
+    - mountPath: /mnt/drivers-inventory
+      name: drivers-inventory
+    - mountPath: /etc/modprobe.d/ib_core.conf
+      name: host-ib-core
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-58fvh
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  hostNetwork: true
+  initContainers:
+  - args:
+    - --node-name
+    - $(NODE_NAME)
+    - --configmap-name
+    - ofed-init-container-config
+    - --configmap-namespace
+    - nvidia-network-operator
+    - --configmap-key
+    - config.json
+    env:
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: spec.nodeName
+    image: nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v26.1.1
+    imagePullPolicy: IfNotPresent
+    name: network-operator-init-container
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-58fvh
+      readOnly: true
+  nodeName: aks-gpuworker1-72833017-vmss000001
+  nodeSelector:
+    feature.node.kubernetes.io/kernel-version.full: 6.8.0-1059-azure
+    feature.node.kubernetes.io/pci-15b3.present: "true"
+    feature.node.kubernetes.io/system-os_release.ID: ubuntu
+    feature.node.kubernetes.io/system-os_release.VERSION_ID: "24.04"
+  preemptionPolicy: PreemptLowerPriority
+  priority: 2000001000
+  priorityClassName: system-node-critical
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: ofed-driver
+  serviceAccountName: ofed-driver
+  terminationGracePeriodSeconds: 300
+  tolerations:
+  - effect: NoSchedule
+    key: nvidia.com/gpu
+    operator: Exists
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/disk-pressure
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/memory-pressure
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/pid-pressure
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/unschedulable
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/network-unavailable
+    operator: Exists
+  volumes:
+  - hostPath:
+      path: /run/mellanox/drivers
+      type: ""
+    name: run-mlnx-ofed
+  - hostPath:
+      path: /etc/network
+      type: ""
+    name: etc-network
+  - hostPath:
+      path: /etc
+      type: ""
+    name: host-etc
+  - hostPath:
+      path: /usr
+      type: ""
+    name: host-usr
+  - hostPath:
+      path: /lib/udev
+      type: ""
+    name: host-udev
+  - hostPath:
+      path: /run/udev
+      type: ""
+    name: host-run-udev
+  - hostPath:
+      path: /lib/modules
+      type: ""
+    name: host-lib-modules
+  - hostPath:
+      path: /var/opt/mofed-container/inventory
+      type: DirectoryOrCreate
+    name: drivers-inventory
+  - hostPath:
+      path: /etc/modprobe.d/ib_core.conf
+      type: FileOrCreate
+    name: host-ib-core
+  - name: kube-api-access-58fvh
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2026-07-08T20:59:41Z"
+    observedGeneration: 1
+    status: "True"
+    type: PodReadyToStartContainers
+  - lastProbeTime: null
+    lastTransitionTime: "2026-07-08T20:59:42Z"
+    observedGeneration: 1
+    status: "True"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2026-07-08T21:02:22Z"
+    observedGeneration: 1
+    status: "True"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2026-07-08T21:02:22Z"
+    observedGeneration: 1
+    status: "True"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2026-07-08T20:59:38Z"
+    observedGeneration: 1
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - containerID: containerd://220a4565ea327aeadbb3f714389e0e8378fbc5f8c13b96f9c3eee9dddd87d37a
+    image: nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64
+    imageID: nvcr.io/nvidia/mellanox/doca-driver@sha256:0ebf2439d80dc8f11f2790c642439c96abd40e563013c378ec319f29b5d8ab5f
+    lastState: {}
+    name: mofed-container
+    ready: true
+    resources: {}
+    restartCount: 0
+    started: true
+    state:
+      running:
+        startedAt: "2026-07-08T20:59:50Z"
+    user:
+      linux:
+        gid: 0
+        supplementalGroups:
+        - 0
+        uid: 0
+    volumeMounts:
+    - mountPath: /run/mellanox/drivers
+      name: run-mlnx-ofed
+    - mountPath: /etc/network
+      name: etc-network
+    - mountPath: /host/etc
+      name: host-etc
+    - mountPath: /host/usr
+      name: host-usr
+    - mountPath: /host/lib/udev
+      name: host-udev
+    - mountPath: /run/udev
+      name: host-run-udev
+      readOnly: true
+      recursiveReadOnly: Disabled
+    - mountPath: /host/lib/modules
+      name: host-lib-modules
+    - mountPath: /mnt/drivers-inventory
+      name: drivers-inventory
+    - mountPath: /etc/modprobe.d/ib_core.conf
+      name: host-ib-core
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-58fvh
+      readOnly: true
+      recursiveReadOnly: Disabled
+  hostIP: 10.0.128.33
+  hostIPs:
+  - ip: 10.0.128.33
+  initContainerStatuses:
+  - containerID: containerd://42c09f1a2112acb8f3e6434559ab0114626316605a143ecf0c43df09862564f1
+    image: nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v26.1.1
+    imageID: nvcr.io/nvidia/mellanox/network-operator-init-container@sha256:1bb3d668df54d1b1d459b0411ab06efe4dd9ab59fa6e00e964f393d1f84063da
+    lastState: {}
+    name: network-operator-init-container
+    ready: true
+    resources: {}
+    restartCount: 0
+    started: false
+    state:
+      terminated:
+        containerID: containerd://42c09f1a2112acb8f3e6434559ab0114626316605a143ecf0c43df09862564f1
+        exitCode: 0
+        finishedAt: "2026-07-08T20:59:41Z"
+        reason: Completed
+        startedAt: "2026-07-08T20:59:41Z"
+    user:
+      linux:
+        gid: 1000
+        supplementalGroups:
+        - 1000
+        uid: 1000
+    volumeMounts:
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-58fvh
+      readOnly: true
+      recursiveReadOnly: Disabled
+  observedGeneration: 1
+  phase: Running
+  podIP: 10.0.128.33
+  podIPs:
+  - ip: 10.0.128.33
+  qosClass: BestEffort
+  startTime: "2026-07-08T20:59:39Z"

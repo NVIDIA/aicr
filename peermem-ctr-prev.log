@@ -1,0 +1,1 @@
+error: error from server (NotFound): pods "nvidia-driver-daemonset-xqdxp" not found in namespace "gpu-operator"
