@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	corev1 "k8s.io/api/core/v1"
@@ -314,11 +315,27 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 		"kubectl get deviceclass gpu.nvidia.com; kubectl get resourceslices; kubectl get nodes -o wide",
 		mode.Summary())
 
+	// VERIFY, then SELECT (#1327): a recipe-configured policy pins the
+	// mechanism this check exercises — the cluster must actually serve it
+	// (fail closed on drift, no silent fallback to the other mechanism).
+	// Only unspecified (standalone runs) keeps the capability-driven
+	// dispatch below.
+	policy := ctx.ValidationInput.GetGPUAllocationPolicy()
+	// Evidence BEFORE the verdict: a Verify failure below must leave the
+	// configured policy in the artifacts.
+	recordRawTextArtifact(ctx, "GPU allocation policy", "",
+		fmt.Sprintf("configured policy: %s", policy))
+	if verifyErr := verifyGPUAllocationPolicy(policy, mode); verifyErr != nil {
+		return verifyErr
+	}
+
 	switch {
-	case mode.DRAUsable:
+	case policy == validatorv1.GPUAllocationPolicyDRAResourceClaim,
+		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DRAUsable:
 		recordRawTextArtifact(ctx, "Secure access mode", "", "mode exercised: DRA (gpu.nvidia.com ResourceClaim)")
 		return runDRASecureAccessTest(ctx, dynClient, mode.APIVersion)
-	case mode.DevicePluginUsable:
+	case policy == validatorv1.GPUAllocationPolicyDevicePluginExtendedResource,
+		policy == validatorv1.GPUAllocationPolicyUnspecified && mode.DevicePluginUsable:
 		// Sound attribution: constrain the test pod (required node affinity)
 		// to the probe's device-plugin nodes — every listed node advertises
 		// scalar allocatable nvidia.com/gpu, and on such a node the

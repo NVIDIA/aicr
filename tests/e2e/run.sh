@@ -911,6 +911,12 @@ apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
+  # Enabled GPU advertiser: allocation-policy resolution (#1327) rejects
+  # advertiser-less recipes (row 6) before any validator runs; the ref
+  # carries no expectedResources so it is inert for these checks.
+  - name: gpu-operator
+    type: Helm
+    namespace: gpu-operator
   - name: nonexistent-component
     type: Helm
     namespace: gpu-operator
@@ -989,6 +995,12 @@ apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
+  # Enabled GPU advertiser: allocation-policy resolution (#1327) rejects
+  # advertiser-less recipes (row 6) before any validator runs; the ref
+  # carries no expectedResources so it is inert for these checks.
+  - name: gpu-operator
+    type: Helm
+    namespace: gpu-operator
   - name: ${nginx_release}
     type: Helm
     source: https://charts.bitnami.com/bitnami
@@ -1037,6 +1049,12 @@ apiVersion: aicr.run/v1alpha2
 metadata:
   version: dev
 componentRefs:
+  # Enabled GPU advertiser: allocation-policy resolution (#1327) rejects
+  # advertiser-less recipes (row 6) before any validator runs; the ref
+  # carries no expectedResources so it is inert for these checks.
+  - name: gpu-operator
+    type: Helm
+    namespace: gpu-operator
   - name: ${nginx_release}
     type: Helm
     source: https://charts.bitnami.com/bitnami

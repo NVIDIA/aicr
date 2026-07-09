@@ -162,6 +162,11 @@ driver:
     enabled: false
 
 devicePlugin:
+  # Pin AICR's supported production co-installation intent explicitly: the
+  # device plugin is the whole-GPU advertiser (nvidia.com/gpu). Matches the
+  # upstream chart default, but declared so the GPU allocation-policy tuple
+  # is observable to recipe-driven resolution (issue #1327).
+  enabled: true
   env:
     - name: DP_DISABLE_HEALTHCHECKS
       value: "109"

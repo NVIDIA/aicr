@@ -210,7 +210,7 @@ type Mode struct {
 	// only, devices counted without pool/taint validation. This mirrors how
 	// kai-scheduler v0.14.1 attributes slices to nodes
 	// (kubernetes_lister.go:198, cluster_info.go:270 — kai then rejects
-	// scalar device-plugin GPU pods on every counted node, node_info.go:310)
+	// scalar device-plugin GPU pods on every counted node, node_info.go (the scalar-GPU-on-DRA-node rejection, upstream-marked "temporary fix"))
 	// and doubles as the SUPPORTED-configuration detector: in AICR's
 	// supported full-GPU DRA state the NVIDIA driver publishes one
 	// node-local pool per node, so a node with usable validated devices
@@ -295,6 +295,13 @@ func (m *Mode) Summary() string {
 	if m.ExtendedResourceDetail != "" {
 		lines = append(lines, m.ExtendedResourceDetail)
 	}
+	// Standing eligibility caveat (#1620 review): node ELIGIBILITY here is
+	// Ready + uncordoned only — node taints are NOT evaluated, so a Ready
+	// node carrying e.g. dedicated=infra:NoSchedule still counts as usable.
+	// Workloads are expected to carry matching tolerations (the validate
+	// command's --toleration flag).
+	lines = append(lines,
+		"note: node eligibility is Ready+uncordoned only — node taints are not evaluated; workloads must tolerate any node taints")
 	if len(m.DualAdvertisedNodes) > 0 {
 		lines = append(lines, fmt.Sprintf(
 			"WARNING: both mechanisms advertise GPUs on node(s) [%s] — GPU over-admission risk",
@@ -398,7 +405,7 @@ func Detect(parent context.Context, clientset kubernetes.Interface, dynClient dy
 	// advertising scalar nvidia.com/gpu allocatable is device-plugin-backed
 	// even with such a mapping — DRA satisfies the extended-resource request
 	// only where scalar allocatable is absent/zero.
-	erBacked, erDetail, err := detectExtendedResourceDRABacked(ctx, dynClient, version)
+	erBacked, erDetail, gpuClass, err := detectExtendedResourceDRABacked(ctx, dynClient, version)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +432,7 @@ func Detect(parent context.Context, clientset kubernetes.Interface, dynClient dy
 	mode.NodeLocalGPUSliceDevices, mode.GPUPoolNodes, mode.ForeignGPUSliceDrivers,
 		mode.NonNodeLocalGPUSlices, mode.AmbiguousGPUPools = scanGPUSliceTopology(sliceItems)
 
-	draNodeDevices, draDetail, err := detectFullGPUDRA(ctx, dynClient, version, eligible, sliceItems)
+	draNodeDevices, draDetail, err := detectFullGPUDRA(ctx, version, eligible, sliceItems, gpuClass)
 	if err != nil {
 		return nil, err
 	}
@@ -467,18 +474,29 @@ func Detect(parent context.Context, clientset kubernetes.Interface, dynClient dy
 // spec.driver == gpu.nvidia.com in a complete, current-generation pool
 // advertises an untainted device reachable from a Ready, schedulable node.
 // version is the served resource.k8s.io API version discovered by
-// DiscoverServedVersion (v1, v1beta2, or v1beta1); DeviceClasses and
-// ResourceSlices are read via the dynamic client at that group-version.
+// DiscoverServedVersion (v1, v1beta2, or v1beta1). class is the
+// gpu.nvidia.com DeviceClass from the attribution probe's single List (nil
+// when absent — no second apiserver round-trip per Detect).
 // Returns the set of usable node names and a human-readable detail.
-func detectFullGPUDRA(ctx context.Context, dynClient dynamic.Interface, version string, eligible map[string]*corev1.Node, sliceItems []unstructured.Unstructured) (map[string]int, string, error) {
-	// DeviceClass gpu.nvidia.com must exist. A missing resource.k8s.io API
-	// group also surfaces as NotFound here — either way, DRA is not usable.
-	class, err := dynClient.Resource(GVRAt(version, "deviceclasses")).Get(ctx, draDriverGPU, metav1.GetOptions{})
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			return nil, fmt.Sprintf("full-GPU DRA not usable: DeviceClass %s not found", draDriverGPU), nil
+func detectFullGPUDRA(ctx context.Context, version string, eligible map[string]*corev1.Node, sliceItems []unstructured.Unstructured, class *unstructured.Unstructured) (map[string]int, string, error) {
+	// DeviceClass gpu.nvidia.com must exist.
+	if class == nil {
+		detail := fmt.Sprintf("full-GPU DRA not usable: DeviceClass %s not found", draDriverGPU)
+		// Half-installation surface (#1620 review): the driver
+		// publishing VALIDATED slices while the class is missing is a
+		// broken install (class deleted / not created), not a benign
+		// ComputeDomain-only configuration — name it so a downstream
+		// N/A disposition is diagnosable from the evidence alone.
+		usable, _, cntErr := UsableDriverDeviceCounts(ctx, sliceItems, draDriverGPU, eligible)
+		if cntErr != nil {
+			return nil, "", cntErr
 		}
-		return nil, "", ClassifyK8sReadError(err, fmt.Sprintf("DeviceClass %s", draDriverGPU))
+		if len(usable) > 0 {
+			detail += fmt.Sprintf(
+				" — but %d Ready, schedulable node(s) carry validated %s ResourceSlices: HALF-INSTALLED full-GPU DRA (driver publishing slices, DeviceClass missing or deleted)",
+				len(usable), draDriverGPU)
+		}
+		return nil, detail, nil
 	}
 	// Known limitation: the class's CEL device selectors are NOT evaluated
 	// (like DeviceTaintRule objects, that is scheduler territory) — a
@@ -605,6 +623,15 @@ func scanGPUSliceTopology(items []unstructured.Unstructured) (nodeLocal map[stri
 // untainted devices the driver advertises in complete, current-generation
 // pools. Sizing consumers (DRA-mode worker counts) need the device count,
 // not just node membership.
+//
+// Counting invariant (#1620 review): under allNodes, multi-node
+// nodeSelector, or per-device allNodes topologies one physical device would
+// increment the count for EVERY reachable node, over-reporting aggregate
+// capacity N×. That state is deliberately unreachable for gpu.nvidia.com
+// consumers: non-node-local topologies are surfaced via
+// Mode.NonNodeLocalGPUSlices and rejected fail-fast (#1652) BEFORE any
+// sizing reads these counts. If that fail-fast is ever relaxed, this
+// counting must be revisited first.
 func UsableDriverDeviceCounts(ctx context.Context, items []unstructured.Unstructured, driver string, eligible map[string]*corev1.Node) (map[string]int, int, error) {
 	// Group the driver's slices by pool name (pool names are scoped per driver).
 	pools := make(map[string][]*unstructured.Unstructured)
@@ -652,26 +679,42 @@ func UsableDriverDeviceCounts(ctx context.Context, items []unstructured.Unstruct
 // "DRA API not served" (NotFound) reports false without evidence; any other
 // DeviceClass list error propagates (fail closed). version is the served
 // resource.k8s.io API version to list DeviceClasses at.
-func detectExtendedResourceDRABacked(ctx context.Context, dynClient dynamic.Interface, version string) (bool, string, error) {
+// It also returns the gpu.nvidia.com DeviceClass object when present (nil
+// otherwise), so detectFullGPUDRA can reuse the single List instead of a
+// second per-Detect apiserver round-trip.
+func detectExtendedResourceDRABacked(ctx context.Context, dynClient dynamic.Interface, version string) (bool, string, *unstructured.Unstructured, error) {
 	classList, err := dynClient.Resource(GVRAt(version, "deviceclasses")).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return false, fmt.Sprintf(
 				"extended-resource attribution: DRA API not served — %s cannot be DRA-backed",
-				resourceNVIDIAGPU), nil
+				resourceNVIDIAGPU), nil, nil
 		}
-		return false, "", ClassifyK8sReadError(err, "DeviceClasses for extended-resource attribution")
+		return false, "", nil, ClassifyK8sReadError(err, "DeviceClasses for extended-resource attribution")
 	}
+	var gpuClass *unstructured.Unstructured
+	backed := false
+	detail := ""
 	for i := range classList.Items {
-		erName, _, _ := unstructured.NestedString(classList.Items[i].Object, "spec", "extendedResourceName")
-		if erName == resourceNVIDIAGPU {
-			return true, fmt.Sprintf(
-				"extended-resource attribution: DeviceClass %s maps %s to DRA (spec.extendedResourceName) — allocatable %s may be served by DRA, not the device plugin",
-				classList.Items[i].GetName(), resourceNVIDIAGPU, resourceNVIDIAGPU), nil
+		item := &classList.Items[i]
+		if item.GetName() == draDriverGPU {
+			gpuClass = item
+		}
+		if !backed {
+			erName, _, _ := unstructured.NestedString(item.Object, "spec", "extendedResourceName")
+			if erName == resourceNVIDIAGPU {
+				backed = true
+				detail = fmt.Sprintf(
+					"extended-resource attribution: DeviceClass %s maps %s to DRA (spec.extendedResourceName) — allocatable %s may be served by DRA, not the device plugin",
+					item.GetName(), resourceNVIDIAGPU, resourceNVIDIAGPU)
+			}
 		}
 	}
-	return false, fmt.Sprintf(
-		"extended-resource attribution: no DeviceClass maps %s to DRA", resourceNVIDIAGPU), nil
+	if !backed {
+		detail = fmt.Sprintf(
+			"extended-resource attribution: no DeviceClass maps %s to DRA", resourceNVIDIAGPU)
+	}
+	return backed, detail, gpuClass, nil
 }
 
 // currentPoolSlices returns the slices at the pool's maximum observed

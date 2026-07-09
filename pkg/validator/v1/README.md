@@ -21,7 +21,16 @@ The package is intentionally narrow and exports three concerns:
 
 1. **`ValidationInput`** (`validation_input.go`) — the wire format consumed
    by a recipe's `spec.validation` block. Carries phases, checks,
-   constraints, criteria, and the resolved component refs.
+   constraints, criteria, the resolved component refs, and the resolved
+   `gpuAllocationPolicy` (`allocation_policy.go`). **Migration note for
+   external controllers:** recipe-backed callers should build inputs with
+   `ToValidationInputWithContext`, which resolves the GPU allocation policy
+   from the recipe's hydrated values; the legacy `ToValidationInput` leaves
+   the policy empty, which validators normalize to `unspecified` and keep
+   capability-driven selection (also the behavior for inputs from
+   pre-policy producers — the field is `omitempty` in both directions).
+   Unknown and reserved configured policies fail closed at the gated
+   checks.
 2. **`ValidatorCatalog` + `ValidatorEntry`** (`catalog.go`) — the catalog
    schema and the `Phase`/filtering helpers. Catalog *loading* lives in
    `pkg/validator/catalog`; this package owns the types.

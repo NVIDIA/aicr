@@ -113,6 +113,12 @@ type ValidationInput struct {
 
 	// Constraints are top-level readiness constraints evaluated before validation phases (optional).
 	Constraints []recipe.Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+
+	// GPUAllocationPolicy is the recipe-resolved whole-GPU allocation policy
+	// (see ResolveGPUAllocationPolicy and the GPUAllocationPolicy* constants).
+	// Empty means unspecified: standalone runs without recipe context keep
+	// capability-driven automatic selection (#1327).
+	GPUAllocationPolicy string `json:"gpuAllocationPolicy,omitempty" yaml:"gpuAllocationPolicy,omitempty"`
 }
 
 // ValidationMetadata contains validation-level metadata.
@@ -141,6 +147,13 @@ func NewValidationInput() *ValidationInput {
 //
 // Populates optional APIVersion/Kind/Metadata fields to support standalone usage.
 // When embedding in CRs, these fields can be omitted via omitempty tags.
+//
+// Legacy conversion: it leaves GPUAllocationPolicy empty (normalized to
+// "unspecified" by GetGPUAllocationPolicy), so callers that feed the result
+// directly to Validator.ValidatePhases bypass recipe policy resolution and
+// validators keep capability-driven selection. Prefer
+// ToValidationInputWithContext, which resolves the policy from the recipe's
+// hydrated values (#1327).
 func ToValidationInput(r *recipe.RecipeResult) *ValidationInput {
 	if r == nil {
 		return nil
@@ -217,4 +230,16 @@ func (i *ValidationInput) GetComponentRefs() []recipe.ComponentRef {
 		return nil
 	}
 	return i.ComponentRefs
+}
+
+// GetGPUAllocationPolicy returns the configured whole-GPU allocation policy
+// in a nil-safe way, normalizing "no policy" (nil input or empty field —
+// standalone runs, or inputs produced before the field existed) to
+// GPUAllocationPolicyUnspecified so consumers can switch on one canonical
+// value set.
+func (i *ValidationInput) GetGPUAllocationPolicy() string {
+	if i == nil || i.GPUAllocationPolicy == "" {
+		return GPUAllocationPolicyUnspecified
+	}
+	return i.GPUAllocationPolicy
 }

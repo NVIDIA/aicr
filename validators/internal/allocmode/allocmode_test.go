@@ -1159,8 +1159,10 @@ func TestDetect_ProbeReadErrorClassification(t *testing.T) {
 		{name: "node list", typed: true, verb: "list", resname: "nodes"},
 		{name: "API discovery", typed: true, verb: "get", resname: "resource"},
 		{name: "ResourceSlice list", typed: false, verb: "list", resname: "resourceslices"},
-		{name: "DeviceClass get", typed: false, verb: "get", resname: "deviceclasses"},
-		{name: "DeviceClass list (extended-resource attribution)", typed: false, verb: "list", resname: "deviceclasses"},
+		// The single DeviceClass List serves both the extended-resource
+		// attribution probe and full-GPU DRA detection (the per-Detect Get
+		// was removed as redundant — one round-trip per Detect).
+		{name: "DeviceClass list (attribution + full-GPU detection)", typed: false, verb: "list", resname: "deviceclasses"},
 	}
 	cases := []struct {
 		kind       string
@@ -1189,9 +1191,6 @@ func TestDetect_ProbeReadErrorClassification(t *testing.T) {
 				} else {
 					dynClient.PrependReactor(st.verb, st.resname, reactor)
 				}
-				// Disambiguate the two deviceclasses sites by verb only —
-				// "get" hits detectFullGPUDRA, "list" hits the attribution
-				// probe; each reactor matches exactly one.
 				_, err := Detect(context.Background(), clientset, dynClient)
 				if err == nil {
 					t.Fatalf("Detect() = nil error, want failure injected at %s", st.name)
@@ -1201,5 +1200,87 @@ func TestDetect_ProbeReadErrorClassification(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestUsableDriverSliceNodes_Direct pins the exported wrapper directly —
+// previously it was exercised only transitively through the conformance
+// bridge alias, which trips the repo's new-exported-func coverage gate if
+// the alias ever moves (#1620 review).
+func TestUsableDriverSliceNodes_Direct(t *testing.T) {
+	eligible := EligibleReadySchedulableNodes(&corev1.NodeList{
+		Items: []corev1.Node{*testNode("node-a")},
+	})
+	items := []unstructured.Unstructured{
+		// Valid: complete current-generation pool, untainted device,
+		// Ready node → node-a is usable.
+		*testResourceSlice("good", draDriverGPU, "node-a", 1, 1,
+			map[string]interface{}{"nodeName": "node-a"},
+			[]interface{}{plainDevice("gpu-0")}),
+		// Foreign driver: not counted for gpu.nvidia.com.
+		*testResourceSlice("foreign", "other.example.com", "node-a", 1, 1,
+			map[string]interface{}{"nodeName": "node-a"},
+			[]interface{}{plainDevice("x-0")}),
+		// Incomplete pool (resourceSliceCount 2, one slice present): the
+		// driver's slice is SEEN but not usable.
+		*testResourceSlice("incomplete", draDriverGPU, "pool-i", 1, 2,
+			map[string]interface{}{"nodeName": "node-a"},
+			[]interface{}{plainDevice("gpu-9")}),
+	}
+	nodes, seen, err := UsableDriverSliceNodes(context.Background(), items, draDriverGPU, eligible)
+	if err != nil {
+		t.Fatalf("UsableDriverSliceNodes() error = %v", err)
+	}
+	if seen != 2 {
+		t.Errorf("seen = %d, want 2 (both gpu.nvidia.com slices, foreign driver excluded)", seen)
+	}
+	if _, ok := nodes["node-a"]; !ok || len(nodes) != 1 {
+		t.Errorf("nodes = %v, want exactly {node-a} (complete pool only)", nodes)
+	}
+}
+
+// TestDriverIdentifierPins is the drift-detection safeguard for the
+// identifiers deliberately duplicated from validators/conformance/consts.go
+// (an import in either direction risks a cycle): each package pins its copy
+// to the canonical literal, so a typo or rename in one copy fails that
+// package's pin instead of silently desyncing detection behavior between
+// the shared probe and the conformance checks.
+func TestDriverIdentifierPins(t *testing.T) {
+	pins := map[string]string{
+		draDriverGPU:           "gpu.nvidia.com",
+		draDriverComputeDomain: "compute-domain.nvidia.com",
+		apiGroupResourceK8sIO:  "resource.k8s.io",
+		resourceNVIDIAGPU:      "nvidia.com/gpu",
+	}
+	for got, want := range pins {
+		if got != want {
+			t.Errorf("driver identifier drifted: %q, want %q (keep in sync with validators/conformance/consts.go)", got, want)
+		}
+	}
+}
+
+// TestDetect_HalfInstalledDRASurfacedInDetail pins the half-installation
+// diagnostic (#1620 review): validated gpu.nvidia.com ResourceSlices with
+// the DeviceClass missing is a broken install, and DRADetail must say so
+// rather than reading like a benign ComputeDomain-only configuration.
+func TestDetect_HalfInstalledDRASurfacedInDetail(t *testing.T) {
+	clientset := k8sfake.NewClientset(testNode("node-a"))
+	withDRAAPIDiscovery(t, clientset)
+	// Validated slice, NO gpu.nvidia.com DeviceClass.
+	dynClient := newDRAFakeDynamicClient(
+		testResourceSlice("s1", draDriverGPU, "node-a", 1, 1,
+			map[string]interface{}{"nodeName": "node-a"},
+			[]interface{}{plainDevice("gpu-0")}),
+	)
+
+	mode, err := Detect(context.Background(), clientset, dynClient)
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+	if mode.DRAUsable {
+		t.Error("DRAUsable = true, want false (DeviceClass missing)")
+	}
+	if !strings.Contains(mode.DRADetail, "HALF-INSTALLED") {
+		t.Errorf("DRADetail = %q, want the HALF-INSTALLED half-installation surface", mode.DRADetail)
 	}
 }

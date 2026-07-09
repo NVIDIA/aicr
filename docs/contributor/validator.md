@@ -111,6 +111,19 @@ capability-driven via the shared `validators/internal/allocmode` probe, with
 inference-perf's worker wiring mode-dispatched per chosen node — but the
 saturation-ordering rationale stands for every GPU-needing check).
 
+The GPU allocation checks follow an **Inspect / Verify / Select** separation
+(#1327): `allocmode.Detect` is the INSPECT step — it probes cluster facts
+(usable full-GPU DRA, usable device plugin, per-node device counts) without
+policy judgment; `allocmode.Verify` is the VERIFY step — it compares the
+recipe-configured `ValidationInput.GPUAllocationPolicy` (resolved from
+hydrated recipe values by `pkg/validator/v1.ResolveGPUAllocationPolicy`)
+against those facts and fails closed with `ErrCodeInvalidRequest` on
+mismatch; SELECT — the capability-preference dispatch inside each check —
+applies only when the policy is `unspecified` (standalone runs without recipe
+context). A configured policy forces the mechanism at
+secure-accelerator-access, dra-support's behavioral subtest, and
+inference-perf's worker wiring and node discovery.
+
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.

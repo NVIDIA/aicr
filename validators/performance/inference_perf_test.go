@@ -2565,7 +2565,7 @@ func TestSelectWorkerNode(t *testing.T) {
 			if scalarUsed == nil {
 				scalarUsed = map[string]int{}
 			}
-			chosen, draWiring, alloc, free, ok := selectWorkerNode(tt.candidates, tt.mode, scalarUsed, used)
+			chosen, draWiring, alloc, free, ok := selectWorkerNode(tt.candidates, tt.mode, validatorv1.GPUAllocationPolicyUnspecified, scalarUsed, used)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %t, want %t", ok, tt.wantOK)
 			}
@@ -2887,11 +2887,11 @@ func TestSelectWorkerNode_KaiCompatibilityGuard(t *testing.T) {
 			// ...but kai counts them raw.
 			NodeLocalGPUSliceDevices: map[string]int{"bad-slice-node": 4},
 		}
-		_, _, _, _, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, map[string]int{}, map[string]int{})
+		_, _, _, _, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, validatorv1.GPUAllocationPolicyUnspecified, map[string]int{}, map[string]int{})
 		if ok {
 			t.Fatal("ok = true, want false — kai would reject scalar pods on the raw-slice node")
 		}
-		msg := describeNoEligibleWorkerNode([]v1.Node{badSliceNode}, mode, nil)
+		msg := describeNoEligibleWorkerNode([]v1.Node{badSliceNode}, mode, validatorv1.GPUAllocationPolicyUnspecified, nil)
 		for _, want := range []string{"bad-slice-node", "4 raw device(s)", "kai-scheduler counts but AICR cannot validate", "fix the ResourceSlices or free a different node"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("fail-fast message missing %q:\n%s", want, msg)
@@ -2907,7 +2907,7 @@ func TestSelectWorkerNode_KaiCompatibilityGuard(t *testing.T) {
 			DevicePluginNodes:        []string{"bad-slice-node"},
 			NodeLocalGPUSliceDevices: map[string]int{"bad-slice-node": 4},
 		}
-		chosen, draWiring, _, free, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, map[string]int{}, map[string]int{})
+		chosen, draWiring, _, free, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, validatorv1.GPUAllocationPolicyUnspecified, map[string]int{}, map[string]int{})
 		if !ok || !draWiring || chosen.Name != "bad-slice-node" || free != 4 {
 			t.Errorf("got (node=%s dra=%t free=%d ok=%t), want DRA wiring with 4 free", chosen.Name, draWiring, free, ok)
 		}
@@ -2922,11 +2922,11 @@ func TestSelectWorkerNode_KaiCompatibilityGuard(t *testing.T) {
 			NodeLocalGPUSliceDevices: map[string]int{"bad-slice-node": 8},
 		}
 		scalarUsed := map[string]int{"bad-slice-node": 1}
-		_, _, _, _, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, scalarUsed, map[string]int{})
+		_, _, _, _, ok := selectWorkerNode([]v1.Node{badSliceNode}, mode, validatorv1.GPUAllocationPolicyUnspecified, scalarUsed, map[string]int{})
 		if ok {
 			t.Fatal("ok = true, want false — a DRA candidate with scalar occupancy must be skipped")
 		}
-		msg := describeNoEligibleWorkerNode([]v1.Node{badSliceNode}, mode, scalarUsed)
+		msg := describeNoEligibleWorkerNode([]v1.Node{badSliceNode}, mode, validatorv1.GPUAllocationPolicyUnspecified, scalarUsed)
 		for _, want := range []string{"bad-slice-node", "1 scalar GPU(s) in use", "DRA allocator cannot see or avoid"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("fail-fast message missing %q:\n%s", want, msg)
