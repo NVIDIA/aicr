@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "deployer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namePrefix": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9][a-z0-9-]*$"
+        },
+        "destinationServer": {
+          "type": "string",
+          "pattern": "^$|^https://[^'\"\\s@:/][^'\"\\s@]*$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+          "maxLength": 253
+        }
+      }
+    }
+  }
+}

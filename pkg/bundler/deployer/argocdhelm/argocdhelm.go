@@ -72,7 +72,9 @@
 package argocdhelm
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -133,6 +135,12 @@ const (
 	rootValuesTargetRevisionKey = "targetRevision"
 )
 
+// rootValuesDeployerKey is the .Values map that carries deployer-level
+// Argo Application options (namePrefix, destinationServer, project).
+// Reserved: the component registry must not use "deployer" as a
+// component name or override key (guard test in pkg/recipe). See #1625.
+const rootValuesDeployerKey = "deployer"
+
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
@@ -172,6 +180,38 @@ type Generator struct {
 	// in the bundle's root values.yaml so deploying from the push-target
 	// registry requires no --set flags. Empty for local-directory output. See #1342.
 	OCIParentNamespace string
+
+	// NamePrefix is prepended to every child Application metadata.name.
+	// The parent Application name is covered by AppName. Written into
+	// the bundle's root values.yaml as an install-time default; operators
+	// override with `helm install --set deployer.namePrefix=...`.
+	// Composed names are validated as DNS-1123 subdomains at generation
+	// time. See #1625.
+	NamePrefix string
+
+	// DestinationServer overrides spec.destination.server on child
+	// Applications only; empty falls back to
+	// argocd.DefaultDestinationServer. Written into the bundle's root
+	// values.yaml as an install-time default; operators override with
+	// `helm install --set deployer.destinationServer=...`. The parent
+	// stays on the control-plane cluster — Application CRs are reconciled
+	// only from the cluster running Argo CD. See #1625.
+	DestinationServer string
+
+	// Project overrides spec.project on child Applications only; empty
+	// falls back to argocd.DefaultProject. Written into the bundle's root
+	// values.yaml as an install-time default; operators override with
+	// `helm install --set deployer.project=...`. The parent stays in
+	// "default" — a project able to create Applications in the Argo CD
+	// namespace is effectively admin. See #1625.
+	Project string
+
+	// CascadeDelete adds argocd.ResourcesFinalizer to the parent and
+	// every child Application. Baked at bundle time — finalizers is a
+	// list field that cannot round-trip as a `.Values.deployer.*`
+	// template expression, so it is intentionally NOT install-time
+	// overridable. See #1628.
+	CascadeDelete bool
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
@@ -227,6 +267,21 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
 		return nil, err
 	}
+	// Validate NamePrefix upfront (not only per-folder in processFolders)
+	// so zero-folder recipes still reject a malformed prefix.
+	if err := bundlercfg.ValidateNamePrefix(g.NamePrefix); err != nil {
+		return nil, err
+	}
+	if err := bundlercfg.ValidateDestinationServer(g.DestinationServer); err != nil {
+		return nil, err
+	}
+	// ValidateProject (not ValidateAppName) is load-bearing: it mirrors
+	// IsDNS1123Subdomain exactly, matching the install-time
+	// values.schema.json pattern, so a baked Project default can never
+	// make the generated bundle fail its own schema at install time.
+	if err := bundlercfg.ValidateProject(g.Project); err != nil {
+		return nil, err
+	}
 
 	// Step 1: Generate flat Argo CD output to a temp directory
 	tmpDir, err := os.MkdirTemp("", "argocdhelm-*")
@@ -263,6 +318,19 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
 		VendorCharts:           g.VendorCharts,
+		// Forward the effective parent name so the inner generator's
+		// parent-collision check tests against THIS deployer's parent
+		// ("aicr-stack" or --app-name), not argocd's own "nvidia-stack"
+		// default. The inner app-of-apps.yaml is discarded, so the only
+		// observable effect is a correct collision baseline.
+		AppName: cmp.Or(g.AppName, DefaultAppName),
+		// Forward CascadeDelete too: child finalizers survive the YAML
+		// round-trip in transformApplication untouched. NamePrefix /
+		// DestinationServer / Project are NOT forwarded — those fields
+		// are rewritten into `.Values.deployer.*` template expressions
+		// during transform, so forwarding would bake values the rewrite
+		// then discards.
+		CascadeDelete: g.CascadeDelete,
 	}
 
 	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
@@ -286,37 +354,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.Files = append(output.Files, chartPath)
 	output.TotalSize += chartSize
 
-	// Step 3: Write static values as chart files and build dynamic-only root values.yaml
-	staticFiles, staticSize, dynamicOnlyValues, err := g.writeStaticValuesAndBuildStubs(outputDir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write static values", err)
+	// Step 3: Write static values as chart files, the root values.yaml,
+	// and the install-time values.schema.json gate.
+	if valuesErr := g.writeValuesFiles(outputDir, output); valuesErr != nil {
+		return nil, valuesErr
 	}
-	output.Files = append(output.Files, staticFiles...)
-	output.TotalSize += staticSize
-
-	// Inject appName at the root of values.yaml when the caller chose a
-	// non-default name. The parent App template reads `.Values.appName`
-	// with the DefaultAppName fallback, so omitting the key on default
-	// bundles keeps values.yaml empty when no other dynamic values exist.
-	// Install-time `helm install --set appName=...` still overrides this.
-	if g.AppName != "" {
-		dynamicOnlyValues[rootValuesAppNameKey] = g.AppName
-	}
-
-	// Bake the OCI parent namespace as the repoURL default when the bundle was
-	// pushed to a registry — `helm show values` and a plain `helm install` both
-	// work without --set flags. For local output, OCIParentNamespace is "" and
-	// the {{ required }} safety-net is unchanged. See #1342.
-	repoURLDefault := g.OCIParentNamespace
-	dynamicOnlyValues[rootValuesRepoURLKey] = repoURLDefault
-	dynamicOnlyValues[rootValuesTargetRevisionKey] = ""
-
-	valuesPath, valuesSize, err := writeRootValuesFile(dynamicOnlyValues, outputDir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write root values.yaml", err)
-	}
-	output.Files = append(output.Files, valuesPath)
-	output.TotalSize += valuesSize
 
 	// Step 4: Walk the NNN-<name>/ folders the argocd deployer produced.
 	// For each folder, copy its non-Application content into outputDir so
@@ -373,6 +415,73 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	)
 
 	return output, nil
+}
+
+// writeValuesFiles writes the chart's value surfaces: per-component
+// static/<name>.yaml files, the root values.yaml (with appName, repoURL,
+// targetRevision, and deployer defaults injected), and values.schema.json.
+// Each written file is appended to output.Files/TotalSize.
+func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) error {
+	staticFiles, staticSize, dynamicOnlyValues, err := g.writeStaticValuesAndBuildStubs(outputDir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write static values", err)
+	}
+	output.Files = append(output.Files, staticFiles...)
+	output.TotalSize += staticSize
+
+	// Inject appName at the root of values.yaml when the caller chose a
+	// non-default name. The parent App template reads `.Values.appName`
+	// with the DefaultAppName fallback, so omitting the key on default
+	// bundles keeps values.yaml empty when no other dynamic values exist.
+	// Install-time `helm install --set appName=...` still overrides this.
+	if g.AppName != "" {
+		dynamicOnlyValues[rootValuesAppNameKey] = g.AppName
+	}
+
+	// Bake the OCI parent namespace as the repoURL default when the bundle was
+	// pushed to a registry — `helm show values` and a plain `helm install` both
+	// work without --set flags. For local output, OCIParentNamespace is "" and
+	// the {{ required }} safety-net is unchanged. See #1342.
+	dynamicOnlyValues[rootValuesRepoURLKey] = g.OCIParentNamespace
+	dynamicOnlyValues[rootValuesTargetRevisionKey] = ""
+
+	dynamicOnlyValues[rootValuesDeployerKey] = g.deployerValues()
+
+	valuesPath, valuesSize, err := writeRootValuesFile(dynamicOnlyValues, outputDir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write root values.yaml", err)
+	}
+	output.Files = append(output.Files, valuesPath)
+	output.TotalSize += valuesSize
+
+	schemaPath, schemaSize, err := writeValuesSchema(outputDir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write values.schema.json", err)
+	}
+	output.Files = append(output.Files, schemaPath)
+	output.TotalSize += schemaSize
+	return nil
+}
+
+// deployerValues builds the root values.yaml `deployer:` map. Baked
+// values become the chart's install-time defaults; every key is
+// overridable with `helm install --set deployer.<key>=...`. cascadeDelete
+// is intentionally absent — finalizers is a list field that cannot be
+// round-tripped as a template expression, so it is bundle-time only.
+func (g *Generator) deployerValues() map[string]any {
+	destinationServer := g.DestinationServer
+	if destinationServer == "" {
+		destinationServer = argocd.DefaultDestinationServer
+	}
+	project := g.Project
+	if project == "" {
+		project = argocd.DefaultProject
+	}
+	return map[string]any{
+		"namePrefix":        g.NamePrefix,
+		"destinationServer": destinationServer,
+		"project":           project,
+	}
 }
 
 // finalizeOutput generates checksums (if requested) and sets deployment metadata.
@@ -463,6 +572,110 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 	return files, totalSize, dynamicOnlyValues, nil
 }
 
+// valuesSchemaProperty, valuesSchemaDeployerProps, valuesSchemaDeployer,
+// valuesSchemaRootProps, and valuesSchema model the values.schema.json
+// document with fixed struct field order — the output feeds checksums.txt
+// and must be byte-deterministic across runs, so map[string]any (whose
+// encoding/json key order depends on sorting, and whose shape invites
+// accidental nondeterminism) is deliberately avoided.
+type valuesSchemaProperty struct {
+	Type      string `json:"type"`
+	Pattern   string `json:"pattern,omitempty"`
+	MaxLength int    `json:"maxLength,omitempty"`
+}
+
+type valuesSchemaDeployerProps struct {
+	NamePrefix        valuesSchemaProperty `json:"namePrefix"`
+	DestinationServer valuesSchemaProperty `json:"destinationServer"`
+	Project           valuesSchemaProperty `json:"project"`
+}
+
+type valuesSchemaDeployer struct {
+	Type                 string                    `json:"type"`
+	AdditionalProperties bool                      `json:"additionalProperties"`
+	Properties           valuesSchemaDeployerProps `json:"properties"`
+}
+
+type valuesSchemaRootProps struct {
+	Deployer valuesSchemaDeployer `json:"deployer"`
+}
+
+type valuesSchema struct {
+	Schema     string                `json:"$schema"`
+	Type       string                `json:"type"`
+	Properties valuesSchemaRootProps `json:"properties"`
+}
+
+// writeValuesSchema emits values.schema.json constraining the deployer.*
+// install-time inputs. Helm validates coalesced values against this schema
+// on install/upgrade/template/lint, so a typo like
+// `--set deployer.destinationSever=...` fails loudly instead of silently
+// falling back to the in-cluster default (fail-closed at install time,
+// mirroring the bundle-time allowlist in pkg/bundler/config). Only the
+// deployer key is constrained: root-level additionalProperties must stay
+// open for per-component override maps (gpuoperator: ...). cascadeDelete
+// is deliberately omitted — it is bundle-time only, so an install-time
+// `--set deployer.cascadeDelete=...` fails this schema by design.
+func writeValuesSchema(outputDir string) (string, int64, error) {
+	const schemaTypeString = "string"
+	schemaPath, err := deployer.SafeJoin(outputDir, "values.schema.json")
+	if err != nil {
+		return "", 0, err
+	}
+	schema := valuesSchema{
+		Schema: "http://json-schema.org/draft-07/schema#",
+		Type:   "object",
+		Properties: valuesSchemaRootProps{
+			Deployer: valuesSchemaDeployer{
+				Type:                 "object",
+				AdditionalProperties: false,
+				Properties: valuesSchemaDeployerProps{
+					NamePrefix: valuesSchemaProperty{
+						Type:    schemaTypeString,
+						Pattern: `^$|^[a-z0-9][a-z0-9-]*$`,
+					},
+					DestinationServer: valuesSchemaProperty{
+						Type: schemaTypeString,
+						// `@` is forbidden to match the bundle-time Go
+						// validator, which rejects embedded credentials
+						// (https://u:p@host). The first character after
+						// https:// must not be `:` or `/` so a hostname-less
+						// URL (https://:6443, https:///path) fails closed,
+						// matching ValidateHTTPSURL's Hostname() check.
+						// The `^$|` alternative allows an explicit-empty
+						// install-time value: the child template's
+						// `| default` fallback then renders the baked
+						// in-cluster default.
+						Pattern: `^$|^https://[^'"\s@:/][^'"\s@]*$`,
+					},
+					Project: valuesSchemaProperty{
+						Type: schemaTypeString,
+						// Mirrors IsDNS1123Subdomain exactly (total length
+						// capped at 253 via maxLength; per-label caps are
+						// deliberately NOT enforced because Kubernetes
+						// object names don't enforce them — a 64+-char
+						// label is a legal AppProject name). The `^$|`
+						// alternative allows an explicit-empty install-time
+						// value to reset to the baked default via the child
+						// template's `| default` fallback.
+						Pattern:   `^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`,
+						MaxLength: 253,
+					},
+				},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values schema", err)
+	}
+	data = append(data, '\n')
+	if writeErr := os.WriteFile(schemaPath, data, 0600); writeErr != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values.schema.json", writeErr)
+	}
+	return schemaPath, int64(len(data)), nil
+}
+
 // rootValuesInstallHeader documents the install-time inputs surfaced
 // in the bundle's root values.yaml. The empty defaults below let
 // `helm show values` list the keys; the parent App template's
@@ -482,6 +695,16 @@ const rootValuesInstallHeader = `# Generated by AICR
 #   targetRevision   Chart version / OCI artifact tag.
 #                    Defaults to .Chart.Version when unset at install time.
 #                    Example: --set targetRevision=v1.0.0
+#
+#   deployer.namePrefix          Prefix prepended to every child Application
+#                                name (multi-tenant collision avoidance).
+#   deployer.destinationServer   Target cluster API URL for child
+#                                Applications (default in-cluster).
+#   deployer.project             Argo CD project for child Applications.
+#
+#   deployer.cascadeDelete is intentionally NOT an install-time value —
+#   it is bundle-time only (aicr bundle --set deployer:cascadeDelete=true);
+#   helm --set deployer.cascadeDelete=... fails the values schema.
 #
 ---
 `
@@ -625,8 +848,20 @@ func (g *Generator) writeParentApplicationTemplate(templatesDir string) (string,
 	if joinErr != nil {
 		return "", 0, joinErr
 	}
-	content := []byte(parentAppTemplate)
-	if writeErr := os.WriteFile(destPath, content, 0600); writeErr != nil {
+	content := parentAppTemplate
+	if g.CascadeDelete {
+		content = strings.Replace(content,
+			"  namespace: argocd\nspec:",
+			"  namespace: argocd\n  finalizers:\n    - "+argocd.ResourcesFinalizer+"\nspec:", 1)
+		// strings.Replace no-ops silently if the anchor string is ever
+		// refactored out of parentAppTemplate — fail loudly instead of
+		// shipping a bundle that ignores --set deployer:cascadeDelete.
+		if !strings.Contains(content, argocd.ResourcesFinalizer) {
+			return "", 0, errors.New(errors.ErrCodeInternal,
+				"failed to inject finalizer into parent Application template")
+		}
+	}
+	if writeErr := os.WriteFile(destPath, []byte(content), 0600); writeErr != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			"failed to write parent Application template", writeErr)
 	}
@@ -700,6 +935,36 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 		}
 		output.Files = append(output.Files, copiedFiles...)
 		output.TotalSize += copySize
+
+		// Validate the composed child name at bundle time: the rendered
+		// template prepends `.Values.deployer.namePrefix` (defaulting to
+		// the baked NamePrefix in root values.yaml), so a prefix that
+		// composes into an invalid DNS-1123 name must fail here rather
+		// than at apiserver admission.
+		if nameErr := bundlercfg.ValidateAppName(g.NamePrefix + folderComponent); nameErr != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("deployer namePrefix produces invalid child Application name %q", g.NamePrefix+folderComponent), nameErr)
+		}
+		// Argo CD derives the Helm release name from the Application name
+		// for Helm-rendered children, so a composed name over Helm's cap
+		// passes DNS-1123 validation but fails at sync time. The cap is
+		// applied uniformly to ALL children (including non-Helm ones) to
+		// keep a single invariant rather than branching on folder kind.
+		// Reject at bundle time; the rendered template guard covers
+		// install-time --set deployer.namePrefix overrides.
+		composedName := g.NamePrefix + folderComponent
+		if len(composedName) > argocd.HelmReleaseNameMaxLen {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("deployer namePrefix produces child Application name %q (%d chars); child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children", composedName, len(composedName), argocd.HelmReleaseNameMaxLen))
+		}
+		parentName := g.AppName
+		if parentName == "" {
+			parentName = DefaultAppName
+		}
+		if composedName == parentName {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("child Application name %q collides with the parent Application name; choose a different --app-name or deployer namePrefix", composedName))
+		}
 
 		overrideKey, keyErr := resolveOverrideKey(parentComponent, g.RecipeResult.DataProvider())
 		if keyErr != nil {
@@ -779,6 +1044,10 @@ func transformApplication(srcDir, templatesDir, folderName, componentName, overr
 			fmt.Sprintf("application manifest for %s has neither 'spec.source' nor 'spec.sources'", componentName))
 	}
 
+	if deployerErr := applyDeployerTemplates(app, componentName); deployerErr != nil {
+		return "", 0, deployerErr
+	}
+
 	// helm.values is a *yaml.Node with LiteralStyle, so yaml.Marshal emits
 	// the raw Helm template as a block scalar that Helm evaluates at render
 	// time (rather than a quoted YAML string).
@@ -787,6 +1056,7 @@ func transformApplication(srcDir, templatesDir, folderName, componentName, overr
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to marshal transformed application for %s", componentName), marshalErr)
 	}
+	out = append([]byte(childNameGuard(componentName)), out...)
 
 	destPath, pathErr := deployer.SafeJoin(templatesDir, componentName+".yaml")
 	if pathErr != nil {
@@ -798,6 +1068,70 @@ func transformApplication(srcDir, templatesDir, folderName, componentName, overr
 			fmt.Sprintf("failed to write template for %s", componentName), writeErr)
 	}
 	return destPath, int64(len(out)), nil
+}
+
+// childNameGuard returns the Helm template guard block prepended to every
+// child Application template. The bundle-time checks in processFolders
+// cover baked NamePrefix values, but install-time `--set
+// deployer.namePrefix=...` bypasses them — these guards fail `helm
+// template`/`helm install` when the composed child name exceeds Helm's
+// release-name cap (Argo CD uses the Application name as the Helm release
+// name) or collides with the parent Application's name. The guard lines
+// are Helm template control flow that renders to nothing; Helm template
+// files need not be valid YAML pre-render. The appName fallback MUST
+// mirror parentAppTemplate's `.Values.appName | default "aicr-stack"`.
+// The `toString` coercion is load-bearing: a plain `--set appName=true`
+// (or `=123`) arrives as a bool/int64 through Helm's type inference, and
+// `eq` fails with "incompatible types for comparison" against the string
+// $childName. The parent template survives the same input because it
+// pipes through `quote`; the guard must coerce likewise.
+func childNameGuard(componentName string) string {
+	return fmt.Sprintf(
+		`{{- $childName := printf "%%s%%s" ((.Values.deployer | default dict).namePrefix | default "") %q -}}
+{{- if gt (len $childName) %d }}{{ fail (printf "deployer.namePrefix produces child Application name %%q (%%d chars): child Application names are capped at %d characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children" $childName (len $childName)) }}{{ end -}}
+{{- if eq $childName (.Values.appName | default %q | toString) }}{{ fail (printf "child Application name %%q collides with the parent Application name: choose a different deployer.namePrefix or appName" $childName) }}{{ end -}}
+`, componentName, argocd.HelmReleaseNameMaxLen, argocd.HelmReleaseNameMaxLen, DefaultAppName)
+}
+
+// applyDeployerTemplates rewrites the child Application fields covered by
+// the deployer: option vocabulary into install-time Helm expressions. The
+// sprig `default` calls are nil-safety only — real defaults ship in the
+// chart's root values.yaml deployer: map, which Helm merges under any
+// install-time --set. metadata.finalizers (cascadeDelete) is NOT
+// rewritten: it survives the YAML round-trip as baked bundle-time state.
+func applyDeployerTemplates(app map[string]any, childName string) error {
+	metadata, ok := app["metadata"].(map[string]any)
+	if !ok {
+		return errors.New(errors.ErrCodeInternal, "application manifest missing 'metadata'")
+	}
+	metadata["name"] = &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   yamlStringTag,
+		Style: yaml.SingleQuotedStyle,
+		Value: fmt.Sprintf(`{{ (.Values.deployer | default dict).namePrefix | default "" }}%s`, childName),
+	}
+
+	spec, ok := app["spec"].(map[string]any)
+	if !ok {
+		return errors.New(errors.ErrCodeInternal, "application manifest missing 'spec'")
+	}
+	spec["project"] = &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   yamlStringTag,
+		Style: yaml.SingleQuotedStyle,
+		Value: fmt.Sprintf(`{{ (.Values.deployer | default dict).project | default %q }}`, argocd.DefaultProject),
+	}
+	destination, ok := spec["destination"].(map[string]any)
+	if !ok {
+		return errors.New(errors.ErrCodeInternal, "application manifest missing 'spec.destination'")
+	}
+	destination["server"] = &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   yamlStringTag,
+		Style: yaml.SingleQuotedStyle,
+		Value: fmt.Sprintf(`{{ (.Values.deployer | default dict).destinationServer | default %q }}`, argocd.DefaultDestinationServer),
+	}
+	return nil
 }
 
 // injectValuesIntoSingleSource adds a helm.values block to an existing
@@ -1222,6 +1556,17 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 		buf.WriteString(" \\\n  " + strings.Join(dynamicSetFlags, " \\\n  "))
 	}
 	buf.WriteString("\n```\n")
+
+	buf.WriteString("\n## Deployer Options\n\n")
+	buf.WriteString("Child Application deployer options are install-time overridable:\n\n")
+	buf.WriteString("- `--set deployer.namePrefix=<prefix>` — prefix prepended to every\n")
+	buf.WriteString("  child Application name (multi-tenant collision avoidance).\n")
+	buf.WriteString("- `--set deployer.destinationServer=<url>` — target cluster API URL\n")
+	buf.WriteString("  for child Applications (default in-cluster).\n")
+	buf.WriteString("- `--set deployer.project=<project>` — Argo CD project for child\n")
+	buf.WriteString("  Applications.\n\n")
+	buf.WriteString("`cascadeDelete` is bundle-time only (finalizers cannot round-trip as\n")
+	buf.WriteString("a template expression): `aicr bundle --set deployer:cascadeDelete=true`.\n")
 
 	if len(g.DynamicValues) > 0 {
 		buf.WriteString("\n## Dynamic Values\n\n")

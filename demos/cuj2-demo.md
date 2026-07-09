@@ -291,9 +291,9 @@ http://127.0.0.1:9090/chat.html
 
     Feature                  Description
     ──────────────────────── ─────────────────────────────────────────────
-    dra-support              DRA GPU allocation test
+    dra-support              DRA support test (full-GPU DRA ResourceClaim; #1629)
     gang-scheduling          Gang scheduling co-scheduling test
-    secure-access            Secure accelerator access verification
+    secure-access            Secure accelerator access (DRA ResourceClaim isolation)
     accelerator-metrics      Accelerator & AI service metrics
     inference-gateway        Inference API gateway conditions
     robust-operator          Robust AI operator + webhook test

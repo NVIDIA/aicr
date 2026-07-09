@@ -1,12 +1,16 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ .Name }}
+  name: {{ printf "%q" .Name }}
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "{{ .SyncWave }}"
+{{- if .CascadeDelete }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+{{- end }}
 spec:
-  project: default
+  project: {{ printf "%q" .Project }}
 {{- if .IsLocalChart }}
   source:
     repoURL: '{{ .RepoURL }}'
@@ -33,8 +37,8 @@ spec:
       ref: values
 {{- end }}
   destination:
-    server: https://kubernetes.default.svc
-    namespace: {{ .Namespace }}
+    server: {{ printf "%q" .DestinationServer }}
+    namespace: {{ printf "%q" .Namespace }}
   syncPolicy:
     automated:
       prune: true

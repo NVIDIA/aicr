@@ -128,9 +128,12 @@ func ValidateHTTPSURL(label, raw string) error {
 	// while leaving Scheme/Host intact, so a scheme+host-only check would
 	// otherwise accept "https://user:pass@host". Credentials have no place in
 	// a signing endpoint and would leak via config/flags/process listings.
-	if u.Scheme != "https" || u.Host == "" || u.User != nil {
+	// Hostname() (not Host) is load-bearing: "https://:6443" parses with a
+	// non-empty Host (":6443") but an empty hostname — a port with no host is
+	// never a usable endpoint and must fail closed.
+	if u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid %s %q: must be an absolute https:// URL without embedded credentials", label, raw))
+			fmt.Sprintf("invalid %s %q: must be an absolute https:// URL with a hostname and without embedded credentials", label, raw))
 	}
 	return nil
 }

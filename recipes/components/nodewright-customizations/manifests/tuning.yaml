@@ -88,8 +88,8 @@ spec:
 
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
-      version: "0.3.0"
-      containerSHA: sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7
+      version: "0.3.1"
+      containerSHA: sha256:6dedbbb8627dec88acdfd68867f60a3ddca88e5f4c62beddfb704a8e0cfe51d1
       interrupt:
         type: reboot
       env:
@@ -127,5 +127,5 @@ spec:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "false"
       dependsOn:
-        nvidia-tuned: "0.3.0"
+        nvidia-tuned: "0.3.1"
 {{- end }}

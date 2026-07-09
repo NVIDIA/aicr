@@ -764,6 +764,12 @@ paths:
           description: >
             Override values in generated bundle files (format: bundler:path.to.field=value).
             Can be repeated for multiple overrides.
+
+            The reserved prefix "deployer:" carries Argo CD Application
+            options for the argocd and argocd-helm deployers
+            (namePrefix, destinationServer, project, cascadeDelete),
+            e.g. deployer:namePrefix=tenant-a-. Unknown deployer keys
+            are rejected.
           schema:
             type: array
             items:

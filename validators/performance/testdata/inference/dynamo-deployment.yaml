@@ -14,17 +14,19 @@
 
 # Dynamo inference workload for performance benchmarking.
 # Deploys a vLLM aggregated backend with a small model for smoke testing.
-# Worker replicas scale to match available GPUs (1 GPU per replica via DRA).
+# Worker replicas scale to match available GPUs (1 GPU per replica).
 # Frontend-to-worker traffic uses Dynamo's request plane default (TCP). The
 # local vLLM ZMQ KV-event publisher feeds the worker runtime, which relays
 # KV-cache events onto the NATS-backed Dynamo event plane.
 #
-# Target overlays require K8s 1.34+ with nvidia-dra-driver-gpu, so worker
-# GPUs are requested through a DRA ResourceClaimTemplate rather than raw
-# nvidia.com/gpu resources.
+# Worker GPU wiring is MODE-DISPATCHED (capability-driven, issue #1327): on
+# nodes with usable full-GPU DRA the workers bind a DRA ResourceClaimTemplate
+# (kai-scheduler rejects scalar GPU requests on nodes bearing raw node-local GPU ResourceSlices);
+# elsewhere they carry device-plugin nvidia.com/gpu limits, which need no
+# gpu.nvidia.com DeviceClass.
 #
-# Pod scheduling (nodeSelector / tolerations / resourceClaims bindings) is
-# injected programmatically from Go (see applyInferenceWorkerScheduling in
+# Pod scheduling (nodeSelector / tolerations / GPU wiring) is injected
+# programmatically from Go (see applyInferenceWorkerScheduling in
 # inference_perf_constraint.go) so taint values with YAML-special characters
 # cannot break the template.
 

@@ -753,6 +753,8 @@ func TestValidateHTTPSURL(t *testing.T) {
 		{"missing scheme rejected", "fulcio.internal.example.com", true},
 		{"relative path rejected", "not-a-url", true},
 		{"scheme without host rejected", "https://", true},
+		{"port without hostname rejected", "https://:6443", true},
+		{"path without hostname rejected", "https:///path", true},
 		{"non-http scheme rejected", "ftp://example.com", true},
 	}
 	for _, tt := range tests {

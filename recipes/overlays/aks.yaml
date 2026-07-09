@@ -39,7 +39,9 @@ spec:
     # Azure Disk CSI is a built-in AKS addon (enabled by default since AKS 1.21).
 
     # AKS-specific GPU Operator overrides
-    # AKS pre-installs NVIDIA container toolkit; disable toolkit installation
+    # GPU Operator-managed mode: the operator installs the driver and the
+    # container toolkit on `--gpu-driver none` nodepools
+    # (see docs/integrator/aks-gpu-setup.md)
     - name: gpu-operator
       type: Helm
       version: "v26.3.2"

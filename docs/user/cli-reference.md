@@ -1121,7 +1121,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "status": "passed",
         "duration": 8000,
         "suite": ["conformance"],
-        "stdout": ["DRA GPU allocation successful"]
+        "stdout": ["DRA support verified (driver healthy, ResourceSlices validated)"]
       },
       {
         "name": "cluster-autoscaling",
@@ -1396,6 +1396,8 @@ The `--deployer` flag controls how deployment artifacts are generated:
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
+> **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
+
 **Deployment Order:**
 
 All deployers respect the `deploymentOrder` field from the recipe, ensuring components are installed in the correct sequence:
@@ -1424,6 +1426,7 @@ Override any value in the generated bundle files using dot notation:
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
 - **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes a component the recipe enabled. A component the recipe **disabled** (`overrides.enabled: false`) cannot be re-enabled this way — `--set <component>:enabled=true` on such a component is rejected, since re-enabling a platform-provided component would install a conflicting second copy. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
 - **Aliases merge**: overrides supplied under both a component's canonical name and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are **combined, not dropped**; the canonical name wins on any shared path. (Same alias-merge behavior as [`--set-json` / `--set-file`](#list-and-object-value-overrides).)
+- **GPU allocation-policy keys are deprecated at bundle time**: static overrides of the nested policy values — `nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride` and `gpu-operator`(`-ocp`) `devicePlugin.enabled` — still work via `--set`, `--set-json`, or `--set-file` but log a deprecation warning; the component-level `enabled` toggle of those components is honored **only via scalar `--set`** (the typed `--set-json`/`--set-file` path rejects `enabled` for every component, as described above) and likewise warns. Validators verify the recipe-resolved allocation policy, so a bundle-time change surfaces as recipe/cluster drift; move the allocation mode to a recipe overlay. `--dynamic` on any of these keys is **rejected** (the value would be unknowable when the policy is resolved). This boundary covers only what the bundler renders: **post-generation changes — `argocd-helm` / Argo CD parameter overrides, install-time `helm --set`, and manual edits to generated bundles — cannot be intercepted by AICR** and are outside the guarantee; they surface later as recipe/cluster drift when validation verifies the recipe-resolved policy. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 - **Repeat to add; commas are literal**: To supply multiple overrides, repeat the flag (`--set a:x=1 --set b:y=2`). On the `bundle` command, commas inside a single slice-flag value are taken **literally** (not treated as a value separator), so a value containing a comma — and the comma-heavy JSON passed to `--set-json` — is preserved intact. This applies to all repeatable `bundle` flags (`--set`, `--set-json`, `--set-file`, `--dynamic`, `--*-node-selector`, `--*-node-toleration`, `--workload-selector`).
 
 **Examples:**
@@ -1460,6 +1463,46 @@ aicr bundle -r recipe.yaml \
 aicr bundle -r recipe.yaml \
   --set awsebscsidriver:enabled=false \
   -o ./bundles
+```
+
+#### Argo CD Deployer Options
+
+The `deployer` prefix is reserved: with `--deployer argocd` or `--deployer argocd-helm`, `--set deployer:<key>=<value>` configures the generated Argo CD Applications instead of component chart values. Unknown `deployer:` keys are rejected, and the prefix is rejected entirely with any other `--deployer` type (`helm`, `flux`, `helmfile`).
+
+| Key | Applies to | Default | Example |
+|-----|------------|---------|---------|
+| `namePrefix` | Child Application names | (none) | `--set deployer:namePrefix=tenant-a-` |
+| `destinationServer` | Child Applications' `spec.destination.server` | `https://kubernetes.default.svc` | `--set deployer:destinationServer=https://prod.example.com:6443` |
+| `project` | Child Applications' `spec.project` | `default` | `--set deployer:project=gpu-infra` |
+| `cascadeDelete` | Parent and child Applications | `false` | `--set deployer:cascadeDelete=true` |
+
+**Child Applications only:** `namePrefix`, `destinationServer`, and `project` affect the per-component child Applications, not the parent app-of-apps. Application CRs are reconciled only from the cluster running Argo CD, so the parent stays on the control-plane cluster in project `default` — see the Argo CD [cluster bootstrapping guide](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/). The parent's name is set with [`--app-name`](#aicr-bundle).
+
+**Prerequisites for remote destinations:** AICR only writes `deployer:destinationServer` and `deployer:project` into the generated Applications — it does not configure Argo CD. The destination cluster must already be registered with Argo CD (`argocd cluster add <context>` or a [declarative cluster Secret](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/#clusters)), and the [Argo CD project](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) referenced by `deployer:project` must permit the emitted destinations and source repositories; otherwise the child Applications fail to sync with a permission or unknown-cluster error.
+
+**Name limits:** the composed child Application name (`namePrefix` + component name) must be at most 53 characters — Argo CD uses the Application name as the Helm release name, which Helm caps at 53 — and must not equal the parent Application's name (set with `--app-name`). Both violations are rejected at bundle time, and argocd-helm bundles re-check them at `helm template`/`helm install` time for install-time `--set deployer.namePrefix=...` overrides.
+
+**Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the three string keys ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (note the dot, not colon). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. `cascadeDelete` is bundle-time only — it adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
+
+**Use `--set-string` for values Helm would type-infer:** the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
+
+```shell
+# Deploy child Applications to a remote cluster under a tenant prefix
+aicr bundle -r recipe.yaml --deployer argocd \
+  --set deployer:namePrefix=tenant-a- \
+  --set deployer:destinationServer=https://prod.example.com:6443 \
+  --set deployer:project=gpu-infra \
+  -o ./bundles
+
+# Enable cascading deletion on the app-of-apps and its children
+aicr bundle -r recipe.yaml --deployer argocd-helm \
+  --set deployer:cascadeDelete=true \
+  -o ./bundle
+
+# argocd-helm: override the shipped defaults at install time instead
+helm install aicr-stack ./bundle \
+  --set deployer.namePrefix=tenant-a- \
+  --set deployer.project=gpu-infra
 ```
 
 #### List and Object Value Overrides
@@ -2361,11 +2404,16 @@ the full flag reference.
 ##### argocd
 
 Delete the parent `Application` that owns the bundle's child Applications
-(app-of-apps). AICR does **not** set the
+(app-of-apps). By default AICR does **not** set the
 `resources-finalizer.argocd.argoproj.io` finalizer on generated
 Applications, so a plain `kubectl delete` removes only the Application CR
-and leaves the managed resources running. Use one of the cascade-aware
-flows instead:
+and leaves the managed resources running. Bundles generated with
+`--set deployer:cascadeDelete=true` (see
+[Argo CD Deployer Options](#argo-cd-deployer-options)) are the exception:
+the finalizer is baked onto the parent and every child Application, so a
+plain `kubectl delete` on the parent already cascades to the managed
+resources. For default bundles, use one of the cascade-aware flows
+instead:
 
 ```bash
 # Argo CD CLI — cascade is the default; foreground waits for resources

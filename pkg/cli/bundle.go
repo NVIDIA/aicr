@@ -557,6 +557,9 @@ Package with explicit tag (overrides CLI version):
 	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
 	Use the special 'enabled' key to include/exclude components at bundle time
 	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver).
+	Use the reserved 'deployer' prefix with --deployer argocd/argocd-helm to
+	set Argo Application options: namePrefix, destinationServer, project,
+	cascadeDelete (e.g., --set deployer:namePrefix=tenant-a-).
 	--set is scalar-only; use --set-json / --set-file for list or object values.`,
 				Category: catDeployment,
 			},

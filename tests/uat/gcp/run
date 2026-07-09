@@ -78,8 +78,12 @@ HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
 # validate run now polls internally, up to GPUReadinessTimeout, to ride through a
 # reboot) -- plus cold-boot GPU-operator convergence
 # (driver/toolkit/device-plugin/DCGM) and prometheus-adapter APIService
-# aggregation, across the required consecutive passes. Fails closed if exceeded.
-READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1800}" # 30 min
+# aggregation, across the required consecutive passes. Sized at 60m because
+# nodewright (skyhook) tuning plus its reboot cycles alone can run past 30m on a
+# cold GPU node (the earlier 30m budget timed out purely waiting on tuning), and
+# the gate must still have room to observe the required consecutive passes after
+# tuning settles. Fails closed if exceeded.
+READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-3600}" # 60 min
 # The gate requires the deployment phase to pass this many times CONSECUTIVELY
 # before declaring readiness. A single pass proves "converged at instant T", not
 # "will stay converged": nodewright (skyhook) tuning reboots the GPU node more
