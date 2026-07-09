@@ -786,14 +786,94 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		}
 	}
 
-	// Apply shared trainjob: testdata/trainjob.yaml
+	// Apply shared trainjob: testdata/trainjob.yaml.
+	// waitForTrainingRuntime above proved the runtime is visible at the API
+	// server, but the Trainer validating webhook resolves runtimeRef against its
+	// own informer cache, which lags that read — so the create can still be
+	// rejected with "TrainingRuntime not found". applyTrainJobWithRetry retries
+	// on exactly that denial until the webhook cache catches up.
 	trainjobPath := filepath.Join("testdata", "trainjob.yaml")
-	if err := applyYAMLWithDynamicClient(ctx.Ctx, dynamicClient, trainJobGVR, config.Namespace, trainjobPath, templateData); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply train job", err)
+	if err := applyTrainJobWithRetry(ctx.Ctx, dynamicClient, config.Namespace, trainjobPath, templateData); err != nil {
+		return err
 	}
 	slog.Info("Applied TrainJob")
 
 	return nil
+}
+
+// applyTrainJobWithRetry creates the shared NCCL TrainJob, retrying on the one
+// transient failure we cannot eliminate from the client side: the Kubeflow
+// Trainer validating webhook (validator.trainjob.trainer.kubeflow.org) rejects
+// the TrainJob because its own controller-runtime informer cache has not yet
+// observed the TrainingRuntime we just created and confirmed visible via
+// waitForTrainingRuntime. The webhook's lister is eventually consistent with the
+// API server's strongly-consistent read, and that freshness is not observable
+// from here — so a bounded retry (letting the cache catch up) is the only robust
+// remedy. Any non-race error is returned immediately.
+func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface, namespace, path string, data map[string]string) error {
+	obj, err := parseYAMLTemplate(path, data)
+	if err != nil {
+		return err
+	}
+
+	retryCtx, cancel := context.WithTimeout(ctx, defaults.TrainJobAdmissionRetryTimeout)
+	defer cancel()
+
+	attempt := 0
+	for {
+		attempt++
+		createErr := createUnstructured(retryCtx, dynamicClient, trainJobGVR, namespace, obj)
+		if createErr == nil {
+			if attempt > 1 {
+				slog.Info("TrainJob created after Trainer webhook cache caught up to the TrainingRuntime",
+					"attempts", attempt)
+			}
+			return nil
+		}
+		// If the retry budget expired — including while createUnstructured was in
+		// flight — classify as timeout rather than leaking whatever error the
+		// aborted create returned (which is not the webhook race and would
+		// otherwise fall through to the non-race return below with ErrCodeInternal).
+		if retryCtx.Err() != nil {
+			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
+				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
+				createErr, map[string]interface{}{"attempts": attempt})
+		}
+		if !isTrainingRuntimeNotYetVisible(createErr) {
+			// A real failure (or a genuinely missing runtime) — do not mask it.
+			return createErr
+		}
+		slog.Warn("TrainJob rejected: Trainer webhook has not yet observed the TrainingRuntime; retrying",
+			"attempt", attempt, "error", createErr)
+		select {
+		case <-retryCtx.Done():
+			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
+				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
+				createErr, map[string]interface{}{"attempts": attempt})
+		case <-time.After(defaults.TrainJobAdmissionRetryInterval):
+		}
+	}
+}
+
+// isTrainingRuntimeNotYetVisible reports whether err is the Kubeflow Trainer
+// webhook's "the referenced TrainingRuntime does not exist yet" denial. On a
+// runtime we just created and confirmed present at the API server
+// (waitForTrainingRuntime), this denial is a webhook-cache-lag race rather than
+// a genuinely missing runtime, so it is safe to retry. Matched primarily by the
+// webhook's stable denial phrasing; the fallback is guarded to admission
+// rejection reasons so a genuine NotFound / timeout is never mistaken for the
+// race. StructuredError implements Unwrap, so the apierrors checks see through
+// createUnstructured's wrap.
+func isTrainingRuntimeNotYetVisible(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "must be created before the TrainJob is created") {
+		return true
+	}
+	return strings.Contains(msg, ncclTrainingRuntimeName) && strings.Contains(msg, "not found") &&
+		(apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) || apierrors.IsForbidden(err))
 }
 
 // buildComputeDomain builds the resource.nvidia.com/v1beta1 ComputeDomain CR
@@ -941,15 +1021,6 @@ func waitForIMEXClaimTemplate(ctx context.Context, dynamicClient dynamic.Interfa
 			}
 		}
 	}
-}
-
-// applyYAMLWithDynamicClient reads a YAML template, performs substitution, and applies it using dynamic client
-func applyYAMLWithDynamicClient(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace, path string, data map[string]string) error {
-	obj, err := parseYAMLTemplate(path, data)
-	if err != nil {
-		return err
-	}
-	return createUnstructured(ctx, dynamicClient, gvr, namespace, obj)
 }
 
 // parseYAMLTemplate reads a YAML template file, performs ${KEY} substitution,
