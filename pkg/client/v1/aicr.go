@@ -1315,13 +1315,20 @@ func (c *Client) ValidateState(
 	// the recipe. ValidatePhases takes a *v1.ValidationInput, not a
 	// *recipe.RecipeResult, on github/main (post-PR #1015/#1066 refactor
 	// that promoted validation inputs into the v1 catalog package).
-	// ToValidationInput translates the internal recipe result into that
-	// shape without re-resolving the recipe.
+	// ToValidationInputWithContext translates the internal recipe result
+	// into that shape without re-resolving the recipe, and resolves the
+	// whole-GPU allocation policy from the recipe's hydrated values (#1327)
+	// — an invalid allocation configuration fails closed here, before any
+	// validator Job is deployed.
 	internalPhases := make([]validator.Phase, len(cfg.phases))
 	for i, p := range cfg.phases {
 		internalPhases[i] = validator.Phase(p)
 	}
-	results, err := v.ValidatePhases(ctx, internalPhases, validatorv1.ToValidationInput(recipe.internal), toInternalSnapshot(snap))
+	validationInput, err := validatorv1.ToValidationInputWithContext(ctx, recipe.internal)
+	if err != nil {
+		return nil, err
+	}
+	results, err := v.ValidatePhases(ctx, internalPhases, validationInput, toInternalSnapshot(snap))
 	if err != nil {
 		return nil, err
 	}
