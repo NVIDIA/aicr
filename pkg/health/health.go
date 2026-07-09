@@ -263,7 +263,7 @@ func computeCombo(entry recipe.CatalogEntry, result *recipe.RecipeResult, err er
 // Manifest-only "Helm" components (typed Helm but carrying local manifestFiles
 // with no external chart/source — e.g. nodewright-customizations) are also
 // skipped: there is no external chart version to pin, so grading them against
-// the pin requirement is a false positive. See isManifestOnlyHelm.
+// the pin requirement is a false positive. See recipe.ComponentRef.IsManifestOnlyHelm.
 //
 // A recipe with no enabled Helm components (e.g. pure-Kustomize) scores a
 // vacuous pass with an explanatory detail, since Kustomize defaultTag pinning
@@ -287,12 +287,27 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 		// Manifest-only "Helm" components (e.g. nodewright-customizations) are
 		// typed Helm but ship local manifestFiles with no external chart, so
 		// they have no chart version to pin. Skip them — exactly like disabled
-		// components — rather than flag a non-existent pin as unpinned.
-		if isManifestOnlyHelm(ref) {
+		// components — rather than flag a non-existent pin as unpinned. But a
+		// version they DO set still ships raw into the rendered chart's
+		// .Chart.Version / helm.sh/chart label, so a MALFORMED one (bare "v",
+		// padded) is graded before the exemption applies — matching the
+		// coherence check, which rejects those shapes outright (the classifier
+		// grades directly-constructed results as defense-in-depth).
+		if ref.IsManifestOnlyHelm() {
+			if ref.Version != "" && !isEffectiveRawVersion(ref.Version) {
+				helmCount++
+				unpinned = append(unpinned, ref.Name)
+			}
 			continue
 		}
 		helmCount++
-		if ref.Version == "" {
+		// Shared rule with the coherence check (recipe.IsEffectiveChartVersion):
+		// whitespace-only and bare-"v" versions do not pin what deploys. A
+		// PADDED version is equally unpinned — the deployers consume the
+		// field raw (a broken semver in Flux, an invalid helm.sh/chart
+		// label for manifest-rendered charts), so the trimmed value that
+		// grades here is not the value that ships.
+		if !isEffectiveRawVersion(ref.Version) {
 			unpinned = append(unpinned, ref.Name)
 		}
 	}
@@ -305,6 +320,15 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 		return StatusPass, "no enabled Helm components; chart-version pinning not applicable (Kustomize tag pinning is out of scope)"
 	}
 	return StatusPass, ""
+}
+
+// isEffectiveRawVersion reports whether version pins what actually deploys:
+// effective after the deployers' normalization (recipe.IsEffectiveChartVersion)
+// AND free of surrounding whitespace — the deployers consume the field raw, so
+// a padded value that grades clean when trimmed is not the value that ships.
+func isEffectiveRawVersion(version string) bool {
+	return recipe.IsEffectiveChartVersion(version) &&
+		version == strings.TrimSpace(version)
 }
 
 // classifyConstraintsWellformed grades the constraints_wellformed dimension
@@ -366,18 +390,6 @@ func classifyConstraintsWellformed(result *recipe.RecipeResult) (state, detail s
 	}
 
 	return StatusPass, ""
-}
-
-// isManifestOnlyHelm reports whether a Helm-typed ComponentRef is a
-// manifest-only component: it references no external chart (empty Chart and
-// Source) but ships local manifest files. Such a component has no chart
-// version to pin, so chart_pinned must not grade it. This mirrors the
-// manifest-only detection in the bundler's deployers (ref.Chart == "" &&
-// ref.Source == "" with manifests present), keeping the health signal aligned
-// with what is actually bundled and deployed.
-func isManifestOnlyHelm(ref recipe.ComponentRef) bool {
-	return ref.Chart == "" && ref.Source == "" &&
-		(len(ref.ManifestFiles) > 0 || len(ref.PreManifestFiles) > 0)
 }
 
 // computeCoverage builds the declared_coverage descriptor from the resolved

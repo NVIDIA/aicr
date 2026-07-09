@@ -655,3 +655,93 @@ func TestRunMixedComponents(t *testing.T) {
 		t.Fatalf("run() error = %v", err)
 	}
 }
+
+// TestRunStrictDegenerateVersions pins the strict gate against the shared
+// resolution rule (recipe.IsEffectiveChartVersion plus the padded-value
+// rejection): a defaultVersion that is whitespace-only, a bare "v", or
+// padded would pass an empty-string check here but fail ValidateCoherence
+// at recipe resolution — the CI gate must be at least as strict as the
+// resolver it guards.
+func TestRunStrictDegenerateVersions(t *testing.T) {
+	registryFor := func(version string) string {
+		return `apiVersion: v1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    helm:
+      defaultRepository: "oci://ghcr.io/nvidia"
+      defaultChart: gpu-operator
+      defaultVersion: "` + version + `"
+      defaultNamespace: gpu-operator
+`
+	}
+	tests := []struct {
+		name    string
+		version string
+		wantErr bool
+	}{
+		{"whitespace-only version fails strict", "   ", true},
+		{"bare v version fails strict", "v", true},
+		{"padded version fails strict", " 1.0.0", true},
+		{"trailing-space version fails strict", "1.0.0 ", true},
+		{"pinned version passes strict", "v25.3.0", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeTestRegistry(t, registryFor(tt.version))
+			outDir := t.TempDir()
+			mock := &helmtest.MockRenderer{
+				Rendered: map[string][]byte{"gpu-operator": []byte(renderedYAML)},
+			}
+			err := run(root, outDir, "test-v1", mock, false, true, true, true)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("run() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestSurveyComponentSourceOnlyChartFallback pins the registry-level chart
+// fallback: a Helm entry with a defaultRepository but no defaultChart deploys
+// the component-name chart (recipe.ComponentRef.EffectiveChart), so the BOM
+// must render that chart and record it — not pass an empty chart to the
+// renderer ("no helm chart configured" in strict mode) and omit the metadata.
+func TestSurveyComponentSourceOnlyChartFallback(t *testing.T) {
+	root := writeTestRegistry(t, testRegistryHelm)
+	mock := &helmtest.MockRenderer{
+		Rendered: map[string][]byte{
+			"gpu-operator": []byte(renderedYAML),
+		},
+	}
+
+	c := component{
+		Name:        "gpu-operator",
+		DisplayName: "GPU Operator",
+		Helm: helmCfg{
+			DefaultRepository: "oci://ghcr.io/nvidia",
+			DefaultVersion:    "25.3.0",
+			DefaultNamespace:  "gpu-operator",
+		},
+	}
+
+	res := surveyComponent(context.Background(), root, c, mock, false)
+	if len(res.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", res.Warnings)
+	}
+	if res.Chart != "gpu-operator" {
+		t.Errorf("Chart = %q, want the component-name fallback %q", res.Chart, "gpu-operator")
+	}
+	if len(mock.Inputs) != 1 {
+		t.Fatalf("renderer calls = %d, want 1", len(mock.Inputs))
+	}
+	if got := mock.Inputs[0].Chart; got != "gpu-operator" {
+		t.Errorf("renderer ChartInput.Chart = %q, want fallback %q", got, "gpu-operator")
+	}
+
+	// A manifest-only entry (no repository, no chart) stays chartless.
+	manifestOnly := component{Name: "nodewright-customizations", DisplayName: "nodewright"}
+	if got := manifestOnly.effectiveChart(); got != "" {
+		t.Errorf("manifest-only effectiveChart() = %q, want empty", got)
+	}
+}

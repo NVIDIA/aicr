@@ -1490,8 +1490,15 @@ components:
                   Deployment type; send the canonical value `Helm` or
                   `Kustomize` (the normative contract). A Helm ref must not carry
                   `tag`/`path`; a Kustomize ref requires `path` (and, when it
-                  sets `tag`, a `source`). Incoherent combinations are rejected
-                  with 400. For back-compatibility the server back-fills a
+                  sets `tag`, a `source`). An enabled Helm ref must reference a
+                  deployable primary: either an external chart (a `source`
+                  repository plus an effective `version`; the chart name falls
+                  back to the component name when `chart` is unset, but a
+                  `chart` without a `source` is rejected) or local primary
+                  `manifestFiles` (a manifest-only component; `preManifestFiles`
+                  alone do not qualify). Helm `chart` and `source` values must
+                  not carry surrounding whitespace. Incoherent combinations are
+                  rejected with 400. For back-compatibility the server back-fills a
                   missing type on an enabled ref from the registry when the
                   component is known (a missing type on an unknown component is
                   rejected with 400), and accepts other casings (e.g. `helm`)
@@ -1499,19 +1506,61 @@ components:
                   values above.
               version:
                 type: string
-                description: Chart version (Helm)
+                description: >-
+                  Chart version (Helm). Required for an enabled Helm ref that
+                  references an external chart: an empty, whitespace-only, or
+                  bare `v` value is rejected with 400, as is a value carrying
+                  surrounding whitespace (deployers consume the version
+                  verbatim). Flux and Argo CD strip
+                  a leading `v` for non-OCI outputs (Helm resolves the empty
+                  remainder as "latest"), non-vendored Helm/Helmfile and OCI
+                  outputs preserve it, and vendored wrappers substitute a
+                  fabricated default — a bare `v` is rejected uniformly to
+                  avoid output-dependent chart identities. Not required for
+                  manifest-only Helm components, but when set there the same
+                  whitespace and bare-`v` rules apply (the value lands in the
+                  rendered chart's `helm.sh/chart` label).
               tag:
                 type: string
                 description: Git tag/ref (Kustomize); only meaningful with a source
               source:
                 type: string
-                description: Chart repository URL (Helm) or OCI/Git source reference (Kustomize)
+                description: >-
+                  Chart repository URL (Helm) or OCI/Git source reference
+                  (Kustomize). For Helm refs, values with surrounding
+                  whitespace are rejected with 400 — deployers consume the
+                  field verbatim. (Kustomize sources are not whitespace-
+                  validated today.)
               chart:
                 type: string
-                description: Helm chart name
+                description: >-
+                  Helm chart name; falls back to the component name when unset
+                  on a source-backed ref. Values with surrounding whitespace
+                  are rejected with 400. A chart without a source is rejected
+                  (nothing to pull from).
               path:
                 type: string
                 description: Path within the source to the kustomization (Kustomize)
+              manifestFiles:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  Manifest files bundled with a Helm component (paths relative
+                  to the data directory). Without a chart/source they form the
+                  manifest-only primary and exempt the ref from the `version`
+                  requirement; with an external chart they apply AFTER the
+                  primary release. Rejected with 400 on Kustomize refs (a
+                  Kustomize ref wraps a single primary source).
+              preManifestFiles:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  Manifest files applied BEFORE the component's primary release
+                  (paths relative to the data directory). Auxiliary only:
+                  pre-manifests alone do not make a ref deployable or exempt it
+                  from the `version` requirement.
               patches:
                 type: array
                 items:

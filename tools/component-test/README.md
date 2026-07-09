@@ -44,6 +44,26 @@ Or set `testTier` in `registry.yaml`:
   helm: ...
 ```
 
+**Dependencies are not deployed.** The harness bundles and deploys exactly one
+component; `dependencyRefs` declared on the component's overlay/mixin refs are
+NOT installed — for chart-backed and manifest-only components alike. If the
+component hard-depends on another component (e.g. `nodewright-customizations`
+applies a Skyhook CR whose CRD ships with `nodewright-operator`;
+`kubeflow-trainer` needs `cert-manager` webhooks), install the dependency
+first with `KEEP_CLUSTER=true` so the EXIT-trap cleanup does not immediately
+uninstall it — for example
+`make component-test COMPONENT=nodewright-operator KEEP_CLUSTER=true` — or
+expect the deploy step to fail on the bare test cluster. The deploy script
+prints a warning listing undeployed dependencies: for manifest-only
+components these come from the exact overlay ref the recipe was synthesized
+from; for chart-backed components (whose synthesized recipe is registry
+defaults, tied to no variant) the warning lists the union across recipe
+variants, so some entries may be variant-only (e.g. a GB200 leaf's DRA
+driver) and not needed by the default configuration. Platform-specific
+dependencies (e.g. the `*-ocp*`/OLM chains, whose `OperatorGroup` and
+`Subscription` manifests need OLM CRDs) cannot be pre-installed with this
+Kind-based harness — test those against a matching cluster.
+
 ## Make Targets
 
 ```bash

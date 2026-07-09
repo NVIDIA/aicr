@@ -710,8 +710,10 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, man
 		})
 
 		// Mixed components (Helm chart + manifests) produce a post HelmRelease
-		// that depends on the primary.
-		isMixed := ref.Chart != "" && ref.Source != "" && len(manifests[ref.Name]) > 0
+		// that depends on the primary. Chart-or-source matches the generation
+		// predicate (and terminalReleaseNameFor): a source-only ref with
+		// manifests emits a post release the README must list.
+		isMixed := (ref.Chart != "" || ref.Source != "") && len(manifests[ref.Name]) > 0
 		if isMixed {
 			summaries = append(summaries, ComponentSummary{
 				Name:         ref.Name + "-post",

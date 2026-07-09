@@ -158,6 +158,24 @@ implicit `kustomization.yaml` pickup.
 Reference the component from an overlay's `componentRefs:` to include it in
 recipes that match the overlay's criteria.
 
+**Helm components must resolve with an effective chart version.** Declare
+`helm.defaultVersion` in the registry entry, or pin `version:` on every
+`componentRef` that references the component. A Helm `componentRef` that
+resolves without one is rejected at recipe resolution (`INVALID_REQUEST`)
+rather than passed through — several deployers would otherwise emit the empty
+version verbatim and Helm would silently install "latest" at deploy time.
+Whitespace-only versions and a bare `v` count as absent — Flux and Argo CD
+strip a leading `v` for non-OCI outputs (Helm resolves the empty remainder as
+"latest"), non-vendored Helm/Helmfile and OCI outputs preserve it, and
+vendored wrappers substitute a fabricated default; a bare `v` is rejected
+uniformly to avoid output-dependent chart identities. Also,
+`chart`, `source`, and `version` values carrying surrounding whitespace are
+rejected outright, since deployers consume those fields verbatim. Manifest-only Helm components are exempt: a ref
+whose chart and source are both empty and that ships at least one primary
+`manifestFiles` entry has no chart version to pin. `preManifestFiles` alone
+do not qualify — pre-manifests are auxiliary to a primary release, so a ref
+with only pre-manifests is rejected as having no deployable primary.
+
 ## Precedence rules
 
 | Resource | Behavior |

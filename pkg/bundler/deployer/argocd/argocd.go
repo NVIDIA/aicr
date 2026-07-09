@@ -676,10 +676,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef) []localformat.Component {
 	out := make([]localformat.Component, 0, len(refs))
 	for _, ref := range refs {
-		chart := ref.Chart
-		if chart == "" {
-			chart = ref.Name
-		}
+		chart := ref.EffectiveChart()
 		values := g.ComponentValues[ref.Name]
 		if values == nil {
 			values = make(map[string]any)
@@ -725,10 +722,7 @@ func findComponentRef(refs []recipe.ComponentRef, parent string) *recipe.Compone
 // Argo CD's Git-only $values multi-source ref. Errors from value marshaling
 // surface as ErrCodeInternal.
 func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWave int, repoURL, targetRevision string, values map[string]any, inline bool) (ApplicationData, error) {
-	chart := comp.Chart
-	if chart == "" {
-		chart = comp.Name
-	}
+	chart := comp.EffectiveChart()
 	data := ApplicationData{
 		Name:           f.Name,
 		Namespace:      comp.Namespace,

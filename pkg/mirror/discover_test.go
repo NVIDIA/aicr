@@ -91,6 +91,42 @@ spec:
 			wantComps:  1,
 		},
 		{
+			// A source-only ref (no explicit chart) is a deployable shape
+			// whose chart name falls back to the component name in the
+			// deployers; the mirror inventory must apply the same fallback
+			// rather than silently omitting the chart and its images.
+			name: "source-only helm ref falls back to component name",
+			rec: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{
+						Name:    "gpu-operator",
+						Type:    recipe.ComponentTypeHelm,
+						Source:  "https://helm.ngc.nvidia.com/nvidia",
+						Version: "v25.3.0",
+					},
+				},
+			},
+			helmRenderer: &helmtest.MockRenderer{
+				Rendered: map[string][]byte{
+					"gpu-operator": []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+spec:
+  template:
+    spec:
+      containers:
+      - name: gpu-operator
+        image: nvcr.io/nvidia/gpu-operator:v25.3.0
+`),
+				},
+			},
+			wantImages: 1,
+			wantCharts: 1,
+			wantComps:  1,
+		},
+		{
 			name: "helm render failure produces warning",
 			rec: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
@@ -474,5 +510,50 @@ func TestDiscover_NilDataProviderFallsBackToEmbedded(t *testing.T) {
 		if c.Component == "network-operator" && len(c.Warnings) > 0 {
 			t.Errorf("unexpected warnings reading embedded manifest: %v", c.Warnings)
 		}
+	}
+}
+
+// TestDiscover_SourceOnlyFallbackShape pins the source-only fallback
+// precisely: the renderer must receive the component name as the chart, the
+// resulting ChartRef must carry the fallback name, and a manifest-only ref
+// must not invoke the renderer at all (its images come from the manifest
+// scan; a fabricated chart render would only produce a spurious warning).
+func TestDiscover_SourceOnlyFallbackShape(t *testing.T) {
+	renderer := &helmtest.MockRenderer{
+		Rendered: map[string][]byte{"gpu-operator": []byte("kind: ConfigMap\n")},
+	}
+	rec := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+				Version: "v25.3.0",
+			},
+			{
+				Name:          "nodewright-customizations",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning.yaml"},
+			},
+		},
+	}
+
+	lister := NewLister(WithHelmRenderer(renderer))
+	list, err := lister.Discover(context.Background(), rec)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+
+	if len(renderer.Inputs) != 1 {
+		t.Fatalf("renderer calls = %d, want 1 (manifest-only refs must not render)", len(renderer.Inputs))
+	}
+	if got := renderer.Inputs[0].Chart; got != "gpu-operator" {
+		t.Errorf("renderer ChartInput.Chart = %q, want fallback to component name %q", got, "gpu-operator")
+	}
+	if len(list.Charts) != 1 {
+		t.Fatalf("charts = %d, want 1 (source-only mirrored, manifest-only chartless)", len(list.Charts))
+	}
+	if got := list.Charts[0].Chart; got != "gpu-operator" {
+		t.Errorf("ChartRef.Chart = %q, want fallback %q", got, "gpu-operator")
 	}
 }

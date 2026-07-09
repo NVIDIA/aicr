@@ -178,6 +178,104 @@ func TestClassifyChartPinned(t *testing.T) {
 			result(manifestOnly("nodewright-customizations")),
 			StatusPass, "not applicable",
 		},
+		{
+			// Whitespace-only trims to empty in Helm — counted as unpinned.
+			"whitespace-only version fails",
+			result(helm("ws", "   ")),
+			StatusFail, "ws",
+		},
+		{
+			// A PADDED version is unpinned: deployers consume the field raw,
+			// so the trimmed value graded here is not the value that ships.
+			"padded version fails",
+			result(helm("padded", " 1.0.0 ")),
+			StatusFail, "padded",
+		},
+		{
+			// A literal "v" normalizes to empty in the Flux generator
+			// (deployer.NormalizeVersion) — counted as unpinned.
+			"literal v version fails",
+			result(helm("v-only", "v")),
+			StatusFail, "v-only",
+		},
+		{
+			// A bare "v" counts as unpinned on OCI sources too: vendored
+			// wrappers normalize it to a fabricated default, so the pin is
+			// not what deploys.
+			"oci bare v tag fails",
+			result(recipe.ComponentRef{
+				Name: "oci-comp", Type: recipe.ComponentTypeHelm,
+				Source: "oci://registry.example.com/charts", Version: "v",
+			}),
+			StatusFail, "oci-comp",
+		},
+		{
+			// v-prefixed full versions are pinned on any source.
+			"oci v-prefixed version passes",
+			result(recipe.ComponentRef{
+				Name: "oci-comp", Type: recipe.ComponentTypeHelm,
+				Source: "oci://registry.example.com/charts", Version: "v1.2.3",
+			}),
+			StatusPass, "",
+		},
+		{
+			// Pre-manifests are auxiliary to a primary release: a pre-only ref
+			// does NOT qualify for the manifest-only exemption (it cannot be
+			// built by the resolver since #1615, but the classifier grades
+			// directly-constructed results as defense-in-depth).
+			"pre-manifest-only helm counted as unpinned",
+			result(recipe.ComponentRef{
+				Name: "pre-only", Type: recipe.ComponentTypeHelm,
+				PreManifestFiles: []string{"components/pre-only/manifests/ns.yaml"},
+			}),
+			StatusFail, "pre-only",
+		},
+		{
+			// Primary manifests qualify even when pre-manifests ride along.
+			"manifest-only with pre-manifests keeps exemption",
+			result(recipe.ComponentRef{
+				Name: "nodewright-customizations", Type: recipe.ComponentTypeHelm,
+				ManifestFiles:    []string{"components/nodewright-customizations/manifests/tuning.yaml"},
+				PreManifestFiles: []string{"components/nodewright-customizations/manifests/ns.yaml"},
+			}),
+			StatusPass, "not applicable",
+		},
+		{
+			// The exemption covers the ABSENT version, not a malformed one:
+			// a version the ref does set ships raw into the rendered chart's
+			// .Chart.Version / helm.sh/chart label, so a padded value is
+			// graded before the manifest-only skip (coherence rejects the
+			// shape; the classifier is defense-in-depth).
+			"manifest-only with padded version fails",
+			result(recipe.ComponentRef{
+				Name: "nodewright-customizations", Type: recipe.ComponentTypeHelm,
+				Version:       " 1.0.0 ",
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning.yaml"},
+			}),
+			StatusFail, "nodewright-customizations",
+		},
+		{
+			// A bare "v" on a manifest-only ref is fabricated into "0.1.0"
+			// by NormalizeVersionWithDefault — malformed, not exempt.
+			"manifest-only with bare v version fails",
+			result(recipe.ComponentRef{
+				Name: "nodewright-customizations", Type: recipe.ComponentTypeHelm,
+				Version:       "v",
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning.yaml"},
+			}),
+			StatusFail, "nodewright-customizations",
+		},
+		{
+			// A WELL-FORMED set version keeps the exemption: there is no
+			// external chart to pin, and the value ships cleanly.
+			"manifest-only with valid version keeps exemption",
+			result(recipe.ComponentRef{
+				Name: "nodewright-customizations", Type: recipe.ComponentTypeHelm,
+				Version:       "1.0.0",
+				ManifestFiles: []string{"components/nodewright-customizations/manifests/tuning.yaml"},
+			}),
+			StatusPass, "not applicable",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -542,8 +640,12 @@ components:
 // TestComputeChartPinnedFailThroughBuilder drives a chart_pinned fail through
 // the real builder: a leaf with a Helm component whose registry entry declares
 // no default chart version, so the resolved ComponentRef carries an empty
-// Version. The recipe resolves cleanly (resolves=pass) but chart_pinned must
-// fail, dragging the rolled-up status to fail.
+// Version. Since #1615, resolution itself fails closed on such a ref
+// (ValidateCoherence rejects a chart-referencing Helm ref without a version),
+// so the combo fails at resolves — the unpinned chart can never reach a
+// deployer. The chart_pinned dimension no longer sees this case through the
+// builder; it remains as defense-in-depth for directly-constructed
+// RecipeResults (covered by TestClassifyChartPinned).
 func TestComputeChartPinnedFailThroughBuilder(t *testing.T) {
 	provider := newInMemoryProvider(map[string][]byte{
 		"overlays/base.yaml": []byte(`kind: RecipeMetadata
@@ -588,21 +690,33 @@ components:
 	if combo == nil {
 		t.Fatalf("unpinned-leaf was not enumerated; combos = %+v", report.Combos)
 	}
-	if got := combo.Structure.Dimensions[DimResolves]; got != StatusPass {
-		t.Errorf("resolves = %q, want %q (recipe should resolve cleanly)", got, StatusPass)
-	}
-	if got := combo.Structure.Dimensions[DimChartPinned]; got != StatusFail {
-		t.Errorf("chart_pinned = %q, want %q (unpinned Helm chart)", got, StatusFail)
+	if got := combo.Structure.Dimensions[DimResolves]; got != StatusFail {
+		t.Errorf("resolves = %q, want %q (an unpinned chart-referencing Helm ref must fail resolution, #1615)",
+			got, StatusFail)
 	}
 	if combo.Structure.Status != StatusFail {
 		t.Errorf("status = %q, want %q", combo.Structure.Status, StatusFail)
 	}
-	if d := combo.Structure.Detail[DimChartPinned]; !strings.Contains(d, "unpinned-helm") {
-		t.Errorf("detail = %q, want it to name the unpinned component", d)
+	d := combo.Structure.Detail[DimResolves]
+	if !strings.Contains(d, "unpinned-helm") || !strings.Contains(d, "chart version") {
+		t.Errorf("detail = %q, want it to name the unpinned component and the missing chart version", d)
 	}
-	// The recipe resolved, so the descriptor must be populated (non-nil).
-	if combo.Structure.Coverage == nil {
-		t.Error("Coverage = nil, want non-nil on a resolved recipe")
+	// No RecipeResult survives a failed resolve, so the descriptor is omitted
+	// and no graded dimension beyond resolves is emitted — chart_pinned must
+	// be absent, not a misleading pass/fail.
+	if combo.Structure.Coverage != nil {
+		t.Errorf("Coverage = %+v, want nil on a failed resolve", *combo.Structure.Coverage)
+	}
+	if got, present := combo.Structure.Dimensions[DimChartPinned]; present {
+		t.Errorf("chart_pinned = %q, want absent on a failed resolve", got)
+	}
+	if got, present := combo.Structure.Dimensions[DimConstraintsWellformed]; present {
+		t.Errorf("constraints_wellformed = %q, want absent on a failed resolve", got)
+	}
+	for _, dim := range []string{DimChartPinned, DimConstraintsWellformed} {
+		if d, present := combo.Structure.Detail[dim]; present {
+			t.Errorf("Detail[%s] = %q, want absent on a failed resolve", dim, d)
+		}
 	}
 }
 

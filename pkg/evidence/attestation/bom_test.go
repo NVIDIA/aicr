@@ -336,3 +336,65 @@ func TestBuildAutoBOM_IncludesRecipeAndValidatorComponents(t *testing.T) {
 		t.Errorf("disabled component must not appear in auto BOM")
 	}
 }
+
+// TestBuildAutoBOM_SourceOnlyRefRecordsEffectiveChart pins the auto-BOM chart
+// projection: a source-only Helm ref deploys the component-name chart (the
+// deployers' EffectiveChart fallback), so the digest-bound evidence must
+// carry aicr:helm:chart for it rather than omitting the property. A
+// manifest-only Helm ref deploys no external chart and stays chartless.
+func TestBuildAutoBOM_SourceOnlyRefRecordsEffectiveChart(t *testing.T) {
+	rec := &recipe.RecipeResult{
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceEKS,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "source-only", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Version: "1.0.0"},
+			{Name: "manifest-only", Type: recipe.ComponentTypeHelm, ManifestFiles: []string{"components/manifest-only/manifests/a.yaml"}},
+		},
+	}
+
+	body, err := BuildAutoBOM(rec, nil, nil, "v0.1.0")
+	if err != nil {
+		t.Fatalf("BuildAutoBOM: %v", err)
+	}
+
+	doc := &cdx.BOM{}
+	if err := json.Unmarshal(body, doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if doc.Components == nil {
+		t.Fatal("BOM has no components")
+	}
+
+	chartProp := func(c cdx.Component) (string, bool) {
+		if c.Properties == nil {
+			return "", false
+		}
+		for _, p := range *c.Properties {
+			if p.Name == "aicr:helm:chart" {
+				return p.Value, true
+			}
+		}
+		return "", false
+	}
+
+	var sawSourceOnly, sawManifestOnly bool
+	for _, c := range *doc.Components {
+		switch c.Name {
+		case "source-only":
+			sawSourceOnly = true
+			if got, ok := chartProp(c); !ok || got != "source-only" {
+				t.Errorf("source-only aicr:helm:chart = (%q, %v), want the component-name fallback", got, ok)
+			}
+		case "manifest-only":
+			sawManifestOnly = true
+			if got, ok := chartProp(c); ok {
+				t.Errorf("manifest-only aicr:helm:chart = %q, want absent (no external chart deploys)", got)
+			}
+		}
+	}
+	if !sawSourceOnly || !sawManifestOnly {
+		t.Fatalf("components missing from auto BOM: source-only=%v manifest-only=%v", sawSourceOnly, sawManifestOnly)
+	}
+}
