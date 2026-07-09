@@ -173,11 +173,23 @@ time. See
 `Standard_ND96isr_H100_v5` is the 8-GPU ND H100 v5 SKU. The AKS Dynamo
 inference throughput gate (`inference-throughput`) is a fixed absolute
 **full-node** floor calibrated on an 8-GPU H100 node, so this SKU is the
-supported happy path for that gate. Smaller NCads H100 SKUs
-(`Standard_NC80adis_H100_v5` = 2 GPUs, `Standard_NC40ads_H100_v5` = 1 GPU) run
-fine for deployment but will false-fail the throughput floor; gate on
-`inference-ttft-p99` only on those until the per-GPU normalization in
+supported happy path for that gate. The same applies to the AKS H100 training
+NCCL gate (`nccl-all-reduce-bw >= 150`): its floor is calibrated on full
+ND96isr nodes using the Network Operator's RDMA shared device pool
+(`rdma/hca_shared_devices_a`) over the SKU's multi-HCA InfiniBand fabric.
+Smaller NCads H100 SKUs (`Standard_NC80adis_H100_v5` = 2 GPUs,
+`Standard_NC40ads_H100_v5` = 1 GPU) run fine for deployment but will
+false-fail both full-node floors — they lack the GPU count and IB fabric the
+calibrations assume; gate on `inference-ttft-p99` only on those until the
+per-GPU normalization in
 [#1254](https://github.com/NVIDIA/aicr/issues/1254) lands.
+
+The NCCL gate's benchmark pods pull the `nccl-tests` image from
+`public.ecr.aws` (AWS's public registry) — a cross-cloud pull when running on
+Azure. Private or egress-restricted AKS clusters must allow registry egress to
+`public.ecr.aws` or mirror the image into an Azure-reachable registry (e.g.
+ACR) before running the performance phase; otherwise the benchmark workers
+fail at image pull and the check fails without measuring anything.
 
 ### Alternative: Use the AKS Driver-Only Profile
 

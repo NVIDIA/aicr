@@ -168,6 +168,14 @@ validation:
       - expected-resources
       - gpu-operator-version
       - check-nvidia-smi
+  performance:
+    checks:
+      - nccl-all-reduce-bw
+    constraints:
+      # Provisional floor pending calibration on an ND96isr_H100_v5 testbed —
+      # see recipes/overlays/h100-aks-training.yaml.
+      - name: nccl-all-reduce-bw
+        value: '>= 150'
   conformance:
     checks:
       - platform-health

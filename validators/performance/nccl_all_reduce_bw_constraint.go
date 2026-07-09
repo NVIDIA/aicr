@@ -215,6 +215,11 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// runtime template and the same calibrated >= 300 GB/s floor.
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100, recipe.CriteriaAcceleratorH200},
 		recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
+		// AKS ND-series H100 (e.g. Standard_ND96isr_H100_v5): 8x H100 SXM
+		// intra-node NVLink, 8x 400Gb NDR InfiniBand inter-node via the
+		// network-operator rdma-shared-device-plugin. NCCL uses its built-in
+		// IB/verbs transport (see testdata/h100/aks/runtime.yaml).
+		recipe.CriteriaServiceAKS: {recipe.CriteriaAcceleratorH100},
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
 	variantNET: {
@@ -711,6 +716,16 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		}
 	}
 
+	// For AKS, discover the rdma-shared-device-plugin resource on the target
+	// GPU nodes. ND-series InfiniBand SKUs expose the node's IB HCAs through a
+	// shared pool (rdma/hca_shared_devices_a); a worker requests one unit to
+	// have every /dev/infiniband device mounted. A count of 0 is valid —
+	// NCCL falls back to TCP over the pod network (slower but functional),
+	// mirroring the EKS zero-EFA behavior above.
+	if service == recipe.CriteriaServiceAKS {
+		applyAKSTemplateData(config, templateData)
+	}
+
 	// Build effective worker scheduling: user override takes precedence over platform default.
 	defaultNodeSelector, defaultTolerations, err := platformWorkerScheduling(service, instanceType, config.Nodes)
 	if err != nil {
@@ -1065,7 +1080,7 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 // platformWorkerScheduling returns the default nodeSelector and tolerations
 // for NCCL worker pods on the given service. instanceType is only used for EKS;
 // nodes (the accelerator-narrowed target set from resolveTargetGPUNodes) is
-// used for GKE (the gke-accelerator label) and OKE (the shared
+// used for GKE (the gke-accelerator label) and OKE/AKS (the shared
 // nvidia.com/gpu.product label).
 func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration, error) {
 	switch service {
@@ -1091,7 +1106,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE:
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS:
 		// OKE bare-metal GB200 pools are commonly tainted and may coexist
 		// with other GPU shapes under one control plane. Tolerate the pool
 		// taint (mirroring EKS/GKE) and pin workers to the same cohort the
@@ -1100,12 +1115,19 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 		// on. On non-GFD installs no shared product label exists, so emit no
 		// selector — matching the counting path's unfiltered fallback so the
 		// two stay aligned.
+		//
+		// AKS shares this shape: GPU pools carry the nvidia.com/gpu=present:
+		// NoSchedule taint and AICR recipes deploy the GPU Operator with GFD,
+		// so gpu.product (e.g. NVIDIA-H100-80GB-HBM3) is the discriminating
+		// label. The AKS-native kubernetes.azure.com/accelerator label is not
+		// used because its value is just "nvidia" — it cannot pin the H100
+		// cohort narrowByAccelerator sized the job against.
 		var nodeSelector map[string]string
 		if product := commonGPUProduct(nodes); product != "" {
 			nodeSelector = map[string]string{gpuProductLabel: product}
 		}
 		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3:
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3:
 		return nil, nil, nil
 	default:
 		return nil, nil, nil
