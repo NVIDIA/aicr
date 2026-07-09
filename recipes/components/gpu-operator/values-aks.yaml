@@ -17,8 +17,11 @@
 #
 # By default, GPU Operator manages the NVIDIA driver. Create nodepools
 # with `--gpu-driver none` to prevent AKS from also installing drivers.
-# To use the AKS-managed driver instead, set driver.enabled to false.
-# See https://learn.microsoft.com/en-us/azure/aks/nvidia-gpu-operator
+# To use the AKS driver-only install profile instead (AKS installs the
+# driver), set driver.enabled=false, toolkit.enabled=false, and
+# operator.runtimeClass=nvidia-container-runtime together — never just
+# one of them. See docs/integrator/aks-gpu-setup.md and
+# https://learn.microsoft.com/en-us/azure/aks/nvidia-gpu-operator
 #
 # Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/configs/values/gpu-operator/values.yaml
 
@@ -28,18 +31,21 @@
 nfd:
   enabled: false
 
-# Re-enable GPUDirect RDMA. The AKS overlay deploys network-operator,
-# which installs MOFED kernel modules on the host (ND-series InfiniBand
-# nodes). useHostMofed: true tells gpu-operator's driver container to
-# bind nvidia_peermem against the host's MOFED symbols instead of
-# building its own bundled MOFED — required for the network-operator
-# integration to actually work end-to-end. The global default in
-# components/gpu-operator/values.yaml is off because EFA / non-MOFED
-# fabrics trip v26.3.2's driver-validation gate.
+# Network Operator supplies MOFED through its OFED driver container
+# (doca-driver, see network-operator/manifests/nic-cluster-policy-aks.yaml).
+# Although that container loads modules into the host kernel, this is NOT
+# host-preinstalled MOFED — useHostMofed describes how MOFED is installed
+# and coordinated, not where its modules execute. Keep useHostMofed false
+# so the GPU Operator driver container builds nvidia_peermem against the
+# containerized MOFED stack; true can cause an ib_core symbol mismatch
+# (modprobe nvidia-peermem: Invalid argument, observed on aicr-test1).
+# This stays false regardless of driver ownership mode: with
+# driver.enabled=false it is inert, but the correct value prevents a
+# future ownership-mode change from reviving the bug.
 driver:
   rdma:
     enabled: true
-    useHostMofed: true
+    useHostMofed: false
 
 # The following flags are set in the aks-rdma-infiniband reference configuration
 # but are not required for RDMA functionality. They suppress DaemonSets that

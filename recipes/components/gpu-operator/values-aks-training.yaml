@@ -19,18 +19,21 @@ cdi:
   enabled: true
   default: false
 
-# AKS pre-installs NVIDIA container toolkit
-toolkit:
-  enabled: false
-
-# Re-enable GPUDirect RDMA. AKS ships MOFED via network-operator on
-# ND-series InfiniBand nodes; useHostMofed: true binds nvidia_peermem
-# against the host's MOFED kernel modules (see values-aks.yaml for the
-# full rationale).
+# Network Operator supplies MOFED through its OFED driver container
+# (doca-driver, see network-operator/manifests/nic-cluster-policy-aks.yaml).
+# Although that container loads modules into the host kernel, this is NOT
+# host-preinstalled MOFED — useHostMofed describes how MOFED is installed
+# and coordinated, not where its modules execute. Keep useHostMofed false
+# so the GPU Operator driver container builds nvidia_peermem against the
+# containerized MOFED stack; true can cause an ib_core symbol mismatch
+# (modprobe nvidia-peermem: Invalid argument, observed on aicr-test1).
+# This stays false regardless of driver ownership mode: with
+# driver.enabled=false it is inert, but the correct value prevents a
+# future ownership-mode change from reviving the bug.
 driver:
   rdma:
     enabled: true
-    useHostMofed: true
+    useHostMofed: false
 
 validator:
   plugin:

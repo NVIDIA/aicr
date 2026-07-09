@@ -131,9 +131,25 @@ spec:
 
 ## GPU Driver Setup
 
-AKS GPU nodepools install NVIDIA drivers by default. This conflicts with the
-GPU Operator, which also installs drivers by default. Use one of the approaches
-below to avoid the conflict.
+AKS has two mutually exclusive GPU **ownership modes**. Each is a complete
+provisioning profile — the nodepool creation flags and the GPU Operator values
+must come from the *same* mode. Mixing them (for example, a `--gpu-driver none`
+pool with `toolkit.enabled=false`) leaves containerd without a working `nvidia`
+runtime handler: every GPU Operator operand fails with
+`FailedCreatePodSandBox: no runtime for "nvidia" is configured` and GPU nodes
+advertise zero `nvidia.com/gpu`.
+
+| Mode | Nodepool | GPU Operator values |
+|------|----------|---------------------|
+| GPU Operator-managed (default, recommended) | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true` (recipe defaults) |
+| AKS driver-only | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (all three together) |
+
+Both modes use an *unmanaged* GPU node pool. Do not combine AICR with
+AKS-managed GPU node pools (`--enable-managed-gpu=true`, preview —
+`gpuProfile.nvidia.managementMode: Managed`): that profile makes AKS install
+its own device plugin, DCGM exporter, and GPU health tooling, which duplicate
+and conflict with the GPU Operator operands AICR deploys. See
+[AKS install profiles](https://learn.microsoft.com/en-us/azure/aks/aks-managed-gpu-nodes#install-profiles).
 
 ### Recommended: Let GPU Operator Manage the Driver
 
@@ -150,7 +166,16 @@ az aks nodepool add \
   --node-count 1
 ```
 
-No changes to AICR recipes are needed — this is the default configuration.
+No changes to AICR recipes are needed — this is the default configuration. The
+recipe defaults (`driver.enabled=true`, `toolkit.enabled=true`) give the GPU
+Operator ownership of the full stack: it installs the driver and configures the
+containerd `nvidia` runtime handler through its container-toolkit DaemonSet.
+
+Note that `--gpu-driver none` shifts driver lifecycle and compatibility
+responsibility from Microsoft's node-image QA to the GPU Operator (and the AICR
+recipe's pinned versions), and node bring-up now includes driver installation
+time. See
+[Skip GPU driver installation](https://learn.microsoft.com/en-us/azure/aks/use-nvidia-gpu#skip-gpu-driver-install).
 
 `Standard_ND96isr_H100_v5` is the 8-GPU ND H100 v5 SKU. The AKS Dynamo
 inference throughput gate (`inference-throughput`) is a fixed absolute
@@ -161,13 +186,23 @@ fine for deployment but will false-fail the throughput floor; gate on
 `inference-ttft-p99` only on those until the per-GPU normalization in
 [#1254](https://github.com/NVIDIA/aicr/issues/1254) lands.
 
-### Alternative: Use the AKS-Managed Driver
+### Alternative: Use the AKS Driver-Only Profile
 
-If you prefer the AKS-managed driver (e.g., for driver version pinning by AKS),
-disable the GPU Operator driver:
+If you prefer AKS to install the driver (e.g., for driver version pinning by
+AKS), create the nodepool with the AKS **Driver only** install profile
+(`--enable-managed-gpu=false`, the AKS default — simply omit
+`--gpu-driver none`). Only driver and container-runtime ownership transfers to
+AKS; AICR's GPU Operator still deploys and owns the device plugin, DCGM
+exporter, and the rest of the GPU stack. This requires **all three** overrides
+together — never set only one side, because a partial configuration either
+leaves containerd without a working `nvidia` runtime or conflicts with the
+preinstalled driver:
 
 ```shell
-aicr bundle -r recipe.yaml --set gpuoperator:driver.enabled=false
+aicr bundle -r recipe.yaml \
+  --set gpuoperator:driver.enabled=false \
+  --set gpuoperator:toolkit.enabled=false \
+  --set gpuoperator:operator.runtimeClass=nvidia-container-runtime
 ```
 
 Or add to your values override file:
@@ -175,7 +210,22 @@ Or add to your values override file:
 ```yaml
 driver:
   enabled: false
+toolkit:
+  enabled: false
+operator:
+  runtimeClass: nvidia-container-runtime
 ```
+
+`operator.runtimeClass` must match the runtime handler preconfigured on the AKS
+node image; NVIDIA's AKS example uses `nvidia-container-runtime` (see
+[GPU Operator on Microsoft AKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/microsoft-aks.html)).
+
+`driver.rdma.useHostMofed` remains `false` in this mode too — it is inert while
+`driver.enabled=false`, but keeping it correct prevents a later ownership-mode
+change from reviving the `nvidia_peermem` symbol-mismatch bug (see the comment
+in `recipes/components/gpu-operator/values-aks.yaml`).
+
+This profile has not yet been validated end-to-end with network-operator/RDMA.
 
 ## References
 
