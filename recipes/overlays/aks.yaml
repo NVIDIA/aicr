@@ -53,12 +53,16 @@ spec:
     # Manifests deliver the full RDMA stack that the Helm chart does not template:
     #   - NicClusterPolicy: MOFED driver, RDMA shared device plugin, DOCA telemetry
     #   - NFD NodeFeatureRule: labels IB-capable nodes (pci-15b3.present=true)
-    #   - ib-node-config: host MEMLOCK limits so workloads inherit unlimited rlimit
+    # Host MEMLOCK limits and IB module loading moved to nodewright
+    # (nvidia-setup aks-h100 via the nodewright-customizations tuning manifest,
+    # wired in the accelerator overlays), replacing the privileged
+    # ib-node-config DaemonSet.
     # Reference: https://azure.github.io/aks-rdma-infiniband/configurations/network-operator
     #
     # RDMA is enabled by default. To opt out at bundle time:
     #   --set networkoperator:enabled=false \
-    #   --set gpuoperator:driver.rdma.useHostMofed=false
+    #   --set gpuoperator:driver.rdma.useHostMofed=false \
+    #   --set nodewrightcustomizations:enabled=false
     - name: network-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
@@ -67,7 +71,6 @@ spec:
       manifestFiles:
         - components/network-operator/manifests/nfd-network-rule.yaml
         - components/network-operator/manifests/nic-cluster-policy-aks.yaml
-        - components/network-operator/manifests/ib-node-config-aks.yaml
       dependencyRefs:
         - nfd
         - cert-manager

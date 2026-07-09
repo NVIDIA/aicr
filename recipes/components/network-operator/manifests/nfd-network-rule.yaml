@@ -20,7 +20,7 @@
 # mlx5Gen Virtual Function — Azure ND-series VMs surface the IB NIC to the guest
 # via SR-IOV as one of these VFs (e.g. ND A100 v4 exposes the ConnectX-6 VF
 # 101c, ND H100 v5 the mlx5Gen VF). This label is used by the NicClusterPolicy
-# nodeAffinity and the ib-node-config DaemonSet to target only IB-capable nodes.
+# nodeAffinity to target only IB-capable nodes.
 #
 # The network-operator chart's built-in deployNodeFeatureRules targets generic
 # Ethernet NICs (class 0200/0207). This rule targets the IB VFs specifically,

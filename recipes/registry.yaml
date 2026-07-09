@@ -263,6 +263,19 @@ components:
             - training
             - inference
         message: "Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes."
+      - function: CheckWildcardAcceleratedToleration
+        # Blocking: the wildcard deadlock requires manual node cordon/reboot to
+        # recover, so fail the bundle rather than emit a missable warning. The
+        # documented RDMA opt-out (--set nodewrightcustomizations:enabled=false)
+        # is exempt — a disabled component renders nothing and cannot deadlock.
+        severity: error
+        conditions:
+          service:
+            - aks
+        message: "AKS admission collapses a pod's tolerations to just the wildcard,
+          which deadlocks nodewright packages that declare interrupts on first
+          install (NVIDIA/nodewright#296). Pass keyed tolerations instead, e.g.
+          --accelerated-node-toleration nvidia.com/gpu:NoSchedule."
 
   - name: nvsentinel
     displayName: nvsentinel

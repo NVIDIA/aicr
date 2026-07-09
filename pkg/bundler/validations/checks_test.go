@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -263,6 +265,193 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 			if tt.wantWarningMsg != "" && len(warnings) > 0 {
 				if !slices.Contains(warnings, tt.wantWarningMsg) {
 					t.Errorf("CheckAcceleratedSelectorMissing() warning message = %v, want to contain %q", warnings, tt.wantWarningMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckWildcardAcceleratedToleration(t *testing.T) {
+	aksRecipe := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "nodewright-customizations"},
+		},
+		Criteria: &recipe.Criteria{
+			Service: recipe.CriteriaServiceAKS,
+		},
+	}
+	aksConditions := map[string][]string{"service": {"aks"}}
+
+	tests := []struct {
+		name           string
+		componentName  string
+		recipeResult   *recipe.RecipeResult
+		bundlerConfig  *config.Config
+		conditions     map[string][]string
+		wantWarnings   int
+		wantErrors     int
+		wantWarningMsg string
+	}{
+		{
+			name:          "component not in recipe",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+				},
+				Criteria: &recipe.Criteria{
+					Service: recipe.CriteriaServiceAKS,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			conditions:    aksConditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "condition not met (eks)",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Service: recipe.CriteriaServiceEKS,
+				},
+			},
+			bundlerConfig: config.NewConfig(
+				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Operator: corev1.TolerationOpExists},
+				}),
+			),
+			conditions:   aksConditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:           "no tolerations set (template wildcard fallback)",
+			componentName:  "nodewright-customizations",
+			recipeResult:   aksRecipe,
+			bundlerConfig:  config.NewConfig(),
+			conditions:     aksConditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: "wildcard (keyless) accelerated-node toleration",
+		},
+		{
+			name:          "default wildcard toleration (CLI fallback)",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksRecipe,
+			bundlerConfig: config.NewConfig(
+				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Operator: corev1.TolerationOpExists},
+				}),
+			),
+			conditions:     aksConditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: "wildcard (keyless) accelerated-node toleration",
+		},
+		{
+			name:          "keyed toleration only",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksRecipe,
+			bundlerConfig: config.NewConfig(
+				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+				}),
+			),
+			conditions:   aksConditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "component disabled via --set (RDMA opt-out) skips wildcard check",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksRecipe,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"enabled": "false"},
+				}),
+			),
+			conditions:   aksConditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "component disabled via skyhook alias skips wildcard check",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksRecipe,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"skyhookcustomizations": {"enabled": "false"},
+				}),
+			),
+			conditions:   aksConditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "component disabled via exact hyphenated name skips wildcard check",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksRecipe,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewright-customizations": {"enabled": "false"},
+				}),
+			),
+			conditions:   aksConditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "keyed plus wildcard still warns",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksRecipe,
+			bundlerConfig: config.NewConfig(
+				config.WithAcceleratedNodeTolerations([]corev1.Toleration{
+					{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+					{Operator: corev1.TolerationOpExists},
+				}),
+			),
+			conditions:     aksConditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: "wildcard (keyless) accelerated-node toleration",
+		},
+		{
+			name:          "nil config",
+			componentName: "nodewright-customizations",
+			recipeResult:  aksRecipe,
+			bundlerConfig: nil,
+			conditions:    aksConditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			warnings, errors := CheckWildcardAcceleratedToleration(ctx, tt.componentName, tt.recipeResult, tt.bundlerConfig, tt.conditions)
+
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("CheckWildcardAcceleratedToleration() warnings = %d, want %d", len(warnings), tt.wantWarnings)
+			}
+			if len(errors) != tt.wantErrors {
+				t.Errorf("CheckWildcardAcceleratedToleration() errors = %d, want %d", len(errors), tt.wantErrors)
+			}
+
+			if tt.wantWarningMsg != "" && len(warnings) > 0 {
+				found := false
+				for _, w := range warnings {
+					if strings.Contains(w, tt.wantWarningMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("CheckWildcardAcceleratedToleration() warnings = %v, want to contain %q", warnings, tt.wantWarningMsg)
 				}
 			}
 		})

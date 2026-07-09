@@ -23,6 +23,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+// overrideValueFalse is the string form of a disabled `--set <key>:enabled=false`
+// override — value overrides are collected as strings, so booleans arrive as
+// their string literal.
+const overrideValueFalse = "false"
+
 // init auto-registers validation functions in this package.
 // This allows the registry to discover validation functions automatically.
 func init() {
@@ -31,6 +36,7 @@ func init() {
 	registerCheck("CheckWorkloadSelectorMissing", CheckWorkloadSelectorMissing)
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
+	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -167,6 +173,89 @@ func checkConditions(recipeResult *recipe.RecipeResult, conditions map[string][]
 	return true
 }
 
+// nodewrightCustomizationsOverrideAliases are the registry valueOverrideKeys for
+// the nodewright-customizations component — the aliases (beyond the exact
+// component name) a user passes to --set to disable it, e.g.
+// --set nodewrightcustomizations:enabled=false. The bundler resolves --set
+// overrides under the exact component name AND these aliases
+// (DefaultBundler.componentOverrideKeys), so the disable check below mirrors
+// that set to avoid a false positive when a user disables via one form and the
+// check reads another.
+var nodewrightCustomizationsOverrideAliases = []string{"nodewrightcustomizations", "skyhookcustomizations"}
+
+// CheckWildcardAcceleratedToleration reports when the effective accelerated-node
+// tolerations for a component include a wildcard (keyless operator: Exists)
+// toleration. Scope it via registry conditions to services where the wildcard
+// is harmful — on AKS, admission collapses a pod's toleration list to just the
+// wildcard when one is present, which defeats the nodewright operator's drain
+// exemption for its own package pods and deadlocks packages that declare
+// interrupts (NVIDIA/nodewright#296). That deadlock requires manual node
+// cordon/reboot to recover, so the registry wires this at severity: error to
+// block the bundle until a keyed toleration is supplied.
+//
+// The default bundle path always hits this: with no
+// --accelerated-node-toleration flag the CLI falls back to
+// snapshotter.DefaultTolerations() (a single bare operator: Exists). An empty
+// toleration list is flagged too, because the tuning manifest template renders
+// its own wildcard fallback when none are injected.
+//
+// A component disabled via --set (e.g. the documented RDMA opt-out
+// --set nodewrightcustomizations:enabled=false) renders no package pods and
+// cannot deadlock, so it is skipped regardless of the toleration shape.
+func CheckWildcardAcceleratedToleration(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if bundlerConfig == nil {
+		return nil, nil
+	}
+
+	// Check if component exists in recipe
+	hasComponent := false
+	for _, ref := range recipeResult.ComponentRefs {
+		if ref.Name == componentName {
+			hasComponent = true
+			break
+		}
+	}
+
+	if !hasComponent {
+		return nil, nil
+	}
+
+	// Check conditions (e.g., service: aks)
+	if !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+
+	// A disabled component renders nothing, so it cannot deadlock — skip it.
+	// Check the exact component name and its registry aliases, mirroring how
+	// the bundler resolves --set overrides so any disable form is honored.
+	overrides := bundlerConfig.ValueOverrides()
+	for _, key := range append([]string{componentName}, nodewrightCustomizationsOverrideAliases...) {
+		if overrides[key]["enabled"] == overrideValueFalse {
+			return nil, nil
+		}
+	}
+
+	tolerations := bundlerConfig.AcceleratedNodeTolerations()
+	wildcard := len(tolerations) == 0 // template falls back to its own wildcard
+	for _, tol := range tolerations {
+		if tol.Key == "" {
+			wildcard = true
+			break
+		}
+	}
+
+	if !wildcard {
+		return nil, nil
+	}
+
+	baseMsg := fmt.Sprintf("%s renders a wildcard (keyless) accelerated-node toleration", componentName)
+	slog.Warn(baseMsg,
+		"component", componentName,
+		"conditions", conditions,
+	)
+	return []string{baseMsg}, nil
+}
+
 // CheckHostMofedWithoutNetworkOperator warns when network-operator is disabled
 // via --set but gpu-operator still has driver.rdma.useHostMofed=true (the
 // AKS default). Without network-operator, no host MOFED is present and
@@ -189,14 +278,14 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 	}
 
 	enabledVal, hasEnabled := netOpOverrides["enabled"]
-	if !hasEnabled || enabledVal != "false" {
+	if !hasEnabled || enabledVal != overrideValueFalse {
 		return nil, nil
 	}
 
 	// network-operator is disabled — check if useHostMofed is overridden to false
 	gpuOpOverrides := overrides["gpuoperator"]
 	if gpuOpOverrides != nil {
-		if mofedVal, ok := gpuOpOverrides["driver.rdma.useHostMofed"]; ok && mofedVal == "false" {
+		if mofedVal, ok := gpuOpOverrides["driver.rdma.useHostMofed"]; ok && mofedVal == overrideValueFalse {
 			return nil, nil
 		}
 	}

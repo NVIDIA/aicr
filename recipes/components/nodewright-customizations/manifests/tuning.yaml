@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Nodewright EKS Ubuntu GPU Customization
+# Nodewright Ubuntu GPU Customization (EKS and AKS)
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
 #
 # This customization configures GPU nodes on Ubuntu with:
@@ -48,7 +48,17 @@ spec:
     {{- else }}
     # Tolerate-all default, matching ParseTolerations()/DefaultTolerations()
     # (operator Exists, no key). Only reached if no acceleratedTolerations are
-    # injected from scheduling defaults/flags.
+    # injected from scheduling defaults/flags — note the default `aicr bundle`
+    # path always injects the same wildcard via DefaultTolerations(), so the
+    # rendered CR carries it either way.
+    # AKS caveat: AKS admission collapses a pod toleration list to just the
+    # wildcard when one is present, which defeats the nodewright operator
+    # drain exemption for its own package pods and deadlocks packages that
+    # declare interrupts (NVIDIA/nodewright#296). On AKS always inject keyed
+    # acceleratedTolerations (for example nvidia.com/gpu). The
+    # CheckWildcardAcceleratedToleration bundle-time validation (registry.yaml,
+    # service: aks) blocks the bundle (severity: error) when the effective
+    # tolerations include a wildcard, unless the component is disabled via --set.
     - operator: Exists
     {{- end }}
   # Dynamic: Supports --accelerated-node-selector CLI flag
@@ -65,11 +75,13 @@ spec:
   {{- end }}
   # Tuning
   packages:
-    # Check for kernel being >= to 6.17.0-1019 and if not install
+    # Check for kernel being >= to 6.17.0-1019 and if not install.
+    # On AKS this package is a designed no-op: the aks defaults omit KERNEL
+    # (AKS manages its own Ubuntu kernel) and ensure_kernel exits early.
     nvidia-setup-kernel:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.4.0"
-      containerSHA: sha256:187c56c6d2104d48c7632c293def79c714b04dd85c587b7793818ceba9d4fb04
+      version: "0.5.0"
+      containerSHA: sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}
@@ -104,13 +116,13 @@ spec:
         service: {{ $cust.service }}
         {{- end }}
       dependsOn:
-        nvidia-setup-kernel: "0.4.0"
+        nvidia-setup-kernel: "0.5.0"
 
     # Full setup after kernel is in place
     nvidia-setup-full:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.4.0"
-      containerSHA: sha256:187c56c6d2104d48c7632c293def79c714b04dd85c587b7793818ceba9d4fb04
+      version: "0.5.0"
+      containerSHA: sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad
       interrupt:
         type: reboot
       resources:

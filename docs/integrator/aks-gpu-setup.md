@@ -232,6 +232,46 @@ in `recipes/components/gpu-operator/values-aks.yaml`).
 
 This profile has not yet been validated end-to-end with network-operator/RDMA.
 
+## InfiniBand RDMA Host Setup (nodewright)
+
+AKS recipes deliver the InfiniBand RDMA host configuration (persistent
+`ib_umad`/`rdma_ucm` module loading, `LimitMEMLOCK=infinity` for containerd and
+kubelet) through nodewright: the `nodewright-customizations` component applies
+`nvidia-setup` and `nvidia-tuned` packages to GPU nodes, with reboots handled
+as nodewright interrupts. This replaces the earlier privileged
+`ib-node-config` DaemonSet.
+
+**Pass a keyed toleration on AKS.** AKS admission collapses a pod's toleration
+list to just the wildcard (`operator: Exists`, no key) when one is present,
+which defeats the nodewright operator's drain exemption for its own package
+pods and deadlocks packages that declare interrupts on first install
+([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)). Recovering
+from that deadlock requires manually cordoning and rebooting the node. Because
+`aicr bundle` injects a wildcard toleration by default when
+`--accelerated-node-toleration` is not set, always bundle AKS recipes with a
+keyed toleration matching your GPU node taint:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
+  -o ./bundles
+```
+
+Bundling an AKS recipe without a keyed toleration is a **blocking error**
+(`CheckWildcardAcceleratedToleration`): the bundle is not produced until you
+supply one, so the deadlock cannot ship silently.
+
+To opt out of the RDMA stack entirely (e.g., on non-InfiniBand SKUs) — this
+disables `nodewright-customizations`, so no keyed toleration is required:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set networkoperator:enabled=false \
+  --set gpuoperator:driver.rdma.useHostMofed=false \
+  --set nodewrightcustomizations:enabled=false \
+  -o ./bundles
+```
+
 ## References
 
 - [GPU Operator on AKS](https://learn.microsoft.com/en-us/azure/aks/nvidia-gpu-operator)

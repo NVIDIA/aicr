@@ -37,6 +37,8 @@ func TestCompute_Structure(t *testing.T) {
 		t.Fatalf("Compute: %v", err)
 	}
 	want := []wantRow{
+		{"aks", "a100", "h100", "nvidia-setup", "nvidia-tuned"},
+		{"aks", "h100", "-", "nvidia-setup", "nvidia-tuned"},
 		{"bcm", "*", "h100", "nvidia-setup", ""},
 		{"bcm", "h100", "-", "nvidia-setup", ""},
 		{"eks", "a100", "h100", "nvidia-setup", "nvidia-tuned"},

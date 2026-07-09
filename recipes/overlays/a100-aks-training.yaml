@@ -34,9 +34,6 @@ spec:
     - name: K8s.server.version
       value: ">= 1.30"
 
-  # Nodewright customizations omitted — Nodewright packages do not support
-  # service: aks. The nodewright-operator itself is inherited from base
-  # and still deploys. This follows the H100 AKS training pattern.
   componentRefs:
     # A100-specific GPU Operator overrides (inherits valuesFile from aks-training)
     - name: gpu-operator
@@ -45,9 +42,26 @@ spec:
         - nfd
         - cert-manager
         - kube-prometheus-stack
+        - nodewright-customizations
       overrides:
         gdrcopy:
           enabled: true
+
+    # A100 reuses the h100 nodewright tuning profile (tuning.yaml), mirroring
+    # a100-eks-training: nvidia-setup ships aks configs only for aks-h100, and
+    # per the nodewright maintainer the h100 tuning is the correct profile for
+    # A100 (the A100-vs-H100 deltas pertain only to baremetal). The recipe
+    # criteria above stays a100; only this tuning profile selector is h100.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning.yaml
+      overrides:
+        service: aks
+        accelerator: h100
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
 
     - name: nfd
       type: Helm

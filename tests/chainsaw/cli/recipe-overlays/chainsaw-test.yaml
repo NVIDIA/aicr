@@ -71,9 +71,15 @@ spec:
                 echo "=== ${basename}: recipe (service=${service:-default} accel=${accelerator} os=${os_val} intent=${intent} platform=${platform:-none}) ==="
                 ${AICR_BIN} recipe ${flags} -o "${test_dir}/recipe.yaml" || { echo "FAIL: recipe generation for ${basename}" >&2; exit 1; }
 
-                # Generate bundle
+                # Generate bundle. Pass a keyed accelerated-node toleration:
+                # harmless for most overlays, but required on AKS, where the
+                # default wildcard toleration trips the blocking
+                # CheckWildcardAcceleratedToleration validation (AKS collapses
+                # toleration lists to the wildcard, deadlocking nodewright
+                # interrupt packages; see NVIDIA/nodewright#296).
                 echo "=== ${basename}: bundle ==="
-                ${AICR_BIN} bundle -r "${test_dir}/recipe.yaml" -o "${test_dir}/bundle" || \
+                ${AICR_BIN} bundle -r "${test_dir}/recipe.yaml" -o "${test_dir}/bundle" \
+                  --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" || \
                   { echo "FAIL: bundle generation for ${basename}" >&2; exit 1; }
 
                 # Verify bundle structure

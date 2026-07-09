@@ -32,10 +32,6 @@ spec:
     - name: K8s.server.version
       value: ">= 1.32.4"
 
-  # Nodewright customizations omitted — Nodewright packages do not support
-  # service: aks. The nodewright-operator itself is inherited from base
-  # and still deploys. This follows the same pattern as Kind overlays
-  # (h100-kind-training.yaml) which also omit Nodewright tuning.
   componentRefs:
     # H100-specific GPU Operator overrides (inherits valuesFile from aks-training)
     - name: gpu-operator
@@ -44,9 +40,25 @@ spec:
         - nfd
         - cert-manager
         - kube-prometheus-stack
+        - nodewright-customizations
       overrides:
         gdrcopy:
           enabled: true
+
+    # Same tuning manifest as EKS: nvidia-setup 0.5.0 supports service: aks
+    # (aks-h100), covering host IB RDMA + memlock setup that the
+    # ib-node-config-aks DaemonSet used to perform, and nvidia-tuned applies
+    # the aks-h100-multiNodeTraining profile.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning.yaml
+      overrides:
+        service: aks
+        accelerator: h100
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
 
     - name: nfd
       type: Helm

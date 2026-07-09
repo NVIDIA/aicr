@@ -651,6 +651,7 @@ audit existing condition blocks per CLAUDE.md's enum-expansion rule.
 | `CheckWorkloadSelectorMissing` | nodewright `--workload-selector` set when conditions match |
 | `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set |
 | `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
+| `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`, skipped when the component is disabled via `--set` |
 
 Registered in `pkg/bundler/validations/checks.go::init()`.
 
