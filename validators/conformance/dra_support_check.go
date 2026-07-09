@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -199,6 +200,35 @@ func CheckDRASupport(ctx *validators.Context) error {
 	mode, err := detectGPUAllocationMode(ctx.Ctx, ctx.Clientset, dynClient)
 	if err != nil {
 		return err
+	}
+	// Policy gate (#1327): configuration selects the mechanism the subtest
+	// may exercise. Verify runs for ANY configured (non-unspecified) policy
+	// and fails closed on mismatch — including the reserved and unknown
+	// policies, which allocmode.Verify rejects outright (Verify is a no-op
+	// for unspecified). Under dra-resource-claim the recipe PROMISES usable
+	// full-GPU DRA, so its absence is a FAILURE rather than the
+	// not-applicable skip below. Under device-plugin-extended-resource the
+	// full-GPU subtest is N/A even when DRA is incidentally usable (the
+	// dual-advertised transition state) — the subtest must not exercise the
+	// non-configured mechanism. Unspecified keeps today's capability-driven
+	// dispatch.
+	policy := ctx.ValidationInput.GetGPUAllocationPolicy()
+	// Evidence BEFORE the verdict: record the configured policy and the
+	// inspected mode so a Verify failure below is diagnosable from the
+	// artifacts alone (evidence parity with secure-accelerator-access).
+	recordRawTextArtifact(ctx, "GPU allocation policy", "",
+		fmt.Sprintf("configured policy: %s", policy))
+	recordRawTextArtifact(ctx, "GPU allocation mode", "",
+		mode.Summary())
+	if verifyErr := verifyGPUAllocationPolicy(policy, mode); verifyErr != nil {
+		return verifyErr
+	}
+	if policy == validatorv1.GPUAllocationPolicyDevicePluginExtendedResource {
+		recordRawTextArtifact(ctx, "Behavioral GPU allocation", "",
+			"skipped (not applicable): configured GPU allocation policy is "+policy+
+				" — whole GPUs are device-plugin-allocated, so the full-GPU DRA behavioral subtest does not apply; "+
+				"DRA validated via driver health and validated ResourceSlices. "+mode.DRADetail)
+		return nil
 	}
 	if !mode.DRAUsable {
 		recordRawTextArtifact(ctx, "Behavioral GPU allocation", "",
