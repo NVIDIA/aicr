@@ -41,7 +41,7 @@ and `resourceslices`.
 
 ## Dynamic Resource Allocation (DRA)
 
-All AICR recipes include the `nvidia-dra-driver-gpu` component, which exposes
+All AKS GPU recipes include the `nvidia-dra-driver-gpu` component, which exposes
 GPU resources via the Kubernetes DRA API. In the supported configuration,
 whole-GPU allocation goes through the device plugin (`nvidia.com/gpu` limits),
 while DRA serves ComputeDomain/IMEX channels and other structured resources —
@@ -59,19 +59,25 @@ integration.
 On AKS 1.34, DRA is GA. You do not need to pass any custom API server flags or
 register an AKS preview feature.
 
-### CLI Override
+### Configuring the allocation mode
 
-You can control DRA settings when bundling:
-
-```shell
-# Enable GPU resource advertisement (default)
-aicr bundle -r recipe.yaml --set dradriver:gpuResourcesEnabledOverride=true
-
-# Disable DRA GPU allocation (fall back to device plugin)
-aicr bundle -r recipe.yaml \
-  --set dradriver:gpuResourcesEnabledOverride=false \
-  --set dradriver:resources.gpus.enabled=false
-```
+The whole-GPU allocation mode is an **allocation policy** that validators
+resolve from the recipe's hydrated values and verify against the cluster,
+failing closed on mismatch
+([#1327](https://github.com/NVIDIA/aicr/issues/1327)) — so configure it in a
+recipe overlay, not at bundle time. Bundle-time `--set` / `--set-json` /
+`--set-file` overrides of the nested policy keys
+(`dradriver:resources.gpus.enabled`, `dradriver:gpuResourcesEnabledOverride`,
+`gpuoperator:devicePlugin.enabled`, and the same key on `gpu-operator-ocp`)
+still work but are **deprecated** and log a warning; the component-level
+`enabled` toggle of those components — disabling an advertiser changes the
+policy exactly like the nested keys — is honored only via scalar `--set`
+(the typed `--set-json`/`--set-file` path rejects `enabled` for every
+component) and likewise warns when used this way. In every case:
+validators verify the recipe-resolved policy, so a bundle-time change
+surfaces as recipe/cluster drift at validation time. `--dynamic` declarations
+on these keys are rejected outright — the value would be unknowable when the
+policy is resolved.
 
 ### Device Plugin vs DRA
 
@@ -83,33 +89,67 @@ physical GPUs available.
 For device-plugin whole-GPU allocation (recommended — matches the NVIDIA DRA
 driver's supported configuration; the DRA driver stays active for
 ComputeDomain/IMEX and other non-GPU resources, only its full-GPU
-advertisement is disabled):
+advertisement is disabled), set the policy tuple in a recipe overlay:
 
-```shell
-aicr bundle -r recipe.yaml \
-  --set dradriver:gpuResourcesEnabledOverride=false \
-  --set dradriver:resources.gpus.enabled=false
+```yaml
+spec:
+  componentRefs:
+    - name: nvidia-dra-driver-gpu
+      overrides:
+        gpuResourcesEnabledOverride: false
+        resources:
+          gpus:
+            enabled: false
+    - name: gpu-operator
+      overrides:
+        devicePlugin:
+          enabled: true
 ```
 
-For DRA-only (not currently supported by AICR validation — the
-inference-perf validator's worker wiring is capability-driven and can bind
-DRA claims, but its GPU-capacity discovery requires scalar device-plugin
-`nvidia.com/gpu` allocatable, which is absent when the device plugin is
-disabled; the one device-plugin-converted demo manifest,
-`vllm-metrics-test.yaml`, is likewise unschedulable there. See the full-GPU
-DRA opt-in discussion on issue
-[#1327](https://github.com/NVIDIA/aicr/issues/1327) for the KEP-5004 path
-that will lift this):
+For DRA-only (experimental — the validators exercise ResourceClaims and
+discover DRA-only nodes from the allocation probe under this policy, but full
+`aicr validate` is not guaranteed until the
+[#1327](https://github.com/NVIDIA/aicr/issues/1327) graduation checklist
+passes; the one device-plugin-converted demo manifest,
+`vllm-metrics-test.yaml`, is likewise unschedulable there), the opt-in
+overlay must change all three values:
 
-```shell
-aicr bundle -r recipe.yaml --set gpuoperator:devicePlugin.enabled=false
+```yaml
+spec:
+  componentRefs:
+    - name: nvidia-dra-driver-gpu
+      overrides:
+        gpuResourcesEnabledOverride: true
+        resources:
+          gpus:
+            enabled: true
+    - name: gpu-operator
+      overrides:
+        devicePlugin:
+          enabled: false
 ```
 
 ## GPU Driver Setup
 
-AKS GPU nodepools install NVIDIA drivers by default. This conflicts with the
-GPU Operator, which also installs drivers by default. Use one of the approaches
-below to avoid the conflict.
+AKS has two mutually exclusive GPU **ownership modes**. Each is a complete
+provisioning profile — the nodepool creation flags and the GPU Operator values
+must come from the *same* mode. Mixing them (for example, a `--gpu-driver none`
+pool with `toolkit.enabled=false`) leaves containerd without a working `nvidia`
+runtime handler: every GPU Operator operand fails with
+`FailedCreatePodSandBox: no runtime for "nvidia" is configured` and GPU nodes
+advertise zero `nvidia.com/gpu`.
+
+| Mode | Nodepool | GPU Operator values |
+|------|----------|---------------------|
+| GPU Operator-managed (default, recommended) | `--gpu-driver none` (AKS "None/BYO" install profile) | `driver.enabled=true`, `toolkit.enabled=true` (recipe defaults) |
+| AKS driver-only | AKS "Driver only" install profile (`--enable-managed-gpu=false`, the AKS default) | `driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` (all three together) |
+
+Both modes use an *unmanaged* GPU node pool. Do not combine AICR with
+AKS-managed GPU node pools (`--enable-managed-gpu=true`, preview —
+`gpuProfile.nvidia.managementMode: Managed`): that profile makes AKS install
+its own device plugin, DCGM exporter, and GPU health tooling, which duplicate
+and conflict with the GPU Operator operands AICR deploys. See
+[AKS install profiles](https://learn.microsoft.com/en-us/azure/aks/aks-managed-gpu-nodes#install-profiles).
 
 ### Recommended: Let GPU Operator Manage the Driver
 
@@ -126,7 +166,16 @@ az aks nodepool add \
   --node-count 1
 ```
 
-No changes to AICR recipes are needed — this is the default configuration.
+No changes to AICR recipes are needed — this is the default configuration. The
+recipe defaults (`driver.enabled=true`, `toolkit.enabled=true`) give the GPU
+Operator ownership of the full stack: it installs the driver and configures the
+containerd `nvidia` runtime handler through its container-toolkit DaemonSet.
+
+Note that `--gpu-driver none` shifts driver lifecycle and compatibility
+responsibility from Microsoft's node-image QA to the GPU Operator (and the AICR
+recipe's pinned versions), and node bring-up now includes driver installation
+time. See
+[Skip GPU driver installation](https://learn.microsoft.com/en-us/azure/aks/use-nvidia-gpu#skip-gpu-driver-install).
 
 `Standard_ND96isr_H100_v5` is the 8-GPU ND H100 v5 SKU. The AKS Dynamo
 inference throughput gate (`inference-throughput`) is a fixed absolute
@@ -137,13 +186,23 @@ fine for deployment but will false-fail the throughput floor; gate on
 `inference-ttft-p99` only on those until the per-GPU normalization in
 [#1254](https://github.com/NVIDIA/aicr/issues/1254) lands.
 
-### Alternative: Use the AKS-Managed Driver
+### Alternative: Use the AKS Driver-Only Profile
 
-If you prefer the AKS-managed driver (e.g., for driver version pinning by AKS),
-disable the GPU Operator driver:
+If you prefer AKS to install the driver (e.g., for driver version pinning by
+AKS), create the nodepool with the AKS **Driver only** install profile
+(`--enable-managed-gpu=false`, the AKS default — simply omit
+`--gpu-driver none`). Only driver and container-runtime ownership transfers to
+AKS; AICR's GPU Operator still deploys and owns the device plugin, DCGM
+exporter, and the rest of the GPU stack. This requires **all three** overrides
+together — never set only one side, because a partial configuration either
+leaves containerd without a working `nvidia` runtime or conflicts with the
+preinstalled driver:
 
 ```shell
-aicr bundle -r recipe.yaml --set gpuoperator:driver.enabled=false
+aicr bundle -r recipe.yaml \
+  --set gpuoperator:driver.enabled=false \
+  --set gpuoperator:toolkit.enabled=false \
+  --set gpuoperator:operator.runtimeClass=nvidia-container-runtime
 ```
 
 Or add to your values override file:
@@ -151,7 +210,22 @@ Or add to your values override file:
 ```yaml
 driver:
   enabled: false
+toolkit:
+  enabled: false
+operator:
+  runtimeClass: nvidia-container-runtime
 ```
+
+`operator.runtimeClass` must match the runtime handler preconfigured on the AKS
+node image; NVIDIA's AKS example uses `nvidia-container-runtime` (see
+[GPU Operator on Microsoft AKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/microsoft-aks.html)).
+
+`driver.rdma.useHostMofed` remains `false` in this mode too — it is inert while
+`driver.enabled=false`, but keeping it correct prevents a later ownership-mode
+change from reviving the `nvidia_peermem` symbol-mismatch bug (see the comment
+in `recipes/components/gpu-operator/values-aks.yaml`).
+
+This profile has not yet been validated end-to-end with network-operator/RDMA.
 
 ## References
 

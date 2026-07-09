@@ -258,6 +258,14 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		}
 	}
 
+	// Bundle-time override policy for GPU allocation-policy keys (#1327):
+	// reject --dynamic declarations, warn on static overrides. Runs after
+	// alias resolution against the recipe-bound registry, before values are
+	// extracted, so REST/SDK callers get the same enforcement as the CLI.
+	if policyErr := b.enforceAllocationPolicyOverrides(recipeResult.DataProvider()); policyErr != nil {
+		return nil, policyErr
+	}
+
 	// Extract values for each component from the recipe
 	componentValues, err := b.extractComponentValues(ctx, recipeResult)
 	if err != nil {

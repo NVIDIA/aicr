@@ -119,7 +119,7 @@ components:
         conditions:
           service:
             - aks
-        message: "Add --set gpuoperator:driver.rdma.useHostMofed=false when disabling network-operator."
+        message: "network-operator disabled: keep driver.rdma.useHostMofed=false (the AKS default); set true only with host-preinstalled MOFED."
 
   - name: network-operator
     displayName: network-operator
