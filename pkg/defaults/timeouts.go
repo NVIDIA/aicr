@@ -923,6 +923,17 @@ const (
 	// attempts while the Kubeflow Trainer validating webhook's informer cache
 	// catches up to a freshly-created TrainingRuntime.
 	TrainJobAdmissionRetryInterval = 500 * time.Millisecond
+
+	// NCCLLauncherLogReadInterval is the backoff between re-reads of a succeeded
+	// NCCL launcher pod's log while waiting for the results table to be fully
+	// captured. A pod that has just reached Succeeded can briefly serve an empty
+	// or truncated log if its container is being torn down mid-read.
+	NCCLLauncherLogReadInterval = 2 * time.Second
+
+	// NCCLLauncherLogReadAttempts bounds how many times the succeeded launcher
+	// pod's log is re-read before giving up and returning the last read for
+	// diagnosis (the parser then fails and the log is surfaced).
+	NCCLLauncherLogReadAttempts = 5
 )
 
 // Termination and truncation limits for validator output.
