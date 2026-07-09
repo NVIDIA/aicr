@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -124,9 +125,9 @@ func ScriptSection(feature string) string {
 
 // FeatureDescriptions maps feature names to human-readable descriptions.
 var FeatureDescriptions = map[string]string{
-	featureDRASupport:         "DRA support test (submission collector deploys a gpu.nvidia.com ResourceClaim pod — requires full-GPU DRA; mode-aware collection: #1629)",
+	featureDRASupport:         "DRA support test (mode-aware: behavioral full-GPU ResourceClaim allocation under the DRA policy; ResourceSlice/API evidence with an N/A behavioral note under device-plugin)",
 	featureGangScheduling:     "Gang scheduling co-scheduling test",
-	featureSecureAccess:       "Secure accelerator access verification (submission collector exercises DRA ResourceClaim isolation — requires full-GPU DRA; device-plugin-mode collection: #1629)",
+	featureSecureAccess:       "Secure accelerator access verification (device-plugin two-container isolation or DRA ResourceClaim isolation, policy/mode-selected)",
 	featureAcceleratorMetrics: "Accelerator metrics (DCGM exporter)",
 	featureAIServiceMetrics:   "AI service metrics (Prometheus ServiceMonitor discovery)",
 	featureInferenceGateway:   "Inference API gateway conditions",
@@ -146,11 +147,12 @@ type sectionRunner func(ctx context.Context, scriptPath, scriptDir, section stri
 // Collector orchestrates behavioral evidence collection by invoking the
 // embedded collect-evidence.sh script against a live Kubernetes cluster.
 type Collector struct {
-	outputDir  string
-	features   []string
-	noCleanup  bool
-	noCluster  bool
-	kubeconfig string
+	outputDir        string
+	features         []string
+	noCleanup        bool
+	noCluster        bool
+	kubeconfig       string
+	allocationPolicy string
 
 	// runSectionFn is overridable in tests. Defaults to c.runSection.
 	runSectionFn sectionRunner
@@ -189,6 +191,19 @@ func WithNoCleanup(noCleanup bool) CollectorOption {
 func WithKubeconfig(kubeconfig string) CollectorOption {
 	return func(c *Collector) {
 		c.kubeconfig = kubeconfig
+	}
+}
+
+// WithAllocationPolicy threads the recipe-resolved GPU allocation policy
+// (#1327 contract: configuration selects the allocation policy) into the
+// evidence script as the AICR_GPU_ALLOCATION_POLICY environment variable, so
+// the dra-support and secure-access sections exercise the configured
+// mechanism (#1629). An empty policy means no recipe context (standalone
+// run): the variable is not set and the script falls back to capability
+// detection.
+func WithAllocationPolicy(policy string) CollectorOption {
+	return func(c *Collector) {
+		c.allocationPolicy = policy
 	}
 }
 
@@ -352,15 +367,27 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 
 	cmd := exec.CommandContext(subCtx, "bash", scriptPath, section)
 	cmd.Dir = scriptDir
-	cmd.Env = append(os.Environ(),
+	// Strip any ambient AICR_GPU_ALLOCATION_POLICY: the script must see the
+	// policy the collector resolved (appended below when set) or nothing at
+	// all (standalone runs use capability detection). Inheriting a stray
+	// value from the parent shell/CI would silently override detection and
+	// collect evidence for the wrong mode.
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "AICR_GPU_ALLOCATION_POLICY=")
+	})
+	env = append(env,
 		"EVIDENCE_DIR="+c.outputDir,
 		"SCRIPT_DIR="+scriptDir,
 	)
+	cmd.Env = env
 	if c.noCleanup {
 		cmd.Env = append(cmd.Env, "NO_CLEANUP=true")
 	}
 	if c.kubeconfig != "" {
 		cmd.Env = append(cmd.Env, "KUBECONFIG="+c.kubeconfig)
+	}
+	if c.allocationPolicy != "" {
+		cmd.Env = append(cmd.Env, "AICR_GPU_ALLOCATION_POLICY="+c.allocationPolicy)
 	}
 
 	stdout := newBoundedBuffer(defaults.EvidenceMaxOutputBytes)

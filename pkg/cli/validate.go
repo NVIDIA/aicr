@@ -627,9 +627,18 @@ Run validation without failing on check errors (informational mode):
 			}
 
 			// Short-circuit: --cncf-submission bypasses normal validation and runs
-			// the behavioral evidence collector directly.
+			// the behavioral evidence collector directly. When recipe context is
+			// available (--recipe or config input), the recipe's GPU allocation
+			// policy is resolved and threaded into the collector so the
+			// dra-support and secure-access sections are mode-aware (#1629);
+			// standalone runs pass no policy and keep capability-driven
+			// detection (#1327 contract).
 			if cncfSubmission {
-				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"))
+				policy, policyErr := resolveCNCFAllocationPolicy(ctx, cmd, cfg, resolved)
+				if policyErr != nil {
+					return policyErr
+				}
+				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"), policy)
 			}
 
 			phases, err := validator.ParsePhaseSelection(stringSliceFlagOrConfig(cmd, "phase", resolved.Phases))
@@ -773,9 +782,38 @@ Run validation without failing on check errors (informational mode):
 	}
 }
 
+// resolveCNCFAllocationPolicy resolves the recipe-configured GPU allocation
+// policy for --cncf-submission runs. Without recipe context (no --recipe flag
+// and no config recipe input) it returns "" — a standalone run keeps the
+// evidence script's capability-driven detection, mirroring the #1327 contract
+// ("only recipe-less standalone runs select automatically"). With recipe
+// context, load/resolution errors fail closed: an invalid allocation
+// configuration must not silently collect evidence for the wrong mechanism.
+func resolveCNCFAllocationPolicy(ctx context.Context, cmd *cli.Command, cfg *config.AICRConfig, resolved *config.ValidateResolved) (string, error) {
+	recipeFilePath := stringFlagOrConfig(cmd, "recipe", resolved.RecipePath)
+	if recipeFilePath == "" {
+		return "", nil
+	}
+
+	client, err := recipeClientFromCmd(cmd, cfg)
+	if err != nil {
+		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
+	}
+	defer func() { _ = client.Close() }()
+
+	slog.Info("loading recipe to resolve the GPU allocation policy for CNCF evidence collection", "uri", recipeFilePath)
+	rec, err := client.LoadRecipe(ctx, recipeFilePath, cmd.String("kubeconfig"))
+	if err != nil {
+		return "", err
+	}
+	return v1.ResolveGPUAllocationPolicy(ctx, rec.Resolved())
+}
+
 // runCNCFSubmission handles --cncf-submission: validates feature names and
-// runs the behavioral evidence collector against the live cluster.
-func runCNCFSubmission(ctx context.Context, evidenceDir string, features []string, kubeconfig string) error {
+// runs the behavioral evidence collector against the live cluster. policy is
+// the recipe-resolved GPU allocation policy ("" for standalone runs — see
+// resolveCNCFAllocationPolicy).
+func runCNCFSubmission(ctx context.Context, evidenceDir string, features []string, kubeconfig, policy string) error {
 	// Validate feature names.
 	for _, f := range features {
 		if !cncf.IsValidFeature(f) {
@@ -790,11 +828,15 @@ func runCNCFSubmission(ctx context.Context, evidenceDir string, features []strin
 	defer cancel()
 
 	slog.Info("starting CNCF submission evidence collection",
-		"evidenceDir", evidenceDir, "features", features)
+		"evidenceDir", evidenceDir, "features", features, "gpuAllocationPolicy", policy)
 
-	collector := cncf.NewCollector(evidenceDir,
+	opts := []cncf.CollectorOption{
 		cncf.WithFeatures(features),
 		cncf.WithKubeconfig(kubeconfig),
-	)
+	}
+	if policy != "" {
+		opts = append(opts, cncf.WithAllocationPolicy(policy))
+	}
+	collector := cncf.NewCollector(evidenceDir, opts...)
 	return collector.Run(ctx)
 }
