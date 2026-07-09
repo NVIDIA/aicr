@@ -72,6 +72,82 @@ func TestEmitDiagnosticBlock(t *testing.T) {
 	}
 }
 
+func TestLauncherLogsUnavailable(t *testing.T) {
+	tests := []struct {
+		name string
+		logs string
+		want bool
+	}{
+		{"empty", "", true},
+		{"whitespace only", "  \n\t ", true},
+		{"kubelet GC placeholder", "unable to retrieve container logs for containerd://abc123", true},
+		{"placeholder amid text", "line1\nunable to retrieve container logs for containerd://x\n", true},
+		{"real logs", "NCCL INFO Bootstrap : Using eth0\nsome output", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := launcherLogsUnavailable(tt.logs); got != tt.want {
+				t.Errorf("launcherLogsUnavailable(%q) = %v, want %v", tt.logs, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLauncherTerminationTail(t *testing.T) {
+	const ns = "aicr-test"
+	pod := func(name string, cs []corev1.ContainerStatus) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Status:     corev1.PodStatus{ContainerStatuses: cs},
+		}
+	}
+	terminated := func(msg string) corev1.ContainerState {
+		return corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: msg}}
+	}
+
+	tests := []struct {
+		name    string
+		pods    []runtime.Object
+		podName string
+		want    string
+	}{
+		{
+			name:    "returns trimmed terminated message of node container",
+			pods:    []runtime.Object{pod("launcher-a", []corev1.ContainerStatus{{Name: nodeJobName, State: terminated("  mpirun: ORTE failed\n")}})},
+			podName: "launcher-a",
+			want:    "mpirun: ORTE failed",
+		},
+		{
+			name:    "empty when node container still running",
+			pods:    []runtime.Object{pod("launcher-b", []corev1.ContainerStatus{{Name: nodeJobName, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}})},
+			podName: "launcher-b",
+			want:    "",
+		},
+		{
+			name: "ignores non-node container messages",
+			pods: []runtime.Object{pod("launcher-c", []corev1.ContainerStatus{
+				{Name: "sidecar", State: terminated("sidecar noise")},
+			})},
+			podName: "launcher-c",
+			want:    "",
+		},
+		{
+			name:    "empty when pod missing",
+			pods:    nil,
+			podName: "nope",
+			want:    "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset(tt.pods...)
+			if got := launcherTerminationTail(context.Background(), client, ns, tt.podName); got != tt.want {
+				t.Errorf("launcherTerminationTail = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTailLines(t *testing.T) {
 	tests := []struct {
 		name string

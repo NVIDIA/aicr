@@ -76,6 +76,14 @@ spec:
                 containers:
                 - name: node
                   image: nvcr.io/nvidia/pytorch:25.06-py3
+                  # On non-zero exit, kubelet captures the tail (~4KiB) of this
+                  # container's own logs into pod status. The JobSet tears the
+                  # launcher down within ~150ms of failure, so a post-mortem
+                  # `kubectl logs`/GetPodLogs often races container GC and returns
+                  # "unable to retrieve container logs"; this termination message
+                  # lives in the pod object and survives that GC, giving the
+                  # diagnostics a reliable fallback for the fatal mpirun/NCCL tail.
+                  terminationMessagePolicy: FallbackToLogsOnError
                   env:
                   - name: LD_LIBRARY_PATH
                     value: "/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"

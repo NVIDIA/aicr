@@ -1261,13 +1261,42 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// worker diagnostics too and fold everything into the returned output.
 		slog.Info("Pod did not succeed, retrieving logs for debugging...")
 		launcherLogs, logErr := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
-		if logErr != nil {
+		// fetchNote records why the direct fetch was unusable so it survives into
+		// the emitted diagnostic payload (not just slog) when the termination-tail
+		// fallback is also empty — otherwise the reader sees no reason at all.
+		var fetchNote string
+		switch {
+		case logErr != nil:
 			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
-			launcherLogs = fmt.Sprintf("<launcher logs unavailable: %v>", logErr)
-		} else {
+			fetchNote = fmt.Sprintf("direct log fetch failed: %v", logErr)
+			launcherLogs = ""
+		case launcherLogsUnavailable(launcherLogs):
+			// kubelet returned its placeholder ("unable to retrieve container
+			// logs ...") as a 200 body, not an error: the container was GC'd
+			// before this post-mortem fetch — the JobSet tears the launcher down
+			// within ~150ms of failure. Treat as unavailable and fall back below.
+			slog.Warn("launcher container logs already GC'd; falling back to termination message", "pod", launcherPod.Name)
+			fetchNote = "direct logs unavailable (container GC'd before fetch)"
+			launcherLogs = ""
+		default:
 			// Tail to the same cap as worker diagnostics — a verbose launcher
 			// (mpirun + NCCL debug) would otherwise balloon the failure payload.
 			launcherLogs = tailLines(strings.TrimSpace(launcherLogs), maxDiagLogLines)
+		}
+
+		// When the direct log fetch raced container GC, fall back to the
+		// launcher container's termination message. The launcher container sets
+		// terminationMessagePolicy: FallbackToLogsOnError, so kubelet captures
+		// the tail of its output into pod status on non-zero exit — that lives in
+		// the pod object and survives the container GC that GetPodLogs loses to.
+		// Either way the fetchNote reason is preserved in the payload.
+		if launcherLogs == "" {
+			if term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, ctx.Namespace, launcherPod.Name); term != "" {
+				launcherLogs = fmt.Sprintf("<%s; container termination-message tail follows>\n%s",
+					fetchNote, tailLines(term, maxDiagLogLines))
+			} else {
+				launcherLogs = fmt.Sprintf("<%s; no termination message captured>", fetchNote)
+			}
 		}
 		workerDiag := collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
 
@@ -1317,6 +1346,44 @@ func emitDiagnosticBlock(label, block string) {
 	for _, line := range strings.Split(trimmed, "\n") {
 		slog.Error("diagnostics", "section", label, "line", line)
 	}
+}
+
+// launcherLogsUnavailable reports whether a GetPodLogs body is really the
+// kubelet placeholder for a container whose logs can no longer be served (the
+// container was garbage-collected), rather than genuine log output. kubelet
+// returns this as a 200 response body, so it arrives as content with no error.
+func launcherLogsUnavailable(logs string) bool {
+	t := strings.TrimSpace(logs)
+	return t == "" || strings.Contains(t, "unable to retrieve container logs")
+}
+
+// launcherTerminationTail re-Gets the pod and returns the first terminated
+// container's State.Terminated.Message — the tail of that container's own
+// output, captured into pod status by kubelet because the launcher container
+// sets terminationMessagePolicy: FallbackToLogsOnError. Unlike GetPodLogs, this
+// survives the container GC that races a post-mortem log fetch. Best-effort:
+// returns "" (never errors) so it can't mask the original failure.
+func launcherTerminationTail(ctx context.Context, clientset kubernetes.Interface, namespace, podName string) string {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	pod, err := clientset.CoreV1().Pods(namespace).Get(getCtx, podName, metav1.GetOptions{})
+	if err != nil {
+		slog.Warn("failed to re-get launcher pod for termination message", "pod", podName, "error", err)
+		return ""
+	}
+	// Match the launcher's main container by name (nodeJobName). The pod also
+	// has a fix-ssh-perms init container; keying by name avoids picking up an
+	// unrelated container's message if the status ordering ever changes.
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != nodeJobName {
+			continue
+		}
+		if cs.State.Terminated != nil {
+			return strings.TrimSpace(cs.State.Terminated.Message)
+		}
+	}
+	return ""
 }
 
 // tailLines returns the last n lines of s (or all of s when it has n or fewer).
