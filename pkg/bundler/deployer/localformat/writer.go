@@ -192,6 +192,10 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 	if err != nil {
 		return nil, err
 	}
+	// Mark the post wrapper so deployers can key manifest-specific
+	// behavior off the folder shape (see Folder.CarriesPostManifests);
+	// the vendored writer sets the same marker on its collapsed folder.
+	f.CarriesPostManifests = phase == phasePost
 	return &f, nil
 }
 

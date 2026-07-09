@@ -125,6 +125,17 @@ components:
     displayName: network-operator
     valueOverrideKeys:
       - networkoperator
+    # Overlays attach NicClusterPolicy CRs (mellanox.com API group) as
+    # manifestFiles — e.g. aks.yaml's nic-cluster-policy-aks.yaml —
+    # which the bundler wraps into the injected network-operator-post
+    # release. Those CRDs are installed by this chart at apply time,
+    # but the wrapper shares the parent's sub-helmfile level and
+    # helm-diff runs before anything in the level applies, so on a
+    # fresh cluster the wrapper's REST-mapper check can never pass
+    # ("no matches for kind NicClusterPolicy"). This flag emits
+    # disableValidation: true on the -post wrapper release only.
+    # See issues #914 and #929 for the pattern.
+    manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/network-operator/health-check.yaml
     helm:
@@ -574,6 +585,15 @@ components:
     # on this release tells helm-diff to skip the live-mapper check.
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
+    # recipes/mixins/platform-kubeflow.yaml additionally attaches
+    # torch-distributed-cluster-training-runtime.yaml (a
+    # ClusterTrainingRuntime CR of the CRD this chart ships) as
+    # manifestFiles, which the bundler wraps into the injected
+    # kubeflow-trainer-post release (or the chart's own vendored
+    # wrapper under --vendor-charts). hasSelfRefCRDs above covers only
+    # the primary release (#929); this flag extends the helm-diff
+    # bypass to the manifest-bearing folder. See #1666.
+    manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/kubeflow-trainer/health-check.yaml
     helm:
