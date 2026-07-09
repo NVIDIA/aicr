@@ -236,7 +236,7 @@ const (
 	// validateInferencePerf): when full-GPU DRA is usable the workers bind a
 	// DRA ResourceClaimTemplate (required on clusters whose kai-scheduler
 	// treats nodes bearing raw node-local GPU ResourceSlices as DRA-only and rejects scalar GPU
-	// requests — kai v0.14.1 node_info.go:310); otherwise they request GPUs
+	// requests — kai v0.14.1 node_info.go (the scalar-GPU-on-DRA-node rejection, upstream-marked "temporary fix")); otherwise they request GPUs
 	// through resources.limits[gpuResourceName], which works on clusters
 	// without the gpu.nvidia.com DeviceClass (issue #1327).
 	gpuResourceName = "nvidia.com/gpu"
@@ -354,7 +354,7 @@ type inferenceWorkloadConfig struct {
 // ResourceClaimTemplate path. Decided node-locally in buildInferenceConfig:
 // true when the CHOSEN worker node advertises usable full-GPU DRA devices —
 // on such nodes kai-scheduler (v0.14.1) rejects scalar device-plugin GPU
-// requests outright (pkg/scheduler/api/node_info/node_info.go:310), so the
+// requests outright (pkg/scheduler/api/node_info/node_info.go (the scalar-GPU-on-DRA-node rejection, upstream-marked "temporary fix")), so the
 // claim path is the only schedulable wiring there. On device-plugin-only
 // nodes the limits path applies — it needs no gpu.nvidia.com DeviceClass
 // (issue #1327).
@@ -404,7 +404,7 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// node-local GPU ResourceSlices as DRA-only and rejects scalar
 	// nvidia.com/gpu requests, so
 	// device-plugin wiring would leave every worker Pending (observed live on
-	// dual-mode GB200/EKS; kai v0.14.1 node_info.go:310).
+	// dual-mode GB200/EKS; kai v0.14.1 node_info.go (the scalar-GPU-on-DRA-node rejection, upstream-marked "temporary fix")).
 	mode, err := allocmode.Detect(ctx.Ctx, ctx.Clientset, ctx.DynamicClient)
 	if err != nil {
 		return nil, err
@@ -414,6 +414,19 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// validation matrix (#1652) — before any sizing or resource creation.
 	if rejErr := rejectUnsupportedGPUTopology(mode); rejErr != nil {
 		return nil, rejErr
+	}
+
+	// VERIFY (#1327): a recipe-configured policy pins the worker GPU wiring
+	// — the cluster must actually serve the configured mechanism (fail
+	// closed on drift, no silent fallback). Unspecified verifies nothing
+	// and keeps the node-local capability dispatch. Evidence BEFORE the
+	// verdict (parity with the conformance gates): a Verify failure must
+	// leave the configured policy and inspected mode in the check output.
+	policy := ctx.ValidationInput.GetGPUAllocationPolicy()
+	fmt.Printf("--- GPU allocation policy ---\nconfigured policy: %s\n%s\n",
+		policy, mode.Summary())
+	if verifyErr := allocmode.Verify(policy, mode); verifyErr != nil {
+		return nil, verifyErr
 	}
 
 	config, err := buildInferenceConfig(ctx, mode)
@@ -553,14 +566,38 @@ func dynamoCRDInstalled(ctx *validators.Context) (bool, error) {
 func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*inferenceWorkloadConfig, error) {
 	slog.Info("Analyzing GPU node configuration...")
 
-	gpuNodes, err := helper.FindSchedulableGpuNodes(ctx.Ctx, ctx.Clientset)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find GPU nodes", err)
+	// Node discovery is policy-dispatched (#1327): under the configured
+	// dra-resource-claim policy candidates come from the probe's validated
+	// DRA facts (Mode.DRANodes) — scalar allocatable nvidia.com/gpu is
+	// absent on DRA-only clusters, so the scalar-only helper would find
+	// nothing there. Under device-plugin-extended-resource and unspecified,
+	// scalar discovery applies as before.
+	policy := ctx.ValidationInput.GetGPUAllocationPolicy()
+	var gpuNodes []v1.Node
+	var err error
+	if policy == validatorv1.GPUAllocationPolicyDRAResourceClaim {
+		gpuNodes, err = findDRACapableNodes(ctx, mode)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		gpuNodes, err = helper.FindSchedulableGpuNodes(ctx.Ctx, ctx.Clientset)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to find GPU nodes", err)
+		}
+		if len(gpuNodes) == 0 {
+			// DRA-only surface (#1620 review): a cluster whose GPU nodes
+			// carry usable full-GPU DRA devices but no scalar allocatable
+			// must be named — the generic message hides the actual state.
+			if mode != nil && len(mode.DRANodes) > 0 {
+				return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"no schedulable GPU node advertises scalar %s, but %d node(s) carry usable full-GPU DRA devices (%s) — a DRA-only cluster is not supported by AICR validation without a recipe-configured dra-resource-claim policy (experimental; see issue #1327)",
+					gpuResourceName, len(mode.DRANodes), strings.Join(mode.DRANodes, ",")))
+			}
+			return nil, errors.New(errors.ErrCodeInternal, "no schedulable GPU nodes found")
+		}
 	}
-	if len(gpuNodes) == 0 {
-		return nil, errors.New(errors.ErrCodeInternal, "no schedulable GPU nodes found")
-	}
-	slog.Info("Found GPU nodes", "count", len(gpuNodes))
+	slog.Info("Found GPU nodes", "count", len(gpuNodes), "policy", policy)
 
 	// Restrict the candidate pool to nodes matching the user's selector, if any.
 	// This keeps gpuCount, nodeSelector, and tolerations all derived from a
@@ -593,11 +630,19 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		return nil, err
 	}
 
-	chosen, draWiring, gpuCountPerNode, freeGPUs, ok := selectWorkerNode(candidates, mode, scalarUsed, draUsed)
+	chosen, draWiring, gpuCountPerNode, freeGPUs, ok := selectWorkerNode(candidates, mode, policy, scalarUsed, draUsed)
 	if !ok {
-		return nil, errors.New(errors.ErrCodeInternal, describeNoEligibleWorkerNode(candidates, mode, scalarUsed))
+		return nil, errors.New(errors.ErrCodeInternal, describeNoEligibleWorkerNode(candidates, mode, policy, scalarUsed))
 	}
 	if freeGPUs <= 0 {
+		if policy == validatorv1.GPUAllocationPolicyDRAResourceClaim {
+			// Policy-aware framing (#1327): under the configured DRA policy
+			// only the DRA ledger applies — a device-plugin-shaped
+			// explanation would misdirect the operator.
+			return nil, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("configured GPU allocation policy %q: no eligible DRA-capable candidate node has free GPUs (%d matched; existing gpu.nvidia.com ResourceClaim allocations saturate every eligible candidate's DRA ledger — DRA candidates carrying scalar nvidia.com/gpu occupancy are excluded entirely); free GPU claims or pass --node-selector kubernetes.io/hostname=<empty-node>",
+					policy, len(candidates)))
+		}
 		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("no eligible candidate GPU node has free GPUs (%d matched; eligible candidates are saturated by existing workloads in the selected mechanism's ledger — nodes excluded as NotReady, probe-ineligible, kai-blocked, or DRA-wired-but-scalar-occupied are not counted); free GPUs or pass --node-selector kubernetes.io/hostname=<empty-node>",
 				len(candidates)))
@@ -1168,7 +1213,7 @@ func podEffectiveGPURequest(pod *v1.Pod) int {
 //     the probe ran, appear in the probe's Ready/schedulable sets.
 //   - Mechanism per node: DRA where the node advertises usable full-GPU DRA
 //     devices (kai-scheduler rejects scalar device-plugin GPU requests on
-//     nodes bearing raw node-local GPU ResourceSlices — node_info.go:310 — so plugin wiring is
+//     nodes bearing raw node-local GPU ResourceSlices — node_info.go (the scalar-GPU-on-DRA-node rejection, upstream-marked "temporary fix") — so plugin wiring is
 //     not eligible there); device plugin otherwise.
 //   - Capacity: Mode.DRANodeDevices for DRA pairs (scalar allocatable can
 //     differ on dual-advertised nodes and would oversize); scalar
@@ -1184,8 +1229,16 @@ func podEffectiveGPURequest(pod *v1.Pod) int {
 //     prefer DRA, then the lexicographically smaller node name — fully
 //     deterministic for equal inputs.
 //
+// A configured (non-unspecified) policy FORCES the mechanism (#1327): under
+// dra-resource-claim only DRA-capable candidates are eligible; under
+// device-plugin-extended-resource only device-plugin candidates are — a
+// DRA-capable node is not (kai-scheduler rejects scalar GPU pods on nodes
+// bearing gpu.nvidia.com ResourceSlices, node_info.go (the scalar-GPU-on-DRA-node rejection, upstream-marked "temporary fix")). The cross-ledger
+// scalar-occupancy skip and the kai raw-slice guard stay in force in every
+// mode.
+//
 // ok is false when no candidate is eligible at all.
-func selectWorkerNode(candidates []v1.Node, mode *allocmode.Mode, scalarUsed, draUsed map[string]int) (chosen v1.Node, draWiring bool, allocatable, free int, ok bool) {
+func selectWorkerNode(candidates []v1.Node, mode *allocmode.Mode, policy string, scalarUsed, draUsed map[string]int) (chosen v1.Node, draWiring bool, allocatable, free int, ok bool) {
 	draCapable := map[string]bool{}
 	pluginBacked := map[string]bool{}
 	if mode != nil {
@@ -1206,6 +1259,12 @@ func selectWorkerNode(candidates []v1.Node, mode *allocmode.Mode, scalarUsed, dr
 		var occupancy int
 		switch {
 		case mode != nil && draCapable[n.Name]:
+			if policy == validatorv1.GPUAllocationPolicyDevicePluginExtendedResource {
+				// Configured device-plugin policy: DRA wiring is off the
+				// table, and plugin wiring cannot schedule here either
+				// (kai rejects scalar GPU pods on slice-bearing nodes).
+				continue
+			}
 			// Supported full-GPU DRA state: the NVIDIA driver publishes
 			// node-local per-node pools, so validated devices ARE the
 			// kai-attributable devices — size from the validated count.
@@ -1225,11 +1284,16 @@ func selectWorkerNode(candidates []v1.Node, mode *allocmode.Mode, scalarUsed, dr
 			// kai-compatibility guard: the node carries RAW gpu.nvidia.com
 			// ResourceSlices that kai-scheduler counts (no pool/taint
 			// validation) and therefore rejects scalar device-plugin GPU
-			// pods on (node_info.go:310) — plugin wiring can never schedule
+			// pods on (node_info.go (the scalar-GPU-on-DRA-node rejection, upstream-marked "temporary fix")) — plugin wiring can never schedule
 			// here. Not DRA-capable either (AICR could not validate the
 			// slices), so the node is ineligible entirely.
 			continue
 		case mode == nil || pluginBacked[n.Name]:
+			if policy == validatorv1.GPUAllocationPolicyDRAResourceClaim {
+				// Configured DRA policy: only DRA-capable candidates are
+				// eligible — never fall back to device-plugin wiring.
+				continue
+			}
 			// Plugin-backed nodes carry no attributable gpu.nvidia.com
 			// allocations (no node-local slices → no pool attribution), so
 			// draUsed is normally 0 here; summing keeps the count honest if
@@ -1296,9 +1360,17 @@ func rejectUnsupportedGPUTopology(mode *allocmode.Mode) error {
 // selectWorkerNode returning no eligible (node, mechanism) pair, naming any
 // candidates blocked by the kai-compatibility guard or by the cross-ledger
 // scalar-occupancy skip so the operator can act on the actual cause instead
-// of a generic "no nodes".
-func describeNoEligibleWorkerNode(candidates []v1.Node, mode *allocmode.Mode, scalarUsed map[string]int) string {
-	msg := fmt.Sprintf("no eligible GPU node among %d candidate(s) — every candidate is NotReady, absent from the allocation-capability probe's Ready/schedulable node sets, blocked for device-plugin wiring by kai-visible gpu.nvidia.com ResourceSlices, or DRA-capable but carrying scalar nvidia.com/gpu workloads", len(candidates))
+// of a generic "no nodes". Under the configured dra-resource-claim policy the
+// message leads with the DRA-ledger framing (#1327) — a device-plugin-shaped
+// explanation would misdirect the operator when only DRA candidates were ever
+// eligible; unspecified/device-plugin wording is unchanged.
+func describeNoEligibleWorkerNode(candidates []v1.Node, mode *allocmode.Mode, policy string, scalarUsed map[string]int) string {
+	var msg string
+	if policy == validatorv1.GPUAllocationPolicyDRAResourceClaim {
+		msg = fmt.Sprintf("configured GPU allocation policy %q: no eligible DRA-capable GPU node among %d candidate(s) — every candidate is NotReady, absent from the allocation probe's usable full-GPU DRA node set, or DRA-capable but carrying scalar nvidia.com/gpu workloads the DRA allocator cannot see or avoid", policy, len(candidates))
+	} else {
+		msg = fmt.Sprintf("no eligible GPU node among %d candidate(s) — every candidate is NotReady, absent from the allocation-capability probe's Ready/schedulable node sets, blocked for device-plugin wiring by kai-visible gpu.nvidia.com ResourceSlices, or DRA-capable but carrying scalar nvidia.com/gpu workloads", len(candidates))
+	}
 	if mode == nil {
 		return msg
 	}
@@ -1358,6 +1430,46 @@ func nodesMatchingSelector(nodes []v1.Node, selector map[string]string) []v1.Nod
 		}
 	}
 	return out
+}
+
+// findDRACapableNodes returns the fresh node objects for the allocation
+// probe's usable full-GPU DRA node set (Mode.DRANodes) — the DRA-mode
+// analog of helper.FindSchedulableGpuNodes for the configured
+// dra-resource-claim policy (#1327): DRA-only nodes advertise no scalar
+// allocatable nvidia.com/gpu, so scalar discovery finds nothing there.
+// Capacity still comes from Mode.DRANodeDevices in selectWorkerNode.
+// Currently-cordoned nodes are excluded (freshness guard, mirroring the
+// scalar helper); Readiness is re-checked in selectWorkerNode.
+func findDRACapableNodes(ctx *validators.Context, mode *allocmode.Mode) ([]v1.Node, error) {
+	if mode == nil || len(mode.DRANodes) == 0 {
+		return nil, errors.New(errors.ErrCodeInternal,
+			"no Ready, schedulable node with usable full-GPU DRA devices for the configured dra-resource-claim policy")
+	}
+	// Bounded like the sibling occupancy List (countUsedGPUsByNode) — the
+	// check-level deadline also applies, but the tighter diagnostic bound
+	// keeps discovery from eating the workload budget on a slow apiserver.
+	listCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	nodeList, err := ctx.Clientset.CoreV1().Nodes().List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return nil, allocmode.ClassifyK8sReadError(err, "nodes for DRA-mode inference node discovery")
+	}
+	draSet := make(map[string]bool, len(mode.DRANodes))
+	for _, name := range mode.DRANodes {
+		draSet[name] = true
+	}
+	var gpuNodes []v1.Node
+	for _, node := range nodeList.Items {
+		if node.Spec.Unschedulable || !draSet[node.Name] {
+			continue
+		}
+		gpuNodes = append(gpuNodes, node)
+	}
+	if len(gpuNodes) == 0 {
+		return nil, errors.New(errors.ErrCodeInternal,
+			"no Ready, schedulable node with usable full-GPU DRA devices for the configured dra-resource-claim policy")
+	}
+	return gpuNodes, nil
 }
 
 // nodeGPUCount returns the node's allocatable nvidia.com/gpu count, or 0 if
