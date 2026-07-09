@@ -32,4 +32,5 @@ var (
 	sortedNodeNames               = allocmode.SortedNodeNames
 	draAPIVersionPreference       = allocmode.APIVersionPreference
 	classifyK8sReadError          = allocmode.ClassifyK8sReadError
+	verifyGPUAllocationPolicy     = allocmode.Verify
 )
