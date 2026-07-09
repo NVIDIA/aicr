@@ -829,7 +829,7 @@ func TestAdoptRecipe_DeepCopiesForClientIsolation(t *testing.T) {
 		APIVersion: recipe.RecipeAPIVersion,
 		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 		ComponentRefs: []recipe.ComponentRef{
-			{Name: "c1", Type: recipe.ComponentTypeHelm},
+			{Name: "c1", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Chart: "c1", Version: "1.0.0"},
 		},
 	}
 	if input.DataProvider() != nil {
@@ -1094,7 +1094,7 @@ func TestAdoptRecipe_RejectsIncoherentRef(t *testing.T) {
 	// Coherent, lowercase type (OpenAPI wire form) -> accepted AND canonicalized
 	// so downstream deployers see the canonical constant.
 	res, err := client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
-		{Name: "gpu-operator", Type: recipe.ComponentType("helm"), Version: "v1"},
+		{Name: "gpu-operator", Type: recipe.ComponentType("helm"), Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1"},
 	}))
 	if err != nil {
 		t.Fatalf("adoptRecipe rejected a coherent lowercase-typed ref: %v", err)
@@ -1107,7 +1107,7 @@ func TestAdoptRecipe_RejectsIncoherentRef(t *testing.T) {
 	// deployers derive the type from fields) must be back-filled from the
 	// registry, not rejected.
 	res2, err := client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
-		{Name: "gpu-operator", Version: "v1"},
+		{Name: "gpu-operator", Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1"},
 	}))
 	if err != nil {
 		t.Fatalf("adoptRecipe rejected a type-less registry ref instead of back-filling: %v", err)
@@ -1213,5 +1213,140 @@ func TestClient_CloseDrainsInflightAdopt(t *testing.T) {
 	case <-closeDone:
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close did not complete within 10s after adopt drained")
+	}
+}
+
+// TestAdoptRecipe_RejectsVersionlessHelmRef pins the #1615 invariant at the
+// CLIENT boundary (not just recipe.PrepareAndValidate, which adoptRecipe
+// delegates to): an externally-supplied RecipeResult whose enabled Helm ref
+// references a chart source without a version must be rejected by
+// adoptRecipe with ErrCodeInvalidRequest naming the component.
+func TestAdoptRecipe_RejectsVersionlessHelmRef(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	input := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeAPIVersion,
+		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:   "versionless-helm",
+				Type:   recipe.ComponentTypeHelm,
+				Source: "https://charts.example.com",
+				Chart:  "versionless-helm",
+			},
+		},
+	}
+	_, err = client.adoptRecipe(t.Context(), input)
+	if err == nil {
+		t.Fatal("adoptRecipe accepted an enabled Helm ref without a chart version")
+	}
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
+	}
+	for _, want := range []string{"versionless-helm", "chart version"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+
+	// The exported facade must reject with the identical shape.
+	_, err = client.AdoptRecipe(t.Context(), input)
+	if err == nil {
+		t.Fatal("AdoptRecipe accepted an enabled Helm ref without a chart version")
+	}
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("AdoptRecipe error code = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
+	}
+	for _, want := range []string{"versionless-helm", "chart version"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("AdoptRecipe error %q does not contain %q", err.Error(), want)
+		}
+	}
+
+	// Whitespace-only versions are equally rejected at this boundary (Helm
+	// trims the argument and installs latest).
+	wsInput := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeAPIVersion,
+		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "versionless-helm",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://charts.example.com",
+				Chart:   "versionless-helm",
+				Version: "   ",
+			},
+		},
+	}
+	if _, err := client.adoptRecipe(t.Context(), wsInput); err == nil ||
+		!stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+
+		t.Errorf("adoptRecipe(whitespace version) error = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
+	}
+}
+
+// TestFacadeResultFromInternal_ChartProjection pins the facade's chart
+// projection against the deployers' EffectiveChart rule (and the facade
+// ComponentRef.Chart contract in types.go): a source-only Helm ref exposes
+// the component-name fallback the deployers actually install, while
+// manifest-only Helm refs and Kustomize refs stay chartless.
+func TestFacadeResultFromInternal_ChartProjection(t *testing.T) {
+	t.Parallel()
+
+	internal := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "explicit-chart",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://charts.example.com",
+				Chart:   "the-chart",
+				Version: "1.0.0",
+			},
+			{
+				Name:    "source-only",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://charts.example.com",
+				Version: "1.0.0",
+			},
+			{
+				Name:          "manifest-only",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{"components/manifest-only/manifests/a.yaml"},
+			},
+			{
+				Name: "kustomize-comp",
+				Type: recipe.ComponentTypeKustomize,
+				Path: "deploy",
+			},
+		},
+	}
+
+	out := facadeResultFromInternal(internal, "test")
+	if len(out.Components) != len(internal.ComponentRefs) {
+		t.Fatalf("components = %d, want %d", len(out.Components), len(internal.ComponentRefs))
+	}
+	wantCharts := map[string]string{
+		"explicit-chart": "the-chart",
+		"source-only":    "source-only", // EffectiveChart fallback, not ""
+		"manifest-only":  "",
+		"kustomize-comp": "",
+	}
+	for _, comp := range out.Components {
+		want, ok := wantCharts[comp.Name]
+		if !ok {
+			t.Errorf("unexpected component %q", comp.Name)
+			continue
+		}
+		if comp.Chart != want {
+			t.Errorf("component %q Chart = %q, want %q", comp.Name, comp.Chart, want)
+		}
 	}
 }

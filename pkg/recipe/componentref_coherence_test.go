@@ -36,12 +36,12 @@ func TestComponentRefCoherenceProblem(t *testing.T) {
 		},
 		{
 			name:    "helm carries kustomize tag",
-			ref:     ComponentRef{Name: "a", Type: ComponentTypeHelm, Version: "v1", Tag: "v2"},
+			ref:     ComponentRef{Name: "a", Type: ComponentTypeHelm, Source: "https://charts", Chart: "a", Version: "v1", Tag: "v2"},
 			wantBad: true,
 		},
 		{
 			name:    "helm carries kustomize path",
-			ref:     ComponentRef{Name: "a", Type: ComponentTypeHelm, Version: "v1", Path: "deploy"},
+			ref:     ComponentRef{Name: "a", Type: ComponentTypeHelm, Source: "https://charts", Chart: "a", Version: "v1", Path: "deploy"},
 			wantBad: true,
 		},
 		{
@@ -86,7 +86,7 @@ func TestComponentRefCoherenceProblem(t *testing.T) {
 			// recipes / older clients); the canonical form is Helm. It must be
 			// accepted case-insensitively, not rejected as an unsupported type.
 			name: "lowercase helm is accepted",
-			ref:  ComponentRef{Name: "a", Type: ComponentType("helm"), Version: "v1"},
+			ref:  ComponentRef{Name: "a", Type: ComponentType("helm"), Source: "https://charts", Chart: "a", Version: "v1"},
 		},
 		{
 			name: "lowercase kustomize is accepted",
@@ -96,14 +96,14 @@ func TestComponentRefCoherenceProblem(t *testing.T) {
 			// Case-insensitivity does not weaken the rules: a lowercase Helm ref
 			// still may not carry Kustomize fields.
 			name:    "lowercase helm still rejects tag",
-			ref:     ComponentRef{Name: "a", Type: ComponentType("helm"), Version: "v1", Tag: "v2"},
+			ref:     ComponentRef{Name: "a", Type: ComponentType("helm"), Source: "https://charts", Chart: "a", Version: "v1", Tag: "v2"},
 			wantBad: true,
 		},
 		{
 			// Patches are carried through resolution but applied by no deployer;
 			// a ref that declares them is rejected rather than silently dropped.
 			name:    "helm with patches rejected",
-			ref:     ComponentRef{Name: "a", Type: ComponentTypeHelm, Version: "v1", Patches: []string{"p.yaml"}},
+			ref:     ComponentRef{Name: "a", Type: ComponentTypeHelm, Source: "https://charts", Chart: "a", Version: "v1", Patches: []string{"p.yaml"}},
 			wantBad: true,
 		},
 		{
@@ -125,7 +125,7 @@ func TestComponentRefCoherenceProblem(t *testing.T) {
 func TestRecipeResultValidateCoherence(t *testing.T) {
 	// Coherent set → no error.
 	ok := &RecipeResult{ComponentRefs: []ComponentRef{
-		{Name: "h", Type: ComponentTypeHelm, Version: "v1"},
+		{Name: "h", Type: ComponentTypeHelm, Source: "https://charts", Chart: "h", Version: "v1"},
 		{Name: "k", Type: ComponentTypeKustomize, Path: "deploy"},
 	}}
 	if err := ok.ValidateCoherence(); err != nil {
@@ -134,7 +134,7 @@ func TestRecipeResultValidateCoherence(t *testing.T) {
 
 	// Two incoherent refs → single ErrCodeInvalidRequest naming both.
 	bad := &RecipeResult{ComponentRefs: []ComponentRef{
-		{Name: "h", Type: ComponentTypeHelm, Tag: "v2"},
+		{Name: "h", Type: ComponentTypeHelm, Source: "https://charts", Chart: "h", Version: "v1", Tag: "v2"},
 		{Name: "k", Type: ComponentTypeKustomize, Source: "git://x", Tag: "v1"}, // no path
 	}}
 	err := bad.ValidateCoherence()
@@ -184,7 +184,7 @@ func TestPrepareAndValidate_PropagatesRegistryError(t *testing.T) {
 	// non-retryable "unsupported type" rejection.
 	r := &RecipeResult{
 		provider:      failingRegistryProvider{},
-		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Version: "v1"}}, // type-less
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Source: "https://charts", Chart: "gpu-operator", Version: "v1"}}, // type-less
 	}
 	err := r.PrepareAndValidate()
 	if err == nil {
@@ -202,7 +202,7 @@ func TestPrepareAndValidate_PropagatesRegistryError(t *testing.T) {
 	// provider does not cause an error.
 	ok := &RecipeResult{
 		provider:      failingRegistryProvider{},
-		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm, Version: "v1"}},
+		ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm, Source: "https://charts", Chart: "gpu-operator", Version: "v1"}},
 	}
 	if err := ok.PrepareAndValidate(); err != nil {
 		t.Errorf("no back-fill needed, but got error (registry should not be read): %v", err)
@@ -214,7 +214,7 @@ func TestPrepareAndValidate_PropagatesRegistryError(t *testing.T) {
 	disabledStub := &RecipeResult{
 		provider: failingRegistryProvider{},
 		ComponentRefs: []ComponentRef{
-			{Name: "enabled-helm", Type: ComponentTypeHelm, Version: "v1"},
+			{Name: "enabled-helm", Type: ComponentTypeHelm, Source: "https://charts", Chart: "enabled-helm", Version: "v1"},
 			{Name: "legacy-stub", Overrides: map[string]any{"enabled": false}}, // type-less + disabled
 		},
 	}
@@ -232,8 +232,8 @@ func TestPrepareAndValidate_BackfillLoopSkipsDisabled(t *testing.T) {
 	r := &RecipeResult{
 		provider: dp,
 		ComponentRefs: []ComponentRef{
-			{Name: "gpu-operator", Version: "v1"},                                   // enabled + type-less -> back-filled
-			{Name: "network-operator", Overrides: map[string]any{"enabled": false}}, // disabled + type-less registry component -> loop must skip
+			{Name: "gpu-operator", Source: "https://charts", Chart: "gpu-operator", Version: "v1"}, // enabled + type-less -> back-filled
+			{Name: "network-operator", Overrides: map[string]any{"enabled": false}},                // disabled + type-less registry component -> loop must skip
 		},
 	}
 	if err := r.PrepareAndValidate(); err != nil {
@@ -279,7 +279,8 @@ func TestPrepareAndValidate_RejectsReservedDeployerName(t *testing.T) {
 		{
 			name: "non-reserved names pass",
 			refs: []ComponentRef{
-				{Name: "gpu-operator", Type: ComponentTypeHelm, Version: "v1"},
+				{Name: "gpu-operator", Type: ComponentTypeHelm, Version: "v1",
+					Source: "https://charts", Chart: "gpu-operator"},
 			},
 			wantErr: false,
 		},

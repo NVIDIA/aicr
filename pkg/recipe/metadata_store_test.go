@@ -1350,10 +1350,11 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 	independentLeaf.Spec.Mixins = []string{"monitoring-gate"}
 	independentLeaf.Spec.ComponentRefs = []ComponentRef{
 		{
-			Name:   "dcgm-exporter",
-			Type:   ComponentTypeHelm,
-			Source: "https://example.com/charts",
-			Chart:  "dcgm-exporter",
+			Name:    "dcgm-exporter",
+			Type:    ComponentTypeHelm,
+			Source:  "https://example.com/charts",
+			Chart:   "dcgm-exporter",
+			Version: "1.0.0",
 		},
 	}
 
@@ -1399,10 +1400,11 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 					},
 					ComponentRefs: []ComponentRef{
 						{
-							Name:   "nvidia-dcgm-exporter",
-							Type:   ComponentTypeHelm,
-							Source: "https://example.com/charts",
-							Chart:  "nvidia-dcgm-exporter",
+							Name:    "nvidia-dcgm-exporter",
+							Type:    ComponentTypeHelm,
+							Source:  "https://example.com/charts",
+							Chart:   "nvidia-dcgm-exporter",
+							Version: "1.0.0",
 						},
 					},
 				},
@@ -1504,10 +1506,11 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 	}
 	sharedTraining.Spec.ComponentRefs = []ComponentRef{
 		{
-			Name:   "shared-component",
-			Type:   ComponentTypeHelm,
-			Source: "https://example.com/charts",
-			Chart:  "shared-component",
+			Name:    "shared-component",
+			Type:    ComponentTypeHelm,
+			Source:  "https://example.com/charts",
+			Chart:   "shared-component",
+			Version: "1.0.0",
 		},
 	}
 
@@ -1564,10 +1567,11 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 				}{
 					Constraints: []Constraint{{Name: "Monitoring.enabled", Value: "true"}},
 					ComponentRefs: []ComponentRef{{
-						Name:   "surviving-component",
-						Type:   ComponentTypeHelm,
-						Source: "https://example.com/charts",
-						Chart:  "surviving-component",
+						Name:    "surviving-component",
+						Type:    ComponentTypeHelm,
+						Source:  "https://example.com/charts",
+						Chart:   "surviving-component",
+						Version: "1.0.0",
 					}},
 				},
 			},

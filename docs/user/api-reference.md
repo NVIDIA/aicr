@@ -443,6 +443,15 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 > `dependencyRefs`. The filter prunes those edges safely (a filtered-out
 > dependency is assumed satisfied externally) and rejects unknown or disabled
 > component names with HTTP 400.
+>
+> Enabled Helm refs must reference a deployable primary: an external chart
+> (a `source` repository plus an effective `version` — empty, whitespace-only,
+> or a bare `v` is rejected; the chart name falls back to the component name
+> when `chart` is unset, but a `chart` without a `source` is rejected) or
+> local primary `manifestFiles`. `chart`, `source`, and `version` values
+> carrying surrounding whitespace are rejected — deployers consume them
+> verbatim.
+> Incoherent refs are rejected with HTTP 400 naming the component.
 
 ```shell
 # Basic: pipe recipe to bundle

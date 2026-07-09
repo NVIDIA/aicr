@@ -809,7 +809,11 @@ metadata:
   version: dev
 componentRefs:
   - name: gpu-operator
-    enabled: true
+    type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
+    namespace: gpu-operator
 validation:
   deployment:
     checks:
@@ -862,7 +866,11 @@ metadata:
   version: dev
 componentRefs:
   - name: gpu-operator
-    enabled: true
+    type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
+    namespace: gpu-operator
 validation:
   deployment:
     checks:
@@ -916,9 +924,15 @@ componentRefs:
   # carries no expectedResources so it is inert for these checks.
   - name: gpu-operator
     type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
     namespace: gpu-operator
   - name: nonexistent-component
     type: Helm
+    source: https://charts.example.com
+    chart: nonexistent-component
+    version: v1.0.0
     namespace: gpu-operator
     expectedResources:
       - kind: Deployment
@@ -986,6 +1000,26 @@ RECIPE
     fi
 
     if [ "$helm_install_ok" = true ]; then
+      # Derive the installed chart version so the recipes below describe what
+      # is actually deployed (the install is unpinned; a fabricated pin would
+      # lie). Coherence requires SOME version on a chart-referencing ref.
+      # Fail closed: the pipeline is guarded against set -e/pipefail so a
+      # helm/jq failure reaches the fail branch (and the nginx cleanup below)
+      # instead of killing the run, and only an exact nginx-<version> result
+      # is accepted — an empty or null answer must not become a fabricated pin.
+      local nginx_chart nginx_chart_ver=""
+      nginx_chart=$(helm list -n "$nginx_ns" -o json 2>/dev/null \
+        | jq -r --arg r "$nginx_release" '[.[] | select(.name == $r) | .chart][0] // empty' \
+        2>/dev/null) || nginx_chart=""
+      case "$nginx_chart" in
+        nginx-?*) nginx_chart_ver="${nginx_chart#nginx-}" ;;
+      esac
+
+      if [ -z "$nginx_chart_ver" ]; then
+        fail "validate/expected-resources-manual-pass" "could not determine installed nginx chart version (helm list chart: '${nginx_chart}')"
+        fail "validate/expected-resources-manual-merge" "could not determine installed nginx chart version (helm list chart: '${nginx_chart}')"
+      else
+
       # Test: Manual expectedResources pointing to real Deployment (should pass)
       msg "--- Test: Manual expectedResources matching deployed workload ---"
       local recipe_manual="${validate_dir}/recipe-manual-pass.yaml"
@@ -1000,11 +1034,15 @@ componentRefs:
   # carries no expectedResources so it is inert for these checks.
   - name: gpu-operator
     type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
     namespace: gpu-operator
   - name: ${nginx_release}
     type: Helm
     source: https://charts.bitnami.com/bitnami
     chart: nginx
+    version: "${nginx_chart_ver}"
     namespace: ${nginx_ns}
     expectedResources:
       - kind: Deployment
@@ -1054,11 +1092,15 @@ componentRefs:
   # carries no expectedResources so it is inert for these checks.
   - name: gpu-operator
     type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
     namespace: gpu-operator
   - name: ${nginx_release}
     type: Helm
     source: https://charts.bitnami.com/bitnami
     chart: nginx
+    version: "${nginx_chart_ver}"
     namespace: ${nginx_ns}
     expectedResources:
       - kind: Deployment
@@ -1095,6 +1137,7 @@ RECIPE
         fi
       else
         fail "validate/expected-resources-manual-merge" "expected-resources not found in output"
+      fi
       fi
     else
       skip "validate/expected-resources-manual-pass" "helm install failed"
@@ -1134,6 +1177,9 @@ metadata:
 componentRefs:
   - name: gpu-operator
     type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
     namespace: gpu-operator
 validation:
   deployment:
@@ -1187,6 +1233,9 @@ metadata:
 componentRefs:
   - name: gpu-operator
     type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
     namespace: gpu-operator
     expectedResources:
       - kind: Deployment
@@ -1271,7 +1320,11 @@ metadata:
   version: dev
 componentRefs:
   - name: gpu-operator
-    enabled: true
+    type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    version: v24.6.0
+    namespace: gpu-operator
 validation:
   deployment:
     checks:

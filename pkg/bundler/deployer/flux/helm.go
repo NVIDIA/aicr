@@ -166,11 +166,16 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 		version = deployer.NormalizeVersion(version)
 	}
 
+	// Parity with localformat's renderInputFor: the chart name falls back
+	// to the component name so a source-only ref (a long-standing deployable
+	// shape) does not emit a HelmRelease with an empty chart reference.
+	chart := ref.EffectiveChart()
+
 	data := HelmReleaseData{
 		Name:            ref.Name,
 		Namespace:       g.resolveNamespace(),
 		TargetNamespace: ref.Namespace,
-		Chart:           ref.Chart,
+		Chart:           chart,
 		Version:         version,
 		SourceKind:      "HelmRepository",
 		SourceName:      sName,
@@ -327,10 +332,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	puller localformat.ChartPuller,
 	output *deployer.Output) (bool, localformat.VendorRecord, []string, error) {
 
-	chartName := ref.Chart
-	if chartName == "" {
-		chartName = ref.Name
-	}
+	chartName := ref.EffectiveChart()
 
 	// Build localformat.Component for the puller.
 	lfc := localformat.Component{

@@ -248,6 +248,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
   helm:
     defaultRepository: https://charts.example.com
     defaultChart: example/my-operator
+    defaultVersion: v1.0.0  # required: an unpinned Helm chart fails recipe resolution
   nodeScheduling:
     system:
       nodeSelectorPaths: [operator.nodeSelector]

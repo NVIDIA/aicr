@@ -58,6 +58,23 @@ func (c component) kind() string {
 	}
 }
 
+// effectiveChart returns the chart a Helm registry entry deploys: the
+// explicit defaultChart, falling back to the component name when unset on a
+// source-backed (defaultRepository) entry. This mirrors
+// recipe.ComponentRef.EffectiveChart, which the resolver and deployers apply
+// to the resolved ref — the BOM must render and record the same chart.
+// Entries with neither repository nor chart (manifest-only / Kustomize)
+// return "".
+func (c component) effectiveChart() string {
+	if c.Helm.DefaultChart != "" {
+		return c.Helm.DefaultChart
+	}
+	if c.Helm.DefaultRepository != "" {
+		return c.Name
+	}
+	return ""
+}
+
 func loadRegistry(path string) (*registry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

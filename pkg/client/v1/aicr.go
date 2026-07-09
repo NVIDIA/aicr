@@ -827,12 +827,21 @@ func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult
 		internal:     r,
 	}
 	for _, c := range r.ComponentRefs {
+		// Project the chart the component actually deploys: a source-only
+		// Helm ref falls back to the component name (the deployers'
+		// EffectiveChart rule), so SDK consumers never see an empty chart
+		// for a deployable external chart. Manifest-only Helm refs and
+		// Kustomize refs stay chartless.
+		chart := c.Chart
+		if c.HasExternalChart() {
+			chart = c.EffectiveChart()
+		}
 		out.Components = append(out.Components, ComponentRef{
 			Name:      c.Name,
 			Kind:      string(c.Type),
 			Version:   c.Version,
 			Source:    c.Source,
-			Chart:     c.Chart,
+			Chart:     chart,
 			Namespace: c.Namespace,
 		})
 	}

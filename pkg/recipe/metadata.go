@@ -238,7 +238,10 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 //     conversely, is rejected outright by the Helm-only Flux generator — see
 //     #1588.);
 //   - a Kustomize ref needs a Path to build from;
-//   - a Tag is only meaningful with a Source (git repo / OCI ref); and
+//   - a Tag is only meaningful with a Source (git repo / OCI ref);
+//   - a Helm ref that is not manifest-only must pin a chart version — an
+//     empty version reaches Helm as "latest" through the helmfile/flux/argocd
+//     deployers (see #1615); and
 //   - no deployer applies ComponentRef.Patches, so a ref that declares patch
 //     files is rejected rather than silently producing an unpatched bundle
 //     (see #1588).
@@ -268,6 +271,86 @@ func (ref *ComponentRef) coherenceProblem() string {
 				"or convert it into a coherent Kustomize ref (which needs a path, and a source if it sets a tag)",
 				ref.Name, ref.Tag, ref.Path)
 		}
+		// Chart/source values carrying ANY surrounding whitespace (including
+		// whitespace-only values) are rejected outright rather than trimmed:
+		// the deployers consume these fields RAW — flux's manifest-only
+		// detection and OCI classification, localformat's classifier, the
+		// HelmRepository URL — so a padded value would validate as one shape
+		// here and deploy as another (or as a broken URL) there.
+		if ref.Chart != strings.TrimSpace(ref.Chart) {
+			return fmt.Sprintf("Helm component %q has a chart name with surrounding "+
+				"whitespace (%q); set the exact chart name or omit the field (see #1615)",
+				ref.Name, ref.Chart)
+		}
+		if ref.Source != strings.TrimSpace(ref.Source) {
+			return fmt.Sprintf("Helm component %q has a source with surrounding "+
+				"whitespace (%q); set the exact repository or omit the field (see #1615)",
+				ref.Name, ref.Source)
+		}
+		// Any SET version must be well-formed, whatever the primary shape:
+		// a padded value is rejected for the same reason as padded
+		// chart/source values — the deployers consume the field RAW.
+		// NormalizeVersion only strips a "v" prefix, so " 1.0.0" lands
+		// verbatim in a Flux HelmRelease (a broken semver range) and in
+		// helm --version arguments; and even a MANIFEST-ONLY ref propagates
+		// its version into the rendered chart's .Chart.Version
+		// (localformat's renderInputFor → helm.sh/chart labels), so a
+		// padded value ships an invalid label value. Whitespace-only
+		// versions are padded values too and are caught here.
+		if ref.Version != strings.TrimSpace(ref.Version) {
+			return fmt.Sprintf("Helm component %q has a chart version with surrounding "+
+				"whitespace (%q); set the exact chart version (see #1615)",
+				ref.Name, ref.Version)
+		}
+		// A bare "v" is rejected for every output kind and shape (see
+		// IsEffectiveChartVersion, the shared rule): Flux/Argo CD normalize
+		// it to empty for non-OCI outputs (unpinned/latest), vendored
+		// wrappers and manifest-only rendering substitute a fabricated
+		// default (NormalizeVersionWithDefault), and Helm/Helmfile/
+		// non-vendored-OCI preserve it — one recipe, output-dependent chart
+		// identities. Longer values keep their leading "v" ("v1.0.0" is
+		// fine everywhere). An UNSET version is judged per shape below.
+		if ref.Version != "" && !IsEffectiveChartVersion(ref.Version) {
+			return fmt.Sprintf("Helm component %q has chart version %q, which Flux/Argo CD "+
+				"normalize to empty for non-OCI outputs and vendored wrappers replace with a "+
+				"fabricated default; set a full chart version (see #1615)", ref.Name, ref.Version)
+		}
+		// A Helm ref needs a deployable primary: an external chart (a source
+		// repository; the chart name falls back to the component name in the
+		// deployers when unset) or local primary manifest files. A chart name
+		// WITHOUT a source is not deployable — Flux skips HelmRepository
+		// creation for an empty source and localformat's chart pull rejects a
+		// missing repository. Pre-manifests are auxiliary to a primary
+		// release and qualify nothing on their own. The raw comparisons below
+		// match the deployers'; whitespace-only values were rejected above.
+		hasChart := ref.Chart != ""
+		hasSource := ref.Source != ""
+		switch {
+		case hasSource:
+			// External chart: it must pin an EFFECTIVE version. The
+			// localformat deployer hard-fails on an empty one, but
+			// helmfile/flux/argocd emit it verbatim and Helm resolves
+			// "latest" at install time — a silent stale-default failure
+			// (#1615). Unreachable for embedded-registry resolution
+			// (bom-pinning-check pins every Helm chart), but an external
+			// --data registry can omit defaultVersion, and loaded/adopted
+			// RecipeResults never run ApplyRegistryDefaults at all.
+			// Well-formedness (padding, bare "v") was checked above; here
+			// only PRESENCE remains.
+			if ref.Version == "" {
+				return fmt.Sprintf("Helm component %q has no chart version; set version: on the "+
+					"componentRef — criteria-resolved recipes may inherit it from helm.defaultVersion "+
+					"in the component registry (see #1615)", ref.Name)
+			}
+		case hasChart:
+			return fmt.Sprintf("Helm component %q has a chart name (%q) but no source repository; "+
+				"the deployers have no repository to pull from — set source:, or remove the chart "+
+				"for a manifest-only component (see #1615)", ref.Name, ref.Chart)
+		case len(ref.ManifestFiles) == 0:
+			return fmt.Sprintf("Helm component %q has no deployable primary (no source, no chart, "+
+				"and no primary manifestFiles; preManifestFiles alone are auxiliary to a primary "+
+				"release) — add a chart source or primary manifest files (see #1615)", ref.Name)
+		}
 	case strings.EqualFold(string(ref.Type), string(ComponentTypeKustomize)):
 		if !hasPath {
 			return fmt.Sprintf("component %q is Kustomize but has no path; a path is required to build from", ref.Name)
@@ -294,6 +377,66 @@ func (ref *ComponentRef) coherenceProblem() string {
 			ref.Name, ref.Type, ComponentTypeHelm, ComponentTypeKustomize)
 	}
 	return ""
+}
+
+// IsManifestOnlyHelm reports whether a Helm-typed ref ships only local
+// primary manifest files with no external chart — e.g.
+// nodewright-customizations, whose registry entry declares an empty
+// helm.defaultRepository and no defaultVersion. Such refs are typed Helm (the
+// ComponentConfig.GetType default) but have no chart version to pin: the
+// deployers render their manifests into a local chart directory instead of
+// pulling an upstream chart.
+//
+// PreManifestFiles do NOT qualify: pre-manifests are auxiliary resources
+// injected ahead of a primary release (every real pre-manifest-carrying ref
+// resolves with a chart from the registry), so a ref whose only content is
+// pre-manifests has no deployable primary — it is a husk, not a manifest-only
+// component. Both the coherence check and pkg/health's chart_pinned dimension
+// key off this predicate.
+func (ref *ComponentRef) IsManifestOnlyHelm() bool {
+	// Raw comparisons match the deployers' manifest-only detection (flux) and
+	// classifier (localformat); whitespace-only chart/source values are
+	// rejected by the coherence check, so they never reach consumers. The
+	// Type guard keeps the exported name honest: a Kustomize ref with
+	// manifests and blank chart/source is not a manifest-only HELM ref.
+	return strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)) &&
+		ref.Chart == "" && ref.Source == "" && len(ref.ManifestFiles) > 0
+}
+
+// HasExternalChart reports whether a Helm-typed ref references an external
+// chart: a source repository, optionally with an explicit chart name. Non-Helm
+// refs and refs whose only chart signal is a chart name (nothing to pull
+// from — coherence rejects that shape) do not qualify.
+func (ref *ComponentRef) HasExternalChart() bool {
+	return strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)) && ref.Source != ""
+}
+
+// EffectiveChart returns the chart name a Helm-typed ref deploys: the
+// explicit Chart, falling back to the component name when unset (a
+// source-only ref). Every ComponentRef consumer derives the chart through
+// this method — the flux, argocd, helmfile, and helm deployers, pkg/mirror,
+// and the facade/query/BOM projections. (localformat keeps an equivalent
+// fallback on its own Component type, which is constructed from
+// EffectiveChart-derived inputs but also serves direct callers.)
+func (ref *ComponentRef) EffectiveChart() string {
+	if ref.Chart != "" {
+		return ref.Chart
+	}
+	return ref.Name
+}
+
+// IsEffectiveChartVersion reports whether version still pins an actual chart
+// version once the deployers' normalization is applied: non-empty after
+// trimming, and not a bare "v". Flux and Argo CD strip the leading "v" for
+// non-OCI outputs (deployer.NormalizeVersion) and treat the empty remainder
+// as unpinned; Helm/Helmfile and non-vendored OCI outputs preserve the value;
+// vendored wrappers substitute a fabricated default
+// (deployer.NormalizeVersionWithDefault). A bare "v" is rejected uniformly so
+// one recipe cannot carry output-dependent chart identities. The coherence
+// check and pkg/health's chart_pinned dimension share this rule.
+func IsEffectiveChartVersion(version string) bool {
+	v := strings.TrimSpace(version)
+	return v != "" && strings.TrimPrefix(v, "v") != ""
 }
 
 // canonicalizeComponentTypes normalizes each ref's case-insensitively-matched

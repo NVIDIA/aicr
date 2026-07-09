@@ -32,12 +32,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 const (
@@ -113,7 +115,15 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	if strict {
 		var hardErrs []string
 		for _, r := range results {
-			if r.Type == kindHelm && r.Version == "" {
+			// Shared rule with recipe resolution (IsEffectiveChartVersion):
+			// a whitespace-only or bare-"v" defaultVersion would pass an
+			// empty-string check here but fail ValidateCoherence at resolve
+			// time — the gate must be at least as strict as the resolver it
+			// guards. Padded values are equally rejected (deployers consume
+			// the version verbatim).
+			if r.Type == kindHelm &&
+				(!recipe.IsEffectiveChartVersion(r.Version) || r.Version != strings.TrimSpace(r.Version)) {
+
 				hardErrs = append(hardErrs, fmt.Sprintf("%s: chart version is not pinned", r.Name))
 			}
 			for _, w := range r.Warnings {
@@ -203,7 +213,7 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 	}
 	out, err := r.Render(ctx, helm.ChartInput{
 		Name:       c.Name,
-		Chart:      c.Helm.DefaultChart,
+		Chart:      c.effectiveChart(),
 		Repository: c.Helm.DefaultRepository,
 		Version:    c.Helm.DefaultVersion,
 		Namespace:  c.Helm.DefaultNamespace,
@@ -231,7 +241,7 @@ func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.R
 		DisplayName: c.DisplayName,
 		Type:        c.kind(),
 		Repository:  repository,
-		Chart:       c.Helm.DefaultChart,
+		Chart:       c.effectiveChart(),
 		Version:     version,
 		Namespace:   c.Helm.DefaultNamespace,
 		Pinned:      version != "",

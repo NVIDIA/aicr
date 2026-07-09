@@ -151,6 +151,84 @@ if [[ -z "$values_file" ]]; then
     fi
 fi
 
+# Manifest-only Helm components (registry declares helm: with no repository and
+# no chart, e.g. nodewright-customizations) deploy local manifestFiles instead
+# of an external chart. Recipe coherence rejects a Helm ref with no source, no
+# chart, AND no primary manifestFiles ("no deployable primary", #1615), so
+# gather the manifest list from the first overlay/mixin that declares it.
+manifest_files=""
+manifest_overrides=""
+manifest_deps=""
+if [[ "$chart_type" == "Helm" && -z "$chart_source" && -z "$chart_name" ]]; then
+    checked_base=false
+    for overlay in "${REPO_ROOT}"/recipes/overlays/base.yaml \
+        "${REPO_ROOT}"/recipes/overlays/*.yaml \
+        "${REPO_ROOT}"/recipes/mixins/*.yaml; do
+        [[ -f "$overlay" ]] || continue
+        # base.yaml appears in both the explicit path and the glob; skip the duplicate
+        if [[ "$(basename "$overlay")" == "base.yaml" ]]; then
+            if [[ "$checked_base" == "true" ]]; then continue; fi
+            checked_base=true
+        fi
+        candidate=$(yq eval ".spec.componentRefs[] | select(.name == \"${COMPONENT}\") | .manifestFiles[]" "$overlay" 2>/dev/null)
+        if [[ -n "$candidate" ]]; then
+            manifest_files="$candidate"
+            # Carry the SAME ref's overrides: manifest-only components render
+            # their manifests against them (e.g. nodewright-customizations
+            # selects its Skyhook tuning by overrides.service/accelerator/
+            # intent — without them the rendered Skyhook has an empty
+            # accelerator). Strip `enabled`: the harness always deploys the
+            # component it is testing, even where the source overlay gates it.
+            manifest_overrides=$(yq eval ".spec.componentRefs[] | select(.name == \"${COMPONENT}\") | .overrides // {} | del(.enabled) | select(length > 0)" "$overlay" 2>/dev/null)
+            # The synthesized config IS this overlay ref, so only ITS
+            # dependencyRefs apply to what actually deploys here.
+            manifest_deps=$(yq eval ".spec.componentRefs[] | select(.name == \"${COMPONENT}\") | (.dependencyRefs // [])[]" "$overlay" 2>/dev/null)
+            break
+        fi
+    done
+    if [[ -z "$manifest_files" ]]; then
+        log_error "Component '$COMPONENT' is a manifest-only Helm component (no chart repository in the registry),"
+        log_error "but no overlay or mixin declares manifestFiles for it — the synthesized recipe would have no"
+        log_error "deployable primary and be rejected at bundle generation (see #1615)"
+        exit 1
+    fi
+fi
+
+# This harness deploys exactly ONE component; dependencyRefs declared on the
+# component's overlay/mixin refs are NOT installed — for chart-backed and
+# manifest-only components alike. Some dependencies are hard requirements
+# (e.g. nodewright-customizations applies a Skyhook CR whose CRD ships with
+# nodewright-operator; kubeflow-trainer needs cert-manager webhooks), so a
+# bare test cluster fails at deploy time. Warn loudly rather than fail: the
+# dependency may legitimately be pre-installed from a prior run.
+#
+# Scope the warning to the configuration actually synthesized:
+#   - manifest-only: only the matched overlay ref's deps apply (another
+#     leaf's variant-only deps — e.g. a GB200 leaf's DRA driver — do not);
+#   - chart-backed: the recipe is registry defaults, tied to no variant, so
+#     report the UNION of deps across variants, labeled as variant-declared.
+component_deps=""
+dep_context=""
+if [[ -n "$manifest_files" ]]; then
+    component_deps="${manifest_deps:-}"
+    dep_context="declared by the overlay ref this recipe was synthesized from"
+else
+    component_deps=$(for overlay in "${REPO_ROOT}"/recipes/overlays/*.yaml "${REPO_ROOT}"/recipes/mixins/*.yaml; do
+        [[ -f "$overlay" ]] || continue
+        yq eval ".spec.componentRefs[] | select(.name == \"${COMPONENT}\") | (.dependencyRefs // [])[]" "$overlay" 2>/dev/null
+    done | grep -v '^$' | sort -u) || component_deps=""
+    dep_context="declared by one or more recipe variants; the registry-default configuration synthesized here may not require all of them"
+fi
+if [[ -n "$component_deps" ]]; then
+    log_warning "Component '$COMPONENT' has dependencies this single-component harness does NOT deploy (${dep_context}):"
+    while IFS= read -r dep; do
+        [[ -n "$dep" ]] && log_warning "  - ${dep}"
+    done <<< "$component_deps"
+    log_warning "Deployment may fail if required ones are absent (e.g. missing CRDs or webhooks). Kind-compatible"
+    log_warning "dependencies can be pre-installed via: make component-test COMPONENT=<dep> KEEP_CLUSTER=true —"
+    log_warning "platform-specific ones (e.g. *-ocp*/OLM components) need a matching cluster, not this Kind harness."
+fi
+
 # Build a minimal resolved recipe (RecipeResult format, which aicr bundle expects)
 cat > "${WORK_DIR}/recipe.yaml" <<EOF
 kind: RecipeResult
@@ -161,8 +239,11 @@ componentRefs:
   - name: ${COMPONENT}
     namespace: ${HELM_NAMESPACE}
     type: ${chart_type}
-    source: ${chart_source}
 EOF
+
+if [[ -n "$chart_source" ]]; then
+    echo "    source: ${chart_source}" >> "${WORK_DIR}/recipe.yaml"
+fi
 
 if [[ -n "$chart_name" ]]; then
     echo "    chart: ${chart_name}" >> "${WORK_DIR}/recipe.yaml"
@@ -170,6 +251,19 @@ fi
 
 if [[ -n "$chart_version" ]]; then
     echo "    version: ${chart_version}" >> "${WORK_DIR}/recipe.yaml"
+fi
+
+if [[ -n "$manifest_files" ]]; then
+    echo "    manifestFiles:" >> "${WORK_DIR}/recipe.yaml"
+    while IFS= read -r mf; do
+        [[ -n "$mf" ]] && echo "      - ${mf}" >> "${WORK_DIR}/recipe.yaml"
+    done <<< "$manifest_files"
+fi
+
+if [[ -n "$manifest_overrides" ]]; then
+    echo "    overrides:" >> "${WORK_DIR}/recipe.yaml"
+    # Re-indent the yq-extracted overrides map under the componentRef.
+    sed 's/^/      /' <<< "$manifest_overrides" >> "${WORK_DIR}/recipe.yaml"
 fi
 
 if [[ -n "$values_file" ]]; then

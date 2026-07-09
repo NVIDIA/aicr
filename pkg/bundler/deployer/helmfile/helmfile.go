@@ -336,10 +336,7 @@ func toLocalformatComponents(
 	out := make([]localformat.Component, 0, len(refs))
 	ns := make(map[string]string, len(refs))
 	for _, ref := range refs {
-		chartName := ref.Chart
-		if chartName == "" {
-			chartName = ref.Name
-		}
+		chartName := ref.EffectiveChart()
 		out = append(out, localformat.Component{
 			Name:         ref.Name,
 			Namespace:    ref.Namespace,
