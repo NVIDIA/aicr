@@ -70,6 +70,18 @@ type ComponentConfig struct {
 	// HealthCheck defines custom health check configuration for this component.
 	HealthCheck HealthCheckConfig `yaml:"healthCheck,omitempty"`
 
+	// ManifestFiles lists manifest files (relative to the recipes data
+	// root, e.g. "components/kueue/manifests/cluster-queue.yaml") bundled
+	// with the component whenever a recipe references it and the
+	// componentRef does not declare its own manifestFiles. A ref-declared
+	// (overlay/mixin) manifestFiles list takes precedence — these defaults
+	// are not merged into it. Consumers cannot opt out of the defaults
+	// except by declaring their own list: an empty ref-declared list is
+	// indistinguishable from an absent one after YAML decoding (len == 0
+	// → defaults filled), so `manifestFiles: []` silently receives the
+	// defaults back.
+	ManifestFiles []string `yaml:"manifestFiles,omitempty"`
+
 	// GKECriticalPriority signals that the component's default chart manifests
 	// include pods with `priorityClassName: system-node-critical` or
 	// `system-cluster-critical`. When true and the recipe's
@@ -393,6 +405,15 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 		if slices.Contains(comp.ValueOverrideKeys, ReservedDeployerKey) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("registry component %q declares the reserved override key %q; it is reserved for --set deployer:<key> Argo deployer options", comp.Name, ReservedDeployerKey))
+		}
+		// Fail closed on Kustomize components declaring manifestFiles
+		// defaults: validateComponentRef rejects Kustomize refs that carry
+		// manifestFiles, so ApplyRegistryDefaults would clone-fill this
+		// list into every referencing recipe and fail resolution in every
+		// consumer at once. Surface the config mistake here, at load time.
+		if comp.GetType() == ComponentTypeKustomize && len(comp.ManifestFiles) > 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q is Kustomize but declares manifestFiles; a component may declare either Kustomize (tag/path) or raw manifest files, not both — manifestFiles defaults apply only to Helm components", comp.Name))
 		}
 	}
 

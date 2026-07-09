@@ -573,10 +573,24 @@ components:
       - kueue
     healthCheck:
       assertFile: checks/kueue/health-check.yaml
+    # Default quota CRs so a referenced kueue admits workloads out of the
+    # box. Applied post-install (wave N+1) via the injected -post local
+    # chart, after the main release ships the CRDs.
+    manifestFiles:
+      - components/kueue/manifests/resource-flavor.yaml
+      - components/kueue/manifests/cluster-queue.yaml
+      - components/kueue/manifests/local-queue.yaml
+    # The quota CRs above (ResourceFlavor / ClusterQueue / LocalQueue)
+    # instantiate CRDs this chart itself installs at apply time, so the
+    # injected kueue-post wrapper's helm-diff REST-mapper check can never
+    # pass on a fresh cluster. This flag emits disableValidation: true on
+    # the -post wrapper release only. See issues #914 and #929 for the
+    # pattern (canonical examples: network-operator, kubeflow-trainer).
+    manifestsUseChartCRDs: true
     helm:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
-      defaultVersion: "0.17.1"
+      defaultVersion: "0.18.2"
       defaultNamespace: kueue-system
     nodeScheduling:
       system:

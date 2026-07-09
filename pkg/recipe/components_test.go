@@ -15,12 +15,15 @@
 package recipe
 
 import (
+	"bytes"
 	"context"
+	stderrors "errors"
 	"maps"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1198,5 +1201,87 @@ func TestLoadRegistry_RejectsReservedDeployerKey(t *testing.T) {
 				t.Errorf("error %q does not name the reserved key %q", err.Error(), ReservedDeployerKey)
 			}
 		})
+	}
+}
+
+// TestLoadRegistry_RejectsKustomizeManifestFiles verifies the registry
+// loader fails closed when a Kustomize-typed component declares
+// registry-level manifestFiles defaults. validateComponentRef rejects
+// Kustomize refs carrying manifestFiles, so a registry entry combining
+// both would be clone-filled into every referencing recipe and fail
+// resolution in every consumer at once — surface the config mistake at
+// load time instead (same fail-closed contract as the reserved
+// deployer-key guard above).
+func TestLoadRegistry_RejectsKustomizeManifestFiles(t *testing.T) {
+	registryYAML := "apiVersion: aicr.run/v1alpha2\n" +
+		"kind: ComponentRegistry\n" +
+		"components:\n" +
+		"  - name: my-kustomize-app\n" +
+		"    displayName: My Kustomize App\n" +
+		"    kustomize:\n" +
+		"      defaultSource: https://github.com/example/my-app\n" +
+		"      defaultPath: deploy/production\n" +
+		"      defaultTag: v1.0.0\n" +
+		"    manifestFiles:\n" +
+		"      - components/my-kustomize-app/manifests/extra.yaml\n"
+	dp := newInMemoryProvider("kustomize-manifestfiles", map[string][]byte{
+		"registry.yaml": []byte(registryYAML),
+	})
+	_, err := GetComponentRegistryFor(dp)
+	if err == nil {
+		t.Fatal("expected registry load to fail on Kustomize component with manifestFiles, got nil error")
+	}
+	if !strings.Contains(err.Error(), `"my-kustomize-app"`) {
+		t.Errorf("error %q does not name the offending component", err.Error())
+	}
+	if !strings.Contains(err.Error(), "manifestFiles") {
+		t.Errorf("error %q does not mention manifestFiles", err.Error())
+	}
+	// Fail-closed contract: the guard must surface a 4xx invalid-request
+	// (a registry misconfiguration is a bad input, not an internal fault),
+	// mirroring the coherence-check precedent in
+	// componentref_coherence_test.go. Asserting only the message would stay
+	// green if the guard's code silently regressed to ErrCodeInternal.
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("want ErrCodeInvalidRequest, got %v", err)
+	}
+}
+
+func TestComponentRegistry_ManifestFilesResolve(t *testing.T) {
+	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+	registry, err := GetComponentRegistryFor(provider)
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+	for _, comp := range registry.Components {
+		for _, mf := range comp.ManifestFiles {
+			data, err := provider.ReadFile(context.Background(), mf)
+			if err != nil {
+				t.Errorf("component %q manifestFiles entry %q is not readable from embedded data: %v",
+					comp.Name, mf, err)
+				continue
+			}
+			if len(bytes.TrimSpace(data)) == 0 {
+				t.Errorf("component %q manifestFiles entry %q is empty", comp.Name, mf)
+			}
+		}
+	}
+
+	// Regression sentinel pinned to kueue: a generic "some component has
+	// manifestFiles" check stays green if kueue's quota entries are
+	// dropped while another component still declares a list. Assert the
+	// kueue component and its exact quota CR paths.
+	kueue := registry.Get("kueue")
+	if kueue == nil {
+		t.Fatal("registry has no kueue component")
+	}
+	wantManifests := []string{
+		"components/kueue/manifests/resource-flavor.yaml",
+		"components/kueue/manifests/cluster-queue.yaml",
+		"components/kueue/manifests/local-queue.yaml",
+	}
+	if !slices.Equal(kueue.ManifestFiles, wantManifests) {
+		t.Errorf("kueue manifestFiles = %v, want %v (dependency-ordered quota CRs)",
+			kueue.ManifestFiles, wantManifests)
 	}
 }

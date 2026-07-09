@@ -37,6 +37,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -2082,6 +2083,77 @@ func TestComponentRefApplyRegistryDefaults_HealthCheckAsserts(t *testing.T) {
 
 		if ref.HealthCheckAsserts != "existing-content" {
 			t.Errorf("HealthCheckAsserts = %q, want %q (should preserve existing)", ref.HealthCheckAsserts, "existing-content")
+		}
+	})
+}
+
+func TestComponentRefApplyRegistryDefaults_ManifestFiles(t *testing.T) {
+	registryDefaults := []string{
+		"components/kueue/manifests/resource-flavor.yaml",
+		"components/kueue/manifests/cluster-queue.yaml",
+	}
+	refDeclared := []string{"components/other/manifests/custom.yaml"}
+	tests := []struct {
+		name              string
+		registryFiles     []string
+		refFiles          []string
+		wantManifestFiles []string
+	}{
+		{
+			name:              "filled from registry defaults when ref has none",
+			registryFiles:     registryDefaults,
+			wantManifestFiles: registryDefaults,
+		},
+		{
+			name:              "ref-declared manifest files win",
+			registryFiles:     registryDefaults,
+			refFiles:          refDeclared,
+			wantManifestFiles: refDeclared,
+		},
+		{
+			name: "no-op when registry declares none",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &ComponentConfig{
+				Name:          "test-helm",
+				DisplayName:   "Test Helm",
+				ManifestFiles: tt.registryFiles,
+				Helm: HelmConfig{
+					DefaultRepository: "https://charts.example.com",
+				},
+			}
+			ref := &ComponentRef{Name: "test-helm", ManifestFiles: tt.refFiles}
+
+			ref.ApplyRegistryDefaults(config)
+
+			if !slices.Equal(ref.ManifestFiles, tt.wantManifestFiles) {
+				t.Errorf("ManifestFiles = %v, want %v", ref.ManifestFiles, tt.wantManifestFiles)
+			}
+		})
+	}
+
+	t.Run("registry defaults are cloned", func(t *testing.T) {
+		config := &ComponentConfig{
+			Name:          "test-helm",
+			DisplayName:   "Test Helm",
+			ManifestFiles: registryDefaults,
+			Helm: HelmConfig{
+				DefaultRepository: "https://charts.example.com",
+			},
+		}
+		ref := &ComponentRef{Name: "test-helm"}
+
+		ref.ApplyRegistryDefaults(config)
+		if !slices.Equal(ref.ManifestFiles, registryDefaults) {
+			t.Fatalf("ManifestFiles = %v, want %v", ref.ManifestFiles, registryDefaults)
+		}
+
+		ref.ManifestFiles[0] = "mutated"
+		if config.ManifestFiles[0] != "components/kueue/manifests/resource-flavor.yaml" {
+			t.Errorf("registry config aliased: config.ManifestFiles[0] = %q", config.ManifestFiles[0])
 		}
 	})
 }

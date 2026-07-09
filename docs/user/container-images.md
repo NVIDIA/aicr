@@ -48,7 +48,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kai-scheduler | helm | kai-scheduler | v0.14.1 | 2 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
-| kueue | helm | kueue | 0.17.1 | 1 |
+| kueue | helm | kueue | 0.18.2 | 1 |
 | network-operator | helm | nvidia/network-operator | 26.1.1 | 4 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
@@ -184,7 +184,7 @@ _No images extracted._
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.17.1`
+- `registry.k8s.io/kueue/kueue:v0.18.2`
 
 ### network-operator
 

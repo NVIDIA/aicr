@@ -1,0 +1,43 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default ResourceFlavor for the AICR kueue component.
+# No nodeLabels: stays valid on heterogeneous clusters. The toleration is
+# REQUIRED for GPU workloads — Kueue injects flavor tolerations into
+# admitted workloads, and topology-aware scheduling does not see
+# webhook-injected tolerations (e.g. from the GPU Operator).
+#
+# TRADE-OFF: as the single default flavor, this toleration is injected
+# into EVERY admitted workload — including CPU-only jobs, which can then
+# schedule onto nvidia.com/gpu-tainted nodes (the taint no longer repels
+# them). Admission-neutral by design; operators tuning quotas for
+# CPU-only queues should add a separate flavor without this toleration.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: default-flavor
+  annotations:
+    # kueue.x-k8s.io is a custom (CRD-backed) apiVersion — required by
+    # TestManifestHelmHooksRequired so this CR is applied post-install,
+    # after kueue's own chart has installed the ResourceFlavor CRD.
+    # Weight 1: no dependency on the other two kueue manifests here, but
+    # ClusterQueue references this flavor by name, so it applies first.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule

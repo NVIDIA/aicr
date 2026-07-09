@@ -14,10 +14,12 @@
 
 # Kueue Health Check
 #
-# Validates that Kueue is running and healthy in the kueue-system namespace.
-# Checks that the kueue-controller-manager deployment has at least one
-# available replica and that no pods in the namespace are stuck in Pending,
-# Failed, or Unknown phases.
+# Validates that Kueue is running and healthy in the kueue-system
+# namespace, and that the default quota CRs shipped with the component
+# (ResourceFlavor default-flavor, ClusterQueue cluster-queue, LocalQueue
+# default/default) were admitted and reconciled to Active — a functional
+# proof (CRDs installed, controller reconciling, and flavor/queue resolution)
+# within the assert/error-only allowlist.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -96,3 +98,40 @@ spec:
                 namespace: kueue-system
               status:
                 ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    - name: validate-quota-crs-active
+      try:
+        # The default quota CRs ship with the component via registry
+        # manifestFiles (wave N+1), so they must exist wherever this
+        # check runs. v1beta2 is the storage version in chart 0.18.2.
+        #
+        # COUPLING: these asserts are pinned to the DEFAULT CR names. An
+        # overlay that overrides the component's manifestFiles (shipping
+        # its own queue CRs under different names) must also override
+        # healthCheck.assertFile, or this check fails on the missing
+        # default names even though Kueue itself is healthy.
+        - assert:
+            resource:
+              apiVersion: kueue.x-k8s.io/v1beta2
+              kind: ResourceFlavor
+              metadata:
+                name: default-flavor
+        # JMESPath projection over conditions for the same sliceNode
+        # exact-length reason documented above: a raw conditions list
+        # only matches when it is the SOLE condition present.
+        - assert:
+            resource:
+              apiVersion: kueue.x-k8s.io/v1beta2
+              kind: ClusterQueue
+              metadata:
+                name: cluster-queue
+              status:
+                ((conditions || `[]`)[?type == 'Active' && status == 'True'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: kueue.x-k8s.io/v1beta2
+              kind: LocalQueue
+              metadata:
+                name: default
+                namespace: default
+              status:
+                ((conditions || `[]`)[?type == 'Active' && status == 'True'] | length(@) > `0`): true

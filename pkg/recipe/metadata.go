@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 
@@ -210,6 +211,14 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 		if ref.Path == "" && config.Kustomize.DefaultPath != "" {
 			ref.Path = config.Kustomize.DefaultPath
 		}
+	}
+
+	// ManifestFiles: default from the registry only when the resolved ref
+	// carries none. Clone (not alias) so per-ref mutations cannot leak
+	// into the shared registry config (see slice-aliasing overlay-merge
+	// anti-pattern in CLAUDE.md).
+	if len(ref.ManifestFiles) == 0 && len(config.ManifestFiles) > 0 {
+		ref.ManifestFiles = slices.Clone(config.ManifestFiles)
 	}
 
 	// healthCheck.assertFile hydration is NOT performed in this method.
