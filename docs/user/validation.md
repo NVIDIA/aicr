@@ -250,17 +250,22 @@ Expected flow (~5–7 min on H100): readiness pre-flight → deploy a
 request (stricter than a `/health` probe, which returns 200 before the model
 can actually serve) → AIPerf benchmark Job parses throughput +
 TTFT p99 → compare to recipe constraints (10 % tolerance) → cleanup. Worker
-GPU wiring is **capability-driven** (the same probe the conformance checks
-use) and supports exactly two GPU allocation configurations: (1) nodes
-publishing **node-local `gpu.nvidia.com` ResourceSlices** (full-GPU DRA — i.e.
-dual-advertised clusters, today's AICR default), where workers bind a DRA
+GPU wiring is **configuration-selected and capability-verified** for
+recipe-backed runs — the recipe's resolved allocation policy picks the
+mechanism, and the inspection probe (the same one the conformance checks
+use) verifies the cluster serves it, failing closed on mismatch; only
+recipe-less standalone runs (`unspecified`) select by capability. The wiring
+supports exactly two GPU allocation configurations: (1) nodes
+publishing **node-local `gpu.nvidia.com` ResourceSlices** (full-GPU DRA — the
+experimental opt-in; stock recipes default to device-plugin allocation since
+the #1327 flip), where workers bind a DRA
 `ResourceClaimTemplate` sized from the validated per-node device count —
 kai-scheduler treats nodes bearing raw node-local GPU ResourceSlices as
 DRA-only and rejects scalar GPU requests, so the claim path is the only
 schedulable wiring there;
-and (2) **ComputeDomain-only / no full-GPU slices** (device-plugin nodes),
-where workers request GPUs via `nvidia.com/gpu` limits, which need no
-`gpu.nvidia.com` DeviceClass. Anything outside those two states fails fast
+and (2) **ComputeDomain-only / no full-GPU slices** (device-plugin nodes —
+the production default), where workers request GPUs via `nvidia.com/gpu`
+limits, which need no `gpu.nvidia.com` DeviceClass. Anything outside those two states fails fast
 with an actionable error instead of guessing: full-GPU ResourceSlices from a
 non-NVIDIA GPU driver, allocated `ResourceClaim`s requesting a non-NVIDIA
 "gpu"-named DeviceClass, `gpu.nvidia.com` slices using non-node-local
@@ -376,9 +381,56 @@ recipes always do), `gpus.enabled=true` without
 it), and no whole-GPU advertiser remaining — `gpus.enabled` off with the GPU
 operator component (`gpu-operator`, or `gpu-operator-ocp` on OpenShift
 recipes) absent, disabled, or carrying `devicePlugin.enabled=false`. Two
-transitional states warn but still resolve: dual advertisement (both
-mechanisms enabled — today's stock recipes) and an inert
-`gpuResourcesEnabledOverride=true` with `gpus.enabled=false`.
+further states are likewise rejected (they warned during the transition to
+the device-plugin production default and are errors since the flip): dual
+advertisement (both mechanisms enabled — exactly one whole-GPU advertiser is
+required) and an inert `gpuResourcesEnabledOverride=true` with
+`gpus.enabled=false` (the waiver would disarm the upstream chart's
+install-guard tripwire). Stock recipes ship the production default:
+`gpus.enabled=false`, `gpuResourcesEnabledOverride=false`, and
+`devicePlugin.enabled=true`; the experimental DRA opt-in flips all three
+together in a recipe overlay.
+
+**Upgrading a cluster from the dual-advertised (pre-flip) configuration:**
+applying the flipped bundle does not drain existing workloads — a running
+full-GPU `gpu.nvidia.com` claim pod keeps its prepared GPU while the
+`nvidia.com/gpu` ledger, which cannot see that assignment, admits newly
+converted scalar workloads onto the same device. Migrate in this order:
+
+1. Stop/delete all workloads holding full-GPU `gpu.nvidia.com`
+   ResourceClaims (ComputeDomain/IMEX claims are unaffected and stay).
+2. Confirm no allocated or reserved full-GPU claims remain, using the
+   **driver-specific, fail-closed drain check below**. On IMEX platforms,
+   allocated `compute-domain.nvidia.com` claims legitimately remain, so a
+   plain `kubectl get resourceclaims -A` can never come back empty —
+   filter on the allocation driver instead, and treat ANY output (or any
+   query failure) as unsafe to proceed.
+3. Apply the flipped bundle (upgrade `nvidia-dra-driver-gpu`).
+4. Wait until the `gpu.nvidia.com` ResourceSlices and DeviceClass disappear
+   (`compute-domain.nvidia.com` slices must remain).
+5. Confirm scalar `nvidia.com/gpu` allocatable is present on the GPU nodes.
+6. Only then start the scalar (device-plugin) workloads.
+
+The step-2 drain check — capture and test each stage separately (a piped
+`kubectl ... | jq ...` masks a failed List as an empty, safe-looking
+result), and proceed only when it exits 0:
+
+```shell
+claims="$(kubectl get resourceclaims -A -o json)" || { echo "claim query FAILED — do not proceed"; exit 1; }
+unsafe="$(printf '%s' "$claims" | jq -r '
+  .items[]
+  | select([.status.allocation.devices.results[]?.driver] | index("gpu.nvidia.com"))
+  | "\(.metadata.namespace)/\(.metadata.name) reservedFor=\([.status.reservedFor[]?.name] | join(","))"')" \
+  || { echo "claim filter FAILED — do not proceed"; exit 1; }
+[ -z "$unsafe" ] || { printf 'unsafe full-GPU claims remain:\n%s\n' "$unsafe"; exit 1; }
+echo "no full-GPU gpu.nvidia.com claims — safe to proceed"
+```
+
+While migrating, also delete any *pending* (unallocated) claims whose spec
+references the `gpu.nvidia.com` DeviceClass: they hold no GPU (no
+over-admission risk, so the check above rightly ignores them), but the flip
+removes that DeviceClass, leaving such claims — and any pods referencing
+them — stranded unschedulable forever.
 
 Validators compare the configured policy against the inspected cluster state
 and **fail closed on mismatch** — a cluster that cannot serve the configured
