@@ -272,10 +272,15 @@ not require pool names to be node names) are all rejected —
 these are outside the NVIDIA DRA driver's supported configuration
 ([#1327](https://github.com/NVIDIA/aicr/issues/1327)); generalized
 topology/driver support is tracked in
-[#1652](https://github.com/NVIDIA/aicr/issues/1652). Pure DRA-only clusters
-(device plugin disabled) remain unsupported: candidate GPU-node discovery
-requires scalar `nvidia.com/gpu` allocatable (see the AKS setup guide's
-DRA-only note). The chosen node and wiring mode are recorded in the check's
+[#1652](https://github.com/NVIDIA/aicr/issues/1652). When the recipe
+configures a GPU allocation policy (see
+[Configured GPU allocation policy](#configured-gpu-allocation-policy)), the
+wiring is forced instead of capability-selected, and under
+`dra-resource-claim` candidate GPU nodes are discovered from the probe's
+validated DRA facts rather than scalar `nvidia.com/gpu` allocatable — so
+DRA-only nodes (device plugin disabled) are discoverable; full DRA-only
+`aicr validate` remains experimental (see the #1327 graduation checklist).
+The chosen node and wiring mode are recorded in the check's
 evidence output.
 
 All Dynamo Frontend and worker pods pin to a single GPU node via
@@ -344,6 +349,42 @@ drives a non-zero CLI exit on its own.
 | **C** | `dynamo-platform` is declared but the `DynamoGraphDeployment` CRD is not installed on the cluster (operator not deployed yet) | `skipped - DynamoGraphDeployment CRD not installed on cluster (dynamo-platform component declared but operator not deployed yet)` |
 
 Guards fire before any cluster mutation, so skips are cheap (typically < 10 s).
+
+## Configured GPU allocation policy
+
+When you validate with a recipe, AICR resolves a whole-GPU **allocation
+policy** from the recipe's fully hydrated component values and carries it to
+the validators ([#1327](https://github.com/NVIDIA/aicr/issues/1327)):
+
+| Policy | Meaning |
+|--------|---------|
+| `device-plugin-extended-resource` | Whole GPUs via the device plugin (`nvidia.com/gpu` requests) |
+| `dra-resource-claim` | Whole GPUs via DRA (`gpu.nvidia.com` ResourceClaims) |
+| `dra-extended-resource` | Reserved (KEP-5004 mapped extended resource) — not yet validated |
+| `unspecified` | No recipe context (standalone validator runs): capability-driven automatic selection |
+
+The `nvidia-dra-driver-gpu` value `resources.gpus.enabled` is the switch:
+`true` resolves `dra-resource-claim`; explicit `false` — or the component
+absent or disabled — resolves `device-plugin-extended-resource`. On an
+**enabled** DRA component the switch must be explicitly set: the upstream
+chart's declared default is `true`, so an absent value would diverge from
+what Helm deploys. Three configurations are rejected at resolution time with
+an invalid-request error: an enabled `nvidia-dra-driver-gpu` component with
+`resources.gpus.enabled` absent (pin it explicitly in the recipe; stock
+recipes always do), `gpus.enabled=true` without
+`gpuResourcesEnabledOverride=true` (the upstream chart install guard refuses
+it), and no whole-GPU advertiser remaining — `gpus.enabled` off with the GPU
+operator component (`gpu-operator`, or `gpu-operator-ocp` on OpenShift
+recipes) absent, disabled, or carrying `devicePlugin.enabled=false`. Two
+transitional states warn but still resolve: dual advertisement (both
+mechanisms enabled — today's stock recipes) and an inert
+`gpuResourcesEnabledOverride=true` with `gpus.enabled=false`.
+
+Validators compare the configured policy against the inspected cluster state
+and **fail closed on mismatch** — a cluster that cannot serve the configured
+mechanism is a validation failure by design, never a silent fallback to the
+other mechanism. Only recipe-less standalone runs (`unspecified`) keep the
+capability-driven automatic selection.
 
 ## Running all phases
 

@@ -41,7 +41,7 @@ and `resourceslices`.
 
 ## Dynamic Resource Allocation (DRA)
 
-All AICR recipes include the `nvidia-dra-driver-gpu` component, which exposes
+All AKS GPU recipes include the `nvidia-dra-driver-gpu` component, which exposes
 GPU resources via the Kubernetes DRA API. In the supported configuration,
 whole-GPU allocation goes through the device plugin (`nvidia.com/gpu` limits),
 while DRA serves ComputeDomain/IMEX channels and other structured resources —
@@ -59,19 +59,25 @@ integration.
 On AKS 1.34, DRA is GA. You do not need to pass any custom API server flags or
 register an AKS preview feature.
 
-### CLI Override
+### Configuring the allocation mode
 
-You can control DRA settings when bundling:
-
-```shell
-# Enable GPU resource advertisement (default)
-aicr bundle -r recipe.yaml --set dradriver:gpuResourcesEnabledOverride=true
-
-# Disable DRA GPU allocation (fall back to device plugin)
-aicr bundle -r recipe.yaml \
-  --set dradriver:gpuResourcesEnabledOverride=false \
-  --set dradriver:resources.gpus.enabled=false
-```
+The whole-GPU allocation mode is an **allocation policy** that validators
+resolve from the recipe's hydrated values and verify against the cluster,
+failing closed on mismatch
+([#1327](https://github.com/NVIDIA/aicr/issues/1327)) — so configure it in a
+recipe overlay, not at bundle time. Bundle-time `--set` / `--set-json` /
+`--set-file` overrides of the nested policy keys
+(`dradriver:resources.gpus.enabled`, `dradriver:gpuResourcesEnabledOverride`,
+`gpuoperator:devicePlugin.enabled`, and the same key on `gpu-operator-ocp`)
+still work but are **deprecated** and log a warning; the component-level
+`enabled` toggle of those components — disabling an advertiser changes the
+policy exactly like the nested keys — is honored only via scalar `--set`
+(the typed `--set-json`/`--set-file` path rejects `enabled` for every
+component) and likewise warns when used this way. In every case:
+validators verify the recipe-resolved policy, so a bundle-time change
+surfaces as recipe/cluster drift at validation time. `--dynamic` declarations
+on these keys are rejected outright — the value would be unknowable when the
+policy is resolved.
 
 ### Device Plugin vs DRA
 
@@ -83,26 +89,44 @@ physical GPUs available.
 For device-plugin whole-GPU allocation (recommended — matches the NVIDIA DRA
 driver's supported configuration; the DRA driver stays active for
 ComputeDomain/IMEX and other non-GPU resources, only its full-GPU
-advertisement is disabled):
+advertisement is disabled), set the policy tuple in a recipe overlay:
 
-```shell
-aicr bundle -r recipe.yaml \
-  --set dradriver:gpuResourcesEnabledOverride=false \
-  --set dradriver:resources.gpus.enabled=false
+```yaml
+spec:
+  componentRefs:
+    - name: nvidia-dra-driver-gpu
+      overrides:
+        gpuResourcesEnabledOverride: false
+        resources:
+          gpus:
+            enabled: false
+    - name: gpu-operator
+      overrides:
+        devicePlugin:
+          enabled: true
 ```
 
-For DRA-only (not currently supported by AICR validation — the
-inference-perf validator's worker wiring is capability-driven and can bind
-DRA claims, but its GPU-capacity discovery requires scalar device-plugin
-`nvidia.com/gpu` allocatable, which is absent when the device plugin is
-disabled; the one device-plugin-converted demo manifest,
-`vllm-metrics-test.yaml`, is likewise unschedulable there. See the full-GPU
-DRA opt-in discussion on issue
-[#1327](https://github.com/NVIDIA/aicr/issues/1327) for the KEP-5004 path
-that will lift this):
+For DRA-only (experimental — the validators exercise ResourceClaims and
+discover DRA-only nodes from the allocation probe under this policy, but full
+`aicr validate` is not guaranteed until the
+[#1327](https://github.com/NVIDIA/aicr/issues/1327) graduation checklist
+passes; the one device-plugin-converted demo manifest,
+`vllm-metrics-test.yaml`, is likewise unschedulable there), the opt-in
+overlay must change all three values:
 
-```shell
-aicr bundle -r recipe.yaml --set gpuoperator:devicePlugin.enabled=false
+```yaml
+spec:
+  componentRefs:
+    - name: nvidia-dra-driver-gpu
+      overrides:
+        gpuResourcesEnabledOverride: true
+        resources:
+          gpus:
+            enabled: true
+    - name: gpu-operator
+      overrides:
+        devicePlugin:
+          enabled: false
 ```
 
 ## GPU Driver Setup
