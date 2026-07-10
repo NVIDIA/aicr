@@ -1359,7 +1359,32 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get pod logs", err)
 	}
 
-	return logs, nil
+	// Append the launcher's termination message. The GKE launcher writes the NCCL
+	// results rows there explicitly, and unlike the streamed log it survives
+	// kubelet container-log rotation — the massive NCCL/TCPXO teardown spam can
+	// rotate the results table out of the segment GetPodLogs returns, leaving only
+	// the teardown tail (issue #1712). parseBandwidthFromLogs keys on the last
+	// matching row, so appending the termination message makes it the
+	// rotation-proof source of truth while the streamed log remains available for
+	// transport verification and diagnostics. Empty for launchers that don't write
+	// results there (other platforms), leaving behavior unchanged.
+	term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, ctx.Namespace, launcherPod.Name)
+	if term != "" {
+		slog.Info("Appending launcher termination message (rotation-proof results)", "termBytes", len(term))
+	}
+	return appendTerminationResults(logs, term), nil
+}
+
+// appendTerminationResults appends the launcher termination message (the
+// rotation-proof NCCL results the launcher wrote to /dev/termination-log) to the
+// streamed log. parseBandwidthFromLogs keys on the last matching row, so the
+// appended results become the source of truth; an empty term leaves logs
+// unchanged (launchers that don't write results there).
+func appendTerminationResults(logs, term string) string {
+	if term == "" {
+		return logs
+	}
+	return logs + "\n" + term
 }
 
 // ncclLauncherLogComplete reports whether a launcher log contains the NCCL

@@ -87,8 +87,34 @@ spec:
                   env:
                   - name: LD_LIBRARY_PATH
                     value: "/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  # Wrap mpirun so the NCCL results rows land in the termination
+                  # message on success — rotation-proof, unlike the streamed log.
+                  # The NCCL/TCPXO teardown spam can rotate the results table out
+                  # of the log segment GetPodLogs returns (issue #1712); the Go
+                  # side appends this message so parseBandwidthFromLogs recovers
+                  # the bandwidth. tee keeps live stdout intact; only the results
+                  # rows (not the teardown) go to /dev/termination-log, under the
+                  # ~4KiB kubelet cap. `bash -c '<script>' bash "$@"` runs the
+                  # mpirun args below verbatim as positional params.
                   command:
-                  - /usr/local/mpi/bin/mpirun
+                  - /bin/bash
+                  - -c
+                  - |
+                    set -o pipefail
+                    /usr/local/mpi/bin/mpirun "$@" 2>&1 | tee /tmp/nccl-results.out
+                    rc=${PIPESTATUS[0]}
+                    # Write results ONLY on success (rc==0). A partial-failure run
+                    # can print early rows then abort; a non-empty termination file
+                    # would suppress FallbackToLogsOnError's failure tail (#1651).
+                    # Any failure leaves the file empty so kubelet uses the log tail.
+                    # Data rows are "<size> <count> <type> ..."; the summary is
+                    # "# Avg bus bandwidth"; teardown spam matches neither.
+                    if [ "$rc" -eq 0 ]; then
+                      pat='^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+[[:alpha:]]+|Avg bus bandwidth'
+                      grep -E "$pat" /tmp/nccl-results.out 2>/dev/null | tail -c 3900 > /dev/termination-log 2>/dev/null || true
+                    fi
+                    exit "$rc"
+                  - bash
                   args:
                   - -np
                   - "${GPU_COUNT}"
@@ -131,17 +157,17 @@ spec:
                   # set explicitly for compatibility with non-privileged environments.
                   - -x
                   - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64
-                  # INFO (was WARN) so a failed run surfaces the exact NCCL/FastRak
-                  # init path — with WARN we only saw the shim's config-checker
-                  # warnings, not the fatal abort. Scoped to INIT,NET,ENV,GRAPH to
-                  # keep the volume manageable within the launcher log tail while
-                  # covering the FastRak/TCPXO transport bring-up where the failure
-                  # occurs. Rank stdout streams back through mpirun to the launcher,
-                  # so this lands in the captured launcher diagnostics.
+                  # WARN (reverted from #1647's INFO): at INFO the NCCL/TCPXO
+                  # teardown emits tens of thousands of NET/FasTrak lines that
+                  # overflow kubelet's containerLogMaxSize and rotate the results
+                  # table out of the retrievable log (#1712). The RxDM/gVNIC failure
+                  # that motivated INFO is resolved; results are now captured
+                  # rotation-proof via the termination message (#1713), and #1651's
+                  # FallbackToLogsOnError still surfaces the failure tail. To debug a
+                  # new FastRak/TCPXO connection failure, re-enable INFO ad hoc:
+                  #   -x NCCL_DEBUG=INFO -x NCCL_DEBUG_SUBSYS=INIT,NET,ENV,GRAPH
                   - -x
-                  - NCCL_DEBUG=INFO
-                  - -x
-                  - NCCL_DEBUG_SUBSYS=INIT,NET,ENV,GRAPH
+                  - NCCL_DEBUG=WARN
                   - -x
                   - NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY=/dev/aperture_devices
                   - -x
