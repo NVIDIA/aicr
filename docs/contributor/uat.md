@@ -23,7 +23,7 @@ All UAT runs go through one entry point, `uat-run.yaml` — the shared dispatch 
 gh workflow run uat-run.yaml --repo NVIDIA/aicr --ref main -f reservation=aws-h100
 ```
 
-`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml` or `uat-gcp.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
+`uat-run.yaml` resolves the reservation row, then invokes the cloud-appropriate reusable pipeline (`uat-aws.yaml`, `uat-gcp.yaml`, or `uat-azure.yaml`). A typo'd reservation name fails fast in the resolve step (the `uat-broker` helper exits *not found*). For manual debugging, `skip_tests` and `skip_delete` inputs are available.
 
 Two further inputs shape the run (both default to the nightly-batch behavior, so the cron needs neither):
 
@@ -58,12 +58,13 @@ An unrecognized `intent` (or a missing sibling config) fails closed in the pipel
 
 ### Nightly intent cadence (both intents, both clouds)
 
-The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both intents on every reservation**, so training *and* inference are exercised nightly on both AWS and GCP. (Note: an inference cell currently provisions and validates the inference platform; the `phase_serve` serving-CUJ step itself remains disabled in both cloud workflows pending #1644, so nightly runs do not yet execute the serving request path.) The set of intents per reservation is data — the `nightly-intents` list in `infra/uat/reservations.yaml` (empty defaults to `[training]`):
+The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both intents on every nightly-enrolled reservation**, so training *and* inference are exercised nightly on both AWS and GCP (the bring-up `azure-h100` row opts out — see the table below). (Note: an inference cell currently provisions and validates the inference platform; the `phase_serve` serving-CUJ step itself remains disabled in both cloud workflows pending #1644, so nightly runs do not yet execute the serving request path.) The set of intents per reservation is data — the `nightly-intents` list in `infra/uat/reservations.yaml` (absent defaults to `[training]`; an explicit empty list `[]` opts the reservation out of the nightly batch entirely — bring-up mode, manual dispatch only):
 
 | Reservation | Cloud | `nightly-intents` | Nightly CUJs |
 |-------------|-------|-------------------|--------------|
 | `aws-h100` | AWS | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
 | `gcp-h100` | GCP | `[training, inference]` | `phase_train` + `phase_serve` (serve step disabled pending #1644) |
+| `azure-h100` | Azure | `[]` | none — opted out during bring-up |
 
 **How it stays contention-free — serialize, don't add a second cron.** The intents are folded into the existing [version matrix](#the-version-matrix) as extra cells rather than a second scheduled job. The controller's drive loop is **version outer / intent inner**: for each version it dispatches one intent's full provision→CUJ→teardown cell (inference cells currently run provision→validate→teardown; the serve CUJ is disabled pending #1644), waits for it (`gh run watch`), then dispatches the next — all through the *same* per-reservation lease. So the intents serialize naturally, and because `main` runs every intent before any release cell, a time-box drop only ever sheds the oldest *release* cells (never `main`'s inference). This is the deliberate DC3 cadence decision: **never schedule two daily crons against one reservation** — the lease is a single-slot queue (one in-progress + one pending), so a second cron plus an occasional human dispatch on the same reservation is a routine three-contender case whose loser is silently [superseded](#how-queuing-works-the-reservation-lease). One cron dispatching serialized cells sidesteps that entirely.
 
@@ -158,13 +159,15 @@ If the guard trips, tear the daytime cluster down with `lifecycle=daytime-down` 
 
 **GCP — actuator-time failure (decided posture).** `uat-gcp.yaml` has **no** pre-flight capacity/quota assertion, and DC2 deliberately did **not** add one. GCP relies on the GKE actuator failing at provision time if the reservation is exhausted. With the reservation lease serializing contending runs, a provision-time failure means a genuinely undersized/exhausted reservation, not a race — so a symmetric gcloud reservation check would add a second cloud API surface without changing the outcome. This is a recorded decision, not an oversight; there is intentionally no capacity step in the GCP pipeline.
 
+**Azure — quota-backed, GCP posture.** Azure capacity is **subscription quota** (westus `NDSH100v5`), not a reservation object — the registry row carries no `reservation-id` — and `uat-azure.yaml` follows the GCP posture: no pre-flight capacity assertion; the AKS actuator fails loudly at provision time if the quota is exhausted (with the lease serializing contenders, that failure means genuinely exhausted quota, not a race). Auth differs in mechanism, not model: `azure/login` exchanges the GitHub OIDC token against an Entra federated credential and writes the az CLI context to `~/.azure`, which is mounted into the AKS actuator container; because a federated az session cannot self-refresh, each long phase re-runs `azure/login` so no phase runs on an expired token.
+
 ## How queuing works (the reservation lease)
 
 The lease is a GitHub Actions concurrency group keyed by reservation name — `uat-<reservation>` (for example `uat-aws-h100`) — declared on `uat-run.yaml` with `cancel-in-progress: false`. Two runs that target the *same* reservation serialize: the second waits until the first (including its teardown) finishes. Two runs that target *different* reservations share no group and run in parallel, because they are independent hardware.
 
 This replaces the previous behavior, where a second run hitting a busy AWS reservation hard-failed on the capacity check. Now it queues.
 
-**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. At launch this is acceptable: there are two reservations, each contended by at most the nightly cron plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed. So that a dropped request is never silent, the `uat-superseded-notice.yaml` observer watches for it: triggered on `workflow_run: completed` for `UAT Run`, it classifies a cancelled run that never started a job as a supersede (versus a genuine mid-run cancel) and emits a job-summary entry plus a `::warning`. (The nightly controller reconciles the same signal synchronously for the cells it dispatches; a DC6 regression guard, #1279, will exercise the observer.) If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
+**The one-in-progress-plus-one-pending limit.** GitHub concurrency holds at most one in-progress run plus one pending run per group. If a *third* run is queued for a reservation that already has one in-progress and one pending, GitHub cancels the older pending run and the newest takes its place. At launch this is acceptable: there are three reservations, each contended by at most the nightly cron (Azure: manual dispatch only during bring-up) plus an occasional ad-hoc dispatch. A run cancelled this way is *superseded*, not failed. So that a dropped request is never silent, the `uat-superseded-notice.yaml` observer watches for it: triggered on `workflow_run: completed` for `UAT Run`, it classifies a cancelled run that never started a job as a supersede (versus a genuine mid-run cancel) and emits a job-summary entry plus a `::warning`. (The nightly controller reconciles the same signal synchronously for the cells it dispatches; a DC6 regression guard, #1279, will exercise the observer.) If deeper queuing is ever needed (many requesters per reservation), the escalation path is the *Deferred* standing broker service — a pull-based queue rather than GitHub concurrency — recorded in the epic (#1264).
 
 ## The version matrix
 
@@ -187,8 +190,8 @@ Reservations are data, not code. To onboard a new reserved pool, add a row to `i
 
 ```yaml
 - name: aws-b200          # the lease key; becomes concurrency group uat-aws-b200
-  cloud: aws              # aws | gcp — selects which pipeline (EKS vs GKE) provisions
-  reservation-id: cr-...  # the cloud capacity-reservation id (GCP uses the full path)
+  cloud: aws              # aws | gcp | azure — selects which pipeline (EKS / GKE / AKS) provisions
+  reservation-id: cr-...  # the cloud capacity-reservation id (GCP uses the full path); OMIT for quota-backed capacity (azure)
   accelerator: b200
   gpu-count: 8
   cluster-config-path: tests/uat/aws/cluster-config-b200.yaml
@@ -197,7 +200,9 @@ Reservations are data, not code. To onboard a new reserved pool, add a row to `i
 
 No broker, workflow, or Go change is needed — the nightly batch enumerates rows from the registry, and `uat-run.yaml` resolves them. The unit of sequencing is the *reservation*, so a new GPU type in an existing cloud simply runs in parallel with the others on its own lease. (Provisioning is per *cloud*: the same `uat-aws.yaml` pipeline provisions any AWS accelerator from the row's `cluster-config-path`; you do not add a per-accelerator workflow.)
 
-The values in this file are identifiers, **not secrets** — a reservation-id grants no access on its own; access to the reserved capacity is governed by cloud IAM/ACLs bound to the CI federation identity (see `infra/uat-aws-account/` and `infra/uat-gcp-account/`). They are safe to commit.
+Onboarding a new *cloud* (rather than a new pool in an existing cloud) is a code change on top of the row: a `run-<cloud>` job in `uat-run.yaml`, a `uat-<cloud>.yaml` pipeline, and account federation under `infra/uat-<cloud>-account/`. During bring-up, set `nightly-intents: []` (explicit empty list — absent defaults to `[training]`) so the reservation is manually dispatchable via `uat-run.yaml` but skipped by the nightly batch; flip it once the pipeline has green runs.
+
+The values in this file are identifiers, **not secrets** — a reservation-id grants no access on its own; access to the reserved capacity is governed by cloud IAM/ACLs bound to the CI federation identity (see `infra/uat-aws-account/`, `infra/uat-gcp-account/`, and `infra/uat-azure-account/`). They are safe to commit.
 
 ## Roadmap
 

@@ -58,8 +58,43 @@ func TestParseRegistry(t *testing.T) {
 			code:    errors.ErrCodeInvalidRequest,
 		},
 		{
+			// Zero-byte input takes the decoder's io.EOF path and must
+			// surface the canonical "no reservations" validation error.
+			name:    "zero-byte input",
+			yaml:    "",
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
 			name:    "malformed yaml",
 			yaml:    "reservations: [oops",
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// KnownFields: a mistyped row key must fail the parse, not
+			// silently leave the real field on its default (fail open).
+			name: "mistyped row key fails closed",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    reservation-id: cr-x
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intnts: []
+`,
+			wantErr: true,
+			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "unknown top-level key fails closed",
+			yaml: `
+reservatons:
+  - name: aws-h100
+`,
 			wantErr: true,
 			code:    errors.ErrCodeInvalidRequest,
 		},
@@ -82,8 +117,8 @@ reservations:
 			name: "unknown cloud",
 			yaml: `
 reservations:
-  - name: az-h100
-    cloud: azure
+  - name: foo-h100
+    cloud: foo
     reservation-id: cr-x
     accelerator: h100
     gpu-count: 8
@@ -92,6 +127,35 @@ reservations:
 `,
 			wantErr: true,
 			code:    errors.ErrCodeInvalidRequest,
+		},
+		{
+			// Azure is a recognized cloud (PR: Azure UAT support).
+			name: "azure cloud ok",
+			yaml: `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: false,
+		},
+		{
+			// reservation-id is optional: quota-backed capacity (e.g. Azure
+			// subscription quota) has no capacity-reservation identifier.
+			name: "missing reservation-id ok",
+			yaml: `
+reservations:
+  - name: aws-h100
+    cloud: aws
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+`,
+			wantErr: false,
 		},
 		{
 			name: "missing cluster-config-path",
@@ -454,7 +518,7 @@ func TestCommittedRegistryValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("committed reservations.yaml invalid: %v", err)
 	}
-	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP}
+	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure}
 	for name, cloud := range want {
 		res, err := reg.Lookup(name)
 		if err != nil {
@@ -501,6 +565,10 @@ func TestCommittedRegistryValid(t *testing.T) {
 	wantNightly := map[string][]string{
 		"aws-h100": {IntentTraining, IntentInference},
 		"gcp-h100": {IntentTraining, IntentInference},
+		// azure-h100 is bring-up-phase: explicitly opted out of the nightly
+		// batch (nightly-intents: []) until the pipeline has green manual
+		// runs; flipped to [training] (then both) in the follow-up PR.
+		"azure-h100": {},
 	}
 	for name, want := range wantNightly {
 		res, lookupErr := reg.Lookup(name)
@@ -515,13 +583,45 @@ func TestCommittedRegistryValid(t *testing.T) {
 	}
 }
 
+// TestParseRegistryBareNullNightlyIntents locks the authoring edge documented
+// on Reservation.NightlyIntents: a bare `nightly-intents:` (YAML null)
+// decodes to nil — indistinguishable from an absent key — so the reservation
+// resolves to the [training] default (opt-IN), and only an explicit `[]`
+// opts out. KnownFields cannot catch this; if this test ever fails because
+// the decode semantics changed, update the field's doc comment too.
+func TestParseRegistryBareNullNightlyIntents(t *testing.T) {
+	const doc = `
+reservations:
+  - name: azure-h100
+    cloud: azure
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c.yaml
+    test-config-dir: t
+    nightly-intents:
+`
+	reg, err := ParseRegistry([]byte(doc))
+	if err != nil {
+		t.Fatalf("ParseRegistry(bare-null nightly-intents) = %v, want nil error", err)
+	}
+	got := reg.Reservations[0].NightlyIntentsOrDefault()
+	if len(got) != 1 || got[0] != IntentTraining {
+		t.Errorf("NightlyIntentsOrDefault() = %v, want [%s] (bare null must behave as absent)", got, IntentTraining)
+	}
+}
+
 func TestNightlyIntentsOrDefault(t *testing.T) {
 	tests := []struct {
 		name string
 		set  []string
 		want []string
 	}{
-		{"empty defaults to training", nil, []string{IntentTraining}},
+		// Absent (nil) keeps the pre-DC3 training default.
+		{"nil defaults to training", nil, []string{IntentTraining}},
+		// Explicit empty list is a nightly OPT-OUT, not the default: a
+		// quota-backed bring-up reservation must be manually dispatchable
+		// without being swept into the nightly batch.
+		{"explicit empty list opts out", []string{}, []string{}},
 		{"explicit training only", []string{IntentTraining}, []string{IntentTraining}},
 		{"both intents", []string{IntentTraining, IntentInference}, []string{IntentTraining, IntentInference}},
 		{"inference only", []string{IntentInference}, []string{IntentInference}},
@@ -533,6 +633,15 @@ func TestNightlyIntentsOrDefault(t *testing.T) {
 				t.Errorf("NightlyIntentsOrDefault() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+
+	// Opt-out must be distinguishable from absent at the caller: the broker
+	// prints strings.Join(...) — empty for opt-out — while nil (absent)
+	// resolves to "training". slices.Equal treats nil and []string{} as equal,
+	// so assert the length explicitly.
+	r := Reservation{NightlyIntents: []string{}}
+	if got := r.NightlyIntentsOrDefault(); len(got) != 0 {
+		t.Errorf("explicit empty NightlyIntents = %v, want empty (opt-out)", got)
 	}
 }
 

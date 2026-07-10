@@ -1,0 +1,826 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT - Azure
+
+# Reusable per-cloud UAT pipeline — invoked by uat-run.yaml, the shared
+# dispatch surface that owns the per-reservation concurrency lease (#1274,
+# DC1). It is intentionally NOT directly dispatchable or scheduled: the
+# nightly cron lives in uat-nightly-batch.yaml and ad-hoc runs go through
+# uat-run.yaml, so every run on the Azure quota pool serializes on the same
+# lease. The keyless-cosign signing identity (and the EXPECTED_IDENTITY_REGEXP
+# pin below) is uat-azure.yaml@…; kept in lockstep with uat-gcp.yaml /
+# uat-aws.yaml.
+on:
+  workflow_call:
+    inputs:
+      reservation:
+        description: 'Reservation name (lease key) this run targets; used for labeling and the daytime cluster name.'
+        type: string
+        required: true
+      aicr_version:
+        description: 'Released aicr version to install (e.g. v1.2.3); empty = build from source (main tip).'
+        type: string
+        default: ''
+      intent:
+        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml).'
+        type: string
+        default: training
+      lifecycle:
+        description: 'nightly (provision→CUJ→teardown) | daytime-up (provision+deploy+HOLD) | daytime-down (tear down the held daytime cluster).'
+        type: string
+        default: nightly
+      cluster_config_path:
+        description: 'Cluster-config the AKS actuator provisions from (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
+      test_config_dir:
+        description: 'Directory holding the AICRConfig test files (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
+      skip_delete:
+        description: 'Skip cluster teardown (manual runs only; the nightly batch always deletes).'
+        type: boolean
+        default: false
+      skip_tests:
+        description: 'Skip UAT test execution (manual runs only; the nightly batch always tests).'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# NOTE: the per-reservation concurrency lease is owned by the caller
+# (uat-run.yaml). A reusable workflow must not declare its own concurrency
+# here, or every reservation would serialize against one group instead of
+# queueing per reservation.
+
+jobs:
+  uat-azure:
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    # Budget = uncapped non-UAT steps (build, validator image push, AKS
+    # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 60
+    # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
+    # = up to 160) + the always()-run Destroy Cluster teardown (3 retries, ~10m
+    # each = up to ~40m). Only one of train/serve runs per intent, so the budget
+    # counts the larger (serve). The teardown MUST fit in this budget: a job-level
+    # timeout cancels pending always() steps, so an undersized cap would skip
+    # teardown and leak the GPU node. 160 UAT + ~30 setup + ~40 teardown = ~230,
+    # so 270 leaves the teardown ample headroom even on a worst-case phase run.
+    timeout-minutes: 270
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      packages: write
+    outputs:
+      # Digest-pinned OCI ref of the signed evidence bundle, consumed by
+      # the ingest-evidence job below. Empty when no bundle was produced.
+      bundle_ref: ${{ steps.evidence_ref.outputs.ref }}
+    env:
+      # Entra federation identifiers (infra/uat-azure-account terraform
+      # output; the client id is the github-actions-aicr user-assigned
+      # managed identity). Identifiers, NOT secrets — the federated-credential
+      # subject pins (main + test/uat refs of NVIDIA/aicr), not knowledge of
+      # these ids, gate access.
+      AZURE_CLIENT_ID: "047f0427-5dcf-4e7c-97c3-9c71d92c5abb"
+      AZURE_TENANT_ID: "43083d15-7273-40c1-b7db-39efd9ccc17a"
+      AZURE_SUBSCRIPTION_ID: "e88faa01-b4fd-49d3-b934-0ad9f9fca307"
+      # Managed-identity principal (object) id — the assignee for the
+      # run-scoped cluster-admin grant below (terraform output
+      # AZURE_PRINCIPAL_ID). Inlined because the federated az session may
+      # lack the Graph access needed to resolve the client id to a principal.
+      AZURE_PRINCIPAL_ID: "3c061691-eded-40cb-869e-d5fdb2944a62"
+      # Cluster name (AKS actuator derives both the cluster name and its
+      # resource group `<id>-rg` from .deployment.id). The nightly
+      # per-run lifecycle uses a run-scoped name for per-run isolation; the
+      # daytime lifecycles use a STABLE, reservation-tagged name so the evening
+      # teardown (daytime-down) and the nightly pre-batch guard can find the
+      # held cluster. Reservation names are lowercase alnum+hyphen, so the
+      # derived name is a valid AKS cluster name.
+      DEPLOYMENT_ID: >-
+        ${{ (inputs.lifecycle == 'daytime-up' || inputs.lifecycle == 'daytime-down')
+        && format('aicr-day-{0}', inputs.reservation)
+        || format('aicr-{0}', github.run_id) }}
+      CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
+      # DC2 selects the AICRConfig by intent; both intents drive the same
+      # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
+      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:d3831f21c397b0a03a281e7d55e39e6c9535ba7e099c11dba5c9c0c28cb13c4a"
+      VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
+      VALIDATOR_TAG: "uat-${{ github.run_id }}"
+      # Pin validator-image resolution for MAIN cells to this run's freshly
+      # built+pushed validators (the `Build and push validator images` step
+      # tags them `:uat-<run_id>`), mirroring how AICR_IMAGE pins the agent — so
+      # the validators pair with the binary under test rather than a stale
+      # :latest. The main binary is stamped version=main (below), which the
+      # catalog would otherwise leave on the :latest path. Empty for release
+      # cells (aicr_version set): they use the released :<version> validators the
+      # released binary self-resolves, and an empty AICR_VALIDATOR_IMAGE_TAG is
+      # a no-op (the catalog ignores an empty override).
+      AICR_VALIDATOR_IMAGE_TAG: ${{ inputs.aicr_version == '' && format('uat-{0}', github.run_id) || '' }}
+
+    steps:
+      # Checkout
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Fail closed on an unrecognized intent/lifecycle before any provisioning:
+      # workflow_dispatch constrains these to a choice, but workflow_call passes
+      # free strings, so a caller typo must surface as a clear error rather than
+      # a missing-file failure deep in a phase. Also assert the per-intent config
+      # exists so a missing sibling config fails here, not mid-run.
+      - name: Validate inputs
+        env:
+          INTENT: ${{ inputs.intent }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+          SKIP_TESTS: ${{ inputs.skip_tests }}
+        run: |
+          set -euo pipefail
+          case "${INTENT}" in
+            training|inference) ;;
+            *) echo "::error::unknown intent '${INTENT}' (want training|inference)"; exit 1 ;;
+          esac
+          case "${LIFECYCLE}" in
+            nightly|daytime-up|daytime-down) ;;
+            *) echo "::error::unknown lifecycle '${LIFECYCLE}' (want nightly|daytime-up|daytime-down)"; exit 1 ;;
+          esac
+          # The per-intent config is only consumed by the UAT phase steps, so
+          # only require it when tests will actually run: skip_tests burn-in
+          # runs and daytime-down (teardown-only) must not fail on a missing
+          # test config before provisioning/teardown even starts.
+          if [[ "${SKIP_TESTS}" != "true" && "${LIFECYCLE}" != "daytime-down" && ! -f "${TEST_CONFIG}" ]]; then
+            echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
+          fi
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID}"
+
+      # Versions
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      # Build from source
+      - name: Setup Go
+        # Main cells only: release cells install a prebuilt binary and must not
+        # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+
+      # Main cell (aicr_version empty): build the aicr binary from the
+      # checked-out source (tip). Release cells install the released binary
+      # instead (next step). daytime-down tears down the held cluster only — it
+      # builds nothing and pushes no images.
+      - name: Build aicr binary
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        env:
+          GOFLAGS: -mod=vendor
+          # github.sha via env (never inline ${{ }} in a shell run — expression
+          # injection). It is a 40-hex commit, so no real risk, but env is the
+          # repo norm and keeps zizmor/CodeRabbit quiet.
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Stamp the main-cell binary's version metadata via ldflags (mirroring
+          # goreleaser's pkg/cli.{version,commit,date} targets) so the emitted
+          # recipe/evidence report "main" + the commit instead of the un-stamped
+          # "dev"/"unknown" defaults. version="main" is deliberately NOT a
+          # release-shaped string, so it does not trip the catalog's
+          # :latest→:<version> validator-image rewrite; validator resolution is
+          # pinned explicitly below (AICR_VALIDATOR_IMAGE_TAG). Release cells
+          # install a goreleaser-built binary already stamped with its tag, so
+          # this step is main-only.
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build \
+            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -o ./aicr ./cmd/aicr
+          # Assert the stamp actually landed — a broken ldflags target path would
+          # otherwise silently leave the binary on the default dev/unknown
+          # metadata (which then propagates to the evidence/TestGrid version).
+          VER_OUT="$(./aicr --version)"
+          echo "${VER_OUT}"
+          if ! printf '%s' "${VER_OUT}" | grep -qF "main (commit: ${COMMIT_SHA}"; then
+            echo "::error::aicr binary not stamped (want 'main (commit: ${COMMIT_SHA}…'); got: ${VER_OUT}" >&2
+            exit 1
+          fi
+
+      # Release cell (aicr_version set): install the RELEASED aicr binary at that
+      # version instead of building. The released binary self-resolves its own
+      # version's images — validators via pkg/validator/catalog (:latest ->
+      # :<version>) and the snapshot-agent via ghcr.io/nvidia/aicr:<version> — so
+      # the validator/agent build+push steps below are skipped for release cells.
+      - name: Install released aicr
+        if: inputs.aicr_version != '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        uses: ./.github/actions/install-aicr-release
+        with:
+          aicr-version: ${{ inputs.aicr_version }}
+
+      - name: Authenticate to GHCR
+        uses: ./.github/actions/ghcr-login
+
+      # Main cell only: release cells use the released validator images the
+      # released binary self-resolves to (skipped when aicr_version is set).
+      - name: Build and push validator images
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        run: |
+          GO_VERSION="$(cat .go-version)"
+          # CHAINSAW_* args dropped in #1236 — the deployment validator
+          # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
+          # Test format in-process via validators/chainsaw/inprocess.go.
+          #
+          # aiperf-bench is an ancillary (non-Go) validator image the
+          # performance phase's inference-perf check pulls at runtime, resolved
+          # through the same AICR_VALIDATOR_IMAGE_TAG=uat-<run_id> override as
+          # the Go validators. It MUST be built+pushed here too, or the AIPerf
+          # pod ImagePullBackOffs on a nonexistent uat-<run_id> tag and hangs
+          # until the job timeout (#1636). It uses a different Dockerfile path
+          # and takes no GO_VERSION build-arg. Keep the phase set in sync with
+          # VALIDATOR_PHASES in on-push.yaml / on-tag.yaml.
+          for phase in deployment performance conformance aiperf-bench; do
+            IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
+            case "${phase}" in
+              aiperf-bench)
+                docker build -f validators/performance/aiperf-bench.Dockerfile \
+                  -t "${IMAGE}" .
+                ;;
+              *)
+                docker build -f "validators/${phase}/Dockerfile" \
+                  --build-arg "GO_VERSION=${GO_VERSION}" \
+                  -t "${IMAGE}" .
+                ;;
+            esac
+            docker push "${IMAGE}"
+          done
+
+      # Auth. azure/login exchanges the GitHub OIDC token against the Entra
+      # federated credential and writes the az CLI context to ~/.azure — the
+      # same context the AKS actuator container consumes (mounted in Bringup/
+      # Destroy below). A federated az session cannot self-refresh (the OIDC
+      # token is single-exchange; access tokens last ~60-75 min), so the long
+      # phases below each re-run azure/login — mirroring the AWS pipeline's
+      # per-stage STS refreshes.
+      - name: Authenticate to Azure
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      # Azure capacity posture. This reservation row is QUOTA-backed (westus
+      # NDSH100v5 subscription quota — see infra/uat/reservations.yaml), so
+      # like GCP there is NO pre-flight capacity assertion: the AKS actuator
+      # fails at provision time if quota is exhausted. The reservation lease
+      # (uat-run.yaml) already serializes contending runs, so a provision-time
+      # failure means genuinely exhausted quota, not a race. Recorded in
+      # docs/contributor/uat.md; intentionally no capacity step below.
+
+      # Pre-batch guard (#1275, DC2). The nightly lifecycle refuses to provision
+      # into a reservation that still holds an un-torn-down daytime cluster: a
+      # missed evening teardown must surface as a BLOCKED batch, not as silent
+      # contention. Detect by the stable daytime cluster name
+      # (aicr-day-<reservation>); we already hold the reservation lease
+      # (uat-run.yaml) and are authenticated, so this runs before Bringup and
+      # fails fast rather than racing. Only the nightly lifecycle guards —
+      # daytime-up creates that cluster, daytime-down removes it.
+      - name: Pre-batch guard — refuse if a daytime cluster still holds the reservation
+        id: guard
+        if: inputs.lifecycle == 'nightly'
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+        run: |
+          set -euo pipefail
+          DAYTIME_NAME="aicr-day-${RESERVATION}"
+          set +e
+          OUT=$(az aks show --name "${DAYTIME_NAME}" \
+            --resource-group "${DAYTIME_NAME}-rg" 2>&1)
+          RC=$?
+          set -e
+          if [[ ${RC} -eq 0 ]]; then
+            echo "::error::daytime cluster ${DAYTIME_NAME} still holds reservation ${RESERVATION}; refusing to start the nightly batch. Tear it down first (uat-run lifecycle=daytime-down)."
+            exit 1
+          fi
+          # Fail closed on anything that is NOT a definitive "does not exist":
+          # a throttle/auth error must not be read as "clear to proceed". The
+          # actuator derives the RG as <cluster>-rg, so either the cluster or
+          # its whole RG being absent is a definitive negative.
+          if grep -qE 'ResourceNotFound|ResourceGroupNotFound|could not be found' <<<"${OUT}"; then
+            echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
+          else
+            echo "::error::could not determine daytime-cluster state for ${DAYTIME_NAME}: ${OUT}"
+            exit 1
+          fi
+
+      # Deps
+      - name: Install tools
+        id: deps
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_helmfile: 'true'
+          helmfile_version: '${{ steps.versions.outputs.helmfile }}'
+          helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+          # ko builds the snapshot-agent image (main cells only). Release cells
+          # install a prebuilt binary and build no images, so skip ko — a bad ko
+          # pin or download must not fail a release cell before UAT starts.
+          install_ko: ${{ inputs.aicr_version == '' && inputs.skip_tests != true && 'true' || 'false' }}
+          ko_version: ${{ steps.versions.outputs.ko }}
+
+      # The snapshot agent runs in-cluster as its own image, separate from the
+      # locally-built aicr binary that drives the UAT phases. Left at the
+      # default (ghcr.io/nvidia/aicr:latest), it would be the last *released*
+      # build — so any artifact-schema change in the PR under test (e.g. an
+      # apiVersion bump) produces a snapshot the freshly-built binary rejects.
+      # Build the agent from the PR source and point AICR_IMAGE at it so the
+      # snapshot is stamped by the code under test, not a stale release. Single
+      # arch: the GPU worker (ND H100 v5) is amd64. Lives in the
+      # aicr-validators namespace (not the release ghcr.io/nvidia/aicr repo);
+      # cleaned up below.
+      - name: Build and push snapshot-agent image
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr \
+            --bare \
+            --platform=linux/amd64 \
+            --image-label="org.opencontainers.image.revision=${COMMIT_SHA}" \
+            --tags="${VALIDATOR_TAG}"
+
+      # Config
+      - name: Update Config
+        id: config
+        run: |
+          set -euox pipefail
+          yq -i '.deployment.id = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
+          cat "$CLUSTER_CONFIG"
+
+      # Bringup — skipped for daytime-down (teardown-only; nothing to provision).
+      # The actuator reads Azure credentials from the mounted az CLI context
+      # (~/.azure, written by azure/login above); ARM_* env vars are not
+      # needed. The image runs as user `builder`, so the mount target is
+      # /home/builder/.azure (per the actuator README) — a /root/.azure mount
+      # would leave the container credential-less. Actuator Terraform state
+      # lives in the subscription's clst<sub-hex> storage account
+      # (deployment.state: tenancy; bootstrapped once via the actuator's
+      # setup tool — see infra/uat-azure-account/README.md), which is what
+      # lets the always()-teardown below destroy from the same runner after
+      # a fresh login.
+      - name: Bringup Infra
+        id: infra
+        if: inputs.lifecycle != 'daytime-down'
+        run: |
+          set -euox pipefail
+          docker run \
+            -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
+            -e AUTO_APPROVE=true \
+            -v "$HOME/.azure:/home/builder/.azure" \
+            "${AKS_ACTUATOR_IMAGE}" apply
+
+      # Data-plane kubectl access, scoped to THIS run's cluster. The actuator
+      # provisions AKS with Entra RBAC and local accounts disabled, so the
+      # pipeline identity needs a Kubernetes data-plane role. Granting
+      # "Azure Kubernetes Service RBAC Cluster Admin" at the run's resource
+      # group — instead of the shared subscription — keeps a compromised CI
+      # identity away from co-tenant Azure-RBAC clusters (the UAT
+      # subscription is NOT dedicated). The self-assignment is permitted by
+      # the ABAC-scoped RBAC Administrator grant (infra/uat-azure-account
+      # federation.tf), whose condition allows exactly this role definition
+      # alongside the two the actuator assigns; the assignment is removed
+      # with the resource group at teardown.
+      - name: Grant run-scoped cluster admin
+        if: steps.infra.outcome == 'success'
+        run: |
+          set -euo pipefail
+          SCOPE="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${DEPLOYMENT_ID}-rg"
+          set +e
+          OUT=$(az role assignment create \
+            --assignee-object-id "${AZURE_PRINCIPAL_ID}" \
+            --assignee-principal-type ServicePrincipal \
+            --role "Azure Kubernetes Service RBAC Cluster Admin" \
+            --scope "${SCOPE}" 2>&1)
+          RC=$?
+          set -e
+          # Idempotent for daytime re-runs against a held cluster: an
+          # already-present assignment is success, anything else fails.
+          if [[ ${RC} -ne 0 ]] && ! grep -q 'RoleAssignmentExists\|already exists' <<<"${OUT}"; then
+            echo "${OUT}"
+            echo "::error::failed to grant run-scoped cluster admin on ${SCOPE}"
+            exit 1
+          fi
+          echo "cluster-admin granted (run-scoped): ${SCOPE}"
+
+      # Connect. kubelogin ships with `az aks install-cli`; when the cluster
+      # kubeconfig uses Entra RBAC (exec plugin), convert it to azurecli mode
+      # so kubectl reuses the same az session the per-phase re-logins refresh.
+      # Both versions pinned from .settings.yaml — install-cli defaults BOTH
+      # kubectl and kubelogin to latest, which would drift from the repo pins
+      # (and silently overwrite the kubectl installed by setup-build-tools).
+      - name: Install kubelogin
+        if: steps.infra.outcome == 'success'
+        env:
+          KUBECTL_VERSION: ${{ steps.versions.outputs.kubectl }}
+          KUBELOGIN_VERSION: ${{ steps.versions.outputs.kubelogin }}
+        run: |
+          sudo az aks install-cli \
+            --client-version "${KUBECTL_VERSION}" \
+            --kubelogin-version "${KUBELOGIN_VERSION}"
+
+      - name: Connect to Cluster
+        id: client
+        if: steps.infra.outcome == 'success'
+        shell: bash
+        run: |
+          set -euox pipefail
+          echo "Updating kubeconfig..."
+          az aks get-credentials \
+            --name "${DEPLOYMENT_ID}" \
+            --resource-group "${DEPLOYMENT_ID}-rg" \
+            --overwrite-existing
+          if grep -q 'kubelogin' "$HOME/.kube/config"; then
+            kubelogin convert-kubeconfig -l azurecli
+          fi
+          echo "Verifying cluster connection..."
+          # The run-scoped cluster-admin role assignment (previous step) can
+          # take a few minutes to propagate to the AKS data-plane authorizer;
+          # retry before declaring the connection dead.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if kubectl get nodes; then
+              exit 0
+            fi
+            echo "kubectl not authorized yet (attempt ${attempt}/10); retrying in 30s..."
+            sleep 30
+          done
+          echo "::error::cluster connection failed after 10 attempts (role assignment not propagated?)"
+          exit 1
+
+      # UAT phases — each step invokes tests/uat/azure/run so the demo
+      # (demos/cuj1-training.md) and CI stay in lockstep, and per-phase
+      # failures surface as discrete steps in the GitHub Actions UI. Phases
+      # chain on success: prep → install → conformance → train → verify.
+      # The signed evidence bundle is produced by the conformance step; the
+      # subsequent train step exercises the deployed stack so the recorded
+      # evidence reflects a fully successful run.
+      - name: UAT - prep (snapshot + recipe + validate + bundle)
+        id: prep
+        if: steps.client.outcome == 'success' && inputs.skip_tests != true
+        timeout-minutes: 15
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+          # Snapshot agent: main cell = the PR-built image (see "Build and push
+          # snapshot-agent image"); release cell = the released aicr image at that
+          # version. Honored by `aicr snapshot`.
+          AICR_IMAGE: ${{ inputs.aicr_version == '' && format('ghcr.io/nvidia/aicr-validators/agent:{0}', env.VALIDATOR_TAG) || format('ghcr.io/nvidia/aicr:{0}', inputs.aicr_version) }}
+        run: ./tests/uat/azure/run prep "${TEST_CONFIG}"
+
+      # Per-stage credential refresh. A federated az session cannot
+      # self-refresh, and the UAT chain outlives one access token; re-run
+      # azure/login at each long phase boundary so no phase runs on an
+      # expiring token (mirrors the AWS pipeline's STS refreshes). Gated to
+      # the same condition as the step each precedes.
+      - name: Refresh Azure credentials before install
+        if: steps.prep.outcome == 'success'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: UAT - install (helmfile apply)
+        id: install
+        if: steps.prep.outcome == 'success'
+        # Capped at 60m — the federated az session CANNOT self-refresh
+        # (client-credentials grant, no refresh token), and its access token
+        # lives ~60-75m. kubelogin's azurecli mode pulls tokens from that
+        # session on every kubectl call, so a step longer than one token
+        # lifetime starts failing auth mid-phase with no way to re-mint
+        # (azure/login only runs between steps). Matches the AWS/GCP install
+        # caps. The helmfile apply (HELMFILE_TIMEOUT_SECONDS, 20m) and the
+        # readiness gate budget inside tests/uat/azure/run must together fit
+        # under this cap; widening it for slow cold-GPU bring-up requires the
+        # readiness loop to re-login mid-phase first (az login
+        # --federated-token with a freshly minted ACTIONS_ID_TOKEN — planned
+        # alongside the run script in PR 2/2). Do NOT copy a >60m phase
+        # budget to future clouds without that mid-phase re-auth.
+        timeout-minutes: 60
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/azure/run install "${TEST_CONFIG}"
+
+      # Runs ALL validate phases (deployment + conformance + performance), not
+      # just conformance. The deployment phase polls component health checks
+      # until the GPU stack converges — the readiness barrier the helmfile
+      # bundle lacks (the helm deploy.sh `kubectl wait`s instead). Step id stays
+      # `conformance` so the train/verify gating below is unaffected.
+      # daytime-up provisions and deploys the stack, then HOLDS: the CUJ
+      # (conformance/train/verify + evidence) is a nightly-batch concern, so
+      # daytime-up stops after install and leaves the cluster up for handoff.
+      - name: Refresh Azure credentials before validate
+        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: UAT - validate (all phases) + emit signed evidence
+        id: conformance
+        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
+        # Larger budget than conformance-only: the deployment phase waits out
+        # cold-start GPU bring-up (driver install/migration). (The performance
+        # phase's NCCL benchmark skips on single-GPU-node clusters like this
+        # one, so it is not the long pole here.)
+        timeout-minutes: 40
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/azure/run conformance "${TEST_CONFIG}"
+
+      # The CUJ phase is intent-selected, mirroring the runner's intent-aware
+      # `all`: training runs the Kubeflow TrainJob; inference would run the
+      # served DynamoGraphDeployment (phase_serve, DC3). For training, the
+      # TrainJob fires; for inference the serve step is currently disabled (see
+      # below), so verify/evidence cover the deployed stack either way.
+      - name: Refresh Azure credentials before CUJ
+        if: steps.conformance.outcome == 'success'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: UAT - train (TrainJob)
+        id: train
+        if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
+        timeout-minutes: 25
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/azure/run train "${TEST_CONFIG}"
+
+      # TEMPORARILY DISABLED (step commented out below). The vLLM workload run is
+      # excluded from UAT for now because the Frontend component pulls the full
+      # ~12GB vllm-runtime image on a fresh (non-GPU) node and never finishes
+      # within the 30m readiness budget: the decode worker reuses the GPU node's
+      # cached image (`already present on machine`), but the Frontend lands on a
+      # different node and pulls from scratch, wedging in ContainerCreating until
+      # the phase times out. The inference STACK (dynamo + KAI scheduler + DRA
+      # driver) is still stood up and validated by prep/install/conformance/verify;
+      # only the served-workload run is skipped (the Serve summary row is a static
+      # `disabled`). Re-enable by uncommenting the step once the pull is addressed
+      # (pre-pull/image cache, or pin the Frontend to the GPU node so it reuses
+      # the cached image).
+      #
+      # - name: UAT - serve (DynamoGraphDeployment + endpoint)
+      #   id: serve
+      #   if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
+      #   # Larger budget than train: a cold pull of the multi-GB vllm-runtime
+      #   # image + model download + engine warmup precedes the first served
+      #   # token (phase_serve's SERVE_READY_TIMEOUT_SECONDS is 30m).
+      #   timeout-minutes: 40
+      #   shell: bash
+      #   env:
+      #     AICR_BIN: ${{ github.workspace }}/aicr
+      #     RUN_ID: ${{ github.run_id }}
+      #   run: ./tests/uat/azure/run serve "${TEST_CONFIG}"
+
+      - name: UAT - verify (evidence verify)
+        id: verify
+        if: steps.conformance.outcome == 'success'
+        timeout-minutes: 5
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+          # Pin the expected Sigstore signer to this workflow's OIDC
+          # identity so verify only passes for bundles signed by this
+          # workflow — without these, any Fulcio identity would verify
+          # and the security check becomes a no-op (see warning in
+          # https://github.com/NVIDIA/aicr/actions/runs/26194736809).
+          EXPECTED_ISSUER: https://token.actions.githubusercontent.com
+          EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-azure\.yaml@refs/heads/.+$'
+        run: ./tests/uat/azure/run verify "${TEST_CONFIG}"
+
+      # Export the digest-pinned bundle ref for the ingest-evidence job.
+      # Reads the pointer the conformance step wrote; emits empty (job
+      # skips) when no bundle/digest is present.
+      - name: Export evidence bundle ref
+        id: evidence_ref
+        if: steps.conformance.outcome == 'success'
+        uses: ./.github/actions/export-evidence-ref
+
+      # Artifacts + summary run BEFORE teardown so a slow or failing
+      # `Destroy Cluster` (which can take 10+ min) does not delay or
+      # consume the job-timeout budget needed to persist evidence.
+      #
+      # The signed evidence bundle itself is pushed to OCI by the
+      # conformance step (ghcr.io/nvidia/aicr-evidence/h100-aks-ubuntu-training-kubeflow:run-${{
+      # github.run_id }}) and is the source of truth; here we attach the
+      # lightweight pointer so a reviewer can locate that bundle directly
+      # from the Actions UI for up to a year. Failure-debug artifacts are
+      # scoped tighter (30d).
+      - name: Upload evidence pointer
+        if: always() && steps.conformance.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-azure-evidence-pointer-${{ github.run_id }}
+          path: evidence/pointer.yaml
+          # Org policy caps at 90d; anything higher is silently clamped.
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload failure debug
+        if: failure() && steps.prep.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-azure-debug-${{ github.run_id }}
+          path: |
+            snapshot.yaml
+            recipe.yaml
+            dry-run.json
+            report.json
+            evidence-result.json
+            evidence/pointer.yaml
+            train-logs/**
+            serve-logs/**
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # Summary
+      - name: Test Summary
+        if: always()
+        env:
+          SUMMARY_RESERVATION: ${{ inputs.reservation }}
+          SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
+          SUMMARY_INTENT: ${{ inputs.intent }}
+          SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
+          # Via env, not inline ${{ }} in the run block: github.ref_name can
+          # carry shell-active characters (expression injection); sha is safe
+          # but routed the same way for consistency with the build step.
+          SUMMARY_SHA: ${{ github.sha }}
+          SUMMARY_REF: ${{ github.ref_name }}
+        run: |
+          {
+            echo "## UAT Results (Azure)"
+            echo ""
+            printf '**Reservation:** `%s` · **Intent:** `%s` · **Lifecycle:** `%s`\n' \
+              "$SUMMARY_RESERVATION" "$SUMMARY_INTENT" "$SUMMARY_LIFECYCLE"
+            printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
+            printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
+            printf '**Build:** `%s` (branch: `%s`)\n' "$SUMMARY_SHA" "$SUMMARY_REF"
+            echo ""
+            echo "| Phase | Status |"
+            echo "|-------|--------|"
+            echo "| Pre-batch guard | ${{ steps.guard.outcome }} |"
+            echo "| Dependencies | ${{ steps.deps.outcome }} |"
+            echo "| Config | ${{ steps.config.outcome }} |"
+            echo "| Cluster | ${{ steps.infra.outcome }} |"
+            echo "| Connection | ${{ steps.client.outcome }} |"
+            echo "| Prep | ${{ steps.prep.outcome }} |"
+            echo "| Install | ${{ steps.install.outcome }} |"
+            echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
+            echo "| Train | ${{ steps.train.outcome }} |"
+            echo "| Serve | disabled (vLLM excluded from UAT) |"
+            echo "| Verify | ${{ steps.verify.outcome }} |"
+            if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
+              echo ""
+              echo "**Evidence (OCI):** \`${{ steps.evidence_ref.outputs.ref }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Cleanup (after artifacts so a failed cleanup does not lose evidence).
+      # Main cell only — release cells reference shared, permanent released image
+      # tags and must not delete them.
+      - name: Cleanup validator image
+        if: always() && inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete UAT-tagged validator + snapshot-agent images to avoid GHCR
+          # clutter. aiperf-bench is included so the tag pushed by the build
+          # step above (#1636) does not leak.
+          for phase in deployment performance conformance aiperf-bench agent; do
+            VERSION_ID=$(gh api \
+              "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
+              --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
+            if [[ -n "${VERSION_ID}" ]]; then
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
+            fi
+          done
+
+      # Re-authenticate to Azure immediately before teardown: the session
+      # minted at the top of the job has long expired by now (the UAT phases
+      # can run the full job timeout). id-token: write is granted for the
+      # whole job, so azure/login can re-exchange here. Mirrors the AWS
+      # teardown credential refresh.
+      #
+      # Teardown gating (#1275, DC2): tear down for the nightly lifecycle
+      # (unless skip_delete) and for daytime-down (the explicit evening
+      # teardown of the held cluster — daytime-down provisions nothing, so it
+      # does not gate on steps.infra). NEVER for daytime-up, which holds the
+      # cluster for handoff. skip_delete is a nightly-only debugging escape
+      # and is ignored for daytime-down.
+      - name: Re-authenticate to Azure for teardown
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      # Teardown (retry up to 3 times). Runs last so a slow destroy
+      # cannot block evidence upload or summary rendering.
+      #
+      # Self-contained by design: this always() step sets BOTH deployment
+      # fields itself (id + destroy) rather than relying on the Update Config
+      # step, so a failure before Update Config cannot leave the destroy
+      # targeting the committed placeholder id (aicr-uat) instead of this
+      # run's cluster. Its only tool dependencies — yq, docker, az — are all
+      # preinstalled on the ubuntu-latest runner image, so it does not depend
+      # on the setup-build-tools step having run either.
+      - name: Destroy Cluster
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yq -i '.deployment.id = strenv(DEPLOYMENT_ID) | .deployment.destroy = true' "$CLUSTER_CONFIG"
+          cat "$CLUSTER_CONFIG"
+          destroyed=false
+          for attempt in 1 2 3; do
+            echo "Destroy attempt ${attempt}..."
+            if docker run \
+              -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
+              -e AUTO_APPROVE=true \
+              -v "$HOME/.azure:/home/builder/.azure" \
+              "${AKS_ACTUATOR_IMAGE}" apply; then
+              echo "Cluster destroyed successfully"
+              destroyed=true
+              break
+            fi
+            echo "Destroy attempt ${attempt} failed, retrying..."
+            sleep 30
+          done
+          # Fail the step if every attempt failed; otherwise a genuine destroy
+          # failure exits 0 and the GPU node leaks silently.
+          if [ "$destroyed" != true ]; then
+            echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
+            exit 1
+          fi
+
+  # Ingest the signed UAT evidence bundle into the corroboration bucket.
+  # Runs as its own job (separate runner) only when the run produced a
+  # bundle; the reusable workflow verifies signer + issuer + identity +
+  # registry in a credential-free step before publishing to GCS.
+  ingest-evidence:
+    name: Ingest UAT evidence
+    needs: uat-azure
+    if: needs.uat-azure.outputs.bundle_ref != ''
+    permissions:
+      contents: read
+      id-token: write  # WIF for the publish job
+      packages: read   # GHCR pull for the verify job
+    uses: ./.github/workflows/evidence-ingest.yaml
+    with:
+      bundle_ref: ${{ needs.uat-azure.outputs.bundle_ref }}
+      recipe: aks-h100-${{ inputs.intent }}
