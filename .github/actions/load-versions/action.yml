@@ -70,6 +70,9 @@ outputs:
   kubectl:
     description: 'kubectl version'
     value: ${{ steps.versions.outputs.kubectl }}
+  kubelogin:
+    description: 'kubelogin version'
+    value: ${{ steps.versions.outputs.kubelogin }}
   kwok:
     description: 'KWOK version'
     value: ${{ steps.versions.outputs.kwok }}
@@ -168,6 +171,7 @@ runs:
 
         # Testing tools
         echo "kubectl=$(yq eval '.testing_tools.kubectl' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "kubelogin=$(yq eval '.testing_tools.kubelogin' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "kind=$(yq eval '.testing_tools.kind' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "nvkind=$(yq eval '.testing_tools.nvkind' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -219,6 +223,7 @@ runs:
         echo "  go_licenses: ${{ steps.versions.outputs.go_licenses }}"
         echo "  grype: ${{ steps.versions.outputs.grype }}"
         echo "  kubectl: ${{ steps.versions.outputs.kubectl }}"
+        echo "  kubelogin: ${{ steps.versions.outputs.kubelogin }}"
         echo "  kind: ${{ steps.versions.outputs.kind }}"
         echo "  nvkind: ${{ steps.versions.outputs.nvkind }}"
         echo "  ctlptl: ${{ steps.versions.outputs.ctlptl }}"
