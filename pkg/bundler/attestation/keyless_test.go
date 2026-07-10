@@ -32,7 +32,7 @@ import (
 )
 
 func TestNewKeylessAttester(t *testing.T) {
-	attester := NewKeylessAttester("test-oidc-token", "", "")
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
 
 	if attester == nil {
 		t.Fatal("NewKeylessAttester() returned nil")
@@ -62,7 +62,7 @@ func TestNewKeylessAttester_SigstoreURLs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := NewKeylessAttester("test-oidc-token", tt.fulcio, tt.rekor)
+			a := NewKeylessAttester("test-oidc-token", tt.fulcio, tt.rekor, "", false)
 			if a.fulcioURL != tt.wantFulcio {
 				t.Errorf("fulcioURL = %q, want %q", a.fulcioURL, tt.wantFulcio)
 			}
@@ -74,7 +74,7 @@ func TestNewKeylessAttester_SigstoreURLs(t *testing.T) {
 }
 
 func TestKeylessAttester_Identity(t *testing.T) {
-	attester := NewKeylessAttester("test-oidc-token", "", "")
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
 
 	// Identity is not known until after Attest() succeeds (Fulcio returns it).
 	// Before signing, identity should be empty.
@@ -84,7 +84,7 @@ func TestKeylessAttester_Identity(t *testing.T) {
 }
 
 func TestKeylessAttester_HasRekorEntry(t *testing.T) {
-	attester := NewKeylessAttester("test-oidc-token", "", "")
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
 
 	if !attester.HasRekorEntry() {
 		t.Error("HasRekorEntry() = false, want true (keyless always uses Rekor)")

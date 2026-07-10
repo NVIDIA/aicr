@@ -105,6 +105,18 @@ type bundleCmdOptions struct {
 	fulcioURL string
 	rekorURL  string
 
+	// useTUFSigningConfig signs to Rekor v2 using the TUF-distributed signing
+	// config — the default for both keyless and KMS signing. Computed as the
+	// absence of a v1/custom opt-out (rekorURL, signingConfigPath), not a user
+	// flag; signingKey is deliberately not an opt-out, so KMS also defaults to v2.
+	// See #1650.
+	useTUFSigningConfig bool
+
+	// signingConfigPath signs with a custom Sigstore signing config file instead
+	// of the default Rekor v2 config (advanced escape hatch, e.g. an edited
+	// config or a private v2 instance). See #1650.
+	signingConfigPath string
+
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
 	plainHTTP     bool
@@ -156,9 +168,19 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		assumeYes:                 cmd.Bool(flagAssumeYes),
 		fulcioURL:                 stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
 		rekorURL:                  stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
+		signingConfigPath:         cmd.String(flagSigningConfig),
 		insecureTLS:               boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
 		plainHTTP:                 boolFlagOrConfig(cmd, flagPlainHTTP, resolved.PlainHTTP),
 		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
+	}
+
+	// Rekor v2 is the default for both keyless and KMS --attest signing: the
+	// TUF-distributed v2 signing config is used unless the caller opts out to a
+	// Rekor v1 URL or supplies a custom signing config file. Shared with
+	// recipe sign-catalog so the derivation and the exclusivity rule stay in sync.
+	opts.useTUFSigningConfig, err = signingTargetFromFlags(opts.rekorURL, opts.signingConfigPath)
+	if err != nil {
+		return nil, err
 	}
 
 	if opts.recipeFilePath == "" {
@@ -398,10 +420,31 @@ func validateSigningKeyExclusivity(cmd *cli.Command, opts *bundleCmdOptions) err
 // values (non-empty endpoints that are not absolute https:// URLs). The
 // HTTPS check is shared with the config layer via config.ValidateHTTPSURL.
 func validateSigstoreEndpoints(opts *bundleCmdOptions) error {
+	// The --rekor-url / --signing-config exclusivity is enforced up-front by
+	// signingTargetFromFlags (in parseBundleCmdOptions), so only URL shape is
+	// checked here.
 	if err := config.ValidateHTTPSURL("fulcio URL", opts.fulcioURL); err != nil {
 		return err
 	}
 	return config.ValidateHTTPSURL("rekor URL", opts.rekorURL)
+}
+
+// signingTargetFromFlags derives the transparency-signing target shared by the
+// signing commands (bundle --attest, recipe sign-catalog): with neither opt-out
+// set, signing uses the TUF-distributed Rekor v2 default (useTUF == true);
+// --rekor-url selects a Rekor v1 URL and --signing-config a custom config file,
+// and the two are mutually exclusive. Either value can also arrive from a
+// non-flag source (AICR_REKOR_URL / AICR_SIGNING_CONFIG env, or
+// spec.bundle.rekorURL in --config), so the message names those sources rather
+// than citing a flag the caller may never have typed. Centralized so a future
+// policy change lands in one place instead of drifting across per-command copies.
+func signingTargetFromFlags(rekorURL, signingConfigPath string) (useTUF bool, err error) {
+	if rekorURL != "" && signingConfigPath != "" {
+		return false, errors.New(errors.ErrCodeInvalidRequest,
+			"--"+flagRekorURL+" and --"+flagSigningConfig+
+				" (or their env vars AICR_REKOR_URL / AICR_SIGNING_CONFIG, or spec.bundle.rekorURL in --config) are mutually exclusive")
+	}
+	return rekorURL == "" && signingConfigPath == "", nil
 }
 
 // resolveOutputTarget returns the parsed *oci.Reference for --output,
@@ -715,7 +758,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     flagSigningKey,
-				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Combine with --rekor-url to log to a private Rekor. Verify the resulting bundle with `aicr verify --key <uri>`.",
+				Usage:    "Sign --attest bundles with a KMS-backed key (awskms:// | gcpkms:// | azurekms://) instead of keyless OIDC, for CI/CD without OIDC. Mutually exclusive with --identity-token, --oidc-device-flow, --fulcio-url. Like keyless, KMS signs to Rekor v2 by default; opt out with --rekor-url (v1) or --signing-config (custom). Verify the resulting bundle with `aicr verify --key <uri>`.",
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{
@@ -732,8 +775,14 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     flagRekorURL,
-				Usage:    "Override the Rekor transparency-log URL for --attest keyless signing (e.g. a private Sigstore instance). Must be an absolute https:// URL with no embedded credentials. Defaults to the public-good Rekor. Also reads AICR_REKOR_URL.",
+				Usage:    "Sign --attest bundles to Rekor v1 at this URL instead of the Rekor v2 default (e.g. a private Sigstore instance, or the public-good v1 URL). Must be an absolute https:// URL with no embedded credentials. Also reads AICR_REKOR_URL.",
 				Sources:  cli.EnvVars("AICR_REKOR_URL"),
+				Category: catDeployment,
+			},
+			&cli.StringFlag{
+				Name:     flagSigningConfig,
+				Usage:    "Sign --attest bundles with a custom Sigstore signing config JSON instead of the default Rekor v2 config (advanced). Also reads AICR_SIGNING_CONFIG.",
+				Sources:  cli.EnvVars("AICR_SIGNING_CONFIG"),
 				Category: catDeployment,
 			},
 			assumeYesFlag(catDeployment),
@@ -945,14 +994,16 @@ func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.At
 // disclosure gate so both reason about the identical token-source precedence.
 func bundleOIDCResolveOptions(opts *bundleCmdOptions) attestation.ResolveOptions {
 	return attestation.ResolveOptions{
-		Attest:        opts.attest,
-		IdentityToken: opts.identityToken,
-		SigningKey:    opts.signingKey,
-		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-		DeviceFlow:    opts.oidcDeviceFlow,
-		FulcioURL:     opts.fulcioURL,
-		RekorURL:      opts.rekorURL,
+		Attest:              opts.attest,
+		IdentityToken:       opts.identityToken,
+		SigningKey:          opts.signingKey,
+		AmbientURL:          os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+		AmbientToken:        os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+		DeviceFlow:          opts.oidcDeviceFlow,
+		FulcioURL:           opts.fulcioURL,
+		RekorURL:            opts.rekorURL,
+		SigningConfigPath:   opts.signingConfigPath,
+		UseTUFSigningConfig: opts.useTUFSigningConfig,
 		// Prompts (verification URL + user code) go to stderr so they don't
 		// pollute stdout when callers redirect bundle output.
 		PromptWriter: os.Stderr,

@@ -27,15 +27,32 @@ inputs:
   aicr-version:
     description: 'Released aicr version tag to install (e.g. v1.2.3).'
     required: true
+  cosign_version:
+    description: 'Cosign version (from .settings.yaml via load-versions; must be >= v3.1.0 to verify release provenance logged to Rekor v2 as hashedrekord/PAE).'
+    required: true
 
 runs:
   using: composite
   steps:
+    # GitHub does not enforce `required: true` on composite-action inputs at
+    # runtime, so a caller that omits cosign_version would pass '' to
+    # cosign-release and silently get the installer default (which lags the
+    # v3.1.0 floor). Fail closed instead. See #1650.
+    - name: Require cosign_version
+      shell: bash
+      env:
+        COSIGN_VERSION: ${{ inputs.cosign_version }}
+      run: '[ -n "$COSIGN_VERSION" ] || { echo "cosign_version input is required (>= v3.1.0 for Rekor v2)" >&2; exit 1; }'
     # verify-blob-attestation needs no OIDC token (verification, not signing);
     # it fetches only the Sigstore trusted root, so the caller's contents:read
     # ceiling suffices. Pinned to the same SHA the release/build workflows use.
     - name: Install Cosign
       uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      with:
+        # Pin from .settings.yaml (>= v3.1.0). The release binary provenance is
+        # logged to Rekor v2 as hashedrekord/PAE; keep the verifier in lockstep
+        # with the signer rather than the installer default (v3.0.6). See #1650.
+        cosign-release: '${{ inputs.cosign_version }}'
     - name: Download, verify, and install released aicr
       shell: bash
       env:

@@ -1261,8 +1261,9 @@ aicr bundle [flags]
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
 | `--oidc-device-flow` | | bool | Use the OAuth 2.0 device authorization grant for `--attest` instead of opening a browser callback. Useful on headless hosts that can still reach Sigstore (`--identity-token` and CI ambient OIDC are alternatives). Also reads `AICR_OIDC_DEVICE_FLOW`. |
 | `--fulcio-url` | | string | Override the Fulcio CA URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Fulcio when omitted. Also reads `AICR_FULCIO_URL`. |
-| `--rekor-url` | | string | Override the Rekor transparency-log URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Rekor when omitted. Also reads `AICR_REKOR_URL`. The two URLs are independent — a private Fulcio can pair with the public Rekor or vice versa. |
-| `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a cloud KMS URI; supported schemes are `awskms://`, `gcpkms://`, and `azurekms://`. Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. `--rekor-url` may still be combined to log to a private Rekor. See [KMS-Backed Signing](#kms-backed-signing). |
+| `--rekor-url` | | string | Sign the `--attest` bundle to **Rekor v1** at this URL instead of the **Rekor v2 default** (a private Sigstore instance, or the public-good v1 URL). Must be an absolute `https://` URL with no embedded credentials. Also reads `AICR_REKOR_URL`. Independent of `--fulcio-url`. Mutually exclusive with `--signing-config`. |
+| `--signing-config` | | string | Sign the `--attest` bundle with a custom Sigstore signing config JSON instead of the default Rekor v2 config (advanced — e.g. an edited config or a private v2 instance). Also reads `AICR_SIGNING_CONFIG`. Mutually exclusive with `--rekor-url`. |
+| `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a cloud KMS URI; supported schemes are `awskms://`, `gcpkms://`, and `azurekms://`. Like keyless signing, KMS signs to Rekor v2 by default; opt out with `--rekor-url` (v1) or `--signing-config` (custom). Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. See [KMS-Backed Signing](#kms-backed-signing). |
 | `--yes` | `--assume-yes` | bool | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 
 #### Bundle Config File Mode
@@ -2171,9 +2172,9 @@ When `--attest` is passed, the bundle command performs five steps:
 4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549) and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
-Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
+Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
 
-**Private Sigstore infrastructure:** organizations running their own Fulcio CA or Rekor log can redirect signing with `--fulcio-url` and `--rekor-url` (both must be absolute `https://` URLs with no embedded credentials). The two are independent, so a private Fulcio can pair with the public Rekor or vice versa. Public Sigstore remains the default when the flags are omitted.
+**Rekor v1 / private Sigstore:** pass `--rekor-url` to sign to Rekor **v1** at a specific URL — a private instance, or the public-good v1 URL — instead of the v2 default. Organizations running their own Fulcio CA can also redirect with `--fulcio-url` (both must be absolute `https://` URLs with no embedded credentials); the two are independent. For a fully custom v2 setup, `--signing-config` takes a Sigstore signing config JSON (mutually exclusive with `--rekor-url`).
 
 > **Verification:** these flags redirect **signing** only. Verify the resulting bundles with `aicr verify --trust-root <trusted_root.json>`, supplying the `trusted_root.json` your self-hosted Fulcio/Rekor emits. That root is unioned with AICR's built-in public-good root, so privately-signed and NVIDIA-signed bundles both verify; see the [`aicr verify`](#aicr-verify) `--trust-root` flag.
 
@@ -2276,9 +2277,10 @@ aicr bundle --recipe recipe.yaml --attest \
 `--signing-key` together with any of them is a validation error, since they
 select incompatible signing modes (KMS key versus Fulcio-issued certificate).
 
-`--rekor-url` is **not** mutually exclusive: KMS-signed bundles upload to the
-public-good Rekor transparency log by default, mirroring keyless signing. Pass
-`--rekor-url` to log to a private Rekor instead.
+Like keyless signing, KMS signs to **Rekor v2** by default. Opt out with
+`--rekor-url` to log to a Rekor v1 instance (private or public-good), or
+`--signing-config` to use a custom signing config; the two opt-outs are mutually
+exclusive with each other but both compose with `--signing-key`.
 
 The resulting bundle uses the same Sigstore bundle format as keyless signing,
 but its verification material is the signing key's public key rather than a
@@ -2839,14 +2841,20 @@ See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidenc
 
 ### aicr trust update
 
-Fetch the latest Sigstore trusted root from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year).
+Fetch the latest Sigstore trusted root **and Rekor v2 signing config** from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year). The trusted root is verification material (which signatures are valid); the signing config is sign-side (which Rekor/timestamp endpoints signing writes to — AICR signs to Rekor v2 by default).
 
 **Synopsis:**
 ```shell
-aicr trust update
+aicr trust update [--emit-signing-config <path>]
 ```
 
-**No flags.** This command contacts `tuf-repo-cdn.sigstore.dev`, verifies the update chain against the embedded TUF root, and writes the result to `~/.sigstore/root/`.
+This command contacts `tuf-repo-cdn.sigstore.dev`, verifies the update chain against the embedded TUF root, and writes the result to `~/.sigstore/root/`.
+
+**Flags:**
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--emit-signing-config` | string | Also write the fetched Rekor v2 signing config to this file path, for tools that take a signing-config path (e.g. `cosign attest-blob --signing-config`). |
 
 **When to run:**
 - After initial installation (the install script runs this automatically)
@@ -2856,6 +2864,7 @@ aicr trust update
 **Example:**
 ```shell
 aicr trust update
+aicr trust update --emit-signing-config signing-config.json
 ```
 
 ---

@@ -344,16 +344,13 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 
 	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer signCancel()
-	// Honor any configured private Sigstore endpoints rather than forcing
-	// public Sigstore. Empty values fall back to the public-good defaults
-	// inside SignStatement. (The validate-emit path does not yet expose
-	// --fulcio-url/--rekor-url, so these are empty today; this keeps the
-	// signer from overriding a configured endpoint once it does.)
-	signRes, err := bundleattest.SignStatement(signCtx, artifactStmt, bundleattest.SignOptions{
-		OIDCToken: token,
-		FulcioURL: opts.OIDCResolve.FulcioURL,
-		RekorURL:  opts.OIDCResolve.RekorURL,
-	})
+	// Map the full resolved signing target (Fulcio/Rekor endpoints plus the
+	// Rekor v2 signing-config selection) through the shared helper so evidence
+	// signing stays in lockstep with bundle/catalog signing — evidence defaults
+	// to Rekor v2 via ResolveOptions.UseTUFSigningConfig. Empty endpoint values
+	// fall back to the public-good defaults inside SignStatement.
+	signRes, err := bundleattest.SignStatement(signCtx, artifactStmt,
+		bundleattest.SignOptionsFromResolve(token, opts.OIDCResolve))
 	if err != nil {
 		return emitOutcome{}, err
 	}
