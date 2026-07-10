@@ -43,21 +43,77 @@ func warnIfHeterogeneousNodes(nodes []v1.Node) {
 	}
 }
 
-// discoverEKSNodeConfig reads the instance type label and EFA adapter count
-// from a GPU node. Returns an error if the label is missing. EFA count of 0
-// is valid (device plugin not installed — NCCL falls back to TCP).
-func discoverEKSNodeConfig(node v1.Node) (string, int, error) {
-	instanceType := node.Labels["node.kubernetes.io/instance-type"]
+// efaResourceName is the EFA extended resource published by the AWS EFA
+// Kubernetes device plugin on EKS GPU nodes.
+const efaResourceName = v1.ResourceName("vpc.amazonaws.com/efa")
+
+// discoverEKSNodeConfig reads the instance type label (from the first target
+// node) and the EFA adapter count validated as uniform across all target GPU
+// nodes. Returns an error if the instance-type label is missing or if the EFA
+// count is not uniform across the cohort (partial device-plugin rollout). An
+// EFA count of 0 is valid when uniform (device plugin not installed — NCCL
+// falls back to TCP).
+func discoverEKSNodeConfig(nodes []v1.Node) (string, int, error) {
+	if len(nodes) == 0 {
+		return "", 0, aicrErrors.New(aicrErrors.ErrCodeInternal,
+			"no target GPU nodes for EKS discovery")
+	}
+
+	instanceType := nodes[0].Labels["node.kubernetes.io/instance-type"]
 	if instanceType == "" {
 		return "", 0, aicrErrors.New(aicrErrors.ErrCodeInternal,
 			"GPU node missing node.kubernetes.io/instance-type label")
 	}
 
-	efaResource := v1.ResourceName("vpc.amazonaws.com/efa")
-	efaQuantity := node.Status.Allocatable[efaResource]
-	efaCount := int(efaQuantity.Value())
+	efaCount, err := uniformFabricResourceCount(nodes, efaResourceName)
+	if err != nil {
+		return "", 0, err
+	}
 
 	return instanceType, efaCount, nil
+}
+
+// uniformFabricResourceCount returns the allocatable count of an extended
+// fabric resource (EFA on EKS, the shared RDMA pool on AKS) across the full set
+// of resolved target GPU nodes, requiring every node to advertise the SAME
+// count. NCCL sizes every worker identically, so deriving the count from only
+// the first node silently mis-sizes the fabric request during a partial
+// device-plugin rollout or a mixed-instance cohort.
+//
+// A uniform count is returned as-is; a uniform zero is valid and selects the
+// existing TCP fallback. A disagreement across nodes (mixed/partial rollout)
+// returns an error so the validator fails closed and the operator re-runs once
+// the cluster has converged.
+func uniformFabricResourceCount(nodes []v1.Node, resource v1.ResourceName) (int, error) {
+	if len(nodes) == 0 {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("no target GPU nodes to inspect for %s", resource))
+	}
+
+	firstQuantity := nodes[0].Status.Allocatable[resource]
+	first := int(firstQuantity.Value())
+
+	present := 0
+	uniform := true
+	for i := range nodes {
+		quantity := nodes[i].Status.Allocatable[resource]
+		count := int(quantity.Value())
+		if count > 0 {
+			present++
+		}
+		if count != first {
+			uniform = false
+		}
+	}
+
+	if !uniform {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("%s present on %d of %d target GPU nodes — cluster still converging "+
+				"or device plugin not fully rolled out; re-run once uniform",
+				resource, present, len(nodes)))
+	}
+
+	return first, nil
 }
 
 // buildEFAResourceLine returns the YAML line for EFA resource requests/limits
