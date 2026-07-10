@@ -245,7 +245,7 @@ spec:
 EOF
             ;;
         *)
-            log_error "emit_resourceclaim_yaml: unsupported resource.k8s.io version: ${version:-<empty>}"
+            log_error "emit_resourceclaim_yaml: unsupported resource.k8s.io version: ${version:-<empty>}" >&2
             return 1
             ;;
     esac
@@ -970,8 +970,8 @@ MANIFEST
     fi
     rm -f "${test_manifest}"
 
-    log_info "Waiting for isolation test pod (up to 60s)..."
-    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" 60)
+    log_info "Waiting for isolation test pod (up to ${POD_TIMEOUT}s)..."
+    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" "${POD_TIMEOUT}")
     log_info "Pod phase: ${pod_phase}"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
@@ -1058,6 +1058,10 @@ metadata:
   namespace: secure-access-test
 spec:
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
   tolerations:
     - operator: Exists
   containers:
@@ -1080,6 +1084,8 @@ spec:
             echo "FAIL: expected exactly 1 GPU, saw ${count}"
             exit 1
           fi
+      securityContext:
+        allowPrivilegeEscalation: false
       resources:
         limits:
           nvidia.com/gpu: 1
@@ -1102,6 +1108,8 @@ spec:
             exit 1
           fi
           echo "PASS: nvidia-smi absent or fails without GPU allocation"
+      securityContext:
+        allowPrivilegeEscalation: false
 MANIFEST
 
     if ! capture "Apply isolation test manifest" kubectl apply -f "${dp_manifest}"; then
