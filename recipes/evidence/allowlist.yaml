@@ -62,6 +62,9 @@ firstParty:
   - label: aicr-uat-gcp
     issuer: https://token.actions.githubusercontent.com
     identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-gcp\.yaml@refs/heads/.+$'
+  - label: aicr-uat-azure
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-azure\.yaml@refs/heads/.+$'
 
 # Community: individual external contributors, keyed by source slug only.
 # Each commits pointers under recipes/evidence/<recipe>/<src>/ where <src> is
@@ -69,6 +72,8 @@ firstParty:
 community:
   - issuer: https://github.com/login/oauth
     source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
+  - issuer: https://token.actions.githubusercontent.com
+    source: 5bf9e82f0e90a11528ac85f4bcb866c8
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []

@@ -1,19 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: gpu-operator-post
+  name: "gpu-operator-post"
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  project: default
+  project: "default"
   source:
     repoURL: 'https://github.com/example/aicr-bundles.git'
     targetRevision: main
     path: 002-gpu-operator-post
   destination:
-    server: https://kubernetes.default.svc
-    namespace: gpu-operator
+    server: "https://kubernetes.default.svc"
+    namespace: "gpu-operator"
   syncPolicy:
     automated:
       prune: true

@@ -108,6 +108,27 @@ type ComponentConfig struct {
 	// templates create a ClusterPolicy CR of the ClusterPolicy CRD it
 	// ships in `crds/`. See https://github.com/NVIDIA/aicr/issues/914.
 	HasSelfRefCRDs bool `yaml:"hasSelfRefCRDs,omitempty"`
+
+	// ManifestsUseChartCRDs signals that the component's attached
+	// manifestFiles (wrapped by the bundler into an injected -post
+	// local-helm release) instantiate CRs whose CRDs this component's
+	// own chart installs at apply time. The -post wrapper shares the
+	// parent's DAG level, so the stratified sub-helmfile layout (see
+	// HasSelfRefCRDs above) does not help: helmfile diffs every
+	// release in a level before applying any of them, and the `needs:`
+	// edge orders apply, not diff — on a fresh cluster the wrapper's
+	// helm-diff REST-mapper check can therefore never pass. This flag
+	// instructs the helmfile deployer to emit `disableValidation: true`
+	// on the release whose folder carries the post-phase manifests —
+	// the injected -post wrapper, or the collapsed single folder under
+	// --vendor-charts (mixed components do not split there). Releases
+	// without post manifests and -pre wrappers keep the mapper check;
+	// see issue #929. Canonical examples: network-operator (the AKS
+	// overlay attaches a NicClusterPolicy CR whose CRD the chart
+	// installs) and kubeflow-trainer (platform-kubeflow attaches a
+	// ClusterTrainingRuntime CR of the CRD shipped in the chart's
+	// crds/).
+	ManifestsUseChartCRDs bool `yaml:"manifestsUseChartCRDs,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.
@@ -202,6 +223,14 @@ type ComponentValidationConfig struct {
 	// Message is an optional detail message to append to validation failures/warnings.
 	Message string `yaml:"message,omitempty"`
 }
+
+// ReservedDeployerKey is the --set component prefix reserved for
+// deployer-level Argo Application options (see #1625). Must stay equal
+// to pkg/bundler/config.DeployerOverrideKey — pkg/recipe cannot import
+// pkg/bundler/config (layering), so a test in pkg/bundler/config asserts
+// the two constants match. Registry loads fail closed when a component
+// declares this value as its name or as a valueOverrideKeys entry.
+const ReservedDeployerKey = "deployer"
 
 // registryCacheEntry holds the lazily-built ComponentRegistry for a single
 // DataProvider identity. sync.Once gates concurrent first-load callers onto
@@ -348,6 +377,23 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	var registry ComponentRegistry
 	if err := yaml.Unmarshal(data, &registry); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse registry.yaml", err)
+	}
+
+	// Fail closed on the reserved deployer key for EVERY loaded registry
+	// (embedded and external --data alike): a component named "deployer"
+	// or aliasing it via valueOverrideKeys would make `--set deployer:...`
+	// ambiguous between component Helm values and deployer-level Argo
+	// Application options. See #1625.
+	for i := range registry.Components {
+		comp := &registry.Components[i]
+		if comp.Name == ReservedDeployerKey {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q uses the reserved deployer override key as its name; %q is reserved for --set deployer:<key> Argo deployer options", comp.Name, ReservedDeployerKey))
+		}
+		if slices.Contains(comp.ValueOverrideKeys, ReservedDeployerKey) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q declares the reserved override key %q; it is reserved for --set deployer:<key> Argo deployer options", comp.Name, ReservedDeployerKey))
+		}
 	}
 
 	// Build index for fast lookup

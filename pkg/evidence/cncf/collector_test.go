@@ -17,12 +17,79 @@ package cncf
 import (
 	"context"
 	stderrors "errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
+
+// TestRunSectionThreadsAllocationPolicyEnv verifies the #1629 threading
+// contract at the subprocess boundary: WithAllocationPolicy must surface as
+// the AICR_GPU_ALLOCATION_POLICY environment variable inside the invoked
+// script, and a Collector without a policy must leave the variable unset
+// (standalone runs keep capability-driven detection).
+func TestRunSectionThreadsAllocationPolicyEnv(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available; skipping subprocess env test")
+	}
+
+	tests := []struct {
+		name   string
+		policy string
+		// ambient, when set, is exported into the test process environment
+		// before the run — the collector must not let it leak through.
+		ambient string
+		// script exits 0 only when the env var matches expectations.
+		script string
+	}{
+		{
+			name:   "policy threaded into script env",
+			policy: "dra-resource-claim",
+			script: `[ "${AICR_GPU_ALLOCATION_POLICY:-}" = "dra-resource-claim" ]`,
+		},
+		{
+			name:   "no policy leaves env unset",
+			policy: "",
+			script: `[ -z "${AICR_GPU_ALLOCATION_POLICY:-}" ]`,
+		},
+		{
+			name:    "ambient env var stripped for standalone runs",
+			policy:  "",
+			ambient: "dra-resource-claim",
+			script:  `[ -z "${AICR_GPU_ALLOCATION_POLICY:-}" ]`,
+		},
+		{
+			name:    "resolved policy overrides ambient env var",
+			policy:  "device-plugin-extended-resource",
+			ambient: "dra-resource-claim",
+			script:  `[ "${AICR_GPU_ALLOCATION_POLICY:-}" = "device-plugin-extended-resource" ]`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.ambient != "" {
+				t.Setenv("AICR_GPU_ALLOCATION_POLICY", tt.ambient)
+			}
+			dir := t.TempDir()
+			scriptPath := filepath.Join(dir, "probe.sh")
+			if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env bash\n"+tt.script+"\n"), 0o700); err != nil { //nolint:gosec // test script needs execute permission
+				t.Fatalf("failed to write probe script: %v", err)
+			}
+
+			opts := []CollectorOption{}
+			if tt.policy != "" {
+				opts = append(opts, WithAllocationPolicy(tt.policy))
+			}
+			c := NewCollector(filepath.Join(dir, "out"), opts...)
+			if err := c.runSection(context.Background(), scriptPath, dir, "dra"); err != nil {
+				t.Errorf("runSection() = %v, want nil (env expectation in probe script not met)", err)
+			}
+		})
+	}
+}
 
 func TestResolveFeature(t *testing.T) {
 	tests := []struct {
@@ -130,6 +197,7 @@ func TestNewCollector(t *testing.T) {
 			WithFeatures([]string{"dra", "gang"}),
 			WithNoCleanup(true),
 			WithKubeconfig("/path/to/kubeconfig"),
+			WithAllocationPolicy("device-plugin-extended-resource"),
 		)
 		if len(c.features) != 2 {
 			t.Errorf("features length = %d, want 2", len(c.features))
@@ -140,12 +208,22 @@ func TestNewCollector(t *testing.T) {
 		if c.kubeconfig != "/path/to/kubeconfig" {
 			t.Errorf("kubeconfig = %q, want %q", c.kubeconfig, "/path/to/kubeconfig")
 		}
+		if c.allocationPolicy != "device-plugin-extended-resource" {
+			t.Errorf("allocationPolicy = %q, want %q", c.allocationPolicy, "device-plugin-extended-resource")
+		}
 	})
 
 	t.Run("empty kubeconfig not set", func(t *testing.T) {
 		c := NewCollector("/tmp/out", WithKubeconfig(""))
 		if c.kubeconfig != "" {
 			t.Errorf("kubeconfig = %q, want empty", c.kubeconfig)
+		}
+	})
+
+	t.Run("default allocation policy empty", func(t *testing.T) {
+		c := NewCollector("/tmp/out")
+		if c.allocationPolicy != "" {
+			t.Errorf("allocationPolicy = %q, want empty (standalone runs pass no policy)", c.allocationPolicy)
 		}
 	})
 }

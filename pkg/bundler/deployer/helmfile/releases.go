@@ -95,15 +95,15 @@ type Release struct {
 	// (true) applies otherwise. Pointer so a deliberate false survives
 	// YAML marshaling and a nil value omits the field entirely.
 	CreateNamespace *bool `yaml:"createNamespace,omitempty"`
-	// DisableValidation is emitted when the chart self-references its
-	// own CRDs at diff time (registry flag HasSelfRefCRDs). helm-diff
-	// will skip the live-cluster REST-mapper check for this release,
-	// letting render succeed when a template creates a CR whose CRD
-	// is shipped under `crds/` in the same chart and not yet present
-	// in the cluster. Scoped to the primary release only — injected
-	// -pre / -post wrapper folders carry raw manifests, not the
-	// self-ref chart, so they keep the safety check. Issues #914,
-	// #929.
+	// DisableValidation tells helm-diff to skip the live-cluster
+	// REST-mapper check for this release, letting render succeed when
+	// a manifest creates a CR whose CRD is not yet present in the
+	// cluster. Emitted in two registry-driven cases: on the primary
+	// release when the chart self-references its own CRDs
+	// (HasSelfRefCRDs), and on the injected -post wrapper when its
+	// manifests instantiate CRs of CRDs the parent chart installs
+	// (ManifestsUseChartCRDs). All other wrappers keep the safety
+	// check. Issues #914, #929.
 	DisableValidation bool `yaml:"disableValidation,omitempty"`
 }
 
@@ -220,6 +220,24 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		// the wrapper's manifests — a typo in a resource Kind would
 		// render at diff time and fail at apply. See issue #929.
 		if f.Name == f.Parent && flags[f.Parent].HasSelfRefCRDs {
+			rel.DisableValidation = true
+		}
+		// ManifestsUseChartCRDs is the post-manifest counterpart: the
+		// component's attached manifests instantiate CRs whose CRDs the
+		// component's own chart installs. The manifest-bearing folder
+		// shares the parent's DAG level, and helmfile diffs every
+		// release in a level before applying any — the `needs:` edge
+		// orders apply, not diff — so on a fresh cluster its mapper
+		// check can never pass (network-operator's NicClusterPolicy on
+		// AKS; kubeflow-trainer's ClusterTrainingRuntime). Keyed off
+		// Folder.CarriesPostManifests, which both the injected -post
+		// wrapper and the collapsed vendored mixed folder set — a
+		// release-name suffix check would silently miss the vendored
+		// layout, where Name == Parent. Primaries without post
+		// manifests and -pre wrappers (whose manifests apply before
+		// the chart and cannot depend on its CRDs) keep the mapper
+		// sanity check per issue #929.
+		if f.CarriesPostManifests && flags[f.Parent].ManifestsUseChartCRDs {
 			rel.DisableValidation = true
 		}
 

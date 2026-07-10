@@ -131,8 +131,12 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 
 			var allImages []string
 
-			// Helm components: render chart and extract images.
-			if compRef.Type == recipe.ComponentTypeHelm {
+			// Helm components with an external chart: render it and extract
+			// images. Manifest-only refs (neither chart nor source) have no
+			// chart to render — their images come from the manifest scan
+			// below, so invoking Helm with a fabricated chart name would only
+			// produce a spurious warning.
+			if compRef.Type == recipe.ComponentTypeHelm && compRef.HasExternalChart() {
 				values, valErr := rec.GetValuesForComponentWithContext(gctx, compRef.Name)
 				if valErr != nil {
 					slog.Warn("failed to load values for component",
@@ -148,9 +152,12 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 					}
 					applyValueOverrides(values, keyOverrides)
 
+					// Source-only refs omit the chart name; EffectiveChart
+					// applies the same component-name fallback the deployers
+					// use, so the mirror inventory matches what deploys.
 					rendered, renderErr := l.helmRenderer.Render(gctx, helm.ChartInput{
 						Name:        compRef.Name,
-						Chart:       compRef.Chart,
+						Chart:       compRef.EffectiveChart(),
 						Repository:  compRef.Source,
 						Version:     compRef.Version,
 						Namespace:   compRef.Namespace,
@@ -200,13 +207,16 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 			slices.Sort(allImages)
 			ci.Images = slices.Compact(allImages)
 
-			// Build ChartRef for Helm components.
+			// Build ChartRef for Helm components. A source-only ref has an
+			// external chart whose name falls back to the component name
+			// (matching the deployers); a ref with neither chart nor source
+			// is manifest-only and has no chart to mirror.
 			var chartRef *ChartRef
-			if compRef.Type == recipe.ComponentTypeHelm && compRef.Chart != "" {
+			if compRef.Type == recipe.ComponentTypeHelm && compRef.HasExternalChart() {
 				chartRef = &ChartRef{
 					Name:       compRef.Name,
 					Repository: compRef.Source,
-					Chart:      compRef.Chart,
+					Chart:      compRef.EffectiveChart(),
 					Version:    compRef.Version,
 					Namespace:  compRef.Namespace,
 				}

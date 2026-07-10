@@ -571,6 +571,14 @@ const (
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
 	// standard HTTPClientTimeout is appropriate.
 	NCCLTrainerArchiveDownloadTimeout = 5 * time.Minute
+
+	// TrainJobAdmissionRetryTimeout bounds retrying the NCCL TrainJob create when the
+	// Kubeflow Trainer validating webhook rejects it because the webhook's informer cache
+	// has not yet observed the just-created TrainingRuntime. waitForTrainingRuntime already
+	// confirms the runtime is visible at the API server, but the webhook validates runtimeRef
+	// against a separate lister that lags that strongly-consistent read — a freshness the
+	// client cannot observe. This bounds how long we let the webhook cache catch up.
+	TrainJobAdmissionRetryTimeout = 1 * time.Minute
 )
 
 // Inference performance validation timeouts.
@@ -769,6 +777,13 @@ const (
 	// OOM the process the way os.ReadFile would.
 	MaxTrustedRootBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
+	// MaxSigningConfigBytes caps the size of a user-supplied Sigstore
+	// signing_config.json passed to `aicr bundle --signing-config` (#1650). A
+	// real signing config is a few KB; 1 MiB is generous headroom while bounding
+	// an attacker-influenced path (a /proc symlink, an NFS mount) so it cannot
+	// OOM the process the way sigstore-go's bare os.ReadFile would.
+	MaxSigningConfigBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxExternalDataFileBytes caps the size of recipe/registry data files
 	// read from the external data directory by LayeredDataProvider. This is
 	// the single source of truth for the external-data size limit:
@@ -910,6 +925,22 @@ const (
 	// TrainingRuntimePollInterval is the retry interval when waiting
 	// for a TrainingRuntime resource to become visible via the API.
 	TrainingRuntimePollInterval = 500 * time.Millisecond
+
+	// TrainJobAdmissionRetryInterval is the backoff between NCCL TrainJob create
+	// attempts while the Kubeflow Trainer validating webhook's informer cache
+	// catches up to a freshly-created TrainingRuntime.
+	TrainJobAdmissionRetryInterval = 500 * time.Millisecond
+
+	// NCCLLauncherLogReadInterval is the backoff between re-reads of a succeeded
+	// NCCL launcher pod's log while waiting for the results table to be fully
+	// captured. A pod that has just reached Succeeded can briefly serve an empty
+	// or truncated log if its container is being torn down mid-read.
+	NCCLLauncherLogReadInterval = 2 * time.Second
+
+	// NCCLLauncherLogReadAttempts bounds how many times the succeeded launcher
+	// pod's log is re-read before giving up and returning the last read for
+	// diagnosis (the parser then fails and the log is surfaced).
+	NCCLLauncherLogReadAttempts = 5
 )
 
 // Termination and truncation limits for validator output.

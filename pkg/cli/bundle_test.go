@@ -513,10 +513,11 @@ func runExclusivityCheck(t *testing.T, args []string) error {
 	cmd := bundleCmd()
 	cmd.Action = func(_ context.Context, c *cli.Command) error {
 		opts := &bundleCmdOptions{
-			signingKey:     c.String(flagSigningKey),
-			identityToken:  c.String(flagIdentityToken),
-			oidcDeviceFlow: c.Bool(flagOIDCDeviceFlow),
-			fulcioURL:      c.String(flagFulcioURL),
+			signingKey:        c.String(flagSigningKey),
+			identityToken:     c.String(flagIdentityToken),
+			oidcDeviceFlow:    c.Bool(flagOIDCDeviceFlow),
+			fulcioURL:         c.String(flagFulcioURL),
+			signingConfigPath: c.String(flagSigningConfig),
 		}
 		return validateSigningKeyExclusivity(c, opts)
 	}
@@ -564,6 +565,13 @@ func TestValidateSigningKeyExclusivity(t *testing.T) {
 			name:    "signing-key with fulcio-url is rejected",
 			args:    []string{"--signing-key", key, "--fulcio-url", "https://fulcio.example.com"},
 			wantErr: true,
+		},
+		{
+			// KMS signs to Rekor v2 by default and accepts a custom signing
+			// config, so --signing-key + --signing-config is valid (#1650).
+			name:    "signing-key with signing-config is allowed",
+			args:    []string{"--signing-key", key, "--signing-config", "sc.json"},
+			wantErr: false,
 		},
 		{
 			// --rekor-url is orthogonal to keyless-vs-KMS: KMS signing uploads

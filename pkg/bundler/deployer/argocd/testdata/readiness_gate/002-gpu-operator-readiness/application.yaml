@@ -1,19 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: gpu-operator-readiness
+  name: "gpu-operator-readiness"
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  project: default
+  project: "default"
   source:
     repoURL: 'https://github.com/example/aicr-bundles.git'
     targetRevision: main
     path: 002-gpu-operator-readiness
   destination:
-    server: https://kubernetes.default.svc
-    namespace: gpu-operator
+    server: "https://kubernetes.default.svc"
+    namespace: "gpu-operator"
   syncPolicy:
     automated:
       prune: true

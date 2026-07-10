@@ -32,12 +32,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/NVIDIA/aicr/pkg/bom"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 const (
@@ -110,14 +112,46 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		results = append(results, surveyComponent(ctx, repoRoot, c, renderer, skipHelm))
 	}
 
+	// Version variants: explicit base/overlay/mixin Helm pins that differ
+	// from the registry default, derived from the recipe data itself and
+	// rendered at catalog parity (issue #1611).
+	sources, err := loadRecipeSources(ctx, repoRoot)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load recipe sources")
+	}
+	byName := make(map[string]component, len(reg.Components))
+	for _, c := range reg.Components {
+		byName[c.Name] = c
+	}
+	variants, err := deriveVariants(reg, sources)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "derive variants")
+	}
+	for i, v := range variants {
+		variants[i] = surveyVariant(ctx, repoRoot, v, byName[v.Name], renderer, skipHelm)
+	}
+
 	if strict {
 		var hardErrs []string
 		for _, r := range results {
-			if r.Type == kindHelm && r.Version == "" {
+			// Shared rule with recipe resolution (IsEffectiveChartVersion):
+			// a whitespace-only or bare-"v" defaultVersion would pass an
+			// empty-string check here but fail ValidateCoherence at resolve
+			// time — the gate must be at least as strict as the resolver it
+			// guards. Padded values are equally rejected (deployers consume
+			// the version verbatim).
+			if r.Type == kindHelm &&
+				(!recipe.IsEffectiveChartVersion(r.Version) || r.Version != strings.TrimSpace(r.Version)) {
+
 				hardErrs = append(hardErrs, fmt.Sprintf("%s: chart version is not pinned", r.Name))
 			}
 			for _, w := range r.Warnings {
 				hardErrs = append(hardErrs, r.Name+": "+w)
+			}
+		}
+		for _, v := range variants {
+			for _, w := range v.Warnings {
+				hardErrs = append(hardErrs, v.Name+"@"+v.Version+": "+w)
 			}
 		}
 		if len(hardErrs) > 0 {
@@ -130,13 +164,17 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		}
 	}
 
-	doc := bom.BuildBOM(bom.Metadata{
-		Name:        "aicr",
-		Version:     aicrVersion,
-		Description: "NVIDIA AI Cluster Runtime",
-		ToolName:    "aicr-bom",
-		ToolVersion: aicrVersion,
-	}, results)
+	doc, err := bom.BuildBOMWithVariants(bom.Metadata{
+		Name:           "aicr",
+		Version:        aicrVersion,
+		Description:    "NVIDIA AI Cluster Runtime",
+		ToolName:       "aicr-bom",
+		ToolVersion:    aicrVersion,
+		RenderFidelity: bom.RenderFidelityCatalogParity,
+	}, results, variants)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "build cyclonedx bom")
+	}
 
 	jsonPath := filepath.Join(outDir, "bom.cdx.json")
 	jf, err := os.Create(jsonPath) //nolint:gosec // outDir is operator-supplied
@@ -159,13 +197,14 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "create "+mdPath, err)
 	}
-	mdErr := bom.WriteMarkdown(mf, bom.Metadata{
-		Name:          "aicr",
-		Version:       aicrVersion,
-		Description:   "NVIDIA AI Cluster Runtime",
-		Deterministic: deterministic,
-		NoTitle:       noTitle,
-	}, results)
+	mdErr := bom.WriteMarkdownWithVariants(mf, bom.Metadata{
+		Name:           "aicr",
+		Version:        aicrVersion,
+		Description:    "NVIDIA AI Cluster Runtime",
+		Deterministic:  deterministic,
+		NoTitle:        noTitle,
+		RenderFidelity: bom.RenderFidelityCatalogParity,
+	}, results, variants)
 	closeErr = mf.Close()
 	if mdErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "render markdown", mdErr)
@@ -178,8 +217,11 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	for _, r := range results {
 		totalImages += len(r.Images)
 	}
-	fmt.Printf("bom: wrote %s and %s (%d components, %d image refs)\n",
-		jsonPath, mdPath, len(results), totalImages)
+	for _, v := range variants {
+		totalImages += len(v.Images)
+	}
+	fmt.Printf("bom: wrote %s and %s (%d components, %d variants, %d image refs)\n",
+		jsonPath, mdPath, len(results), len(variants), totalImages)
 	return nil
 }
 
@@ -203,7 +245,7 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 	}
 	out, err := r.Render(ctx, helm.ChartInput{
 		Name:       c.Name,
-		Chart:      c.Helm.DefaultChart,
+		Chart:      c.effectiveChart(),
 		Repository: c.Helm.DefaultRepository,
 		Version:    c.Helm.DefaultVersion,
 		Namespace:  c.Helm.DefaultNamespace,
@@ -231,7 +273,7 @@ func surveyComponent(ctx context.Context, repoRoot string, c component, r helm.R
 		DisplayName: c.DisplayName,
 		Type:        c.kind(),
 		Repository:  repository,
-		Chart:       c.Helm.DefaultChart,
+		Chart:       c.effectiveChart(),
 		Version:     version,
 		Namespace:   c.Helm.DefaultNamespace,
 		Pinned:      version != "",

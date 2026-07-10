@@ -100,6 +100,7 @@ components:
 | `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `validators/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
+| `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper, or the collapsed vendored folder under `--vendor-charts` (manifests create CRs of CRDs the chart installs) |
 
 `HelmConfig`: `defaultRepository`, `defaultChart`, `defaultVersion`,
 `defaultNamespace`. `KustomizeConfig`: `defaultSource`, `defaultPath`,
@@ -492,9 +493,19 @@ unpinned row cannot slip through. Because a docs-only PR that edits the committe
 BOM skips the full `tests` job, the `bom-freshness` job in
 `.github/workflows/merge-gate.yaml` runs this same test whenever
 `docs/user/container-images.md` or `recipes/registry.yaml` change, so
-the gate holds for docs-only edits too. It does **not** catch *upstream
-image drift* — a chart bumping an image inside its own templates without
-a pin change on our side. Full `make bom-check` verifies that too by
+the gate holds for docs-only edits too.
+
+`TestCommittedBOMVariantsMatchRecipePins` (same file, same jobs) gates
+the doc's **Version variants** table the same way: it derives every
+explicit base/overlay/mixin Helm pin that differs from its registry
+default and compares bidirectionally — a new divergent pin without a
+variant row fails, and a stale row without a backing pin fails. Variant
+discovery reads only the recipe data (the pins are the source facts);
+it has no dependency on the version-pin guard's exemption policy, which
+decides whether a divergence is *allowed*, not what deploys.
+
+Neither gate catches *upstream image drift* — a chart bumping an image
+inside its own templates without a pin change on our side. Full `make bom-check` verifies that too by
 re-rendering, but it is **opt-in only** — not wired into `make qualify`,
 `make lint`, or the PR gate. So you still must run `make bom-docs` after
 a values change.

@@ -1121,7 +1121,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "status": "passed",
         "duration": 8000,
         "suite": ["conformance"],
-        "stdout": ["DRA GPU allocation successful"]
+        "stdout": ["DRA support verified (driver healthy, ResourceSlices validated)"]
       },
       {
         "name": "cluster-autoscaling",
@@ -1261,8 +1261,9 @@ aicr bundle [flags]
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
 | `--oidc-device-flow` | | bool | Use the OAuth 2.0 device authorization grant for `--attest` instead of opening a browser callback. Useful on headless hosts that can still reach Sigstore (`--identity-token` and CI ambient OIDC are alternatives). Also reads `AICR_OIDC_DEVICE_FLOW`. |
 | `--fulcio-url` | | string | Override the Fulcio CA URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Fulcio when omitted. Also reads `AICR_FULCIO_URL`. |
-| `--rekor-url` | | string | Override the Rekor transparency-log URL for `--attest` keyless signing, pointing at a private Sigstore instance. Must be an absolute `https://` URL with no embedded credentials. Defaults to the public-good Rekor when omitted. Also reads `AICR_REKOR_URL`. The two URLs are independent — a private Fulcio can pair with the public Rekor or vice versa. |
-| `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a cloud KMS URI; supported schemes are `awskms://`, `gcpkms://`, and `azurekms://`. Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. `--rekor-url` may still be combined to log to a private Rekor. See [KMS-Backed Signing](#kms-backed-signing). |
+| `--rekor-url` | | string | Sign the `--attest` bundle to **Rekor v1** at this URL instead of the **Rekor v2 default** (a private Sigstore instance, or the public-good v1 URL). Must be an absolute `https://` URL with no embedded credentials. Also reads `AICR_REKOR_URL`. Independent of `--fulcio-url`. Mutually exclusive with `--signing-config`. |
+| `--signing-config` | | string | Sign the `--attest` bundle with a custom Sigstore signing config JSON instead of the default Rekor v2 config (advanced — e.g. an edited config or a private v2 instance). Also reads `AICR_SIGNING_CONFIG`. Mutually exclusive with `--rekor-url`. |
+| `--signing-key` | | string | Sign the `--attest` bundle with a KMS-backed key instead of keyless OIDC, for CI/CD environments without OIDC (Jenkins, internal pipelines). Takes a cloud KMS URI; supported schemes are `awskms://`, `gcpkms://`, and `azurekms://`. Like keyless signing, KMS signs to Rekor v2 by default; opt out with `--rekor-url` (v1) or `--signing-config` (custom). Mutually exclusive with `--identity-token`, `--oidc-device-flow`, and `--fulcio-url` (the keyless-only flags); passing both is a validation error. See [KMS-Backed Signing](#kms-backed-signing). |
 | `--yes` | `--assume-yes` | bool | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 
 #### Bundle Config File Mode
@@ -1396,6 +1397,8 @@ The `--deployer` flag controls how deployment artifacts are generated:
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
+> **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
+
 **Deployment Order:**
 
 All deployers respect the `deploymentOrder` field from the recipe, ensuring components are installed in the correct sequence:
@@ -1424,6 +1427,7 @@ Override any value in the generated bundle files using dot notation:
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
 - **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes a component the recipe enabled. A component the recipe **disabled** (`overrides.enabled: false`) cannot be re-enabled this way — `--set <component>:enabled=true` on such a component is rejected, since re-enabling a platform-provided component would install a conflicting second copy. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
 - **Aliases merge**: overrides supplied under both a component's canonical name and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are **combined, not dropped**; the canonical name wins on any shared path. (Same alias-merge behavior as [`--set-json` / `--set-file`](#list-and-object-value-overrides).)
+- **GPU allocation-policy keys are deprecated at bundle time**: static overrides of the nested policy values — `nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride` and `gpu-operator`(`-ocp`) `devicePlugin.enabled` — still work via `--set`, `--set-json`, or `--set-file` but log a deprecation warning; the component-level `enabled` toggle of those components is honored **only via scalar `--set`** (the typed `--set-json`/`--set-file` path rejects `enabled` for every component, as described above) and likewise warns. Validators verify the recipe-resolved allocation policy, so a bundle-time change surfaces as recipe/cluster drift; move the allocation mode to a recipe overlay. `--dynamic` on any of these keys is **rejected** (the value would be unknowable when the policy is resolved). This boundary covers only what the bundler renders: **post-generation changes — `argocd-helm` / Argo CD parameter overrides, install-time `helm --set`, and manual edits to generated bundles — cannot be intercepted by AICR** and are outside the guarantee; they surface later as recipe/cluster drift when validation verifies the recipe-resolved policy. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 - **Repeat to add; commas are literal**: To supply multiple overrides, repeat the flag (`--set a:x=1 --set b:y=2`). On the `bundle` command, commas inside a single slice-flag value are taken **literally** (not treated as a value separator), so a value containing a comma — and the comma-heavy JSON passed to `--set-json` — is preserved intact. This applies to all repeatable `bundle` flags (`--set`, `--set-json`, `--set-file`, `--dynamic`, `--*-node-selector`, `--*-node-toleration`, `--workload-selector`).
 
 **Examples:**
@@ -1460,6 +1464,54 @@ aicr bundle -r recipe.yaml \
 aicr bundle -r recipe.yaml \
   --set awsebscsidriver:enabled=false \
   -o ./bundles
+```
+
+#### Argo CD Deployer Options
+
+The `deployer` prefix is reserved: with `--deployer argocd` or `--deployer argocd-helm`, `--set deployer:<key>=<value>` configures the generated Argo CD Applications instead of component chart values. Unknown `deployer:` keys are rejected, and the prefix is rejected entirely with any other `--deployer` type (`helm`, `flux`, `helmfile`).
+
+| Key | Applies to | Default | Example |
+|-----|------------|---------|---------|
+| `namePrefix` | Child Application names | (none) | `--set deployer:namePrefix=tenant-a-` |
+| `destinationServer` | Child Applications' `spec.destination.server` | `https://kubernetes.default.svc` | `--set deployer:destinationServer=https://prod.example.com:6443` |
+| `project` | Child Applications' `spec.project` | `default` | `--set deployer:project=gpu-infra` |
+| `cascadeDelete` | Parent and child Applications | `false` | `--set deployer:cascadeDelete=true` |
+
+**Child Applications only:** `namePrefix`, `destinationServer`, and `project` affect the per-component child Applications, not the parent app-of-apps. Application CRs are reconciled only from the cluster running Argo CD, so the parent stays on the control-plane cluster in project `default` — see the Argo CD [cluster bootstrapping guide](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/). The parent's name is set with [`--app-name`](#aicr-bundle).
+
+**Prerequisites for remote destinations:** AICR only writes `deployer:destinationServer` and `deployer:project` into the generated Applications — it does not configure Argo CD. The destination cluster must already be registered with Argo CD (`argocd cluster add <context>` or a [declarative cluster Secret](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/#clusters)), and the [Argo CD project](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) referenced by `deployer:project` must permit the emitted destinations and source repositories; otherwise the child Applications fail to sync with a permission or unknown-cluster error.
+
+**Name limits:** the composed child Application name (`namePrefix` + component name) must be at most 53 characters — Argo CD uses the Application name as the Helm release name, which Helm caps at 53 — and must not equal the parent Application's name (set with `--app-name`). Both violations are rejected at bundle time, and argocd-helm bundles re-check them at `helm template`/`helm install` time for install-time `--set deployer.namePrefix=...` overrides.
+
+**Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the three string keys ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (note the dot, not colon). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. `cascadeDelete` is bundle-time only — it adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
+
+**Children-only rendering (`deployer.includeRootApp`, install-time only):** argocd-helm bundles render the parent app-of-apps Application as a chart template, so an *externally managed* root Application pointed at the published chart — for example one created by a controller such as a Cluster API addon provider — would otherwise render a second parent (`aicr-stack`) that owns the same child Applications and fights the external root through its automated prune/selfHeal sync policy. Set `deployer.includeRootApp: false` in that root Application's `spec.source.helm.valuesObject` (or `helm install --set deployer.includeRootApp=false`) to render children-only. The default (`true`) keeps the standalone `helm install` flow unchanged; the same published bundle serves both consumption modes. This is a **boolean** key — pass it with plain `--set` (not `--set-string`), and note it is not a bundle-time `deployer:` key.
+
+**Use `--set-string` for values Helm would type-infer:** apart from the boolean `deployer.includeRootApp`, the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
+
+```shell
+# Deploy child Applications to a remote cluster under a tenant prefix
+aicr bundle -r recipe.yaml --deployer argocd \
+  --set deployer:namePrefix=tenant-a- \
+  --set deployer:destinationServer=https://prod.example.com:6443 \
+  --set deployer:project=gpu-infra \
+  -o ./bundles
+
+# Enable cascading deletion on the app-of-apps and its children
+aicr bundle -r recipe.yaml --deployer argocd-helm \
+  --set deployer:cascadeDelete=true \
+  -o ./bundle
+
+# argocd-helm: override the shipped defaults at install time instead
+helm install aicr-stack ./bundle \
+  --set deployer.namePrefix=tenant-a- \
+  --set deployer.project=gpu-infra
+
+# argocd-helm: children-only — an external root Application already
+# points at the published chart (e.g. created by a controller)
+helm template aicr-bundle oci://ghcr.io/myorg/aicr-bundle \
+  --set repoURL=oci://ghcr.io/myorg \
+  --set deployer.includeRootApp=false
 ```
 
 #### List and Object Value Overrides
@@ -2120,9 +2172,9 @@ When `--attest` is passed, the bundle command performs five steps:
 4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549) and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
-Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
+Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
 
-**Private Sigstore infrastructure:** organizations running their own Fulcio CA or Rekor log can redirect signing with `--fulcio-url` and `--rekor-url` (both must be absolute `https://` URLs with no embedded credentials). The two are independent, so a private Fulcio can pair with the public Rekor or vice versa. Public Sigstore remains the default when the flags are omitted.
+**Rekor v1 / private Sigstore:** pass `--rekor-url` to sign to Rekor **v1** at a specific URL — a private instance, or the public-good v1 URL — instead of the v2 default. Organizations running their own Fulcio CA can also redirect with `--fulcio-url` (both must be absolute `https://` URLs with no embedded credentials); the two are independent. For a fully custom v2 setup, `--signing-config` takes a Sigstore signing config JSON (mutually exclusive with `--rekor-url`).
 
 > **Verification:** these flags redirect **signing** only. Verify the resulting bundles with `aicr verify --trust-root <trusted_root.json>`, supplying the `trusted_root.json` your self-hosted Fulcio/Rekor emits. That root is unioned with AICR's built-in public-good root, so privately-signed and NVIDIA-signed bundles both verify; see the [`aicr verify`](#aicr-verify) `--trust-root` flag.
 
@@ -2225,9 +2277,10 @@ aicr bundle --recipe recipe.yaml --attest \
 `--signing-key` together with any of them is a validation error, since they
 select incompatible signing modes (KMS key versus Fulcio-issued certificate).
 
-`--rekor-url` is **not** mutually exclusive: KMS-signed bundles upload to the
-public-good Rekor transparency log by default, mirroring keyless signing. Pass
-`--rekor-url` to log to a private Rekor instead.
+Like keyless signing, KMS signs to **Rekor v2** by default. Opt out with
+`--rekor-url` to log to a Rekor v1 instance (private or public-good), or
+`--signing-config` to use a custom signing config; the two opt-outs are mutually
+exclusive with each other but both compose with `--signing-key`.
 
 The resulting bundle uses the same Sigstore bundle format as keyless signing,
 but its verification material is the signing key's public key rather than a
@@ -2361,11 +2414,16 @@ the full flag reference.
 ##### argocd
 
 Delete the parent `Application` that owns the bundle's child Applications
-(app-of-apps). AICR does **not** set the
+(app-of-apps). By default AICR does **not** set the
 `resources-finalizer.argocd.argoproj.io` finalizer on generated
 Applications, so a plain `kubectl delete` removes only the Application CR
-and leaves the managed resources running. Use one of the cascade-aware
-flows instead:
+and leaves the managed resources running. Bundles generated with
+`--set deployer:cascadeDelete=true` (see
+[Argo CD Deployer Options](#argo-cd-deployer-options)) are the exception:
+the finalizer is baked onto the parent and every child Application, so a
+plain `kubectl delete` on the parent already cascades to the managed
+resources. For default bundles, use one of the cascade-aware flows
+instead:
 
 ```bash
 # Argo CD CLI — cascade is the default; foreground waits for resources
@@ -2783,14 +2841,20 @@ See [`demos/evidence.md`](https://github.com/NVIDIA/aicr/blob/main/demos/evidenc
 
 ### aicr trust update
 
-Fetch the latest Sigstore trusted root from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year).
+Fetch the latest Sigstore trusted root **and Rekor v2 signing config** from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year). The trusted root is verification material (which signatures are valid); the signing config is sign-side (which Rekor/timestamp endpoints signing writes to — AICR signs to Rekor v2 by default).
 
 **Synopsis:**
 ```shell
-aicr trust update
+aicr trust update [--emit-signing-config <path>]
 ```
 
-**No flags.** This command contacts `tuf-repo-cdn.sigstore.dev`, verifies the update chain against the embedded TUF root, and writes the result to `~/.sigstore/root/`.
+This command contacts `tuf-repo-cdn.sigstore.dev`, verifies the update chain against the embedded TUF root, and writes the result to `~/.sigstore/root/`.
+
+**Flags:**
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--emit-signing-config` | string | Also write the fetched Rekor v2 signing config to this file path, for tools that take a signing-config path (e.g. `cosign attest-blob --signing-config`). |
 
 **When to run:**
 - After initial installation (the install script runs this automatically)
@@ -2800,6 +2864,7 @@ aicr trust update
 **Example:**
 ```shell
 aicr trust update
+aicr trust update --emit-signing-config signing-config.json
 ```
 
 ---

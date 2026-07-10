@@ -51,7 +51,12 @@ network:
       count: 8
       mtu: 8244
       cidrBase: "192.168.0.0/16"
-      gvnicCidr: "192.168.128.0/20"
+      # No gvnicCidr: an extra gVNIC additional network on an a3-megagpu-8g GPU
+      # pool has no free PCI slot, so it takes a GPU-NIC slot (0000:06:00.0) and
+      # displaces gpu-nic-7 onto a virtio slot. RxDM then detects only 7/8 GPU
+      # NICs in the PCI tree, exits 1, and never binds its UDS, so NCCL fails
+      # with "connect() 111: Connection refused" on NET/FasTrak. Nothing here
+      # consumes the gVNIC network. See docs/integrator/gke-tcpxo-networking.md.
     firewallRules:
       # Allows all intra-VPC TCP/UDP/ICMP from 10.0.0.0/8, which covers node
       # subnets and the GKE pod secondary ranges. NATS (4222) is already

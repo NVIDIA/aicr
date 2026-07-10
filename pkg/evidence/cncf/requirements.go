@@ -36,7 +36,7 @@ var requirements = map[string]requirementMeta{
 	featureDRASupport: {
 		RequirementID: "dra_support",
 		Title:         "DRA Support (Dynamic Resource Allocation)",
-		Description:   "Demonstrates that the cluster supports Dynamic Resource Allocation with a functioning DRA driver, kubelet plugin, and GPU ResourceSlices.",
+		Description:   "Demonstrates that the cluster supports the Dynamic Resource Allocation capability itself: a functioning DRA driver, kubelet plugin, and validated NVIDIA ResourceSlices. Production GPU allocation may use either DRA or the device plugin.",
 		File:          "dra-support.md",
 	},
 	featureGangScheduling: {
@@ -84,7 +84,7 @@ var requirements = map[string]requirementMeta{
 	"secure-accelerator-access": {
 		RequirementID: "secure_accelerator_access",
 		Title:         "Secure Accelerator Access",
-		Description:   "Demonstrates that GPU access is exclusively mediated through DRA with no direct host device access or hostPath mounts.",
+		Description:   "Demonstrates that GPU access is mediated through a Kubernetes allocation mechanism — DRA ResourceClaims or device plugin resource limits — with no direct host device access or hostPath mounts.",
 		File:          "secure-accelerator-access.md",
 	},
 }

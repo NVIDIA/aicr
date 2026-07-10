@@ -72,7 +72,7 @@
   │  ──▶ agentgateway ──▶ ... ──▶ gpu-operator ──▶ dynamo-platform ──▶ ... │
   │                                                                        │
   │  Result: Fully configured GPU cluster                                  │
-  │    • 8x H100 GPUs advertised via DRA                                   │
+  │    • 8x H100 GPUs via device plugin (nvidia.com/gpu)                   │
   │    • Gang scheduling (KAI Scheduler)                                   │
   │    • Inference gateway (agentgateway)                                  │
   │    • GPU metrics (DCGM → Prometheus → HPA)                             │
@@ -291,9 +291,11 @@ http://127.0.0.1:9090/chat.html
 
     Feature                  Description
     ──────────────────────── ─────────────────────────────────────────────
-    dra-support              DRA GPU allocation test
+    dra-support              DRA support test (mode-aware: full-GPU claim under DRA
+                             policy, slice-evidence N/A path under device-plugin)
     gang-scheduling          Gang scheduling co-scheduling test
-    secure-access            Secure accelerator access verification
+    secure-access            Secure accelerator access (device-plugin or DRA
+                             ResourceClaim isolation, policy/mode-selected)
     accelerator-metrics      Accelerator & AI service metrics
     inference-gateway        Inference API gateway conditions
     robust-operator          Robust AI operator + webhook test

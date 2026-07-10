@@ -101,10 +101,28 @@ per run. Per-phase containers are built from
 | `performance` | Cluster meets perf thresholds | NCCL bandwidth, AIPerf TTFT p99 |
 
 Performance runs **last** on purpose: its inference-perf benchmark saturates
-every GPU on the node and tears the DynamoGraphDeployment (and its DRA
-ResourceClaims) down asynchronously. Running it before conformance starved
-conformance's GPU-needing checks (notably `dra-support`, whose 1-GPU test pod
-failed to schedule with "cannot allocate all claims" on single-node clusters).
+every GPU on the node and tears the DynamoGraphDeployment (and, in DRA
+wiring mode, its DRA ResourceClaims) down asynchronously. Running it before
+conformance starved conformance's GPU-needing checks (historically
+`dra-support`, whose 1-GPU test pod failed to schedule with "cannot allocate
+all claims" on single-node clusters; since #1620 that behavioral subtest runs
+only where full-GPU DRA is usable — the GPU allocation checks are
+capability-driven via the shared `validators/internal/allocmode` probe, with
+inference-perf's worker wiring mode-dispatched per chosen node — but the
+saturation-ordering rationale stands for every GPU-needing check).
+
+The GPU allocation checks follow an **Inspect / Verify / Select** separation
+(#1327): `allocmode.Detect` is the INSPECT step — it probes cluster facts
+(usable full-GPU DRA, usable device plugin, per-node device counts) without
+policy judgment; `allocmode.Verify` is the VERIFY step — it compares the
+recipe-configured `ValidationInput.GPUAllocationPolicy` (resolved from
+hydrated recipe values by `pkg/validator/v1.ResolveGPUAllocationPolicy`)
+against those facts and fails closed with `ErrCodeInvalidRequest` on
+mismatch; SELECT — the capability-preference dispatch inside each check —
+applies only when the policy is `unspecified` (standalone runs without recipe
+context). A configured policy forces the mechanism at
+secure-accelerator-access, dra-support's behavioral subtest, and
+inference-perf's worker wiring and node discovery.
 
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
@@ -249,10 +267,11 @@ last stable release is absent from `:latest` until the next one. Running
 `AICR_VALIDATOR_IMAGE_TAG=latest` against a `main`-tracking recipe can
 therefore silently run *older* validator behavior — e.g. a
 `performance.constraints` pin such as `inference-model` /
-`inference-concurrency-per-gpu` is only honored by a validator new enough
-to read it; an older `:latest` validator ignores the pin and runs its
-compiled default, which can surface as a misleading result rather than a
-clear version error.
+`inference-concurrency-per-gpu` / `nccl-benchmark-profile` is only honored
+by a validator new enough to read it; an older `:latest` validator ignores
+the pin and runs its compiled default, which can surface as a misleading
+result (for `nccl-benchmark-profile`, a silent skip) rather than a clear
+version error.
 
 **To run the validator built on `main`** (e.g. testing a recipe whose pins
 are not yet in a release), point at `:edge` or a published `main` commit —
@@ -379,6 +398,26 @@ package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 > running the `-net` or `-nvls` variant **must** declare a same-named
 > constraint; the variant will Skip if only the generic
 > `nccl-all-reduce-bw` constraint is present.
+
+#### NCCL: recipe-driven applicability (`nccl-benchmark-profile`)
+
+NCCL applicability defaults to the compiled `supportedNCCLCombinations`
+matrix (variant → service → accelerators), keyed to the recipe's
+`criteria`. The optional `nccl-benchmark-profile` performance constraint
+(bare `{accelerator}/{service}` value, e.g. `gb200/eks`) overrides that
+default so external `--data` recipes — new services, or embedded services
+extended to new accelerators — can run the embedded benchmarks
+([#1703](https://github.com/NVIDIA/aicr/issues/1703)). Resolution is
+recipe-only (no env tier), and parsing fails closed: a malformed or
+unknown profile aborts the check with `ErrCodeInvalidRequest` instead of
+skipping. The profile keys template selection, service-specific fabric
+plumbing (EFA / GKE NIC discovery, worker scheduling defaults), and
+preflights; node identification (the GFD `gpu.product` filter) stays on
+the recipe's own `criteria.accelerator`. Profiles are restricted to pairs
+already present in the compiled matrix, so the
+`TestSupportedNCCLCombinationsHaveRuntimeTemplates` wiring guard
+(advertised tuple ⇒ parseable template) covers every profile a recipe can
+name. See `validators/performance/nccl_benchmark_profile.go`.
 
 #### `inference-perf`: model, concurrency, and weights cache
 

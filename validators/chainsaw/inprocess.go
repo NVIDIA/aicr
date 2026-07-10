@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/kyverno/chainsaw/pkg/apis"
@@ -446,6 +447,15 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 			return errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("list-match canceled for %s in %q", kind, namespace), err)
 		}
+		// Skip ghosts (Terminating or NodeLost): a node replaced or lost
+		// mid-run leaves its DaemonSet/workload pod behind for minutes until
+		// pod GC, while a healthy replacement already runs on the live node.
+		// A negative (error) assertion must not fire on such an orphan — that
+		// is the orphan-pod trap documented in the project anti-patterns, and
+		// it turned a healthy ebs-csi-node DaemonSet into a false failure.
+		if isTerminatingOrLost(actual) {
+			continue
+		}
 		errs, checkErr := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 		if checkErr != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -460,10 +470,88 @@ func evaluateError(ctx context.Context, e *v1alpha1.Error, fetcher ResourceFetch
 				}
 			}
 			return errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%s %s/%s matches forbidden shape", kind, namespace, itemName))
+				fmt.Sprintf("%s %s/%s matches forbidden shape%s",
+					kind, namespace, itemName, describePodStatus(actual)))
 		}
 	}
 	return nil
+}
+
+// isTerminatingOrLost reports whether a listed resource is a ghost that a
+// negative (error) assertion must skip: a resource with a deletionTimestamp
+// (Terminating, being garbage-collected) or a pod the node controller has
+// marked NodeLost after its node went unreachable. During UAT, a GPU/inference
+// node replaced or lost mid-run leaves such a pod behind for minutes until pod
+// GC removes it, even though a healthy replacement already runs on the live
+// node. Flagging the ghost is the orphan-pod trap: filter it out so the check
+// reflects the state of live nodes only.
+func isTerminatingOrLost(obj map[string]any) bool {
+	if md, ok := obj["metadata"].(map[string]any); ok {
+		if ts, ok := md["deletionTimestamp"].(string); ok && ts != "" {
+			return true
+		}
+	}
+	if st, ok := obj["status"].(map[string]any); ok {
+		if reason, ok := st["reason"].(string); ok && reason == "NodeLost" {
+			return true
+		}
+	}
+	return false
+}
+
+// describePodStatus renders a compact, human-readable summary of a resource's
+// health-relevant status (phase, first container-waiting reason, node) so a
+// "forbidden shape matched" failure is self-diagnosing in the check report
+// instead of an opaque shape reference. Returns "" for resources without these
+// fields (e.g. non-pod kinds), leaving the message unchanged.
+func describePodStatus(obj map[string]any) string {
+	parts := make([]string, 0, 3)
+	if st, ok := obj["status"].(map[string]any); ok {
+		if phase, ok := st["phase"].(string); ok && phase != "" {
+			parts = append(parts, "phase="+phase)
+		}
+		if reason := firstWaitingReason(st); reason != "" {
+			parts = append(parts, "waiting="+reason)
+		}
+	}
+	if spec, ok := obj["spec"].(map[string]any); ok {
+		if node, ok := spec["nodeName"].(string); ok && node != "" {
+			parts = append(parts, "node="+node)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// firstWaitingReason returns the first container-waiting reason found across a
+// pod's containerStatuses and initContainerStatuses, or "" if none is waiting.
+func firstWaitingReason(status map[string]any) string {
+	for _, key := range []string{"containerStatuses", "initContainerStatuses"} {
+		list, ok := status[key].([]any)
+		if !ok {
+			continue
+		}
+		for _, cs := range list {
+			csm, ok := cs.(map[string]any)
+			if !ok {
+				continue
+			}
+			state, ok := csm["state"].(map[string]any)
+			if !ok {
+				continue
+			}
+			waiting, ok := state["waiting"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if reason, ok := waiting["reason"].(string); ok && reason != "" {
+				return reason
+			}
+		}
+	}
+	return ""
 }
 
 // extractResourceSelector pulls apiVersion / kind / metadata fields

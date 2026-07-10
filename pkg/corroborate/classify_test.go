@@ -101,10 +101,12 @@ func TestLoadAllowlist_CanonicalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAllowlist(recipes/evidence/allowlist.yaml): %v", err)
 	}
-	class, ok := classifySigner(al, ghIssuer,
-		"https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main")
-	if class != ClassFirstParty || !ok {
-		t.Errorf("canonical allowlist classified UAT signer as (%q,%v), want (first-party,true)", class, ok)
+	for _, cloud := range []string{"aws", "gcp", "azure"} {
+		identity := "https://github.com/NVIDIA/aicr/.github/workflows/uat-" + cloud + ".yaml@refs/heads/main"
+		class, ok := classifySigner(al, ghIssuer, identity)
+		if class != ClassFirstParty || !ok {
+			t.Errorf("canonical allowlist classified %s UAT signer as (%q,%v), want (first-party,true)", cloud, class, ok)
+		}
 	}
 }
 

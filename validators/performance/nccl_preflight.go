@@ -61,13 +61,23 @@ func runPerNodeProbe(
 	g, gctx := errgroup.WithContext(ctx.Ctx)
 	g.SetLimit(perNodeFanoutConcurrency)
 	for _, n := range nodes {
+		// Stop scheduling once the group context is canceled — a sibling probe's
+		// hard failure or a parent-context deadline — rather than queuing work
+		// that would only run against an already-canceled context. Any nodes not
+		// yet probed are irrelevant: g.Wait below returns the cancellation error,
+		// so the partial missing-list is never consumed.
+		if gctx.Err() != nil {
+			break
+		}
 		nodeName := n.Name
 		g.Go(func() error {
 			ok, err := probe(gctx, ctx.Clientset, ctx.Namespace, nodeName)
 			if err != nil {
-				return aicrErrors.WrapWithContext(aicrErrors.ErrCodeInternal,
-					probeLabel+" preflight probe failed", err,
-					map[string]interface{}{"node": nodeName})
+				// Preserve the probe's structured code (e.g. ErrCodeTimeout from
+				// the phase wait) instead of flattening every failure to Internal;
+				// only genuinely uncoded errors get the fallback classification.
+				return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
+					probeLabel+" preflight probe failed on node "+nodeName)
 			}
 			if !ok {
 				mu.Lock()

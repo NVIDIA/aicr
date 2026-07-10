@@ -208,6 +208,12 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 // TrainJob + MPI with per-platform TrainingRuntimes and a shared TrainJob.
 // variantDefault preserves the pre-variant behavior; named variants opt in
 // targeted transport-class coverage.
+//
+// This matrix is the criteria-derived DEFAULT applicability. A recipe whose
+// criteria are not listed here (e.g. a service registered only via --data)
+// can still run these benchmarks by naming one of the listed tuples through
+// the nccl-benchmark-profile performance constraint — see
+// nccl_benchmark_profile.go and NVIDIA/aicr#1703.
 var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	variantDefault: {
 		// H200 is Hopper on EFA, electrically identical to H100 for NCCL
@@ -215,6 +221,11 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// runtime template and the same calibrated >= 300 GB/s floor.
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100, recipe.CriteriaAcceleratorH200},
 		recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
+		// AKS ND-series H100 (e.g. Standard_ND96isr_H100_v5): 8x H100 SXM
+		// intra-node NVLink, 8x 400Gb NDR InfiniBand inter-node via the
+		// network-operator rdma-shared-device-plugin. NCCL uses its built-in
+		// IB/verbs transport (see testdata/h100/aks/runtime.yaml).
+		recipe.CriteriaServiceAKS: {recipe.CriteriaAcceleratorH100},
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
 	variantNET: {
@@ -230,6 +241,8 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 // Each platform has its own TrainingRuntime; the TrainJob is shared (just runtimeRef + numNodes).
 // The variant selects a transport-class template (NET, NVLS) when the recipe needs per-fabric
 // coverage on clusters that expose multiple inter-node fabrics (e.g. GB200/EKS).
+// Applicability derives from the recipe criteria via supportedNCCLCombinations, overridable
+// through the nccl-benchmark-profile constraint (see nccl_benchmark_profile.go).
 // Returns actual bandwidth value, whether it passed the threshold, and any error.
 func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constraint, variant ncclVariant) (string, bool, error) {
 	slog.Info("Starting NCCL All Reduce bandwidth validation", "variant", string(variant))
@@ -248,27 +261,34 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		return "", false, err
 	}
 
-	supported := false
-	if fabric == fabricRoCE && variant == variantNET {
-		// RoCE NET is fabric-keyed and accelerator-agnostic — supported on any
-		// service with a testdata/roce/{service} template. Only NET has a RoCE
-		// path; NVLS (NVLink/IMEX) is fabric-independent and uses the normal
-		// accelerator-keyed combinations below.
-		supported = roceNETSupportedServices[service]
-	} else if byService, ok := supportedNCCLCombinations[variant]; ok {
-		if supportedAccelerators, ok := byService[service]; ok {
-			for _, a := range supportedAccelerators {
-				if accelerator == a {
-					supported = true
-					break
-				}
-			}
-		}
+	// The benchmark target defaults to the recipe's criteria; an explicit
+	// nccl-benchmark-profile constraint overrides it so recipes whose criteria
+	// are absent from the compiled matrix (external --data services, new
+	// accelerators) can opt into an embedded benchmark profile. The target
+	// keys applicability, template selection, service-specific fabric
+	// plumbing, and preflights; node identification below keeps using the
+	// criteria accelerator.
+	target := ncclBenchmarkTarget{accelerator: accelerator, service: service}
+	profile, err := resolveNCCLBenchmarkProfile(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if profile != nil {
+		target = *profile
+		slog.Info("Recipe declares an NCCL benchmark profile — overriding criteria-derived applicability",
+			"profile", target.String(), "criteriaService", service, "criteriaAccelerator", accelerator)
 	}
 
-	if !supported {
+	if !ncclCombinationSupported(variant, fabric, target) {
 		slog.Info("Skipping NCCL All Reduce bandwidth validation: unsupported variant/service/accelerator combination",
-			"variant", string(variant), "service", service, "accelerator", accelerator, "fabric", string(fabric))
+			"variant", string(variant), "target", target.String(), "fromProfile", target.fromProfile, "fabric", string(fabric))
+		if target.fromProfile {
+			// The profile itself is valid (resolveNCCLBenchmarkProfile fails
+			// closed on unknown pairs); it just doesn't implement this variant
+			// — e.g. gb200/eks covers net and nvls but not the default check.
+			return fmt.Sprintf("skipped - benchmark profile %s does not implement the %s NCCL variant",
+				target.String(), constraintNameForVariant(variant)), true, nil
+		}
 		return "skipped - requires Service + Accelerator to be implemented", true, nil
 	}
 
@@ -279,8 +299,13 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 	slog.Info("Target bandwidth threshold", "threshold", threshold, "tolerance", "10%")
 
-	// Determine GPU configuration from cluster.
-	gpuConfig, err := determineGPUConfig(ctx, service, accelerator)
+	// Determine GPU configuration from cluster. The service comes from the
+	// benchmark target (an EKS-profiled cluster gets the EKS instance-type
+	// narrowing) but the accelerator stays the recipe's own criteria value:
+	// the GFD gpu.product node filter identifies the cluster's hardware, and
+	// a profile naming gb200 must not filter a cluster of an unmatched newer
+	// accelerator down to zero nodes.
+	gpuConfig, err := determineGPUConfig(ctx, target.service, accelerator)
 	if err != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
 	}
@@ -297,8 +322,10 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Preflight cluster-side prerequisites before spending TrainJob time.
 	// On GB200/EKS the NET variant needs NVreg_GrdmaPciTopoCheckOverride=1
 	// on the NVIDIA driver; without it, EFA can't attach dma-buf to GPU HBM
-	// and NCCL silently falls back to Socket.
-	if fabric == fabricEFA && gb200NetPreflightApplies(variant, accelerator, service) {
+	// and NCCL silently falls back to Socket. Preflights key off the
+	// benchmark target: opting into a profile opts into that profile's
+	// environment contract, preflights included.
+	if fabric == fabricEFA && gb200NetPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
@@ -311,7 +338,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// artifacts the workers never start sshd and the launcher mpirun fails
 	// with an opaque "pod failed" minutes later. Fail fast with an actionable
 	// error naming the unready nodes instead.
-	if gkeTCPXOPreflightApplies(variant, accelerator, service) {
+	if gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
@@ -320,7 +347,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, accelerator, service, variant, fabric)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric)
 	if err != nil {
 		return "", false, err
 	}
@@ -328,6 +355,16 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Parse bandwidth from logs (shared across all service types).
 	bandwidth, err := parseBandwidthFromLogs(logs)
 	if err != nil {
+		// The launcher pod succeeded but its log yielded no parseable bandwidth
+		// row. Surface the retrieved log into report.json the way the pod-failed
+		// path does via emitDiagnosticBlock — without it, a succeeded-but-
+		// unparseable run is a dead end: we cannot tell an empty/truncated log
+		// capture from a benchmark that exited 0 without emitting the results
+		// table. (The caller discards the returned logs string on error, so
+		// logging is the only way this reaches the check's captured stdout.)
+		slog.Error("NCCL launcher succeeded but bandwidth could not be parsed; dumping launcher log",
+			"logBytes", len(logs))
+		emitDiagnosticBlock("launcher log (bandwidth parse failed)", tailLines(strings.TrimSpace(logs), maxDiagLogLines))
 		return logs, false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse bandwidth from logs", err)
 	}
 
@@ -678,7 +715,7 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// EFA count of 0 is valid — NCCL falls back to TCP (slower but functional).
 	if service == recipe.CriteriaServiceEKS {
 		warnIfHeterogeneousNodes(config.Nodes)
-		it, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
+		it, efaCount, err := discoverEKSNodeConfig(config.Nodes)
 		if err != nil {
 			return err
 		}
@@ -698,6 +735,18 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 			} else {
 				slog.Info("Discovered EKS node configuration", "instanceType", instanceType, "efaCount", efaCount)
 			}
+		}
+	}
+
+	// For AKS, discover the rdma-shared-device-plugin resource on the target
+	// GPU nodes. ND-series InfiniBand SKUs expose the node's IB HCAs through a
+	// shared pool (rdma/hca_shared_devices_a); a worker requests one unit to
+	// have every /dev/infiniband device mounted. A count of 0 is valid —
+	// NCCL falls back to TCP over the pod network (slower but functional),
+	// mirroring the EKS zero-EFA behavior above.
+	if service == recipe.CriteriaServiceAKS {
+		if err := applyAKSTemplateData(config, templateData); err != nil {
+			return err
 		}
 	}
 
@@ -742,8 +791,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 
 		// Create-or-update (not plain Create) so a stale claim left by a prior
 		// run that was hard-killed before its deferred cleanup ran is reclaimed
-		// rather than failing the apply with AlreadyExists. Matches the shared
-		// resourceClaimTemplateGVR pattern in inference_perf_constraint.go.
+		// rather than failing the apply with AlreadyExists. The RoCE NET path
+		// legitimately still deploys a DRA ResourceClaimTemplate (per-GPU NIC
+		// claims via the shared resourceClaimTemplateGVR in dra_gvr.go).
 		claimPath := filepath.Join("testdata", string(fabricRoCE), string(service), "roce-claim.yaml")
 		if cerr := createOrUpdateFromTemplate(ctx, resourceClaimTemplateGVR, config.Namespace, claimPath, templateData, nil); cerr != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply RoCE ResourceClaimTemplate", cerr)
@@ -785,14 +835,94 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		}
 	}
 
-	// Apply shared trainjob: testdata/trainjob.yaml
+	// Apply shared trainjob: testdata/trainjob.yaml.
+	// waitForTrainingRuntime above proved the runtime is visible at the API
+	// server, but the Trainer validating webhook resolves runtimeRef against its
+	// own informer cache, which lags that read — so the create can still be
+	// rejected with "TrainingRuntime not found". applyTrainJobWithRetry retries
+	// on exactly that denial until the webhook cache catches up.
 	trainjobPath := filepath.Join("testdata", "trainjob.yaml")
-	if err := applyYAMLWithDynamicClient(ctx.Ctx, dynamicClient, trainJobGVR, config.Namespace, trainjobPath, templateData); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply train job", err)
+	if err := applyTrainJobWithRetry(ctx.Ctx, dynamicClient, config.Namespace, trainjobPath, templateData); err != nil {
+		return err
 	}
 	slog.Info("Applied TrainJob")
 
 	return nil
+}
+
+// applyTrainJobWithRetry creates the shared NCCL TrainJob, retrying on the one
+// transient failure we cannot eliminate from the client side: the Kubeflow
+// Trainer validating webhook (validator.trainjob.trainer.kubeflow.org) rejects
+// the TrainJob because its own controller-runtime informer cache has not yet
+// observed the TrainingRuntime we just created and confirmed visible via
+// waitForTrainingRuntime. The webhook's lister is eventually consistent with the
+// API server's strongly-consistent read, and that freshness is not observable
+// from here — so a bounded retry (letting the cache catch up) is the only robust
+// remedy. Any non-race error is returned immediately.
+func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface, namespace, path string, data map[string]string) error {
+	obj, err := parseYAMLTemplate(path, data)
+	if err != nil {
+		return err
+	}
+
+	retryCtx, cancel := context.WithTimeout(ctx, defaults.TrainJobAdmissionRetryTimeout)
+	defer cancel()
+
+	attempt := 0
+	for {
+		attempt++
+		createErr := createUnstructured(retryCtx, dynamicClient, trainJobGVR, namespace, obj)
+		if createErr == nil {
+			if attempt > 1 {
+				slog.Info("TrainJob created after Trainer webhook cache caught up to the TrainingRuntime",
+					"attempts", attempt)
+			}
+			return nil
+		}
+		// If the retry budget expired — including while createUnstructured was in
+		// flight — classify as timeout rather than leaking whatever error the
+		// aborted create returned (which is not the webhook race and would
+		// otherwise fall through to the non-race return below with ErrCodeInternal).
+		if retryCtx.Err() != nil {
+			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
+				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
+				createErr, map[string]interface{}{"attempts": attempt})
+		}
+		if !isTrainingRuntimeNotYetVisible(createErr) {
+			// A real failure (or a genuinely missing runtime) — do not mask it.
+			return createErr
+		}
+		slog.Warn("TrainJob rejected: Trainer webhook has not yet observed the TrainingRuntime; retrying",
+			"attempt", attempt, "error", createErr)
+		select {
+		case <-retryCtx.Done():
+			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
+				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
+				createErr, map[string]interface{}{"attempts": attempt})
+		case <-time.After(defaults.TrainJobAdmissionRetryInterval):
+		}
+	}
+}
+
+// isTrainingRuntimeNotYetVisible reports whether err is the Kubeflow Trainer
+// webhook's "the referenced TrainingRuntime does not exist yet" denial. On a
+// runtime we just created and confirmed present at the API server
+// (waitForTrainingRuntime), this denial is a webhook-cache-lag race rather than
+// a genuinely missing runtime, so it is safe to retry. Matched primarily by the
+// webhook's stable denial phrasing; the fallback is guarded to admission
+// rejection reasons so a genuine NotFound / timeout is never mistaken for the
+// race. StructuredError implements Unwrap, so the apierrors checks see through
+// createUnstructured's wrap.
+func isTrainingRuntimeNotYetVisible(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "must be created before the TrainJob is created") {
+		return true
+	}
+	return strings.Contains(msg, ncclTrainingRuntimeName) && strings.Contains(msg, "not found") &&
+		(apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) || apierrors.IsForbidden(err))
 }
 
 // buildComputeDomain builds the resource.nvidia.com/v1beta1 ComputeDomain CR
@@ -942,15 +1072,6 @@ func waitForIMEXClaimTemplate(ctx context.Context, dynamicClient dynamic.Interfa
 	}
 }
 
-// applyYAMLWithDynamicClient reads a YAML template, performs substitution, and applies it using dynamic client
-func applyYAMLWithDynamicClient(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace, path string, data map[string]string) error {
-	obj, err := parseYAMLTemplate(path, data)
-	if err != nil {
-		return err
-	}
-	return createUnstructured(ctx, dynamicClient, gvr, namespace, obj)
-}
-
 // parseYAMLTemplate reads a YAML template file, performs ${KEY} substitution,
 // and unmarshals it into an unstructured object.
 func parseYAMLTemplate(path string, data map[string]string) (*unstructured.Unstructured, error) {
@@ -983,7 +1104,7 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 // platformWorkerScheduling returns the default nodeSelector and tolerations
 // for NCCL worker pods on the given service. instanceType is only used for EKS;
 // nodes (the accelerator-narrowed target set from resolveTargetGPUNodes) is
-// used for GKE (the gke-accelerator label) and OKE (the shared
+// used for GKE (the gke-accelerator label) and OKE/AKS (the shared
 // nvidia.com/gpu.product label).
 func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration, error) {
 	switch service {
@@ -1009,7 +1130,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE:
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS:
 		// OKE bare-metal GB200 pools are commonly tainted and may coexist
 		// with other GPU shapes under one control plane. Tolerate the pool
 		// taint (mirroring EKS/GKE) and pin workers to the same cohort the
@@ -1018,12 +1139,19 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 		// on. On non-GFD installs no shared product label exists, so emit no
 		// selector — matching the counting path's unfiltered fallback so the
 		// two stay aligned.
+		//
+		// AKS shares this shape: GPU pools carry the nvidia.com/gpu=present:
+		// NoSchedule taint and AICR recipes deploy the GPU Operator with GFD,
+		// so gpu.product (e.g. NVIDIA-H100-80GB-HBM3) is the discriminating
+		// label. The AKS-native kubernetes.azure.com/accelerator label is not
+		// used because its value is just "nvidia" — it cannot pin the H100
+		// cohort narrowByAccelerator sized the job against.
 		var nodeSelector map[string]string
 		if product := commonGPUProduct(nodes); product != "" {
 			nodeSelector = map[string]string{gpuProductLabel: product}
 		}
 		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3:
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3:
 		return nil, nil, nil
 	default:
 		return nil, nil, nil
@@ -1188,27 +1316,156 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 		// the worker side (sshd never came up, TCPXO sidecar crashed), so pull
 		// worker diagnostics too and fold everything into the returned output.
 		slog.Info("Pod did not succeed, retrieving logs for debugging...")
-		logs, logErr := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
-		if logErr != nil {
+		launcherLogs, logErr := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
+		// fetchNote records why the direct fetch was unusable so it survives into
+		// the emitted diagnostic payload (not just slog) when the termination-tail
+		// fallback is also empty — otherwise the reader sees no reason at all.
+		var fetchNote string
+		switch {
+		case logErr != nil:
 			slog.Warn("failed to retrieve launcher pod logs", "pod", launcherPod.Name, "error", logErr)
-			logs = fmt.Sprintf("<launcher logs unavailable: %v>\n", logErr)
-		} else {
+			fetchNote = fmt.Sprintf("direct log fetch failed: %v", logErr)
+			launcherLogs = ""
+		case launcherLogsUnavailable(launcherLogs):
+			// kubelet returned its placeholder ("unable to retrieve container
+			// logs ...") as a 200 body, not an error: the container was GC'd
+			// before this post-mortem fetch — the JobSet tears the launcher down
+			// within ~150ms of failure. Treat as unavailable and fall back below.
+			slog.Warn("launcher container logs already GC'd; falling back to termination message", "pod", launcherPod.Name)
+			fetchNote = "direct logs unavailable (container GC'd before fetch)"
+			launcherLogs = ""
+		default:
 			// Tail to the same cap as worker diagnostics — a verbose launcher
 			// (mpirun + NCCL debug) would otherwise balloon the failure payload.
-			logs = tailLines(strings.TrimSpace(logs), maxDiagLogLines) + "\n"
+			launcherLogs = tailLines(strings.TrimSpace(launcherLogs), maxDiagLogLines)
 		}
-		logs += collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
+
+		// When the direct log fetch raced container GC, fall back to the
+		// launcher container's termination message. The launcher container sets
+		// terminationMessagePolicy: FallbackToLogsOnError, so kubelet captures
+		// the tail of its output into pod status on non-zero exit — that lives in
+		// the pod object and survives the container GC that GetPodLogs loses to.
+		// Either way the fetchNote reason is preserved in the payload.
+		if launcherLogs == "" {
+			if term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, ctx.Namespace, launcherPod.Name); term != "" {
+				launcherLogs = fmt.Sprintf("<%s; container termination-message tail follows>\n%s",
+					fetchNote, tailLines(term, maxDiagLogLines))
+			} else {
+				launcherLogs = fmt.Sprintf("<%s; no termination message captured>", fetchNote)
+			}
+		}
+		workerDiag := collectNCCLWorkerDiagnostics(ctx.Ctx, ctx.Clientset, ctx.Namespace)
+
+		// Surface the diagnostics via slog, not just the return value: every
+		// caller on this error path (runNCCLTrainJob, validateNcclAllReduceBw,
+		// checkNCCLAllReduceBWVariant) discards the returned logs string, so
+		// logging is the only way the launcher/worker failure detail reaches the
+		// check's captured stdout (report.json). emitDiagnosticBlock logs each
+		// line individually so multi-line output stays readable there instead of
+		// collapsing into a single logfmt value.
+		slog.Error("NCCL launcher pod failed; dumping diagnostics", "launcherPod", launcherPod.Name)
+		emitDiagnosticBlock("launcher "+launcherPod.Name+" logs", launcherLogs)
+		emitDiagnosticBlock("worker diagnostics", workerDiag)
+
+		logs := launcherLogs + "\n" + workerDiag
 		return logs, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "pod failed to complete successfully", err)
 	}
 
-	// Get logs from completed pod using helper method
+	// Get logs from the completed pod. A pod that has just reached Succeeded can
+	// briefly serve an empty or truncated log if its container is being torn down
+	// mid-read, and the NCCL results table (which parseBandwidthFromLogs keys on)
+	// prints last — so re-read until the results are present before returning.
 	slog.Info("Retrieving logs from successful pod...")
-	logs, err := podHelper.GetPodLogs(ctx.Ctx, launcherPod)
+	logs, err := getCompleteLauncherLogs(ctx.Ctx, podHelper, launcherPod)
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get pod logs", err)
 	}
 
-	return logs, nil
+	// Append the launcher's termination message. The GKE launcher writes the NCCL
+	// results rows there explicitly, and unlike the streamed log it survives
+	// kubelet container-log rotation — the massive NCCL/TCPXO teardown spam can
+	// rotate the results table out of the segment GetPodLogs returns, leaving only
+	// the teardown tail (issue #1712). parseBandwidthFromLogs keys on the last
+	// matching row, so appending the termination message makes it the
+	// rotation-proof source of truth while the streamed log remains available for
+	// transport verification and diagnostics. Empty for launchers that don't write
+	// results there (other platforms), leaving behavior unchanged.
+	term := launcherTerminationTail(ctx.Ctx, ctx.Clientset, ctx.Namespace, launcherPod.Name)
+	if term != "" {
+		slog.Info("Appending launcher termination message (rotation-proof results)", "termBytes", len(term))
+	}
+	return appendTerminationResults(logs, term), nil
+}
+
+// appendTerminationResults appends the launcher termination message (the
+// rotation-proof NCCL results the launcher wrote to /dev/termination-log) to the
+// streamed log. parseBandwidthFromLogs keys on the last matching row, so the
+// appended results become the source of truth; an empty term leaves logs
+// unchanged (launchers that don't write results there).
+func appendTerminationResults(logs, term string) string {
+	if term == "" {
+		return logs
+	}
+	return logs + "\n" + term
+}
+
+// ncclLauncherLogComplete reports whether a launcher log contains the NCCL
+// results parseBandwidthFromLogs needs. all_reduce_perf prints its "Avg bus
+// bandwidth" summary line only after the full size sweep finishes, so its
+// presence guarantees the trailing largest-message-size row — the row the parser
+// keys on (last regexp match) — is already in the log. We deliberately do NOT
+// accept a bare data-row match here: an early row can appear while the log is
+// still streaming, and gating on it would let the retry loop short-circuit
+// before the largest row lands, defeating the purpose (parseBandwidthFromLogs
+// would then read a smaller-size row).
+func ncclLauncherLogComplete(logs string) bool {
+	return strings.Contains(logs, "Avg bus bandwidth")
+}
+
+// getCompleteLauncherLogs retrieves the launcher pod's logs, re-reading until the
+// NCCL results are present or the attempt budget is exhausted. A pod that has
+// just reached Succeeded can serve an empty or truncated log if its container is
+// torn down while we read; because the parser keys on the trailing
+// largest-message-size row, a truncated read loses exactly that row and yields
+// "could not find bandwidth value in logs".
+func getCompleteLauncherLogs(ctx context.Context, podHelper *helper.PodLifecycle, pod *v1.Pod) (string, error) {
+	return readLauncherLogsUntilComplete(ctx,
+		func(c context.Context) (string, error) { return podHelper.GetPodLogs(c, pod) },
+		defaults.NCCLLauncherLogReadAttempts, defaults.NCCLLauncherLogReadInterval)
+}
+
+// readLauncherLogsUntilComplete re-reads via fetch until ncclLauncherLogComplete
+// is satisfied or attempts is exhausted, sleeping interval between tries. It
+// returns the last read even when still incomplete, so the caller's parse-failure
+// path can surface it for diagnosis rather than discarding it. Split from
+// getCompleteLauncherLogs so the retry logic is unit-testable without a cluster.
+func readLauncherLogsUntilComplete(ctx context.Context, fetch func(context.Context) (string, error), attempts int, interval time.Duration) (string, error) {
+	var logs string
+	for attempt := 1; ; attempt++ {
+		var err error
+		logs, err = fetch(ctx)
+		if err != nil {
+			return "", err
+		}
+		if ncclLauncherLogComplete(logs) {
+			if attempt > 1 {
+				slog.Info("launcher log complete after re-read", "attempts", attempt, "logBytes", len(logs))
+			}
+			return logs, nil
+		}
+		if attempt >= attempts {
+			slog.Warn("launcher log still lacks NCCL results after re-reads; returning last read for diagnosis",
+				"attempts", attempt, "logBytes", len(logs))
+			return logs, nil
+		}
+		slog.Info("launcher log has no NCCL results yet; re-reading", "attempt", attempt, "logBytes", len(logs))
+		select {
+		case <-ctx.Done():
+			// Return what we have; the caller's parse path will surface it.
+			return logs, nil
+		case <-time.After(interval):
+		}
+	}
 }
 
 // maxDiagLogLines bounds how many trailing log lines are kept per worker
@@ -1216,6 +1473,61 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 // the end, so the tail is what matters; the cap keeps a verbose worker
 // (apt-get + NCCL debug output) from ballooning the returned failure payload.
 const maxDiagLogLines = 100
+
+// emitDiagnosticBlock writes a labeled, multi-line diagnostic blob to the log
+// one line at a time. The check's stdout (captured into report.json) is a
+// stream of slog lines, so logging the blob as a single attribute would
+// collapse it into one unreadable logfmt value; emitting per line keeps it
+// greppable alongside the other progress lines. A blank/whitespace-only block
+// is logged as "(empty)" so the absence of output is itself visible.
+func emitDiagnosticBlock(label, block string) {
+	trimmed := strings.TrimSpace(block)
+	if trimmed == "" {
+		slog.Error("diagnostics", "section", label, "line", "(empty)")
+		return
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		slog.Error("diagnostics", "section", label, "line", line)
+	}
+}
+
+// launcherLogsUnavailable reports whether a GetPodLogs body is really the
+// kubelet placeholder for a container whose logs can no longer be served (the
+// container was garbage-collected), rather than genuine log output. kubelet
+// returns this as a 200 response body, so it arrives as content with no error.
+func launcherLogsUnavailable(logs string) bool {
+	t := strings.TrimSpace(logs)
+	return t == "" || strings.Contains(t, "unable to retrieve container logs")
+}
+
+// launcherTerminationTail re-Gets the pod and returns the first terminated
+// container's State.Terminated.Message — the tail of that container's own
+// output, captured into pod status by kubelet because the launcher container
+// sets terminationMessagePolicy: FallbackToLogsOnError. Unlike GetPodLogs, this
+// survives the container GC that races a post-mortem log fetch. Best-effort:
+// returns "" (never errors) so it can't mask the original failure.
+func launcherTerminationTail(ctx context.Context, clientset kubernetes.Interface, namespace, podName string) string {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	pod, err := clientset.CoreV1().Pods(namespace).Get(getCtx, podName, metav1.GetOptions{})
+	if err != nil {
+		slog.Warn("failed to re-get launcher pod for termination message", "pod", podName, "error", err)
+		return ""
+	}
+	// Match the launcher's main container by name (nodeJobName). The pod also
+	// has a fix-ssh-perms init container; keying by name avoids picking up an
+	// unrelated container's message if the status ordering ever changes.
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != nodeJobName {
+			continue
+		}
+		if cs.State.Terminated != nil {
+			return strings.TrimSpace(cs.State.Terminated.Message)
+		}
+	}
+	return ""
+}
 
 // tailLines returns the last n lines of s (or all of s when it has n or fewer).
 func tailLines(s string, n int) string {
@@ -1257,7 +1569,20 @@ func collectNCCLWorkerDiagnostics(ctx context.Context, clientset kubernetes.Inte
 	sections := make([]string, len(pods.Items))
 	g, gctx := errgroup.WithContext(diagCtx)
 	g.SetLimit(perNodeFanoutConcurrency)
+enqueue:
 	for i := range pods.Items {
+		// Stop scheduling once the diagnostic budget (diagCtx) expires so a
+		// large failed job returns promptly instead of queuing work that would
+		// only run against an already-canceled context; note the shortfall in
+		// the remaining sections so the truncation is visible, not silent.
+		select {
+		case <-gctx.Done():
+			for j := i; j < len(pods.Items); j++ {
+				sections[j] = fmt.Sprintf("worker %s: diagnostics skipped: %v\n", pods.Items[j].Name, gctx.Err())
+			}
+			break enqueue
+		default:
+		}
 		p := &pods.Items[i]
 		g.Go(func() error {
 			sections[i] = workerPodDiagnostics(gctx, clientset, namespace, p)

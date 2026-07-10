@@ -1,15 +1,18 @@
+{{- $childName := printf "%s%s" ((.Values.deployer | default dict).namePrefix | default "") "cert-manager" -}}
+{{- if gt (len $childName) 53 }}{{ fail (printf "deployer.namePrefix produces child Application name %q (%d chars): child Application names are capped at 53 characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children" $childName (len $childName)) }}{{ end -}}
+{{- if eq $childName (.Values.appName | default "aicr-stack" | toString) }}{{ fail (printf "child Application name %q collides with the parent Application name: choose a different deployer.namePrefix or appName" $childName) }}{{ end -}}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
     annotations:
         argocd.argoproj.io/sync-wave: "0"
-    name: cert-manager
+    name: '{{ (.Values.deployer | default dict).namePrefix | default "" }}cert-manager'
     namespace: argocd
 spec:
     destination:
         namespace: cert-manager
-        server: https://kubernetes.default.svc
-    project: default
+        server: '{{ (.Values.deployer | default dict).destinationServer | default "https://kubernetes.default.svc" }}'
+    project: '{{ (.Values.deployer | default dict).project | default "default" }}'
     source:
         chart: cert-manager
         helm:

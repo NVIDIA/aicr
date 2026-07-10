@@ -2627,3 +2627,51 @@ func TestGenerate_CustomOCISourceName(t *testing.T) {
 		t.Error("ArtifactGenerator should NOT contain default 'aicr-bundle'")
 	}
 }
+
+// TestGenerate_SourceOnlyRefChartFallsBackToName pins the chart-name
+// fallback: a source-only ref (no explicit chart — a long-standing deployable
+// shape whose chart name the localformat deployer derives from the component
+// name) must emit a HelmRelease whose chart is the component name, not an
+// empty string Flux cannot reconcile.
+func TestGenerate_SourceOnlyRefChartFallsBackToName(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		Version:      "v0.9.0",
+		// Post-manifests make this a source-only MIXED component: the
+		// generator emits a <name>-post release, and the README summary must
+		// list it (its isMixed predicate keys on chart-or-source, matching
+		// terminalReleaseNameFor).
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {"extra.yaml": []byte("kind: ConfigMap\nmetadata:\n  name: extra\n")},
+		},
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	hr := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(hr, "chart: gpu-operator") {
+		t.Errorf("HelmRelease should fall back to the component name for the chart, got:\n%s", hr)
+	}
+
+	readme := readFile(t, filepath.Join(outputDir, "README.md"))
+	if !strings.Contains(readme, "gpu-operator-post") {
+		t.Errorf("README should list the gpu-operator-post release for a source-only mixed component, got:\n%s", readme)
+	}
+}

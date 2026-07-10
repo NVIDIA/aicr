@@ -27,6 +27,9 @@ inputs:
     description: 'Minimum coverage percentage required'
     required: false
     default: ''
+  helm_version:
+    description: 'Helm version pinned in .settings.yaml (testing_tools.helm, via load-versions) — required by the argocd-helm live-render tests, which fail (not skip) in CI when helm is missing'
+    required: true
 
 runs:
   using: 'composite'
@@ -46,6 +49,17 @@ runs:
       run: |
         go mod vendor
         git diff --exit-code vendor/ || (echo "vendor/ is out of sync with go.mod/go.sum; run 'make tidy' and commit go.mod, go.sum, and vendor/" && exit 1)
+
+    # The ubuntu-latest runner image bundles Helm 3; the unit tests that
+    # shell out to helm (pkg/bundler/deployer/argocdhelm live-render tests)
+    # must run against the Helm major pinned in .settings.yaml. The
+    # setup-build-tools step replaces any preinstalled binary that does not
+    # match the pin and fails the job if the install fails.
+    - name: Install Helm
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_helm: 'true'
+        helm_version: '${{ inputs.helm_version }}'
 
     - name: Install envtest binaries
       shell: bash

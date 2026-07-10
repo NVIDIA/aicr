@@ -78,8 +78,12 @@ HELMFILE_TIMEOUT_SECONDS="${HELMFILE_TIMEOUT_SECONDS:-1200}" # 20 min
 # validate run now polls internally, up to GPUReadinessTimeout, to ride through a
 # reboot) -- plus cold-boot p5.48xlarge GPU-operator convergence
 # (driver/toolkit/device-plugin/DCGM) and prometheus-adapter APIService
-# aggregation, across the required consecutive passes. Fails closed if exceeded.
-READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-1800}" # 30 min
+# aggregation, across the required consecutive passes. Sized at 60m because
+# nodewright (skyhook) tuning plus its reboot cycles alone can run past 30m on a
+# cold GPU node (the earlier 30m budget timed out purely waiting on tuning), and
+# the gate must still have room to observe the required consecutive passes after
+# tuning settles. Fails closed if exceeded.
+READINESS_TIMEOUT_SECONDS="${READINESS_TIMEOUT_SECONDS:-3600}" # 60 min
 # The gate requires the deployment phase to pass this many times CONSECUTIVELY
 # before declaring readiness. A single pass proves "converged at instant T", not
 # "will stay converged": nodewright (skyhook) tuning reboots the GPU node more
@@ -499,8 +503,9 @@ phase_serve() {
   # Deploy the served inference graph (Dynamo) — the intent=inference CUJ, the
   # DC3 counterpart of phase_train. Mirrors the DynamoGraphDeployment in
   # demos/cuj2-inference.md (demos/workloads/inference/vllm-agg.yaml): the KAI
-  # queue, a DRA ResourceClaim, and a two-component (Frontend + decode Worker)
-  # graph serving an OpenAI-compatible endpoint.
+  # queue and a two-component (Frontend + decode Worker) graph serving an
+  # OpenAI-compatible endpoint. The worker requests its GPU as a scalar
+  # nvidia.com/gpu limit — the device-plugin production default (#1327).
   #
   # Tolerations are a portable SUPERSET of the taints across BOTH UAT clusters
   # (AWS and GKE GPU pools use different `dedicated` values; the DRA/gpu-operator
@@ -524,22 +529,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: ${SERVE_NAMESPACE}
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: ${SERVE_NAME}-gpu-claim
-  namespace: ${SERVE_NAMESPACE}
-  labels:
-    kai.scheduler/queue: ${SERVE_QUEUE}
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
 ---
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
@@ -579,9 +568,6 @@ spec:
             - {key: dedicated, operator: Equal, value: worker-workload, effect: NoExecute}
             - {key: dedicated, operator: Equal, value: gpu-workload, effect: NoSchedule}
             - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
-          resourceClaims:
-            - name: gpu
-              resourceClaimName: ${SERVE_NAME}-gpu-claim
           containers:
             - name: main
               image: ${SERVE_RUNTIME_IMAGE}
@@ -593,8 +579,8 @@ spec:
                 - --kv-events-config
                 - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
               resources:
-                claims:
-                  - name: gpu
+                limits:
+                  nvidia.com/gpu: 1
 EOF
   echo "::endgroup::"
 

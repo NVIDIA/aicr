@@ -268,10 +268,7 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", ref.Name))
 		}
 
-		chartName := ref.Chart
-		if chartName == "" {
-			chartName = ref.Name
-		}
+		chartName := ref.EffectiveChart()
 
 		components = append(components, ComponentData{
 			Name:       ref.Name,

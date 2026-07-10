@@ -145,28 +145,38 @@ func (c *ValidatorCatalog) ForPhase(phase Phase) []ValidatorEntry {
 	return result
 }
 
-// FilterEntriesByValidation filters catalog entries based on the validation's declared checks for the given phase.
-// Returns nil if the validation has no phase configuration or no checks declared.
-func FilterEntriesByValidation(entries []ValidatorEntry, phase Phase, validationInput *ValidationInput) []ValidatorEntry {
+// checksForPhase returns the check names declared for phase in the validation
+// input, or nil when the validation has no configuration for that phase.
+func checksForPhase(phase Phase, validationInput *ValidationInput) []string {
 	if validationInput == nil {
 		return nil
 	}
-
-	var phaseChecks []string
 	switch phase {
 	case PhaseDeployment:
 		if validationInput.Config.Deployment != nil {
-			phaseChecks = validationInput.Config.Deployment.Checks
+			return validationInput.Config.Deployment.Checks
 		}
 	case PhasePerformance:
 		if validationInput.Config.Performance != nil {
-			phaseChecks = validationInput.Config.Performance.Checks
+			return validationInput.Config.Performance.Checks
 		}
 	case PhaseConformance:
 		if validationInput.Config.Conformance != nil {
-			phaseChecks = validationInput.Config.Conformance.Checks
+			return validationInput.Config.Conformance.Checks
 		}
 	}
+	return nil
+}
+
+// FilterEntriesByValidation filters catalog entries based on the validation's declared checks for the given phase.
+// Returns nil if the validation has no phase configuration or no checks declared.
+//
+// Declared check names that match no entry are dropped here; use
+// UnmatchedChecks against the full catalog to surface those so a typo'd or
+// misplaced check name does not silently produce an empty (spuriously passing)
+// phase.
+func FilterEntriesByValidation(entries []ValidatorEntry, phase Phase, validationInput *ValidationInput) []ValidatorEntry {
+	phaseChecks := checksForPhase(phase, validationInput)
 
 	// No checks declared for this phase → skip it.
 	if len(phaseChecks) == 0 {
@@ -187,4 +197,68 @@ func FilterEntriesByValidation(entries []ValidatorEntry, phase Phase, validation
 	}
 
 	return filtered
+}
+
+// UnmatchedCheck describes a declared check name that matched no catalog entry
+// in the phase it was declared under.
+type UnmatchedCheck struct {
+	// Name is the declared check name that matched nothing in its phase.
+	Name string
+
+	// Phase is the phase the name was declared under.
+	Phase Phase
+
+	// OtherPhase is non-empty when the name exists in the catalog under a
+	// different phase — a likely misplacement rather than a typo.
+	OtherPhase Phase
+}
+
+// UnmatchedChecks returns the check names declared for phase that match no
+// catalog entry in that phase. It is the complement of
+// FilterEntriesByValidation: the names dropped on the floor. For each unmatched
+// name it records whether the same name exists under a different phase, which
+// distinguishes a misplaced check from an outright typo.
+//
+// The receiver is the full catalog (all phases) so cross-phase matches can be
+// detected. Returns nil when every declared check for the phase resolves.
+func (c *ValidatorCatalog) UnmatchedChecks(phase Phase, validationInput *ValidationInput) []UnmatchedCheck {
+	if c == nil {
+		return nil
+	}
+
+	phaseChecks := checksForPhase(phase, validationInput)
+	if len(phaseChecks) == 0 {
+		return nil
+	}
+
+	// Index catalog entry names by phase for O(1) lookup.
+	namePhases := make(map[string]Phase, len(c.Validators))
+	inPhase := make(map[string]bool)
+	for _, v := range c.Validators {
+		if Phase(v.Phase) == phase {
+			inPhase[v.Name] = true
+			continue
+		}
+		// Record one other phase per name; a name matching the target phase
+		// is never treated as "elsewhere".
+		if _, ok := namePhases[v.Name]; !ok {
+			namePhases[v.Name] = Phase(v.Phase)
+		}
+	}
+
+	var unmatched []UnmatchedCheck
+	seen := make(map[string]bool, len(phaseChecks))
+	for _, name := range phaseChecks {
+		if inPhase[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		unmatched = append(unmatched, UnmatchedCheck{
+			Name:       name,
+			Phase:      phase,
+			OtherPhase: namePhases[name],
+		})
+	}
+
+	return unmatched
 }

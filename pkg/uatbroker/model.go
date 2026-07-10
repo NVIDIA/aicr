@@ -16,12 +16,13 @@ package uatbroker
 
 // Recognized cloud values for a reservation row.
 const (
-	CloudAWS = "aws"
-	CloudGCP = "gcp"
+	CloudAWS   = "aws"
+	CloudGCP   = "gcp"
+	CloudAzure = "azure"
 )
 
 // validClouds is the set of accepted Reservation.Cloud values.
-var validClouds = map[string]bool{CloudAWS: true, CloudGCP: true}
+var validClouds = map[string]bool{CloudAWS: true, CloudGCP: true, CloudAzure: true}
 
 // Recognized recipe-intent values. The daytime human-access rotation (#1281,
 // DC8) picks one flavor per reservation via Reservation.DaytimeIntent; these
@@ -41,8 +42,12 @@ var validIntents = map[string]bool{IntentTraining: true, IntentInference: true}
 // "uat-<Name>" — to the cloud-specific identifiers and the on-disk
 // cluster/test configuration a UAT run consumes.
 type Reservation struct {
-	Name              string `yaml:"name"`
-	Cloud             string `yaml:"cloud"`
+	Name  string `yaml:"name"`
+	Cloud string `yaml:"cloud"`
+	// ReservationID is the cloud capacity-reservation identifier (GCP uses the
+	// fully-qualified resource path). OPTIONAL: quota-backed reservations
+	// (e.g. Azure subscription quota) have no reservation identifier and omit
+	// it — the Name is still the lease key either way.
 	ReservationID     string `yaml:"reservation-id"`
 	Accelerator       string `yaml:"accelerator"`
 	GPUCount          int    `yaml:"gpu-count"`
@@ -50,14 +55,22 @@ type Reservation struct {
 	TestConfigDir     string `yaml:"test-config-dir"`
 	// NightlyIntents lists the recipe intents the nightly version-matrix batch
 	// (#1274, DC1) runs on this reservation, each a full CUJ per version cell:
-	// "training", "inference", or both. Empty defaults to ["training"] (the
-	// pre-DC3 behavior) — see NightlyIntentsOrDefault. DC3 (#1276) sets it to
+	// "training", "inference", or both. Absent defaults to ["training"]; an
+	// explicit empty list opts out of the nightly batch entirely — see
+	// NightlyIntentsOrDefault. DC3 (#1276) sets it to
 	// [training, inference] on every reservation so both CUJs run nightly on
 	// both clouds; the batch dispatches them SEQUENTIALLY through the shared
 	// per-reservation lease (intent inner-loop, version outer-loop), so there is
 	// never contention and `main` lands both intents before any release cell.
 	// Entries must be recognized intents and unique (a duplicate would
 	// double-run the same cell).
+	//
+	// AUTHORING CAVEAT: to opt out, the value must be an explicit empty
+	// list (`nightly-intents: []`). A bare `nightly-intents:` (YAML null)
+	// decodes to nil — indistinguishable from an absent key — and therefore
+	// opts the reservation INTO the [training] default, provisioning real
+	// GPU capacity. KnownFields cannot catch this (the key is valid);
+	// TestParseRegistryBareNullNightlyIntents locks the behavior.
 	NightlyIntents []string `yaml:"nightly-intents"`
 	// DaytimeIntent opts this reservation into the daytime human-access
 	// rotation (#1281, DC8) and picks the flavor stood up on it during the
@@ -68,13 +81,17 @@ type Reservation struct {
 	DaytimeIntent string `yaml:"daytime-intent"`
 }
 
-// NightlyIntentsOrDefault returns the reservation's nightly-batch intents,
-// defaulting an empty list to [IntentTraining] — the pre-DC3 behavior, so an
-// un-annotated reservation keeps running only the training CUJ nightly. Validate
-// guarantees any listed value is a recognized, non-duplicate intent. The
-// returned slice is a fresh copy the caller may mutate freely.
+// NightlyIntentsOrDefault returns the reservation's nightly-batch intents.
+// An ABSENT nightly-intents field (nil) defaults to [IntentTraining] — the
+// pre-DC3 behavior, so an un-annotated reservation keeps running the training
+// CUJ nightly. An EXPLICIT empty list ([]) is a nightly opt-out and returns
+// empty: the reservation stays manually dispatchable through uat-run.yaml but
+// the nightly batch skips it (used for bring-up of a new cloud before its
+// pipeline has earned nightly enrollment). Validate guarantees any listed
+// value is a recognized, non-duplicate intent. The returned slice is a fresh
+// copy the caller may mutate freely.
 func (r *Reservation) NightlyIntentsOrDefault() []string {
-	if len(r.NightlyIntents) == 0 {
+	if r.NightlyIntents == nil {
 		return []string{IntentTraining}
 	}
 	out := make([]string, len(r.NightlyIntents))

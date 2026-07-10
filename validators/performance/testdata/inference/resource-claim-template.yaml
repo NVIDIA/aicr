@@ -12,12 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# DRA ResourceClaimTemplate for the inference benchmark workload.
-# One instance is allocated per worker pod (1 GPU each) by the Dynamo operator
-# when a pod references the claim via podTemplate.spec.resourceClaims.
+# DRA ResourceClaimTemplate for the inference benchmark workload (DRA wiring
+# mode only). One instance is allocated per worker pod (1 GPU each) by the
+# Dynamo operator when a pod references the claim via
+# podTemplate.spec.resourceClaims.
+# ${CLAIM_API_VERSION} is the SERVED resource.k8s.io version detected by the
+# allocmode probe — v1 or v1beta2, which share the `exactly:` request shape.
+# v1beta1 uses the inline request shape: see
+# resource-claim-template-v1beta1.yaml.
 # Must stay in sync with inferenceClaimTemplateName in inference_perf_constraint.go.
 
-apiVersion: resource.k8s.io/v1
+apiVersion: resource.k8s.io/${CLAIM_API_VERSION}
 kind: ResourceClaimTemplate
 metadata:
   name: ${CLAIM_TEMPLATE_NAME}

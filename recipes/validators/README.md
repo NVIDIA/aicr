@@ -50,6 +50,12 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 
+The NCCL checks derive applicability from the recipe's `criteria` by default;
+a recipe outside the embedded service + accelerator matrix (e.g. registered
+via `--data`) opts in with the `nccl-benchmark-profile` performance
+constraint — see
+[Opting external recipes into a benchmark profile](../../docs/user/validation.md#opting-external-recipes-into-a-benchmark-profile).
+
 ### Conformance Phase
 
 | Name | Description | Timeout |
@@ -62,7 +68,7 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `pod-autoscaling` | Verify HPA-driven pod autoscaling with GPU metrics | 10m |
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |
-| `secure-accelerator-access` | Verify secure GPU access via DRA (no host device mounts) | 10m |
+| `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts) | 10m |
 | `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, and job submission health | 5m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |

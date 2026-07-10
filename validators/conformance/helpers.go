@@ -142,7 +142,9 @@ func getDeploymentIfAvailable(ctx *validators.Context, namespace, name string) (
 	deploy, err := ctx.Clientset.AppsV1().Deployments(namespace).Get(
 		ctx.Ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("deployment %s/%s not found", namespace, name), err)
+		// Shared classifier — a Forbidden/timeout/transport failure must not
+		// masquerade as "not found" (ambiguous negative checks fail closed).
+		return nil, classifyK8sReadError(err, fmt.Sprintf("deployment %s/%s", namespace, name))
 	}
 	if deploy.Status.AvailableReplicas < 1 {
 		expected := int32(1)
@@ -236,7 +238,8 @@ func getDaemonSetIfReady(ctx *validators.Context, namespace, name string) (*apps
 	ds, err := ctx.Clientset.AppsV1().DaemonSets(namespace).Get(
 		ctx.Ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("daemonset %s/%s not found", namespace, name), err)
+		// Shared classifier — see getDeploymentIfAvailable.
+		return nil, classifyK8sReadError(err, fmt.Sprintf("daemonset %s/%s", namespace, name))
 	}
 	if ds.Status.NumberReady < 1 {
 		return ds, errors.New(errors.ErrCodeInternal,
@@ -244,6 +247,23 @@ func getDaemonSetIfReady(ctx *validators.Context, namespace, name string) (*apps
 				namespace, name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
 	return ds, nil
+}
+
+// cleanupInspectEquivalent returns the READ-ONLY "equivalent" command for the
+// per-run test-namespace cleanup artifact. Deliberately not a `kubectl
+// delete`: when cleanup does delete, it does so with a metadata.uid
+// precondition plus an ownership-label check (see cleanupGPUTestNamespace),
+// and no kubectl one-liner reproduces those guards — publishing an executable
+// delete would invite an UNGUARDED deletion that could remove a same-name
+// replacement namespace. The note stays STATE-NEUTRAL about what cleanup did
+// (some paths deliberately delete nothing: foreign namespace, definitively
+// rejected create, never-surfacing ambiguous create) and about what the
+// inspection shows (a same-name namespace created later legitimately produces
+// output) — the artifact body describes the actual outcome.
+func cleanupInspectEquivalent(namespace string) string {
+	return fmt.Sprintf(
+		"kubectl get namespace %s --ignore-not-found -o jsonpath='{.metadata.uid} {.status.phase}'  # read-only inspection of the current state; see the artifact body for what cleanup actually did",
+		namespace)
 }
 
 // recordArtifact writes diagnostic evidence to stdout.

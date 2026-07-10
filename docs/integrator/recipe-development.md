@@ -195,6 +195,36 @@ together in an overlay rather than relying on the global defaults for the inputs
 `dynamo-router`; set `gateway-epp` to validate the GAIE/EPP path through the
 AICR-managed inference gateway.
 
+### NCCL benchmark profile constraint
+
+The NCCL checks (`nccl-all-reduce-bw`, `-net`, `-nvls`) decide applicability
+from the recipe's `criteria` against a service + accelerator matrix compiled
+into the validator, so a recipe for a service registered only through
+external `--data` (or an embedded service on a new accelerator) skips them by
+default. The optional `nccl-benchmark-profile` entry in
+`validation.performance.constraints` (a bare `{accelerator}/{service}` value,
+no comparator) opts such a recipe into one of the embedded benchmarks:
+
+```yaml
+validation:
+  performance:
+    checks: [nccl-all-reduce-bw-net, nccl-all-reduce-bw-nvls]
+    constraints:
+      - name: nccl-benchmark-profile     # optional; embedded profile to run as
+        value: gb200/eks
+      - name: nccl-all-reduce-bw-net     # thresholds stay same-named as the checks
+        value: ">= 40"
+      - name: nccl-all-reduce-bw-nvls
+        value: ">= 500"
+```
+
+The profile resolves from the recipe only (no env tier) and fails closed on a
+malformed or unknown value. Pick the pair whose fabric matches the target
+hardware — the profile drives the benchmark's transport template, fabric
+discovery, and preflights. See
+[Opting external recipes into a benchmark profile](../user/validation.md#opting-external-recipes-into-a-benchmark-profile)
+for the valid pairs and skip/fail semantics.
+
 ### Component Types
 
 **Helm components** (most common):

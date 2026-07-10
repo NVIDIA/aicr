@@ -661,6 +661,7 @@ spec:
       type: Helm
       source: https://example.com/facade-test
       chart: facade-marker-` + marker + `
+      version: "1.0.0"
 `
 	}
 

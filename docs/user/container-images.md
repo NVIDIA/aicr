@@ -20,10 +20,12 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **33**
-- Unique images: **82**
+- Unique images: **86**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
+
+_Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recipes/components/<name>/values.yaml; per-recipe overlay overrides are not applied`
 
 ## Components
 
@@ -50,18 +52,27 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
-| nfd | helm | node-feature-discovery | 0.18.3 | 1 |
+| nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 5 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
-| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1-rc.1 | 1 |
+| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
+
+## Version variants
+
+These versions are explicitly pinned by the listed sources and differ
+from the component's registry default above.
+
+| Component | Variant Version | Declared By | Images |
+|-----------|-----------------|-------------|--------|
+| kube-prometheus-stack | 83.7.0 | aks | 8 |
 
 ## Images by component
 
@@ -193,7 +204,7 @@ _No images extracted._
 
 ### nfd
 
-- `registry.k8s.io/nfd/node-feature-discovery:v0.18.3`
+- `registry.k8s.io/nfd/node-feature-discovery:v0.19.0`
 
 ### nfd-ocp
 
@@ -207,7 +218,7 @@ _No images extracted._
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.4.0@sha256:187c56c6d2104d48c7632c293def79c714b04dd85c587b7793818ceba9d4fb04`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.0@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.1@sha256:6dedbbb8627dec88acdfd68867f60a3ddca88e5f4c62beddfb704a8e0cfe51d1`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 
@@ -219,7 +230,7 @@ _No images extracted._
 
 ### nvidia-dra-driver-gpu
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1-rc.1`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1`
 
 ### nvsentinel
 
@@ -254,6 +265,17 @@ _No images extracted._
 ### slinky-slurm-operator-crds
 
 _No images extracted._
+
+### kube-prometheus-stack@83.7.0 (variant)
+
+- `docker.io/grafana/grafana:12.4.3`
+- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.1`
+- `quay.io/kiwigrid/k8s-sidecar:2.6.0`
+- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
+- `quay.io/prometheus/alertmanager:v0.32.0`
+- `quay.io/prometheus/node-exporter:v1.11.1`
+- `quay.io/prometheus/prometheus:v3.11.2`
+- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 <!-- END AICR-BOM -->
 
@@ -355,9 +377,9 @@ Component: nvidia-dra-driver-gpu (1 images)
 Presence-only check: does NOT verify publisher trust/identity.
 Y = artifact attached, - = artifact absent, ? = could not probe.
 
-  Image                                                                Sig  SBOM  Prov  Notes
-  -------------------------------------------------------------------  ---  ----  ----  -----
-  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1-rc.1  Y    -     -
+  Image                                                           Sig  SBOM  Prov  Notes
+  --------------------------------------------------------------  ---  ----  ----  -----
+  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1  Y    -     -
 
 Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
 ```

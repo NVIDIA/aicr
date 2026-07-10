@@ -64,12 +64,18 @@ outputs:
   grype:
     description: 'Grype version'
     value: ${{ steps.versions.outputs.grype }}
+  cosign:
+    description: 'Cosign version (must be >= v3.1.0 so DSSE attestations are logged to Rekor v2 as hashedrekord/PAE, not the legacy dsse entry type)'
+    value: ${{ steps.versions.outputs.cosign }}
   yamllint:
     description: 'yamllint version'
     value: ${{ steps.versions.outputs.yamllint }}
   kubectl:
     description: 'kubectl version'
     value: ${{ steps.versions.outputs.kubectl }}
+  kubelogin:
+    description: 'kubelogin version'
+    value: ${{ steps.versions.outputs.kubelogin }}
   kwok:
     description: 'KWOK version'
     value: ${{ steps.versions.outputs.kwok }}
@@ -165,9 +171,11 @@ runs:
 
         # Security tools
         echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "cosign=$(yq eval '.security_tools.cosign' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Testing tools
         echo "kubectl=$(yq eval '.testing_tools.kubectl' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "kubelogin=$(yq eval '.testing_tools.kubelogin' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "kind=$(yq eval '.testing_tools.kind' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "nvkind=$(yq eval '.testing_tools.nvkind' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -218,7 +226,9 @@ runs:
         echo "  addlicense: ${{ steps.versions.outputs.addlicense }}"
         echo "  go_licenses: ${{ steps.versions.outputs.go_licenses }}"
         echo "  grype: ${{ steps.versions.outputs.grype }}"
+        echo "  cosign: ${{ steps.versions.outputs.cosign }}"
         echo "  kubectl: ${{ steps.versions.outputs.kubectl }}"
+        echo "  kubelogin: ${{ steps.versions.outputs.kubelogin }}"
         echo "  kind: ${{ steps.versions.outputs.kind }}"
         echo "  nvkind: ${{ steps.versions.outputs.nvkind }}"
         echo "  ctlptl: ${{ steps.versions.outputs.ctlptl }}"

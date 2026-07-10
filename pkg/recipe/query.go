@@ -100,7 +100,17 @@ func HydrateResultWithContext(ctx context.Context, result *RecipeResult) (map[st
 		if ref.Namespace != "" {
 			comp["namespace"] = ref.Namespace
 		}
-		if ref.Chart != "" {
+		// Expose the chart the component actually deploys: a source-only
+		// Helm ref falls back to the component name (EffectiveChart, the
+		// deployers' rule), so components.<name>.chart resolves for every
+		// deployable external chart. Manifest-only Helm refs and Kustomize
+		// refs stay chartless; a raw Chart on a non-external ref (rejected
+		// by coherence, but query also serves directly-constructed results)
+		// is surfaced as-is rather than hidden.
+		switch {
+		case ref.HasExternalChart():
+			comp["chart"] = ref.EffectiveChart()
+		case ref.Chart != "":
 			comp["chart"] = ref.Chart
 		}
 		if ref.Version != "" {

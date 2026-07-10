@@ -250,6 +250,53 @@ func TestHydrateResult(t *testing.T) {
 		}
 	})
 
+	t.Run("source-only helm ref exposes the effective chart", func(t *testing.T) {
+		// A source-only ref deploys the component-name chart (the deployers'
+		// EffectiveChart fallback); the hydrated projection must expose it so
+		// a components.<name>.chart selector resolves instead of NOT_FOUND.
+		// Manifest-only Helm refs have no chart and must stay chartless.
+		result := &RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.run/v1alpha2",
+			ComponentRefs: []ComponentRef{
+				{
+					Name:    "source-only",
+					Type:    ComponentTypeHelm,
+					Source:  "https://example.com/charts",
+					Version: "v1.0.0",
+				},
+				{
+					Name:          "manifest-only",
+					Type:          ComponentTypeHelm,
+					ManifestFiles: []string{"components/manifest-only/manifests/a.yaml"},
+				},
+			},
+		}
+
+		hydrated, err := HydrateResult(result)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		components, ok := hydrated["components"].(map[string]any)
+		if !ok {
+			t.Fatal("components is not a map")
+		}
+		srcOnly, ok := components["source-only"].(map[string]any)
+		if !ok {
+			t.Fatal("source-only is not a map")
+		}
+		if srcOnly["chart"] != "source-only" {
+			t.Errorf("source-only chart = %v, want the component-name fallback", srcOnly["chart"])
+		}
+		manifestOnly, ok := components["manifest-only"].(map[string]any)
+		if !ok {
+			t.Fatal("manifest-only is not a map")
+		}
+		if _, exists := manifestOnly["chart"]; exists {
+			t.Errorf("manifest-only chart = %v, want absent (no chart deploys)", manifestOnly["chart"])
+		}
+	})
+
 	t.Run("excluded overlays include reasons", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:            "RecipeResult",

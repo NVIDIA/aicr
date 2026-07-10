@@ -60,13 +60,19 @@ capture() {
     # Strip any remaining absolute paths to manifests (e.g., temp dirs from aicr evidence)
     cmd_display=$(echo "${cmd_display}" | sed 's|[^ ]*/manifests/|manifests/|g')
     echo "\$ ${cmd_display}" >> "${EVIDENCE_FILE}"
+    local rc=0
     if output=$("$@" 2>&1); then
         echo "${output}" >> "${EVIDENCE_FILE}"
     else
+        rc=$?
         echo "${output}" >> "${EVIDENCE_FILE}"
-        echo "(exit code: $?)" >> "${EVIDENCE_FILE}"
+        echo "(exit code: ${rc})" >> "${EVIDENCE_FILE}"
     fi
     echo '```' >> "${EVIDENCE_FILE}"
+    # Propagate the command's status so callers whose step must succeed
+    # (e.g. applying the test workload) can fail closed. Callers that only
+    # record diagnostics ignore the return value, as before.
+    return "${rc}"
 }
 
 # Wait for a pod to reach a terminal phase (Succeeded or Failed).
@@ -155,6 +161,313 @@ cleanup_ns() {
     kubectl delete namespace "$ns" --ignore-not-found --timeout=60s &>/dev/null || true
 }
 
+# ensure_fresh_namespace deletes any prior run's namespace and VERIFIES it is
+# gone before the caller deploys a new workload. Without the verification, a
+# stuck/terminating namespace makes the subsequent apply fail while a stale
+# previously-successful pod survives — wait_for_pod would then observe the OLD
+# pod's phase and produce a false PASS. Returns nonzero (callers record FAIL)
+# when the namespace still exists after ~90s.
+ensure_fresh_namespace() {
+    local ns="$1" elapsed=0
+    cleanup_ns "$ns" pre
+    while kubectl get namespace "$ns" &>/dev/null; do
+        if [ "$elapsed" -ge 90 ]; then
+            log_error "namespace ${ns} still present after ${elapsed}s — cannot guarantee a fresh workload"
+            return 1
+        fi
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    return 0
+}
+
+# --- GPU allocation mode helpers (#1629) ---
+
+# detect_resource_api_version prints the newest SERVED resource.k8s.io API
+# version — preference order v1, v1beta2, v1beta1, mirroring
+# validators/internal/allocmode.APIVersionPreference — or nothing when the
+# group is not served or the discovery query fails. Callers that need the DRA
+# API treat an empty result as "API not served" and record FAIL (fail closed).
+detect_resource_api_version() {
+    local served v
+    served=$(kubectl api-versions 2>/dev/null) || return 0
+    for v in v1 v1beta2 v1beta1; do
+        if echo "${served}" | grep -qx "resource.k8s.io/${v}"; then
+            echo "${v}"
+            return 0
+        fi
+    done
+}
+
+# emit_resourceclaim_yaml prints a single-GPU ResourceClaim manifest at the
+# given served resource.k8s.io API version. Schema shapes verified against the
+# vendored types (vendor/k8s.io/api/resource/*/types.go):
+#   v1, v1beta2: spec.devices.requests[0].exactly.deviceClassName
+#                (DeviceRequest.Exactly -> ExactDeviceRequest)
+#   v1beta1:     spec.devices.requests[0].deviceClassName — no `exactly`
+#                wrapper (DeviceRequest carries the fields directly)
+# Any other version is an error (fail closed).
+# Usage: emit_resourceclaim_yaml <version> <name> <namespace> <deviceclass>
+emit_resourceclaim_yaml() {
+    local version="$1" name="$2" namespace="$3" deviceclass="$4"
+    case "${version}" in
+        v1|v1beta2)
+            cat <<EOF
+apiVersion: resource.k8s.io/${version}
+kind: ResourceClaim
+metadata:
+  name: ${name}
+  namespace: ${namespace}
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: ${deviceclass}
+          allocationMode: ExactCount
+          count: 1
+EOF
+            ;;
+        v1beta1)
+            cat <<EOF
+apiVersion: resource.k8s.io/v1beta1
+kind: ResourceClaim
+metadata:
+  name: ${name}
+  namespace: ${namespace}
+spec:
+  devices:
+    requests:
+      - name: gpu
+        deviceClassName: ${deviceclass}
+        allocationMode: ExactCount
+        count: 1
+EOF
+            ;;
+        *)
+            log_error "emit_resourceclaim_yaml: unsupported resource.k8s.io version: ${version:-<empty>}" >&2
+            return 1
+            ;;
+    esac
+}
+
+# count_resourceslices_for_driver prints the number of ResourceSlices
+# published by the given DRA driver, or "error" (and returns 1) when the
+# query or parse fails — callers must fail closed on "error", never treat it
+# as zero.
+count_resourceslices_for_driver() {
+    local driver="$1" out
+    if ! out=$(kubectl get resourceslices -o json 2>/dev/null | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+print(sum(1 for s in data.get("items", [])
+          if s.get("spec", {}).get("driver") == sys.argv[1]))
+' "${driver}" 2>/dev/null) || [ -z "${out}" ]; then
+        echo "error"
+        return 1
+    fi
+    echo "${out}"
+}
+
+# resolve_alloc_mode resolves which GPU allocation mode the dra-support and
+# secure-access sections must exercise, mirroring the Go validators' #1327
+# contract: configuration selects the allocation policy (the recipe-resolved
+# AICR_GPU_ALLOCATION_POLICY env var, threaded by `aicr validate
+# --cncf-submission` when recipe context is available); only recipe-less
+# standalone runs fall back to capability detection. An unknown or
+# unverifiable policy — including the reserved dra-extended-resource — fails
+# closed with NO fallback to detection, mirroring allocmode.Verify.
+#
+# Result is cached in globals (resolved once per script invocation):
+#   ALLOC_MODE         "dra" | "device-plugin" (empty on failure)
+#   ALLOC_MODE_SOURCE  provenance of the decision (policy vs detection)
+#   ALLOC_MODE_DETAIL  detection basis / evidence lines (detection path only)
+#   ALLOC_MODE_ERROR   fail-closed reason when resolution failed (returns 1)
+resolve_alloc_mode() {
+    if [ -n "${ALLOC_MODE_RESOLVED:-}" ]; then
+        [ -n "${ALLOC_MODE_ERROR}" ] && return 1
+        return 0
+    fi
+    ALLOC_MODE_RESOLVED=1
+    ALLOC_MODE=""
+    ALLOC_MODE_SOURCE=""
+    ALLOC_MODE_DETAIL=""
+    ALLOC_MODE_ERROR=""
+
+    local policy="${AICR_GPU_ALLOCATION_POLICY:-}"
+    case "${policy}" in
+        device-plugin-extended-resource)
+            ALLOC_MODE="device-plugin"
+            ALLOC_MODE_SOURCE="recipe-configured GPU allocation policy \"${policy}\""
+            return 0
+            ;;
+        dra-resource-claim)
+            ALLOC_MODE="dra"
+            ALLOC_MODE_SOURCE="recipe-configured GPU allocation policy \"${policy}\""
+            return 0
+            ;;
+        ""|unspecified)
+            # No configured policy — standalone run, capability detection below.
+            ;;
+        *)
+            ALLOC_MODE_ERROR="unknown/unverifiable GPU allocation policy \"${policy}\" — mirrors allocmode.Verify fail-closed semantics, issue #1327"
+            return 1
+            ;;
+    esac
+
+    # Capability detection (standalone runs), mirroring
+    # validators/internal/allocmode.Detect as far as bash reasonably can:
+    #   DRA usable:           gpu.nvidia.com DeviceClass exists AND >=1
+    #                         node-local (spec.nodeName) gpu.nvidia.com
+    #                         ResourceSlice advertises >=1 device on a Ready,
+    #                         schedulable node.
+    #   Device-plugin usable: a Ready, schedulable node has allocatable
+    #                         nvidia.com/gpu > 0.
+    # Every query failure is fail-closed: the mechanism is treated as NOT
+    # usable and the failure is recorded — never silently skipped.
+    ALLOC_MODE_SOURCE="capability detection (no recipe-configured GPU allocation policy)"
+
+    local api_version dra_detail plugin_detail
+    local dra_usable="false" plugin_usable="false"
+    api_version=$(detect_resource_api_version)
+
+    if [ -z "${api_version}" ]; then
+        dra_detail="DRA not usable: no served resource.k8s.io API version (or discovery query failed — treated as not usable, fail closed)"
+    elif ! kubectl get deviceclass gpu.nvidia.com &>/dev/null; then
+        dra_detail="DRA not usable: DeviceClass gpu.nvidia.com not found (or query failed — treated as not usable, fail closed)"
+    else
+        local nodes_json_file slices_json_file
+        nodes_json_file=$(mktemp "${TMPDIR:-/tmp}/aicr-evidence-XXXXXX")
+        slices_json_file=$(mktemp "${TMPDIR:-/tmp}/aicr-evidence-XXXXXX")
+        if kubectl get nodes -o json > "${nodes_json_file}" 2>/dev/null \
+            && kubectl get resourceslices -o json > "${slices_json_file}" 2>/dev/null \
+            && dra_detail=$(python3 - "${nodes_json_file}" "${slices_json_file}" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    nodes = json.load(f)
+with open(sys.argv[2]) as f:
+    slices = json.load(f)
+
+eligible = set()
+for n in nodes.get("items", []):
+    if n.get("spec", {}).get("unschedulable"):
+        continue
+    conditions = n.get("status", {}).get("conditions", []) or []
+    if any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
+        eligible.add(n["metadata"]["name"])
+
+counts = {}
+for s in slices.get("items", []):
+    spec = s.get("spec", {})
+    if spec.get("driver") != "gpu.nvidia.com":
+        continue
+    node = spec.get("nodeName", "")
+    devices = spec.get("devices", []) or []
+    if node in eligible and len(devices) > 0:
+        counts[node] = counts.get(node, 0) + len(devices)
+
+if counts:
+    fmt = ",".join(f"{k}={v}" for k, v in sorted(counts.items()))
+    print("DRA usable: DeviceClass gpu.nvidia.com exists and node-local "
+          f"gpu.nvidia.com ResourceSlice device(s) on Ready, schedulable node(s) [{fmt}]")
+else:
+    print("DRA not usable: DeviceClass gpu.nvidia.com exists but no gpu.nvidia.com "
+          "ResourceSlice advertises a device (via spec.nodeName) on a Ready, schedulable node")
+PYEOF
+        ); then
+            case "${dra_detail}" in
+                "DRA usable:"*) dra_usable="true" ;;
+            esac
+        else
+            dra_detail="DRA not usable: node/ResourceSlice query or parse failed — treated as not usable, fail closed"
+        fi
+        rm -f "${nodes_json_file}" "${slices_json_file}"
+    fi
+
+    if plugin_detail=$(kubectl get nodes -o json 2>/dev/null | python3 -c '
+import json
+import sys
+
+nodes = json.load(sys.stdin)
+usable = []
+for n in nodes.get("items", []):
+    if n.get("spec", {}).get("unschedulable"):
+        continue
+    conditions = n.get("status", {}).get("conditions", []) or []
+    if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
+        continue
+    alloc = n.get("status", {}).get("allocatable", {}).get("nvidia.com/gpu", "0")
+    try:
+        count = int(alloc)
+    except ValueError:
+        count = 0
+    if count > 0:
+        usable.append("{}={}".format(n["metadata"]["name"], count))
+
+if usable:
+    print("device plugin usable: Ready, schedulable node(s) with allocatable "
+          "nvidia.com/gpu [{}]".format(",".join(sorted(usable))))
+else:
+    print("device plugin not usable: no Ready, schedulable node advertises "
+          "allocatable nvidia.com/gpu")
+' 2>/dev/null); then
+        case "${plugin_detail}" in
+            "device plugin usable:"*) plugin_usable="true" ;;
+        esac
+    else
+        plugin_detail="device plugin not usable: node query or parse failed — treated as not usable, fail closed"
+    fi
+
+    ALLOC_MODE_DETAIL="${dra_detail}
+${plugin_detail}
+note: this detection checks DeviceClass existence, node-local ResourceSlice publication, and scalar allocatable only — full pool-generation/completeness, device-taint, and topology validation is performed by the Go validators (validators/internal/allocmode), not this script"
+
+    # Preference order must match validators/conformance/secure_access_check.go
+    # capability dispatch: DRA when usable, else device plugin, else FAIL.
+    if [ "${dra_usable}" = "true" ]; then
+        ALLOC_MODE="dra"
+    elif [ "${plugin_usable}" = "true" ]; then
+        ALLOC_MODE="device-plugin"
+    else
+        ALLOC_MODE_ERROR="no usable whole-GPU allocation mechanism detected: ${dra_detail}; ${plugin_detail}"
+        return 1
+    fi
+    return 0
+}
+
+# write_alloc_mode_evidence appends the resolved GPU allocation mode (or the
+# fail-closed resolution error) to the current EVIDENCE_FILE. Returns
+# resolve_alloc_mode's status so callers can bail out after recording FAIL.
+write_alloc_mode_evidence() {
+    local ok=true
+    resolve_alloc_mode || ok=false
+
+    cat >> "${EVIDENCE_FILE}" <<EOF
+## GPU Allocation Mode
+
+**Configured policy (AICR_GPU_ALLOCATION_POLICY):** \`${AICR_GPU_ALLOCATION_POLICY:-<unset>}\`
+**Mode source:** ${ALLOC_MODE_SOURCE:-n/a}
+EOF
+    if [ "${ok}" = "true" ]; then
+        echo "**Resolved mode:** \`${ALLOC_MODE}\`" >> "${EVIDENCE_FILE}"
+    fi
+    if [ -n "${ALLOC_MODE_DETAIL}" ]; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Detection basis:**" >> "${EVIDENCE_FILE}"
+        echo '```' >> "${EVIDENCE_FILE}"
+        echo "${ALLOC_MODE_DETAIL}" >> "${EVIDENCE_FILE}"
+        echo '```' >> "${EVIDENCE_FILE}"
+    fi
+    if [ "${ok}" != "true" ]; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — ${ALLOC_MODE_ERROR}" >> "${EVIDENCE_FILE}"
+        return 1
+    fi
+    return 0
+}
+
 # Detect cluster info once and cache in global variables.
 # Sets: CLUSTER_DESC, CLUSTER_K8S_VERSION, CLUSTER_PLATFORM, CLUSTER_OS_IMAGE,
 #        CLUSTER_PROVIDER_ID, CLUSTER_INSTANCE_TYPE, CLUSTER_ACCELERATOR
@@ -204,6 +517,13 @@ EOF
 }
 
 # --- Section 1: DRA Support ---
+# Mode-aware (#1629), mirroring validators/conformance/dra_support_check.go:
+# always records the served resource.k8s.io version and per-driver
+# ResourceSlice inventory; the behavioral full-GPU ResourceClaim test runs
+# only under the DRA allocation mode. Under the device-plugin mode whole GPUs
+# are device-plugin-allocated, so the behavioral claim test is recorded as
+# not applicable and the section passes on API + NVIDIA slice evidence
+# (compute-domain.nvidia.com slices count as valid NVIDIA DRA publication).
 collect_dra() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/dra-support.md"
     log_info "Collecting DRA Support evidence → ${EVIDENCE_FILE}"
@@ -211,12 +531,31 @@ collect_dra() {
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 Demonstrates that the cluster supports DRA (resource.k8s.io API group), has a working
-DRA driver, advertises GPU devices via ResourceSlices, and can allocate GPUs to pods
-through ResourceClaims.
+DRA driver, and advertises NVIDIA devices via ResourceSlices. Under the DRA GPU
+allocation mode a behavioral test additionally allocates a GPU to a pod through a
+ResourceClaim; under the device-plugin mode whole GPUs are device-plugin-allocated
+and the behavioral ResourceClaim test is not applicable.
+
+EOF
+    if ! write_alloc_mode_evidence; then
+        log_error "GPU allocation mode resolution failed: ${ALLOC_MODE_ERROR}"
+        return
+    fi
+
+    local api_version
+    api_version=$(detect_resource_api_version)
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ## DRA API Enabled
 EOF
     capture "DRA API resources" kubectl api-resources --api-group=resource.k8s.io
+    echo "" >> "${EVIDENCE_FILE}"
+    if [ -n "${api_version}" ]; then
+        echo "**Served resource.k8s.io version (newest):** \`resource.k8s.io/${api_version}\`" >> "${EVIDENCE_FILE}"
+    else
+        echo "**Served resource.k8s.io version (newest):** none — the resource.k8s.io API group is not served" >> "${EVIDENCE_FILE}"
+    fi
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
@@ -236,24 +575,89 @@ EOF
 EOF
     capture "ResourceSlices" kubectl get resourceslices
 
+    # Per-driver inventory: gpu.nvidia.com (full-GPU DRA) and
+    # compute-domain.nvidia.com (IMEX channels — the supported NVIDIA DRA
+    # configuration under the device-plugin default, #1620/#1327). "error"
+    # means the query failed and is treated as no evidence (fail closed).
+    local gpu_slices cd_slices
+    gpu_slices=$(count_resourceslices_for_driver gpu.nvidia.com) || true
+    cd_slices=$(count_resourceslices_for_driver compute-domain.nvidia.com) || true
+    cat >> "${EVIDENCE_FILE}" <<EOF
+
+**ResourceSlice inventory by NVIDIA driver**
+\`\`\`
+gpu.nvidia.com:            ${gpu_slices} slice(s)
+compute-domain.nvidia.com: ${cd_slices} slice(s)
+\`\`\`
+EOF
+
+    if [ "${ALLOC_MODE}" = "device-plugin" ]; then
+        collect_dra_device_plugin_verdict "${api_version}" "${gpu_slices}" "${cd_slices}"
+        return
+    fi
+
+    # Fail closed on a failed inventory query in DRA mode too: the slice
+    # inventory is part of the submission evidence, and a behavioral PASS
+    # must not ship alongside an "error" inventory row.
+    if [ "${gpu_slices}" = "error" ] || [ "${cd_slices}" = "error" ]; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — ResourceSlice inventory query failed (fail closed); rerun with a reachable API server." >> "${EVIDENCE_FILE}"
+        log_error "ResourceSlice inventory query failed in DRA mode"
+        return
+    fi
+
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ## GPU Allocation Test
 
 Deploy a test pod that requests 1 GPU via ResourceClaim and verifies device access.
-
-**Test manifest:** `pkg/evidence/cncf/scripts/manifests/dra-gpu-test.yaml`
+The ResourceClaim is generated at the newest served resource.k8s.io API version;
+the namespace and pod come from `pkg/evidence/cncf/scripts/manifests/dra-gpu-test.yaml`.
 EOF
+
+    if [ -z "${api_version}" ]; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — DRA allocation mode selected but no served resource.k8s.io API version was discovered; the ResourceClaim test cannot run." >> "${EVIDENCE_FILE}"
+        log_error "DRA mode with no served resource.k8s.io API version"
+        return
+    fi
+
+    # Compose the test manifest: drop the embedded ResourceClaim document from
+    # dra-gpu-test.yaml and substitute the version-correct claim.
+    local test_manifest
+    test_manifest=$(mktemp "${TMPDIR:-/tmp}/aicr-evidence-XXXXXX")
+    awk 'BEGIN{RS="---\n"; ORS="---\n"} $0 !~ /kind: ResourceClaim/' \
+        "${SCRIPT_DIR}/manifests/dra-gpu-test.yaml" > "${test_manifest}"
+    if ! emit_resourceclaim_yaml "${api_version}" gpu-claim dra-test gpu.nvidia.com >> "${test_manifest}"; then
+        rm -f "${test_manifest}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — could not generate a ResourceClaim for served version ${api_version}." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
     echo '```yaml' >> "${EVIDENCE_FILE}"
-    cat "${SCRIPT_DIR}/manifests/dra-gpu-test.yaml" >> "${EVIDENCE_FILE}"
+    cat "${test_manifest}" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
-    # Clean up any previous run
-    cleanup_ns dra-test pre
+    # Clean up any previous run and verify it is actually gone — a stale
+    # Succeeded pod from a prior run must not satisfy wait_for_pod.
+    if ! ensure_fresh_namespace dra-test; then
+        rm -f "${test_manifest}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — previous dra-test namespace could not be removed; cannot guarantee a fresh workload." >> "${EVIDENCE_FILE}"
+        return
+    fi
 
-    # Deploy test
+    # Deploy test (fail closed when the apply itself fails)
     log_info "Deploying DRA GPU test..."
-    capture "Apply test manifest" kubectl apply -f "${SCRIPT_DIR}/manifests/dra-gpu-test.yaml"
+    if ! capture "Apply test manifest" kubectl apply -f "${test_manifest}"; then
+        rm -f "${test_manifest}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — applying the DRA test manifest failed." >> "${EVIDENCE_FILE}"
+        cleanup_ns dra-test
+        return
+    fi
+    rm -f "${test_manifest}"
 
     # Wait for pod completion
     log_info "Waiting for DRA test pod (up to ${POD_TIMEOUT}s)..."
@@ -281,6 +685,49 @@ EOF
     capture "Delete test namespace" cleanup_ns dra-test
 
     log_info "DRA evidence collection complete."
+}
+
+# collect_dra_device_plugin_verdict renders the device-plugin-mode verdict for
+# the dra-support section: no claim pod is deployed (whole GPUs are
+# device-plugin-allocated); PASS requires a served resource.k8s.io version AND
+# at least one ResourceSlice from an NVIDIA driver (gpu.nvidia.com or
+# compute-domain.nvidia.com — the latter is the supported publication under
+# the device-plugin default). A failed slice query ("error") fails closed.
+collect_dra_device_plugin_verdict() {
+    local api_version="$1" gpu_slices="$2" cd_slices="$3"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## GPU Allocation Test
+
+**Behavioral full-GPU allocation: Not applicable** — device-plugin allocation
+policy; whole GPUs are device-plugin-allocated (`nvidia.com/gpu` extended
+resource), so no full-GPU ResourceClaim test pod is deployed. DRA support is
+evidenced by the served resource.k8s.io API and NVIDIA driver ResourceSlice
+publication above.
+
+> **Note:** this section validates a subset under the device-plugin mode —
+> API served + NVIDIA ResourceSlice publication. Full pool-generation and
+> device-taint validation of the slices is performed by the Go validators
+> (`aicr validate --phase conformance`, dra-support check), not this script.
+EOF
+
+    echo "" >> "${EVIDENCE_FILE}"
+    if [ -z "${api_version}" ]; then
+        echo "**Result: FAIL** — the resource.k8s.io API group is not served (requires K8s 1.32+)." >> "${EVIDENCE_FILE}"
+        return
+    fi
+    if [ "${gpu_slices}" = "error" ] || [ "${cd_slices}" = "error" ]; then
+        echo "**Result: FAIL** — ResourceSlice inventory query failed (gpu.nvidia.com: ${gpu_slices}, compute-domain.nvidia.com: ${cd_slices}) — fail closed." >> "${EVIDENCE_FILE}"
+        return
+    fi
+    if [ "$((gpu_slices + cd_slices))" -ge 1 ]; then
+        echo "**Result: PASS** — resource.k8s.io/${api_version} is served and NVIDIA DRA driver(s) publish ResourceSlices (gpu.nvidia.com: ${gpu_slices}, compute-domain.nvidia.com: ${cd_slices}). Behavioral full-GPU claim test not applicable under the device-plugin allocation policy." >> "${EVIDENCE_FILE}"
+    else
+        echo "**Result: FAIL** — resource.k8s.io/${api_version} is served but no NVIDIA DRA driver publishes any ResourceSlice (gpu.nvidia.com: 0, compute-domain.nvidia.com: 0)." >> "${EVIDENCE_FILE}"
+    fi
+
+    log_info "DRA evidence collection complete (device-plugin mode)."
 }
 
 # --- Section 2: Gang Scheduling ---
@@ -356,15 +803,31 @@ EOF
 }
 
 # --- Section 3: Secure Accelerator Access ---
+# Mode-aware (#1629), mirroring validators/conformance/secure_access_check.go:
+# under the DRA mode the isolation test allocates a GPU through a
+# ResourceClaim (generated at the served resource.k8s.io version); under the
+# device-plugin mode it ports the two-container pattern from
+# kubernetes-sigs/ai-conformance#75 — an authorized container with
+# `nvidia.com/gpu: 1` limits must see exactly one GPU, and an unauthorized
+# sibling container with no GPU request must see none.
 collect_secure() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/secure-accelerator-access.md"
     log_info "Collecting Secure Accelerator Access evidence → ${EVIDENCE_FILE}"
     write_section_header "Secure Accelerator Access"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
-Demonstrates that GPU access is mediated through Kubernetes APIs (DRA ResourceClaims
-and GPU Operator), not via direct host device mounts. This ensures proper isolation,
-access control, and auditability of accelerator usage.
+Demonstrates that GPU access is mediated through Kubernetes allocation APIs
+(DRA ResourceClaims or device plugin resource limits, per the cluster's GPU
+allocation mode), not via direct host device mounts. This ensures proper
+isolation, access control, and auditability of accelerator usage.
+
+EOF
+    if ! write_alloc_mode_evidence; then
+        log_error "GPU allocation mode resolution failed: ${ALLOC_MODE_ERROR}"
+        return
+    fi
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ## GPU Operator Health
 
@@ -384,11 +847,22 @@ EOF
 EOF
     capture "GPU operator DaemonSets" kubectl get ds -n gpu-operator
 
+    if [ "${ALLOC_MODE}" = "device-plugin" ]; then
+        collect_secure_device_plugin
+    else
+        collect_secure_dra
+    fi
+}
+
+# collect_secure_dra exercises the DRA isolation test: a pod granted one GPU
+# through a gpu.nvidia.com ResourceClaim generated at the newest served
+# resource.k8s.io API version.
+collect_secure_dra() {
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ## DRA-Mediated GPU Access
 
-GPU access is provided through DRA ResourceClaims (`resource.k8s.io/v1`), not through
+GPU access is provided through DRA ResourceClaims (`resource.k8s.io`), not through
 direct `hostPath` volume mounts to `/dev/nvidia*`. The DRA driver advertises individual
 GPU devices via ResourceSlices, and pods request access through ResourceClaims.
 
@@ -406,35 +880,42 @@ EOF
 
 ## Device Isolation Verification
 
-Deploy a test pod requesting 1 GPU via ResourceClaim and verify:
+Deploy a test pod requesting 1 GPU via ResourceClaim (generated at the newest
+served resource.k8s.io API version) and verify:
 1. No `hostPath` volumes to `/dev/nvidia*`
 2. Pod spec uses `resourceClaims` (DRA), not `resources.limits` (device plugin)
 3. Only the allocated GPU device is visible inside the container
 EOF
 
-    # Clean up any previous run
-    cleanup_ns secure-access-test pre
+    local api_version
+    api_version=$(detect_resource_api_version)
+    if [ -z "${api_version}" ]; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — DRA allocation mode selected but no served resource.k8s.io API version was discovered; the ResourceClaim isolation test cannot run." >> "${EVIDENCE_FILE}"
+        log_error "DRA mode with no served resource.k8s.io API version"
+        return
+    fi
 
-    # Deploy DRA test for isolation verification
-    cat <<'MANIFEST' | kubectl apply -f -
+    # Clean up any previous run
+    if ! ensure_fresh_namespace secure-access-test; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — previous secure-access-test namespace could not be removed; cannot guarantee a fresh workload." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    # Compose the isolation test manifest with the version-correct claim.
+    local test_manifest
+    test_manifest=$(mktemp "${TMPDIR:-/tmp}/aicr-evidence-XXXXXX")
+    {
+        cat <<'MANIFEST'
 apiVersion: v1
 kind: Namespace
 metadata:
   name: secure-access-test
 ---
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: isolated-gpu
-  namespace: secure-access-test
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
+MANIFEST
+        emit_resourceclaim_yaml "${api_version}" isolated-gpu secure-access-test gpu.nvidia.com
+        cat <<'MANIFEST'
 ---
 apiVersion: v1
 kind: Pod
@@ -458,20 +939,39 @@ spec:
           echo "=== Visible NVIDIA devices ==="
           ls -la /dev/nvidia* 2>/dev/null || echo "No /dev/nvidia* devices"
           echo ""
-          echo "=== nvidia-smi output ==="
-          nvidia-smi -L
+          echo "=== nvidia-smi output (claim requests exactly 1 GPU) ==="
+          if ! nvidia-smi -L; then
+            echo "FAIL: nvidia-smi cannot enumerate GPUs - no usable GPU granted"
+            exit 1
+          fi
+          count=$(nvidia-smi -L | wc -l)
           echo ""
           echo "=== GPU count ==="
           nvidia-smi --query-gpu=index,name,uuid --format=csv,noheader
-          echo ""
+          echo "visible GPU count: ${count}"
+          if [ "${count}" != "1" ]; then
+            echo "FAIL: expected exactly 1 GPU visible via the ResourceClaim, saw ${count}"
+            exit 1
+          fi
+          echo "PASS: exactly one GPU visible"
           echo "Secure accelerator access test completed"
       resources:
         claims:
           - name: gpu
 MANIFEST
+    } > "${test_manifest}"
 
-    log_info "Waiting for isolation test pod (up to 60s)..."
-    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" 60)
+    if ! capture "Apply isolation test manifest" kubectl apply -f "${test_manifest}"; then
+        rm -f "${test_manifest}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — applying the isolation test manifest failed." >> "${EVIDENCE_FILE}"
+        cleanup_ns secure-access-test
+        return
+    fi
+    rm -f "${test_manifest}"
+
+    log_info "Waiting for isolation test pod (up to ${POD_TIMEOUT}s)..."
+    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" "${POD_TIMEOUT}")
     log_info "Pod phase: ${pod_phase}"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
@@ -493,7 +993,7 @@ EOF
     # Verdict
     echo "" >> "${EVIDENCE_FILE}"
     if [ "${pod_phase}" = "Succeeded" ]; then
-        echo "**Result: PASS** — GPU access mediated through DRA ResourceClaim. No direct host device mounts. Only allocated GPU visible in container." >> "${EVIDENCE_FILE}"
+        echo "**Result: PASS** — GPU access mediated through DRA ResourceClaim (resource.k8s.io/${api_version}). No direct host device mounts. Only allocated GPU visible in container." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — Pod phase: ${pod_phase}" >> "${EVIDENCE_FILE}"
     fi
@@ -505,6 +1005,165 @@ EOF
     capture "Delete test namespace" cleanup_ns secure-access-test
 
     log_info "Secure accelerator access evidence collection complete."
+}
+
+# collect_secure_device_plugin exercises the device-plugin isolation pattern
+# ported from kubernetes-sigs/ai-conformance#75 (mirrored by
+# validators/conformance/secure_access_check.go): one pod with two containers —
+# an authorized container requesting `nvidia.com/gpu: 1` that must see EXACTLY
+# one GPU via nvidia-smi (positive probe), and an unauthorized sibling
+# container with no GPU request that must see no /dev/nvidia* device nodes and
+# no working nvidia-smi (negative probes). The pod reaches phase Succeeded only
+# when every container exits 0, so PASS requires all probes to pass; any probe
+# or query failure fails closed.
+collect_secure_device_plugin() {
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Device-Plugin-Mediated GPU Access
+
+GPU access is provided through the device plugin (`nvidia.com/gpu` extended
+resource in `resources.limits`), not through direct `hostPath` volume mounts to
+`/dev/nvidia*`. The kubelet grants each container exactly the devices the
+device plugin allocated to it.
+
+## Device Isolation Verification
+
+Deploy a test pod with two containers and verify container-level isolation
+(kubernetes-sigs/ai-conformance#75 pattern):
+1. Authorized container (`nvidia.com/gpu: 1` limit): `nvidia-smi` sees EXACTLY one GPU
+2. Unauthorized sibling container (no GPU request): no `/dev/nvidia*` device nodes,
+   and `nvidia-smi` is absent or fails
+3. No `hostPath` volumes to `/dev/nvidia*`
+EOF
+
+    # Clean up any previous run and verify it is actually gone.
+    if ! ensure_fresh_namespace secure-access-test; then
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — previous secure-access-test namespace could not be removed; cannot guarantee a fresh workload." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    local dp_manifest
+    dp_manifest=$(mktemp "${TMPDIR:-/tmp}/aicr-evidence-XXXXXX")
+    cat <<'MANIFEST' > "${dp_manifest}"
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-access-test
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: isolation-test
+  namespace: secure-access-test
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
+  tolerations:
+    - operator: Exists
+  containers:
+    - name: authorized
+      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      command:
+        - bash
+        - -c
+        - |
+          echo "=== nvidia-smi -L (authorized container, nvidia.com/gpu: 1) ==="
+          if ! nvidia-smi -L; then
+            echo "FAIL: nvidia-smi cannot enumerate GPUs - no usable GPU granted"
+            exit 1
+          fi
+          count=$(nvidia-smi -L | wc -l)
+          echo "visible GPU count: ${count}"
+          if [ "${count}" = "1" ]; then
+            echo "PASS: exactly one GPU visible"
+          else
+            echo "FAIL: expected exactly 1 GPU, saw ${count}"
+            exit 1
+          fi
+      securityContext:
+        allowPrivilegeEscalation: false
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+    - name: unauthorized
+      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      command:
+        - bash
+        - -c
+        - |
+          echo "=== /dev/nvidia* (unauthorized sibling, no GPU request) ==="
+          if ls /dev/nvidia* 2>/dev/null; then
+            echo "FAIL: GPU device nodes visible without GPU allocation"
+            exit 1
+          fi
+          echo "PASS: no /dev/nvidia* device nodes visible"
+          echo ""
+          echo "=== nvidia-smi (must be absent or fail) ==="
+          if nvidia-smi -L 2>/dev/null; then
+            echo "FAIL: nvidia-smi enumerated GPUs without GPU allocation"
+            exit 1
+          fi
+          echo "PASS: nvidia-smi absent or fails without GPU allocation"
+      securityContext:
+        allowPrivilegeEscalation: false
+MANIFEST
+
+    if ! capture "Apply isolation test manifest" kubectl apply -f "${dp_manifest}"; then
+        rm -f "${dp_manifest}"
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — applying the isolation test manifest failed." >> "${EVIDENCE_FILE}"
+        cleanup_ns secure-access-test
+        return
+    fi
+    rm -f "${dp_manifest}"
+
+    log_info "Waiting for device-plugin isolation test pod (up to ${POD_TIMEOUT}s)..."
+    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" "${POD_TIMEOUT}")
+    log_info "Pod phase: ${pod_phase}"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+### Pod Spec (device plugin limits, no hostPath volumes)
+EOF
+    capture "Container GPU limits" kubectl get pod isolation-test -n secure-access-test \
+        -o jsonpath='{range .spec.containers[*]}{.name}{": nvidia.com/gpu="}{.resources.limits.nvidia\.com/gpu}{"\n"}{end}'
+    capture "Pod volumes (no hostPath)" kubectl get pod isolation-test -n secure-access-test -o jsonpath='{.spec.volumes}'
+    capture "Container exit codes" kubectl get pod isolation-test -n secure-access-test \
+        -o jsonpath='{range .status.containerStatuses[*]}{.name}{": exitCode="}{.state.terminated.exitCode}{"\n"}{end}'
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+### Authorized Container (positive probe: exactly one GPU)
+EOF
+    capture "Authorized container logs" kubectl logs isolation-test -c authorized -n secure-access-test
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+### Unauthorized Sibling Container (negative probes: no GPU visible)
+EOF
+    capture "Unauthorized container logs" kubectl logs isolation-test -c unauthorized -n secure-access-test
+
+    # Verdict: phase Succeeded requires every container to exit 0, i.e. the
+    # positive probe AND both negative probes passed. Anything else — probe
+    # failure, scheduling failure, timeout, query failure — is FAIL.
+    echo "" >> "${EVIDENCE_FILE}"
+    if [ "${pod_phase}" = "Succeeded" ]; then
+        echo "**Result: PASS** — GPU access mediated through device plugin \`nvidia.com/gpu\` limits: the authorized container saw exactly one GPU and the unauthorized sibling container saw none. No direct host device mounts." >> "${EVIDENCE_FILE}"
+    else
+        echo "**Result: FAIL** — Pod phase: ${pod_phase} (PASS requires the authorized container to see exactly one GPU AND the unauthorized sibling to see none)." >> "${EVIDENCE_FILE}"
+    fi
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Cleanup
+EOF
+    capture "Delete test namespace" cleanup_ns secure-access-test
+
+    log_info "Secure accelerator access evidence collection complete (device-plugin mode)."
 }
 
 # --- Section 4a: Accelerator Metrics (DCGM Exporter) ---
@@ -2296,5 +2955,14 @@ main() {
     echo "  Total: $((passed + failed + skipped)) | Passed: ${passed} | Failed: ${failed} | Skipped: ${skipped}"
     echo ""
 }
+
+# Hidden subcommand for unit tests (pkg/evidence/cncf/claim_shape_test.go):
+# print the version-correct ResourceClaim YAML and exit without contacting a
+# cluster. Not part of the documented section interface.
+# Usage: collect-evidence.sh emit-claim <version> [name] [namespace] [deviceclass]
+if [ "${SECTION}" = "emit-claim" ]; then
+    emit_resourceclaim_yaml "${2:-}" "${3:-gpu-claim}" "${4:-dra-test}" "${5:-gpu.nvidia.com}"
+    exit $?
+fi
 
 main

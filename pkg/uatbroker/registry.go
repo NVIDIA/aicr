@@ -15,6 +15,8 @@
 package uatbroker
 
 import (
+	"bytes"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,10 +30,20 @@ import (
 // path cannot OOM the process; the registry is a small hand-edited file.
 const maxRegistryBytes int64 = 1 << 20 // 1 MiB
 
-// ParseRegistry parses and validates a reservations.yaml document.
+// ParseRegistry parses and validates a reservations.yaml document. Decoding
+// is strict (KnownFields): a mistyped key like `nightly-intnts:` must fail
+// the parse rather than silently leave the real field on its default and
+// fail open (e.g. re-enrolling an opted-out row in the nightly batch).
 func ParseRegistry(data []byte) (*Registry, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
 	var reg Registry
-	if err := yaml.Unmarshal(data, &reg); err != nil {
+	if err := dec.Decode(&reg); err != nil {
+		if stderrors.Is(err, io.EOF) {
+			// Empty document: report the canonical "no reservations"
+			// validation error instead of a cryptic EOF.
+			return nil, reg.Validate()
+		}
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "parse reservation registry", err)
 	}
 	if err := reg.Validate(); err != nil {
@@ -60,9 +72,9 @@ func LoadRegistryFile(path string) (*Registry, error) {
 }
 
 // Validate enforces registry invariants: at least one row; every row has the
-// required fields; cloud is recognized; gpu-count is positive; and names are
-// unique (the name is the lease key, so a duplicate would make the lease
-// ambiguous).
+// required fields (reservation-id is optional — quota-backed rows have none);
+// cloud is recognized; gpu-count is positive; and names are unique (the name
+// is the lease key, so a duplicate would make the lease ambiguous).
 func (r *Registry) Validate() error {
 	if len(r.Reservations) == 0 {
 		return errors.New(errors.ErrCodeInvalidRequest, "reservation registry has no reservations")
@@ -83,10 +95,12 @@ func (r *Registry) Validate() error {
 		seen[res.Name] = true
 		if !validClouds[res.Cloud] {
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("reservation %s has unknown cloud %q (want %s or %s)", res.Name, res.Cloud, CloudAWS, CloudGCP))
+				fmt.Sprintf("reservation %s has unknown cloud %q (want %s, %s, or %s)",
+					res.Name, res.Cloud, CloudAWS, CloudGCP, CloudAzure))
 		}
+		// reservation-id is intentionally NOT required: quota-backed rows
+		// (Azure subscription quota) have no capacity-reservation identifier.
 		for _, f := range []struct{ key, val string }{
-			{"reservation-id", res.ReservationID},
 			{"accelerator", res.Accelerator},
 			{"cluster-config-path", res.ClusterConfigPath},
 			{"test-config-dir", res.TestConfigDir},

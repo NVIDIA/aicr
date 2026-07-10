@@ -1,0 +1,72 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: github.com/mchmarny/cluster/v1alpha1
+kind: Cluster
+
+deployment:
+  id: aicr-uat
+  provider: aks
+  tenancy: "e88faa01-b4fd-49d3-b934-0ad9f9fca307"
+  location: westus
+  state: tenancy
+  destroy: false
+  tags:
+    env: demo
+    stack: mini-gpu
+
+cluster:
+  aks:
+    version: "1.35"
+    private:
+      enabled: false
+    controlPlane:
+      authorizedNetworks:
+        - cidr: 216.228.127.128/30  # terraform egress IP is auto-added too
+        - cidr: 52.41.222.58/32
+        - cidr: 54.68.11.139/32
+    adminGroups:
+      - "3366c0b0-9393-418c-aadf-196691840bf7" # edsp-dgxc-argus
+    zones: []  # westus has no availability zones
+
+compute:
+  aks:
+    nodePools:
+      # westus quota: StandardDsv6Family is capped at 200 vCPUs subscription-wide
+      # (shared with other clusters); system + CPU pools below total 32 vCPUs.
+      system:
+        vmSize: Standard_D8s_v6 # 8 vCPU, 32 GiB
+        maxPods: 100  # default is 30, but we need more for GPU workloads
+        size: 3
+        autoscaling:
+          enabled: false
+      workers:
+        - name: cpuworker1
+          vmSize: Standard_D8s_v6 # 8 vCPU, 32 GiB
+          osDiskType: Managed
+          osDiskSizeGb: 200
+          size: 1
+          autoscaling:
+            enabled: false
+          labels:
+            nodeGroup: cpu-worker
+        - name: gpuworker1
+          gpuType: h100  # NDSH100v5 family: 2x96=192 of 1152 vCPUs
+          gpuDriverInstall: false  # no Azure driver — GPU software managed in-cluster (GPU Operator)
+          osDiskSizeGb: 512
+          size: 2
+          autoscaling:
+            enabled: false
+          labels:
+            nodeGroup: gpu-worker

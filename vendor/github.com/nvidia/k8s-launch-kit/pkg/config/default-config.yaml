@@ -41,6 +41,16 @@ docaDriver:
   unloadThirdPartyRDMAModules: true
   skipPreflightChecks: false
 
+maintenance:
+  # Global concurrency; positive integer or 1%-100%.
+  maxParallelOperations: 4
+  # Global or legacy SR-IOV limit; non-negative integer or 1%-100%.
+  maxUnavailable: 4
+  # Ready-request cleanup delay in seconds; non-negative.
+  maxNodeMaintenanceTimeSeconds: 3600
+  # Legacy OFED concurrency; non-negative, 0 is unlimited.
+  maxParallelUpgrades: 4
+
 nvIpam:
   poolName: nv-ipam-pool
   # --- Option 1: Auto-generate subnets (used when subnets list is empty) --- 
