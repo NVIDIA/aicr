@@ -46,7 +46,6 @@ workerConfig:
           - "vendor"
 
 # --- Fields present in nfd/values.yaml but NOT in NodeFeatureDiscovery CR ---
-# enableNodeFeatureApi: Helm chart setting; OCP operator enables this by default.
 # master.enable: OCP operator always deploys the master controller.
 # worker.enable: OCP operator always deploys the worker DaemonSet.
 # topologyUpdater.createCRDs: OCP operator manages CRDs via OLM.
