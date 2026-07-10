@@ -418,6 +418,25 @@ jobs:
             -v "$AZ_MOUNT:/home/builder/.azure" \
             "${AKS_ACTUATOR_IMAGE}" apply
 
+      # Fresh federated login before grant + connect. azure/login stores the
+      # GitHub OIDC token as the session's client assertion, and that
+      # assertion is valid for only ~5 MINUTES: minting a token for a NEW
+      # audience — kubelogin's AKS server app (6dae42f8…), which has no
+      # cached token yet — requires redeeming it, so the first kubectl after
+      # bringup fails with AADSTS700024 no matter how long we retry (run
+      # 29120867385). The cached ARM token is unaffected (which is why the
+      # role-assignment grant works without this), but connect needs a fresh
+      # assertion; once kubelogin obtains the AKS-audience token it is
+      # cached in ~/.azure like any other, and the existing per-phase
+      # re-logins keep the chain alive.
+      - name: Refresh Azure credentials before cluster connect
+        if: steps.infra.outcome == 'success'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
       # Data-plane kubectl access, scoped to THIS run's cluster. The actuator
       # provisions AKS with Entra RBAC and local accounts disabled, so the
       # pipeline identity needs a Kubernetes data-plane role. Granting
