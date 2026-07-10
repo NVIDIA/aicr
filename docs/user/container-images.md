@@ -20,10 +20,12 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **33**
-- Unique images: **82**
+- Unique images: **86**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
+
+_Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recipes/components/<name>/values.yaml; per-recipe overlay overrides are not applied`
 
 ## Components
 
@@ -62,6 +64,15 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
+
+## Version variants
+
+These versions are explicitly pinned by the listed sources and differ
+from the component's registry default above.
+
+| Component | Variant Version | Declared By | Images |
+|-----------|-----------------|-------------|--------|
+| kube-prometheus-stack | 83.7.0 | aks | 8 |
 
 ## Images by component
 
@@ -254,6 +265,17 @@ _No images extracted._
 ### slinky-slurm-operator-crds
 
 _No images extracted._
+
+### kube-prometheus-stack@83.7.0 (variant)
+
+- `docker.io/grafana/grafana:12.4.3`
+- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.1`
+- `quay.io/kiwigrid/k8s-sidecar:2.6.0`
+- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
+- `quay.io/prometheus/alertmanager:v0.32.0`
+- `quay.io/prometheus/node-exporter:v1.11.1`
+- `quay.io/prometheus/prometheus:v3.11.2`
+- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 <!-- END AICR-BOM -->
 
