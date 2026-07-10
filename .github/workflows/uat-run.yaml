@@ -43,7 +43,7 @@ on:
   workflow_dispatch:
     inputs:
       reservation:
-        description: 'Reservation name from infra/uat/reservations.yaml (e.g. aws-h100, gcp-h100).'
+        description: 'Reservation name from infra/uat/reservations.yaml (e.g. aws-h100, gcp-h100, azure-h100).'
         type: string
         required: true
       aicr_version:
@@ -158,11 +158,13 @@ jobs:
           go build -o ./bin/uat-broker ./tools/uat-broker
           ./bin/uat-broker reservations --name "$RESERVATION" >> "$GITHUB_OUTPUT"
 
-  # One of run-aws / run-gcp fires based on the resolved cloud (the registry
-  # validates cloud ∈ {aws,gcp}, so exactly one matches). The caller job grants
-  # the permission SUPERSET its callee needs — a reusable workflow's jobs are
-  # ceilinged by the calling job's permissions, and the called pipeline does
-  # OIDC, GHCR push, and (nested) evidence-ingest GCS WIF.
+  # One of run-aws / run-gcp / run-azure fires based on the resolved cloud
+  # (the registry validates cloud membership, so at most one matches; the
+  # unmapped-cloud job below fails closed if a registry cloud has no
+  # run-<cloud> job here yet). The caller job grants the permission SUPERSET
+  # its callee needs — a reusable workflow's jobs are ceilinged by the calling
+  # job's permissions, and the called pipeline does OIDC, GHCR push, and
+  # (nested) evidence-ingest GCS WIF.
   run-aws:
     needs: resolve
     if: needs.resolve.outputs.cloud == 'aws'
@@ -204,3 +206,45 @@ jobs:
       test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
       skip_delete: ${{ inputs.skip_delete }}
       skip_tests: ${{ inputs.skip_tests }}
+
+  run-azure:
+    needs: resolve
+    if: needs.resolve.outputs.cloud == 'azure'
+    # Superset ceiling for the nested pipeline (a reusable workflow's jobs
+    # cannot exceed the caller's permissions).
+    permissions:
+      contents: read  # checkout inside the called pipeline
+      actions: read  # required by the nested uat-* + evidence-ingest jobs
+      id-token: write  # cloud OIDC/WIF: provision, keyless cosign, and GCS evidence publish
+      packages: write  # push validator + snapshot-agent images to GHCR
+    uses: ./.github/workflows/uat-azure.yaml
+    with:
+      reservation: ${{ inputs.reservation }}
+      aicr_version: ${{ inputs.aicr_version }}
+      intent: ${{ inputs.intent }}
+      lifecycle: ${{ inputs.lifecycle }}
+      cluster_config_path: ${{ needs.resolve.outputs.cluster_config_path }}
+      test_config_dir: ${{ needs.resolve.outputs.test_config_dir }}
+      skip_delete: ${{ inputs.skip_delete }}
+      skip_tests: ${{ inputs.skip_tests }}
+
+  # Fail closed on an unmapped cloud. The broker validates cloud membership
+  # against its own set, but a cloud can be added there (and to the registry)
+  # before its run-<cloud> job exists here — without this job the dispatch
+  # would silently no-op: the lease is taken, no pipeline runs, and the
+  # requester sees a green run that did nothing.
+  unmapped-cloud:
+    needs: resolve
+    if: >-
+      needs.resolve.outputs.cloud != 'aws' &&
+      needs.resolve.outputs.cloud != 'gcp' &&
+      needs.resolve.outputs.cloud != 'azure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail on unmapped cloud
+        env:
+          CLOUD: ${{ needs.resolve.outputs.cloud }}
+        run: |
+          set -euo pipefail
+          echo "::error::reservation resolved to cloud '${CLOUD}', which has no run-<cloud> job in uat-run.yaml — add one (see run-azure for the shape)."
+          exit 1

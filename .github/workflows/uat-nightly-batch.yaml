@@ -158,13 +158,21 @@ jobs:
           # EACH listed intent (training and/or inference) as its own full CUJ
           # cell per version, dispatched SEQUENTIALLY through the shared
           # per-reservation lease — so both intents run nightly with no
-          # contention and no second cron. The broker resolves an empty list to
-          # the training default, so this is always non-empty; fail closed if it
-          # somehow is not (a broker/registry regression).
-          NIGHTLY_INTENTS_CSV=$(./bin/uat-broker reservations --name "$RESERVATION" | sed -n 's/^nightly-intents=//p')
-          if [[ -z "$NIGHTLY_INTENTS_CSV" ]]; then
-            echo "::error::could not resolve nightly-intents for ${RESERVATION}" >&2
+          # contention and no second cron. The broker resolves an ABSENT
+          # nightly-intents to the training default; an EXPLICIT empty list is
+          # a bring-up opt-out (manual dispatch only) and resolves to an empty
+          # value. Distinguish the two failure shapes: a MISSING key is a
+          # broker/registry regression (fail closed); a present-but-EMPTY
+          # value is the opt-out (skip this leg gracefully).
+          ROW=$(./bin/uat-broker reservations --name "$RESERVATION")
+          if ! grep -q '^nightly-intents=' <<<"$ROW"; then
+            echo "::error::could not resolve nightly-intents for ${RESERVATION} (key missing from broker output)" >&2
             exit 1
+          fi
+          NIGHTLY_INTENTS_CSV=$(sed -n 's/^nightly-intents=//p' <<<"$ROW")
+          if [[ -z "$NIGHTLY_INTENTS_CSV" ]]; then
+            echo "::notice::Reservation ${RESERVATION} opts out of the nightly batch (nightly-intents: []); skipping this leg."
+            exit 0
           fi
           IFS=',' read -r -a intents <<< "$NIGHTLY_INTENTS_CSV"
           echo "Nightly intents for ${RESERVATION}: ${intents[*]}"

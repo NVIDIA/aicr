@@ -51,6 +51,10 @@ security_tools:
 testing_tools:
   # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
   kubectl: 'v1.36.2'
+  # kubelogin: Entra exec-plugin for AKS kubeconfigs, installed by uat-azure.yaml
+  # via `az aks install-cli` (which defaults to latest without an explicit pin).
+  # renovate: datasource=github-releases depName=Azure/kubelogin depType=testing_tools
+  kubelogin: 'v0.2.19'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.32.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
