@@ -60,6 +60,17 @@ type recipeSource struct {
 }
 
 // sourceDirs maps each recipe directory to its kind discipline.
+//
+// Scope note: this loader intentionally scans only overlays/ and mixins/,
+// whereas the canonical metadata store (pkg/recipe/metadata_store.go) walks
+// the entire recipes/ tree and treats any .yaml outside checks/, components/,
+// and mixins/ (minus data-v1.yaml/registry.yaml) as RecipeMetadata. By
+// convention every recipe overlay lives under overlays/, so the two scopes
+// agree today. A RecipeMetadata file parked elsewhere (e.g. directly under
+// recipes/) would be resolvable by the store but invisible to variant
+// discovery — a silent gap in the "projection matches what deploys" claim. If
+// the recipes/ layout ever grows metadata outside overlays/, this list must be
+// widened to match the store's scan so no divergent pin is dropped.
 var sourceDirs = []struct {
 	dir  string
 	kind string
