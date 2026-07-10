@@ -111,8 +111,12 @@ testing_tools:
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
   karpenter: 'v1.13.0'
   # In-cluster OCI registry for KWOK deployer-matrix CI (issue #843).
-  # renovate: datasource=docker depName=registry depType=testing_tools
-  registry_image: 'registry:3.1.1'
+  # Pulled from ECR Public (AWS's first-party mirror of Docker official
+  # images): anonymous Docker Hub pulls rate-limit on shared CI runners
+  # (main red 4 consecutive KWOK runs, 2026-07-09). Do not regress to a
+  # bare Docker Hub pin on bump.
+  # renovate: datasource=docker depName=public.ecr.aws/docker/library/registry depType=testing_tools
+  registry_image: 'public.ecr.aws/docker/library/registry:3.1.1'
   # Argo CD Helm chart for KWOK deployer-matrix CI. v9.5.x pins app v3.4.x,
   # the first stable line with native OCI artifact source (issue #843).
   # renovate: datasource=helm depName=argo-cd registryUrl=https://argoproj.github.io/argo-helm depType=testing_tools
@@ -131,8 +135,11 @@ testing_tools:
   # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.
-  # renovate: datasource=docker depName=gitea/gitea depType=testing_tools
-  gitea_image: 'gitea/gitea:1.26.4-rootless'
+  # Pulled from docker.gitea.com (Gitea's first-party registry): anonymous
+  # Docker Hub pulls rate-limit on shared CI runners. Do not regress to a
+  # Docker Hub pin on bump.
+  # renovate: datasource=docker depName=docker.gitea.com/gitea depType=testing_tools
+  gitea_image: 'docker.gitea.com/gitea:1.26.4-rootless'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.0.1'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
