@@ -121,8 +121,11 @@ It is a clean no-op when there are no flat pointers, and it fails with a
 clear message if it cannot pull a bundle (the public-package requirement
 above). Pull the commit it pushes (`git pull`) — your PR now carries a
 **signed, nested** pointer (the flat pending file is gone). The *bundle* is
-signed; the commit-back itself is a normal, unsigned GitHub Actions commit,
-which the eventual squash-merge re-signs under the repo's policy.
+signed; the commit-back is created through GitHub's `createCommitOnBranch`
+API, so GitHub applies its web-flow signature and it shows **Verified** (the
+DCO sign-off is preserved). The evidence trust anchor remains the Sigstore
+bundle signature, verified by `aicr evidence verify` — independent of the
+git commit's signature status.
 
 > **Run this leg before merge.** The blocking per-source contract gate
 > requires a **signed, nested** pointer; it rejects a flat pending pointer

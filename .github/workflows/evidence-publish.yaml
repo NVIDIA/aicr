@@ -112,9 +112,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          # Do not persist the push token in .git/config: it would sit there
-          # across the fork-controlled `go build` step. The push step below
-          # supplies the token explicitly only when it needs it.
+          # Do not persist a token in .git/config: it would sit there across
+          # the fork-controlled `go build` step. The commit-back does not need
+          # it — it goes through the GitHub API (createCommitOnBranch), which
+          # authenticates via GH_TOKEN in the commit step's env.
           persist-credentials: false
 
       - name: Load versions
@@ -150,38 +151,22 @@ jobs:
         run: .github/scripts/evidence-sign-unsigned.sh
 
       - name: Commit signed pointers
-        # always(), with no signed-count guard: the git-diff check below decides
-        # whether there is anything to commit. This is load-bearing for partial
-        # failure — `aicr evidence sign` patches the signer block into the flat
-        # pointer BEFORE the relocation step, so if relocation then fails the
-        # bundle is already signed in the registry. Committing the signed (but
-        # not-yet-relocated) pointer persists that work, so the next dispatch
-        # takes the idempotent relocate-only path instead of re-signing and
-        # attaching a duplicate referrer. The job still fails (the sign step
-        # exited non-zero), surfacing the failure.
+        # always(), with no signed-count guard: the git-diff check inside the
+        # script decides whether there is anything to commit. This is
+        # load-bearing for partial failure — `aicr evidence sign` patches the
+        # signer block into the flat pointer BEFORE the relocation step, so if
+        # relocation then fails the bundle is already signed in the registry.
+        # Committing the signed (but not-yet-relocated) pointer persists that
+        # work, so the next dispatch takes the idempotent relocate-only path
+        # instead of re-signing and attaching a duplicate referrer. The job
+        # still fails (the sign step exited non-zero), surfacing the failure.
+        #
+        # The commit-back is created via GitHub's GraphQL createCommitOnBranch
+        # mutation rather than `git push`, so GitHub applies its web-flow
+        # signature and the commit shows Verified (#1551). The DCO sign-off is
+        # preserved in the commit body; the loop guard holds because a commit
+        # authored by GITHUB_TOKEN does not trigger workflow runs.
         if: ${{ always() }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # -A stages the relocation as a delete (flat pointer) + add (nested
-          # pointer) plus any in-place signer patch, so the moved files commit
-          # correctly. Check the STAGED set after `git add` so an untracked
-          # relocated file is still counted as a change.
-          git add -A recipes/evidence/
-          if git diff --cached --quiet -- recipes/evidence/; then
-            echo "No pointer changes to commit (nothing to sign)."
-            exit 0
-          fi
-          # -s adds a `Signed-off-by:` (DCO) trailer matching the bot author,
-          # so the DCO bot passes on the commit-back. The commit is NOT
-          # cryptographically signed (no -S) — it fills in the evidence
-          # pointer's signer block (the bundle signature); repo commit-signing
-          # policy is satisfied by the eventual squash-merge.
-          git commit -s -m "chore(evidence): sign pending evidence pointers"
-          # Push with the token supplied inline (credentials are not persisted
-          # in .git/config). A non-fast-forward here is a clear, recoverable
-          # failure: re-dispatch after pulling.
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "HEAD:${GITHUB_REF_NAME}"
+        run: .github/scripts/evidence-commit-signed.sh
