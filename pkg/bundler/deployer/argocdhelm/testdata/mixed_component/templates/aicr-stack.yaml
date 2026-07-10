@@ -1,3 +1,4 @@
+{{- if dig "includeRootApp" true (.Values.deployer | default dict) -}}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -32,3 +33,4 @@ spec:
       # 262144-byte client-side annotation cap. See application.yaml.tmpl
       # in the upstream argocd deployer for the full rationale.
       - ServerSideApply=true
+{{- end }}

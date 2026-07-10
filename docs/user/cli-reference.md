@@ -1484,7 +1484,9 @@ The `deployer` prefix is reserved: with `--deployer argocd` or `--deployer argoc
 
 **Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the three string keys ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (note the dot, not colon). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. `cascadeDelete` is bundle-time only — it adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
 
-**Use `--set-string` for values Helm would type-infer:** the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
+**Children-only rendering (`deployer.includeRootApp`, install-time only):** argocd-helm bundles render the parent app-of-apps Application as a chart template, so an *externally managed* root Application pointed at the published chart — for example one created by a controller such as a Cluster API addon provider — would otherwise render a second parent (`aicr-stack`) that owns the same child Applications and fights the external root through its automated prune/selfHeal sync policy. Set `deployer.includeRootApp: false` in that root Application's `spec.source.helm.valuesObject` (or `helm install --set deployer.includeRootApp=false`) to render children-only. The default (`true`) keeps the standalone `helm install` flow unchanged; the same published bundle serves both consumption modes. This is a **boolean** key — pass it with plain `--set` (not `--set-string`), and note it is not a bundle-time `deployer:` key.
+
+**Use `--set-string` for values Helm would type-infer:** apart from the boolean `deployer.includeRootApp`, the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
 
 ```shell
 # Deploy child Applications to a remote cluster under a tenant prefix
@@ -1503,6 +1505,12 @@ aicr bundle -r recipe.yaml --deployer argocd-helm \
 helm install aicr-stack ./bundle \
   --set deployer.namePrefix=tenant-a- \
   --set deployer.project=gpu-infra
+
+# argocd-helm: children-only — an external root Application already
+# points at the published chart (e.g. created by a controller)
+helm template aicr-bundle oci://ghcr.io/myorg/aicr-bundle \
+  --set repoURL=oci://ghcr.io/myorg \
+  --set deployer.includeRootApp=false
 ```
 
 #### List and Object Value Overrides
