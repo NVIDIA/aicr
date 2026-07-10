@@ -22,6 +22,19 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 )
 
+// encodeBOM serializes a CycloneDX BOM to canonical JSON for byte-stable
+// regression comparisons.
+func encodeBOM(t *testing.T, doc *cdx.BOM) string {
+	t.Helper()
+	var buf bytes.Buffer
+	enc := cdx.NewBOMEncoder(&buf, cdx.BOMFileFormatJSON)
+	enc.SetPretty(true)
+	if err := enc.Encode(doc); err != nil {
+		t.Fatalf("encode BOM: %v", err)
+	}
+	return buf.String()
+}
+
 func sampleVariants() []VariantResult {
 	return []VariantResult{
 		{
@@ -241,6 +254,17 @@ func TestLegacyEntryPointsUnchanged(t *testing.T) {
 	}
 	if legacy.String() != modern.String() {
 		t.Error("WriteMarkdown and WriteMarkdownWithVariants(nil) diverged")
+	}
+
+	// The CycloneDX surface must match too: the legacy BuildBOM and the
+	// variant-aware BuildBOMWithVariants(nil) must serialize byte-identically,
+	// locking component/dependency ordering and image dedup for importers.
+	modernBOM, err := BuildBOMWithVariants(meta, results, nil)
+	if err != nil {
+		t.Fatalf("BuildBOMWithVariants: %v", err)
+	}
+	if encodeBOM(t, BuildBOM(meta, results)) != encodeBOM(t, modernBOM) {
+		t.Error("BuildBOM and BuildBOMWithVariants(nil) serialized differently")
 	}
 
 	// Legacy BuildBOM tolerates duplicate component names exactly as before.

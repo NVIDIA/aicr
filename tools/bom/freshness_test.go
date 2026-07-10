@@ -470,9 +470,6 @@ func parseBOMVariantsTable(section string) (map[variantKey]string, bool, error) 
 			expectSeparator = false
 			continue
 		}
-		if strings.Trim(trimmed, "|-: ") == "" {
-			continue
-		}
 		if len(cells) != headerCols {
 			return nil, headings > 0, fmt.Errorf("malformed Version variants row %q: %d cells, want the "+
 				"header's %d — run `make bom-docs`", trimmed, len(cells), headerCols)

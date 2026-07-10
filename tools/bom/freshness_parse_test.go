@@ -197,6 +197,13 @@ func TestParseBOMVariantsTable(t *testing.T) {
 			goodTable + "| kps2 | 82.0.0 | aks | 8 | extra |\n",
 			true, 0, true,
 		},
+		{
+			// An all-blank data row must be rejected, not silently skipped:
+			// a mangled doc row like `| | | | |` is malformed table state.
+			"all-blank data row",
+			goodTable + "| | | | |\n",
+			true, 0, true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
