@@ -397,10 +397,22 @@ jobs:
         if: inputs.lifecycle != 'daytime-down'
         run: |
           set -euox pipefail
+          # Mount a permissive throwaway COPY of the az context, not the live
+          # ~/.azure: the container runs as `builder` (a different uid from
+          # the runner user, and Linux bind mounts preserve host uid/gid),
+          # and the az CLI must WRITE to its config dir on startup — a direct
+          # mount dies with EACCES on /home/builder/.azure/config before
+          # terraform init (run 29115582026; works on Docker Desktop only
+          # because macOS file sharing maps ownership). The copy also keeps
+          # the runner's own session pristine for the host-side az/kubectl
+          # steps that follow.
+          AZ_MOUNT=$(mktemp -d)
+          cp -a "$HOME/.azure/." "$AZ_MOUNT/"
+          chmod -R a+rwX "$AZ_MOUNT"
           docker run \
             -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
             -e AUTO_APPROVE=true \
-            -v "$HOME/.azure:/home/builder/.azure" \
+            -v "$AZ_MOUNT:/home/builder/.azure" \
             "${AKS_ACTUATOR_IMAGE}" apply
 
       # Data-plane kubectl access, scoped to THIS run's cluster. The actuator
@@ -786,13 +798,19 @@ jobs:
           set -euxo pipefail
           yq -i '.deployment.id = strenv(DEPLOYMENT_ID) | .deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
+          # Same writable-copy mount as Bringup Infra (container uid cannot
+          # write a directly-mounted ~/.azure). Fresh copy per attempt so a
+          # partially-mutated context cannot poison the retries.
           destroyed=false
           for attempt in 1 2 3; do
             echo "Destroy attempt ${attempt}..."
+            AZ_MOUNT=$(mktemp -d)
+            cp -a "$HOME/.azure/." "$AZ_MOUNT/"
+            chmod -R a+rwX "$AZ_MOUNT"
             if docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
               -e AUTO_APPROVE=true \
-              -v "$HOME/.azure:/home/builder/.azure" \
+              -v "$AZ_MOUNT:/home/builder/.azure" \
               "${AKS_ACTUATOR_IMAGE}" apply; then
               echo "Cluster destroyed successfully"
               destroyed=true
