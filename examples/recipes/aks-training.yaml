@@ -51,7 +51,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v25.10.1
+    version: v26.3.2
     valuesFile: components/gpu-operator/values-aks-training.yaml
     overrides:
       cdi:
@@ -91,7 +91,7 @@ componentRefs:
     chart: kube-prometheus-stack
     type: Helm
     source: https://prometheus-community.github.io/helm-charts
-    version: 84.4.0
+    version: 83.7.0
     valuesFile: components/kube-prometheus-stack/values.yaml
     dependencyRefs:
       - prometheus-operator-crds
@@ -113,7 +113,7 @@ componentRefs:
     chart: dra-driver-nvidia-gpu
     type: Helm
     source: oci://registry.k8s.io/dra-driver-nvidia/charts
-    version: 0.4.1-rc.1
+    version: 0.4.1
     valuesFile: components/nvidia-dra-driver-gpu/values.yaml
     overrides:
       controller:
@@ -126,7 +126,7 @@ componentRefs:
     chart: nvsentinel
     type: Helm
     source: oci://ghcr.io/nvidia
-    version: v1.3.0
+    version: v1.9.0
     valuesFile: components/nvsentinel/values.yaml
     dependencyRefs:
       - cert-manager
@@ -145,7 +145,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.17.0
+    version: v0.17.1
     valuesFile: components/nodewright-operator/values.yaml
 deploymentOrder:
   - cert-manager
@@ -168,6 +168,14 @@ validation:
       - expected-resources
       - gpu-operator-version
       - check-nvidia-smi
+  performance:
+    checks:
+      - nccl-all-reduce-bw
+    constraints:
+      # Provisional floor pending calibration on an ND96isr_H100_v5 testbed —
+      # see recipes/overlays/h100-aks-training.yaml.
+      - name: nccl-all-reduce-bw
+        value: '>= 150'
   conformance:
     checks:
       - platform-health

@@ -14,39 +14,71 @@
 
 name: UAT - AWS
 
+# Reusable per-cloud UAT pipeline — invoked by uat-run.yaml, the shared
+# dispatch surface that owns the per-reservation concurrency lease (#1274,
+# DC1). It is intentionally NOT directly dispatchable or scheduled: the
+# nightly cron lives in uat-nightly-batch.yaml and ad-hoc runs go through
+# uat-run.yaml, so every run on the AWS reservation serializes on the same
+# lease. The filename is kept so the keyless-cosign signing identity (and the
+# EXPECTED_IDENTITY_REGEXP pins) stay `uat-aws.yaml@…` unchanged.
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      reservation:
+        description: 'Reservation name (lease key) this run targets; used for labeling and the daytime cluster name.'
+        type: string
+        required: true
+      aicr_version:
+        description: 'Released aicr version to install (e.g. v1.2.3); empty = build from source (main tip).'
+        type: string
+        default: ''
+      intent:
+        description: 'Recipe intent — selects the per-intent test config (h100-<intent>-config.yaml).'
+        type: string
+        default: training
+      lifecycle:
+        description: 'nightly (provision→CUJ→teardown) | daytime-up (provision+deploy+HOLD) | daytime-down (tear down the held daytime cluster).'
+        type: string
+        default: nightly
+      cluster_config_path:
+        description: 'Cluster-config the EKS actuator provisions from (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
+      test_config_dir:
+        description: 'Directory holding the AICRConfig test files (from infra/uat/reservations.yaml).'
+        type: string
+        required: true
       skip_delete:
-        description: 'Skip cluster teardown (manual runs only; schedule always deletes)'
+        description: 'Skip cluster teardown (manual runs only; the nightly batch always deletes).'
         type: boolean
         default: false
       skip_tests:
-        description: 'Skip UAT test execution (manual runs only; schedule always tests)'
+        description: 'Skip UAT test execution (manual runs only; the nightly batch always tests).'
         type: boolean
         default: false
-  schedule:
-    - cron: '0 4 * * *' # daily at midnight PST, runs on default branch only
 
 permissions:
   contents: read
 
-# Long-running cloud provisioning — never cancel mid-teardown.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+# NOTE: the per-reservation concurrency lease is owned by the caller
+# (uat-run.yaml). A reusable workflow must not declare its own concurrency
+# here, or every reservation would serialize against one group instead of
+# queueing per reservation.
 
 jobs:
   uat-aws:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    # Covers the uncapped non-UAT steps (build, validator image push, EKS
-    # provisioning, evidence upload) + the UAT phase steps (prep 15 + install 45
-    # + validate 40 + train 25 + verify 5 = 130) + the always()-run Destroy
-    # Cluster teardown. The teardown MUST fit in this budget: a job-level timeout
-    # cancels pending always() steps, so an undersized cap would skip teardown
-    # and leak the GPU node / capacity reservation.
-    timeout-minutes: 180
+    # Budget = uncapped non-UAT steps (build, validator image push, EKS
+    # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 90
+    # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
+    # = up to 190) + the always()-run Destroy Cluster teardown (3 retries, ~10m
+    # each = up to ~40m). Only one of train/serve runs per intent, so the budget
+    # counts the larger (serve). The teardown MUST fit in this budget: a job-level
+    # timeout cancels pending always() steps, so an undersized cap would skip
+    # teardown and leak the GPU node / capacity reservation. 190 UAT + ~30 setup +
+    # ~40 teardown = ~260, so 270 leaves the teardown headroom on a worst-case run.
+    timeout-minutes: 270
     permissions:
       contents: read
       actions: read
@@ -60,15 +92,38 @@ jobs:
       AWS_ACCOUNT_ID: "615299774277"
       AWS_REGION: "us-east-1"
       GITHUB_ACTIONS_ROLE_NAME: "github-actions-role-aicr"
-      DEPLOYMENT_ID: "aicr-uat-${{ github.run_id }}"
-      CLUSTER_CONFIG: tests/uat/aws/cluster-config.yaml
-      TEST_CONFIG: tests/uat/aws/tests/h100-training-config.yaml
-      # v0.4.23 — required for the .eks-nested cluster-config schema; the
-      # prior pin (v0.2.6) read .compute.nodeGroups.* directly and failed
+      # Cluster name (EKS actuator derives it from .deployment.id). The nightly
+      # per-run lifecycle uses a run-scoped name for per-run OCI/state isolation;
+      # the daytime lifecycles use a STABLE, reservation-tagged name so the
+      # evening teardown (daytime-down) and the nightly pre-batch guard can find
+      # the held cluster. Reservation names are lowercase alnum+hyphen, so the
+      # derived name is a valid EKS cluster name.
+      DEPLOYMENT_ID: >-
+        ${{ (inputs.lifecycle == 'daytime-up' || inputs.lifecycle == 'daytime-down')
+        && format('aicr-uat-day-{0}', inputs.reservation)
+        || format('aicr-uat-{0}', github.run_id) }}
+      CLUSTER_CONFIG: ${{ inputs.cluster_config_path }}
+      # DC2 selects the AICRConfig by intent; both intents drive the same
+      # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
+      # v0.4.27 — required for node-group taints in the cluster-config schema
+      # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
+      # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
+      # support; v0.2.6 read .compute.nodeGroups.* directly and failed
       # Terraform parse with "object with 1 attribute eks".
-      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:57fd2bf77055f8e0090bd7b8e099e7f11fd874f0b5764057439d11f1cd32a8b1"
+      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
+      # Pin validator-image resolution for MAIN cells to this run's freshly
+      # built+pushed validators (the `Build and push validator images` step
+      # tags them `:uat-<run_id>`), mirroring how AICR_IMAGE pins the agent — so
+      # the validators pair with the binary under test rather than a stale
+      # :latest. The main binary is stamped version=main (below), which the
+      # catalog would otherwise leave on the :latest path. Empty for release
+      # cells (aicr_version set): they use the released :<version> validators the
+      # released binary self-resolves, and an empty AICR_VALIDATOR_IMAGE_TAG is
+      # a no-op (the catalog ignores an empty override).
+      AICR_VALIDATOR_IMAGE_TAG: ${{ inputs.aicr_version == '' && format('uat-{0}', github.run_id) || '' }}
 
     steps:
       # Checkout
@@ -77,6 +132,30 @@ jobs:
         with:
           persist-credentials: false
 
+      # Fail closed on an unrecognized intent/lifecycle before any provisioning:
+      # workflow_dispatch constrains these to a choice, but workflow_call passes
+      # free strings, so a caller typo must surface as a clear error rather than
+      # a missing-file failure deep in a phase. Also assert the per-intent config
+      # exists so a missing sibling config fails here, not mid-run.
+      - name: Validate inputs
+        env:
+          INTENT: ${{ inputs.intent }}
+          LIFECYCLE: ${{ inputs.lifecycle }}
+        run: |
+          set -euo pipefail
+          case "${INTENT}" in
+            training|inference) ;;
+            *) echo "::error::unknown intent '${INTENT}' (want training|inference)"; exit 1 ;;
+          esac
+          case "${LIFECYCLE}" in
+            nightly|daytime-up|daytime-down) ;;
+            *) echo "::error::unknown lifecycle '${LIFECYCLE}' (want nightly|daytime-up|daytime-down)"; exit 1 ;;
+          esac
+          if [[ ! -f "${TEST_CONFIG}" ]]; then
+            echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
+          fi
+          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${DEPLOYMENT_ID}"
+
       # Versions
       - name: Load versions
         id: versions
@@ -84,6 +163,9 @@ jobs:
 
       # Build from source
       - name: Setup Go
+        # Main cells only: release cells install a prebuilt binary and must not
+        # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
+        if: inputs.aicr_version == '' && inputs.skip_tests != true
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
@@ -92,48 +174,160 @@ jobs:
             go.sum
             vendor/modules.txt
 
+      # Main cell (aicr_version empty): build the aicr binary from the
+      # checked-out source (tip). Release cells install the released binary
+      # instead (next step). daytime-down tears down the held cluster only — it
+      # builds nothing and pushes no images.
       - name: Build aicr binary
-        if: inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GOFLAGS: -mod=vendor
+          # github.sha via env (never inline ${{ }} in a shell run — expression
+          # injection). It is a 40-hex commit, so no real risk, but env is the
+          # repo norm and keeps zizmor/CodeRabbit quiet.
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          go build -o ./aicr ./cmd/aicr
-          ./aicr --version
+          set -euo pipefail
+          # Stamp the main-cell binary's version metadata via ldflags (mirroring
+          # goreleaser's pkg/cli.{version,commit,date} targets) so the emitted
+          # recipe/evidence report "main" + the commit instead of the un-stamped
+          # "dev"/"unknown" defaults. version="main" is deliberately NOT a
+          # release-shaped string, so it does not trip the catalog's
+          # :latest→:<version> validator-image rewrite; validator resolution is
+          # pinned explicitly below (AICR_VALIDATOR_IMAGE_TAG). Release cells
+          # install a goreleaser-built binary already stamped with its tag, so
+          # this step is main-only.
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build \
+            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -o ./aicr ./cmd/aicr
+          # Assert the stamp actually landed — a broken ldflags target path would
+          # otherwise silently leave the binary on the default dev/unknown
+          # metadata (which then propagates to the evidence/TestGrid version).
+          VER_OUT="$(./aicr --version)"
+          echo "${VER_OUT}"
+          if ! printf '%s' "${VER_OUT}" | grep -qF "main (commit: ${COMMIT_SHA}"; then
+            echo "::error::aicr binary not stamped (want 'main (commit: ${COMMIT_SHA}…'); got: ${VER_OUT}" >&2
+            exit 1
+          fi
+
+      # Release cell (aicr_version set): install the RELEASED aicr binary at that
+      # version instead of building. The released binary self-resolves its own
+      # version's images — validators via pkg/validator/catalog (:latest ->
+      # :<version>) and the snapshot-agent via ghcr.io/nvidia/aicr:<version> — so
+      # the validator/agent build+push steps below are skipped for release cells.
+      - name: Install released aicr
+        if: inputs.aicr_version != '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        uses: ./.github/actions/install-aicr-release
+        with:
+          aicr-version: ${{ inputs.aicr_version }}
 
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login
 
+      # Main cell only: release cells use the released validator images the
+      # released binary self-resolves to (skipped when aicr_version is set).
       - name: Build and push validator images
-        if: inputs.skip_tests != true
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         run: |
           GO_VERSION="$(cat .go-version)"
           # CHAINSAW_* args dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
           # Test format in-process via validators/chainsaw/inprocess.go.
-          for phase in deployment performance conformance; do
+          #
+          # aiperf-bench is an ancillary (non-Go) validator image the
+          # performance phase's inference-perf check pulls at runtime, resolved
+          # through the same AICR_VALIDATOR_IMAGE_TAG=uat-<run_id> override as
+          # the Go validators. It MUST be built+pushed here too, or the AIPerf
+          # pod ImagePullBackOffs on a nonexistent uat-<run_id> tag and hangs
+          # until the job timeout (#1636). It uses a different Dockerfile path
+          # and takes no GO_VERSION build-arg. Keep the phase set in sync with
+          # VALIDATOR_PHASES in on-push.yaml / on-tag.yaml.
+          for phase in deployment performance conformance aiperf-bench; do
             IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
-            docker build -f "validators/${phase}/Dockerfile" \
-              --build-arg "GO_VERSION=${GO_VERSION}" \
-              -t "${IMAGE}" .
+            case "${phase}" in
+              aiperf-bench)
+                docker build -f validators/performance/aiperf-bench.Dockerfile \
+                  -t "${IMAGE}" .
+                ;;
+              *)
+                docker build -f "validators/${phase}/Dockerfile" \
+                  --build-arg "GO_VERSION=${GO_VERSION}" \
+                  -t "${IMAGE}" .
+                ;;
+            esac
             docker push "${IMAGE}"
           done
 
       # Auth
+      #
+      # Mints the action-default 1h STS session. kubectl and `aicr validate`
+      # reach EKS through the `aws eks get-token` exec plugin, which signs each
+      # token with these ambient env credentials — so once the session expires
+      # (build + bringup + install + validate can exceed 1h) those get-token
+      # calls fail with ExpiredToken. The per-stage refresh steps below re-mint a
+      # fresh 1h session at each long phase boundary so no single phase runs on
+      # an expiring token; the role's max_session_duration is left at the STS
+      # default, so we deliberately do NOT set role-duration-seconds here.
       - name: Configure AWS credentials
         id: auth
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-UAT-AICR
 
-      # Capacity check (reads desired count and reservation ID from cluster config).
+      # Pre-batch guard (#1275, DC2). The nightly lifecycle refuses to provision
+      # into a reservation that still holds an un-torn-down daytime cluster:
+      # a missed evening teardown must surface as a BLOCKED batch, not as silent
+      # contention with the daytime deployment. Detect by the stable daytime
+      # cluster name (aicr-uat-day-<reservation>); we already hold the
+      # reservation lease (uat-run.yaml) and are authenticated to the cloud, so
+      # this runs before Bringup and fails fast rather than racing. Only the
+      # nightly lifecycle guards — daytime-up creates that cluster, daytime-down
+      # removes it.
+      - name: Pre-batch guard — refuse if a daytime cluster still holds the reservation
+        id: guard
+        if: inputs.lifecycle == 'nightly'
+        env:
+          RESERVATION: ${{ inputs.reservation }}
+        run: |
+          set -euo pipefail
+          DAYTIME_NAME="aicr-uat-day-${RESERVATION}"
+          set +e
+          OUT=$(aws eks describe-cluster --name "${DAYTIME_NAME}" --region "${AWS_REGION}" 2>&1)
+          RC=$?
+          set -e
+          if [[ ${RC} -eq 0 ]]; then
+            echo "::error::daytime cluster ${DAYTIME_NAME} still holds reservation ${RESERVATION}; refusing to start the nightly batch. Tear it down first (uat-run lifecycle=daytime-down)."
+            exit 1
+          fi
+          # Fail closed on anything that is NOT a definitive "does not exist":
+          # a throttle/auth error must not be read as "clear to proceed".
+          if grep -q 'ResourceNotFoundException' <<<"${OUT}"; then
+            echo "no daytime cluster on reservation ${RESERVATION}; proceeding"
+          else
+            echo "::error::could not determine daytime-cluster state for ${DAYTIME_NAME}: ${OUT}"
+            exit 1
+          fi
+
+      # Post-lease capacity assertion (#1275, DC2). The reservation lease
+      # (uat-run.yaml) is now the contention gate, so this is no longer a
+      # race-and-fail pre-flight: by the time it runs we hold the lease and no
+      # other UAT run is consuming the reservation. It asserts the reservation
+      # is provisioned large enough for the desired GPU count — a genuinely
+      # exhausted/undersized reservation still fails, but transient contention
+      # (another run's not-yet-released nodes) no longer does, because we check
+      # the reservation's TOTAL size, not its momentary AvailableInstanceCount.
+      # Skipped for daytime-down, which provisions nothing.
+      #
       # Uses the runner-preinstalled yq because Install tools runs later; if the
       # cluster-config schema ever drifts, the explicit empty-value guard below
       # surfaces the mismatch immediately instead of letting yq return empty
       # silently and the AWS API reject a malformed reservation ID.
-      - name: Check EC2 capacity reservation
+      - name: Assert EC2 capacity reservation (post-lease)
         id: capacity
+        if: inputs.lifecycle != 'daytime-down'
         run: |
           set -euo pipefail
           GPU_WORKER='.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker")'
@@ -148,14 +342,25 @@ jobs:
           fi
           echo "Reservation: ${RESERVATION}, desired: ${DESIRED}"
 
-          AVAILABLE=$(aws ec2 describe-capacity-reservations \
+          # TotalInstanceCount = the reservation's provisioned size (fixed by the
+          # reservation, not by concurrent consumption). AvailableInstanceCount
+          # is logged for context but is intentionally NOT the assertion: with
+          # the lease held, "unavailable" means our own prior run, not a rival.
+          CAP=$(aws ec2 describe-capacity-reservations \
             --capacity-reservation-ids "${RESERVATION}" \
-            --query 'CapacityReservations[0].AvailableInstanceCount' \
+            --query 'CapacityReservations[0].[TotalInstanceCount,AvailableInstanceCount]' \
             --output text)
+          TOTAL=$(awk '{print $1}' <<<"${CAP}")
+          AVAILABLE=$(awk '{print $2}' <<<"${CAP}")
+          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
           echo "available=${AVAILABLE}" >> "$GITHUB_OUTPUT"
-          echo "Available instances in reservation ${RESERVATION}: ${AVAILABLE}"
-          if [[ "${AVAILABLE}" -lt "${DESIRED}" ]]; then
-            echo "::error::Insufficient capacity: need ${DESIRED} instances, only ${AVAILABLE} available in reservation ${RESERVATION}"
+          echo "Reservation ${RESERVATION}: total=${TOTAL}, available=${AVAILABLE}, desired=${DESIRED}"
+          if [[ -z "${TOTAL}" || "${TOTAL}" == "None" ]]; then
+            echo "::error::could not read TotalInstanceCount for reservation ${RESERVATION}"
+            exit 1
+          fi
+          if [[ "${TOTAL}" -lt "${DESIRED}" ]]; then
+            echo "::error::Reservation ${RESERVATION} is undersized: need ${DESIRED} instances, reservation holds only ${TOTAL}"
             exit 1
           fi
 
@@ -173,6 +378,33 @@ jobs:
           install_helmfile: 'true'
           helmfile_version: '${{ steps.versions.outputs.helmfile }}'
           helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+          # ko builds the snapshot-agent image (main cells only). Release cells
+          # install a prebuilt binary and build no images, so skip ko — a bad ko
+          # pin or download must not fail a release cell before UAT starts.
+          install_ko: ${{ inputs.aicr_version == '' && inputs.skip_tests != true && 'true' || 'false' }}
+          ko_version: ${{ steps.versions.outputs.ko }}
+
+      # The snapshot agent runs in-cluster as its own image, separate from the
+      # locally-built aicr binary that drives the UAT phases. Left at the
+      # default (ghcr.io/nvidia/aicr:latest), it would be the last *released*
+      # build — so any artifact-schema change in the PR under test (e.g. an
+      # apiVersion bump) produces a snapshot the freshly-built binary rejects.
+      # Build the agent from the PR source and point AICR_IMAGE at it so the
+      # snapshot is stamped by the code under test, not a stale release. Single
+      # arch: the GPU worker (p5.48xlarge) is amd64. Lives in the aicr-validators
+      # namespace (not the release ghcr.io/nvidia/aicr repo); cleaned up below.
+      - name: Build and push snapshot-agent image
+        if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr \
+            --bare \
+            --platform=linux/amd64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${VALIDATOR_TAG}"
 
       # Config — v0.4.23+ of the EKS actuator derives the cluster name from
       # .deployment.id (same as GKE); the previous yq write to .cluster.name
@@ -185,9 +417,10 @@ jobs:
           yq -i '.deployment.id = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
 
-      # Bringup
+      # Bringup — skipped for daytime-down (teardown-only; nothing to provision).
       - name: Bringup Infra
         id: infra
+        if: inputs.lifecycle != 'daytime-down'
         run: |
           set -euox pipefail
           docker run \
@@ -225,17 +458,39 @@ jobs:
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
+          # Snapshot agent: main cell = the PR-built image (see "Build and push
+          # snapshot-agent image"); release cell = the released aicr image at that
+          # version. Honored by `aicr snapshot`.
+          AICR_IMAGE: ${{ inputs.aicr_version == '' && format('ghcr.io/nvidia/aicr-validators/agent:{0}', env.VALIDATOR_TAG) || format('ghcr.io/nvidia/aicr:{0}', inputs.aicr_version) }}
         run: ./tests/uat/aws/run prep "${TEST_CONFIG}"
+
+      # Per-stage credential refresh. Re-mint a fresh 1h session at each long
+      # phase boundary so no single phase runs on an expiring token — the UAT
+      # chain (build + bringup + install + validate + CUJ) outlives one STS
+      # session, and kubectl/`aicr validate` sign every EKS get-token with the
+      # ambient session credentials. `id-token: write` is granted for the whole
+      # job, so configure-aws-credentials can re-assume here. Keyed to prep
+      # success so it is skipped in the skip_tests / daytime-up-with-no-prep
+      # paths, matching the install step's own gate.
+      - name: Refresh AWS credentials before install
+        if: steps.prep.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Install
 
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
-        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS) + the post-install
+        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS, 20m) + the post-install
         # readiness gate, which runs `aicr validate --phase deployment` until it
-        # passes (up to READINESS_TIMEOUT_SECONDS, 20m, spanning a nodewright
-        # reboot). Must exceed one helmfile attempt + the gate so the gate's own
-        # fail-closed path runs before GitHub Actions kills the step.
-        timeout-minutes: 45
+        # passes READINESS_CONSECUTIVE_PASSES times (up to READINESS_TIMEOUT_SECONDS,
+        # 60m, spanning nodewright tuning + reboots, which can run past 30m on a
+        # cold GPU node). Sized to exceed one helmfile attempt + the full gate
+        # window (20 + 60 = 80, + margin) so the gate's own fail-closed path runs
+        # before GitHub Actions kills the step.
+        timeout-minutes: 90
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -247,9 +502,20 @@ jobs:
       # until the GPU stack converges — the readiness barrier the helmfile
       # bundle lacks (the helm deploy.sh `kubectl wait`s instead). Step id stays
       # `conformance` so the train/verify gating below is unaffected.
+      # daytime-up provisions and deploys the stack, then HOLDS: the CUJ
+      # (conformance/train/verify + evidence) is a nightly-batch concern, so
+      # daytime-up stops after install and leaves the cluster up for handoff.
+      - name: Refresh AWS credentials before validate
+        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-Validate
+
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
-        if: steps.install.outcome == 'success'
+        if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
         # Larger budget than conformance-only: the deployment phase waits out
         # cold-start GPU bring-up (driver install/migration). (The performance
         # phase's NCCL benchmark skips on single-GPU-node clusters like this
@@ -261,15 +527,59 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run conformance "${TEST_CONFIG}"
 
+      # The CUJ phase is intent-selected, mirroring the runner's intent-aware
+      # `all`: training runs the Kubeflow TrainJob; inference would run the
+      # served DynamoGraphDeployment (phase_serve, DC3). For training, the
+      # TrainJob fires; for inference the serve step is currently disabled (see
+      # below), so verify/evidence cover the deployed stack either way.
+
+      # One refresh before the intent-selected CUJ — currently the training
+      # TrainJob (the inference serve step is disabled above). Gates on
+      # conformance success, matching the CUJ step it precedes; if serve is
+      # re-enabled it shares this same gate, so exactly one CUJ runs per intent.
+      - name: Refresh AWS credentials before CUJ
+        if: steps.conformance.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-UAT-AICR-CUJ
+
       - name: UAT - train (TrainJob)
         id: train
-        if: steps.conformance.outcome == 'success'
+        if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
         timeout-minutes: 25
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run train "${TEST_CONFIG}"
+
+      # TEMPORARILY DISABLED (step commented out below). The vLLM workload run is
+      # excluded from UAT for now because the Frontend component pulls the full
+      # ~12GB vllm-runtime image on a fresh (non-GPU) node and never finishes
+      # within the 30m readiness budget: the decode worker reuses the GPU node's
+      # cached image (`already present on machine`), but the Frontend lands on a
+      # different node and pulls from scratch, wedging in ContainerCreating until
+      # the phase times out. The inference STACK (dynamo + KAI scheduler + DRA
+      # driver) is still stood up and validated by prep/install/conformance/verify;
+      # only the served-workload run is skipped (the Serve summary row is a static
+      # `disabled`). Re-enable by uncommenting the step once the pull is addressed
+      # (pre-pull/image cache, or pin the Frontend to the GPU node so it reuses
+      # the cached image). Kept in lockstep with uat-gcp.yaml. Tracked by #1644.
+      #
+      # - name: UAT - serve (DynamoGraphDeployment + endpoint)
+      #   id: serve
+      #   if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
+      #   # Larger budget than train: a cold pull of the multi-GB vllm-runtime
+      #   # image + model download + engine warmup precedes the first served
+      #   # token (phase_serve's SERVE_READY_TIMEOUT_SECONDS is 30m).
+      #   timeout-minutes: 40
+      #   shell: bash
+      #   env:
+      #     AICR_BIN: ${{ github.workspace }}/aicr
+      #     RUN_ID: ${{ github.run_id }}
+      #   run: ./tests/uat/aws/run serve "${TEST_CONFIG}"
 
       - name: UAT - verify (evidence verify)
         id: verify
@@ -326,20 +636,31 @@ jobs:
             evidence-result.json
             evidence/pointer.yaml
             train-logs/**
+            serve-logs/**
           retention-days: 30
           if-no-files-found: ignore
 
       # Summary
       - name: Test Summary
         if: always()
+        env:
+          SUMMARY_RESERVATION: ${{ inputs.reservation }}
+          SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
+          SUMMARY_INTENT: ${{ inputs.intent }}
+          SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
         run: |
           {
             echo "## UAT Results (AWS)"
             echo ""
+            printf '**Reservation:** `%s` · **Intent:** `%s` · **Lifecycle:** `%s`\n' \
+              "$SUMMARY_RESERVATION" "$SUMMARY_INTENT" "$SUMMARY_LIFECYCLE"
+            printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
+            printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
             echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
             echo ""
             echo "| Phase | Status |"
             echo "|-------|--------|"
+            echo "| Pre-batch guard | ${{ steps.guard.outcome }} |"
             echo "| Capacity | ${{ steps.capacity.outcome }} |"
             echo "| Dependencies | ${{ steps.deps.outcome }} |"
             echo "| Config | ${{ steps.config.outcome }} |"
@@ -349,6 +670,7 @@ jobs:
             echo "| Install | ${{ steps.install.outcome }} |"
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
+            echo "| Serve | disabled (vLLM excluded from UAT) |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""
@@ -357,13 +679,17 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Cleanup (after artifacts so a failed cleanup does not lose evidence).
+      # Main cell only — release cells reference shared, permanent released image
+      # tags and must not delete them.
       - name: Cleanup validator image
-        if: always() && inputs.skip_tests != true
+        if: always() && inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete UAT-tagged validator images to avoid GHCR clutter
-          for phase in deployment performance conformance; do
+          # Delete UAT-tagged validator + snapshot-agent images to avoid GHCR
+          # clutter. aiperf-bench is included so the tag pushed by the build
+          # step above (#1636) does not leak.
+          for phase in deployment performance conformance aiperf-bench agent; do
             VERSION_ID=$(gh api \
               "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
               --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
@@ -373,22 +699,55 @@ jobs:
             fi
           done
 
-      # Re-assume the role immediately before teardown. The `Configure AWS
-      # credentials` step at the top of the job mints a 1-hour session (the
-      # action's default with no role-duration-seconds), but the UAT phases
-      # (prep + install + conformance + train + verify) can run the full job
-      # timeout before teardown, so by the time `Destroy Cluster` runs the
-      # original session token has expired. Passing that stale token into the
-      # actuator made every retry fail with ExpiredToken and leaked the GPU
-      # node. The `id-token: write` permission is granted for the whole job,
-      # so configure-aws-credentials can mint a fresh session here.
+      # Re-assume the role immediately before teardown. Every auth step mints a
+      # 1h session, but the UAT phases before teardown can run the full job
+      # timeout, so by the time `Destroy Cluster` runs the last phase's session
+      # has expired. Passing a stale token into the actuator makes every retry
+      # fail with ExpiredToken and leaks the GPU node. The `id-token: write`
+      # permission is granted for the whole job, so configure-aws-credentials can
+      # mint a fresh session here.
+      #
+      # Teardown gating (#1275, DC2): tear down for the nightly lifecycle
+      # (unless skip_delete) and for daytime-down (the explicit evening
+      # teardown of the held cluster — daytime-down provisions nothing, so it
+      # does not gate on steps.infra). NEVER for daytime-up, which holds the
+      # cluster for handoff. skip_delete is a nightly-only debugging escape and
+      # is ignored for daytime-down.
       - name: Refresh AWS credentials for teardown
-        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b  # v6.2.0
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-UAT-AICR-Teardown
+
+      # Pre-destroy LoadBalancer cleanup (#1617). A test cluster that creates a
+      # Service type=LoadBalancer makes the in-tree AWS cloud provider provision
+      # a classic ELB + a k8s-elb-* SG OUTSIDE Terraform state. Those are only
+      # reaped when the Service is deleted gracefully; an abrupt teardown leaves
+      # the orphaned SG as a VPC dependency, so `terraform destroy` fails at
+      # DeleteVpc with DependencyViolation and the VPC leaks. Delete the LB
+      # Services and wait for the cloud controller to reap the ELB + SG before
+      # destroy. Best-effort (the sweep inside Destroy Cluster is the backstop):
+      # the script refreshes its own kubeconfig, so this also covers daytime-down
+      # (which never ran Connect to Cluster).
+      - name: Delete LoadBalancer Services (pre-teardown)
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
+        # Bounded so a hung API server (or many LB Services) can never starve the
+        # always()-run Destroy Cluster of the job-timeout budget it needs — a
+        # cancelled teardown would re-leak the GPU node. The script's own
+        # per-svc/per-API-call timeouts stay well under this cap.
+        timeout-minutes: 8
+        shell: bash
+        run: ./.github/scripts/uat-aws-cleanup-lb.sh graceful "${DEPLOYMENT_ID}"
 
       # Teardown (retry up to 3 times). Runs last so a slow destroy
       # cannot block evidence upload or summary rendering.
@@ -406,15 +765,30 @@ jobs:
       # in an `if` condition does not trip `set -e`, so without the explicit
       # post-loop guard a genuine destroy failure (e.g. orphaned ENIs/SGs
       # blocking VPC deletion) would exit 0 and re-leak silently.
+      #
+      # Between failed attempts, sweep orphaned k8s-elb-* SGs and their classic
+      # ELBs (#1617). By the time a destroy attempt fails at DeleteVpc, Terraform
+      # has already deleted the EKS cluster/nodes, so only the out-of-band LB SG
+      # remains as a VPC dependency; force-deleting it lets the NEXT attempt's
+      # DeleteVpc succeed. The sweep is scoped to this cluster's ownership tag
+      # and is best-effort — the retry is the source of truth. Only sweep (and
+      # sleep) when another attempt will actually run: a sweep after the final
+      # attempt would delete the SG but leave the VPC (no retry follows), so it
+      # is skipped there.
       - name: Destroy Cluster
-        if: always() && steps.infra.outcome != 'skipped' && inputs.skip_delete != true
+        if: >-
+          always() && (
+            inputs.lifecycle == 'daytime-down' ||
+            (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped')
+          )
         shell: bash
         run: |
           set -euxo pipefail
           yq -i '.deployment.destroy = true' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
           destroyed=false
-          for attempt in 1 2 3; do
+          attempts=3
+          for attempt in $(seq 1 "${attempts}"); do
             echo "Destroy attempt ${attempt}..."
             if docker run \
               -e CONFIG_CONTENT="$(base64 < "$CLUSTER_CONFIG")" \
@@ -427,8 +801,15 @@ jobs:
               destroyed=true
               break
             fi
-            echo "Destroy attempt ${attempt} failed, retrying..."
-            sleep 30
+            # Only sweep + back off when another attempt follows: a sweep after
+            # the final attempt would strip the SG but never re-run DeleteVpc.
+            if [ "${attempt}" -lt "${attempts}" ]; then
+              echo "Destroy attempt ${attempt} failed; sweeping orphaned LB resources before retry..."
+              ./.github/scripts/uat-aws-cleanup-lb.sh sweep "${DEPLOYMENT_ID}" || true
+              sleep 30
+            else
+              echo "Destroy attempt ${attempt} failed (final attempt; no sweep/retry follows)"
+            fi
           done
           if [ "$destroyed" != true ]; then
             echo "::error::Cluster ${DEPLOYMENT_ID} destroy failed after 3 attempts; GPU node may be leaking"
@@ -450,4 +831,4 @@ jobs:
     uses: ./.github/workflows/evidence-ingest.yaml
     with:
       bundle_ref: ${{ needs.uat-aws.outputs.bundle_ref }}
-      recipe: eks-h100-training
+      recipe: eks-h100-${{ inputs.intent }}

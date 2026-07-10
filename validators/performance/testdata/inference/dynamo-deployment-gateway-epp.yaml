@@ -18,8 +18,11 @@
 # the local ZMQ-to-NATS relay; the Dynamo worker runtime relays vLLM KV-cache
 # events from the local ZMQ publisher onto the NATS-backed event plane.
 #
-# Pod scheduling (nodeSelector / tolerations / resourceClaims bindings) is
-# injected programmatically from Go (see applyInferenceWorkerScheduling in
+# Worker GPU wiring is MODE-DISPATCHED (capability-driven, issue #1327): DRA
+# ResourceClaimTemplate on nodes with usable full-GPU DRA, device-plugin
+# nvidia.com/gpu limits elsewhere.
+# Pod scheduling (nodeSelector / tolerations / GPU wiring) is injected
+# programmatically from Go (see applyInferenceWorkerScheduling in
 # inference_perf_constraint.go) so taint values with YAML-special characters
 # cannot break the template.
 
@@ -38,7 +41,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/epp-image:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/epp-image:1.2.1
               env:
                 - name: DYN_KV_CACHE_BLOCK_SIZE
                   value: "128"
@@ -93,7 +96,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
               args:
@@ -120,7 +123,7 @@ spec:
                       key: token
                       optional: true
             - name: sidecar-frontend
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               args:
                 - -m
                 - dynamo.frontend

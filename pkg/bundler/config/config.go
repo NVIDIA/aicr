@@ -128,9 +128,12 @@ func ValidateHTTPSURL(label, raw string) error {
 	// while leaving Scheme/Host intact, so a scheme+host-only check would
 	// otherwise accept "https://user:pass@host". Credentials have no place in
 	// a signing endpoint and would leak via config/flags/process listings.
-	if u.Scheme != "https" || u.Host == "" || u.User != nil {
+	// Hostname() (not Host) is load-bearing: "https://:6443" parses with a
+	// non-empty Host (":6443") but an empty hostname — a port with no host is
+	// never a usable endpoint and must fail closed.
+	if u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid %s %q: must be an absolute https:// URL without embedded credentials", label, raw))
+			fmt.Sprintf("invalid %s %q: must be an absolute https:// URL with a hostname and without embedded credentials", label, raw))
 	}
 	return nil
 }
@@ -240,6 +243,12 @@ type Config struct {
 	// targetRevision` triple resolves against the real artifact. See #1019.
 	bundleChartName string
 
+	// ociParentNamespace is the OCI registry + repository path with the chart-name
+	// segment stripped (e.g. "oci://ghcr.io/nvidia" for "oci://ghcr.io/nvidia/my-bundle:v1").
+	// Baked into the argocd-helm bundle's root values.yaml as the default repoURL.
+	// Empty when --output targets a local directory. See #1342.
+	ociParentNamespace string
+
 	// appName overrides the parent Argo Application's `metadata.name` for
 	// the argocd-helm and argocd deployers. Empty means each deployer
 	// applies its own default ("aicr-stack" / "nvidia-stack"). When two
@@ -256,6 +265,15 @@ type Config struct {
 	// that Helm/Argo CD/Flux cannot assess natively. Off by default so
 	// existing bundle output is unchanged; opt-in via --readiness-hooks. See #904.
 	readinessHooks bool
+
+	// bundlers is a positive filter on recipe component names (the
+	// `bundlers` query parameter on POST /v1/bundle): when non-empty, only
+	// the named components are bundled; every other enabled component is
+	// skipped as if disabled (its dependency edges are treated as satisfied
+	// externally). Empty means all enabled components. A name the recipe
+	// does not declare, or one the recipe/--set disabled, is rejected with
+	// ErrCodeInvalidRequest at bundle time. See #1531.
+	bundlers []string
 }
 
 // Getter methods for read-only access
@@ -459,6 +477,12 @@ func (c *Config) BundleChartName() string {
 	return c.bundleChartName
 }
 
+// OCIParentNamespace returns the OCI parent namespace baked into the
+// argocd-helm bundle's root values.yaml as the default repoURL. See #1342.
+func (c *Config) OCIParentNamespace() string {
+	return c.ociParentNamespace
+}
+
 // AppName returns the parent Application name override for the argocd-helm
 // and argocd deployers. Empty means "use the deployer's default". See #1011.
 func (c *Config) AppName() string {
@@ -470,6 +494,17 @@ func (c *Config) AppName() string {
 // opt-in via --readiness-hooks on the CLI. See #904.
 func (c *Config) ReadinessHooks() bool {
 	return c.readinessHooks
+}
+
+// Bundlers returns a copy of the positive component-name filter. Empty means
+// all enabled components are bundled. See #1531.
+func (c *Config) Bundlers() []string {
+	if c.bundlers == nil {
+		return nil
+	}
+	result := make([]string, len(c.bundlers))
+	copy(result, c.bundlers)
+	return result
 }
 
 // Validate checks if the Config has valid settings.
@@ -727,6 +762,15 @@ func WithBundleChartName(name string) Option {
 	}
 }
 
+// WithOCIParentNamespace sets the OCI parent namespace (registry + repo path
+// without the chart segment) baked into the argocd-helm bundle's values.yaml
+// as the default repoURL. Empty keeps repoURL as "" (local output). See #1342.
+func WithOCIParentNamespace(ns string) Option {
+	return func(c *Config) {
+		c.ociParentNamespace = ns
+	}
+}
+
 // WithAppName sets the parent Argo Application's `metadata.name` for the
 // argocd-helm and argocd deployers. Empty leaves the deployer's default
 // in place. Required by operators deploying multiple non-overlapping
@@ -747,6 +791,23 @@ func WithAppName(name string) Option {
 func WithReadinessHooks(enabled bool) Option {
 	return func(c *Config) {
 		c.readinessHooks = enabled
+	}
+}
+
+// WithBundlers sets the positive component-name filter: only recipe
+// components named here are bundled; every other enabled component is
+// skipped exactly like a disabled one, so its dependency edges are pruned
+// as satisfied externally. Empty (or nil) means all enabled components.
+// Names that the recipe does not declare, or that are disabled by the
+// recipe or --set, are rejected with ErrCodeInvalidRequest at bundle time
+// rather than silently ignored. See #1531.
+func WithBundlers(names []string) Option {
+	return func(c *Config) {
+		if len(names) == 0 {
+			return
+		}
+		c.bundlers = make([]string, len(names))
+		copy(c.bundlers, names)
 	}
 }
 

@@ -80,9 +80,11 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" -o recipe
 Create deployment bundles from a recipe:
 
 ```shell
-# Pipe recipe directly to bundle endpoint
+# Pipe recipe directly to bundle endpoint.
+# The POST body must be a fully-hydrated RecipeResult; piping GET /v1/recipe
+# output (as below) supplies one. Do not hand-author a partial body.
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
-  curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
+  curl -X POST "http://localhost:8080/v1/bundle" \
     -H "Content-Type: application/json" -d @- -o bundles.zip
 
 # Extract the bundles
@@ -119,10 +121,10 @@ Generate an optimized configuration recipe based on environment parameters.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `any` |
-| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000`, `any` |
+| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
-| `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`, `any` |
+| `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
 | `nodes` | integer | 0 | GPU node count (0 = any) |
 
@@ -223,10 +225,9 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 ```json
 {
   "apiVersion": "aicr.run/v1alpha2",
-  "kind": "Recipe",
+  "kind": "RecipeResult",
   "metadata": {
-    "version": "v1.0.0",
-    "created": "2026-01-11T10:30:00Z",
+    "version": "v0.14.0",
     "appliedOverlays": [
       "base",
       "eks",
@@ -256,26 +257,36 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
     "os": "any",
     "platform": "any"
   },
+  "constraints": [
+    {
+      "name": "GPU.driver.version",
+      "value": "580.82.07"
+    },
+    {
+      "name": "GPU.driver.cudaVersion",
+      "value": "13.1"
+    }
+  ],
   "componentRefs": [
     {
       "name": "gpu-operator",
-      "version": "v25.3.3",
-      "order": 1,
-      "repository": "https://helm.ngc.nvidia.com/nvidia"
+      "type": "Helm",
+      "chart": "gpu-operator",
+      "source": "https://helm.ngc.nvidia.com/nvidia",
+      "version": "v25.3.3"
     },
     {
       "name": "network-operator",
-      "version": "v25.4.0",
-      "order": 2,
-      "repository": "https://helm.ngc.nvidia.com/nvidia"
+      "type": "Helm",
+      "chart": "network-operator",
+      "source": "https://helm.ngc.nvidia.com/nvidia",
+      "version": "v25.4.0"
     }
   ],
-  "constraints": {
-    "driver": {
-      "version": "580.82.07",
-      "cudaVersion": "13.1"
-    }
-  }
+  "deploymentOrder": [
+    "gpu-operator",
+    "network-operator"
+  ]
 }
 ```
 
@@ -315,6 +326,39 @@ curl -s "http://localhost:8080/v1/query?service=eks&accelerator=h100&selector=co
 
 ---
 
+### POST /v1/query
+
+Alternative to `GET /v1/query` that accepts the criteria and selector in the request body. The body is a `QueryRequest` with a `criteria` object (same fields as the `RecipeCriteria` spec) and a `selector` string.
+
+**Content Types:**
+- `application/json` - JSON format
+- `application/x-yaml` - YAML format
+
+**Request Body:**
+
+```yaml
+criteria:
+  service: eks
+  accelerator: h100
+  intent: training
+selector: "components.gpu-operator.values.driver.version"
+```
+
+**Examples:**
+
+```shell
+curl -X POST "http://localhost:8080/v1/query" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "criteria": {"service": "eks", "accelerator": "h100", "intent": "training"},
+    "selector": "components.gpu-operator.values.driver.version"
+  }'
+```
+
+The response format matches `GET /v1/query`: scalar values are returned as plain JSON values; maps and lists are returned as JSON objects/arrays.
+
+---
+
 ### POST /v1/bundle
 
 Generate deployment bundles from a recipe.
@@ -323,15 +367,15 @@ Generate deployment bundles from a recipe.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `bundlers` | string | (all) | Comma-delimited list of bundler types to execute |
-| `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. |
+| `bundlers` | string | (all) | Comma-delimited list of recipe component names to bundle (e.g. `gpu-operator,network-operator`). Whitespace around names is trimmed. Components not listed are skipped as if disabled (their dependency edges are treated as satisfied externally). A name the recipe does not declare, or one that is disabled (by the recipe or a `set` `enabled=false` override), is rejected with HTTP 400. |
+| `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. The reserved prefix `deployer:` carries Argo CD Application options for `deployer=argocd` and `deployer=argocd-helm` (`namePrefix`, `destinationServer`, `project`, `cascadeDelete`), e.g. `set=deployer:namePrefix=tenant-a-`. Unknown `deployer:` keys — or the prefix with any other deployer — are rejected with HTTP 400. See the CLI reference's [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) for full semantics. |
 | `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, and `deployer=helmfile`. |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
-| `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH` and registry credentials configured for any private upstream repos (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` for HTTP(S); docker config for OCI). If prerequisites are missing the request fails with HTTP 500 and a structured error code (`UNAVAILABLE` for missing helm, `UNAUTHORIZED` for credentials). |
+| `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH` and registry credentials configured for any private upstream repos (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` for HTTP(S); docker config for OCI). If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm, `UNAUTHORIZED` / HTTP 401 for credentials). |
 | `deployer` | string | helm | Deployment method: `helm`, `argocd`, `argocd-helm`, `flux`, or `helmfile` |
 | `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=flux`; ignored by `deployer=argocd-helm`) |
 | `app-name` | string | | Parent Argo Application name (default: `aicr-stack` for `deployer=argocd-helm`, `nvidia-stack` for `deployer=argocd`). Must be a DNS-1123 subdomain. Required when deploying multiple non-overlapping AICR bundles to the same Argo CD namespace so the parent Applications do not collide. For `deployer=argocd-helm`, the value is the chart default and can still be overridden at install time via `helm install --set appName=...`. Rejected with HTTP 400 on other deployers. |
@@ -342,7 +386,7 @@ The request body is the recipe (RecipeResult) directly. No wrapper object needed
 
 #### Components
 
-Bundler names correspond to component names in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). Any component registered there can be passed as a bundler. Current components:
+These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) — the names the `bundlers` query parameter accepts (a request may only name components the recipe declares). The registry is the authoritative source — see the [component catalog](component-catalog.md) for the full, current list with detailed descriptions. The table below is illustrative of commonly used components:
 
 | Component | Description |
 |-----------|-------------|
@@ -352,8 +396,11 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
 | `cert-manager` | TLS certificate management |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
+| `gatekeeper` | OPA Gatekeeper policy controller |
 | `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
+| `gpu-operator-ocp` | GPU Operator variant for OpenShift (OCP) |
+| `gpu-operator-ocp-olm` | GPU Operator for OpenShift via Operator Lifecycle Manager (OLM) |
 | `grove` | Dynamo pod lifecycle management |
 | `k8s-ephemeral-storage-metrics` | Ephemeral storage usage metrics |
 | `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
@@ -362,7 +409,11 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
+| `network-operator-ocp` | Network Operator variant for OpenShift (OCP) |
+| `network-operator-ocp-olm` | Network Operator for OpenShift via Operator Lifecycle Manager (OLM) |
 | `nfd` | Node Feature Discovery — labels nodes with hardware features; publishes per-node `NodeResourceTopology` CRDs on production GPU recipes |
+| `nfd-ocp` | Node Feature Discovery variant for OpenShift (OCP) |
+| `nfd-ocp-olm` | Node Feature Discovery for OpenShift via Operator Lifecycle Manager (OLM) |
 | `nodewright-customizations` | Environment-specific node tuning profiles |
 | `nodewright-operator` | OS-level node tuning and kernel configuration |
 | `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
@@ -375,52 +426,68 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 
 **Examples:**
 
+> **Note:** The POST body must be a **fully-hydrated** `RecipeResult` — the
+> server adopts the body as-is and does **not** hydrate registry defaults, so a
+> hand-authored partial body (missing `namespace`, `valuesFile`, `overrides`,
+> `dependencyRefs`) yields empty values and namespaces in the generated bundle.
+> Obtain a complete body from `aicr recipe ... --format json --output -` (the
+> CLI defaults to YAML, but `POST /v1/bundle` JSON-decodes its body) or `GET /v1/recipe`
+> and pass it unchanged. The inline bodies below are **elided** for brevity (only
+> a few component fields shown) — use a generated `RecipeResult`, not these
+> literals.
+>
+> To bundle a subset of the recipe's components, use the `bundlers` query
+> parameter (e.g. `?bundlers=gpu-operator,network-operator`) rather than
+> hand-trimming `componentRefs` — trimming the body silently drops required
+> dependencies and breaks deployers like Helmfile on dangling
+> `dependencyRefs`. The filter prunes those edges safely (a filtered-out
+> dependency is assumed satisfied externally) and rejects unknown or disabled
+> component names with HTTP 400.
+>
+> Enabled Helm refs must reference a deployable primary: an external chart
+> (a `source` repository plus an effective `version` — empty, whitespace-only,
+> or a bare `v` is rejected; the chart name falls back to the component name
+> when `chart` is unset, but a `chart` without a `source` is rejected) or
+> local primary `manifestFiles`. `chart`, `source`, and `version` values
+> carrying surrounding whitespace are rejected — deployers consume them
+> verbatim.
+> Incoherent refs are rejected with HTTP 400 naming the component.
+
 ```shell
-# Basic: pipe recipe to bundle (GPU Operator only)
+# Basic: pipe recipe to bundle
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
-  curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
+  curl -X POST "http://localhost:8080/v1/bundle" \
     -H "Content-Type: application/json" -d @- -o bundles.zip
 
 # Advanced: with value overrides and Argo CD deployer
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
-  curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator&deployer=argocd&repo=https://github.com/my-org/my-gitops-repo.git&set=gpuoperator:gds.enabled=true" \
+  curl -X POST "http://localhost:8080/v1/bundle?deployer=argocd&repo=https://github.com/my-org/my-gitops-repo.git&set=gpuoperator:gds.enabled=true" \
     -H "Content-Type: application/json" -d @- -o bundles.zip
 
 # With node scheduling for system and GPU nodes
-curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator&system-node-selector=nodeGroup=system&system-node-toleration=dedicated=system:NoSchedule&accelerated-node-selector=nvidia.com/gpu.present=true&accelerated-node-toleration=nvidia.com/gpu=present:NoSchedule" \
+# (recipe.json must be a fully-hydrated RecipeResult, e.g. from GET /v1/recipe)
+curl -X POST "http://localhost:8080/v1/bundle?system-node-selector=nodeGroup=system&system-node-toleration=dedicated=system:NoSchedule&accelerated-node-selector=nvidia.com/gpu.present=true&accelerated-node-toleration=nvidia.com/gpu=present:NoSchedule" \
   -H "Content-Type: application/json" \
   -d @recipe.json \
   -o bundles.zip
 
-# Generate GPU Operator bundle from saved recipe
-curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
+# Generate bundles from a saved (fully-hydrated) recipe
+curl -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" \
   -d @recipe.json \
   -o bundles.zip
 
-# Generate all available bundles (no bundlers param)
+# Elided literal body (NOT complete — use a generated RecipeResult instead)
 curl -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" \
   -d '{
     "apiVersion": "aicr.run/v1alpha2",
-    "kind": "Recipe",
+    "kind": "RecipeResult",
     "componentRefs": [
-      {"name": "gpu-operator", "version": "v26.3.2", "type": "helm"},
-      {"name": "network-operator", "version": "v26.1.1", "type": "helm"}
-    ]
-  }' \
-  -o bundles.zip
-
-# Generate multiple specific bundles
-curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-operator" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "apiVersion": "aicr.run/v1alpha2",
-    "kind": "Recipe",
-    "componentRefs": [
-      {"name": "gpu-operator", "version": "v26.3.2", "type": "helm"},
-      {"name": "network-operator", "version": "v26.1.1", "type": "helm"}
-    ]
+      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.3.2", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
+      {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.1.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
+    ],
+    "deploymentOrder": ["gpu-operator", "network-operator"]
   }' \
   -o bundles.zip
 ```
@@ -439,19 +506,24 @@ curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-oper
 
 ```
 bundles.zip
-├── gpu-operator/
-│   ├── values.yaml              # Helm chart values
-│   ├── scripts/
-│   │   ├── install.sh           # Installation script
-│   │   └── uninstall.sh         # Cleanup script
-│   ├── README.md                # Deployment instructions
-│   └── checksums.txt            # SHA256 checksums
-└── network-operator/
+├── deploy.sh                    # root automation script (executable)
+├── README.md                    # root deployment guide
+├── checksums.txt                # SHA256 checksums (always set for /v1/bundle)
+├── recipe.yaml                  # canonical post-resolution recipe (helm deployer)
+├── 001-<component>/             # per-component folder (NNN-prefixed)
+│   ├── install.sh               # component install script
+│   ├── values.yaml              # static Helm values
+│   ├── cluster-values.yaml      # per-cluster dynamic values
+│   └── upstream.env             # CHART/REPO/VERSION (upstream-helm only)
+└── 002-<component>/
+    ├── install.sh
     ├── values.yaml
-    ├── manifests/
-    │   └── nfd-network-rule.yaml   # NodeFeatureRule for Mellanox NICs
-    └── ...
+    └── cluster-values.yaml
 ```
+
+Checksums are root-level only; component folders carry `install.sh` at their
+root (no `scripts/` subdirectory), and no `uninstall.sh`/`undeploy.sh` is
+generated.
 
 ---
 
@@ -525,24 +597,25 @@ echo "Recipe components:"
 jq -r '.componentRefs[] | "  - \(.name): \(.version)"' recipe.json
 
 # Step 2: Generate bundles from recipe (pipe directly)
+# recipe.json is the fully-hydrated RecipeResult fetched in Step 1.
 echo "Generating bundles..."
-curl -s -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
+curl -s -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" \
   -d @recipe.json \
   -o bundles.zip
 
 # Alternative: one-liner without intermediate file
 # curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
-#   curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
+#   curl -X POST "http://localhost:8080/v1/bundle" \
 #     -H "Content-Type: application/json" -d @- -o bundles.zip
 
 # Step 3: Extract and verify
 echo "Extracting bundles..."
 unzip -q bundles.zip -d ./deployment
 
-# Verify checksums
+# Verify checksums (checksums.txt is at the bundle root, not per-component)
 echo "Verifying checksums..."
-cd deployment/gpu-operator
+cd deployment
 sha256sum -c checksums.txt
 
 # Step 4: Deploy (example)
@@ -570,10 +643,18 @@ ls -la
 | Code | HTTP Status | Description | Retryable |
 |------|-------------|-------------|-----------|
 | `INVALID_REQUEST` | 400 | Invalid query parameters, request body, or disallowed criteria value | No |
+| `UNAUTHORIZED` | 401 | Authentication or authorization failure | No |
+| `NOT_FOUND` | 404 | Selector path not found in the resolved configuration | No |
 | `METHOD_NOT_ALLOWED` | 405 | Wrong HTTP method | No |
-| `NO_MATCHING_RULE` | 404 | No configuration found | No |
+| `CONFLICT` | 409 | Resource state conflict (e.g., already exists or version mismatch) | No |
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many requests | Yes |
-| `INTERNAL_ERROR` | 500 | Server error | Yes |
+| `INTERNAL` | 500 | Server error | Yes |
+| `SERVICE_UNAVAILABLE` | 503 | Server temporarily unavailable | Yes |
+| `TIMEOUT` | 504 | Operation exceeded its time limit | Yes |
+
+> `INVALID_REQUEST` is not always `400`: `POST /v1/query` and `POST /v1/recipe`
+> return it with HTTP **413 Request Entity Too Large** when the request body
+> exceeds the server's body-size limit (`MaxRecipePOSTBytes`).
 
 ### Handling Rate Limits
 
@@ -601,7 +682,7 @@ fi
 
 ## Rate Limiting
 
-- **Limit**: 100 requests per second per IP
+- **Limit**: 100 requests per second (a single process-global token bucket shared across all clients, not per-IP)
 - **Burst**: 200 requests
 - **Headers**: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
 - **429 Response**: Includes `Retry-After` header
@@ -689,10 +770,9 @@ recipe = resp.json()
 
 print(f"Recipe has {len(recipe['componentRefs'])} components")
 
-# Generate bundles — recipe is the request body, bundlers are query params
+# Generate bundles — the (fully-hydrated) recipe is the request body.
 resp = requests.post(
     f"{BASE_URL}/v1/bundle",
-    params={"bundlers": "gpu-operator"},
     json=recipe,
 )
 resp.raise_for_status()
@@ -757,8 +837,8 @@ async function main() {
     
     console.log(`Recipe has ${recipe.componentRefs.length} components`);
     
-    // Generate bundles — recipe is the request body, bundlers are query params
-    const bundleResp = await fetch(`${BASE_URL}/v1/bundle?bundlers=gpu-operator`, {
+    // Generate bundles — the (fully-hydrated) recipe is the request body.
+    const bundleResp = await fetch(`${BASE_URL}/v1/bundle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(recipe),
@@ -823,16 +903,17 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 
 **"Invalid accelerator type" error:**
 ```shell
-# Use valid values: h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any
+# Use valid values: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 
 **"Recipe is required" error:**
 ```shell
-# Ensure recipe is in request body
-curl -X POST "http://localhost:8080/v1/bundle" \
-  -H "Content-Type: application/json" \
-  -d '{"recipe": {...}}'  # recipe must not be null
+# The body IS the RecipeResult itself — not wrapped in a {"recipe": ...} field.
+# Pass a fully-hydrated RecipeResult (e.g. from GET /v1/recipe) directly:
+curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
+  curl -X POST "http://localhost:8080/v1/bundle" \
+    -H "Content-Type: application/json" -d @- -o bundles.zip
 ```
 
 **Empty zip file:**

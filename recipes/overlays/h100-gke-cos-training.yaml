@@ -96,17 +96,26 @@ spec:
       # https://github.com/NVIDIA/aicr/issues/1256.
       constraints:
         # Fixed absolute floor calibrated on a3-megagpu-8g (8x H100,
-        # 8x GPUDirect TCPXO NICs). This recipe is SKU-agnostic — it
-        # matches all GKE/H100 instance types, including small shapes
-        # (e.g. a3-highgpu-1g: 1 GPU, 1 gVNIC ~100 Gbps) whose pure
-        # inter-node NIC path measures single-digit GB/s and cannot
-        # clear this floor. See #1256. The proper fix is either a
-        # weakest-in-scope liveness floor (option a) or a per-fabric
-        # criteria dimension (option b); both need measured numbers
-        # from the small SKUs that we don't have yet. Keeping the
-        # calibrated value here until then.
+        # 8x GPUDirect TCPXO NICs). >= 300 is grounded in GKE's own
+        # measured all-reduce busbw on this fabric: a3-megagpu-8g over
+        # TCPXO sustains ~338-340 GB/s busbw (validated on 2 nodes /
+        # 16 GPUs — see the committed h100-gke-cos-training evidence run
+        # and docs/integrator/gke-tcpxo-networking.md). With the
+        # validator's 10% tolerance a >= 300 floor has an effective cutoff
+        # of 270 GB/s, leaving ample headroom over that measurement. NCCL
+        # busbw is fabric/transport dependent (GKE TCPXO vs EKS EFA), so
+        # this is NOT derived from the EKS floor — it independently lands
+        # at the same >= 300 value because both fabrics clear it.
+        # This recipe is SKU-agnostic — it matches all GKE/H100 instance
+        # types, including small shapes (e.g. a3-highgpu-1g: 1 GPU, 1 gVNIC
+        # ~100 Gbps) whose pure inter-node NIC path measures single-digit
+        # GB/s and cannot clear this floor. See #1256. The proper fix is
+        # either a weakest-in-scope liveness floor (option a) or a per-fabric
+        # criteria dimension (option b); both need measured numbers from the
+        # small SKUs that we don't have yet. Keeping the calibrated value
+        # here until then.
         - name: nccl-all-reduce-bw
-          value: ">= 250"
+          value: ">= 300"
     conformance:
       checks:
         - platform-health

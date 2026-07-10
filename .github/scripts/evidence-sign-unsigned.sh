@@ -2,33 +2,42 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Discover committed-but-unsigned evidence pointers and sign each in place.
-# Consumed by .github/workflows/evidence-publish.yaml (the fork-based
-# signing leg): a contributor pushes an unsigned bundle and commits the
-# pointer locally (`aicr ... --no-sign`), then this signs the bundle each
-# pointer references using the runner's ambient OIDC token and patches the
-# pointer's signer block in place.
+# Discover committed-but-unsigned evidence pointers, sign each, and relocate
+# it to its canonical per-source path. Consumed by
+# .github/workflows/evidence-publish.yaml (the fork-based signing leg).
 #
-# A pointer is "unsigned" iff its first attestation has no `signer` block —
-# the state `--no-sign` produces. Already-signed pointers are skipped, so
-# re-running is idempotent and safe.
+# The two-phase publish flow (#1530): a contributor pushes an unsigned bundle
+# and commits the pointer FLAT at recipes/evidence/<recipe>.yaml
+# (`aicr ... --no-sign`). A flat path is the only committable state for an
+# unsigned pointer — the nested <source> path segment derives from the signer,
+# which a `--no-sign` pointer does not have. This script then:
+#
+#   1. signs the bundle each flat pointer references with the runner's ambient
+#      OIDC token (patching the pointer's signer block in place), and
+#   2. relocates the now-signed pointer to its canonical per-source path
+#      recipes/evidence/<recipe>/<source>/<digest>.yaml — the layout the
+#      per-source contract gate requires.
+#
+# Both steps run inside `aicr evidence sign --relocate`, so the SourceSlug
+# derivation stays in one place (Go) rather than being reimplemented here.
+# `--relocate` is idempotent: an already-signed flat pointer (a prior run
+# signed it but the relocation didn't land) is moved without re-signing, so
+# re-running is safe.
+#
+# Pointers already relocated under <recipe>/<source>/ are not scanned (the
+# glob is flat), so they are never re-processed. allowlist.yaml is skipped.
 #
 # Required env:
 #   AICR   path to the aicr binary (built from a trusted source)
-#
-# Requires the mikefarah `yq` (v4) — the same `yq` the rest of the repo's
-# scripts assume. The kislyuk/python `yq` has incompatible syntax and is not
-# supported. On GitHub-hosted runners mikefarah yq is preinstalled.
 #
 # Any extra arguments are forwarded to `aicr evidence sign` (e.g.
 # --plain-http / --insecure-tls for local-registry tests).
 #
 # Outputs (and, when set, appends to $GITHUB_OUTPUT):
-#   skipped=<n>  pointers already signed (no-op)
-#   signed=<n>   pointers signed this run
-#   failed=<n>   pointers whose signing (or parsing) failed
+#   signed=<n>   flat pointers signed and/or relocated this run
+#   failed=<n>   flat pointers whose signing/relocation failed
 #
-# Exit status is non-zero when any signing failed, so the workflow surfaces
+# Exit status is non-zero when any pointer failed, so the workflow surfaces
 # the cause (commonly a private fork registry returning HTTP 403 on the
 # pre-sign pull — make the aicr-evidence package public).
 
@@ -40,49 +49,38 @@ extra_args=("$@")
 
 signed=0
 failed=0
-skipped=0
 
 shopt -s nullglob
+# The evidence root is also defined in Go as verifier.EvidenceDirName
+# ("recipes/evidence"); a shell script can't import the constant, so keep this
+# glob in sync if that path ever changes.
 for pointer in recipes/evidence/*.yaml; do
-  # signer absent => unsigned (the --no-sign state). A signed-without-Rekor
-  # pointer still has a signer block, so it is correctly skipped.
-  #
-  # Fail closed on a yq error: a missing yq or malformed YAML must NOT look
-  # like an unsigned pointer (which would resign an already-signed bundle and
-  # break rerun idempotence). Treat a parse failure as a hard failure.
-  if ! signer=$(yq eval '.attestations[0].signer // "null"' "$pointer" 2>/dev/null); then
-    echo "::error::failed to parse ${pointer} with yq — invalid YAML, or mikefarah yq (v4) not installed"
-    failed=$((failed + 1))
-    continue
-  fi
-  if [[ "$signer" != "null" ]]; then
-    echo "skip (already signed): ${pointer}"
-    skipped=$((skipped + 1))
+  # allowlist.yaml is not a pointer; never feed it to `evidence sign`.
+  if [[ "${pointer##*/}" == "allowlist.yaml" ]]; then
     continue
   fi
 
-  echo "signing unsigned pointer: ${pointer}"
+  echo "signing + relocating flat pending pointer: ${pointer}"
+  # --relocate: sign in place, then move to the canonical per-source path.
   # --yes: never pause for the interactive identity-disclosure prompt in CI
   # (ambient OIDC does not prompt, but this is belt-and-suspenders).
-  if "$AICR" evidence sign "$pointer" --yes "${extra_args[@]}"; then
+  if "$AICR" evidence sign "$pointer" --relocate --yes "${extra_args[@]}"; then
     signed=$((signed + 1))
   else
-    echo "::error::failed to sign ${pointer} — is the bundle's registry package public? (a private fork package returns HTTP 403 on the pre-sign pull)"
+    echo "::error::failed to sign/relocate ${pointer} — is the bundle's registry package public? (a private fork package returns HTTP 403 on the pre-sign pull)"
     failed=$((failed + 1))
   fi
 done
 
-echo "skipped=${skipped}"
 echo "signed=${signed}"
 echo "failed=${failed}"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
-    echo "skipped=${skipped}"
     echo "signed=${signed}"
     echo "failed=${failed}"
   } >> "$GITHUB_OUTPUT"
 fi
 
-# Fail closed if any pointer could not be signed.
+# Fail closed if any pointer could not be signed/relocated.
 [[ "$failed" -eq 0 ]]

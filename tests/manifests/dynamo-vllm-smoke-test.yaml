@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# GPUs are requested as scalar nvidia.com/gpu limits — the device-plugin
+# production default (#1327).
 
 # Dynamo vLLM smoke test — minimal aggregated inference deployment.
 # Deploys a Frontend (API gateway) and a single vLLM decode worker
@@ -32,20 +35,6 @@
 #     -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello!"}],"max_tokens":30,"stream":false}'
 
 ---
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: vllm-smoke-gpu-claim
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
-
----
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
 metadata:
@@ -60,7 +49,7 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               env:
                 - name: SERVED_MODEL_NAME
                   value: Qwen/Qwen3-0.6B
@@ -76,12 +65,9 @@ spec:
             - key: nvidia.com/gpu
               operator: Exists
               effect: NoSchedule
-          resourceClaims:
-            - name: gpu
-              resourceClaimName: vllm-smoke-gpu-claim
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
               args:
@@ -90,5 +76,5 @@ spec:
                 - --kv-events-config
                 - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
               resources:
-                claims:
-                  - name: gpu
+                limits:
+                  nvidia.com/gpu: 1

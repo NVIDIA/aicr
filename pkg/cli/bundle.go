@@ -20,7 +20,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -117,6 +116,12 @@ type bundleCmdOptions struct {
 	// deployer's "aicr-bundle" default is used when this is empty. See #1019.
 	bundleChartName string
 
+	// ociParentNamespace is the OCI registry + repository path with the
+	// chart segment stripped; used as the default repoURL baked into the
+	// argocd-helm bundle's values.yaml. Derived from ociRef when --output
+	// is an OCI reference; empty for local-directory output. See #1342.
+	ociParentNamespace string
+
 	// appName overrides the parent Argo Application's metadata.name. Empty
 	// means each deployer applies its own default ("aicr-stack" for
 	// argocd-helm, "nvidia-stack" for argocd). See #1011.
@@ -207,6 +212,9 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		// resolves against an artifact that doesn't exist in the registry
 		// when the user picks a non-default name. See #1019.
 		opts.bundleChartName = opts.ociRef.ChartName()
+		// Derive the parent namespace (strip chart segment) so the argocd-helm
+		// deployer can bake it into values.yaml as the default repoURL. See #1342.
+		opts.ociParentNamespace = opts.ociRef.ParentNamespace()
 	} else {
 		// Resolve local output path to absolute to ensure consistent behavior
 		// regardless of how the binary is invoked.
@@ -549,6 +557,9 @@ Package with explicit tag (overrides CLI version):
 	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
 	Use the special 'enabled' key to include/exclude components at bundle time
 	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver).
+	Use the reserved 'deployer' prefix with --deployer argocd/argocd-helm to
+	set Argo Application options: namePrefix, destinationServer, project,
+	cascadeDelete (e.g., --set deployer:namePrefix=tenant-a-).
 	--set is scalar-only; use --set-json / --set-file for list or object values.`,
 				Category: catDeployment,
 			},
@@ -837,6 +848,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithOCISourceName(opts.ociSourceName),
 		config.WithFluxNamespace(opts.fluxNamespace),
 		config.WithBundleChartName(opts.bundleChartName),
+		config.WithOCIParentNamespace(opts.ociParentNamespace),
 		config.WithAppName(opts.appName),
 	)
 
@@ -1040,21 +1052,12 @@ func printArgoCDHelmOCIInstructions(w io.Writer, ref *oci.Reference) {
 
 	chartRef := fmt.Sprintf("%s%s/%s:%s", oci.URIScheme, ref.Registry, ref.Repository, ref.Tag)
 
-	// Parent namespace: the registry + repository path with the chart
-	// (last) segment stripped. path.Dir returns "." for a single-segment
-	// repo (e.g., "aicr-bundle"); in that case the parent is just the
-	// registry, with no path component.
-	parentPath := path.Dir(ref.Repository)
-	var repoURL string
-	if parentPath == "." || parentPath == "/" {
-		repoURL = oci.URIScheme + ref.Registry
-	} else {
-		repoURL = oci.URIScheme + ref.Registry + "/" + parentPath
-	}
+	// Delegate to canonical derivation so baked repoURL and printed hint always match. See #1342.
+	repoURL := ref.ParentNamespace()
 
 	fmt.Fprintf(w, "\nargocd-helm bundle pushed: %s\n", chartRef)
 	fmt.Fprintln(w, "\nTo install:")
 	fmt.Fprintf(w, "  helm install <release> %s \\\n", chartRef)
-	fmt.Fprintln(w, "    --namespace argocd \\")
-	fmt.Fprintf(w, "    --set repoURL=%s\n", repoURL)
+	fmt.Fprintln(w, "    --namespace argocd")
+	fmt.Fprintf(w, "    # repoURL defaults to %s (override with --set repoURL=oci://mirror if mirroring)\n", repoURL)
 }

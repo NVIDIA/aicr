@@ -11,15 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+#
 # Dynamo vLLM inference workload for ai_service_metrics evidence collection.
 # Deploys a DynamoGraphDeployment with vLLM backend (Qwen/Qwen3-0.6B).
-# Uses DRA ResourceClaim for GPU allocation (required on DRA-only clusters).
+# GPUs are requested as scalar nvidia.com/gpu limits — the device-plugin
+# production default (#1327).
 #
 # Prerequisites:
 #   - KAI Scheduler installed (provides default-parent-queue)
 #   - Dynamo platform deployed (dynamo-platform with bundled CRDs)
-#   - DRA driver installed (gpu.nvidia.com DeviceClass)
+#   - NVIDIA device plugin installed (nvidia.com/gpu resource)
 #
 # Usage:
 #   kubectl apply -f dynamo-vllm-agg.yaml
@@ -55,25 +56,6 @@ metadata:
   name: dynamo-workload
 
 ---
-# DRA ResourceClaim for GPU allocation (required on DRA-only clusters).
-# The kai.scheduler/queue label is required for KAI scheduler to manage the claim.
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: vllm-gpu-claim
-  namespace: dynamo-workload
-  labels:
-    kai.scheduler/queue: dynamo
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
-
----
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
 metadata:
@@ -100,7 +82,7 @@ spec:
               effect: NoExecute
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               env:
                 - name: SERVED_MODEL_NAME
                   value: Qwen/Qwen3-0.6B
@@ -126,12 +108,9 @@ spec:
             - key: nvidia.com/gpu
               operator: Exists
               effect: NoSchedule
-          resourceClaims:
-            - name: gpu
-              resourceClaimName: vllm-gpu-claim
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.0
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
               args:
@@ -140,5 +119,5 @@ spec:
                 - --kv-events-config
                 - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
               resources:
-                claims:
-                  - name: gpu
+                limits:
+                  nvidia.com/gpu: 1

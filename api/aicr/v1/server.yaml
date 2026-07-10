@@ -112,7 +112,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
             default: any
         - name: accelerator
           in: query
@@ -120,7 +120,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -128,7 +128,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -141,10 +141,14 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
             default: any
         - name: platform
           in: query
@@ -210,13 +214,15 @@ paths:
                       os: any
                     componentRefs:
                       - name: gpu-operator
+                        type: Helm
                         version: v25.3.3
-                        order: 1
-                        repository: https://helm.ngc.nvidia.com/nvidia
+                        source: https://helm.ngc.nvidia.com/nvidia
+                        chart: gpu-operator
                       - name: network-operator
+                        type: Helm
                         version: v25.4.0
-                        order: 2
-                        repository: https://helm.ngc.nvidia.com/nvidia
+                        source: https://helm.ngc.nvidia.com/nvidia
+                        chart: network-operator
                     constraints:
                       driver:
                         version: "580.82.07"
@@ -479,7 +485,7 @@ paths:
           description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
+            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
             default: any
         - name: accelerator
           in: query
@@ -487,7 +493,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: gpu
           in: query
@@ -495,7 +501,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
             default: any
         - name: intent
           in: query
@@ -508,10 +514,14 @@ paths:
         - name: os
           in: query
           required: false
-          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          description: >-
+            GPU node operating system. If omitted, treated as "any" (wildcard) and
+            OS-agnostic recipe is returned. Some service+accelerator combinations
+            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
+            returns 400.
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
             default: any
         - name: platform
           in: query
@@ -732,8 +742,13 @@ paths:
           in: query
           required: false
           description: >
-            Comma-delimited list of bundler types to execute.
-            If not specified, all registered bundlers are executed.
+            Comma-delimited list of recipe component names to bundle.
+            If not specified, all enabled components are bundled.
+            Components not listed are skipped as if disabled (their
+            dependency edges are treated as satisfied externally).
+            A name the recipe does not declare, or one that is disabled
+            (by the recipe or by a "set" parameter enabled=false
+            override), is rejected with HTTP 400.
           schema:
             type: string
           examples:
@@ -749,6 +764,12 @@ paths:
           description: >
             Override values in generated bundle files (format: bundler:path.to.field=value).
             Can be repeated for multiple overrides.
+
+            The reserved prefix "deployer:" carries Argo CD Application
+            options for the argocd and argocd-helm deployers
+            (namePrefix, destinationServer, project, cascadeDelete),
+            e.g. deployer:namePrefix=tenant-a-. Unknown deployer keys
+            are rejected.
           schema:
             type: array
             items:
@@ -939,9 +960,10 @@ paths:
                   kind: Recipe
                   componentRefs:
                     - name: gpu-operator
+                      type: Helm
                       version: v25.3.3
-                      type: helm
-                      repository: https://helm.ngc.nvidia.com/nvidia
+                      source: https://helm.ngc.nvidia.com/nvidia
+                      chart: gpu-operator
               fullRecipe:
                 summary: Full recipe with metadata
                 value:
@@ -971,9 +993,12 @@ paths:
                     os: any
                   componentRefs:
                     - name: gpu-operator
+                      type: Helm
                       version: v25.3.3
-                      order: 1
-                      repository: https://helm.ngc.nvidia.com/nvidia
+                      source: https://helm.ngc.nvidia.com/nvidia
+                      chart: gpu-operator
+                  deploymentOrder:
+                    - gpu-operator
       responses:
         "200":
           description: Zip archive containing generated bundles
@@ -1006,7 +1031,7 @@ paths:
                 type: string
                 format: binary
         "400":
-          description: Invalid request (invalid recipe or bundler type)
+          description: Invalid request (invalid recipe or bundlers filter)
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestIdResponse"
@@ -1023,15 +1048,19 @@ paths:
                     requestId: "550e8400-e29b-41d4-a716-446655440000"
                     timestamp: "2025-01-15T10:30:00Z"
                     retryable: false
-                invalidBundler:
-                  summary: Invalid bundler type
+                unknownBundler:
+                  summary: Bundlers filter names an undeclared component
                   value:
                     code: INVALID_REQUEST
-                    message: "Invalid bundler type"
-                    details:
-                      bundler: "invalid-bundler"
-                      error: "unsupported bundle type: invalid-bundler"
-                      valid: ["gpu-operator", "network-operator", "nodewright-operator", "nvsentinel", "cert-manager", "nvidia-dra-driver-gpu"]
+                    message: 'unknown component "invalid-bundler" in bundlers filter; recipe declares: gpu-operator, network-operator, cert-manager'
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
+                disabledBundler:
+                  summary: Bundlers filter names a disabled component
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'component "cert-manager" is disabled and cannot be selected via the bundlers filter'
                     requestId: "550e8400-e29b-41d4-a716-446655440000"
                     timestamp: "2025-01-15T10:30:00Z"
                     retryable: false
@@ -1257,12 +1286,12 @@ components:
         service:
           type: string
           description: Kubernetes service type
-          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, any]
+          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
           example: eks
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, h200, gb200, b200, a100, l40, rtx-pro-6000, any]
+          enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
           example: h100
         intent:
           type: string
@@ -1272,7 +1301,7 @@ components:
         os:
           type: string
           description: Operating system family
-          enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
+          enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
           example: ubuntu
         platform:
           type: string
@@ -1449,20 +1478,109 @@ components:
           type: array
           items:
             type: object
+            required: [name]
             properties:
               name:
                 type: string
                 description: Component name
+              type:
+                type: string
+                enum: [Helm, Kustomize]
+                description: >-
+                  Deployment type; send the canonical value `Helm` or
+                  `Kustomize` (the normative contract). A Helm ref must not carry
+                  `tag`/`path`; a Kustomize ref requires `path` (and, when it
+                  sets `tag`, a `source`). An enabled Helm ref must reference a
+                  deployable primary: either an external chart (a `source`
+                  repository plus an effective `version`; the chart name falls
+                  back to the component name when `chart` is unset, but a
+                  `chart` without a `source` is rejected) or local primary
+                  `manifestFiles` (a manifest-only component; `preManifestFiles`
+                  alone do not qualify). Helm `chart` and `source` values must
+                  not carry surrounding whitespace. Incoherent combinations are
+                  rejected with 400. For back-compatibility the server back-fills a
+                  missing type on an enabled ref from the registry when the
+                  component is known (a missing type on an unknown component is
+                  rejected with 400), and accepts other casings (e.g. `helm`)
+                  and normalizes them — but clients should send the canonical
+                  values above.
               version:
                 type: string
-                description: Component version
-              order:
-                type: integer
-                description: Deployment order
-              repository:
+                description: >-
+                  Chart version (Helm). Required for an enabled Helm ref that
+                  references an external chart: an empty, whitespace-only, or
+                  bare `v` value is rejected with 400, as is a value carrying
+                  surrounding whitespace (deployers consume the version
+                  verbatim). Flux and Argo CD strip
+                  a leading `v` for non-OCI outputs (Helm resolves the empty
+                  remainder as "latest"), non-vendored Helm/Helmfile and OCI
+                  outputs preserve it, and vendored wrappers substitute a
+                  fabricated default — a bare `v` is rejected uniformly to
+                  avoid output-dependent chart identities. Not required for
+                  manifest-only Helm components, but when set there the same
+                  whitespace and bare-`v` rules apply (the value lands in the
+                  rendered chart's `helm.sh/chart` label).
+              tag:
                 type: string
-                description: Helm repository URL
-          description: List of component references with deployment order
+                description: Git tag/ref (Kustomize); only meaningful with a source
+              source:
+                type: string
+                description: >-
+                  Chart repository URL (Helm) or OCI/Git source reference
+                  (Kustomize). For Helm refs, values with surrounding
+                  whitespace are rejected with 400 — deployers consume the
+                  field verbatim. (Kustomize sources are not whitespace-
+                  validated today.)
+              chart:
+                type: string
+                description: >-
+                  Helm chart name; falls back to the component name when unset
+                  on a source-backed ref. Values with surrounding whitespace
+                  are rejected with 400. A chart without a source is rejected
+                  (nothing to pull from).
+              path:
+                type: string
+                description: Path within the source to the kustomization (Kustomize)
+              manifestFiles:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  Manifest files bundled with a Helm component (paths relative
+                  to the data directory). Without a chart/source they form the
+                  manifest-only primary and exempt the ref from the `version`
+                  requirement; with an external chart they apply AFTER the
+                  primary release. Rejected with 400 on Kustomize refs (a
+                  Kustomize ref wraps a single primary source).
+              preManifestFiles:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  Manifest files applied BEFORE the component's primary release
+                  (paths relative to the data directory). Auxiliary only:
+                  pre-manifests alone do not make a ref deployable or exempt it
+                  from the `version` requirement.
+              patches:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  Unsupported / not applied. No deployer applies patch files, so
+                  an enabled ref that sets `patches` is rejected with 400 rather
+                  than silently producing an unpatched bundle. Do not set. See
+                  issue #1588.
+          description: >-
+            List of component references. Deployment order is not per-ref; it is
+            the top-level `deploymentOrder` array.
+        deploymentOrder:
+          type: array
+          items:
+            type: string
+          description: >-
+            Topologically sorted component names giving the order to deploy in.
+            Preserve this on a GET→POST round trip (POST /v1/bundle accepts this
+            same shape) — dropping it changes deployment sequencing.
         constraints:
           type: object
           description: Deployment constraints (driver versions, etc.)
@@ -1500,8 +1618,10 @@ components:
           type: array
           items:
             type: string
-            enum: [gpu-operator, network-operator, nodewright-operator, nvsentinel, cert-manager, nvidia-dra-driver-gpu]
           description: >
-            Optional list of bundler types to execute.
-            If not specified, all registered bundlers are executed.
+            Optional list of recipe component names to bundle.
+            If not specified, all enabled components are bundled.
+            Superseded by the "bundlers" query parameter, which accepts
+            enabled component names the recipe declares; unknown or
+            disabled names are rejected with HTTP 400.
           example: [gpu-operator, network-operator]

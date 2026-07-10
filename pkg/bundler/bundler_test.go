@@ -31,6 +31,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -423,6 +425,153 @@ func TestMake_UndeclaredDependencyErrors(t *testing.T) {
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 		t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", err)
+	}
+}
+
+// TestMake_BundlersFilter pins the semantics of the `bundlers` positive
+// component-name filter (POST /v1/bundle ?bundlers=…, config.WithBundlers):
+// a subset selection bundles only the named components, an unknown or
+// disabled name fails with ErrCodeInvalidRequest, and an empty filter
+// preserves current behavior (all enabled components). See #1531.
+func TestMake_BundlersFilter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		bundlers    []string
+		wantDirs    []string
+		wantAbsent  []string
+		wantErr     bool
+		wantErrText string
+	}{
+		{
+			name:       "empty filter bundles all enabled components",
+			bundlers:   nil,
+			wantDirs:   []string{"001-gpu-operator", "002-aws-ebs-csi-driver"},
+			wantAbsent: []string{"cert-manager", "001-cert-manager", "003-cert-manager"},
+		},
+		{
+			name:     "filter selects subset",
+			bundlers: []string{"gpu-operator"},
+			wantDirs: []string{"001-gpu-operator"},
+			wantAbsent: []string{
+				"aws-ebs-csi-driver", "001-aws-ebs-csi-driver", "002-aws-ebs-csi-driver",
+			},
+		},
+		{
+			name:        "unknown name errors",
+			bundlers:    []string{"gpu-operator", "no-such-component"},
+			wantErr:     true,
+			wantErrText: "unknown component",
+		},
+		{
+			name:        "disabled component request errors",
+			bundlers:    []string{"cert-manager"},
+			wantErr:     true,
+			wantErrText: "disabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var bundlerOpts []Option
+			if tt.bundlers != nil {
+				bundlerOpts = append(bundlerOpts,
+					WithConfig(config.NewConfig(config.WithBundlers(tt.bundlers))))
+			}
+			bundler, err := New(bundlerOpts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			recipeResult := &recipe.RecipeResult{
+				APIVersion: "aicr.run/v1alpha2",
+				Kind:       "Recipe",
+				Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+					{Name: "aws-ebs-csi-driver", Version: "2.55.0", Type: "helm", Source: "https://kubernetes-sigs.github.io/aws-ebs-csi-driver"},
+					{Name: "cert-manager", Version: "v1.20.2", Type: "helm", Source: "https://charts.jetstack.io", Overrides: map[string]any{"enabled": false}},
+				},
+				DeploymentOrder: []string{"gpu-operator", "aws-ebs-csi-driver"},
+			}
+
+			ctx := context.Background()
+			tmpDir := t.TempDir()
+			_, makeErr := bundler.Make(ctx, recipeResult, tmpDir)
+			if tt.wantErr {
+				if makeErr == nil {
+					t.Fatal("Make() expected error, got nil")
+				}
+				if !stderrors.Is(makeErr, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("Make() error code = %v, want ErrCodeInvalidRequest", makeErr)
+				}
+				if !strings.Contains(makeErr.Error(), tt.wantErrText) {
+					t.Errorf("Make() error = %q, want substring %q", makeErr.Error(), tt.wantErrText)
+				}
+				return
+			}
+			if makeErr != nil {
+				t.Fatalf("Make() error = %v", makeErr)
+			}
+			for _, dir := range tt.wantDirs {
+				if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); os.IsNotExist(statErr) {
+					t.Errorf("expected %s directory to be created", dir)
+				}
+			}
+			for _, dir := range tt.wantAbsent {
+				if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+					t.Errorf("expected %s directory to NOT be created", dir)
+				}
+			}
+		})
+	}
+}
+
+// TestMake_BundlersFilterDependencyPruned verifies that a dependency edge
+// pointing at an enabled-but-filtered-out component is pruned exactly like a
+// disabled one: the helmfile deployer (the only path that recomputes ordering
+// from dependency edges) must not fail with a false circular-dependency error
+// when the depended-upon component is excluded by the bundlers filter. See #1531.
+func TestMake_BundlersFilterDependencyPruned(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerHelmfile),
+		config.WithBundlers([]string{"gpu-operator"}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1alpha2",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			// cert-manager is enabled but excluded by the bundlers filter;
+			// gpu-operator depends on it — assumed satisfied externally.
+			{Name: "cert-manager", Version: "v1.20.2", Type: "helm", Source: "https://charts.jetstack.io"},
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", DependencyRefs: []string{"cert-manager"}},
+		},
+		DeploymentOrder: []string{"cert-manager", "gpu-operator"},
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	if _, makeErr := bundler.Make(ctx, recipeResult, tmpDir); makeErr != nil {
+		t.Fatalf("Make() with filtered-out depended-upon component error = %v", makeErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator")); os.IsNotExist(statErr) {
+		t.Error("expected 001-gpu-operator to be created")
+	}
+	for _, dir := range []string{"cert-manager", "001-cert-manager", "002-cert-manager"} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s directory to NOT be created", dir)
+		}
 	}
 }
 
@@ -3106,4 +3255,211 @@ func TestBundlerValueParity_WithRecipeResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDynamicPathSetFor(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations", "daemonsets.nodeSelector"},
+			"nfd":         {"worker.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	got := b.dynamicPathSetFor("gpu-operator", nil)
+	wantPaths := []string{"daemonsets.tolerations", "daemonsets.nodeSelector"}
+	for _, p := range wantPaths {
+		if _, ok := got[p]; !ok {
+			t.Errorf("dynamicPathSetFor(gpu-operator) missing %q", p)
+		}
+	}
+	if _, ok := got["worker.tolerations"]; ok {
+		t.Errorf("dynamicPathSetFor(gpu-operator) should not contain nfd path worker.tolerations")
+	}
+	if got2 := b.dynamicPathSetFor("cert-manager", nil); got2 != nil {
+		t.Errorf("expected nil for component with no dynamic paths, got %v", got2)
+	}
+}
+
+func TestDynamicTolerationPathExcludedFromBakeIn(t *testing.T) {
+	tol := corev1.Toleration{Key: "reserved-by", Effect: corev1.TaintEffectNoSchedule}
+	cfg := config.NewConfig(
+		config.WithAcceleratedNodeTolerations([]corev1.Toleration{tol}),
+		config.WithDynamicValues(map[string][]string{
+			"gpuoperator": {"daemonsets.tolerations"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values := map[string]any{}
+	policy := b.computeSchedulingPathPolicy(
+		&recipe.ComponentRef{Name: "gpu-operator"},
+		nil,
+		nil,
+	)
+	if dynPaths := b.dynamicPathSetFor("gpu-operator", nil); len(dynPaths) > 0 {
+		for path := range dynPaths {
+			policy.optOut[path] = struct{}{}
+		}
+	}
+	b.applyNodeSchedulingOverrides("gpu-operator", values, nil, policy)
+	if val, ok := component.GetValueByPath(values, "daemonsets.tolerations"); ok {
+		t.Errorf("daemonsets.tolerations should not be baked in when declared dynamic, got: %v", val)
+	}
+}
+
+// TestMake_RejectsIncoherentRef verifies the public DefaultBundler.Make entry
+// point rejects an incoherent ref (a Helm component carrying a Kustomize path,
+// which the deployers would silently build as Kustomize) rather than producing
+// a mismatched bundle. Pins issue #1584 at the direct-bundler boundary.
+func TestMake_RejectsIncoherentRef(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Version: "v1", Path: "deploy"},
+		},
+	}
+	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err == nil {
+		t.Fatal("expected Make to reject an incoherent Helm+path ref, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s: %v", se.Code, err)
+	}
+	// The caller's RecipeResult must not have been mutated by validation.
+	if got := recipeResult.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
+		t.Errorf("caller's ref was mutated: type=%q", got)
+	}
+}
+
+func TestCreateDeployer_DeployerOptions(t *testing.T) {
+	mk := func(t *testing.T, dep config.DeployerType, set map[string]string) *DefaultBundler {
+		t.Helper()
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithDeployer(dep),
+			config.WithValueOverrides(map[string]map[string]string{
+				config.DeployerOverrideKey: set,
+			}),
+		)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return b
+	}
+	rr := &recipe.RecipeResult{}
+	set := map[string]string{
+		"namePrefix":        "t-",
+		"destinationServer": "https://edge.example.com:6443",
+		"project":           "tenant-a",
+		"cascadeDelete":     "true",
+	}
+
+	t.Run("rejected for helm deployer", func(t *testing.T) {
+		b := mk(t, config.DeployerHelm, map[string]string{"namePrefix": "t-"})
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("expected error for deployer options with --deployer helm")
+		}
+		var se *errors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != errors.ErrCodeInvalidRequest {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "argocd") {
+			t.Errorf("error should mention argocd deployers, got %v", err)
+		}
+	})
+
+	t.Run("unknown option key rejected", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCD, map[string]string{"bogusKey": "x"})
+		_, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("expected error for unknown deployer option")
+		}
+		if !strings.Contains(err.Error(), "unknown deployer option") {
+			t.Errorf("error should mention unknown deployer option, got %v", err)
+		}
+	})
+
+	t.Run("typed overrides rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig(
+			config.WithDeployer(config.DeployerArgoCD),
+			config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: config.DeployerOverrideKey, Path: "cascadeDelete", Value: true},
+			}),
+		)))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		_, err = b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err == nil {
+			t.Fatal("expected error for typed deployer overrides")
+		}
+		var se *errors.StructuredError
+		if !stderrors.As(err, &se) || se.Code != errors.ErrCodeInvalidRequest {
+			t.Fatalf("want ErrCodeInvalidRequest, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "--set") {
+			t.Errorf("error should point at --set deployer:<key>=<value>, got %v", err)
+		}
+	})
+
+	t.Run("argocd generator receives options", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCD, set)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocd.Generator)
+		if !ok {
+			t.Fatalf("want *argocd.Generator, got %T", d)
+		}
+		if g.NamePrefix != "t-" || g.DestinationServer != "https://edge.example.com:6443" ||
+			g.Project != "tenant-a" || !g.CascadeDelete {
+
+			t.Errorf("options not wired: %+v", g)
+		}
+	})
+
+	t.Run("argocd-helm generator receives options", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCDHelm, set)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocdhelm.Generator)
+		if !ok {
+			t.Fatalf("want *argocdhelm.Generator, got %T", d)
+		}
+		if g.NamePrefix != "t-" || g.DestinationServer != "https://edge.example.com:6443" ||
+			g.Project != "tenant-a" || !g.CascadeDelete {
+
+			t.Errorf("options not wired: %+v", g)
+		}
+	})
+
+	t.Run("no options leaves zero values", func(t *testing.T) {
+		b := mk(t, config.DeployerArgoCD, nil)
+		d, err := b.buildDeployer(context.Background(), rr, map[string]map[string]any{}, nil)
+		if err != nil {
+			t.Fatalf("buildDeployer: %v", err)
+		}
+		g, ok := d.(*argocd.Generator)
+		if !ok {
+			t.Fatalf("want *argocd.Generator, got %T", d)
+		}
+		if g.NamePrefix != "" || g.DestinationServer != "" || g.Project != "" || g.CascadeDelete {
+			t.Errorf("expected zero-value options, got %+v", g)
+		}
+	})
 }

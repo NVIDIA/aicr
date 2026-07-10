@@ -1,21 +1,28 @@
 ---
-# Contract 2 fixture — recipes/evidence/allowlist.yaml
-# Entries pin a fully-anchored issuer+identity pair. identity is an exact string
-# or a tightly-bounded regex with NO wildcard org/repo. Classes are disjoint and
-# no two entries overlap. A CI lint (GP1) rejects violations.
+# Test fixture mirroring the canonical recipes/evidence/allowlist.yaml schema
+# (GP1-owned, parsed by the shared pkg/evidence/allowlist loader).
+# First-party CI signers pin an anchored identityPattern (wildcard only in
+# the ref, right of the OIDC subject's '@'); community/partner entries are
+# keyed by the one-way source slug — first 32 hex of
+# sha256(issuer + "\n" + identity) — never a cleartext identity.
 schemaVersion: "1.0.0"
 
 firstParty:
-  - issuer: https://token.actions.githubusercontent.com
-    # exact org/repo; only the ref varies, bounded to this repo's workflows
-    identity: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/main$'
+  - label: aicr-uat-aws
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
+  - label: aicr-uat-gcp
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-gcp\.yaml@refs/heads/.+$'
 
 community:
-  - issuer: https://token.actions.githubusercontent.com
-    identity: https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main
-  - issuer: https://gitlab.com
-    identity: https://gitlab.com/hydra-ml/evidence
+  # slug of https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main
+  - label: acme-gpu
+    issuer: https://token.actions.githubusercontent.com
+    source: f1f1cf33e7d868f95ea0f5b7542e6662
 
 partner:
-  - issuer: https://oidc.coreweave-lab.example
-    identity: https://oidc.coreweave-lab.example/attest
+  # slug of https://oidc.coreweave-lab.example/attest
+  - label: coreweave-lab
+    issuer: https://oidc.coreweave-lab.example
+    source: dbdbbe0e022faf8e9820537fa63164eb

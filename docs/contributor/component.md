@@ -85,7 +85,7 @@ operator:
 - `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
 - `storageClassPaths:` — where `--storage-class` is injected
 - `podScheduling.workload.workloadSelectorPaths` — for workload-pod placement
-- `gkeCriticalPriority`, `hasSelfRefCRDs` — narrow service-specific quirks (see godoc on `ComponentConfig` for when these apply)
+- `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` — narrow service-specific quirks (see godoc on `ComponentConfig` for when these apply)
 
 **4. Run `make bom-docs`** and commit the regenerated
 `docs/user/container-images.md` in the same PR. CLAUDE.md treats this
@@ -137,7 +137,7 @@ One-liner per field:
 | `storageClassPaths` | Where `--storage-class` is written |
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
-| `gkeCriticalPriority`, `hasSelfRefCRDs` | Narrow service-specific flags (see godoc) |
+| `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
 ## `nodeScheduling.system` vs `accelerated`
 
@@ -282,7 +282,7 @@ pods depend on).
 
 AICR ships five output adapters in
 [`pkg/bundler/deployer/`](https://github.com/NVIDIA/aicr/tree/main/pkg/bundler/deployer):
-`helm`, `helmfile`, `argocd`, `argocdhelm`, `flux`. Each calls
+`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`. Each calls
 `localformat.Write()` and then layers its own orchestration files
 (`deploy.sh`, `helmfile.yaml`, Argo `Application` CRs, Flux
 `HelmRelease`s). **Components do not need to be deployer-aware** —
@@ -302,9 +302,14 @@ regenerated file in the **same PR** whenever you:
 - Change a `values.yaml` in a way that affects which images render
   (image-repo override, subchart enable/disable, etc.)
 
-`make bom-check` verifies the committed BOM matches a fresh regen
-but is **opt-in only** — not wired into `make qualify`, `make lint`,
-or the merge gate. Do not rely on CI to catch a missed regen.
+The BOM's version column and component set are gated at PR time
+(`TestCommittedBOMVersionsMatchRegistry` plus the `bom-freshness`
+merge-gate job), so a missed regen after a version or component-set
+change fails CI. Not gated at PR time is *rendered-image drift* — a
+chart pulling a new image with no pin change on our side; `make
+bom-check` (a full re-render comparison) is its **opt-in** blocking
+check, and the weekly BOM-refresh workflow auto-detects it and opens a
+PR. Still run `make bom-docs` locally on any chart-touching change.
 
 ## Boundary: Components Are Metadata
 

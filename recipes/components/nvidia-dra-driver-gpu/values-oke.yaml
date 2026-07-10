@@ -17,8 +17,13 @@
 #
 # OKE pre-installs NVIDIA drivers on GPU bare-metal shapes, so the driver
 # root is `/` (host-installed) rather than `/run/nvidia/driver` (containerized).
-# Compute domains are enabled for multi-node training coordination.
 # Reference: https://github.com/oracle-quickstart/oci-hpc-oke/blob/grace-blackwell/manifests/dra/values.yaml
+#
+# GPU allocation defaults are inherited from values.yaml (this file is merged
+# on top of it): full-GPU DRA advertisement off, chart-guard waiver off, and
+# computeDomains pinned on — the production-default tuple. See the guidance
+# in values.yaml (issue #1327). Compute domains stay enabled for multi-node
+# training coordination.
 
 # See values.yaml for why both nameOverride and fullnameOverride are pinned.
 nameOverride: nvidia-dra-driver-gpu
@@ -26,13 +31,6 @@ fullnameOverride: nvidia-dra-driver-gpu
 
 # Host-installed driver (OKE pre-installs NVIDIA drivers)
 nvidiaDriverRoot: /
-
-gpuResourcesEnabledOverride: true
-resources:
-  gpus:
-    enabled: true
-  computeDomains:
-    enabled: true
 
 controller:
   priorityClassName: ""

@@ -19,6 +19,7 @@ area/ci:
           - 'tools/coverage/**'
           - 'tools/evidence-project/**'
           - 'tools/corroborate/**'
+          - 'tools/uat-broker/**'
 
 area/recipes:
   - changed-files:

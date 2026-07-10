@@ -78,15 +78,32 @@ func BuildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *cat
 		if !c.IsEnabled() {
 			continue
 		}
+		// The pinned version lives in Version for Helm and Tag for Kustomize;
+		// select the active field so a Kustomize component's tag is recorded
+		// (and marked pinned) rather than dropped. pkg/bom names the CycloneDX
+		// property by effective type.
+		pin := c.Version
+		if c.Type == recipe.ComponentTypeKustomize {
+			pin = c.Tag
+		}
+		// Record the chart the component actually deploys: a source-only
+		// Helm ref falls back to the component name (EffectiveChart, the
+		// deployers' rule), so the digest-bound evidence identifies the
+		// deployed chart instead of omitting aicr:helm:chart. Manifest-only
+		// Helm refs and Kustomize refs stay chartless.
+		chart := c.Chart
+		if c.HasExternalChart() {
+			chart = c.EffectiveChart()
+		}
 		results = append(results, bom.ComponentResult{
 			Name:        c.Name,
 			DisplayName: c.Name,
 			Type:        string(c.Type),
 			Repository:  c.Source,
-			Chart:       c.Chart,
-			Version:     c.Version,
+			Chart:       chart,
+			Version:     pin,
 			Namespace:   c.Namespace,
-			Pinned:      c.Version != "",
+			Pinned:      pin != "",
 		})
 	}
 

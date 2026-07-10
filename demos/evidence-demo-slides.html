@@ -161,8 +161,8 @@
   <div class="slide-inner">
     <div class="label">NVIDIA AI Cluster Runtime</div>
     <h1>Recipe evidence</h1>
-    <p class="lede">Signed, non-falsifiable. and verifiable proof that a recipe passed <code class="inl">aicr validate</code> 
-      without access to that service/hardware/OS/platform combination.</p>
+    <p class="lede">A signed, tamper-evident record binding an identity to an <code class="inl">aicr validate</code> result
+      for a service/hardware/OS/platform combination NVIDIA maintainers can't reach.</p>
     <div class="chips">
       <span class="chip"><b>Keyless</b> cosign + Fulcio</span>
       <span class="chip"><b>Public</b> Rekor transparency log</span>
@@ -330,7 +330,7 @@
         <text class="nlabel ttl-g mono" x="34" y="64" font-size="12.5">git repo (NVIDIA/aicr)</text>
         <rect class="node-g" x="34" y="78" width="200" height="116" rx="9"/>
         <text class="nlabel mono" x="48" y="100" font-size="12.5">recipes/evidence/</text>
-        <text class="nlabel mono" x="48" y="118" font-size="12.5">&#160;&#160;&lt;recipe&gt;.yaml</text>
+        <text class="nlabel mono" x="48" y="118" font-size="12.5">&#160;&#160;&lt;recipe&gt;/&lt;src&gt;/&lt;digest&gt;.yaml</text>
         <g class="nsub mono" font-size="11">
           <text x="48" y="142">bundle.oci + digest</text>
           <text x="48" y="158">signer.identity</text>
@@ -411,10 +411,10 @@
 <section class="slide" data-title="Verify">
   <div class="slide-inner">
     <div class="label">06 · The payoff</div>
-    <h2>Verify — offline, no re-run</h2>
+    <h2>Verify — no cluster re-run (registry access)</h2>
     <div class="code">
       <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">clean pass</span><button class="copy">copy</button></div>
-<pre><span class="p">$</span> aicr evidence verify recipes/evidence/h100-eks-ubuntu-training.yaml
+<pre><span class="p">$</span> aicr evidence verify recipes/evidence/h100-eks-ubuntu-training/&lt;src&gt;/&lt;digest&gt;.yaml
 
 <span class="d">## Evidence verification — h100-eks-ubuntu-training</span>
 <span class="g">Signer:</span> https://github.com/&lt;owner&gt;/…/validate.yaml@refs/heads/main  •  <span class="g">Rekor:</span> index 91234567
@@ -429,7 +429,7 @@
  1 materialize-bundle    <span class="p">passed</span>
  2 signature-verify      <span class="p">passed</span>   signer … (issuer …)
  3 predicate-parse       <span class="p">passed</span>   from verified DSSE payload
- 4 manifest-hash-check   <span class="p">passed</span>   all bundle files verified
+ 4 manifest-hash-check   <span class="p">passed</span>   all manifest-listed payload files verified
  5 render-summary        informational
 
 <span class="g">Verdict: bundle valid — all checks passed (exit 0)</span></pre>
@@ -468,14 +468,14 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + SBOM on every published image and CLI binary, signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed SPDX SBOM on every published image (CLI binaries ship a separate, unsigned SBOM asset), signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
       <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
-      <div class="mini"><h4>Recipe evidence</h4><p>The signed validation result for a recipe on real hardware, OCI-distributed with an in-tree pointer.</p></div>
+      <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer.</p></div>
       <div class="mini"><h4>Next, demand-driven</h4><p>Gate hardening to required · multi-cluster evidence per recipe · identity tiers.</p></div>
     </div>
     <div class="note">
       <span class="t info">Summary</span>
-      A signed, OCI-distributed validation result with an in-tree pointer and a CI gate — verifiable offline, no re-run.
+      A signed, OCI-distributed validation result with an in-tree pointer and a CI gate — no cluster re-run to verify (pulls the OCI bundle; registry access required).
     </div>
     <div class="footlinks">
       <a href="../docs/design/007-recipe-evidence.md">ADR-007</a> ·

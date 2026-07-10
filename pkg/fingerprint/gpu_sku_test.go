@@ -44,8 +44,13 @@ func TestParseGPUSKU(t *testing.T) {
 		{"GB200 bare", "NVIDIA GB200", "gb200"},
 		{"GB200 NVL72", "NVIDIA GB200 NVL72", "gb200"},
 		{"GB200 Grace Blackwell", "NVIDIA GB200 Grace Blackwell Superchip", "gb200"},
-		// L40.
+		// GB300 variants ("GB300" is distinct from "GB200" — no collision).
+		{"GB300 bare", "NVIDIA GB300", "gb300"},
+		{"GB300 NVL", "NVIDIA GB300 NVL", "gb300"},
+		{"label GB300 NVL", "NVIDIA-GB300-NVL", "gb300"},
+		// L40 / L40S.
 		{"L40 bare", "NVIDIA L40", "l40"},
+		{"L40S", "NVIDIA L40S", "l40s"},
 		// RTX PRO 6000 (multi-token; editions append trailing words).
 		{"RTX PRO 6000 Blackwell", "NVIDIA RTX PRO 6000 Blackwell", "rtx-pro-6000"},
 		{"RTX PRO 6000 Server Edition", "NVIDIA RTX PRO 6000 Blackwell Server Edition", "rtx-pro-6000"},
@@ -61,6 +66,7 @@ func TestParseGPUSKU(t *testing.T) {
 		{"label B200", "NVIDIA-B200", "b200"},
 		{"label GB200 NVL72", "NVIDIA-GB200-NVL72", "gb200"},
 		{"label L40", "NVIDIA-L40", "l40"},
+		{"label L40S", "NVIDIA-L40S", "l40s"},
 		{"label RTX PRO 6000", "NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition", "rtx-pro-6000"},
 
 		// --- Collision guards: distinct SKUs sharing a substring with a ---
@@ -70,9 +76,7 @@ func TestParseGPUSKU(t *testing.T) {
 		{"GH200 bare", "NVIDIA GH200", ""},
 		{"GH200 144GB HBM3e", "NVIDIA GH200 144GB HBM3e", ""},
 		{"GH200 label", "NVIDIA-GH200-480GB", ""},
-		// L40S / L4 / L20 / L2 vs L40.
-		{"L40S", "NVIDIA L40S", ""},
-		{"L40S label", "NVIDIA-L40S", ""},
+		// L4 / L20 / L2 vs L40 / L40S (L40S is now a supported SKU above).
 		{"L4", "NVIDIA L4", ""},
 		{"L20", "NVIDIA L20", ""},
 		{"L2", "NVIDIA L2", ""},

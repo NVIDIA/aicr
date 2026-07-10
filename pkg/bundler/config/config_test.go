@@ -753,6 +753,8 @@ func TestValidateHTTPSURL(t *testing.T) {
 		{"missing scheme rejected", "fulcio.internal.example.com", true},
 		{"relative path rejected", "not-a-url", true},
 		{"scheme without host rejected", "https://", true},
+		{"port without hostname rejected", "https://:6443", true},
+		{"path without hostname rejected", "https:///path", true},
 		{"non-http scheme rejected", "ftp://example.com", true},
 	}
 	for _, tt := range tests {
@@ -1180,6 +1182,45 @@ func TestWithFluxNamespace(t *testing.T) {
 		cfg := NewConfig(WithFluxNamespace(""))
 		if cfg.FluxNamespace() != DefaultFluxNamespace {
 			t.Errorf("FluxNamespace() with empty = %q, want %q", cfg.FluxNamespace(), DefaultFluxNamespace)
+		}
+	})
+}
+
+func TestWithBundlers(t *testing.T) {
+	t.Run("set names", func(t *testing.T) {
+		names := []string{"gpu-operator", "network-operator"}
+		cfg := NewConfig(WithBundlers(names))
+		got := cfg.Bundlers()
+		if len(got) != 2 || got[0] != "gpu-operator" || got[1] != "network-operator" {
+			t.Errorf("Bundlers() = %v, want %v", got, names)
+		}
+	})
+
+	t.Run("default is nil", func(t *testing.T) {
+		cfg := NewConfig()
+		if got := cfg.Bundlers(); got != nil {
+			t.Errorf("default Bundlers() = %v, want nil", got)
+		}
+	})
+
+	t.Run("empty slice means no filter", func(t *testing.T) {
+		cfg := NewConfig(WithBundlers([]string{}))
+		if got := cfg.Bundlers(); got != nil {
+			t.Errorf("Bundlers() with empty input = %v, want nil", got)
+		}
+	})
+
+	t.Run("input and output are defensively copied", func(t *testing.T) {
+		names := []string{"gpu-operator"}
+		cfg := NewConfig(WithBundlers(names))
+		names[0] = "mutated-input"
+		got := cfg.Bundlers()
+		if got[0] != "gpu-operator" {
+			t.Errorf("Bundlers()[0] = %q after input mutation, want %q", got[0], "gpu-operator")
+		}
+		got[0] = "mutated-output"
+		if again := cfg.Bundlers(); again[0] != "gpu-operator" {
+			t.Errorf("Bundlers()[0] = %q after output mutation, want %q", again[0], "gpu-operator")
 		}
 	})
 }

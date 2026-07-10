@@ -66,13 +66,23 @@ spec:
       constraints:
         - name: Deployment.gpu-operator.version
           value: ">= v24.6.0"
-    # No performance phase: the nccl-all-reduce-bw check is intentionally not
-    # declared here. The validator has no AKS NCCL runtime template or
-    # scheduling path (AKS is not in the support table), so a declared check
-    # would silently skip and report the phase as passed without measuring
-    # anything — false assurance. Wire it (testbed-validated AKS runtime
-    # template + scheduling path + support-table entry + real threshold) once
-    # an H100 AKS testbed is characterized. See issue #1337.
+    performance:
+      checks:
+        - nccl-all-reduce-bw
+      # PROVISIONAL floor, set at half the calibrated EKS H100 value (>= 300,
+      # p5.48xlarge: 8x H100 SXM, 32x EFA). Live baseline: 157.24 GB/s busbw
+      # measured UNTUNED (16 GiB all-reduce, NCCL built-in IB/verbs with
+      # NCCL_NET_PLUGIN=none over the network-operator shared HCA pool) on
+      # aicr-test1, 2x Standard_ND96isr_H100_v5 (8x H100 SXM, 8x 400Gb NDR
+      # InfiniBand per node), 2026-07-09. There is substantial tuning headroom
+      # — 8x 400Gb NDR line rate is ~400 GB/s — so recalibrate this floor
+      # upward once the IB path is tuned rather than treating 157 as the
+      # fabric's ceiling. See issue #1337; the general fabric-class-aware
+      # floor work is tracked in
+      # https://github.com/NVIDIA/aicr/issues/1256.
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 150"
     conformance:
       checks:
         - platform-health

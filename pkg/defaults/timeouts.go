@@ -131,6 +131,16 @@ const (
 	HealthComputeTimeout = 5 * time.Minute
 )
 
+// Tuning status computation timeouts.
+const (
+	// TuningComputeTimeout is the upper bound for a single tuning.Compute run
+	// across the whole recipe catalog when the caller's context has no deadline.
+	// Like health computation it is hermetic and in-memory (no network, no
+	// cluster); the ceiling absorbs a cold metadata-store load plus a manifest
+	// read per leaf.
+	TuningComputeTimeout = 5 * time.Minute
+)
+
 // Server timeouts for HTTP server configuration.
 const (
 	// ServerReadTimeout is the maximum duration for reading request headers.
@@ -323,6 +333,42 @@ const (
 	// budgets so a hung pull is cut off well before the workflow's own
 	// 20-minute job timeout.
 	EvidenceIngestTimeout = 15 * time.Minute
+)
+
+// GPU deployment-readiness poll configuration. The deployment-phase Go checks
+// verifyNodewrightReady (Skyhook status.status == "complete") and
+// verifyDRAKubeletPluginReady (DRA kubelet-plugin DaemonSet fully rolled out)
+// poll their signal until it is healthy *continuously* for the stability
+// window, or the timeout elapses.
+//
+// Rationale: Skyhook node tuning reboots the GPU node one or more times (the
+// tuning packages carry interrupt: reboot) and re-opens status=in_progress
+// after each reboot and for each newly-joined GPU node. While a GPU node is
+// draining/rebooting/rejoining, the DRA kubelet-plugin DaemonSet also churns:
+// DesiredNumberScheduled drops to 0 (no schedulable GPU node) and NumberReady
+// lags on rejoin. Both signals are therefore non-monotonic during rollout, so a
+// single Get sample can land in a transient unhealthy window (e.g. mid-reboot)
+// and fail the whole deployment phase even though the node converges moments
+// later. The former one-shot Gets did exactly that; polling with a dwell rides
+// through the reboot the way the components' chainsaw health-check siblings
+// (retry-until-timeout, 5m) already do, hardened with a continuous-pass window
+// so a check cannot pass on a momentary lull between reboots.
+const (
+	// GPUReadinessPollInterval is the sleep between readiness-signal samples.
+	GPUReadinessPollInterval = 10 * time.Second
+
+	// GPUReadinessStabilityWindow is how long a signal must report healthy
+	// continuously before the check passes, absorbing the flaps a reboot
+	// introduces.
+	GPUReadinessStabilityWindow = 60 * time.Second
+
+	// GPUReadinessTimeout bounds a single check's poll loop. Sized to ride
+	// through a single tuning reboot (GPU node down + rejoin + kubelet ready,
+	// ~5m) plus the stability window, with margin — while staying well under
+	// CheckExecutionTimeout so the subsequent chainsaw asserts still fit the
+	// phase budget. Convergence spanning multiple reboots is absorbed by the
+	// UAT readiness gate's outer retry loop, which re-runs the phase.
+	GPUReadinessTimeout = 8 * time.Minute
 )
 
 // Chainsaw assertion configuration for component health checks.
@@ -525,6 +571,14 @@ const (
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
 	// standard HTTPClientTimeout is appropriate.
 	NCCLTrainerArchiveDownloadTimeout = 5 * time.Minute
+
+	// TrainJobAdmissionRetryTimeout bounds retrying the NCCL TrainJob create when the
+	// Kubeflow Trainer validating webhook rejects it because the webhook's informer cache
+	// has not yet observed the just-created TrainingRuntime. waitForTrainingRuntime already
+	// confirms the runtime is visible at the API server, but the webhook validates runtimeRef
+	// against a separate lister that lags that strongly-consistent read — a freshness the
+	// client cannot observe. This bounds how long we let the webhook cache catch up.
+	TrainJobAdmissionRetryTimeout = 1 * time.Minute
 )
 
 // Inference performance validation timeouts.
@@ -864,6 +918,22 @@ const (
 	// TrainingRuntimePollInterval is the retry interval when waiting
 	// for a TrainingRuntime resource to become visible via the API.
 	TrainingRuntimePollInterval = 500 * time.Millisecond
+
+	// TrainJobAdmissionRetryInterval is the backoff between NCCL TrainJob create
+	// attempts while the Kubeflow Trainer validating webhook's informer cache
+	// catches up to a freshly-created TrainingRuntime.
+	TrainJobAdmissionRetryInterval = 500 * time.Millisecond
+
+	// NCCLLauncherLogReadInterval is the backoff between re-reads of a succeeded
+	// NCCL launcher pod's log while waiting for the results table to be fully
+	// captured. A pod that has just reached Succeeded can briefly serve an empty
+	// or truncated log if its container is being torn down mid-read.
+	NCCLLauncherLogReadInterval = 2 * time.Second
+
+	// NCCLLauncherLogReadAttempts bounds how many times the succeeded launcher
+	// pod's log is re-read before giving up and returning the last read for
+	// diagnosis (the parser then fails and the log is surfaced).
+	NCCLLauncherLogReadAttempts = 5
 )
 
 // Termination and truncation limits for validator output.

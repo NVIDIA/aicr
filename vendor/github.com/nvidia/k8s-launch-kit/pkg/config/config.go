@@ -50,6 +50,9 @@ func DefaultLaunchKitConfig() (*LaunchKitConfig, error) {
 	if err := yaml.Unmarshal(defaultConfigYAML, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse embedded default l8k-config: %w", err)
 	}
+	if err := NormalizeMaintenance(&cfg); err != nil {
+		return nil, fmt.Errorf("invalid embedded maintenance config: %w", err)
+	}
 	return &cfg, nil
 }
 
@@ -134,6 +137,7 @@ func SanitizeIdentifier(s string) string {
 type LaunchKitConfig struct {
 	NetworkOperator *NetworkOperatorConfig `yaml:"networkOperator,omitempty"`
 	DOCADriver      *DOCADriverConfig      `yaml:"docaDriver,omitempty"`
+	Maintenance     *MaintenanceConfig     `yaml:"maintenance,omitempty"`
 	NvIpam          *NvIpamConfig          `yaml:"nvIpam,omitempty"`
 	Sriov           *SriovConfig           `yaml:"sriov,omitempty"`
 	Hostdev         *HostdevConfig         `yaml:"hostdev,omitempty"`
@@ -253,6 +257,12 @@ type NicConfigurationOperatorConfig struct {
 	DeployNicInterfaceNameTemplate bool   `yaml:"deployNicInterfaceNameTemplate"`
 	RdmaPrefix                     string `yaml:"rdmaPrefix"`   // e.g., "rdma_r%rail_id%"
 	NetdevPrefix                   string `yaml:"netdevPrefix"` // e.g., "eth_r%rail_id%"
+	// UpdateFW gates the firmware-update path of the NIC Configuration
+	// Operator. Today it only controls whether the `nicFirmwareStorage` PVC
+	// block is emitted in NicClusterPolicy (needed for the operator to stage
+	// firmware images before flashing). When false (default), the storage
+	// block is omitted so no PVC / StorageClass dependency is introduced.
+	UpdateFW bool `yaml:"updateFW,omitempty"`
 }
 
 type HostdevConfig struct {
@@ -427,6 +437,9 @@ func LoadFullConfig(configPath string, logger logr.Logger) (*LaunchKitConfig, er
 	if err := yaml.Unmarshal(configData, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse cluster config YAML %s: %w", configPath, err)
 	}
+	if err := NormalizeMaintenance(&config); err != nil {
+		return nil, fmt.Errorf("invalid maintenance config in %s: %w", configPath, err)
+	}
 
 	logger.Info("Cluster configuration loaded successfully",
 		"networkOperatorVersion", config.NetworkOperator.Version,
@@ -481,6 +494,12 @@ func emitPresetDeviationWarnings(cfg *LaunchKitConfig, logger logr.Logger) {
 
 // ValidateClusterConfig validates that essential fields are present in the cluster config
 func ValidateClusterConfig(config *LaunchKitConfig, profile string) error {
+	// Public callers may construct a config directly instead of using
+	// LoadFullConfig. Normalize again here so validation covers both paths.
+	if err := NormalizeMaintenance(config); err != nil {
+		return err
+	}
+
 	if config.NetworkOperator.Repository == "" {
 		return fmt.Errorf("networkOperator.repository is required")
 	}

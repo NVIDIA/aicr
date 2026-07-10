@@ -21,11 +21,9 @@ import (
 	_ "embed"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/Mellanox/doca-driver-build/entrypoint/pkg/mofedmodules"
 	nicop "github.com/Mellanox/nic-configuration-operator/api/v1alpha1"
 	"github.com/nvidia/k8s-launch-kit/pkg/config"
 	"github.com/nvidia/k8s-launch-kit/pkg/kubeclient"
@@ -74,21 +72,14 @@ func parseNSProductIDs(data string) map[string]bool {
 	return ids
 }
 
-// isNorthSouthDevice returns true if the device's part number matches
-// a known BlueField DPU (non-SuperNIC) product ID from the ns-product-ids file.
+// isNorthSouthDevice returns true if the device's part number matches a known
+// BlueField DPU (non-SuperNIC) product ID from the ns-product-ids file. The
+// table is positive-only: a hit means the device is definitely a DPU; a miss
+// carries no information (the table doesn't enumerate every shipped SKU).
+// Combined with NicDevice.Status.DPU (operator-read INTERNAL_CPU_MODEL via
+// mlxconfig) for a more complete "definitely north-south" signal.
 func isNorthSouthDevice(partNumber string) bool {
 	return nsProductIDs[partNumber]
-}
-
-// isBlueField3Device returns true if the PCI device ID is BlueField-3
-// (Mellanox vendor 15b3, device 0xa2dc). BF3 is the only BlueField
-// generation where both DPU and SuperNIC SKUs share a device ID, so
-// classification has to fall back to part number against ns-product-ids.
-// Older (BF2) and newer (BF4+) generations use distinct device IDs and
-// stay on the default path — DPUs match ns-product-ids and become
-// north-south; anything else flows through the frequency heuristic.
-func isBlueField3Device(deviceID string) bool {
-	return strings.EqualFold(deviceID, "a2dc")
 }
 
 // DiscoverClusterConfig walks the cluster and populates cfg with the
@@ -193,14 +184,19 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, restConfig *res
 		}
 	}
 
-	// Wait for all expected nodes to report their NicDevice resources
-	if err := waitNicDevicesDiscovered(ctx, c, nicconfigdaemon.Namespace, expectedNodes); err != nil {
+	// Wait for all expected nodes to report their NicDevice resources.
+	// Listed cluster-wide: a pre-existing NIC Configuration Operator install
+	// in another namespace can host the CRs the discovery daemon reconciles
+	// (the daemon's controller queries cluster-wide by node name), so
+	// restricting to nicconfigdaemon.Namespace would miss them.
+	if err := waitNicDevicesDiscovered(ctx, c, expectedNodes); err != nil {
 		return err
 	}
 
-	// Get NicDevice resources and build ClusterConfig from their statuses
+	// Get NicDevice resources and build ClusterConfig from their statuses.
+	// Cluster-wide for the same reason as above.
 	devices := &nicop.NicDeviceList{}
-	if err := c.List(ctx, devices, client.InNamespace(nicconfigdaemon.Namespace)); err != nil {
+	if err := c.List(ctx, devices); err != nil {
 		return err
 	}
 
@@ -326,26 +322,15 @@ func DiscoverClusterConfig(ctx context.Context, c client.Client, restConfig *res
 				// already logs this via the hardware-type probes.
 			}
 
-			modules, err := discoverThirdPartyRDMAModules(ctx, restConfig,
-				nicconfigdaemon.Namespace, group.WorkerNodes, dsPods)
-			if err != nil {
-				log.Log.Error(err, "failed to discover OFED-dependent modules", "group", group.Identifier)
-				uiOutput.Warning("Could not discover OFED-dependent modules for group %s: %v", group.Identifier, err)
-				continue
-			}
-			rdma, storage := classifyDiscoveredModules(modules)
-			if len(rdma) > 0 {
-				group.ThirdPartyRDMAModules = rdma
-				cfg.DOCADriver.UnloadThirdPartyRDMAModules = true
-				uiOutput.Info("Discovered %d third-party RDMA module(s) for group %s — enabled unloadThirdPartyRDMAModules",
-					len(rdma), group.Identifier)
-			}
-			if len(storage) > 0 {
-				group.StorageModules = storage
-				cfg.DOCADriver.UnloadStorageModules = true
-				uiOutput.Info("Discovered %d storage module(s) for group %s — enabled unloadStorageModules",
-					len(storage), group.Identifier)
-			}
+			// OFED-dependent kernel module discovery was previously run here:
+			// it execs a sysfs holder-graph walk into a daemon pod and auto-
+			// enabled UnloadThirdPartyRDMAModules / UnloadStorageModules when
+			// matching modules were found. Removed because (a) the probe was
+			// OOM-prone on large nodes (SIGKILL/137), and (b) the two unload
+			// flags now default to true, so the auto-enable side effect is
+			// redundant. Per-group ThirdPartyRDMAModules / StorageModules
+			// fields stay in the config schema for users who want to populate
+			// them by hand and surface them via the safety warnings.
 		}
 	}
 
@@ -670,8 +655,13 @@ func alternateNamespace(current string) string {
 	}
 }
 
-// waitNicDevicesDiscovered polls until NicDevice objects exist for all expected nodes in the given namespace.
-func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, namespace string, expectedNodes []string) error {
+// waitNicDevicesDiscovered polls until NicDevice objects exist for all expected
+// nodes. CRs are listed cluster-wide: the discovery daemon's reconciler queries
+// NicDevices by node name without a namespace filter, so when an existing NIC
+// Configuration Operator install in another namespace already owns the CRs, the
+// daemon writes status into them in their original namespace rather than into
+// the launch-kit bootstrap namespace.
+func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, expectedNodes []string) error {
 	uiOutput := ui.FromContext(parentCtx)
 	progress := uiOutput.StartProgress(fmt.Sprintf("Discovering network devices on %d node(s) (timeout: 10 min)", len(expectedNodes)))
 
@@ -693,7 +683,7 @@ func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, namesp
 
 	for {
 		list := &nicop.NicDeviceList{}
-		if err := c.List(ctx, list, client.InNamespace(namespace)); err == nil {
+		if err := c.List(ctx, list); err == nil {
 			discoveredNodes := make(map[string]bool)
 			for _, d := range list.Items {
 				if d.Status.Node != "" {
@@ -720,7 +710,7 @@ func waitNicDevicesDiscovered(parentCtx context.Context, c client.Client, namesp
 		select {
 		case <-ctx.Done():
 			progress.Fail("Timeout waiting for devices")
-			return fmt.Errorf("timeout waiting for NicDevice resources from all nodes in namespace %q", namespace)
+			return fmt.Errorf("timeout waiting for NicDevice resources from all expected nodes")
 		case <-ticker.C:
 		}
 	}
@@ -948,23 +938,27 @@ func buildClusterConfig(devices []nicop.NicDevice, nodeLabels map[string]map[str
 			nodeMap[nodeName] = &nodeInfo{}
 		}
 		ni := nodeMap[nodeName]
-		// Stage 1 classification:
-		//   - Part number in ns-product-ids → BlueField DPU → north-south.
-		//   - BlueField-3 chip (deviceID a2dc) with part number NOT in
-		//     ns-product-ids → BlueField-3 SuperNIC → explicit east-west.
-		//     BF3 is special-cased because DPU and SuperNIC SKUs share the
-		//     same device ID; BF2/BF4 use distinct device IDs and DPUs
-		//     among them are already covered by the ns-product-ids match.
+		// Stage 1 classification (operator-authoritative signals first):
+		//   - NicDevice.Status.DPU == true OR part number in ns-product-ids →
+		//     BlueField DPU → north-south. Either signal alone is sufficient;
+		//     the operator reads INTERNAL_CPU_MODEL via mlxconfig
+		//     (EMBEDDED_CPU(1) ⇒ DPU), and the part-number table is positive-
+		//     only — together they cover the SKUs the table doesn't list
+		//     plus the rare CRs where the operator couldn't probe.
+		//   - NicDevice.Status.SuperNIC == true (and not a DPU per above) →
+		//     explicit east-west pin. Replaces the prior chip-ID heuristic
+		//     ("BF3 deviceID a2dc + not in DPU table ⇒ SuperNIC"), which
+		//     misclassified DPU SKUs whose part numbers weren't in the table.
 		//   - Anything else → unclassified (default east-west, may be
 		//     reclassified by the frequency heuristic in Stage 1.5).
-		isDPU := isNorthSouthDevice(d.Status.PartNumber)
-		isBF3SuperNIC := !isDPU && isBlueField3Device(d.Status.Type)
+		isDPU := d.Status.DPU || isNorthSouthDevice(d.Status.PartNumber)
+		isSuperNIC := !isDPU && d.Status.SuperNIC
 		var classification string
 		switch {
 		case isDPU:
-			classification = "north-south (matched DPU part-number)"
-		case isBF3SuperNIC:
-			classification = "east-west (BF3 SuperNIC override)"
+			classification = "north-south (Status.DPU or ns-product-ids match)"
+		case isSuperNIC:
+			classification = "east-west (Status.SuperNIC)"
 		default:
 			classification = "unclassified (default east-west; may be reclassified by frequency heuristic)"
 		}
@@ -972,6 +966,8 @@ func buildClusterConfig(devices []nicop.NicDevice, nodeLabels map[string]map[str
 			"node", nodeName,
 			"deviceID", d.Status.Type,
 			"partNumber", d.Status.PartNumber,
+			"statusDPU", d.Status.DPU,
+			"statusSuperNIC", d.Status.SuperNIC,
 			"classification", classification)
 		for _, p := range d.Status.Ports {
 			entry := nodePFEntry{
@@ -982,7 +978,7 @@ func buildClusterConfig(devices []nicop.NicDevice, nodeLabels map[string]map[str
 				RdmaDevice:         p.RdmaInterface,
 				NetworkInterface:   p.NetworkInterface,
 				IsNorthSouth:       isDPU,
-				IsExplicitEastWest: isBF3SuperNIC,
+				IsExplicitEastWest: isSuperNIC,
 				PSID:               d.Status.PSID,
 				PartNumber:         d.Status.PartNumber,
 				ModelName:          d.Status.ModelName,
@@ -1346,29 +1342,6 @@ func isNoisyLabel(key string) bool {
 		}
 	}
 	return false
-}
-
-// ofedTargetModules is the list of MLX/OFED kernel modules to check for during
-// pre-flight discovery. These modules (and any modules that depend on them) may
-// need to be blacklisted when the DOCA driver is deployed.
-var ofedTargetModules = []string{
-	"mlx5_core", "mlx5_ib", "ib_umad", "ib_uverbs",
-	"ib_ipoib", "rdma_cm", "rdma_ucm", "ib_core", "ib_cm",
-}
-
-// knownStorageModules is the set of storage-over-RDMA kernel modules handled by
-// UNLOAD_STORAGE_MODULES in the driver container. The list is sourced from the
-// canonical `mofedmodules.DefaultStorageModules` exported by doca-driver-build
-// (entrypoint/pkg/mofedmodules) so l8k's classification stays in lockstep with
-// what the driver container will actually unload.
-var knownStorageModules = buildKnownStorageModulesSet()
-
-func buildKnownStorageModulesSet() map[string]bool {
-	m := make(map[string]bool, len(mofedmodules.DefaultStorageModules))
-	for _, mod := range mofedmodules.DefaultStorageModules {
-		m[mod] = true
-	}
-	return m
 }
 
 // parseMachineTypeFromDMI extracts and sanitizes a machine type string from
@@ -1754,163 +1727,6 @@ func findDaemonPod(groupNodes []string, dsPods []corev1.Pod) *corev1.Pod {
 		}
 	}
 	return nil
-}
-
-// discoverThirdPartyRDMAModules execs into a nic-configuration-daemon pod on one
-// of the group's nodes and discovers third-party RDMA modules that depend on
-// OFED target modules via the kernel module holder graph.
-func discoverThirdPartyRDMAModules(ctx context.Context, restConfig *rest.Config,
-	namespace string, groupNodes []string, dsPods []corev1.Pod) ([]string, error) {
-
-	if len(groupNodes) == 0 {
-		return nil, nil
-	}
-
-	// Find a daemon pod running on one of the group's nodes.
-	// All nodes in a group have identical hardware, so one is sufficient.
-	targetPod := findDaemonPod(groupNodes, dsPods)
-	if targetPod == nil {
-		return nil, fmt.Errorf("no nic-configuration-daemon pod found on group nodes")
-	}
-
-	// Build a shell script that does full transitive BFS discovery of
-	// third-party RDMA modules. It scans ALL /sys/module/*/holders/ to build a
-	// complete reverse dependency map, then BFS-traverses from OFED target
-	// modules upward through non-OFED holders. This matches the init
-	// container's checker.go approach.
-	modList := strings.Join(ofedTargetModules, " ")
-	script := fmt.Sprintf(`targets="%s"
-awk_script='
-BEGIN {
-  split(ENVIRON["TARGETS"], arr)
-  for (i in arr) target[arr[i]] = 1
-}
-{
-  mod = $1; holder = $2
-  holders[mod] = holders[mod] " " holder
-}
-END {
-  n = 0
-  for (t in target) {
-    split(holders[t], h)
-    for (i in h) {
-      if (h[i] != "" && !(h[i] in target) && !(h[i] in visited)) {
-        visited[h[i]] = 1
-        queue[n++] = h[i]
-      }
-    }
-  }
-  qi = 0
-  while (qi < n) {
-    cur = queue[qi++]
-    split(holders[cur], h)
-    for (i in h) {
-      if (h[i] != "" && !(h[i] in target) && !(h[i] in visited)) {
-        visited[h[i]] = 1
-        queue[n++] = h[i]
-      }
-    }
-  }
-  for (m in visited) print m
-}'
-for mod_dir in /sys/module/*/; do
-  mod=$(basename "$mod_dir")
-  for dep in "$mod_dir"holders/*; do
-    [ -e "$dep" ] && echo "$mod $(basename "$dep")"
-  done
-done | TARGETS="$targets" awk "$awk_script" | sort -u`, modList)
-
-	containerName := ""
-	if len(targetPod.Spec.Containers) > 0 {
-		containerName = targetPod.Spec.Containers[0].Name
-	}
-
-	log.Log.V(1).Info("Probing OFED-dependent kernel modules",
-		"pod", targetPod.Name, "ofedTargets", ofedTargetModules)
-	output, err := execInPod(ctx, restConfig, namespace, targetPod.Name, containerName,
-		[]string{"/bin/sh", "-c", script})
-	if err != nil {
-		return nil, fmt.Errorf("exec in pod %q failed: %w", targetPod.Name, err)
-	}
-	modules := parseModuleList(output, ofedTargetModules)
-	log.Log.V(1).Info("Discovered OFED-dependent kernel modules",
-		"pod", targetPod.Name,
-		"rawOutput", truncateForLog(output, 200),
-		"parsed", modules)
-	return modules, nil
-}
-
-// parseModuleList splits newline-separated module names, deduplicates, sorts them,
-// and filters out any modules in the exclude list (the OFED target modules themselves).
-func parseModuleList(output string, exclude []string) []string {
-	excludeSet := make(map[string]bool, len(exclude))
-	for _, m := range exclude {
-		excludeSet[m] = true
-	}
-	seen := map[string]bool{}
-	for _, line := range strings.Split(output, "\n") {
-		mod := strings.TrimSpace(line)
-		if mod != "" && !excludeSet[mod] {
-			seen[mod] = true
-		}
-	}
-	if len(seen) == 0 {
-		return nil
-	}
-	modules := make([]string, 0, len(seen))
-	for mod := range seen {
-		modules = append(modules, mod)
-	}
-	sort.Strings(modules)
-	return modules
-}
-
-// coreRdmaInfrastructureModules is the set of kernel-native RDMA core
-// modules that MOFED's openibd unload sequence handles natively. Per
-// upstream guidance in `mofedmodules.DefaultThirdPartyRDMAModules`'s
-// doc comment ("Do NOT add core RDMA infrastructure modules (iw_cm,
-// ib_cm, rdma_cm, rdma_ucm, ib_core, ib_uverbs, etc.)"), these are NOT
-// third-party — they're shared kernel infrastructure that the driver
-// container does not need to unload separately. l8k discovery silently
-// drops them so they never appear as `thirdPartyRDMAModules` in
-// cluster-config.yaml or trigger the `unloadThirdPartyRDMAModules`
-// auto-enable + warning.
-var coreRdmaInfrastructureModules = map[string]bool{
-	"iw_cm":     true,
-	"ib_cm":     true,
-	"rdma_cm":   true,
-	"rdma_ucm":  true,
-	"ib_core":   true,
-	"ib_uverbs": true,
-}
-
-// classifyDiscoveredModules splits a list of discovered OFED-dependent modules into
-// third-party RDMA modules and storage modules. mlx5-prefixed modules (NVIDIA's own)
-// and kernel-native RDMA core modules are silently dropped.
-func classifyDiscoveredModules(modules []string) (rdma, storage []string) {
-	var droppedMlx, droppedCore []string
-	for _, mod := range modules {
-		if strings.HasPrefix(mod, "mlx5") {
-			droppedMlx = append(droppedMlx, mod)
-			continue // NVIDIA module — always greenlit
-		}
-		if coreRdmaInfrastructureModules[mod] {
-			droppedCore = append(droppedCore, mod)
-			continue // Kernel-native RDMA core — MOFED's openibd handles it
-		}
-		if knownStorageModules[mod] {
-			storage = append(storage, mod)
-		} else {
-			rdma = append(rdma, mod)
-		}
-	}
-	log.Log.V(1).Info("Classified OFED-dependent modules",
-		"total", len(modules),
-		"thirdPartyRDMA", rdma,
-		"storage", storage,
-		"droppedMlx5Prefixed", droppedMlx,
-		"droppedCoreRdma", droppedCore)
-	return rdma, storage
 }
 
 // execInPod runs a command in a pod container and returns stdout.

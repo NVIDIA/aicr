@@ -123,7 +123,7 @@ resolve_latest_rc() {
   # Fallback: GitHub REST API (unauthenticated, low rate limit).
   # Apply the same draft/prerelease filtering as the gh path.
   local api="https://api.github.com/repos/${REPO}/releases?per_page=50"
-  curl -fsSL "$api" 2>/dev/null \
+  curl -fsSL --connect-timeout 10 --max-time 30 "$api" 2>/dev/null \
     | jq -r '
         [ .[]
           | select(.draft == false)

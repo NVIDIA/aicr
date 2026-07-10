@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -122,6 +123,12 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 			// deadline, not a network issue.
 			if retryCtx.Err() != nil {
 				return metricsWaitTimeoutError(ctx.Ctx)
+			}
+			// A deterministic response error (e.g. oversize body →
+			// InvalidRequest) must not be relabeled as a reachability failure
+			// that would be retried forever; propagate it as-is.
+			if stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				return err
 			}
 			return errors.Wrap(errors.ErrCodeUnavailable,
 				fmt.Sprintf("Prometheus unreachable at %s — verify network connectivity "+

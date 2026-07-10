@@ -119,12 +119,23 @@ components:
         conditions:
           service:
             - aks
-        message: "Add --set gpuoperator:driver.rdma.useHostMofed=false when disabling network-operator."
+        message: "network-operator disabled: keep driver.rdma.useHostMofed=false (the AKS default); set true only with host-preinstalled MOFED."
 
   - name: network-operator
     displayName: network-operator
     valueOverrideKeys:
       - networkoperator
+    # Overlays attach NicClusterPolicy CRs (mellanox.com API group) as
+    # manifestFiles — e.g. aks.yaml's nic-cluster-policy-aks.yaml —
+    # which the bundler wraps into the injected network-operator-post
+    # release. Those CRDs are installed by this chart at apply time,
+    # but the wrapper shares the parent's sub-helmfile level and
+    # helm-diff runs before anything in the level applies, so on a
+    # fresh cluster the wrapper's REST-mapper check can never pass
+    # ("no matches for kind NicClusterPolicy"). This flag emits
+    # disableValidation: true on the -post wrapper release only.
+    # See issues #914 and #929 for the pattern.
+    manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/network-operator/health-check.yaml
     helm:
@@ -203,7 +214,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
-      defaultVersion: v0.17.0
+      defaultVersion: v0.17.1
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:
@@ -286,12 +297,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
-      # TEMPORARY: pinned to 0.4.1-rc.1 to pick up the fix for the duplicate
-      # pod-template label key that 0.4.0 emits with our values (invalid YAML
-      # that breaks strict consumers — Argo CD/Flux/kustomize/yq). Bump to the
-      # 0.4.1 GA release once it lands (scheduled week of 2026-06-29).
-      # See https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/issues/1184
-      defaultVersion: "0.4.1-rc.1"
+      defaultVersion: "0.4.1"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
@@ -482,7 +488,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "1.2.0"
+      defaultVersion: "1.2.1"
       defaultNamespace: dynamo-system
     storageClassPaths:
       - nats.config.jetstream.fileStore.pvc.storageClassName
@@ -579,6 +585,15 @@ components:
     # on this release tells helm-diff to skip the live-mapper check.
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
+    # recipes/mixins/platform-kubeflow.yaml additionally attaches
+    # torch-distributed-cluster-training-runtime.yaml (a
+    # ClusterTrainingRuntime CR of the CRD this chart ships) as
+    # manifestFiles, which the bundler wraps into the injected
+    # kubeflow-trainer-post release (or the chart's own vendored
+    # wrapper under --vendor-charts). hasSelfRefCRDs above covers only
+    # the primary release (#929); this flag extends the helm-diff
+    # bypass to the manifest-bearing folder. See #1666.
+    manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/kubeflow-trainer/health-check.yaml
     helm:
@@ -619,7 +634,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
-      defaultVersion: "1.1.0"
+      defaultVersion: "1.2.0"
       defaultNamespace: slinky
 
   - name: slinky-slurm-operator
@@ -641,21 +656,13 @@ components:
       # `crds.enabled: false` still match the chart defaults. The values
       # file mirrors the chart defaults explicitly for documentation, but
       # an upstream default flip would otherwise pass through unnoticed.
-      defaultVersion: "1.1.0"
+      defaultVersion: "1.2.0"
       defaultNamespace: slinky
     nodeScheduling:
       system:
-        # slurm-operator chart v1.1.0 templates only render
-        # operator.{affinity,tolerations} and webhook.{affinity,tolerations}.
-        # Setting operator.nodeSelector / webhook.nodeSelector is silently
-        # dropped by the chart, so AICR's --system-node-selector flag is a
-        # no-op for this component until a chart release that includes
-        # https://github.com/SlinkyProject/slurm-operator/pull/187 lands.
-        # Once that PR merges and a new chart is published, add
-        # `nodeSelectorPaths: [operator.nodeSelector, webhook.nodeSelector]`
-        # here and bump defaultVersion above. Workaround in the meantime:
-        # pin nodes via valuesFile overrides on
-        # operator.affinity.nodeAffinity / webhook.affinity.nodeAffinity.
+        nodeSelectorPaths:
+          - operator.nodeSelector
+          - webhook.nodeSelector
         tolerationPaths:
           - operator.tolerations
           - webhook.tolerations
@@ -673,11 +680,11 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm
-      # When bumping defaultVersion, re-verify the `slinky` default
-      # map-keys for nodesets/loginsets still exist (the cross-check in
+      # Chart v1.2.0 no longer supplies default nodesets/loginsets. AICR's
+      # component values define the `slinky` map keys, and the cross-check in
       # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
-      # enforces this, but the chart change must come first).
-      defaultVersion: "1.1.0"
+      # enforces their alignment with the scheduling paths below.
+      defaultVersion: "1.2.0"
       defaultNamespace: slurm
     nodeScheduling:
       system:

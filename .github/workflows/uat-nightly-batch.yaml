@@ -1,0 +1,287 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT Nightly Batch
+
+# The night side of the day/night cycle (#1274, DC1 + DC5): on a nightly cron,
+# run the version matrix per reservation. For each reservation the controller
+# expands an ordered, time-boxed schedule — main first, then the previous N
+# stable releases in descending semver order (uat-broker schedule) — and runs
+# the cells SEQUENTIALLY, dispatching the shared uat-run.yaml per cell and
+# waiting for it before the next. Different reservations run in parallel
+# (independent hardware); uat-run.yaml's per-reservation lease serializes runs
+# that share a reservation. When the time-box closes, remaining cells are
+# dropped oldest-release-first (they are ordered oldest-last, so the controller
+# simply stops). Dispatch (not workflow_call) keeps uat-run.yaml top-level, so
+# its own lease + superseded observer apply and the reusable-nesting depth stays
+# at 3 (uat-run -> uat-{aws,gcp} -> evidence-ingest).
+#
+# aicr_version is threaded per cell; the release cells install the released
+# aicr + validator/agent images at that version (DC5), main builds from source.
+on:
+  schedule:
+    - cron: '0 4 * * *' # 04:00 UTC daily (evening in US Pacific); default branch only
+  workflow_dispatch:
+    inputs:
+      previous_n:
+        description: 'Previous stable releases below main to run per reservation (0 = main only).'
+        type: string
+        default: '1'
+      deadline_offset_hours:
+        description: 'Time-box: hours after batch start to stop dispatching new cells. Keep below the drive job timeout (GitHub caps a hosted job at 6h) so the graceful drop-oldest is reachable.'
+        type: string
+        default: '5'
+
+permissions:
+  contents: read
+
+# Serialize batch runs: a manual dispatch should not fan out a second batch
+# alongside the cron one. (The per-reservation leases in uat-run.yaml would
+# queue the duplicates anyway, but there is no reason to start them.)
+concurrency:
+  group: uat-nightly-batch
+  cancel-in-progress: false
+
+jobs:
+  # Enumerate reservation names from the registry into a JSON array for the
+  # matrix below — keeps the batch data-driven (no per-reservation YAML).
+  enumerate:
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    outputs:
+      reservations: ${{ steps.list.outputs.reservations }}
+      # Single batch-start timestamp shared by every matrix leg, so the time-box
+      # deadline is identical regardless of when each leg's runner starts.
+      batch_start: ${{ steps.list.outputs.batch_start }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+      - name: Enumerate reservations
+        id: list
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          set -euo pipefail
+          go build -o ./bin/uat-broker ./tools/uat-broker
+          mapfile -t names < <(./bin/uat-broker reservations --list)
+          if [ "${#names[@]}" -eq 0 ]; then
+            echo "::error::no reservations found in infra/uat/reservations.yaml"
+            exit 1
+          fi
+          json=$(printf '%s\n' "${names[@]}" | jq -R . | jq -cs .)
+          echo "reservations=${json}" >> "$GITHUB_OUTPUT"
+          echo "Reservations: ${json}"
+          # Capture the batch start once; every leg derives its deadline from this.
+          echo "batch_start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+  # One matrix leg per reservation (parallel). Each leg drives its own version
+  # matrix sequentially. It only DISPATCHES uat-run.yaml (workflow_dispatch is
+  # exempt from the GITHUB_TOKEN recursion rule and always creates a run), so
+  # this job needs actions:write to dispatch + read to watch; the dispatched
+  # uat-run.yaml runs top-level with its own permissions.
+  drive:
+    needs: enumerate
+    runs-on: ubuntu-latest
+    # The controller blocks on `gh run watch` per cell sequentially, so this job
+    # runs as long as the batch. GitHub hard-caps a hosted job at 6h; set an
+    # explicit timeout just under that so the job ends cleanly, and keep
+    # deadline_offset_hours below it so the graceful drop-oldest fires first —
+    # otherwise the job is killed mid-cell and the leg hard-fails.
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        reservation: ${{ fromJSON(needs.enumerate.outputs.reservations) }}
+    permissions:
+      contents: read  # checkout + build uat-broker
+      actions: write  # dispatch uat-run.yaml and watch the dispatched runs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # full tag history for `git tag` -> uat-broker schedule
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+      - name: Run version-matrix cells (sequential, time-boxed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOFLAGS: -mod=vendor
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          RESERVATION: ${{ matrix.reservation }}
+          PREVIOUS_N: ${{ inputs.previous_n || '1' }}
+          DEADLINE_OFFSET_HOURS: ${{ inputs.deadline_offset_hours || '5' }}
+          BATCH_START: ${{ needs.enumerate.outputs.batch_start }}
+        run: |
+          set -euo pipefail
+          # Poll budget for finding a dispatched run (gh workflow run returns no
+          # run id): POLL_MAX_ATTEMPTS x POLL_INTERVAL_SECONDS seconds.
+          POLL_MAX_ATTEMPTS=24
+          POLL_INTERVAL_SECONDS=5
+          go build -o ./bin/uat-broker ./tools/uat-broker
+
+          # Nightly intents for this reservation (#1276, DC3). The batch runs
+          # EACH listed intent (training and/or inference) as its own full CUJ
+          # cell per version, dispatched SEQUENTIALLY through the shared
+          # per-reservation lease — so both intents run nightly with no
+          # contention and no second cron. The broker resolves an empty list to
+          # the training default, so this is always non-empty; fail closed if it
+          # somehow is not (a broker/registry regression).
+          NIGHTLY_INTENTS_CSV=$(./bin/uat-broker reservations --name "$RESERVATION" | sed -n 's/^nightly-intents=//p')
+          if [[ -z "$NIGHTLY_INTENTS_CSV" ]]; then
+            echo "::error::could not resolve nightly-intents for ${RESERVATION}" >&2
+            exit 1
+          fi
+          IFS=',' read -r -a intents <<< "$NIGHTLY_INTENTS_CSV"
+          echo "Nightly intents for ${RESERVATION}: ${intents[*]}"
+
+          # Validate previous_n before the broker consumes it. `--previous-n` is
+          # an int flag so it rejects non-integers, but it would accept a
+          # negative and mis-shape the schedule; reject non-integer or negative
+          # values here too, symmetric with the deadline_offset_hours guard.
+          if [[ ! "$PREVIOUS_N" =~ ^[0-9]+$ ]]; then
+            echo "::error::previous_n must be a non-negative integer; got '${PREVIOUS_N}'." >&2
+            exit 1
+          fi
+
+          # Ordered cells for this reservation: main first, then the previous-N
+          # stable releases in descending semver order (oldest last).
+          schedule=$(git tag -l 'v*' | ./bin/uat-broker schedule \
+            --reservations "$RESERVATION" --previous-n "$PREVIOUS_N")
+          mapfile -t versions < <(jq -r --arg r "$RESERVATION" '.[$r][].aicr_version' <<<"$schedule")
+          echo "Cells for ${RESERVATION}: ${versions[*]:-<none>}"
+
+          # Reject a non-integer / negative deadline_offset_hours before the
+          # arithmetic below — workflow_dispatch passes it as a free-form string
+          # and Bash would silently accept e.g. -1, moving the cutoff before
+          # batch start and dropping every cell immediately.
+          if [[ ! "$DEADLINE_OFFSET_HOURS" =~ ^[0-9]+$ ]]; then
+            echo "::error::deadline_offset_hours must be a non-negative integer; got '${DEADLINE_OFFSET_HOURS}'." >&2
+            exit 1
+          fi
+
+          # Anchor the time-box to the single batch-start timestamp (captured
+          # once in the enumerate job) so every reservation leg shares one cutoff
+          # regardless of when its runner started.
+          deadline=$(( BATCH_START + DEADLINE_OFFSET_HOURS * 3600 ))
+          cell=0
+          leg_failed=""
+          # Version outer-loop, intent inner-loop: `main` runs every intent
+          # before any release cell, so a time-box drop always sheds the OLDEST
+          # release cells first — never main's inference. Each (version × intent)
+          # is a full provision→CUJ→teardown dispatched through the shared lease,
+          # so the intents serialize automatically (no contention).
+          for ver in "${versions[@]}"; do
+            for intent in "${intents[@]}"; do
+              if (( $(date +%s) >= deadline )); then
+                echo "::notice::Time-box reached — dropping remaining cells for ${RESERVATION} (oldest release first)."
+                break 2
+              fi
+              cell=$((cell + 1))
+              label="${ver:-main}"
+              # Unique per-dispatch key (controller run id + attempt + reservation
+              # + cell index) so the resolver below watches THIS run and never a
+              # concurrent manual dispatch of the same reservation/version. The
+              # cell index increments per (version × intent), so the two intents
+              # of one version get distinct keys and distinct run titles.
+              dispatch_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RESERVATION}-${cell}"
+              title="UAT ${RESERVATION} @ ${label} #${dispatch_key}"
+              echo "::group::${title} [intent=${intent}]"
+
+              gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \
+                -f reservation="$RESERVATION" -f aicr_version="$ver" \
+                -f intent="$intent" \
+                -f dispatch_key="$dispatch_key"
+
+              # Resolve the dispatched run by its run-name — this title MUST match
+              # uat-run.yaml's `run-name:` (which appends the same dispatch_key).
+              # dispatch_key makes the title globally unique, so an exact title
+              # match is unambiguous; no createdAt filter (a runner clock running
+              # ahead of GitHub's API clock would falsely reject this dispatch).
+              run_id=""
+              for _ in $(seq 1 "$POLL_MAX_ATTEMPTS"); do
+                sleep "$POLL_INTERVAL_SECONDS"
+                run_id=$(gh run list --repo "$REPO" --workflow uat-run.yaml \
+                  --event workflow_dispatch --limit 50 \
+                  --json databaseId,displayTitle,createdAt 2>/dev/null \
+                  | jq -r --arg t "$title" \
+                      'map(select(.displayTitle == $t))
+                       | sort_by(.createdAt) | .[-1].databaseId // empty' || true)
+                [[ -n "$run_id" ]] && break
+              done
+              if [[ -z "$run_id" ]]; then
+                # Fail the leg rather than continue: an unwatched run can still
+                # hold the reservation's pending slot and let a later (lower-
+                # priority) cell supersede it, breaking version ordering.
+                echo "::error::Dispatched ${title} but could not resolve its run id; stopping this reservation leg to preserve version ordering."
+                echo "::endgroup::"
+                exit 1
+              fi
+
+              echo "Waiting on run ${run_id} ..."
+              # --exit-status is intentionally not fatal here; classify the run's
+              # conclusion below so we can distinguish a benign superseded run from
+              # a real failure without aborting mid-loop.
+              # Output is discarded: in a non-TTY log `gh run watch` APPENDS a full
+              # status render every refresh (no in-place redraw), which flooded the
+              # drive log with tens of thousands of duplicate lines per multi-hour
+              # cell. We only need it to BLOCK until the run finishes; the
+              # conclusion is read from `gh run view` below, so the live render is
+              # redundant. --interval 60 keeps the polling gentle on the API.
+              gh run watch "$run_id" --repo "$REPO" --interval 60 --exit-status >/dev/null 2>&1 || true
+
+              conclusion=$(gh run view "$run_id" --repo "$REPO" --json conclusion --jq '.conclusion' 2>/dev/null || echo "")
+              njobs=$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs" --jq '.total_count' 2>/dev/null || echo "")
+              if [[ "$conclusion" == "cancelled" && "$njobs" == "0" ]]; then
+                # Benign: the single-slot reservation lease dropped a pending run.
+                # Surface it (must not be silent) but do not fail the leg — the
+                # superseded-run observer complements this (DC1 superseded surfacing).
+                echo "::warning::${title} [intent=${intent}] was superseded while pending (dropped by the reservation lease); re-dispatch when the reservation frees."
+              elif [[ "$conclusion" != "success" ]]; then
+                # Real cell failure/timeout — record it so the leg (and thus the
+                # nightly batch) fails, but keep testing the remaining cells.
+                echo "::error::${title} [intent=${intent}] finished with conclusion '${conclusion:-unknown}'."
+                leg_failed=1
+              fi
+              echo "::endgroup::"
+            done
+          done
+
+          if [[ -n "$leg_failed" ]]; then
+            echo "::error::One or more version cells failed for ${RESERVATION}."
+            exit 1
+          fi

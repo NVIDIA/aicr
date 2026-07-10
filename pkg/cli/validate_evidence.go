@@ -21,13 +21,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 )
 
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
@@ -101,58 +97,42 @@ func oidcResolveOptionsFromFlags(cmd *cli.Command) bundleattest.ResolveOptions {
 	}
 }
 
-// emitRecipeEvidence is the CLI shim over attestation.Emit. It loads the
-// validator catalog (a CLI-side concern keyed by the binary's build-time
-// version), builds an EmitOptions value from the parsed flag config, and
-// delegates the orchestration to the evidence package so the same code
-// path is reachable from the future API surface.
-//
-// dp is the command's DataProvider (built once in the validate Action and
-// shared with the aicr.Client driving the run). Threading it into
-// catalog.LoadWithDataProvider means a --data overlay resolves the validator
-// catalog against the command's source rather than the package-global provider —
-// closing the last global dependency on the validate evidence path. A nil
-// dp falls back to the package global inside catalog.LoadWithDataProvider.
+// emitRecipeEvidence is the CLI shim over Client.EmitRecipeEvidence. The
+// catalog load, facade→internal PhaseResult conversion, and attestation.Emit
+// orchestration now live behind the Client facade so a non-CLI caller can emit
+// recipe evidence with facade types alone. The CLI retains only the
+// interactive keyless-signing disclosure (a UI concern) and the flag→options
+// mapping, then delegates.
 func emitRecipeEvidence(
 	ctx context.Context,
-	dp recipe.DataProvider,
-	rec *recipe.RecipeResult,
+	client *aicr.Client,
+	rec *aicr.RecipeResult,
 	snap *snapshotter.Snapshot,
-	results []*validator.PhaseResult,
+	results []*aicr.PhaseResult,
 	cfg *recipeEvidenceConfig,
 ) error {
 
 	// Signing happens only when --push is set without --no-sign (see
 	// attestation.Emit). Gate the interactive keyless login behind the
-	// identity-disclosure prompt before the long validation-and-push run can
-	// open a browser/device-code flow. Non-interactive token sources and
-	// non-TTY runs pass through inside the gate; --no-sign skips it entirely
-	// because no OIDC flow runs.
+	// identity-disclosure prompt before the long push run can open a
+	// browser/device-code flow. Non-interactive token sources and non-TTY runs
+	// pass through inside the gate; --no-sign skips it entirely because no OIDC
+	// flow runs.
 	if cfg.Push != "" && !cfg.NoSign {
 		if err := confirmKeylessSigningDisclosure(cfg.OIDCResolve, cfg.AssumeYes, os.Stdin, os.Stderr); err != nil {
 			return err
 		}
 	}
 
-	cat, err := catalog.LoadWithDataProvider(ctx, dp, version, commit)
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog for evidence")
-	}
-
-	_, err = attestation.Emit(ctx, attestation.EmitOptions{
-		OutDir:       cfg.OutDir,
-		BOMPath:      cfg.BOMPath,
-		Push:         cfg.Push,
-		PlainHTTP:    cfg.PlainHTTP,
-		InsecureTLS:  cfg.InsecureTLS,
-		NoSign:       cfg.NoSign,
-		Full:         cfg.Full,
-		Recipe:       rec,
-		Snapshot:     snap,
-		PhaseResults: results,
-		Catalog:      cat,
-		AICRVersion:  version,
-		OIDCResolve:  cfg.OIDCResolve,
+	return client.EmitRecipeEvidence(ctx, rec, aicr.WrapSnapshot(snap), results, aicr.EvidenceOptions{
+		OutDir:      cfg.OutDir,
+		BOMPath:     cfg.BOMPath,
+		Push:        cfg.Push,
+		PlainHTTP:   cfg.PlainHTTP,
+		InsecureTLS: cfg.InsecureTLS,
+		NoSign:      cfg.NoSign,
+		Full:        cfg.Full,
+		Commit:      commit,
+		OIDCResolve: cfg.OIDCResolve,
 	})
-	return err
 }

@@ -163,7 +163,7 @@ func TestRecipeEndpointPOST(t *testing.T) {
 		},
 		{
 			name:        "valid YAML body",
-			body:        "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: gke\n  accelerator: a100",
+			body:        "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: gke\n  accelerator: a100\n  os: cos",
 			contentType: "application/x-yaml",
 			wantStatus:  http.StatusOK,
 		},

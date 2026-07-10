@@ -559,6 +559,26 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 | Build failures | Run `make tidy` to update dependencies |
 | K8s connection fails | Check `~/.kube/config` or `KUBECONFIG` env |
 
+### Redeploying on Driver-Managed Clusters
+
+On clusters where gpu-operator installs the NVIDIA kernel driver
+(`driver.enabled: true` — e.g. EKS; GKE COS is host-managed and unaffected),
+running `make cleanup` (`tools/cleanup`) can leave the `nvidia_uvm` kernel
+module wedged mid-unload on GPU nodes. The symptom appears on the *next*
+install: the driver validation init container crashes
+(`Init:CrashLoopBackOff`, logs show `failed to create device node
+nvidia-uvm`). The cleanup script detects driver-managed mode (via the
+`nvidia-driver-daemonset` or `driver.enabled` in the release values) and
+prints this guidance; the fix is to reboot the GPU nodes before reinstalling:
+
+```bash
+kubectl cordon <gpu-node>            # each GPU node
+# reboot the instances, e.g. on EKS:
+aws ec2 reboot-instances --instance-ids <ids>
+# wait for the nodes to report Ready, then
+kubectl uncordon <gpu-node>
+```
+
 ### Debugging Tests
 
 ```bash

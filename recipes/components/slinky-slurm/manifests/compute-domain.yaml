@@ -1,0 +1,35 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# These defaults must stay aligned with the Slinky NodeSet in the GB200 Slurm
+# overlay. If a customer overrides the claim name or ResourceClaimTemplate name
+# and introduces a mismatch, Slurm node pods can remain Pending.
+---
+apiVersion: resource.nvidia.com/v1beta1
+kind: ComputeDomain
+metadata:
+  annotations:
+    # preManifestFiles and dependencyRefs provide ordering for this CR.
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  name: slinky-slurm-imex
+  namespace: {{ .Release.Namespace }}
+spec:
+  channel:
+    allocationMode: All
+    resourceClaimTemplate:
+      name: slinky-slurm-imex-channels

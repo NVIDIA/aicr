@@ -17,9 +17,11 @@ package main
 import "k8s.io/apimachinery/pkg/runtime/schema"
 
 // resourceClaimTemplateGVR identifies the standard K8s DRA
-// ResourceClaimTemplate kind. Referenced by any validator that needs to
-// look up or wait on DRA templates (e.g., NVLS ComputeDomain→RCT
-// reconciliation; inference pods referencing DRA claims).
+// ResourceClaimTemplate kind at the GA (v1) group-version. Consumed by the
+// NVLS/NCCL validator (nccl_all_reduce_bw_constraint.go: ComputeDomain→RCT
+// reconciliation and cleanup). inference-perf no longer uses it — its worker
+// claim template is created at the allocmode probe's SERVED version via
+// allocmode.GVRAt (see applyWorkerClaimTemplate).
 var resourceClaimTemplateGVR = schema.GroupVersionResource{
 	Group:    "resource.k8s.io",
 	Version:  "v1",

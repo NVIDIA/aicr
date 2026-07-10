@@ -25,6 +25,7 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | `diff` | — | — | — | not-yet-covered | — |
 | `evidence digest` | — | — | — | not-yet-covered | — |
 | `evidence publish` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
+| `evidence sign` | — | — | — | not-yet-covered | — |
 | `evidence verify` | uat, demo | GPU (H100, real) | nightly | covered | — |
 | `mirror list` | — | — | — | not-yet-covered | — |
 | `query` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |

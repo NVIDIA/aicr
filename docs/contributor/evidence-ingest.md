@@ -5,7 +5,14 @@ bundle into the **source-keyed tree** that the corroboration dashboard
 generator consumes. It is the bridge between the per-run attestation
 bundles produced by `aicr validate --emit-attestation --push` (see
 [ADR-007](../design/007-recipe-evidence.md)) and the aggregated,
-consensus view.
+consensus view. The tree it writes is rendered and served by
+[dashboard-publish (GP5)](evidence-dashboard-publish.md).
+
+The `GPn` labels name stages of the evidence-corroboration pipeline (epic #1400):
+**GP1** signer-allowlist management (`recipes/evidence/allowlist.yaml`),
+**GP2** ingest/verify (this doc), **GP3** dashboard infrastructure
+(`infra/evidence-dashboard`), **GP4** consensus/corroboration
+(`pkg/corroborate`), and **GP5** dashboard publish.
 
 Its defining property is **verify-before-count**: a bundle's signature,
 issuer, identity, and source registry are all checked in a step that
@@ -111,36 +118,45 @@ consumer.
 `project.Allowlist.Classify` derives a signer's trust tier from the
 **verified** `(issuer, identity)`, never a raw pointer string:
 
-1. The first matching `--allowlist` entry wins, `allowlisted=true`.
-2. When no allowlist file is loaded — the interim state before GP1 ships
-   `recipes/evidence/allowlist.yaml` — a built-in heuristic admits AICR's
-   own UAT identity (GitHub Actions OIDC + `NVIDIA/aicr`) as `first-party`
-   so it is not mislabeled. Once the file exists this branch is never
-   taken and classification matches the GP4 consumer exactly.
+1. With an allowlist loaded, the shared loader (`pkg/evidence/allowlist`,
+   the same one the GP4 consumer `pkg/corroborate` uses) decides: a slug or
+   pattern match wins, `allowlisted=true`.
+2. When no allowlist file is loaded (no `--allowlist` flag), a built-in
+   heuristic admits AICR's own UAT identity (GitHub Actions OIDC +
+   `NVIDIA/aicr`) as `first-party` so it is not mislabeled.
 3. Otherwise `community`, `allowlisted=false` — the fail-closed default.
    Reported, but never counted toward consensus.
 
-The allowlist schema is **shared with the GP4 consumer** (`pkg/corroborate`)
-so both read the identical `recipes/evidence/allowlist.yaml` and classify
-a signer identically:
+The canonical `recipes/evidence/allowlist.yaml` keys first-party CI signers
+by an anchored `identityPattern` and external contributors/partners by a
+one-way `source` slug — it deliberately does **not** store a cleartext
+`identity` field (the loader rejects one, to keep personal emails out of the
+repo):
 
 ```yaml
-schemaVersion: "1.0.0"
+schemaVersion: 1.0.0
 firstParty:
-  - issuer: https://token.actions.githubusercontent.com
-    identity: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-(aws|gcp)\.yaml@refs/heads/main$'
+  - label: aicr-uat-aws
+    issuer: https://token.actions.githubusercontent.com
+    identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-aws\.yaml@refs/heads/.+$'
 community:
-  - issuer: https://token.actions.githubusercontent.com
-    identity: https://github.com/acme-gpu/aicr-attest/.github/workflows/attest.yaml@refs/heads/main
-partner:
-  - issuer: https://oidc.coreweave-lab.example
-    identity: https://oidc.coreweave-lab.example/attest
+  # Keyed by source slug only — first 32 hex of sha256(issuer + "\n" + identity).
+  - issuer: https://github.com/login/oauth
+    source: 7c4c0edc8c765a95a0f3afdb3bbb8e91
+partner: []
 ```
 
-`identity` is an exact string, or a `^…$`-anchored regex (full-string
-match). The loader rejects an over-broad regex (unbounded `*`/`+`/`{n,}`
-that could span an org/repo segment) and overlapping entries, so the
-allowlist cannot itself be used to manufacture consensus.
+`identityPattern` is a `^…$`-anchored regex (full-string match); the loader
+rejects an over-broad pattern (any wildcard left of the OIDC subject's `@` —
+only the ref may vary) and overlapping entries, so the allowlist cannot
+itself be used to manufacture consensus.
+
+Both the GP2 ingest loader (`pkg/evidence/project`) and the GP4 consumer
+(`pkg/corroborate`) delegate to the shared canonical loader in
+`pkg/evidence/allowlist` (#1505), so producer and consumer parse the
+identical `identityPattern`/`source` schema and classify a verified signer
+identically. The shared loader rejects a cleartext `identity:` field, so
+personal emails cannot be reintroduced by accident.
 
 ## Forward limitations
 
@@ -150,8 +166,10 @@ allowlist cannot itself be used to manufacture consensus.
   verified against Rekor by digest" shape is not yet implemented, so such
   community bundles cannot be ingested — the producer fails closed rather
   than record an unverified signer.
-- Discovery currently walks the flat `recipes/evidence/<recipe>.yaml`
-  pointers. The per-source nested layout is forward-compatible.
+- Discovery walks the per-source nested layout
+  `recipes/evidence/<recipe>/<src>/<digest>.yaml` (the
+  `<recipe>/<src>/*.yaml` glob in `pkg/evidence/verifier/discover.go`); a
+  flat `recipes/evidence/<recipe>.yaml` is rejected as an unexpected root file.
 - The publish job writes to `gs://aicr-testgrid-staging/results` using the
   shared eidosx WIF service account from `uat-gcp.yaml`. GP3 will replace
   it with a dedicated `objectCreator`-only identity scoped to that prefix.

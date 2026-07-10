@@ -2,11 +2,15 @@
 
 ## Status
 
-**Proposed** — 2026-05-11 (design-only; not implemented).
+**Accepted, implemented** — 2026-05-11.
 
 Implementation tracked under [#843](https://github.com/NVIDIA/aicr/issues/843).
-The matrix dimensions, in-cluster topology, OCI flow, and acceptance
-criteria described below are intent, not current behavior.
+The deployer dimension has shipped in `.github/workflows/kwok-recipes.yaml`
+(and the Tier 3 shard), with the local repro target `make kwok-test-deployer`.
+The four lanes designed here (`helm`, `argocd-oci`, `argocd-helm-oci`,
+`flux-oci`) all landed; the live matrix has since grown to include the
+`argocd-git` / `flux-git` Git-source lanes added by
+[ADR-010](010-kwok-git-source-lanes.md).
 
 Extended by [ADR-010](010-kwok-git-source-lanes.md) [#963](https://github.com/NVIDIA/aicr/issues/963),
 which adds Git-source lanes (`flux-git` via in-cluster Gitea) for the
@@ -292,14 +296,14 @@ failure.
 |---|---|
 | Unit (Go) | No new code on the recommended path. If Phase 0 surfaces a bundler change, that change ships with a table-driven test in `pkg/cli/bundle_test.go`. |
 | Chainsaw (existing) | `tests/chainsaw/cli/bundle-variants` continues to gate schema-shape correctness. |
-| KWOK matrix (new, this ADR) | Three deployer values × Tier 1 generic overlays + Tier 3 full overlay set. |
+| KWOK matrix (new, this ADR) | Four deployer values × Tier 1 generic overlays + Tier 3 full overlay set. |
 | Local repro | `make kwok-test-deployer RECIPE=eks-training DEPLOYER=argocd-oci` runs the same script the CI matrix uses against a local Kind cluster. |
 | Negative test (one-shot, manual) | Before merging, deliberately break `application.yaml.tmpl`, confirm matrix turns red, revert. Document in PR description, not ongoing CI. |
 
 ## Acceptance Criteria
 
 1. A deliberate regression in `pkg/bundler/deployer/argocd/templates/application.yaml.tmpl` causes Tier 1 to turn red.
-2. All three deployer values pass on a representative generic overlay (e.g., `eks-training`).
+2. All four deployer values pass on a representative generic overlay (e.g., `eks-training`).
 3. `make qualify` passes locally.
 4. Tier 3 nightly run on the feature branch completes within the existing 15-minute `timeout-minutes` per matrix cell.
 

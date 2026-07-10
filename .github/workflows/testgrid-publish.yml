@@ -1,0 +1,401 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# TestGrid Publish (TG5)
+#
+# Publishes UAT evidence bundles to the AICR TestGrid dashboard after
+# every completed UAT run (uat-run.yaml, which wraps the GCP or AWS
+# pipeline — any conclusion; a failure or cancelled run that never
+# reached conformance simply has nothing to publish and no-ops cleanly).
+#
+# Disabled by default — gated on vars.TESTGRID_PUBLISH_ENABLED == 'true' —
+# until the prod WIF pool/SA exist (see aicr-testgrid Terraform apply).
+#
+# Pipeline:
+#   1. Validate the producer run is from this repository and branch
+#   2. Download the evidence pointer artifact from the triggering UAT run
+#   3. Extract + validate the OCI bundle ref + digest from pointer.yaml
+#   4. Authenticate to GCP via WIF (publish SA, groups/ prefix write-only)
+#   5. Log in to GHCR to pull the evidence OCI bundle
+#   6. Build testgrid-publish from source
+#   7. Pull the OCI bundle and write started/junit/finished to GCS
+#
+# Auth:
+#   WIF pool:  aicr-testgrid[-<env>]-github   (aicr-testgrid Terraform)
+#   SA:        aicr-testgrid[-<env>]-publish@<project>
+#   Scope:     objectCreator on gs://aicr-testgrid[-<env>]/groups/ prefix only
+#   For prod, <env> is empty (cluster_name = "aicr-testgrid", unsuffixed);
+#   for staging, <env> = "staging". This mirrors terraform/variables.tf and
+#   wif-publish.tf in the aicr-testgrid repo exactly — verify there before
+#   changing the naming logic in "Resolve GCP config" below.
+#
+# Configuration (GitHub repo variables — no secrets in source):
+#   vars.TESTGRID_PUBLISH_ENABLED   'true' to enable (see gate above)
+#   vars.GCP_PROJECT_NUMBER         GCP project number (WIF provider resource name)
+#   vars.GCP_PROJECT_ID             GCP project ID (SA email)
+#
+# The workflow filename must start with "testgrid-publish" — the WIF binding's
+# attribute_condition in wif-publish.tf restricts impersonation to workflows
+# matching this prefix.
+
+name: TestGrid Publish
+
+# Least-privilege default — job elevates only what it needs.
+permissions:
+  contents: read
+
+on:
+  workflow_run:
+    # "UAT Run" (uat-run.yaml) is the only UAT workflow that always executes
+    # top-level: both a human (workflow_dispatch) and the nightly/daytime
+    # controllers trigger it via `gh workflow run` (a real dispatch, not
+    # `uses:`) specifically to keep it top-level — see the "Dispatch (not
+    # workflow_call)" comments in uat-nightly-batch.yaml / uat-daytime.yaml.
+    # uat-gcp.yaml / uat-aws.yaml are workflow_call-only reusable workflows
+    # invoked exclusively via `uses:` from uat-run.yaml's run-gcp/run-aws
+    # jobs — GitHub never emits a workflow_run event for a workflow that
+    # only ever executes as a workflow_call target, so watching them
+    # directly (as this file previously did) never fires.
+    #
+    # Jobs in a called reusable workflow share the caller's github.run_id,
+    # so github.event.workflow_run.id below still correctly matches the
+    # ${{ github.run_id }}-suffixed evidence-pointer artifact names
+    # uploaded from inside uat-gcp.yaml / uat-aws.yaml, and
+    # github.event.workflow_run.conclusion still reflects the real UAT
+    # outcome (run-gcp/run-aws call the reusable workflows with no
+    # continue-on-error, so a conformance failure propagates to
+    # uat-run.yaml's own conclusion).
+    workflows:
+      - "UAT Run"
+    types:
+      - completed
+  # Allow manual dispatch for testing and backfills.
+  #
+  # Trust model: the real enforcement is at the WIF layer, not the
+  # github.ref == 'refs/heads/main' check below (that check is just a
+  # fast, readable fail-closed guard, evaluated from whatever copy of this
+  # file was dispatched — it cannot be the actual security boundary).
+  # The publish SA's IAM binding (aicr-testgrid's wif-publish.tf,
+  # google_service_account_iam_member.publish_wif) grants
+  # roles/iam.workloadIdentityUser via a principalSet pinned to
+  # attribute.workflow_ref == ".../testgrid-publish.yml@refs/heads/main".
+  # GitHub's OIDC token embeds the actual ref the workflow file was loaded
+  # from as job_workflow_ref, so dispatching a modified copy of this file
+  # from any other branch produces a token that does not match the
+  # principalSet — WIF impersonation is rejected at the GCP layer
+  # regardless of what the dispatched copy's own if: checks say.
+  #
+  # bundle_ref is validated for format (ghcr.io/<org>/...@sha256:<64hex>)
+  # but not provenance/signature before the tool pulls and parses it.
+  workflow_dispatch:
+    inputs:
+      bundle_ref:
+        description: "OCI bundle ref (ghcr.io/<org>/...@sha256:...)"
+        type: string
+        required: true
+      source_class:
+        description: "Source class"
+        type: choice
+        default: "uat"
+        options:
+          - uat
+          - community
+      environment:
+        description: "Target environment"
+        type: choice
+        default: "prod"
+        options:
+          - prod
+          - staging
+
+concurrency:
+  # One publish per triggering run (workflow_run) or per environment+bundle
+  # (workflow_dispatch) — prevents duplicate/racing columns if the workflow
+  # is re-run, or the same bundle_ref is dispatched twice, while a prior
+  # publish is still in flight. environment is included in the dispatch key
+  # so a staging backfill and a prod publish of the same bundle_ref (which
+  # write to different buckets) don't serialize behind each other. Falls
+  # back to run_id only when neither is available.
+  group: testgrid-publish-${{ github.event.workflow_run.id || format('{0}-{1}', inputs.environment, inputs.bundle_ref) || github.run_id }}
+  cancel-in-progress: false  # never cancel an in-flight GCS write
+
+jobs:
+  publish:
+    name: Publish to TestGrid
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # Go build ~2 min + gcloud uploads ~3 min; 15 min is generous
+
+    # Gate on vars.TESTGRID_PUBLISH_ENABLED so this workflow is a true no-op
+    # (skipped, not failed) until the prod WIF pool/SA exist in Terraform.
+    # Flip to 'true' once aicr-testgrid prod Terraform is applied — before
+    # that, every successful UAT would otherwise fail at the GCP auth step
+    # and produce CI noise.
+    #
+    # For workflow_run: run for ANY completed conclusion (success, failure,
+    # cancelled, timed_out, skipped, ...) — "Resolve bundle ref" already
+    # no-ops cleanly when no evidence pointer exists (only uploaded on a
+    # successful conformance phase), so non-terminal conclusions fall
+    # through to the same benign skip path instead of the job silently
+    # never running at all.
+    # For workflow_dispatch: restrict to main as a readable fail-closed
+    # guard — the actual security boundary is the WIF SA binding, not this
+    # check (see trust-model comment on the trigger above).
+    if: >
+      vars.TESTGRID_PUBLISH_ENABLED == 'true' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       github.event_name == 'workflow_run')
+
+    permissions:
+      contents: read
+      actions: read    # required to download artifacts from the triggering run
+      packages: read   # required to pull the evidence OCI bundle from ghcr.io
+      id-token: write  # required for WIF token exchange
+
+    env:
+      TG_SOURCE_CLASS: ${{ inputs.source_class || 'uat' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Sanity check before any credential exchange: confirm the producer
+      # run belongs to this repository. Note: github.event.workflow_run.
+      # repository is always the base repo that hosts the workflow (never
+      # a fork) — a repo-scoped workflow_run trigger cannot fire from a
+      # fork's own run in the first place, so this is defense-in-depth,
+      # not fork rejection. WIF's attribute_condition in wif-publish.tf is
+      # the actual security boundary; this check just fails fast with a
+      # clear message instead of a cryptic WIF rejection.
+      - name: Validate producer
+        if: github.event_name == 'workflow_run'
+        env:
+          PRODUCER_REPO: ${{ github.event.workflow_run.repository.full_name }}
+          PRODUCER_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          if [ "${PRODUCER_REPO}" != "${GITHUB_REPOSITORY}" ]; then
+            echo "::error::Producer workflow is from '${PRODUCER_REPO}', expected '${GITHUB_REPOSITORY}' — rejecting"
+            exit 1
+          fi
+          # Allowlist: main and release/* branches qualify for TestGrid.
+          # UAT supports workflow_dispatch on any branch, so without this
+          # an experimental dev-branch UAT would land a column in the
+          # dashboard. Reject anything else explicitly (fail closed).
+          case "${PRODUCER_BRANCH}" in
+            main|release/*)
+              ;;
+            *)
+              echo "::error::Producer ran on branch '${PRODUCER_BRANCH}' — only main and release/* branches publish to TestGrid"
+              exit 1
+              ;;
+          esac
+
+      # Resolve environment-specific GCP resource names.
+      # prod  → aicr-testgrid          (no env suffix — matches Terraform cluster_name)
+      # other → aicr-testgrid-<env>
+      - name: Resolve GCP config
+        id: gcp
+        env:
+          TG_ENV: ${{ inputs.environment || 'prod' }}
+          GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          # Fail fast with a clear message rather than deriving a malformed
+          # WIF provider/SA (e.g. "projects//locations/...") that only
+          # surfaces as a cryptic rejection three steps later at auth time.
+          : "${GCP_PROJECT_NUMBER:?repo variable GCP_PROJECT_NUMBER is unset — set it in Settings > Secrets and variables > Actions > Variables}"
+          : "${GCP_PROJECT_ID:?repo variable GCP_PROJECT_ID is unset — set it in Settings > Secrets and variables > Actions > Variables}"
+          if [ "${TG_ENV}" = "prod" ]; then
+            CLUSTER="aicr-testgrid"
+          else
+            CLUSTER="aicr-testgrid-${TG_ENV}"
+          fi
+          {
+            echo "cluster=${CLUSTER}"
+            echo "bucket=${CLUSTER}"
+            echo "wif_provider=projects/${GCP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${CLUSTER}-github/providers/github-actions"
+            echo "wif_sa=${CLUSTER}-publish@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+          } >> "${GITHUB_OUTPUT}"
+          # Note: `environment` is fully encoded in `bucket` (bucket ==
+          # cluster == aicr-testgrid[-<env>]) and is not passed to
+          # testgrid-publish separately — the tool only needs --bucket.
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      # Install yq (used to parse pointer.yaml) and Go using the repo's
+      # shared composite action — keeps tool versions in sync with .settings.yaml.
+      - name: Set up build tools
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_yq: 'true'
+          yq_version: ${{ steps.versions.outputs.yq }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # Download the evidence pointer artifact from the triggering UAT run.
+      # The pointer is only uploaded when conformance succeeds — on failure runs
+      # with no pointer artifact the download action exits non-zero; we capture
+      # the outcome and distinguish "not found" (benign) from network errors.
+      - name: Download evidence pointer
+        id: download-pointer
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: "*-evidence-pointer-${{ github.event.workflow_run.id }}"
+          merge-multiple: true
+          path: evidence-pointer/
+        continue-on-error: true  # outcome checked explicitly in Resolve bundle ref
+
+      # Extract the OCI ref + digest from pointer.yaml.
+      # For workflow_dispatch the bundle_ref input is used directly.
+      # All user-controlled values flow through env — never inline ${{ }}
+      # in shell scripts to prevent script injection.
+      #
+      # pointer.yaml schema:
+      #   attestations:
+      #     - bundle:
+      #         oci: ghcr.io/nvidia/aicr-uat-gke-h100-training-<run_id>
+      #         digest: sha256:abc123...
+      - name: Resolve bundle ref
+        id: bundle
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_BUNDLE_REF: ${{ inputs.bundle_ref }}
+          DOWNLOAD_POINTER_OUTCOME: ${{ steps.download-pointer.outcome }}
+          UAT_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            BUNDLE_REF="${DISPATCH_BUNDLE_REF}"
+          else
+            # If the download step failed, distinguish "artifact not found"
+            # (conformance did not complete — benign skip) from a real error
+            # (network failure — should not silently drop the publish).
+            # `-print -quit` + `|| true` tolerates an absent evidence-pointer/
+            # directory under set -euo pipefail (find would otherwise exit
+            # non-zero and kill the script before the -z check below runs).
+            POINTER="$(find evidence-pointer/ -name 'pointer.yaml' -print -quit 2>/dev/null || true)"
+            DOWNLOAD_OUTCOME="${DOWNLOAD_POINTER_OUTCOME}"
+            if [ -z "${POINTER}" ]; then
+              if [ "${DOWNLOAD_OUTCOME}" = "failure" ] && [ "${UAT_CONCLUSION}" = "success" ]; then
+                # Narrow known edge case: a manual `skip_tests` UAT dispatch
+                # also concludes success with no pointer (conformance never
+                # ran), which looks identical to a network error from here.
+                # Accepted — this only affects operator-triggered skip_tests
+                # runs, which have nothing to publish anyway.
+                echo "::error::UAT succeeded but evidence pointer download failed — possible network error"
+                exit 1
+              fi
+              if [ "${DOWNLOAD_OUTCOME}" = "failure" ]; then
+                # Unlike the success case above, a non-success UAT conclusion
+                # can't be disambiguated: artifact absence is expected here
+                # (conformance may never have run), so a genuine transient
+                # download error looks identical. Surface it for visibility
+                # without failing the job — there's nothing to publish
+                # either way.
+                echo "::warning::Evidence pointer download failed for a non-success UAT run (conclusion=${UAT_CONCLUSION}) — could be genuine absence or a transient error; treating as skip"
+              fi
+              echo "::notice::No evidence pointer found (conformance did not complete) — skipping TestGrid publish"
+              echo "skip=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            OCI=$(yq '.attestations[0].bundle.oci' "${POINTER}")
+            DIGEST=$(yq '.attestations[0].bundle.digest' "${POINTER}")
+            if [ -z "${OCI}" ] || [ "${OCI}" = "null" ]; then
+              echo "::error::Could not extract OCI ref from ${POINTER}"
+              cat "${POINTER}"
+              exit 1
+            fi
+            if [ -z "${DIGEST}" ] || [ "${DIGEST}" = "null" ]; then
+              echo "::error::Could not extract digest from ${POINTER}"
+              cat "${POINTER}"
+              exit 1
+            fi
+            BUNDLE_REF="${OCI}@${DIGEST}"
+          fi
+          # Validate format: ghcr.io/<org>/...@sha256:<64 hex chars>
+          # Namespace is intentionally NOT restricted to nvidia/ — community
+          # bundles (source_class=community) are hosted under contributor
+          # namespaces, e.g. ghcr.io/yuanchen8911/aicr-evidence.
+          #
+          # Uses bash's [[ =~ ]] (whole-string match, POSIX ERE) rather than
+          # `echo | grep -qE`, which is line-based: a value containing an
+          # embedded newline (e.g. "valid-ref\nfoo=bar") would pass grep
+          # because at least one *line* matches, while the newline still
+          # reaches `echo >> GITHUB_OUTPUT` below and injects a second,
+          # attacker-controlled output key. [[ =~ ]] anchors ^ and $ to the
+          # start/end of the whole variable, so an embedded newline fails.
+          if [[ ! "${BUNDLE_REF}" =~ ^ghcr\.io/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::BUNDLE_REF '${BUNDLE_REF}' does not match expected format ghcr.io/<org>/...@sha256:<64hex>"
+            exit 1
+          fi
+          echo "bundle_ref=${BUNDLE_REF}" >> "${GITHUB_OUTPUT}"
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
+          echo "Resolved bundle: ${BUNDLE_REF}"
+
+      # Authenticate to GCP via WIF using the testgrid publish SA.
+      # This SA has objectCreator on gs://aicr-testgrid[-<env>]/groups/ only.
+      - name: Authenticate to GCP
+        if: steps.bundle.outputs.skip != 'true'
+        id: gcp-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3.0.0
+        with:
+          workload_identity_provider: ${{ steps.gcp.outputs.wif_provider }}
+          service_account: ${{ steps.gcp.outputs.wif_sa }}
+
+      - name: Set up gcloud
+        if: steps.bundle.outputs.skip != 'true'
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
+
+      # Authenticate to GHCR so testgrid-publish can pull the evidence OCI
+      # bundle. The packages: read permission above gates the token scope.
+      - name: Login to GHCR
+        if: steps.bundle.outputs.skip != 'true'
+        uses: ./.github/actions/ghcr-login
+
+      # Always build from source — ensures the binary matches the current
+      # commit and avoids integrity risks from downloading a release artifact
+      # into a privileged WIF context. goreleaser packages testgrid-publish
+      # for local / manual use; the workflow always builds from vendor.
+      - name: Build testgrid-publish
+        if: steps.bundle.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          GOFLAGS="-mod=vendor" go build \
+            -o /tmp/testgrid-publish ./tools/testgrid-publish
+
+      # Pass all user-controlled values through env — never inline ${{ }}
+      # expressions in run: scripts to prevent script injection.
+      - name: Publish to TestGrid
+        if: steps.bundle.outputs.skip != 'true'
+        env:
+          BUNDLE_REF: ${{ steps.bundle.outputs.bundle_ref }}
+          TG_BUCKET: ${{ steps.gcp.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          /tmp/testgrid-publish \
+            --bundle "${BUNDLE_REF}" \
+            --bucket "${TG_BUCKET}" \
+            --source-class "${TG_SOURCE_CLASS}"

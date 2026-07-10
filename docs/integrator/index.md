@@ -24,6 +24,7 @@ This section is for integrators who:
 | [GKE TCPXO Networking](gke-tcpxo-networking.md) | GPUDirect TCPXO prerequisites for GKE training overlays |
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
+| [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
 | [Data Extension](data-extension.md) | Extending the embedded catalog via `--data` — overlays, components, and runtime criteria values without a rebuild |
 | [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
@@ -51,8 +52,14 @@ curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"
       -o recipe.json
 
 - name: Generate bundles
+  # recipe.json is the fully-hydrated RecipeResult from the GET above; the
+  # bundle endpoint adopts it as-is and bundles all of its componentRefs.
+  # To bundle a subset, add the `bundlers` query parameter (comma-delimited
+  # component names, e.g. "?bundlers=gpu-operator,network-operator") rather
+  # than hand-trimming componentRefs, which drops required dependencies.
+  # Unknown or disabled component names are rejected with HTTP 400.
   run: |
-    curl -X POST "http://aicrd.aicr.svc/v1/bundle?bundlers=gpu-operator" \
+    curl -X POST "http://aicrd.aicr.svc/v1/bundle" \
       -H "Content-Type: application/json" \
       -d @recipe.json \
       -o bundles.zip

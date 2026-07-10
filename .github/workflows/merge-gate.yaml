@@ -53,13 +53,15 @@ jobs:
       actions: ${{ steps.changes.outputs.actions }}
       deps: ${{ steps.changes.outputs.deps }}
       renovate: ${{ steps.changes.outputs.renovate }}
+      bom: ${{ steps.changes.outputs.bom }}
+      tuning: ${{ steps.changes.outputs.tuning }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
       # Detect targeted path categories (default: any match = true)
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4.0.2
         id: changes
         with:
           filters: |
@@ -77,6 +79,33 @@ jobs:
               # Make target or its pinned image trigger the gate.
               - '.github/renovate.json5'
               - 'Makefile'
+            bom:
+              # Inputs to the committed-BOM version-freshness check. The full
+              # `tests` job already runs it for code changes, but a docs-only
+              # PR editing the committed BOM (or a registry change that somehow
+              # lands as a docs-only diff) yields code=false and skips `tests`,
+              # so gate the freshness test on the doc + registry directly. The
+              # generator sources are included so a generator change also
+              # re-runs the check independently of the full suite.
+              - 'docs/user/container-images.md'
+              - 'recipes/registry.yaml'
+              - 'tools/bom/**'
+              - 'pkg/bom/**'
+            tuning:
+              # Inputs that can change the committed tuning-status table
+              # WITHOUT tripping pkg/tuning's TestCompute_Structure — which runs
+              # in the `tests` job on any non-docs change and already asserts
+              # every row's service, accelerator, profile, setup-name and
+              # tuning-name. That test is version-agnostic, so the only table
+              # changes it misses are a manifest pin version bump, a
+              # renderer/extractor change, or a hand edit of the committed doc.
+              # Structural changes driven by overlays, mixins, registry or
+              # pkg/recipe already fail that test, so they are deliberately NOT
+              # listed here (keeping this gate off unrelated recipe PRs).
+              - 'docs/integrator/components/nodewright.md'
+              - 'recipes/components/nodewright-customizations/**'
+              - 'pkg/tuning/**'
+              - 'tools/tuning/**'
 
       # code = true iff at least one changed file is NOT docs/markdown/LICENSE.
       #
@@ -91,7 +120,7 @@ jobs:
       # always true — docs-only PRs ran full qualification. '**' matches
       # dotfiles too (dorny sets picomatch dot:true), so '.golangci.yaml',
       # '.settings.yaml', etc. still count as code.
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4.0.2
         id: code
         with:
           predicate-quantifier: 'every'
@@ -149,13 +178,13 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
-      - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # v4.37.0
         with:
           languages: go
       - run: go build ./...
         env:
           GOFLAGS: -mod=vendor
-      - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # v4.37.0
 
   analyze-skip:
     needs: [check-paths]
@@ -320,6 +349,89 @@ jobs:
       - run: echo "No Renovate config changes — validation not required"
 
   # ---------------------------------------------------------------------------
+  # BOM version freshness — ensures the committed container-images.md matches
+  # the registry pins even on docs-only PRs (which skip the full `tests` job).
+  # ---------------------------------------------------------------------------
+
+  bom-freshness:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.bom == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+      - name: Verify committed BOM versions match the registry
+        env:
+          GOFLAGS: -mod=vendor
+        # `go test -run <name>` exits 0 with "no tests to run" if the test is
+        # renamed or removed, which would let this gate silently no-op. Assert
+        # the named test actually executed by requiring its PASS line.
+        run: |
+          set -uo pipefail
+          out=$(go test ./tools/bom/... -run '^TestCommittedBOMVersionsMatchRegistry$' -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          if ! grep -q '^--- PASS: TestCommittedBOMVersionsMatchRegistry' <<<"$out"; then
+            echo "::error::TestCommittedBOMVersionsMatchRegistry did not execute (renamed or removed?); the BOM freshness gate would silently pass. Update this job to run the freshness check."
+            exit 1
+          fi
+
+  bom-freshness-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.bom != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No BOM/registry changes — BOM freshness check not required"
+
+  # ---------------------------------------------------------------------------
+  # Tuning-status doc freshness — ensures the committed tuning table in
+  # docs/integrator/components/nodewright.md matches the recipe catalog and the
+  # nodewright package pins, on PRs touching its inputs (mirrors bom-freshness).
+  # ---------------------------------------------------------------------------
+
+  tuning-freshness:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.tuning == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+      - name: Verify committed tuning-status table is up to date
+        env:
+          GOFLAGS: -mod=vendor
+        # `make tuning-check` regenerates the table into a temp dir and splices
+        # it into the doc, then fails if the working tree differs — so a stale
+        # committed table (or missing splice markers) fails closed here.
+        run: make tuning-check
+
+  tuning-freshness-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.tuning != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No tuning-status inputs changed — freshness check not required"
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — the single required status check
   # ---------------------------------------------------------------------------
 
@@ -339,6 +451,10 @@ jobs:
       - verify-licenses-skip
       - verify-renovate
       - verify-renovate-skip
+      - bom-freshness
+      - bom-freshness-skip
+      - tuning-freshness
+      - tuning-freshness-skip
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:

@@ -20,7 +20,7 @@ Every AICR recipe is:
 - **Validated** — Passes automated constraint and compatibility checks before publishing.
 - **Reproducible** — Same inputs produce identical deployments every time.
 
-Every AICR recipe also carries two kinds of cryptographic proof: **where it came from** (provenance — signed by NVIDIA CI, verifiable offline) and **that it actually works on real hardware** (validity — including signed validation results from contributors with cluster access NVIDIA doesn't have). See [SECURITY.md](SECURITY.md) and the [bundle attestation](demos/bundle-attestation.md), [recipe evidence](demos/evidence.md), and [build provenance](demos/provenance.md) demos for the full chain.
+Every AICR recipe also carries two kinds of cryptographic proof: **where it came from** (provenance — signed by NVIDIA CI, verifiable offline) and, **for recipes with published evidence, what their validation recorded** (validity — a signer-bound, tamper-evident attestation that binds an identity to a recorded `aicr validate` result, from contributors with cluster access NVIDIA doesn't have). See [SECURITY.md](SECURITY.md) and the [bundle attestation](demos/bundle-attestation.md), [recipe evidence](demos/evidence.md), and [build provenance](demos/provenance.md) demos for the full chain.
 
 ## Quick Start
 
@@ -36,15 +36,16 @@ curl -sfL https://get.aicr.run | bash -s --
 aicr recipe --service eks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
-# Inspect any hydrated value (e.g., the resolved GPU driver version)
-aicr query --service eks --accelerator h100 --os ubuntu --intent training --platform kubeflow \
-  --selector components.gpu-operator.values.driver.version
-
 # Render it into deployment-ready bundles (helm, argocd, flux, or helmfile)
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundles
 
 # After deploying the bundle, validate the running cluster against the recipe
 aicr validate --recipe recipe.yaml
+
+# Select hydrated config value (e.g., the resolved GPU driver version)
+aicr query --service eks --accelerator h100 --os ubuntu \
+  --intent training --platform kubeflow \
+  --selector components.gpu-operator.values.driver.version
 ```
 
 The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, or simple Helm commands for `helm`.
@@ -62,7 +63,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, or Helmfile artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
 | **Drift Detection** | `aicr diff` compares two snapshots to surface configuration drift between clusters or over time. |
-| **Supply Chain Security** | SLSA Level 3 provenance, signed SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
+| **Supply Chain Security** | SLSA Build Level 3 image provenance, signed image SBOMs, image attestations (Cosign / Sigstore), and `aicr verify` for offline bundle verification. |
 
 ## Supported Components
 
@@ -83,7 +84,7 @@ See the full [Component Catalog](docs/user/component-catalog.md) for every compo
 
 | Dimension | Values |
 |-----------|--------|
-| **Services** | AKS, BCM, EKS, GKE, Kind, LKE, OKE |
+| **Services** | AKS, BCM, EKS, GKE, Kind, LKE, OCP, OKE |
 | **Accelerators** | A100, B200, GB200, H100, H200, L40, RTX PRO 6000 |
 | **Operating systems** | Amazon Linux, COS, RHEL, Talos, Ubuntu |
 | **Workload intents** | Inference, Training |
@@ -123,6 +124,7 @@ Full documentation lives at **[docs.nvidia.com/aicr](https://docs.nvidia.com/aic
 For contributors:
 
 - **[Contributing Guide](CONTRIBUTING.md)** — Development setup, testing, and PR process
+- **[Code of Conduct](CODE_OF_CONDUCT.md)** — Community standards and enforcement
 - **[Development Guide](DEVELOPMENT.md)** — Local development, Make targets, and tooling
 - **[Architecture Overview](docs/contributor/index.md)** — System design and packages
 

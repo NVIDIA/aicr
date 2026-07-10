@@ -219,6 +219,21 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			"recipe must contain at least one component reference")
 	}
 
+	// Reject incoherent component refs (e.g. a Helm ref that also carries a
+	// Kustomize tag/path, which the deployers silently build as Kustomize)
+	// before generating anything. DefaultBundler.Make is a public entry point
+	// (docs/integrator/public-api.md) reachable without the CLI/server
+	// validation boundaries, so it must apply the same coherence gate. Validate
+	// a provider-preserving defensive copy — a struct copy keeps the bound
+	// provider, and a fresh ComponentRefs slice keeps type back-fill/
+	// canonicalization from mutating the caller's RecipeResult. See #1584.
+	validated := *recipeResult
+	validated.ComponentRefs = append([]recipe.ComponentRef(nil), recipeResult.ComponentRefs...)
+	if err := validated.PrepareAndValidate(); err != nil {
+		return nil, err
+	}
+	recipeResult = &validated
+
 	enabledRefs, filteredOrder, filterErr := b.filterEnabledComponents(recipeResult)
 	if filterErr != nil {
 		return nil, filterErr
@@ -241,6 +256,14 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				"failed to create output directory", err)
 		}
+	}
+
+	// Bundle-time override policy for GPU allocation-policy keys (#1327):
+	// reject --dynamic declarations, warn on static overrides. Runs after
+	// alias resolution against the recipe-bound registry, before values are
+	// extracted, so REST/SDK callers get the same enforcement as the CLI.
+	if policyErr := b.enforceAllocationPolicyOverrides(recipeResult.DataProvider()); policyErr != nil {
+		return nil, policyErr
 	}
 
 	// Extract values for each component from the recipe
@@ -330,6 +353,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		}
 	}
 
+	argoOpts, err := b.argoDeployerOptions()
+	if err != nil {
+		return nil, err
+	}
+
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
 		// --repo is meaningful for --deployer argocd (baked into child
@@ -371,6 +399,11 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			VendorCharts:           b.Config.VendorCharts(),
 			ChartName:              b.Config.BundleChartName(),
 			AppName:                b.Config.AppName(),
+			OCIParentNamespace:     b.Config.OCIParentNamespace(),
+			NamePrefix:             argoOpts.NamePrefix,
+			DestinationServer:      argoOpts.DestinationServer,
+			Project:                argoOpts.Project,
+			CascadeDelete:          argoOpts.CascadeDelete,
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -406,6 +439,10 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentReadiness:     componentReadiness,
 			VendorCharts:           b.Config.VendorCharts(),
 			AppName:                b.Config.AppName(),
+			NamePrefix:             argoOpts.NamePrefix,
+			DestinationServer:      argoOpts.DestinationServer,
+			Project:                argoOpts.Project,
+			CascadeDelete:          argoOpts.CascadeDelete,
 			// Inline values when the bundle repo is OCI: Argo CD's $values
 			// multi-source ref is Git-only (see #960), so an OCI repoURL
 			// must use single-source with helm.valuesObject embedded.
@@ -495,6 +532,36 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
 	}
+}
+
+// argoDeployerOptions parses the deployer-level Argo Application options
+// (`--set deployer:<key>=<value>`) from the value overrides. Parsing lives
+// here — in front of deployer construction — so both the CLI and API paths
+// share a single validation point. The options only apply to the Argo CD
+// generators; fail closed for every other deployer so a typo or unsupported
+// combination never silently ships a misconfigured bundle. See #1625.
+// Typed (--set-json / --set-file) deployer overrides are rejected up front:
+// every deployer option is a scalar, so silently dropping typed input would
+// ship a misconfigured artifact.
+// Returns a zero-value options struct when no deployer overrides were set.
+func (b *DefaultBundler) argoDeployerOptions() (*config.ArgoDeployerOptions, error) {
+	if typed := b.Config.ValueOverridesTyped()[config.DeployerOverrideKey]; len(typed) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"deployer options do not support --set-json/--set-file; use --set deployer:<key>=<value>")
+	}
+	opts, err := config.ParseArgoDeployerOptions(
+		b.Config.ValueOverrides()[config.DeployerOverrideKey])
+	if err != nil {
+		return nil, err
+	}
+	if opts == nil {
+		return &config.ArgoDeployerOptions{}, nil
+	}
+	if d := b.Config.Deployer(); d != config.DeployerArgoCD && d != config.DeployerArgoCDHelm {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("--set deployer:<key> options are only supported with --deployer argocd or argocd-helm (got %q)", d))
+	}
+	return opts, nil
 }
 
 // runDeployer executes a deployer and builds the result output.
@@ -647,6 +714,17 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// are intentionally excluded — see authoritativeSchedulingPaths godoc.
 		policy := b.computeSchedulingPathPolicy(&ref, provider, setOverrides)
 
+		// Paths declared via --dynamic must not have scheduling values baked in.
+		// Merging them into optOut causes applyNodeSchedulingOverrides to skip
+		// injection for those paths; the path will be absent from values entirely
+		// so operators can supply the toleration at install time without
+		// rebuilding the bundle. See #1371.
+		if dynPaths := b.dynamicPathSetFor(ref.Name, provider); len(dynPaths) > 0 {
+			for path := range dynPaths {
+				policy.optOut[path] = struct{}{}
+			}
+		}
+
 		// Apply node selectors, tolerations, workload selector, and taints based on component type
 		b.applyNodeSchedulingOverrides(ref.Name, values, provider, policy)
 
@@ -772,7 +850,8 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 }
 
 // filterEnabledComponents resolves the set of components to bundle by applying
-// recipe-level overrides.enabled and bundle-time --set enabled toggles, then
+// recipe-level overrides.enabled, bundle-time --set enabled toggles, and the
+// positive bundlers component-name filter (config.WithBundlers, #1531), then
 // returns the enabled refs (with dangling dependency edges pruned) alongside
 // the deployment order filtered to those refs.
 //
@@ -817,6 +896,46 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 		}
 		enabledRefs = append(enabledRefs, ref)
 		enabledSet[ref.Name] = struct{}{}
+	}
+
+	// Apply the positive component-name filter (POST /v1/bundle ?bundlers=…,
+	// config.WithBundlers). Requested names must be declared AND enabled —
+	// an unknown name is a typo the operator needs to hear about, and a
+	// disabled one mirrors the --set re-enable rejection above (the recipe
+	// author disabled it because the platform provides it). Enabled
+	// components outside the requested set are skipped exactly like
+	// disabled ones, so the dependency-edge pruning below treats them as
+	// satisfied externally. See #1531.
+	if b.Config != nil {
+		if requested := b.Config.Bundlers(); len(requested) > 0 {
+			requestedSet := make(map[string]struct{}, len(requested))
+			for _, name := range requested {
+				if _, declared := declaredSet[name]; !declared {
+					declaredNames := make([]string, 0, len(recipeResult.ComponentRefs))
+					for _, ref := range recipeResult.ComponentRefs {
+						declaredNames = append(declaredNames, ref.Name)
+					}
+					return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"unknown component %q in bundlers filter; recipe declares: %s",
+						name, strings.Join(declaredNames, ", ")))
+				}
+				if _, enabled := enabledSet[name]; !enabled {
+					return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"component %q is disabled and cannot be selected via the bundlers filter", name))
+				}
+				requestedSet[name] = struct{}{}
+			}
+			kept := make([]recipe.ComponentRef, 0, len(requestedSet))
+			for _, ref := range enabledRefs {
+				if _, ok := requestedSet[ref.Name]; !ok {
+					slog.Info("skipping component excluded by bundlers filter", "component", ref.Name)
+					delete(enabledSet, ref.Name)
+					continue
+				}
+				kept = append(kept, ref)
+			}
+			enabledRefs = kept
+		}
 	}
 
 	if len(enabledRefs) == 0 {
@@ -1163,6 +1282,46 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 // warnMissingStorageClassForPVCs emits a bundle note when a rendered component creates
 // a PVC but leaves storageClassName unset, causing Kubernetes to rely on the
 // target cluster's default StorageClass.
+// dynamicPathSetFor returns the set of value paths declared as dynamic for
+// componentName. Dynamic paths are excluded from scheduling injection so that
+// the path stays absent from values entirely rather than carrying a baked-in
+// value, letting operators supply tolerations at install time without
+// rebuilding the bundle. See #1371.
+func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe.DataProvider) map[string]struct{} {
+	if b.Config == nil || !b.Config.HasDynamicValues() {
+		return nil
+	}
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		slog.Debug("dynamicPathSetFor: failed to load registry, dynamic opt-out disabled",
+			"component", componentName,
+			"error", err,
+		)
+		return nil
+	}
+	raw := b.Config.DynamicValues()
+	pathSet := make(map[string]struct{})
+	for key, paths := range raw {
+		comp := registry.GetByOverrideKey(key)
+		if comp == nil {
+			slog.Warn("dynamicPathSetFor: unresolved --dynamic override key, toleration will be baked in",
+				"key", key,
+				"component", componentName,
+			)
+			continue
+		}
+		if comp.Name != componentName {
+			continue
+		}
+		for _, p := range paths {
+			pathSet[p] = struct{}{}
+		}
+	}
+	if len(pathSet) == 0 {
+		return nil
+	}
+	return pathSet
+}
 func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
 	if b.Config == nil {
 		return nil

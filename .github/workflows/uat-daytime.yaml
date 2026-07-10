@@ -1,0 +1,256 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT Daytime Human-Access
+
+# The day side of the day/night cycle (#1281, DC8): stand up ONE long-lived,
+# human-facing deployment per cloud for the working day, then tear it down
+# before the nightly batch. The cloud→flavor split is data, not code — it comes
+# from the `daytime-intent` column of the reservation registry
+# (infra/uat/reservations.yaml), defaulting to AWS=training / GCP=inference.
+#
+# This workflow is a THIN SCHEDULER. It owns no lifecycle mechanics: it enumerates
+# the daytime rotation from the broker and dispatches the shared uat-run.yaml
+# once per reservation with lifecycle=daytime-up (morning) or daytime-down
+# (evening). DC2 owns provision-and-hold, teardown, and the pre-batch guard;
+# uat-run.yaml owns the per-reservation lease. Because the daytime runs go through
+# that same dispatch surface, they contend on the SAME lease as the nightly batch
+# — CI and human use never overlap on one reservation.
+#
+# The daytime cluster is NOT a UAT cell: daytime-up stops after deploy (no CUJ),
+# so it emits NO evidence bundle and produces NO TestGrid column. Access is
+# distributed OUT-OF-BAND (see docs/contributor/uat.md), never through this CI
+# path.
+on:
+  schedule:
+    # Times are UTC. The nightly batch opens at 04:00 UTC (uat-nightly-batch.yaml).
+    # KEEP IN LOCKSTEP with env.MORNING_UP_CRON / env.EVENING_DOWN_CRON below —
+    # the Resolve-action step maps `github.event.schedule` to up/down by an exact
+    # string match against those env values (the `on:` block cannot reference
+    # env, so this coupling is by convention). Editing one cron without the other
+    # breaks that edge with `::error::could not resolve daytime action` when it fires.
+    - cron: '0 15 * * *' # morning handoff — provision + deploy + HOLD (daytime-up)
+    - cron: '0 2 * * *'  # evening teardown — release the reservation ~2h before the batch (daytime-down)
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'up: provision + deploy + hold the daytime cluster. down: tear it down and release the reservation.'
+        type: choice
+        options: [up, down]
+        required: true
+
+permissions:
+  contents: read
+
+# Serialize daytime scheduler runs so a manual dispatch does not fan out a
+# second up/down alongside a cron one. (uat-run.yaml's per-reservation lease
+# would queue any duplicates anyway; there is no reason to start them.)
+concurrency:
+  group: uat-daytime
+  cancel-in-progress: false
+
+# Cron edges map to lifecycle actions; a manual dispatch names the action
+# directly. Consumed by the enumerate job's Resolve action step, which maps
+# `github.event.schedule` to up/down by an EXACT string match against these.
+# These two values MUST stay identical to the `on.schedule` crons above — an
+# unsynced edit breaks the drifted edge (fails loud, but only when it fires).
+env:
+  MORNING_UP_CRON: '0 15 * * *'   # must equal the daytime-up cron in on.schedule
+  EVENING_DOWN_CRON: '0 2 * * *'  # must equal the daytime-down cron in on.schedule
+
+jobs:
+  # Resolve the up/down action for this trigger and enumerate the daytime
+  # rotation (reservation + intent) from the registry into a JSON matrix. Keeps
+  # the scheduler data-driven: onboarding a daytime reservation is a
+  # `daytime-intent:` edit in infra/uat/reservations.yaml, no workflow change.
+  enumerate:
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.action.outputs.action }}
+      lifecycle: ${{ steps.action.outputs.lifecycle }}
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Resolve action
+        id: action
+        env:
+          # github.event.schedule is the cron string that fired (empty on
+          # workflow_dispatch); inputs.action is set only on workflow_dispatch.
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            action="${INPUT_ACTION}"
+          elif [[ "${SCHEDULE}" == "${MORNING_UP_CRON}" ]]; then
+            action="up"
+          elif [[ "${SCHEDULE}" == "${EVENING_DOWN_CRON}" ]]; then
+            action="down"
+          else
+            echo "::error::could not resolve daytime action (event='${EVENT_NAME}', schedule='${SCHEDULE}')"
+            exit 1
+          fi
+          case "${action}" in
+            up|down) ;;
+            *) echo "::error::invalid action '${action}' (want up|down)"; exit 1 ;;
+          esac
+          echo "action=${action}" >> "$GITHUB_OUTPUT"
+          echo "lifecycle=daytime-${action}" >> "$GITHUB_OUTPUT"
+          echo "Daytime action: ${action} (lifecycle=daytime-${action})"
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+      - name: Enumerate daytime rotation
+        id: list
+        env:
+          GOFLAGS: -mod=vendor
+          ACTION: ${{ steps.action.outputs.action }}
+        run: |
+          set -euo pipefail
+          go build -o ./bin/uat-broker ./tools/uat-broker
+          # Compact to one line for GITHUB_OUTPUT; the matrix is a JSON array of
+          # {reservation,intent} objects consumed as strategy.matrix.include.
+          matrix=$(./bin/uat-broker reservations --daytime | jq -c .)
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "Daytime rotation: ${matrix}"
+          if [[ "${matrix}" == "[]" ]]; then
+            echo "::notice::no reservations carry a daytime-intent; nothing to ${ACTION}."
+          fi
+
+  # One matrix leg per daytime reservation (parallel — independent hardware).
+  # Each leg DISPATCHES uat-run.yaml once (workflow_dispatch is exempt from the
+  # GITHUB_TOKEN recursion rule and always creates a run) and watches it to
+  # completion so a failed morning handoff / evening teardown surfaces here. The
+  # dispatched uat-run.yaml runs top-level with its own permissions and holds the
+  # reservation lease; this job only needs actions:write to dispatch + watch.
+  drive:
+    needs: enumerate
+    if: needs.enumerate.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    # A daytime-up dispatch (provision + deploy) can run ~90 min; watching it
+    # blocks this job for that long. Stay under GitHub's 6h hosted-job cap.
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.enumerate.outputs.matrix) }}
+    permissions:
+      contents: read  # checkout
+      actions: write  # dispatch uat-run.yaml and watch the dispatched run
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Dispatch and watch the daytime run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          RESERVATION: ${{ matrix.reservation }}
+          INTENT: ${{ matrix.intent }}
+          ACTION: ${{ needs.enumerate.outputs.action }}
+          LIFECYCLE: ${{ needs.enumerate.outputs.lifecycle }}
+        run: |
+          set -euo pipefail
+          # Poll budget for finding the dispatched run (gh workflow run returns
+          # no run id): POLL_MAX_ATTEMPTS x POLL_INTERVAL_SECONDS seconds.
+          POLL_MAX_ATTEMPTS=24
+          POLL_INTERVAL_SECONDS=5
+
+          # Unique per-dispatch key (this run's id + attempt + reservation +
+          # action) so the resolver below watches THIS run, never a concurrent
+          # manual dispatch of the same reservation. Mirrors the nightly
+          # controller's correlation scheme.
+          dispatch_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RESERVATION}-${ACTION}"
+          # aicr_version is left empty (daytime always runs main/tip), so
+          # uat-run.yaml's run-name renders '@ main'; the dispatch_key suffix
+          # makes the title globally unique.
+          title="UAT ${RESERVATION} @ main #${dispatch_key}"
+          echo "::group::${title}"
+
+          gh workflow run uat-run.yaml --repo "$REPO" --ref "$REF" \
+            -f reservation="$RESERVATION" \
+            -f intent="$INTENT" \
+            -f lifecycle="$LIFECYCLE" \
+            -f dispatch_key="$dispatch_key"
+
+          # Resolve the dispatched run by its (globally unique) run-name; no
+          # createdAt filter, so a runner clock ahead of GitHub's API clock
+          # cannot falsely reject this dispatch.
+          run_id=""
+          for _ in $(seq 1 "$POLL_MAX_ATTEMPTS"); do
+            sleep "$POLL_INTERVAL_SECONDS"
+            run_id=$(gh run list --repo "$REPO" --workflow uat-run.yaml \
+              --event workflow_dispatch --limit 50 \
+              --json databaseId,displayTitle,createdAt 2>/dev/null \
+              | jq -r --arg t "$title" \
+                  'map(select(.displayTitle == $t))
+                   | sort_by(.createdAt) | .[-1].databaseId // empty' || true)
+            [[ -n "$run_id" ]] && break
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "::error::Dispatched ${title} but could not resolve its run id."
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "Waiting on run ${run_id} ..."
+          # --exit-status is intentionally not fatal here; classify the run's
+          # conclusion below so a benign supersede is not mistaken for a failure.
+          gh run watch "$run_id" --repo "$REPO" --exit-status || true
+
+          conclusion=$(gh run view "$run_id" --repo "$REPO" --json conclusion --jq '.conclusion' 2>/dev/null || echo "")
+          njobs=$(gh api "repos/${REPO}/actions/runs/${run_id}/jobs" --jq '.total_count' 2>/dev/null || echo "")
+          echo "::endgroup::"
+          if [[ "$conclusion" == "cancelled" && "$njobs" == "0" ]]; then
+            # Benign: the single-slot reservation lease dropped this run while it
+            # was still pending (the nightly batch or another daytime run held
+            # the reservation). Surface it — must not be silent — but do not fail:
+            # re-dispatch when the reservation frees.
+            echo "::warning::${title} was superseded while pending (dropped by the reservation lease); re-run when the reservation frees."
+          elif [[ "$conclusion" != "success" ]]; then
+            echo "::error::daytime ${ACTION} for ${RESERVATION} finished with conclusion '${conclusion:-unknown}'."
+            exit 1
+          fi
+          echo "daytime ${ACTION} for ${RESERVATION} (${INTENT}): ${conclusion}"
+
+      - name: Summary
+        if: always()
+        env:
+          SUMMARY_RESERVATION: ${{ matrix.reservation }}
+          SUMMARY_INTENT: ${{ matrix.intent }}
+          SUMMARY_ACTION: ${{ needs.enumerate.outputs.action }}
+        run: |
+          {
+            echo "## Daytime human-access — ${SUMMARY_ACTION}"
+            echo ""
+            printf '**Reservation:** `%s` · **Intent:** `%s` · **Action:** `%s`\n' \
+              "$SUMMARY_RESERVATION" "$SUMMARY_INTENT" "$SUMMARY_ACTION"
+            echo ""
+            echo "Access is distributed out-of-band; this cluster emits no evidence bundle and no TestGrid column."
+          } >> "$GITHUB_STEP_SUMMARY"

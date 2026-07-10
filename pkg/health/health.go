@@ -178,71 +178,41 @@ type Report struct {
 // Compute enumerates every leaf recipe in the catalog and scores each against
 // the structural signals, returning a deterministic Report.
 //
-// Enumeration uses MetadataStore.ListCatalog filtered to leaf overlays.
-// Resolution runs through a single shared recipe.Builder so the owner-stamp
-// invariant holds identically across combos. The returned Report carries
-// map-typed fields; callers serializing it must use
-// serializer.MarshalYAMLDeterministic.
+// Enumeration and hermetic resolution are delegated to recipe.ResolveLeaves,
+// which returns leaves sorted deterministically; Compute then grades each.
+// The returned Report carries map-typed fields; callers serializing it must
+// use serializer.MarshalYAMLDeterministic.
 func Compute(ctx context.Context, opts Options) (*Report, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaults.HealthComputeTimeout)
 	defer cancel()
 
-	store, err := recipe.LoadMetadataStoreFor(ctx, opts.Provider)
+	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{
+		Provider: opts.Provider,
+		Version:  opts.Version,
+		Filter:   opts.Filter,
+	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err,
-			errors.ErrCodeInternal, "failed to load recipe catalog for health computation")
+			errors.ErrCodeInternal, "failed to resolve recipe catalog for health computation")
 	}
-
-	// A single shared builder bound to the same provider used for enumeration,
-	// so every combo resolves against one consistent metadata store and carries
-	// the same owner stamp.
-	builder := recipe.NewBuilder(
-		recipe.WithVersion(opts.Version),
-		recipe.WithDataProvider(opts.Provider),
-	)
 
 	report := &Report{SchemaVersion: SchemaVersion}
-	for _, entry := range store.ListCatalog(opts.Filter) {
-		// Fail loud on cancellation rather than emitting a truncated report:
-		// once ctx is done, every remaining BuildFromCriteria short-circuits to
-		// ErrCodeTimeout (graded unknown), so a partial run would otherwise look
-		// byte-for-byte like a healthy catalog with transient unknowns.
-		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout,
-				"health computation canceled before completing the catalog", err)
-		}
-		if !entry.IsLeaf {
-			continue
-		}
-		report.Combos = append(report.Combos, computeCombo(ctx, builder, entry))
+	for _, leaf := range leaves {
+		report.Combos = append(report.Combos, computeCombo(leaf.Entry, leaf.Result, leaf.Err))
 	}
-
-	sort.Slice(report.Combos, func(i, j int) bool {
-		ci, cj := report.Combos[i].Criteria.String(), report.Combos[j].Criteria.String()
-		if ci != cj {
-			return ci < cj
-		}
-		return report.Combos[i].LeafOverlay < report.Combos[j].LeafOverlay
-	})
-
+	// ResolveLeaves already sorts by criteria string then leaf name — the exact
+	// order Compute produced before — so no re-sort is needed here.
 	return report, nil
 }
 
-// computeCombo scores a single leaf overlay's structural health.
-func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.CatalogEntry) ComboHealth {
+// computeCombo scores a single leaf overlay's structural health from an
+// already-resolved leaf (see recipe.ResolveLeaves).
+func computeCombo(entry recipe.CatalogEntry, result *recipe.RecipeResult, err error) ComboHealth {
 	structure := StructureHealth{
 		Dimensions: make(map[string]string),
 		Detail:     make(map[string]string),
 	}
 
-	// Resolve through the constraint-aware path with a hermetic satisfied stub.
-	// With every constraint reported satisfied this merges exactly the overlays
-	// BuildFromCriteria would (no cluster-dependent exclusions), so the resolves
-	// grade is unchanged — but the result additionally carries the merged
-	// Constraints and any ConstraintWarnings/ExcludedOverlays the constraint-aware
-	// path surfaces, which the constraints_wellformed signal reads. One build,
-	// no snapshot, no cluster.
-	result, err := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, satisfiedEvaluator)
 	state, detail := classifyResolve(err)
 	structure.Dimensions[DimResolves] = state
 	if detail != "" {
@@ -293,7 +263,7 @@ func computeCombo(ctx context.Context, builder *recipe.Builder, entry recipe.Cat
 // Manifest-only "Helm" components (typed Helm but carrying local manifestFiles
 // with no external chart/source — e.g. nodewright-customizations) are also
 // skipped: there is no external chart version to pin, so grading them against
-// the pin requirement is a false positive. See isManifestOnlyHelm.
+// the pin requirement is a false positive. See recipe.ComponentRef.IsManifestOnlyHelm.
 //
 // A recipe with no enabled Helm components (e.g. pure-Kustomize) scores a
 // vacuous pass with an explanatory detail, since Kustomize defaultTag pinning
@@ -317,12 +287,27 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 		// Manifest-only "Helm" components (e.g. nodewright-customizations) are
 		// typed Helm but ship local manifestFiles with no external chart, so
 		// they have no chart version to pin. Skip them — exactly like disabled
-		// components — rather than flag a non-existent pin as unpinned.
-		if isManifestOnlyHelm(ref) {
+		// components — rather than flag a non-existent pin as unpinned. But a
+		// version they DO set still ships raw into the rendered chart's
+		// .Chart.Version / helm.sh/chart label, so a MALFORMED one (bare "v",
+		// padded) is graded before the exemption applies — matching the
+		// coherence check, which rejects those shapes outright (the classifier
+		// grades directly-constructed results as defense-in-depth).
+		if ref.IsManifestOnlyHelm() {
+			if ref.Version != "" && !isEffectiveRawVersion(ref.Version) {
+				helmCount++
+				unpinned = append(unpinned, ref.Name)
+			}
 			continue
 		}
 		helmCount++
-		if ref.Version == "" {
+		// Shared rule with the coherence check (recipe.IsEffectiveChartVersion):
+		// whitespace-only and bare-"v" versions do not pin what deploys. A
+		// PADDED version is equally unpinned — the deployers consume the
+		// field raw (a broken semver in Flux, an invalid helm.sh/chart
+		// label for manifest-rendered charts), so the trimmed value that
+		// grades here is not the value that ships.
+		if !isEffectiveRawVersion(ref.Version) {
 			unpinned = append(unpinned, ref.Name)
 		}
 	}
@@ -337,13 +322,13 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 	return StatusPass, ""
 }
 
-// satisfiedEvaluator is the hermetic stub fed to BuildFromCriteriaWithEvaluator
-// so the constraint-aware resolution path executes offline. It reports every
-// constraint satisfied, so no overlay is excluded and no ConstraintWarning is
-// emitted — the resolution exercises the merge/compose machinery without any
-// snapshot measurement, which is all the parse-only signal needs.
-func satisfiedEvaluator(recipe.Constraint) recipe.ConstraintEvalResult {
-	return recipe.ConstraintEvalResult{Passed: true}
+// isEffectiveRawVersion reports whether version pins what actually deploys:
+// effective after the deployers' normalization (recipe.IsEffectiveChartVersion)
+// AND free of surrounding whitespace — the deployers consume the field raw, so
+// a padded value that grades clean when trimmed is not the value that ships.
+func isEffectiveRawVersion(version string) bool {
+	return recipe.IsEffectiveChartVersion(version) &&
+		version == strings.TrimSpace(version)
 }
 
 // classifyConstraintsWellformed grades the constraints_wellformed dimension
@@ -368,8 +353,9 @@ func satisfiedEvaluator(recipe.Constraint) recipe.ConstraintEvalResult {
 // ConstraintWarnings or ExcludedOverlays, the dimension warns. NOTE: these
 // fields are populated only when the injected evaluator reports a constraint
 // failed or errored (see metadata_store.evaluateOverlayConstraints /
-// evaluateMixinConstraints). satisfiedEvaluator never does, so under the
-// current hermetic resolution the warn branch does not fire — composition
+// evaluateMixinConstraints). The always-satisfied evaluator used by
+// recipe.ResolveLeaves never does, so under the current hermetic resolution
+// the warn branch does not fire — composition
 // problems surface instead as resolve errors. The branch is retained because it
 // is the correct reading of a resolved result and is forward-compatible with a
 // future evaluator wired into this path; it is exercised by unit tests via
@@ -404,18 +390,6 @@ func classifyConstraintsWellformed(result *recipe.RecipeResult) (state, detail s
 	}
 
 	return StatusPass, ""
-}
-
-// isManifestOnlyHelm reports whether a Helm-typed ComponentRef is a
-// manifest-only component: it references no external chart (empty Chart and
-// Source) but ships local manifest files. Such a component has no chart
-// version to pin, so chart_pinned must not grade it. This mirrors the
-// manifest-only detection in the bundler's deployers (ref.Chart == "" &&
-// ref.Source == "" with manifests present), keeping the health signal aligned
-// with what is actually bundled and deployed.
-func isManifestOnlyHelm(ref recipe.ComponentRef) bool {
-	return ref.Chart == "" && ref.Source == "" &&
-		(len(ref.ManifestFiles) > 0 || len(ref.PreManifestFiles) > 0)
 }
 
 // computeCoverage builds the declared_coverage descriptor from the resolved

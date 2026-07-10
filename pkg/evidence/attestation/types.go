@@ -98,6 +98,14 @@ const (
 // regardless of execution-order changes.
 var AllPhases = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
 
+// CTRFRelPath returns the bundle-relative, forward-slash path of the per-phase
+// CTRF report file (e.g. "ctrf/deployment.json"). It matches both the manifest
+// entry path and the on-disk layout the builder writes, so verifiers can map a
+// Phase back to its committed report.
+func CTRFRelPath(p Phase) string {
+	return ctrfDirName + "/" + string(p) + ".json"
+}
+
 // Predicate is the body of the signed in-toto Statement. It serializes
 // to JSON for the on-the-wire predicate and to YAML for human-readable
 // embedding in spec docs.

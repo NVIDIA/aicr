@@ -17,12 +17,14 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [evidence.md](evidence.md) | Recipe evidence demo (validate emit + verify) |
 | [evidence-demo-slides.html](evidence-demo-slides.html) | Recipe evidence demo — slide deck |
 | [evidence-demo.sh](evidence-demo.sh) | Interactive split-leg evidence walkthrough (validate on VPN → publish off VPN → verify) |
-| [provenance.md](provenance.md) | Binary & image SLSA L3 provenance demo (verify, SBOM, Rekor, in-cluster enforcement) |
+| [provenance.md](provenance.md) | Binary & image SLSA provenance demo (verify, SBOM, Rekor, in-cluster enforcement) |
 | [provenance-demo-slides.html](provenance-demo-slides.html) | Build provenance — slide deck |
 | [provenance-demo.sh](provenance-demo.sh) | Interactive consumer-side verification walkthrough |
 | [bundle-attestation.md](bundle-attestation.md) | Bundle attestation demo (`aicr bundle --attest` + `aicr verify` trust levels) |
 | [bundle-attestation-demo-slides.html](bundle-attestation-demo-slides.html) | Bundle attestation — slide deck |
 | [bundle-attestation-demo.sh](bundle-attestation-demo.sh) | Interactive bundle sign + verify + tamper walkthrough |
+| [dynamic.md](dynamic.md) | Dynamic install-time values (cluster-values.yaml split, install-time override, OCI artifact) |
+| [private-signing.md](private-signing.md) | Private/enterprise signing & verification (self-hosted Sigstore, KMS-backed, headless OIDC) |
 | [examples/CUJ2-Test-Report.md](examples/CUJ2-Test-Report.md) | Dated historical capture (2026-03-13) of a CUJ2 inference run — example test report, not a runbook |
 
 ## Recording Test Runs

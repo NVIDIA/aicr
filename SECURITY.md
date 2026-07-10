@@ -21,6 +21,65 @@ To report a potential security vulnerability in any NVIDIA product:
 
 NVIDIA offers acknowledgement for externally reported security issues under our coordinated vulnerability disclosure policy. Visit [PSIRT Policies](https://www.nvidia.com/en-us/security/psirt-policies/) for details.
 
+## Acknowledgement and Response
+
+Reports submitted through the channels above are received by NVIDIA PSIRT.
+PSIRT acknowledges receipt of each report, coordinates with the reporter
+throughout the investigation, and provides progress updates as the issue moves
+toward remediation. The expectations for acknowledgement, ongoing
+communication, and reporter credit are defined in the
+[PSIRT Policies](https://www.nvidia.com/en-us/security/psirt-policies/), which
+set the response timeline for AICR. If you do not receive an acknowledgement,
+re-send your report to psirt@nvidia.com rather than opening a public issue.
+
+## Embargo, Coordinated Disclosure, and CVEs
+
+Confirmed vulnerabilities are handled under embargo. NVIDIA PSIRT manages the
+coordinated disclosure timeline: the issue is kept confidential while a fix is
+prepared, affected downstream consumers are notified where appropriate, and a
+security advisory is published when the embargo lifts. NVIDIA is a CVE Numbering
+Authority (CNA) and assigns CVE identifiers for resolved issues that require
+user action, so downstream users can track and patch them through standard
+vulnerability databases.
+
+AICR maintainers support this process by developing fixes privately and holding
+public discussion of an issue until PSIRT lifts the embargo. Please keep any
+reported vulnerability confidential until then.
+
+## Out of Scope
+
+The following generally do **not** qualify as security vulnerabilities in AICR.
+Reviewing this list before reporting helps PSIRT focus on real issues:
+
+- Findings that require physical access to a node or control-plane host.
+- Social engineering, phishing, or attacks that depend on an already-compromised
+  operator credential or workstation.
+- Theoretical weaknesses with no demonstrated, practical exploit path.
+- Vulnerabilities in upstream components that AICR only deploys (for example the
+  GPU Operator, Network Operator, or other Helm chart sub-images) — report those
+  to the owning project. We will help coordinate when an AICR default is involved.
+- Missing cluster hardening that is the operator's responsibility, such as
+  network policy, secrets management, or RBAC tightening covered by the
+  deployment documentation.
+
+When in doubt, report it — PSIRT would rather triage an out-of-scope report than
+miss a real one.
+
+## Supported Versions
+
+AICR is pre-1.0 and ships from a single active release line. Only the latest
+released minor receives security fixes; earlier minors are end-of-life and
+should be upgraded.
+
+| Version | Supported |
+|---------|-----------|
+| `0.16.x` (latest released minor) | ✅ Receives security fixes |
+| `< 0.16` | ❌ End-of-life — upgrade to the latest release |
+
+Security fixes ship in a new patch or minor release rather than as backports to
+end-of-life versions. When AICR reaches 1.0 this policy will be revised and a
+longer support window published here.
+
 ## Product Security Resources
 
 For all security-related concerns: https://www.nvidia.com/en-us/security
@@ -43,7 +102,7 @@ charts evolve:
 - [`docs/user/container-images.md`](docs/user/container-images.md) — human
   readable summary of every component, chart, and image AICR can deploy.
 - A machine-readable [CycloneDX 1.6][cyclonedx] BOM is produced by `make
-  bom` and published as a release asset. Tooling that consumes SBOMs
+  bom` (generated locally; not currently a published release asset). Tooling that consumes SBOMs
   (Trivy, Grype, Cosign attestation, in-toto) should prefer the JSON; the
   Markdown is its companion.
 
@@ -51,17 +110,18 @@ charts evolve:
 contract:
 
 1. **Chart versions** are pinned for every Helm component, with no
-   exceptions. `recipes/registry.yaml` MUST declare `defaultVersion`;
-   `make bom BOM_STRICT=1` enforces this in CI.
+   exceptions. `recipes/registry.yaml` MUST declare `defaultVersion`. `bom-pinning-check`
+   (a `make lint` dependency) enforces this with `-strict`, with no exceptions.
 2. **Explicit image overrides** that AICR pins in-tree (in
    `recipes/components/<name>/values.yaml` or embedded manifests) carry
-   `@sha256:` digests in addition to tags. Renovate handles digest
-   rotation as upstream rebuilds the same tag.
+   `@sha256:` digests in addition to tags (Renovate handles digest rotation). A
+   small documented exemption map covers refs that cannot take a digest (e.g.
+   CRD schemas); explicit digest pinning is not yet universal.
 3. **Chart-default sub-images** (the ones the upstream chart pulls
    without AICR overriding) ship at whatever the chart resolves at the
-   pinned chart version. Reproducibility for these images is delivered by
-   admission-time digest verification rather than per-sub-image overrides
-   (see the [supply-chain epic][epic-739] for the roadmap).
+   pinned chart version. Reproducibility for these images is *planned* via
+   admission-time digest verification (Stage 3 roadmap, not yet enforced — see
+   the [supply-chain epic][epic-739]), not per-sub-image overrides.
 
 **Upstream attestation coverage.** AICR's own runtime images and the
 [NVSentinel][nvsentinel] images deployed by AICR ship with full
@@ -87,18 +147,43 @@ and how it is signed:
 
 | Guarantee | Artifact | Format / Standard | Signing |
 |-----------|----------|-------------------|---------|
-| Build provenance | Container images | SLSA Build Level 3 (provenance v1) | Sigstore keyless via GitHub Actions OIDC |
+| Build provenance | Container images | SLSA Build Level 3 (provenance v1) | Sigstore keyless via GitHub Actions OIDC, generated from a reusable workflow |
 | Build provenance | CLI binaries | SLSA Build Provenance v1 (Sigstore bundle) | Cosign keyless, logged to public Rekor |
 | Signed SBOM | Container images | SPDX v2.3 JSON attestation | Cosign keyless (Fulcio + Rekor) |
-| Embedded SBOM | CLI binaries | SPDX v2.3 JSON (via GoReleaser) | Released alongside attested binary |
+| Binary SBOM | CLI binaries | SPDX v2.3 JSON (via GoReleaser) | Separate release asset (`*.sbom.json`), not embedded |
 | Bundle attestation | `aicr bundle` output | SLSA Build Provenance v1 | Sigstore keyless OIDC (opt-in `--attest`) |
 | Recipe / bundle validity | `aicr verify` trust levels | `verified` / `attested` / `unverified` / `unknown` | Checksums + Sigstore trusted root |
 
+**Why image provenance is Build Level 3.** Image attestations are generated
+from a dedicated *reusable* workflow
+([`.github/workflows/attest-images.yaml`](.github/workflows/attest-images.yaml)),
+not inline in the release job. That reusable workflow is what raises the level
+from 2 to 3: it isolates provenance generation from the build, so the signing
+identity (the Fulcio certificate's subject) is the reusable workflow itself —
+which the calling workflow cannot alter. Because the build steps cannot forge or
+tamper with the provenance, it satisfies the defining requirement of SLSA Build
+Level 3 ([SLSA v1.0 levels](https://slsa.dev/spec/v1.0/levels)). GitHub issues
+Build Level 2 for attestations generated directly in a caller workflow and Build
+Level 3 only when they are produced by a reusable workflow
+([GitHub docs](https://docs.github.com/actions/security-guides/using-artifact-attestations-and-reusable-workflows-to-achieve-slsa-v1-build-level-3)).
+Confirm the trusted builder by pinning verification to it:
+
+```shell
+gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
+  --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml
+```
+
+CLI binaries remain SLSA Build Provenance v1 (Build Level 2): they are signed
+with `cosign attest-blob` from the release job (`on-tag.yaml`), which does not
+provide the reusable-workflow isolation.
+
 `aicr verify` reports one of four trust levels for a bundle: `verified`
 (full chain verified, binary identity pinned to NVIDIA CI), `attested`
-(chain verified but binary attestation missing or external data used),
-`unverified` (checksums valid, `--attest` was not used), and `unknown`
-(missing checksums or attestation files).
+(bundle attestation verified but the chain is incomplete — binary attestation
+missing/unverified or external data used; a binary attestation that *fails*
+verification reports `attested` but makes `aicr verify` exit nonzero),
+`unverified` (checksums valid but no attestation files, e.g. `--attest` was
+not used), and `unknown` (missing/invalid checksums, or a bundle attestation that fails verification).
 
 ### Verify an Artifact (Happy Path)
 
@@ -110,11 +195,11 @@ export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | 
 export IMAGE="ghcr.io/nvidia/aicr"
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
 
-# Verify build provenance and SBOM attestations
-gh attestation verify "oci://${IMAGE}@${DIGEST}" --owner nvidia
+# Verify build provenance (the SPDX SBOM uses the Cosign flow in docs/integrator/supply-chain-verification.md)
+# --signer-workflow pins the trusted reusable builder; passing it is the SLSA Build Level 3 check.
+gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 # ✓ Verification succeeded!
 #   • Build provenance (SLSA v1.0)
-#   • SBOM (SPDX)
 ```
 
 Verify a generated deployment bundle, enforcing the highest trust level:

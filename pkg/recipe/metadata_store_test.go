@@ -23,9 +23,11 @@ import (
 	"io/fs"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/manifest"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
@@ -630,6 +632,7 @@ func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
 	}
 
 	for _, name := range []string{
+		"gb200-eks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
 	} {
@@ -675,6 +678,18 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
+	gb200ConformanceChecks := []string{
+		"platform-health",
+		"gpu-operator-health",
+		"dra-support",
+		"accelerator-metrics",
+		"ai-service-metrics",
+		"gang-scheduling",
+		"pod-autoscaling",
+		"cluster-autoscaling",
+		"slinky-slurm-health",
+		"slinky-slurm-imex-channel",
+	}
 	kindConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
@@ -692,6 +707,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		name string
 		want []string
 	}{
+		{name: "gb200-eks-ubuntu-training-slurm", want: gb200ConformanceChecks},
 		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},
 		{name: "h100-kind-training-slurm", want: kindConformanceChecks},
@@ -714,6 +730,204 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 				t.Errorf("conformance.checks = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGB200EKSSlurmWiresIMEXComputeDomain(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	leaf, ok := store.GetRecipeByName("gb200-eks-ubuntu-training-slurm")
+	if !ok {
+		t.Fatal("overlay gb200-eks-ubuntu-training-slurm not found in store")
+	}
+	result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
+	if err != nil {
+		t.Fatalf("BuildRecipeResult failed: %v", err)
+	}
+	if !slices.ContainsFunc(
+		result.Constraints,
+		func(c Constraint) bool {
+			return c.Name == "K8s.server.version" && c.Value == ">= 1.34"
+		},
+	) {
+
+		t.Errorf("constraints = %v, want K8s.server.version >= 1.34 for DRA v1", result.Constraints)
+	}
+
+	if computeDomain := result.GetComponentRef("slinky-slurm-imex-compute-domain"); computeDomain != nil {
+		t.Errorf("standalone IMEX ComputeDomain component = %+v, want absent", computeDomain)
+	}
+	slurm := result.GetComponentRef("slinky-slurm")
+	if slurm == nil {
+		t.Fatal("slinky-slurm component missing")
+	}
+	const manifestPath = "components/slinky-slurm/manifests/compute-domain.yaml"
+	if !slices.Contains(slurm.PreManifestFiles, manifestPath) {
+		t.Errorf("slinky-slurm preManifestFiles = %v, want %q", slurm.PreManifestFiles, manifestPath)
+	}
+	if !slices.Contains(slurm.DependencyRefs, "nvidia-dra-driver-gpu") {
+		t.Errorf("slinky-slurm dependencyRefs = %v, want nvidia-dra-driver-gpu", slurm.DependencyRefs)
+	}
+
+	values, err := result.GetValuesForComponent("slinky-slurm")
+	if err != nil {
+		t.Fatalf("GetValuesForComponent(slinky-slurm) failed: %v", err)
+	}
+	if got := valueAtPath[string](t, values, "controller", "extraConfMap", "SwitchType"); got != "switch/nvidia_imex" {
+		t.Errorf("controller.extraConfMap.SwitchType = %q, want switch/nvidia_imex", got)
+	}
+	if got := valueAtPath[string](t, values, "nodesets", "slinky", "extraConfMap", "Gres"); got != "gpu:gb200:4" {
+		t.Errorf("nodesets.slinky.extraConfMap.Gres = %q, want gpu:gb200:4", got)
+	}
+
+	podClaims := valueAtPath[[]any](t, values, "nodesets", "slinky", "podSpec", "resourceClaims")
+	assertSingleNameField(t, podClaims, "name", "imex-channels")
+	assertSingleNameField(t, podClaims, "resourceClaimTemplateName", "slinky-slurm-imex-channels")
+	nodeSetClaim, ok := podClaims[0].(map[string]any)
+	if !ok {
+		t.Fatalf("podClaims[0] = %T, want map[string]any", podClaims[0])
+	}
+	nodeSetRCTName, ok := nodeSetClaim["resourceClaimTemplateName"].(string)
+	if !ok {
+		t.Fatalf("podClaims[0].resourceClaimTemplateName = %T, want string", nodeSetClaim["resourceClaimTemplateName"])
+	}
+	containerClaims := valueAtPath[[]any](t, values, "nodesets", "slinky", "slurmd", "resources", "claims")
+	assertSingleNameField(t, containerClaims, "name", "imex-channels")
+	slurmd := valueAtPath[map[string]any](t, values, "nodesets", "slinky", "slurmd")
+	if got, ok := slurmd["securityContext"]; ok {
+		t.Errorf("nodesets.slinky.slurmd.securityContext = %v, want omitted to use chart default", got)
+	}
+
+	content, err := GetManifestContentWithContext(ctx, result.DataProvider(), manifestPath)
+	if err != nil {
+		t.Fatalf("GetManifestContentWithContext(%q) failed: %v", manifestPath, err)
+	}
+	rendered, err := manifest.Render(content, manifest.RenderInput{
+		ComponentName: slurm.Name,
+		Namespace:     slurm.Namespace,
+		ChartName:     slurm.Chart,
+		ChartVersion:  slurm.Version,
+		Values:        values,
+	})
+	if err != nil {
+		t.Fatalf("render ComputeDomain manifest: %v", err)
+	}
+	var computeDomain map[string]any
+	if err := yaml.Unmarshal(rendered, &computeDomain); err != nil {
+		t.Fatalf("unmarshal rendered ComputeDomain: %v", err)
+	}
+	computeDomainRCTName := valueAtPath[string](t, computeDomain, "spec", "channel", "resourceClaimTemplate", "name")
+	if computeDomainRCTName != nodeSetRCTName {
+		t.Errorf("ComputeDomain RCT name = %q, NodeSet RCT name = %q", computeDomainRCTName, nodeSetRCTName)
+	}
+}
+
+func TestSlinkySlurmIMEXComputeDomainFixedIdentityCannotBeOverridden(t *testing.T) {
+	ctx := context.Background()
+	const manifestPath = "components/slinky-slurm/manifests/compute-domain.yaml"
+	content, err := GetManifestContentWithContext(ctx, nil, manifestPath)
+	if err != nil {
+		t.Fatalf("GetManifestContentWithContext(%q) failed: %v", manifestPath, err)
+	}
+
+	// Scalar --set and typed --set-json/--set-file converge on this final
+	// values map before local manifests are rendered. None may change the
+	// immutable ComputeDomain integration contract.
+	tests := []struct {
+		name   string
+		values map[string]any
+	}{
+		{
+			name: "scalar --set",
+			values: map[string]any{
+				"name":                      "from-set",
+				"allocationMode":            "Immediate",
+				"resourceClaimTemplateName": "from-set",
+			},
+		},
+		{
+			name: "typed --set-json or --set-file",
+			values: map[string]any{
+				"name":                      "from-typed-set",
+				"allocationMode":            "Immediate",
+				"resourceClaimTemplateName": "from-typed-set",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rendered, renderErr := manifest.Render(content, manifest.RenderInput{
+				ComponentName: "slinky-slurm",
+				Namespace:     "slurm",
+				ChartName:     "slurm",
+				ChartVersion:  "1.1.0",
+				Values:        tt.values,
+			})
+			if renderErr != nil {
+				t.Fatalf("render ComputeDomain manifest: %v", renderErr)
+			}
+
+			for _, want := range []string{
+				"name: slinky-slurm-imex",
+				"allocationMode: All",
+				"name: slinky-slurm-imex-channels",
+			} {
+				if !strings.Contains(string(rendered), want) {
+					t.Errorf("rendered ComputeDomain manifest missing fixed value %q:\n%s", want, rendered)
+				}
+			}
+			for _, unwanted := range []string{"from-set", "from-typed-set", "allocationMode: Immediate"} {
+				if strings.Contains(string(rendered), unwanted) {
+					t.Errorf("rendered ComputeDomain manifest contains override value %q:\n%s", unwanted, rendered)
+				}
+			}
+		})
+	}
+}
+
+func valueAtPath[T any](t *testing.T, root map[string]any, path ...string) T {
+	t.Helper()
+
+	if len(path) == 0 {
+		t.Fatal("value path must not be empty")
+	}
+
+	var current any = root
+	for _, key := range path {
+		m, ok := current.(map[string]any)
+		if !ok {
+			t.Fatalf("%q parent is %T, want map[string]any", key, current)
+		}
+		current, ok = m[key]
+		if !ok {
+			t.Fatalf("missing nested key path %v", path)
+		}
+	}
+	value, ok := current.(T)
+	if !ok {
+		var expected T
+		t.Fatalf("nested path %v = %T, want %T", path, current, expected)
+	}
+	return value
+}
+
+func assertSingleNameField(t *testing.T, items []any, field, want string) {
+	t.Helper()
+
+	if len(items) != 1 {
+		t.Fatalf("items length = %d, want 1: %v", len(items), items)
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("items[0] = %T, want map[string]any", items[0])
+	}
+	if got, ok := item[field].(string); !ok || got != want {
+		t.Fatalf("items[0].%s = %v, want %q", field, item[field], want)
 	}
 }
 
@@ -1136,10 +1350,11 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 	independentLeaf.Spec.Mixins = []string{"monitoring-gate"}
 	independentLeaf.Spec.ComponentRefs = []ComponentRef{
 		{
-			Name:   "dcgm-exporter",
-			Type:   ComponentTypeHelm,
-			Source: "https://example.com/charts",
-			Chart:  "dcgm-exporter",
+			Name:    "dcgm-exporter",
+			Type:    ComponentTypeHelm,
+			Source:  "https://example.com/charts",
+			Chart:   "dcgm-exporter",
+			Version: "1.0.0",
 		},
 	}
 
@@ -1185,10 +1400,11 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 					},
 					ComponentRefs: []ComponentRef{
 						{
-							Name:   "nvidia-dcgm-exporter",
-							Type:   ComponentTypeHelm,
-							Source: "https://example.com/charts",
-							Chart:  "nvidia-dcgm-exporter",
+							Name:    "nvidia-dcgm-exporter",
+							Type:    ComponentTypeHelm,
+							Source:  "https://example.com/charts",
+							Chart:   "nvidia-dcgm-exporter",
+							Version: "1.0.0",
 						},
 					},
 				},
@@ -1290,10 +1506,11 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 	}
 	sharedTraining.Spec.ComponentRefs = []ComponentRef{
 		{
-			Name:   "shared-component",
-			Type:   ComponentTypeHelm,
-			Source: "https://example.com/charts",
-			Chart:  "shared-component",
+			Name:    "shared-component",
+			Type:    ComponentTypeHelm,
+			Source:  "https://example.com/charts",
+			Chart:   "shared-component",
+			Version: "1.0.0",
 		},
 	}
 
@@ -1350,10 +1567,11 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 				}{
 					Constraints: []Constraint{{Name: "Monitoring.enabled", Value: "true"}},
 					ComponentRefs: []ComponentRef{{
-						Name:   "surviving-component",
-						Type:   ComponentTypeHelm,
-						Source: "https://example.com/charts",
-						Chart:  "surviving-component",
+						Name:    "surviving-component",
+						Type:    ComponentTypeHelm,
+						Source:  "https://example.com/charts",
+						Chart:   "surviving-component",
+						Version: "1.0.0",
 					}},
 				},
 			},
@@ -1898,5 +2116,198 @@ func TestLoadMetadataStore_ConcurrentSameProviderIsCached(t *testing.T) {
 		if results[i] != results[0] {
 			t.Errorf("result[%d] is not the cached singleton (got %p, want %p)", i, results[i], results[0])
 		}
+	}
+}
+
+// TestGB200OKEFloorNotClobbered is a regression test for the GB200 OKE K8s floor
+// clobber: when oke-ol-training (>= 1.30, accelerator-generic) co-matched
+// gb200-oke-training (>= 1.34) as a sibling leaf, the last-writer-wins constraint
+// merge silently dropped the GB200 DRA floor. Verifies the resolved recipe carries
+// the GB200-specific floor (>= 1.34) regardless of OS supplied.
+func TestGB200OKEFloorNotClobbered(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		criteria     *Criteria
+		wantK8sFloor string
+	}{
+		{
+			name: "gb200 oke training with os ol preserves >= 1.34 floor",
+			criteria: &Criteria{
+				Service:     CriteriaServiceOKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSOracleLinux,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+		{
+			name: "gb200 oke training with os ubuntu preserves >= 1.34 floor",
+			criteria: &Criteria{
+				Service:     CriteriaServiceOKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+			},
+			wantK8sFloor: ">= 1.34",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, tt.criteria)
+			if err != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", err)
+			}
+			var k8sFloor string
+			for _, c := range result.Constraints {
+				if c.Name == testK8sVersionConstant {
+					k8sFloor = c.Value
+					break
+				}
+			}
+			if k8sFloor != tt.wantK8sFloor {
+				t.Errorf("K8s.server.version floor = %q, want %q (possible floor clobber regression)",
+					k8sFloor, tt.wantK8sFloor)
+			}
+		})
+	}
+}
+
+func TestBuildRecipeResult_OSRequired(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	tests := []struct {
+		name        string
+		criteria    *Criteria
+		wantErrCode aicrerrors.ErrorCode
+		wantInMsg   string
+	}{
+		{
+			name:        "gke without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "cos",
+		},
+		{
+			name:     "gke with os cos succeeds",
+			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
+		},
+		{
+			name:        "oke l40s without os returns error (only os-specific overlays exist for l40s-oke)",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "oke l40s with os ol succeeds",
+			criteria: &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining, OS: CriteriaOSOracleLinux},
+		},
+		{
+			name:        "oke gb200 without os returns error (no os-agnostic oke overlay)",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "eks without os succeeds (has os-agnostic overlays)",
+			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+		},
+		{
+			name:     "unknown service without os does not error",
+			criteria: &Criteria{Service: CriteriaServiceType("xyz"), Accelerator: CriteriaAcceleratorH100},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, tt.criteria)
+			if tt.wantErrCode != "" {
+				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
+				}
+				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
+					t.Errorf("error %q does not contain %q", err, tt.wantInMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Error("expected non-nil result")
+				}
+			}
+		})
+	}
+}
+
+func TestBuildRecipeResultWithEvaluator_OSRequired(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+	passAll := func(_ Constraint) ConstraintEvalResult {
+		return ConstraintEvalResult{Passed: true, Actual: "test"}
+	}
+	tests := []struct {
+		name        string
+		criteria    *Criteria
+		wantErrCode aicrerrors.ErrorCode
+		wantInMsg   string
+	}{
+		{
+			name:        "gke without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "cos",
+		},
+		{
+			name:     "gke with os cos succeeds",
+			criteria: &Criteria{Service: CriteriaServiceGKE, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining, OS: CriteriaOSCOS},
+		},
+		{
+			name:        "oke l40s without os returns error",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorL40S, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:        "oke gb200 without os returns error (no os-agnostic oke overlay)",
+			criteria:    &Criteria{Service: CriteriaServiceOKE, Accelerator: CriteriaAcceleratorGB200, Intent: CriteriaIntentTraining},
+			wantErrCode: aicrerrors.ErrCodeInvalidRequest,
+			wantInMsg:   "ol",
+		},
+		{
+			name:     "eks without os succeeds (has os-agnostic overlays)",
+			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, Intent: CriteriaIntentTraining},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResultWithEvaluator(ctx, tt.criteria, passAll)
+			if tt.wantErrCode != "" {
+				if !errors.Is(err, aicrerrors.New(tt.wantErrCode, "")) {
+					t.Errorf("got err %v, want code %s", err, tt.wantErrCode)
+				}
+				if tt.wantInMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantInMsg)) {
+					t.Errorf("error %q does not contain %q", err, tt.wantInMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Error("expected non-nil result")
+				}
+			}
+		})
 	}
 }

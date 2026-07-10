@@ -1,6 +1,6 @@
 # AWS Account OIDC Setup for GitHub Actions
 
-Terraform configuration for AWS IAM OIDC federation enabling keyless GitHub Actions auth for the daily UAT workflow ([`.github/workflows/uat-aws.yaml`](../../.github/workflows/uat-aws.yaml)) that creates ephemeral EKS clusters.
+Terraform configuration for AWS IAM OIDC federation enabling keyless GitHub Actions auth for the UAT pipeline ([`.github/workflows/uat-aws.yaml`](../../.github/workflows/uat-aws.yaml)) that creates ephemeral EKS clusters. The pipeline is invoked through the shared dispatch surface (`uat-run.yaml`) — for ad-hoc runs and via the nightly batch (`uat-nightly-batch.yaml`) on a cron.
 
 ## Prerequisites
 
@@ -44,6 +44,7 @@ terraform apply -var="aws_region=us-west-2"
 
 - **EKS**: `eks:*` — full cluster, node group, addon lifecycle
 - **EC2**: `ec2:*` — VPC, subnets, security groups, instances
+- **Elastic Load Balancing**: `DescribeLoadBalancers`, `DescribeTags`, `DeleteLoadBalancer` — teardown sweep of the classic ELB the in-tree cloud provider creates for `Service type=LoadBalancer` outside Terraform state ([#1617](https://github.com/NVIDIA/aicr/issues/1617))
 - **IAM**: scoped to `aicr-*` roles/profiles/policies; allows EKS service-linked roles under `aws-service-role/*`
 - **Auto Scaling, CloudFormation**: `*` (for EKS-managed stacks and node groups)
 - **STS**: `GetCallerIdentity`, `AssumeRole`, `TagSession`

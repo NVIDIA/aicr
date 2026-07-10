@@ -19,7 +19,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **27**
+- Components: **33**
 - Unique images: **82**
 - Distinct registries: **11**
 
@@ -34,10 +34,12 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
-| dynamo-platform | helm | dynamo-platform | 1.2.0 | 3 |
+| dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
 | gpu-operator | helm | nvidia/gpu-operator | v26.3.2 | 14 |
+| gpu-operator-ocp | manifest | — | — | 0 |
+| gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -46,16 +48,20 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.17.1 | 1 |
 | network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
+| network-operator-ocp | manifest | — | — | 0 |
+| network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.18.3 | 1 |
+| nfd-ocp | manifest | — | — | 0 |
+| nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 5 |
-| nodewright-operator | helm | nodewright | v0.17.0 | 3 |
-| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1-rc.1 | 1 |
+| nodewright-operator | helm | nodewright | v0.17.1 | 3 |
+| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
-| slinky-slurm | helm | slurm | 1.1.0 | 5 |
-| slinky-slurm-operator | helm | slurm-operator | 1.1.0 | 2 |
-| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.1.0 | 0 |
+| slinky-slurm | helm | slurm | 1.2.0 | 5 |
+| slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
 
 ## Images by component
 
@@ -91,7 +97,7 @@ _No images extracted._
 
 - `nats:2.10.21-alpine`
 - `natsio/nats-server-config-reloader:0.16.0`
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.2.0`
+- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.2.1`
 
 ### gatekeeper
 
@@ -103,7 +109,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:24.04@sha256:786a8b558f7be160c6c8c4a54f9a57274f3b4fb1491cf65146521ae77ff1dc54`
+- `ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -122,6 +128,14 @@ _No images extracted._
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.19.1`
 - `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless`
 - `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.5.0`
+
+### gpu-operator-ocp
+
+_No images extracted._
+
+### gpu-operator-ocp-olm
+
+_No images extracted._
 
 ### grove
 
@@ -169,27 +183,43 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0`
 
+### network-operator-ocp
+
+_No images extracted._
+
+### network-operator-ocp-olm
+
+_No images extracted._
+
 ### nfd
 
 - `registry.k8s.io/nfd/node-feature-discovery:v0.18.3`
 
+### nfd-ocp
+
+_No images extracted._
+
+### nfd-ocp-olm
+
+_No images extracted._
+
 ### nodewright-customizations
 
-- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.2.2@sha256:76913a5deff9513f348dd4b7d66cbca9ea1dd22df63baa4ac2f6b2fa7e93664e`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.0@sha256:cc99c8c0675f3752f5081f0978ae57174368952ca0bb5fcac07640fe62c156c7`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.4.0@sha256:187c56c6d2104d48c7632c293def79c714b04dd85c587b7793818ceba9d4fb04`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.1@sha256:6dedbbb8627dec88acdfd68867f60a3ddca88e5f4c62beddfb704a8e0cfe51d1`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 
 ### nodewright-operator
 
-- `bitnami/kubectl:latest@sha256:1bc359beb3ae3982591349df11db50b0917b0596e8bed8ab9cf0c8a84a3502d1`
+- `alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
 - `ghcr.io/nvidia/nodewright/operator:v0.17.0@sha256:1511449bf51f2844b6bb3a03bde3d5590caf2ca283e3e39c0745a8016af2132f`
 - `quay.io/brancz/kube-rbac-proxy:v0.15.0@sha256:2c7b120590cbe9f634f5099f2cbb91d0b668569023a81505ca124a5c437e7663`
 
 ### nvidia-dra-driver-gpu
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1-rc.1`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1`
 
 ### nvsentinel
 
@@ -211,15 +241,15 @@ _No images extracted._
 ### slinky-slurm
 
 - `docker.io/library/alpine:3.23.3`
-- `ghcr.io/slinkyproject/login:25.11-ubuntu24.04`
-- `ghcr.io/slinkyproject/slurmctld:25.11-ubuntu24.04`
-- `ghcr.io/slinkyproject/slurmd:25.11-ubuntu24.04`
-- `ghcr.io/slinkyproject/slurmrestd:25.11-ubuntu24.04`
+- `ghcr.io/slinkyproject/login:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/slurmctld:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/slurmd:26.05-ubuntu26.04`
+- `ghcr.io/slinkyproject/slurmrestd:26.05-ubuntu26.04`
 
 ### slinky-slurm-operator
 
-- `ghcr.io/slinkyproject/slurm-operator-webhook:1.1.0`
-- `ghcr.io/slinkyproject/slurm-operator:1.1.0`
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.0`
+- `ghcr.io/slinkyproject/slurm-operator:1.2.0`
 
 ### slinky-slurm-operator-crds
 
@@ -325,9 +355,9 @@ Component: nvidia-dra-driver-gpu (1 images)
 Presence-only check: does NOT verify publisher trust/identity.
 Y = artifact attached, - = artifact absent, ? = could not probe.
 
-  Image                                                                Sig  SBOM  Prov  Notes
-  -------------------------------------------------------------------  ---  ----  ----  -----
-  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1-rc.1  Y    -     -
+  Image                                                           Sig  SBOM  Prov  Notes
+  --------------------------------------------------------------  ---  ----  ----  -----
+  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1  Y    -     -
 
 Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
 ```

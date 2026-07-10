@@ -60,8 +60,8 @@ aicr --debug snapshot
 # JSON mode: Structured logs
 aicr --log-json snapshot
 
-# Combine with other flags
-aicr --debug --output system.yaml snapshot
+# Combine with other flags (--debug is global; --output is a snapshot flag, so it follows the subcommand)
+aicr --debug snapshot --output system.yaml
 ```
 
 ## Commands
@@ -79,24 +79,24 @@ aicr snapshot [flags]
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (cm://namespace/name), or stdout |
-| `--format` | | string | yaml | Output format: json, yaml, table |
+| `--format` | `-t` | string | yaml | Output format: json, yaml, table |
 | `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) that populates `spec.snapshot.*`. CLI flags below always win over the corresponding config field. |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env). Also used when `--output` is a ConfigMap URI so reads and writes target the same cluster. |
 | `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
-| `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
+| `--image` | | string | matches CLI version | Container image for agent Job. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` snapshot builds default to `ghcr.io/nvidia/aicr:latest`. |
 | `--job-name` | | string | aicr | Name for the agent Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
 | `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [Agent Deployment](agent-deployment.md). Pass an explicit selector to override. |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
-| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
+| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves the agent's `aicr-node-reader` ClusterRoleBinding active. By default this grants only read-only access; with `--discover-network` the retained ClusterRole also carries the mutating rules live network discovery needs (CRD/namespace/daemonset create, pod exec, node patch, NicClusterPolicy). |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--require-gpu` | | bool | false | Require GPU resources on the agent pod (mutually exclusive with `--runtime-class`) |
 | `--runtime-class` | | string | | Runtime class for GPU access without consuming a GPU allocation (e.g., `nvidia`). Mutually exclusive with `--require-gpu`. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
-| `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
+| `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
 | `--requests` | | string | | Override agent container resource requests as a comma-separated list of `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. Reads `AICR_REQUESTS` env when unset. |
 | `--limits` | | string | | Override agent container resource limits as a comma-separated list of `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when `--limits` does not already contain that key — an explicit `--limits nvidia.com/gpu=N` wins. Reads `AICR_LIMITS` env when unset. |
 | `--cluster-config` | | string | | Path to a pre-existing k8s-launch-kit (l8k) `cluster-config.yaml`. Ingests the file's per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) into the snapshot as a `NetworkTopology` Measurement. **Local agent mode only for now** (`AICR_AGENT_MODE=true`) — Job-mode rejects this flag with an `INVALID_REQUEST` error until ConfigMap mounting is implemented. Mutually exclusive with `--discover-network` at the collector level — file path wins when both are set, so callers can default discovery from a flag without inadvertent cluster contact. Reads `AICR_CLUSTER_CONFIG_PATH` env when unset. |
@@ -111,8 +111,9 @@ aicr snapshot [flags]
 - **SystemD Services**: containerd, docker, kubelet configurations
 - **OS Configuration**: grub, kmod, sysctl, release info
 - **Kubernetes**: server version, images, ClusterPolicy
-- **GPU**: driver version, CUDA, MIG settings, hardware info
+- **GPU**: driver-free PCI/NFD hardware detection — GPU presence, GPU count, accelerator model/SKU (resolved from the PCI device ID), nvidia kernel-module loaded state, and detection source. Does not require the NVIDIA driver or `nvidia-smi`, and does not emit driver version, CUDA version, or MIG settings.
 - **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
+- **NetworkTopology**: per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) — emitted only when `--cluster-config` or `--discover-network` is set
 
 **Examples:**
 
@@ -124,7 +125,10 @@ aicr snapshot
 aicr snapshot --output system.json --format json
 
 # Save to Kubernetes ConfigMap (requires cluster access)
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+# The agent Job writes the ConfigMap directly, using the Role created in its
+# deployment namespace (--namespace, default `default`). To write into another
+# namespace, deploy the agent there so it has the matching ConfigMap RBAC:
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 # Debug mode
 aicr --debug snapshot
@@ -205,7 +209,7 @@ spec:
         - nvidia.com/gpu=present:NoSchedule
       requireGpu: false
       runtimeClassName: ""         # mutually exclusive with requireGpu
-      os: ""                       # ubuntu | rhel | cos | amazonlinux | talos
+      os: ""                       # ubuntu | rhel | cos | amazonlinux | ol | talos
       requests: ""                 # "cpu=500m,memory=1Gi"
       limits: ""                   # "cpu=1,memory=2Gi"
     execution:
@@ -235,7 +239,7 @@ The `--template` flag enables custom output formatting using Go templates with [
 .APIVersion     # API version string
 .Metadata       # Map of key-value pairs (timestamp, version, source-node)
 .Measurements   # Array of Measurement objects
-  .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology)
+  .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology)
   .Subtypes     # Array of Subtype objects
     .Name       # Subtype name (e.g., "server", "hardware", "grub")
     .Data       # Map of readings (key -> Reading with .String method)
@@ -287,8 +291,9 @@ data:
 apiVersion: aicr.run/v1alpha2
 kind: Snapshot
 metadata:
-  created: "2025-12-31T10:30:00Z"
-  hostname: gpu-node-1
+  timestamp: "2025-12-31T10:30:00Z"
+  version: v1.0.0
+  source-node: gpu-node-1
 measurements:
   - type: SystemD
     subtypes: [...]
@@ -338,7 +343,7 @@ Generate recipes using an `AICRConfig` document. The same file format also drive
 |------|-------|------|-------------|
 | `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) |
 | `--output` | `-o` | string | Output file (default: stdout) |
-| `--format` | `-f` | string | Format: json, yaml (default: yaml) |
+| `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 
 The config file uses a Kubernetes-style envelope:
@@ -386,14 +391,14 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, any |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, b200, a100, l40, rtx-pro-6000 |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3 |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
-| `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, talos |
+| `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
-| `--format` | `-f` | string | Format: json, yaml (default: yaml) |
+| `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
 
@@ -433,9 +438,9 @@ Generate recipes from captured snapshots:
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--snapshot` | `-s` | string | Path/URI to snapshot (file path, URL, or cm://namespace/name) |
-| `--intent` | `-i` | string | Workload intent: training, inference |
+| `--intent` | | string | Workload intent: training, inference |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
-| `--format` | | string | Format: json, yaml (default: yaml) |
+| `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
 
 **Snapshot Sources:**
@@ -465,16 +470,16 @@ aicr snapshot -o cm://default/snapshot
 aicr recipe -s cm://default/snapshot -o cm://default/recipe
 
 # With custom output
-aicr recipe -s system.yaml -i inference -o recipe.yaml --format yaml
+aicr recipe -s system.yaml --intent inference -o recipe.yaml --format yaml
 ```
 
 **Output structure:**
+
 ```yaml
 apiVersion: aicr.run/v1alpha2
-kind: Recipe
+kind: RecipeResult
 metadata:
   version: v1.0.0
-  created: "2025-12-31T10:30:00Z"
   appliedOverlays:
     - base
     - eks
@@ -487,13 +492,17 @@ criteria:
   os: any
 componentRefs:
   - name: gpu-operator
+    type: Helm
     version: vXX.Y.Z          # illustrative; see Component Catalog for current pins
-    order: 1
-    repository: https://helm.ngc.nvidia.com/nvidia
+    source: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+deploymentOrder:
+  - gpu-operator
 constraints:
-  driver:
-    version: "<driver-version>"   # illustrative
-    cudaVersion: "<cuda-version>"
+  - name: driver.version
+    value: "<driver-version>"     # illustrative
+  - name: driver.cudaVersion
+    value: "<cuda-version>"       # illustrative
 ```
 
 ---
@@ -831,7 +840,7 @@ aicr validate [flags]
 | `--full` | | bool | false | Emit the full (unredacted) evidence bundle. By default the bundle is minimized: `snapshot.yaml` is reduced to an allowlisted set of fields (dropping node names, provider instance IDs, the node label/taint set, OS tuning, loaded modules, systemd config) and per-test CTRF `stdout`/`message` are omitted. `--full` ships the raw payloads. The cryptographic verification story holds either way; minimal bundles record the applied policy in `predicate.redaction` and self-verify with `aicr evidence verify`. |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
-| `--no-sign` | | bool | false | Push the evidence bundle **unsigned** (requires `--emit-attestation` and `--push`) and write a `pointer.yaml` with an empty `signer` block. Defers Fulcio/Rekor signing to the fork-based CI workflow, so the network-light push can run where the cluster lives even when Sigstore egress is blocked. No-op unless both `--emit-attestation` and `--push` are set. `aicr evidence verify` reports the resulting pointer as a non-failing **pending signature** state. |
+| `--no-sign` | | bool | false | Push the evidence bundle **unsigned** (requires `--emit-attestation` and `--push`) and write a `pointer.yaml` with an empty `signer` block. No-op unless both `--emit-attestation` and `--push` are set. Commit the flat unsigned pointer; the fork CI signing leg signs it and relocates it to its nested per-source path (or sign locally with `aicr evidence sign --relocate` on a Sigstore-reachable host). The blocking *Evidence Pointer Contract* gate requires the final committed pointer to be **signed and nested** — see [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci). |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -873,7 +882,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 | `OS.release.ID` | Operating system identifier (ubuntu, rhel) |
 | `OS.release.VERSION_ID` | OS version (24.04, 22.04) |
 | `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
-| `GPU.info.type` | GPU hardware type |
+| `GPU.hardware.model` | GPU model (e.g. `h100`, `l40s`) |
 
 Supported operators:
 
@@ -1112,7 +1121,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "status": "passed",
         "duration": 8000,
         "suite": ["conformance"],
-        "stdout": ["DRA GPU allocation successful"]
+        "stdout": ["DRA support verified (driver healthy, ResourceSlices validated)"]
       },
       {
         "name": "cluster-autoscaling",
@@ -1148,7 +1157,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 
 ### aicr diff
 
-Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology).
+Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology).
 
 **Synopsis:**
 ```shell
@@ -1387,6 +1396,8 @@ The `--deployer` flag controls how deployment artifacts are generated:
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
+> **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
+
 **Deployment Order:**
 
 All deployers respect the `deploymentOrder` field from the recipe, ensuring components are installed in the correct sequence:
@@ -1415,6 +1426,7 @@ Override any value in the generated bundle files using dot notation:
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
 - **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes a component the recipe enabled. A component the recipe **disabled** (`overrides.enabled: false`) cannot be re-enabled this way — `--set <component>:enabled=true` on such a component is rejected, since re-enabling a platform-provided component would install a conflicting second copy. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
 - **Aliases merge**: overrides supplied under both a component's canonical name and a registered alias (e.g. `gpu-operator` and `gpuoperator`) are **combined, not dropped**; the canonical name wins on any shared path. (Same alias-merge behavior as [`--set-json` / `--set-file`](#list-and-object-value-overrides).)
+- **GPU allocation-policy keys are deprecated at bundle time**: static overrides of the nested policy values — `nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride` and `gpu-operator`(`-ocp`) `devicePlugin.enabled` — still work via `--set`, `--set-json`, or `--set-file` but log a deprecation warning; the component-level `enabled` toggle of those components is honored **only via scalar `--set`** (the typed `--set-json`/`--set-file` path rejects `enabled` for every component, as described above) and likewise warns. Validators verify the recipe-resolved allocation policy, so a bundle-time change surfaces as recipe/cluster drift; move the allocation mode to a recipe overlay. `--dynamic` on any of these keys is **rejected** (the value would be unknowable when the policy is resolved). This boundary covers only what the bundler renders: **post-generation changes — `argocd-helm` / Argo CD parameter overrides, install-time `helm --set`, and manual edits to generated bundles — cannot be intercepted by AICR** and are outside the guarantee; they surface later as recipe/cluster drift when validation verifies the recipe-resolved policy. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 - **Repeat to add; commas are literal**: To supply multiple overrides, repeat the flag (`--set a:x=1 --set b:y=2`). On the `bundle` command, commas inside a single slice-flag value are taken **literally** (not treated as a value separator), so a value containing a comma — and the comma-heavy JSON passed to `--set-json` — is preserved intact. This applies to all repeatable `bundle` flags (`--set`, `--set-json`, `--set-file`, `--dynamic`, `--*-node-selector`, `--*-node-toleration`, `--workload-selector`).
 
 **Examples:**
@@ -1453,12 +1465,52 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
+#### Argo CD Deployer Options
+
+The `deployer` prefix is reserved: with `--deployer argocd` or `--deployer argocd-helm`, `--set deployer:<key>=<value>` configures the generated Argo CD Applications instead of component chart values. Unknown `deployer:` keys are rejected, and the prefix is rejected entirely with any other `--deployer` type (`helm`, `flux`, `helmfile`).
+
+| Key | Applies to | Default | Example |
+|-----|------------|---------|---------|
+| `namePrefix` | Child Application names | (none) | `--set deployer:namePrefix=tenant-a-` |
+| `destinationServer` | Child Applications' `spec.destination.server` | `https://kubernetes.default.svc` | `--set deployer:destinationServer=https://prod.example.com:6443` |
+| `project` | Child Applications' `spec.project` | `default` | `--set deployer:project=gpu-infra` |
+| `cascadeDelete` | Parent and child Applications | `false` | `--set deployer:cascadeDelete=true` |
+
+**Child Applications only:** `namePrefix`, `destinationServer`, and `project` affect the per-component child Applications, not the parent app-of-apps. Application CRs are reconciled only from the cluster running Argo CD, so the parent stays on the control-plane cluster in project `default` — see the Argo CD [cluster bootstrapping guide](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/). The parent's name is set with [`--app-name`](#aicr-bundle).
+
+**Prerequisites for remote destinations:** AICR only writes `deployer:destinationServer` and `deployer:project` into the generated Applications — it does not configure Argo CD. The destination cluster must already be registered with Argo CD (`argocd cluster add <context>` or a [declarative cluster Secret](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/#clusters)), and the [Argo CD project](https://argo-cd.readthedocs.io/en/stable/user-guide/projects/) referenced by `deployer:project` must permit the emitted destinations and source repositories; otherwise the child Applications fail to sync with a permission or unknown-cluster error.
+
+**Name limits:** the composed child Application name (`namePrefix` + component name) must be at most 53 characters — Argo CD uses the Application name as the Helm release name, which Helm caps at 53 — and must not equal the parent Application's name (set with `--app-name`). Both violations are rejected at bundle time, and argocd-helm bundles re-check them at `helm template`/`helm install` time for install-time `--set deployer.namePrefix=...` overrides.
+
+**Install-time overrides with argocd-helm:** for `--deployer argocd-helm`, the three string keys ship as defaults in the bundle chart's root `values.yaml` and can also be overridden at install time via `helm install --set deployer.<key>=...` (note the dot, not colon). The bundle ships a `values.schema.json` that Helm applies on install/upgrade/template/lint: unknown `deployer.*` keys (e.g. a `destinationSever` typo) and malformed values are rejected at install time instead of silently falling back to defaults. `cascadeDelete` is bundle-time only — it adds the [`resources-finalizer.argocd.argoproj.io` finalizer](https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/) (a list field, not overridable via `--set`) so deleting an Application also deletes its deployed resources.
+
+**Use `--set-string` for values Helm would type-infer:** the schema is intentionally string-typed, and Helm's plain `--set` parses booleans and bare numbers into their inferred types — `helm install ... --set deployer.project=true` delivers a boolean, which the schema rejects. Pass such values with `--set-string` so they stay strings: `helm install ... --set-string deployer.project=true`.
+
+```shell
+# Deploy child Applications to a remote cluster under a tenant prefix
+aicr bundle -r recipe.yaml --deployer argocd \
+  --set deployer:namePrefix=tenant-a- \
+  --set deployer:destinationServer=https://prod.example.com:6443 \
+  --set deployer:project=gpu-infra \
+  -o ./bundles
+
+# Enable cascading deletion on the app-of-apps and its children
+aicr bundle -r recipe.yaml --deployer argocd-helm \
+  --set deployer:cascadeDelete=true \
+  -o ./bundle
+
+# argocd-helm: override the shipped defaults at install time instead
+helm install aicr-stack ./bundle \
+  --set deployer.namePrefix=tenant-a- \
+  --set deployer.project=gpu-infra
+```
+
 #### List and Object Value Overrides
 
 `--set` is scalar-only: it cannot express a list or object value. Pointing it
-at a list field such as `agentgateway.allowedSourceRanges` exits 0 but writes a
-**bare string** at that path, producing a type-invalid manifest — the value may
-be dropped or rejected at apply time. Use `--set-json` (inline) or `--set-file`
+at a list field such as `agentgateway.allowedSourceRanges` writes a **bare
+string** at that path, which the bundler rejects with an invalid-request error
+(it must be a list of CIDR strings). Use `--set-json` (inline) or `--set-file`
 (from a file) for any list or object override.
 
 **Format:** `component:path=<value>` where:
@@ -1686,7 +1738,7 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 | Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
 | Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
 
-> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the shipped bundle (defaults and stubs), not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
+> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the files listed in `checksums.txt` (recipe.yaml excluded, #1549), not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -1859,8 +1911,7 @@ bundles/
 
 Manifest-only components and mixed-component raw manifests are supported by `--deployer argocd-helm` via the path-based Application shape.
 
-**The bundle is URL-portable.** No `--repo` flag is needed (and is ignored if passed with `--deployer argocd-helm`). The same generated bundle bytes can be pushed to any chart-source backend the user chooses — Argo CD pulls from whichever URL the user supplies at install time via `helm install --set repoURL=...`. The publish location is *not* baked into the bundle artifact.
-
+**The bundle's `repoURL` defaults to the registry it was pushed to.** No `--repo` flag is needed (and is ignored if passed with `--deployer argocd-helm`). When pushed to an OCI registry, the parent namespace is baked into `values.yaml` as the default `repoURL` — a plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when deploying from a different registry.
 **Recommended deploy flow:**
 
 ```shell
@@ -2102,14 +2153,14 @@ The generated ArtifactGenerator CRs extract per-component chart directories from
 
 #### Bundle Attestation
 
-> **Prerequisite:** The `--attest` flag requires a binary installed using the install script, which includes a cryptographic attestation from NVIDIA. Binaries installed via `go install` or manual download do not include this file and cannot use `--attest`.
+> **Prerequisite:** `--attest` needs the binary attestation `aicr-attestation.sigstore.json` beside the `aicr` binary. The install script and the release archives both include it (keep it next to `aicr` when installing manually); binaries from `go install` lack it and cannot use `--attest`.
 
 When `--attest` is passed, the bundle command performs five steps:
 
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
 3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
-4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the bundle content (via `checksums.txt` digest) and the binary that produced it.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549) and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For CI/CD environments without OIDC, pass `--signing-key` to sign with a cloud KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
@@ -2235,7 +2286,7 @@ HashiCorp Vault (`hashivault://`) is not supported: its client libraries are MPL
 
 ##### Attestation Scope
 
-Attestation binds the **shipped bundle** — defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
+Attestation binds the files listed in `checksums.txt` (recipe.yaml is currently excluded, #1549; the attestation files are verified separately) — defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
 
 If you need to enforce specific install-time values (e.g., pinning `driver.version`), that is a **policy concern**, not an attestation one. Use admission control (Kyverno, Gatekeeper) or Argo sync hooks to reject deployments that violate the policy. `aicr verify` checks bundle integrity and provenance; it does not evaluate install-time value constraints.
 
@@ -2353,11 +2404,16 @@ the full flag reference.
 ##### argocd
 
 Delete the parent `Application` that owns the bundle's child Applications
-(app-of-apps). AICR does **not** set the
+(app-of-apps). By default AICR does **not** set the
 `resources-finalizer.argocd.argoproj.io` finalizer on generated
 Applications, so a plain `kubectl delete` removes only the Application CR
-and leaves the managed resources running. Use one of the cascade-aware
-flows instead:
+and leaves the managed resources running. Bundles generated with
+`--set deployer:cascadeDelete=true` (see
+[Argo CD Deployer Options](#argo-cd-deployer-options)) are the exception:
+the finalizer is baked onto the parent and every child Application, so a
+plain `kubectl delete` on the parent already cascades to the managed
+resources. For default bundles, use one of the cascade-aware flows
+instead:
 
 ```bash
 # Argo CD CLI — cascade is the default; foreground waits for resources
@@ -2512,13 +2568,13 @@ aicr verify <bundle-dir> [flags]
 | Level | Name | Criteria |
 |-------|------|----------|
 | 4 | `verified` | Full chain: checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
-| 3 | `attested` | Chain verified but binary attestation missing or external data (`--data`) was used |
+| 3 | `attested` | Bundle attestation verified; binary attestation missing, or external data (`--data`) used |
 | 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
-| 1 | `unknown` | Missing or invalid checksums |
+| 1 | `unknown` | Missing/invalid checksums, or an attestation (bundle or binary) present but failing verification |
 
 #### Verification steps
 
-1. **Checksums** — verifies all content files match `checksums.txt`
+1. **Checksums** — verifies all files listed in `checksums.txt` match
 2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
 3. **Binary attestation** — provenance chain verified with identity pinned to NVIDIA CI (`on-tag.yaml` workflow)
 
@@ -2552,7 +2608,7 @@ aicr verify ./my-bundle --trust-root ./trusted_root.json
 
 > **`--key` network behavior:** Resolving a **KMS URI** (`awskms://`, `gcpkms://`, `azurekms://`) makes network calls to the KMS provider to fetch the public key, so credentials for that provider must be available in the environment. A **local PEM** public-key file is read from disk with no provider calls; export it once with `cosign public-key --key <kms-uri>` (or your provider's console) and verify anywhere.
 >
-> Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache when present and otherwise fetched over the network, so run `aicr trust update` once to pre-populate it. A local PEM key therefore makes verification fully offline only when the trusted-root cache is already warm. Verification that drops the transparency-log requirement entirely, for true air-gapped use, is tracked in [#1154](https://github.com/NVIDIA/aicr/issues/1154).
+> Resolving the key is only part of verification: by default the bundle's Rekor transparency-log entry is also checked. Its inclusion proof is embedded in the bundle, so no live Rekor call is made, but the check needs the Sigstore trusted root. That root is loaded from the local cache and falls back to the embedded trusted root on a cache miss, so no network fetch happens on the verify path and `aicr trust update` is not required for offline use. Verification that drops the transparency-log requirement entirely, for true air-gapped use, is tracked in [#1154](https://github.com/NVIDIA/aicr/issues/1154).
 >
 > **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
 
@@ -2606,7 +2662,7 @@ Sign, push, and write the pointer for a recipe-evidence v1 bundle that was produ
 
 This decouples the cluster-bound validate step from the Fulcio/Rekor-bound signing step so they can run on different networks: validation must run where the cluster is reachable (often a corporate VPN), but keyless signing must reach `fulcio.sigstore.dev` + `rekor.sigstore.dev`, which corporate networks frequently block. Run `validate --emit-attestation` on the VPN, then `evidence publish` from a host with Sigstore egress (CI runner, jump box, hotspot).
 
-The signed artifact is content-addressable, so the result is byte-for-byte identical to the one-shot `validate --emit-attestation --push` output regardless of which host ran which leg — the predicate (including its baked-in `attestedAt` timestamp) is signed verbatim from the bundle on disk.
+The **unsigned** subject/predicate — and therefore the OCI bundle digest — is identical regardless of which host ran which leg, because the predicate (including its baked-in `attestedAt`) is signed verbatim from the bundle on disk. The Sigstore signature, Fulcio certificate, and Rekor entry differ per signing run, so the *signed bytes* themselves are not byte-for-byte reproducible.
 
 **Synopsis:**
 
@@ -2621,7 +2677,7 @@ The positional `<bundle-dir>` is either the directory `--emit-attestation` wrote
 | Flag | Alias | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Required. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. Omit the tag and aicr derives a unique per-recipe one (`<recipe-slug>-<short-fingerprint>`); pass an explicit tag to override. See [`aicr validate --push`](#aicr-validate). |
-| `--no-sign` | | bool | `false` | Push the bundle **unsigned** and write a `pointer.yaml` with an empty `signer` block, instead of signing. Skips all OIDC/Fulcio/Rekor steps (and the identity-disclosure prompt), so it runs even where Sigstore egress is blocked. The bundle's content reference (`bundle.oci`/`bundle.digest`) is still recorded; complete the signing leg later with the fork-based CI workflow. `aicr evidence verify` reports such a pointer as a non-failing **pending signature** state. |
+| `--no-sign` | | bool | `false` | Push the bundle **unsigned** and write a `pointer.yaml` with an empty `signer` block, instead of signing. Skips all OIDC/Fulcio/Rekor steps (and the identity-disclosure prompt), so it runs even where Sigstore egress is blocked. The bundle's content reference (`bundle.oci`/`bundle.digest`) is still recorded. Intended for the two-leg publish flow — commit the flat unsigned pointer and complete the signing leg via the fork CI workflow or [`aicr evidence sign --relocate`](#aicr-evidence-sign), which signs it and relocates it to the nested per-source path the blocking *Evidence Pointer Contract* gate requires. See [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr validate --push`. |
 | `--oidc-device-flow` | | bool | `false` | Use the OAuth 2.0 device authorization grant for OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. Useful on headless hosts. |
 | `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
@@ -2657,9 +2713,11 @@ aicr evidence publish ./out --push ghcr.io/myorg/aicr-evidence
 
 ### aicr evidence sign
 
-Complete the signing leg for a bundle that was already pushed **unsigned** (via `aicr evidence publish --no-sign` or `validate --emit-attestation --push --no-sign`). It reads the committed pointer, pulls the bundle it references (`bundle.oci` + `bundle.digest` — no recipe-name or bundle-ref input needed), signs the predicate with keyless OIDC, attaches the Sigstore Bundle as an OCI referrer of the existing artifact, and patches the pointer's `signer` block in place.
+Complete the signing leg for a bundle that was already pushed **unsigned** (via `aicr evidence publish --no-sign` or `validate --emit-attestation ./out --push <ref> --no-sign`). It reads a **local** pointer file (e.g. `./out/pointer.yaml`), pulls the bundle it references (`bundle.oci` + `bundle.digest` — no recipe-name or bundle-ref input needed), signs the predicate with keyless OIDC, attaches the Sigstore Bundle as an OCI referrer of the existing artifact, and patches the pointer's `signer` block in place.
 
-Signing is the only leg that needs Fulcio/Rekor egress, so this command is designed to run in CI (GitHub Actions ambient OIDC) where Sigstore is reachable, while the push leg runs wherever the cluster lives. The bundle is **not** re-emitted: the predicate is read verbatim from the pulled bundle, so the signature binds the same bytes the unsigned push produced.
+Signing is the only leg that needs Fulcio/Rekor egress, so this command runs wherever Sigstore is reachable (a jump box, CI runner, or hotspot) while the cluster-bound validate/push legs run wherever the cluster lives. The bundle is **not** re-emitted: the predicate is read verbatim from the pulled bundle, so the signature binds the same bytes the unsigned push produced.
+
+The fork CI signing leg runs this with `--relocate` on the committed flat pending pointer — signing it and moving it to the nested per-source path the blocking *Evidence Pointer Contract* gate requires; you can also run it directly on a Sigstore-reachable host. See [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci).
 
 **Synopsis:**
 
@@ -2667,7 +2725,9 @@ Signing is the only leg that needs Fulcio/Rekor egress, so this command is desig
 aicr evidence sign <pointer> [flags]
 ```
 
-The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. The pointer must carry exactly one attestation that is already pushed (`bundle.oci`/`bundle.digest` set) and not yet signed (empty `signer`); otherwise the command fails closed (an already-signed pointer is never re-signed).
+The positional `<pointer>` is the committed flat pending pointer `recipes/evidence/<recipe>.yaml`. The pointer must carry exactly one attestation that is already pushed (`bundle.oci`/`bundle.digest` set) and not yet signed (empty `signer`); otherwise the command fails closed (an already-signed pointer is never re-signed, except under `--relocate`, which moves an already-signed pointer without re-signing).
+
+With `--relocate`, the now-signed pointer is moved from its flat pending path to its canonical per-source path `recipes/evidence/<recipe>/<src>/<digest>.yaml` — the layout the per-source contract gate requires. A flat pointer is the only committable state for an unsigned pointer, because the `<src>` segment derives from the signer it does not yet have. This is the step the fork-based CI signing leg runs.
 
 **Flags:**
 
@@ -2678,6 +2738,7 @@ The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. Th
 | `--yes` | `--assume-yes` | bool | `false` | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. |
 | `--plain-http` | | bool | `false` | Use HTTP instead of HTTPS for the registry (pull + referrer attach; local-registry tests). |
 | `--insecure-tls` | | bool | `false` | Skip TLS verification for the registry (pull + referrer attach; self-signed registries). |
+| `--relocate` | | bool | `false` | After signing, move the pointer from its flat pending path (`recipes/evidence/<recipe>.yaml`) to its canonical per-source path (`recipes/evidence/<recipe>/<src>/<digest>.yaml`). Used by the fork-based CI signing leg to complete the commit-flat → sign → relocate flow. Idempotent: an already-signed flat pointer is moved without re-signing, and a pointer already at its canonical path is a no-op. If a **different** file already occupies the canonical path, the command fails closed with a conflict error rather than overwriting it (per-source pointers are immutable) — resolve by removing the duplicate, or `git pull` to sync a prior relocation, then re-run. |
 
 **Exit codes:**
 
@@ -2690,14 +2751,15 @@ The positional `<pointer>` is the committed `recipes/evidence/<recipe>.yaml`. Th
 
 ```shell
 # In CI (ambient OIDC), after a contributor committed an unsigned pointer:
-aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml
+# sign and relocate it to its canonical per-source path.
+aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml --relocate
 ```
 
 ---
 
 ### aicr evidence verify
 
-Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.
+Verify a recipe-evidence v1 bundle produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every manifest-listed payload file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.
 
 Inline constraint replay is reserved for a follow-up PR.
 
@@ -2737,14 +2799,14 @@ The positional argument is auto-detected as one of:
 
 The JSON/Markdown output's `exit` field mirrors `VerifyResult.Exit` from the library API. Shell consumers can branch via `jq '.exit'` on `--format json` output.
 
-**Pending signature.** An unsigned bundle whose pointer carries no `signer` (e.g. one published with `--no-sign`, awaiting the signing leg) is **not** a failure: it verifies at exit `0` with `pending: true` in the JSON output and a "pending signature" verdict in the Markdown summary. This lets an in-flight PR commit an unsigned pointer without the gate flagging it as broken.
+**Pending signature.** An unsigned bundle whose pointer carries no `signer` (e.g. one published with `--no-sign`, awaiting the signing leg) is **not** a `verify` failure: it verifies at exit `0` with `pending: true` in the JSON output and a "pending signature" verdict in the Markdown summary. This is a useful local check on a not-yet-signed bundle. The committed flat pending pointer is signed and relocated to its nested per-source path by the fork CI signing leg (`aicr evidence sign --relocate`); the blocking *Evidence Pointer Contract* gate (`pkg/evidence/verifier/discover.go`) requires that final signed, nested pointer. See [Publishing Recipe Evidence](../contributor/evidence-publishing.md#recommended-path-split-the-legs-sign-in-ci).
 
 **Failure cause.** On a non-zero exit, the JSON output carries a structured `failureCause` object — `class` (one of `registry-forbidden`, `not-found`, `registry`, `signature`, `integrity`, `schema`, `unknown`), an optional `httpStatus`, and an actionable `hint`. For example, a private fork registry returns `class: registry-forbidden`, `httpStatus: 403` with a hint to make the package public — so the reason is self-serviceable rather than a bare "invalid". The Markdown summary renders the same as **Cause**/**Hint** lines.
 
 **Examples:**
 ```shell
 # Verify a pointer that a contributor committed alongside their recipe change.
-aicr evidence verify recipes/evidence/h100-gke-cos-training/7c4c0edc8c765a95a0f3afdb3bbb8e91/sha256-33d4...yaml
+aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml
 
 # Verify a pushed OCI bundle directly (no repo checkout required).
 aicr evidence verify ghcr.io/myorg/aicr-evidence@sha256:abc...
@@ -2755,7 +2817,7 @@ aicr evidence verify ./out/summary-bundle
 # Pin the expected OIDC signer.
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml \
   --expected-issuer https://token.actions.githubusercontent.com \
-  --expected-identity-regexp '^https://github\.com/myorg/.*$'
+  --expected-identity-regexp '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.+$'
 
 # CI pipelines: JSON output.
 aicr evidence verify recipes/evidence/<recipe>/<src>/<digest>.yaml -o result.json -t json
@@ -2875,7 +2937,9 @@ kubectl logs -n gpu-operator -l app=nvidia-operator-validator
 
 ```shell
 # Step 1: Agent captures snapshot to ConfigMap (using CLI deployment)
-aicr snapshot --output cm://gpu-operator/aicr-snapshot
+# --namespace gpu-operator deploys the agent there so it has the ConfigMap RBAC
+# (namespace-scoped Role) to write into the gpu-operator namespace.
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 # The CLI handles agent deployment automatically
 # No manual kubectl steps needed

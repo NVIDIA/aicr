@@ -495,6 +495,37 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("OKE non-GFD tolerations = %v, want tolerate-all", tols)
 		}
 	})
+	t.Run("AKS pins to shared gpu.product and tolerates taints", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-H100-80GB-HBM3"}}},
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{gpuProductLabel: "NVIDIA-H100-80GB-HBM3"}}},
+		}
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceAKS, "", nodes)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
+		if ns[gpuProductLabel] != "NVIDIA-H100-80GB-HBM3" {
+			t.Errorf("AKS nodeSelector = %v, want %s=NVIDIA-H100-80GB-HBM3", ns, gpuProductLabel)
+		}
+		if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("AKS tolerations = %v, want tolerate-all", tols)
+		}
+	})
+	t.Run("AKS on non-GFD cluster omits selector but still tolerates taints", func(t *testing.T) {
+		nodes := []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{}}},
+		}
+		ns, tols, err := platformWorkerScheduling(recipe.CriteriaServiceAKS, "", nodes)
+		if err != nil {
+			t.Fatalf("platformWorkerScheduling() error = %v", err)
+		}
+		if ns != nil {
+			t.Errorf("AKS non-GFD nodeSelector = %v, want nil", ns)
+		}
+		if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("AKS non-GFD tolerations = %v, want tolerate-all", tols)
+		}
+	})
 	t.Run("unknown service returns nil", func(t *testing.T) {
 		ns, tols, err := platformWorkerScheduling("unknown", "", nil)
 		if err != nil {
@@ -952,6 +983,12 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAny]; len(accels) != 2 {
 		t.Errorf("variantDefault Any count = %d, want 2 (B200, GB200)", len(accels))
 	}
+	// AKS ND-series H100 runs the default variant over NCCL's built-in
+	// IB/verbs transport (testdata/h100/aks/runtime.yaml).
+	wantAKS := []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorH100}
+	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAKS]; !reflect.DeepEqual(accels, wantAKS) {
+		t.Errorf("variantDefault AKS = %v, want %v", accels, wantAKS)
+	}
 }
 
 func TestSupportedNCCLCombinationsHaveRuntimeTemplates(t *testing.T) {
@@ -961,16 +998,18 @@ func TestSupportedNCCLCombinationsHaveRuntimeTemplates(t *testing.T) {
 	// against real NCCL logs during validation.
 	const efaIndent = "                      "
 	data := map[string]string{
-		"NAMESPACE":             "aicr-validation",
-		"WORKER_COUNT":          "2",
-		"GPU_COUNT_PER_NODE":    "8",
-		"GPU_COUNT":             "16",
-		"TEST_TYPE":             testType,
-		"MIN_MESSAGE_SIZE":      minMessageSize,
-		"MAX_MESSAGE_SIZE":      maxMessageSize,
-		"EFA_RESOURCE_LIMITS":   buildEFAResourceLine(1, efaIndent),
-		"EFA_RESOURCE_REQUESTS": buildEFAResourceLine(1, efaIndent),
-		"ROCE_DEVICE_COUNT":     "8",
+		"NAMESPACE":              "aicr-validation",
+		"WORKER_COUNT":           "2",
+		"GPU_COUNT_PER_NODE":     "8",
+		"GPU_COUNT":              "16",
+		"TEST_TYPE":              testType,
+		"MIN_MESSAGE_SIZE":       minMessageSize,
+		"MAX_MESSAGE_SIZE":       maxMessageSize,
+		"EFA_RESOURCE_LIMITS":    buildEFAResourceLine(1, efaIndent),
+		"EFA_RESOURCE_REQUESTS":  buildEFAResourceLine(1, efaIndent),
+		"RDMA_RESOURCE_LIMITS":   buildAKSRdmaResourceLine(1000, efaIndent),
+		"RDMA_RESOURCE_REQUESTS": buildAKSRdmaResourceLine(1000, efaIndent),
+		"ROCE_DEVICE_COUNT":      "8",
 		"GKE_NETWORK_INTERFACES": buildGKENetworkInterfacesAnnotation([]string{
 			"gpu-nic-0",
 			"gpu-nic-1",

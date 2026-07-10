@@ -22,6 +22,15 @@ on:
       - 'recipes/**'
       - 'kwok/**'
       - 'tests/chainsaw/kwok/**'
+      # The aicr binary that renders/bundles recipes is built from Go source;
+      # a recipe-rendering regression or dependency bump must trigger KWOK e2e.
+      - 'pkg/recipe/**'
+      - 'pkg/bundler/**'
+      - 'pkg/cli/**'
+      - 'cmd/aicr/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/workflows/kwok-tier3-shard.yaml'
       - '.github/actions/kwok-test/**'
@@ -33,6 +42,15 @@ on:
       - 'recipes/**'
       - 'kwok/**'
       - 'tests/chainsaw/kwok/**'
+      # The aicr binary that renders/bundles recipes is built from Go source;
+      # a recipe-rendering regression or dependency bump must trigger KWOK e2e.
+      - 'pkg/recipe/**'
+      - 'pkg/bundler/**'
+      - 'pkg/cli/**'
+      - 'cmd/aicr/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/workflows/kwok-tier3-shard.yaml'
       - '.github/actions/kwok-test/**'

@@ -775,9 +775,15 @@ func TestValidateState_ThreadsClientVersion(t *testing.T) {
 	// validator.WithVersion(c.version).
 	client := newClientForBundleTest(t)
 	client.version = "v9.9.9"
+	// gpu-operator is included so GPU allocation-policy resolution (#1327)
+	// finds a whole-GPU advertiser — a recipe with neither gpu-operator[-ocp]
+	// nor the DRA opt-in fails ValidateState at conversion by design (row 6).
 	rec := newRecipeResultForBundleTest(client,
-		[]recipe.ComponentRef{{Name: "c1", Type: recipe.ComponentTypeHelm}},
-		[]ComponentRef{{Name: "c1", Kind: "Helm"}},
+		[]recipe.ComponentRef{
+			{Name: "c1", Type: recipe.ComponentTypeHelm},
+			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},
+		},
+		[]ComponentRef{{Name: "c1", Kind: "Helm"}, {Name: "gpu-operator", Kind: "Helm"}},
 	)
 	results, err := client.ValidateState(t.Context(), rec, &Snapshot{},
 		WithValidationNoCluster(true))
@@ -823,7 +829,7 @@ func TestAdoptRecipe_DeepCopiesForClientIsolation(t *testing.T) {
 		APIVersion: recipe.RecipeAPIVersion,
 		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 		ComponentRefs: []recipe.ComponentRef{
-			{Name: "c1", Type: recipe.ComponentTypeHelm},
+			{Name: "c1", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Chart: "c1", Version: "1.0.0"},
 		},
 	}
 	if input.DataProvider() != nil {
@@ -1043,6 +1049,304 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 		}
 		if recipe.CachedRegistryContainsForTesting(dp) {
 			t.Errorf("iteration %d: registryCache not evicted after Close", i)
+		}
+	}
+}
+
+// TestAdoptRecipe_RejectsIncoherentRef pins issue #1584 at the REST/adopt
+// boundary: POST /v1/bundle decodes a RecipeResult and calls adoptRecipe,
+// which never runs the resolver — so coherence must be enforced here. An
+// incoherent ref (Helm carrying a Kustomize tag) is rejected, and a coherent
+// lowercase-typed ref (the OpenAPI wire form) is accepted case-insensitively.
+func TestAdoptRecipe_RejectsIncoherentRef(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	base := func(refs []recipe.ComponentRef) *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			Kind:          recipe.RecipeResultKind,
+			APIVersion:    recipe.RecipeAPIVersion,
+			Criteria:      &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+			ComponentRefs: refs,
+		}
+	}
+
+	// Incoherent: Helm ref carrying a Kustomize tag -> rejected.
+	_, err = client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
+		{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Version: "v1", Tag: "v2"},
+	}))
+	if err == nil {
+		t.Fatal("adoptRecipe accepted an incoherent Helm+tag ref; want ErrCodeInvalidRequest")
+	}
+	var se *aicrerrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *aicrerrors.StructuredError, got %T: %v", err, err)
+	}
+	if se.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest, got %s", se.Code)
+	}
+
+	// Coherent, lowercase type (OpenAPI wire form) -> accepted AND canonicalized
+	// so downstream deployers see the canonical constant.
+	res, err := client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
+		{Name: "gpu-operator", Type: recipe.ComponentType("helm"), Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1"},
+	}))
+	if err != nil {
+		t.Fatalf("adoptRecipe rejected a coherent lowercase-typed ref: %v", err)
+	}
+	if got := res.internal.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
+		t.Errorf("adopted lowercase type not canonicalized: got %q, want %q", got, recipe.ComponentTypeHelm)
+	}
+
+	// A type-less ref for a registry component (valid before #1584 — the
+	// deployers derive the type from fields) must be back-filled from the
+	// registry, not rejected.
+	res2, err := client.adoptRecipe(t.Context(), base([]recipe.ComponentRef{
+		{Name: "gpu-operator", Source: "https://charts.example.com", Chart: "gpu-operator", Version: "v1"},
+	}))
+	if err != nil {
+		t.Fatalf("adoptRecipe rejected a type-less registry ref instead of back-filling: %v", err)
+	}
+	if got := res2.internal.ComponentRefs[0].Type; got != recipe.ComponentTypeHelm {
+		t.Errorf("type-less registry ref not back-filled: got %q, want %q", got, recipe.ComponentTypeHelm)
+	}
+}
+
+// blockingReadFileProvider parks ReadFile of a target file (e.g. registry.yaml)
+// on a signal, so a test can deterministically pin adoptRecipe inside its
+// registry-backed type back-fill while a second goroutine calls Close.
+type blockingReadFileProvider struct {
+	underlying  recipe.DataProvider
+	target      string
+	readStarted chan struct{}
+	readUnblock chan struct{}
+}
+
+func (b *blockingReadFileProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if strings.HasSuffix(path, b.target) {
+		select {
+		case <-b.readStarted:
+		default:
+			close(b.readStarted)
+		}
+		// Honor the DataProvider contract: return the context error if canceled
+		// rather than parking forever.
+		select {
+		case <-b.readUnblock:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return b.underlying.ReadFile(ctx, path)
+}
+
+func (b *blockingReadFileProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
+	return b.underlying.WalkDir(ctx, root, fn)
+}
+
+func (b *blockingReadFileProvider) Source(path string) string { return b.underlying.Source(path) }
+
+// TestClient_CloseDrainsInflightAdopt pins the inflight registration added for
+// adoptRecipe (issue #1584): PrepareAndValidate reads the component registry to
+// back-fill a missing type, so a concurrent Close must drain the adopt before
+// evicting caches. A type-less gpu-operator ref forces the registry ReadFile,
+// which parks; Close must block on inflight.Wait until the adopt completes.
+func TestClient_CloseDrainsInflightAdopt(t *testing.T) {
+	t.Parallel()
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	blockedDP := &blockingReadFileProvider{
+		underlying:  embedded,
+		target:      "registry.yaml",
+		readStarted: make(chan struct{}),
+		readUnblock: make(chan struct{}),
+	}
+	c := &Client{
+		builder: recipe.NewBuilder(recipe.WithDataProvider(blockedDP)),
+		dp:      blockedDP,
+	}
+
+	adoptDone := make(chan struct{})
+	go func() {
+		defer close(adoptDone)
+		_, _ = c.adoptRecipe(context.Background(), &recipe.RecipeResult{
+			Kind:       recipe.RecipeResultKind,
+			APIVersion: recipe.RecipeAPIVersion,
+			Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Version: "v1"}, // type-less -> forces registry back-fill
+			},
+		})
+	}()
+
+	select {
+	case <-blockedDP.readStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("adoptRecipe never read registry.yaml within 5s")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		defer close(closeDone)
+		_ = c.Close()
+	}()
+
+	select {
+	case <-closeDone:
+		t.Fatal("Close returned before in-flight adoptRecipe drained; inflight registration is missing")
+	case <-time.After(100 * time.Millisecond):
+		// Expected: Close parked on inflight.Wait().
+	}
+
+	close(blockedDP.readUnblock)
+	select {
+	case <-adoptDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("adoptRecipe did not complete within 10s after unblock")
+	}
+	select {
+	case <-closeDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not complete within 10s after adopt drained")
+	}
+}
+
+// TestAdoptRecipe_RejectsVersionlessHelmRef pins the #1615 invariant at the
+// CLIENT boundary (not just recipe.PrepareAndValidate, which adoptRecipe
+// delegates to): an externally-supplied RecipeResult whose enabled Helm ref
+// references a chart source without a version must be rejected by
+// adoptRecipe with ErrCodeInvalidRequest naming the component.
+func TestAdoptRecipe_RejectsVersionlessHelmRef(t *testing.T) {
+	t.Parallel()
+
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	input := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeAPIVersion,
+		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:   "versionless-helm",
+				Type:   recipe.ComponentTypeHelm,
+				Source: "https://charts.example.com",
+				Chart:  "versionless-helm",
+			},
+		},
+	}
+	_, err = client.adoptRecipe(t.Context(), input)
+	if err == nil {
+		t.Fatal("adoptRecipe accepted an enabled Helm ref without a chart version")
+	}
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
+	}
+	for _, want := range []string{"versionless-helm", "chart version"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+
+	// The exported facade must reject with the identical shape.
+	_, err = client.AdoptRecipe(t.Context(), input)
+	if err == nil {
+		t.Fatal("AdoptRecipe accepted an enabled Helm ref without a chart version")
+	}
+	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("AdoptRecipe error code = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
+	}
+	for _, want := range []string{"versionless-helm", "chart version"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("AdoptRecipe error %q does not contain %q", err.Error(), want)
+		}
+	}
+
+	// Whitespace-only versions are equally rejected at this boundary (Helm
+	// trims the argument and installs latest).
+	wsInput := &recipe.RecipeResult{
+		Kind:       recipe.RecipeResultKind,
+		APIVersion: recipe.RecipeAPIVersion,
+		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "versionless-helm",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://charts.example.com",
+				Chart:   "versionless-helm",
+				Version: "   ",
+			},
+		},
+	}
+	if _, err := client.adoptRecipe(t.Context(), wsInput); err == nil ||
+		!stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+
+		t.Errorf("adoptRecipe(whitespace version) error = %v, want %v", err, aicrerrors.ErrCodeInvalidRequest)
+	}
+}
+
+// TestFacadeResultFromInternal_ChartProjection pins the facade's chart
+// projection against the deployers' EffectiveChart rule (and the facade
+// ComponentRef.Chart contract in types.go): a source-only Helm ref exposes
+// the component-name fallback the deployers actually install, while
+// manifest-only Helm refs and Kustomize refs stay chartless.
+func TestFacadeResultFromInternal_ChartProjection(t *testing.T) {
+	t.Parallel()
+
+	internal := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "explicit-chart",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://charts.example.com",
+				Chart:   "the-chart",
+				Version: "1.0.0",
+			},
+			{
+				Name:    "source-only",
+				Type:    recipe.ComponentTypeHelm,
+				Source:  "https://charts.example.com",
+				Version: "1.0.0",
+			},
+			{
+				Name:          "manifest-only",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{"components/manifest-only/manifests/a.yaml"},
+			},
+			{
+				Name: "kustomize-comp",
+				Type: recipe.ComponentTypeKustomize,
+				Path: "deploy",
+			},
+		},
+	}
+
+	out := facadeResultFromInternal(internal, "test")
+	if len(out.Components) != len(internal.ComponentRefs) {
+		t.Fatalf("components = %d, want %d", len(out.Components), len(internal.ComponentRefs))
+	}
+	wantCharts := map[string]string{
+		"explicit-chart": "the-chart",
+		"source-only":    "source-only", // EffectiveChart fallback, not ""
+		"manifest-only":  "",
+		"kustomize-comp": "",
+	}
+	for _, comp := range out.Components {
+		want, ok := wantCharts[comp.Name]
+		if !ok {
+			t.Errorf("unexpected component %q", comp.Name)
+			continue
+		}
+		if comp.Chart != want {
+			t.Errorf("component %q Chart = %q, want %q", comp.Name, comp.Chart, want)
 		}
 	}
 }

@@ -95,7 +95,11 @@ type ComponentRef struct {
 	// Merge order: base values → ValuesFile → Overrides (highest precedence).
 	Overrides map[string]any `json:"overrides,omitempty" yaml:"overrides,omitempty"`
 
-	// Patches is a list of patch files to apply (for Kustomize).
+	// Patches is a list of patch files (intended for Kustomize). NOT CURRENTLY
+	// APPLIED by any deployer — an enabled ref that declares patches is rejected
+	// by ValidateCoherence (disabled refs are skipped) rather than silently
+	// producing an unpatched bundle. See #1588 (implement application or drop
+	// the field).
 	Patches []string `json:"patches,omitempty" yaml:"patches,omitempty"`
 
 	// DependencyRefs is a list of component names this component depends on.
@@ -215,6 +219,362 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 	// produced this result. Hydration is performed by hydrateHealthCheckAsserts
 	// in metadata_store.go after the per-ref defaults pass, where the bound
 	// DataProvider is available. See issue #1219.
+}
+
+// coherenceProblem reports why a resolved ComponentRef's deployment-shape
+// fields are internally inconsistent, or "" if the ref is coherent. The rules
+// mirror what the deployers enforce so an incoherent ref is rejected at
+// resolution rather than silently deploying as a different type (or producing
+// a signed attestation whose metadata does not match what deploys):
+//
+//   - the field-classifying deployers (localformat, and the Helm/Helmfile/ArgoCD
+//     generators built on it) do not trust the declared Type — localformat
+//     classifies any ref carrying a Tag or Path as Kustomize (see
+//     pkg/bundler/deployer/localformat classify/write). The Flux generator
+//     differs: it switches on the declared Type. So a Helm ref carrying a
+//     tag/path builds as Kustomize under the field-classifiers but as Helm
+//     under Flux — the same ref deploys differently by deployer — which is why
+//     a Helm ref must not carry Kustomize fields. (An explicitly Kustomize ref,
+//     conversely, is rejected outright by the Helm-only Flux generator — see
+//     #1588.);
+//   - a Kustomize ref needs a Path to build from;
+//   - a Tag is only meaningful with a Source (git repo / OCI ref);
+//   - a Helm ref that is not manifest-only must pin a chart version — an
+//     empty version reaches Helm as "latest" through the helmfile/flux/argocd
+//     deployers (see #1615); and
+//   - no deployer applies ComponentRef.Patches, so a ref that declares patch
+//     files is rejected rather than silently producing an unpatched bundle
+//     (see #1588).
+//
+// Keep these in lockstep with the localformat rules.
+func (ref *ComponentRef) coherenceProblem() string {
+	// Patches are unsupported for every deployment type: the field is carried
+	// through resolution but no deployer applies it (localformat's Component has
+	// no patches field). Fail closed on any type rather than drop it silently.
+	if len(ref.Patches) > 0 {
+		return fmt.Sprintf("component %q declares patches, but no deployer applies patch files; "+
+			"remove `patches` (removing it does not change the generated bundle). See #1588.", ref.Name)
+	}
+
+	hasTag, hasPath := ref.Tag != "", ref.Path != ""
+	// Match the type case-insensitively: the resolver and the OpenAPI examples
+	// use the canonical ComponentType ("Helm"/"Kustomize"), but lowercase is
+	// accepted as backward-compatible input from hand-authored recipes or older
+	// clients, and the field-classifying deployers key off tag/path (while Flux
+	// switches on Type) — so "helm" and "Helm" must be treated the same.
+	switch {
+	case strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)):
+		if hasTag || hasPath {
+			return fmt.Sprintf("component %q is Helm but carries Kustomize field(s) (tag=%q, path=%q); "+
+				"the field-classifying deployers would treat it as Kustomize while the Type-switching Flux "+
+				"deployer would treat it as Helm, so the same ref deploys differently — remove the tag/path, "+
+				"or convert it into a coherent Kustomize ref (which needs a path, and a source if it sets a tag)",
+				ref.Name, ref.Tag, ref.Path)
+		}
+		// Chart/source values carrying ANY surrounding whitespace (including
+		// whitespace-only values) are rejected outright rather than trimmed:
+		// the deployers consume these fields RAW — flux's manifest-only
+		// detection and OCI classification, localformat's classifier, the
+		// HelmRepository URL — so a padded value would validate as one shape
+		// here and deploy as another (or as a broken URL) there.
+		if ref.Chart != strings.TrimSpace(ref.Chart) {
+			return fmt.Sprintf("Helm component %q has a chart name with surrounding "+
+				"whitespace (%q); set the exact chart name or omit the field (see #1615)",
+				ref.Name, ref.Chart)
+		}
+		if ref.Source != strings.TrimSpace(ref.Source) {
+			return fmt.Sprintf("Helm component %q has a source with surrounding "+
+				"whitespace (%q); set the exact repository or omit the field (see #1615)",
+				ref.Name, ref.Source)
+		}
+		// Any SET version must be well-formed, whatever the primary shape:
+		// a padded value is rejected for the same reason as padded
+		// chart/source values — the deployers consume the field RAW.
+		// NormalizeVersion only strips a "v" prefix, so " 1.0.0" lands
+		// verbatim in a Flux HelmRelease (a broken semver range) and in
+		// helm --version arguments; and even a MANIFEST-ONLY ref propagates
+		// its version into the rendered chart's .Chart.Version
+		// (localformat's renderInputFor → helm.sh/chart labels), so a
+		// padded value ships an invalid label value. Whitespace-only
+		// versions are padded values too and are caught here.
+		if ref.Version != strings.TrimSpace(ref.Version) {
+			return fmt.Sprintf("Helm component %q has a chart version with surrounding "+
+				"whitespace (%q); set the exact chart version (see #1615)",
+				ref.Name, ref.Version)
+		}
+		// A bare "v" is rejected for every output kind and shape (see
+		// IsEffectiveChartVersion, the shared rule): Flux/Argo CD normalize
+		// it to empty for non-OCI outputs (unpinned/latest), vendored
+		// wrappers and manifest-only rendering substitute a fabricated
+		// default (NormalizeVersionWithDefault), and Helm/Helmfile/
+		// non-vendored-OCI preserve it — one recipe, output-dependent chart
+		// identities. Longer values keep their leading "v" ("v1.0.0" is
+		// fine everywhere). An UNSET version is judged per shape below.
+		if ref.Version != "" && !IsEffectiveChartVersion(ref.Version) {
+			return fmt.Sprintf("Helm component %q has chart version %q, which Flux/Argo CD "+
+				"normalize to empty for non-OCI outputs and vendored wrappers replace with a "+
+				"fabricated default; set a full chart version (see #1615)", ref.Name, ref.Version)
+		}
+		// A Helm ref needs a deployable primary: an external chart (a source
+		// repository; the chart name falls back to the component name in the
+		// deployers when unset) or local primary manifest files. A chart name
+		// WITHOUT a source is not deployable — Flux skips HelmRepository
+		// creation for an empty source and localformat's chart pull rejects a
+		// missing repository. Pre-manifests are auxiliary to a primary
+		// release and qualify nothing on their own. The raw comparisons below
+		// match the deployers'; whitespace-only values were rejected above.
+		hasChart := ref.Chart != ""
+		hasSource := ref.Source != ""
+		switch {
+		case hasSource:
+			// External chart: it must pin an EFFECTIVE version. The
+			// localformat deployer hard-fails on an empty one, but
+			// helmfile/flux/argocd emit it verbatim and Helm resolves
+			// "latest" at install time — a silent stale-default failure
+			// (#1615). Unreachable for embedded-registry resolution
+			// (bom-pinning-check pins every Helm chart), but an external
+			// --data registry can omit defaultVersion, and loaded/adopted
+			// RecipeResults never run ApplyRegistryDefaults at all.
+			// Well-formedness (padding, bare "v") was checked above; here
+			// only PRESENCE remains.
+			if ref.Version == "" {
+				return fmt.Sprintf("Helm component %q has no chart version; set version: on the "+
+					"componentRef — criteria-resolved recipes may inherit it from helm.defaultVersion "+
+					"in the component registry (see #1615)", ref.Name)
+			}
+		case hasChart:
+			return fmt.Sprintf("Helm component %q has a chart name (%q) but no source repository; "+
+				"the deployers have no repository to pull from — set source:, or remove the chart "+
+				"for a manifest-only component (see #1615)", ref.Name, ref.Chart)
+		case len(ref.ManifestFiles) == 0:
+			return fmt.Sprintf("Helm component %q has no deployable primary (no source, no chart, "+
+				"and no primary manifestFiles; preManifestFiles alone are auxiliary to a primary "+
+				"release) — add a chart source or primary manifest files (see #1615)", ref.Name)
+		}
+	case strings.EqualFold(string(ref.Type), string(ComponentTypeKustomize)):
+		if !hasPath {
+			return fmt.Sprintf("component %q is Kustomize but has no path; a path is required to build from", ref.Name)
+		}
+		if hasTag && ref.Source == "" {
+			return fmt.Sprintf("component %q is Kustomize with tag %q but no source; a tag is only "+
+				"meaningful with a git source", ref.Name, ref.Tag)
+		}
+		// A Kustomize ref wraps a single primary source; the deployers reject a
+		// ref that also carries post-manifests (ManifestFiles). PreManifestFiles
+		// are pre-injected separately and remain supported.
+		if len(ref.ManifestFiles) > 0 {
+			return fmt.Sprintf("component %q is Kustomize but also declares manifestFiles; a component may "+
+				"declare either Kustomize (tag/path) or raw manifest files, not both", ref.Name)
+		}
+	default:
+		// After ApplyRegistryDefaults every registry-backed ref has a supported
+		// Type; an empty or unknown Type here means an externally-supplied ref
+		// the registry did not populate. The field-classifying deployers key off
+		// tag/path (ignoring this field) while Flux switches on it, so an
+		// unsupported Type would deploy ambiguously or be rejected — fail closed
+		// rather than silently accept it.
+		return fmt.Sprintf("component %q has unsupported type %q; expected %q or %q",
+			ref.Name, ref.Type, ComponentTypeHelm, ComponentTypeKustomize)
+	}
+	return ""
+}
+
+// IsManifestOnlyHelm reports whether a Helm-typed ref ships only local
+// primary manifest files with no external chart — e.g.
+// nodewright-customizations, whose registry entry declares an empty
+// helm.defaultRepository and no defaultVersion. Such refs are typed Helm (the
+// ComponentConfig.GetType default) but have no chart version to pin: the
+// deployers render their manifests into a local chart directory instead of
+// pulling an upstream chart.
+//
+// PreManifestFiles do NOT qualify: pre-manifests are auxiliary resources
+// injected ahead of a primary release (every real pre-manifest-carrying ref
+// resolves with a chart from the registry), so a ref whose only content is
+// pre-manifests has no deployable primary — it is a husk, not a manifest-only
+// component. Both the coherence check and pkg/health's chart_pinned dimension
+// key off this predicate.
+func (ref *ComponentRef) IsManifestOnlyHelm() bool {
+	// Raw comparisons match the deployers' manifest-only detection (flux) and
+	// classifier (localformat); whitespace-only chart/source values are
+	// rejected by the coherence check, so they never reach consumers. The
+	// Type guard keeps the exported name honest: a Kustomize ref with
+	// manifests and blank chart/source is not a manifest-only HELM ref.
+	return strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)) &&
+		ref.Chart == "" && ref.Source == "" && len(ref.ManifestFiles) > 0
+}
+
+// HasExternalChart reports whether a Helm-typed ref references an external
+// chart: a source repository, optionally with an explicit chart name. Non-Helm
+// refs and refs whose only chart signal is a chart name (nothing to pull
+// from — coherence rejects that shape) do not qualify.
+func (ref *ComponentRef) HasExternalChart() bool {
+	return strings.EqualFold(string(ref.Type), string(ComponentTypeHelm)) && ref.Source != ""
+}
+
+// EffectiveChart returns the chart name a Helm-typed ref deploys: the
+// explicit Chart, falling back to the component name when unset (a
+// source-only ref). Every ComponentRef consumer derives the chart through
+// this method — the flux, argocd, helmfile, and helm deployers, pkg/mirror,
+// and the facade/query/BOM projections. (localformat keeps an equivalent
+// fallback on its own Component type, which is constructed from
+// EffectiveChart-derived inputs but also serves direct callers.)
+func (ref *ComponentRef) EffectiveChart() string {
+	if ref.Chart != "" {
+		return ref.Chart
+	}
+	return ref.Name
+}
+
+// IsEffectiveChartVersion reports whether version still pins an actual chart
+// version once the deployers' normalization is applied: non-empty after
+// trimming, and not a bare "v". Flux and Argo CD strip the leading "v" for
+// non-OCI outputs (deployer.NormalizeVersion) and treat the empty remainder
+// as unpinned; Helm/Helmfile and non-vendored OCI outputs preserve the value;
+// vendored wrappers substitute a fabricated default
+// (deployer.NormalizeVersionWithDefault). A bare "v" is rejected uniformly so
+// one recipe cannot carry output-dependent chart identities. The coherence
+// check and pkg/health's chart_pinned dimension share this rule.
+func IsEffectiveChartVersion(version string) bool {
+	v := strings.TrimSpace(version)
+	return v != "" && strings.TrimPrefix(v, "v") != ""
+}
+
+// canonicalizeComponentTypes normalizes each ref's case-insensitively-matched
+// Type to the canonical ComponentType constant ("helm" -> "Helm"), so registry
+// defaulting (which switches on the exact constant) and the deployers (Flux
+// rejects a lowercase "helm", ArgoCD-Helm mis-handles a lowercase "kustomize")
+// all see a consistent value. Unknown types are left unchanged for the
+// coherence check to reject. Call this at every boundary that produces a
+// RecipeResult, before defaulting and before returning the result.
+func canonicalizeComponentTypes(refs []ComponentRef) {
+	for i := range refs {
+		switch {
+		case strings.EqualFold(string(refs[i].Type), string(ComponentTypeHelm)):
+			refs[i].Type = ComponentTypeHelm
+		case strings.EqualFold(string(refs[i].Type), string(ComponentTypeKustomize)):
+			refs[i].Type = ComponentTypeKustomize
+		}
+	}
+}
+
+// backfillComponentTypes sets ref.Type from the registry component's type for
+// each ENABLED ref that has no explicit type, using this result's bound
+// DataProvider's registry. It mirrors what ApplyRegistryDefaults does on the
+// resolve path, so a hand-authored or hydrated recipe that omits `type` —
+// valid before #1584, since the deployers derive the type from the ref's
+// fields — is not rejected by ValidateCoherence. It is the first step of
+// PrepareAndValidate (the load and adopt boundaries do not run
+// ApplyRegistryDefaults). Disabled refs are ignored (they are excluded from the
+// bundle and skipped by ValidateCoherence, so a disabled type-less stub must
+// not trigger a registry load), and the registry is not consulted at all when
+// no enabled ref needs a type. Non-registry components are left untouched
+// (their empty type still fails closed).
+func (r *RecipeResult) backfillComponentTypes() error {
+	if r == nil {
+		return nil
+	}
+	// Only touch the registry if an ENABLED ref actually needs a type. This
+	// avoids a spurious registry load (and its potential error) for the common
+	// case where every ref already declares a type — and, critically, for a
+	// disabled legacy stub with an empty type: ValidateCoherence skips disabled
+	// refs, so back-filling one must not be able to fail the whole recipe on a
+	// registry error when no enabled ref needs it.
+	needsBackfill := false
+	for i := range r.ComponentRefs {
+		if r.ComponentRefs[i].Type == "" && r.ComponentRefs[i].IsEnabled() {
+			needsBackfill = true
+			break
+		}
+	}
+	if !needsBackfill {
+		return nil
+	}
+	// A type-less ref needs the registry to resolve its type; propagate a
+	// load/parse/timeout failure as-is rather than swallowing it and letting
+	// ValidateCoherence report a misleading, non-retryable "unsupported type".
+	registry, err := GetComponentRegistryFor(r.provider)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry to back-fill component types")
+	}
+	for i := range r.ComponentRefs {
+		if r.ComponentRefs[i].Type != "" || !r.ComponentRefs[i].IsEnabled() {
+			continue
+		}
+		if cfg := registry.Get(r.ComponentRefs[i].Name); cfg != nil {
+			r.ComponentRefs[i].Type = cfg.GetType()
+		}
+	}
+	return nil
+}
+
+// PrepareAndValidate normalizes a RecipeResult's component refs and rejects
+// incoherent ones, in the required order: reject refs named with the reserved
+// deployer override key (all refs, enabled or disabled), back-fill missing
+// types on enabled refs from the registry, canonicalize the type casing, then
+// validate
+// coherence (which itself only inspects enabled refs). Boundaries
+// that produce a RecipeResult WITHOUT running ApplyRegistryDefaults — file load
+// (LoadFromFileWithProvider) and external adoption (client adoptRecipe) — call
+// this single method so the three steps cannot drift or be partially applied
+// (e.g. validating before canonicalizing would reject legitimate lowercase
+// types; skipping the back-fill would reject type-less registry refs). The
+// resolve path (finalizeRecipeResult) instead back-fills via ApplyRegistryDefaults
+// and canonicalizes before defaulting, so it calls ValidateCoherence directly.
+func (r *RecipeResult) PrepareAndValidate() error {
+	if r == nil {
+		return nil
+	}
+	// Fail closed on the reserved deployer key BEFORE anything else, and
+	// for ALL refs including disabled ones: registry loads are guarded
+	// (see loadComponentRegistryFor), but a hand-authored recipe passed
+	// to `aicr bundle -r` or POST /v1/bundle can carry a componentRef
+	// named "deployer", which would make `--set deployer:*` ambiguous
+	// between component Helm values and deployer-level Argo options. A
+	// disabled ref must be rejected too — `--set deployer:enabled=...`
+	// style toggles would still collide with the reserved prefix. See #1625.
+	for i := range r.ComponentRefs {
+		if r.ComponentRefs[i].Name == ReservedDeployerKey {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("recipe component %q uses the reserved deployer override key as its name; %q is reserved for --set deployer:<key> Argo deployer options", r.ComponentRefs[i].Name, ReservedDeployerKey))
+		}
+	}
+	if err := r.backfillComponentTypes(); err != nil {
+		return err
+	}
+	canonicalizeComponentTypes(r.ComponentRefs)
+	return r.ValidateCoherence()
+}
+
+// ValidateCoherence rejects enabled ComponentRefs whose deployment-shape fields
+// are internally inconsistent (see coherenceProblem), aggregating every
+// offender into one ErrCodeInvalidRequest so the author sees all problems at
+// once. Disabled refs are skipped: they are excluded from the bundle, so their
+// shape never reaches a deployer.
+//
+// It is invoked at every boundary that produces a RecipeResult — criteria
+// resolution (finalizeRecipeResult), file load (LoadFromFileWithProvider), and
+// external adoption (client adoptRecipe / POST /v1/bundle) — so an incoherent
+// ref cannot slip in via a hand-authored or decoded hydrated recipe.
+func (r *RecipeResult) ValidateCoherence() error {
+	if r == nil {
+		return nil
+	}
+	var problems []string
+	for i := range r.ComponentRefs {
+		if !r.ComponentRefs[i].IsEnabled() {
+			continue
+		}
+		if p := r.ComponentRefs[i].coherenceProblem(); p != "" {
+			problems = append(problems, p)
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return errors.New(errors.ErrCodeInvalidRequest,
+		"recipe has incoherent component ref(s): "+strings.Join(problems, "; "))
 }
 
 // ExpectedResource represents a Kubernetes resource that should exist after deployment.

@@ -13,8 +13,7 @@ against real cloud accounts.
 
 The pre-push gate is **`make qualify`**. It runs tests with the race
 detector and coverage threshold, lints (golangci-lint + yamllint),
-e2e, vulnerability scan, BOM regen check (opt-in flag elsewhere),
-and license check. CI runs the equivalent — if `make qualify` passes
+e2e, vulnerability scan, and license check. CI runs the equivalent — if `make qualify` passes
 locally, CI will pass.
 
 ## Test Surfaces
@@ -77,13 +76,17 @@ through `cmd.Root().Writer` so tests can intercept output:
 
 ```go
 buf := &bytes.Buffer{}
-cmd := newRecipeCmd(client)
-cmd.SetOut(buf)
-cmd.SetArgs([]string{"--service", "eks", "--accelerator", "h100"})
-if err := cmd.Execute(); err != nil {
-    t.Fatalf("execute: %v", err)
+cmd := recipeCmd()
+cmd.Writer = buf
+args := []string{"recipe", "--service", "eks", "--accelerator", "h100"}
+if err := cmd.Run(context.Background(), args); err != nil {
+    t.Fatalf("run: %v", err)
 }
 ```
+
+(The CLI is built on `urfave/cli/v3`: a command exposes a `Writer`
+field and is invoked with `cmd.Run(ctx, args)` where `args[0]` is the
+command name — there is no Cobra-style `SetOut`/`SetArgs`/`Execute`.)
 
 Direct `fmt.Println` / `fmt.Printf` to stdout in `pkg/cli` breaks
 this pattern and is a review-blocker.
@@ -491,12 +494,18 @@ the pre-push gate is local.
   shell first. This is one of the most common local-only CI-passes-fine
   failure modes.
 - **Forgetting `make bom-docs`** after a `recipes/registry.yaml`,
-  component values, or chart-pin change. `docs/user/container-images.md`
-  goes stale silently — `make bom-check` is **opt-in only** and not
-  wired into `make qualify`, `make lint`, or the merge gate today.
-  CI does not catch this. Run `make bom-docs` locally any time the
-  change touches charts.
-- **Coverage decrease > 0.5%** blocks the PR. Add tests rather than
+  component values, or chart-pin change. The BOM's **version column
+  and component set are now gated**: `TestCommittedBOMVersionsMatchRegistry`
+  (run by `make test` → `make qualify`, and by the `bom-freshness`
+  merge-gate job on docs-only PRs) fails CI if a pinned version drifts
+  or a component row is missing/orphaned. What is **not** gated at PR
+  time is *rendered-image drift* — a chart bumping an image inside its
+  own templates with no pin change on our side; `make bom-check` (a full
+  re-render comparison) is its **opt-in** blocking check, and the weekly
+  BOM-refresh workflow auto-detects it and opens a PR. So run
+  `make bom-docs` locally any time the change touches charts.
+- **Coverage decrease > 0.5%** is flagged for justification (the project-wide
+  75% floor is what blocks). Add tests rather than
   reaching for `// nolint` or `t.Skip` — both are review-blockers
   under the no-skip-tests rule in CLAUDE.md.
 - **Live-cluster connections from unit tests.** A test that forgets
@@ -505,7 +514,7 @@ the pre-push gate is local.
   `--no-cluster` (CLI / chainsaw) on the validator path.
 - **CLI tests asserting on stdout.** `pkg/cli` writes through
   `cmd.Root().Writer`. A test that captures `os.Stdout` will see
-  nothing. Use `cmd.SetOut(buf)` and assert on `buf.String()`.
+  nothing. Use `cmd.Writer = buf` and assert on `buf.String()`.
 
 ## See Also
 

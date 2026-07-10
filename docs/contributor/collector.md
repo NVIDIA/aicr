@@ -1,17 +1,33 @@
 # Snapshot Collectors
 
 A **collector** captures one dimension of system state — Kubernetes API,
-GPU hardware, OS release, systemd services, node topology — and emits a
-single `*measurement.Measurement`. Collectors run during `aicr snapshot`
-on a workstation, or inside the in-cluster snapshot agent Job.
-The orchestrator (`pkg/snapshotter`) fans collectors out in parallel
-under `errgroup.WithContext`; the result is a flat `[]*Measurement`
-inside the resolved snapshot artifact.
+GPU hardware, OS release, systemd services, node topology, network
+topology — and emits a single `*measurement.Measurement`. Collectors run
+during `aicr snapshot` on a workstation, or inside the in-cluster
+snapshot agent Job. The orchestrator (`pkg/snapshotter`) fans collectors
+out in parallel under `errgroup.WithContext`; the result is a flat
+`[]*Measurement` inside the resolved snapshot artifact.
 
-The boundary is hard: **collectors are read-only**. They observe state;
-they never `Create`, `Update`, `Delete`, `Apply`, `Patch`, exec into
-pods, or mutate the host. Anything that mutates is a validator (see
-[validator.md](validator.md)), not a collector.
+The boundary is hard for **all collectors except the network collector**:
+they are read-only. They observe state; they never `Create`, `Update`,
+`Delete`, `Apply`, `Patch`, exec into pods, or mutate the host. Anything
+else that mutates is a validator (see [validator.md](validator.md)), not a
+collector.
+
+> **Exception — network collector.** The network collector
+> (`pkg/collector/network`) is **inactive by default**: when neither
+> `ClusterConfigPath` nor `DiscoverNetwork` is set, `Collect` returns
+> `(nil, nil)` and the snapshotter treats that as a no-op (no
+> `NetworkTopology` measurement is emitted). It activates only when one of
+> the two options is supplied. The two are not mutually exclusive — when both
+> are set, `ClusterConfigPath` takes precedence. In `ClusterConfigPath` mode it
+> parses a pre-existing `cluster-config.yaml` with no cluster contact and is
+> read-only. But its `DiscoverNetwork` mode — enabled by `--discover-network`
+> — calls k8s-launch-kit's live `Discover()`, which **mutates cluster state**:
+> it writes `nvidia.kubernetes-launch-kit.*` node labels and patches
+> `NicClusterPolicy` via server-side apply. This is the one collector path
+> that is *not* read-only; use `--discover-network` only against clusters
+> where that mutation is acceptable.
 
 This page is for contributors adding a new collector. End-user
 snapshot semantics live in
@@ -31,6 +47,7 @@ Each subdirectory is one collector; one collector emits one
 | OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
 | Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
+| Network | `pkg/collector/network` | `TypeNetworkTopology` | Ingests an l8k cluster-config (from disk via `ClusterConfigPath`, or live via `DiscoverNetwork`). **Inactive by default** — emits no measurement unless one option is set. `DiscoverNetwork` mutates cluster state (see exception note above). |
 | Talos | `pkg/collector/talos` | `TypeSystemD`, `TypeOS` | OS-specific override pair: a single shared config so one Node API fetch serves both collectors. |
 | File (helper) | `pkg/collector/file` | — | Not a registered collector. A reusable parser for delimited key=value config files (used by the OS subcollectors). |
 
@@ -74,6 +91,7 @@ type Factory interface {
     CreateKubernetesCollector() Collector
     CreateGPUCollector() Collector
     CreateNodeTopologyCollector() Collector
+    CreateNetworkCollector() Collector
 }
 ```
 
@@ -101,12 +119,13 @@ func (c *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 ```
 
 `defaults.CollectorTimeout` is **10s** — the default for any
-host-local collector. Two collectors override:
+host-local collector. Three collectors override:
 
 | Collector | Constant | Value | Rationale |
 |-----------|----------|-------|-----------|
 | Kubernetes | `defaults.CollectorK8sTimeout` | 60s | API server round trips, in-cluster auth setup. |
 | Topology | `defaults.CollectorTopologyTimeout` | 90s | Cluster-wide node pagination on large fleets. |
+| Network | `defaults.CollectorNetworkTimeout` | 10m | Upper bound (defense in depth) on the network collector, which delegates to live discovery with its own per-step timeouts. |
 
 Use the parent deadline if it is sooner — the GPU collector shows the
 pattern (`time.Until(deadline) < timeout`). Long-lived watches do not
@@ -159,8 +178,16 @@ type Subtype struct {
     Name    string
     Data    map[string]Reading
     Context map[string]string
+    Items   []ItemEntry
 }
 ```
+
+`Data` and `Items` are independent: `Data` holds the subtype's own scalar
+`Reading` values, while `Items` holds an ordered list of structured records
+(each `ItemEntry` carries its own `Data` scalars and `Context` strings) for
+subtypes that need a list of homogeneous entries — for example the network
+collector's `pfs` subtype, where each physical-function record is one
+`ItemEntry`. `ItemEntry` does not nest further `Items`.
 
 `Reading` is a typed-scalar interface implemented by
 `Scalar[T]` (`Int`, `Int64`, `Uint`, `Uint64`, `Float64`, `Bool`,
@@ -190,6 +217,13 @@ only — drain and return). Anything in this column is a review block:
 
 If your check requires mutation to know the answer, the answer
 belongs in `pkg/validator`, not `pkg/collector`.
+
+The one sanctioned exception is the network collector's `DiscoverNetwork`
+mode (see the exception note at the top of this page): it delegates to
+k8s-launch-kit's live `Discover()`, which patches node labels and
+`NicClusterPolicy`. That mutation is gated behind the explicit
+`--discover-network` opt-in and lives outside AICR's own code; do not treat
+it as license to add mutating calls to any other collector.
 
 ## Concurrency Rules
 
