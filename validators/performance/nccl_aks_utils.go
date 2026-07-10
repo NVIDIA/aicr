@@ -31,25 +31,24 @@ import (
 // workers request exactly 1 regardless of the HCA count.
 const aksRdmaSharedResource = "rdma/hca_shared_devices_a"
 
-// discoverAKSRdmaCount reads the allocatable rdma-shared-device-plugin
-// resource count from a GPU node. 0 is valid (network-operator RDMA shared
-// device plugin not installed) — NCCL falls back to TCP over the pod network,
-// mirroring the EKS zero-EFA behavior. On ND-series InfiniBand SKUs
-// (e.g. Standard_ND96isr_H100_v5) the plugin advertises a large shared pool
-// (allocatable "1k" = 1000).
-func discoverAKSRdmaCount(node v1.Node) int {
-	rdmaQuantity := node.Status.Allocatable[v1.ResourceName(aksRdmaSharedResource)]
-	return int(rdmaQuantity.Value())
-}
-
 // applyAKSTemplateData populates the AKS-specific runtime template variables:
 // the ${RDMA_RESOURCE_LIMITS}/${RDMA_RESOURCE_REQUESTS} worker resource lines
-// discovered from the first target node, with the same TCP fallback the EKS
-// zero-EFA path uses (reduced max message size) when the RDMA shared device
-// plugin is absent.
-func applyAKSTemplateData(config *gpuConfiguration, templateData map[string]string) {
+// derived from the shared RDMA pool count validated as uniform across all
+// target GPU nodes, with the same TCP fallback the EKS zero-EFA path uses
+// (reduced max message size) when the RDMA shared device plugin is absent.
+//
+// A count of 0 is valid (network-operator RDMA shared device plugin not
+// installed) when uniform — NCCL falls back to TCP over the pod network,
+// mirroring the EKS zero-EFA behavior. On ND-series InfiniBand SKUs
+// (e.g. Standard_ND96isr_H100_v5) the plugin advertises a large shared pool
+// (allocatable "1k" = 1000). A mixed/partial rollout across the cohort fails
+// closed rather than sizing every worker from the first node.
+func applyAKSTemplateData(config *gpuConfiguration, templateData map[string]string) error {
 	warnIfHeterogeneousNodes(config.Nodes)
-	rdmaCount := discoverAKSRdmaCount(config.Nodes[0])
+	rdmaCount, err := uniformFabricResourceCount(config.Nodes, v1.ResourceName(aksRdmaSharedResource))
+	if err != nil {
+		return err
+	}
 	// Indentation matches the resource block position in runtime.yaml.
 	const rdmaIndent = "                      "
 	templateData["RDMA_RESOURCE_LIMITS"] = buildAKSRdmaResourceLine(rdmaCount, rdmaIndent)
@@ -61,6 +60,7 @@ func applyAKSTemplateData(config *gpuConfiguration, templateData map[string]stri
 	} else {
 		slog.Info("Discovered AKS shared RDMA device pool", "resource", aksRdmaSharedResource, "allocatable", rdmaCount)
 	}
+	return nil
 }
 
 // buildAKSRdmaResourceLine returns the YAML line requesting one unit of the

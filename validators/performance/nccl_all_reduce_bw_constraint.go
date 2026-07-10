@@ -693,7 +693,7 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// EFA count of 0 is valid — NCCL falls back to TCP (slower but functional).
 	if service == recipe.CriteriaServiceEKS {
 		warnIfHeterogeneousNodes(config.Nodes)
-		it, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
+		it, efaCount, err := discoverEKSNodeConfig(config.Nodes)
 		if err != nil {
 			return err
 		}
@@ -723,7 +723,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// NCCL falls back to TCP over the pod network (slower but functional),
 	// mirroring the EKS zero-EFA behavior above.
 	if service == recipe.CriteriaServiceAKS {
-		applyAKSTemplateData(config, templateData)
+		if err := applyAKSTemplateData(config, templateData); err != nil {
+			return err
+		}
 	}
 
 	// Build effective worker scheduling: user override takes precedence over platform default.
