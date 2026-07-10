@@ -180,6 +180,21 @@ func TestParseBOMVariantsTable(t *testing.T) {
 			true, 0, true,
 		},
 		{
+			// A header followed by a blank line and prose (instead of the
+			// delimiter row) must fail closed, not silently reset table
+			// state and count as a present-but-empty table.
+			"header followed by blank line and prose",
+			"## Version variants\n\n| Component | Variant Version | Declared By | Images |\n\nno delimiter here\n",
+			true, 0, true,
+		},
+		{
+			// A header that is the last line of the section (loop ends while
+			// still awaiting the delimiter row) must also fail closed.
+			"header is the last line",
+			"## Version variants\n\n| Component | Variant Version | Declared By | Images |\n",
+			true, 0, true,
+		},
+		{
 			// The header must be the generator's exact four columns: a hand
 			// edit that drops Images is an unrecognized table, and the
 			// heading-without-table mismatch fails the gate loudly.

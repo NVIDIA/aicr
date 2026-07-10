@@ -432,6 +432,14 @@ func parseBOMVariantsTable(section string) (map[variantKey]string, bool, error) 
 			underHeading = false
 		}
 		if !strings.HasPrefix(trimmed, "|") {
+			// A matched header MUST be immediately followed by its delimiter
+			// row; a blank line, prose, or a new heading here means the
+			// delimiter is missing, so fail closed rather than silently
+			// resetting state and counting the table as present-but-empty.
+			if expectSeparator {
+				return nil, headings > 0, fmt.Errorf("Version variants table header is not followed by " +
+					"a valid Markdown delimiter row — run `make bom-docs`")
+			}
 			// ANY non-table line (blank, prose, or a new heading) ends the
 			// current table: rows may not resume after an interruption, and
 			// a table state must never survive into a different section.
@@ -494,6 +502,12 @@ func parseBOMVariantsTable(section string) (map[variantKey]string, bool, error) 
 	// a table without its heading, or duplicated sections are all stale or
 	// hand-mangled doc state.
 	present := headings > 0
+	// The header may be the last line of the section, so the loop can end
+	// while still awaiting the delimiter row: fail closed here too.
+	if expectSeparator {
+		return nil, present, fmt.Errorf("Version variants table header is not followed by a valid " +
+			"Markdown delimiter row — run `make bom-docs`")
+	}
 	if headings > 1 || tables > 1 {
 		return nil, present, fmt.Errorf("expected at most one Version variants section, found %d headings "+
 			"and %d tables — run `make bom-docs`", headings, tables)
