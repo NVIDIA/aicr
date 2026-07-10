@@ -24,16 +24,19 @@
 # NOTE — these values are identifiers, NOT secrets. A reservation-id (and the
 # GCP project path it embeds) grants no access on its own: access to the
 # reserved capacity — and to anything running on it — is governed by cloud
-# IAM/ACLs bound to the CI federation identity (see infra/uat-aws-account/
-# and infra/uat-gcp-account/), not by knowledge of the ID. They are safe to
-# commit; disclosure reveals only internal infra naming, not a way in.
+# IAM/ACLs bound to the CI federation identity (see infra/uat-aws-account/,
+# infra/uat-gcp-account/, and infra/uat-azure-account/), not by knowledge of
+# the ID. They are safe to commit; disclosure reveals only internal infra
+# naming, not a way in.
 #
 # Fields:
 #   name                human-facing reservation / lease key (must be unique)
-#   cloud               aws | gcp
+#   cloud               aws | gcp | azure
 #   reservation-id      the cloud capacity-reservation identifier; GCP uses
 #                       the fully-qualified resource path (matches the value
-#                       embedded in cluster-config-path verbatim)
+#                       embedded in cluster-config-path verbatim); OPTIONAL —
+#                       omitted for quota-backed capacity (azure), where
+#                       subscription quota, not a reservation, backs the nodes
 #   accelerator         GPU accelerator family on the reservation
 #   gpu-count           GPUs per reserved node (forward-looking metadata)
 #   cluster-config-path the github.com/mchmarny/cluster Cluster config the
@@ -44,8 +47,10 @@
 #   nightly-intents     (optional) the recipe intents the NIGHTLY version-matrix
 #                       batch (#1274, DC1) runs on this reservation, as a YAML
 #                       list — [training], [inference], or [training,
-#                       inference]. Empty/absent defaults to [training] (the
-#                       pre-DC3 behavior). DC3 (#1276) sets it to [training,
+#                       inference]. Absent defaults to [training] (the
+#                       pre-DC3 behavior); an explicit empty list ([]) opts the
+#                       reservation out of the nightly batch (bring-up mode —
+#                       manual dispatch only). DC3 (#1276) sets it to [training,
 #                       inference] on BOTH reservations so training and inference
 #                       both run nightly on both clouds. The batch runs the
 #                       intents SEQUENTIALLY within each version cell, through
@@ -87,3 +92,18 @@ reservations:
     test-config-dir: tests/uat/gcp/tests
     nightly-intents: [training, inference]
     daytime-intent: inference
+  - name: azure-h100
+    cloud: azure
+    # No reservation-id: capacity is Azure subscription QUOTA (westus
+    # NDSH100v5), not a capacity reservation. The name is still the lease
+    # key, so contending runs queue exactly as on the reserved clouds; a
+    # quota-exhausted provision fails loudly at actuator apply time (the
+    # same posture as GCP — no pre-flight capacity assertion).
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: tests/uat/azure/cluster-config.yaml
+    test-config-dir: tests/uat/azure/tests
+    # Bring-up phase: explicitly opted OUT of the nightly batch (empty list,
+    # not absent — absent would default to [training]). Manual dispatch via
+    # uat-run.yaml only. Flip to [training] after green manual runs.
+    nightly-intents: []
