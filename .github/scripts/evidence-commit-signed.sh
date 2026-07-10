@@ -37,6 +37,7 @@
 
 set -euo pipefail
 
+: "${GH_TOKEN:?GH_TOKEN is required (token authenticating gh api)}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required (owner/repo)}"
 : "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required (branch name)}"
 
