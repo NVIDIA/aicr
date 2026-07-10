@@ -45,11 +45,16 @@ that runs `all_reduce_perf` across GPU nodes and measures aggregate bus
 bandwidth. Three check variants are available; the recipe picks the one (or
 ones) that match the target fabric:
 
-| Check | Transport | When it's selected |
+| Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
+
+The applicability column is the *default*, derived from the recipe's
+`criteria`. A recipe whose criteria fall outside it can opt into one of these
+benchmarks explicitly — see
+[Opting external recipes into a benchmark profile](#opting-external-recipes-into-a-benchmark-profile).
 
 The `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
 (e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
@@ -126,6 +131,54 @@ driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 ```bash
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
+
+### Opting external recipes into a benchmark profile
+
+The default applicability above is keyed to service + accelerator pairs the
+validator ships templates for. A recipe whose criteria fall outside that set —
+typically a `criteria.service` registered only through an external
+[`--data` directory](../integrator/data-extension.md), or an embedded service
+extended to a new accelerator — would otherwise report the NCCL checks as
+skipped even when its `validation` block declares them. Such a recipe opts
+into an embedded benchmark with the `nccl-benchmark-profile` performance
+constraint (a bare `{accelerator}/{service}` value, no comparator):
+
+```yaml
+validation:
+  performance:
+    checks:
+      - nccl-all-reduce-bw-net
+      - nccl-all-reduce-bw-nvls
+    constraints:
+      - name: nccl-benchmark-profile   # run the GB200-on-EKS benchmarks
+        value: gb200/eks
+      - name: nccl-all-reduce-bw-net
+        value: ">= 40"
+      - name: nccl-all-reduce-bw-nvls
+        value: ">= 500"
+```
+
+The profile selects the benchmark's template and environment handling —
+transport-class runtime template, EFA/TCPXO discovery, worker scheduling
+defaults, and preflight checks — as if the cluster were the named pair, so
+pick the profile whose fabric matches the hardware. GPU nodes are still
+matched by the recipe's own `criteria.accelerator` (via the GFD
+`nvidia.com/gpu.product` label) when a matcher exists, but the profile's
+service keys the rest of node handling: an `…/eks` profile narrows workers
+to a single `node.kubernetes.io/instance-type`, and the `…/any` profiles
+(`b200/any`, `gb200/any`) require an explicit `--node-selector` identifying
+the GPU nodes, exactly as `service: any` recipes do. When `--node-selector`
+is passed it replaces the automatic filters rather than narrowing them.
+
+Valid profiles are the pairs in the applicability table above: `b200/any`,
+`gb200/any`, `gb200/eks`, `gb200/oke`, `h100/aks`, `h100/eks`, `h100/gke`,
+`h200/eks`. A
+malformed or unknown value **fails** the check rather than silently skipping
+it. A valid profile that doesn't implement a requested variant (e.g.
+`gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
+check with a message naming the profile. When a profile is set it wins over
+criteria-derived applicability, and the pass/fail thresholds stay in the
+same-named check constraints as always.
 
 ## Inference performance validation
 
@@ -707,6 +760,8 @@ Common reasons and their cause:
 | `no inference-throughput or inference-ttft-p99 constraint in recipe` | `stdout` | Check was invoked but recipe is missing the matching constraints | Re-generate the recipe or add the constraints |
 | `dynamo-platform not in recipe components` | `stdout` | Inference check selected but `dynamo-platform` absent from `componentRefs` | Use `--platform dynamo` when generating the recipe |
 | `DynamoGraphDeployment CRD not installed` | `stdout` | Recipe declares `dynamo-platform` but the operator is not deployed | Run `aicr bundle` + `./deploy.sh` first, or wait for bootstrap to complete |
+| `requires Service + Accelerator to be implemented` | `stdout` | The recipe's `criteria` are outside the NCCL benchmark's default applicability (e.g. a service registered via `--data`) | Add an `nccl-benchmark-profile` constraint — see [Opting external recipes into a benchmark profile](#opting-external-recipes-into-a-benchmark-profile) |
+| `benchmark profile … does not implement the … NCCL variant` | `stdout` | The declared `nccl-benchmark-profile` is valid but has no template for this check variant | Drop the non-applicable check from `validation.performance.checks`, or pick a profile that implements it |
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 

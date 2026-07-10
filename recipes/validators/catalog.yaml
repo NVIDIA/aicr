@@ -66,6 +66,14 @@ validators:
     args: ["check-nvidia-smi"]
     env: []
   # Performance phase
+  #
+  # The NCCL checks (nccl-all-reduce-bw and the -net/-nvls variants at the
+  # bottom of this file) key applicability to the recipe's criteria against a
+  # compiled service+accelerator matrix. A recipe outside that matrix (e.g. a
+  # service registered via --data) opts in PER RECIPE via the
+  # `nccl-benchmark-profile` performance constraint — a bare
+  # "{accelerator}/{service}" value such as gb200/eks, resolved recipe-only
+  # (no env tier). Thresholds stay in the same-named check constraints.
   - name: nccl-all-reduce-bw
     phase: performance
     description: "Verify NCCL All Reduce Bus Bandwidth meets threshold"
