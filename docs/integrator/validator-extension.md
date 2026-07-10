@@ -129,7 +129,12 @@ validation:
       - my-custom-check        # Your custom validator
 ```
 
-If you omit the `checks` list, all catalog entries for the phase run (embedded + custom).
+Every check to run must be listed explicitly. If you omit the `checks` list (or
+set it to `[]`, which clears any inherited checks), the phase runs **zero**
+validators and is skipped — an empty phase reports as passing, so a missing entry
+is easy to overlook. A declared name that matches no catalog entry for the phase
+is likewise dropped (it logs a warning but does not fail the run), so keep names
+in sync with the `name` fields in `validators/catalog.yaml`.
 
 ### Step 5: Run Validation
 

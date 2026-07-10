@@ -103,7 +103,9 @@ reservations:
     gpu-count: 8
     cluster-config-path: tests/uat/azure/cluster-config.yaml
     test-config-dir: tests/uat/azure/tests
-    # Bring-up phase: explicitly opted OUT of the nightly batch (empty list,
-    # not absent — absent would default to [training]). Manual dispatch via
-    # uat-run.yaml only. Flip to [training] after green manual runs.
-    nightly-intents: []
+    # Enrolled with [training] after the green manual acceptance run
+    # (29125390442: full provision → CUJ → evidence → teardown). Inference
+    # joins after a green manual intent=inference dispatch — the AWS/GCP
+    # rows run both, so add it here rather than removing the key (a bare
+    # `nightly-intents:` decodes as absent and defaults to [training]).
+    nightly-intents: [training]

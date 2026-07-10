@@ -75,6 +75,10 @@ runs:
       with:
         registry: ${{ inputs.registry }}
 
+    # Note: the Rekor v2 signing config (AICR_SIGNING_CONFIG) is fetched and
+    # exported by the generate-slsa-predicate action, co-located with
+    # SLSA_PREDICATE, so it is present here without a separate step. See #1650.
+
     - name: Build and Release
       id: release
       shell: bash

@@ -20,13 +20,20 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 )
 
-// TransparencyPolicy decides which transparency logs (if any) a signing
-// operation writes to. It is the second of the two composable axes of
-// SignStatementWith; pair it with a SigningIdentity.
+// TransparencyPolicy decides which transparency logs and timestamp authorities
+// (if any) a signing operation writes to. It is the second of the two composable
+// axes of SignStatementWith; pair it with a SigningIdentity.
 type TransparencyPolicy interface {
 	// Logs returns the sigstore-go transparency-log clients to attach, or
 	// nil for offline signing (no Rekor entry).
 	Logs() []sign.Transparency
+
+	// TimestampAuthorities returns the RFC3161 timestamp-authority clients to
+	// attach, or nil. A Rekor v1 entry carries its own inline signed entry
+	// timestamp, so v1 policies return nil; Rekor v2 returns no inline
+	// timestamp, so a SigningConfig-driven v2 policy attaches a TSA here to give
+	// the bundle trusted time.
+	TimestampAuthorities() []*sign.TimestampAuthority
 }
 
 // rekorPolicy writes one Rekor transparency-log entry. Empty URL falls back
@@ -46,6 +53,10 @@ func (p rekorPolicy) Logs() []sign.Transparency {
 	return []sign.Transparency{sign.NewRekor(&sign.RekorOptions{BaseURL: p.url})}
 }
 
+// TimestampAuthorities returns nil: a Rekor v1 entry carries its own signed
+// entry timestamp, so no separate RFC3161 timestamp authority is required.
+func (rekorPolicy) TimestampAuthorities() []*sign.TimestampAuthority { return nil }
+
 // noTLogPolicy attaches no transparency log (offline / air-gapped signing,
 // issue #409).
 type noTLogPolicy struct{}
@@ -55,3 +66,6 @@ type noTLogPolicy struct{}
 func NewNoTLogPolicy() TransparencyPolicy { return noTLogPolicy{} }
 
 func (noTLogPolicy) Logs() []sign.Transparency { return nil }
+
+// TimestampAuthorities returns nil: offline signing attaches no timestamp.
+func (noTLogPolicy) TimestampAuthorities() []*sign.TimestampAuthority { return nil }

@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -259,6 +260,23 @@ func parseBOMVersionTable(section string) (map[string]string, error) {
 	return out, nil
 }
 
+// isDelimiterRow reports whether cells form a valid GFM delimiter row for a
+// table with want columns: exactly want cells, each matching `:?-+:?`.
+func isDelimiterRow(cells []string, want int) bool {
+	if len(cells) != want {
+		return false
+	}
+	for _, c := range cells {
+		c = strings.TrimSpace(c)
+		c = strings.TrimPrefix(c, ":")
+		c = strings.TrimSuffix(c, ":")
+		if c == "" || strings.Trim(c, "-") != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // splitMarkdownRow splits a "| a | b | c |" row into its trimmed inner cells,
 // dropping the empty leading/trailing segments the outer pipes produce.
 func splitMarkdownRow(row string) []string {
@@ -275,4 +293,228 @@ func splitMarkdownRow(row string) []string {
 		cells = cells[:len(cells)-1]
 	}
 	return cells
+}
+
+// TestCommittedBOMVariantsMatchRecipePins asserts that the committed doc's
+// "Version variants" table is an exact projection of the variants derived
+// from recipe data: every explicit base/overlay/mixin Helm pin that differs
+// from its registry default (issue #1611). The check is bidirectional and
+// exact, mirroring TestCommittedBOMVersionsMatchRegistry:
+//   - every derived variant must have a row (a new divergent pin that skipped
+//     `make bom-docs` fails);
+//   - every row must correspond to a derived variant (a re-aligned or removed
+//     pin that left a stale row fails);
+//   - the Declared By column must list exactly the sorted declaring sources;
+//   - when nothing diverges, the table must be absent entirely.
+//
+// Variant discovery reads the registry and recipe sources from the repo root
+// and deliberately has no dependency on the version-pin guard's exemption
+// policy: the pins are the source facts; the guard decides whether a
+// divergence is ALLOWED, not what is deployed.
+func TestCommittedBOMVariantsMatchRecipePins(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+
+	reg, err := loadRegistry(filepath.Join(repoRoot, "recipes", "registry.yaml"))
+	if err != nil {
+		t.Fatalf("loadRegistry: %v", err)
+	}
+	sources, err := loadRecipeSources(context.Background(), repoRoot)
+	if err != nil {
+		t.Fatalf("loadRecipeSources: %v", err)
+	}
+	derived, err := deriveVariants(reg, sources)
+	if err != nil {
+		t.Fatalf("deriveVariants: %v", err)
+	}
+
+	docPath := filepath.Join(repoRoot, "docs", "user", "container-images.md")
+	data, err := os.ReadFile(docPath) //nolint:gosec // fixed in-repo doc path
+	if err != nil {
+		t.Fatalf("read %s: %v", docPath, err)
+	}
+	section, err := extractGeneratedSection(string(data))
+	if err != nil {
+		t.Fatalf("locate generated BOM section in %s: %v", docPath, err)
+	}
+
+	docVariants, tablePresent, err := parseBOMVariantsTable(section)
+	if err != nil {
+		t.Fatalf("parse Version variants table in %s: %v", docPath, err)
+	}
+
+	if len(derived) == 0 {
+		// The generator omits the table entirely when nothing diverges, so a
+		// PRESENT table — even an empty one — is stale doc state, not merely
+		// zero rows.
+		if tablePresent {
+			t.Fatalf("no divergent pins derived from recipes, but the doc still has a Version "+
+				"variants table (%d rows).\n"+
+				"  Run `make bom-docs` and commit the regenerated doc. See #1611.", len(docVariants))
+		}
+		t.Log("no divergent pins and no variants table — vacuously consistent")
+		return
+	}
+	if !tablePresent {
+		t.Fatalf("%d variants derived from recipe pins, but the doc has no Version variants table.\n"+
+			"  Run `make bom-docs` and commit the regenerated doc. See #1611.", len(derived))
+	}
+
+	derivedByKey := make(map[variantKey][]string, len(derived))
+	for _, v := range derived {
+		derivedByKey[variantKey{name: v.Name, version: v.Version}] = v.Sources
+	}
+
+	for k, wantSources := range derivedByKey {
+		gotSources, ok := docVariants[k]
+		if !ok {
+			t.Errorf("derived variant %s@%s (pinned by %s) has no row in the Version variants table of "+
+				"docs/user/container-images.md.\n"+
+				"  Run `make bom-docs` and commit the regenerated doc. See #1611.",
+				k.name, k.version, strings.Join(wantSources, ", "))
+			continue
+		}
+		if want := strings.Join(wantSources, ", "); gotSources != want {
+			t.Errorf("variant %s@%s Declared By = %q, want %q.\n"+
+				"  Run `make bom-docs` and commit the regenerated doc. See #1611.",
+				k.name, k.version, gotSources, want)
+		}
+	}
+	for k := range docVariants {
+		if _, ok := derivedByKey[k]; !ok {
+			t.Errorf("stale variant row %s@%s: it appears in docs/user/container-images.md but no "+
+				"base/overlay/mixin pin diverges from the registry default at that version.\n"+
+				"  Run `make bom-docs` and commit the regenerated doc. See #1611.", k.name, k.version)
+		}
+	}
+	t.Logf("verified %d variant rows against %d derived variants", len(docVariants), len(derived))
+}
+
+// parseBOMVariantsTable extracts (component, variant version) -> declared-by
+// from the "Version variants" table, plus whether the table was present at
+// all (the generator omits it entirely when nothing diverges, so absence and
+// emptiness are distinct facts). The header must match the generator's exact
+// four columns — a hand edit that drops or renames a column (e.g. Images)
+// must fail the gate loudly (via the heading/table mismatch below), not
+// parse a narrower table; the headers also differ from the Components table
+// ("Variant Version" vs "Pinned Version") so the two parsers cannot conflate
+// tables. Malformed rows are errors, not skips — a silently dropped row
+// would weaken the bidirectional guarantee.
+func parseBOMVariantsTable(section string) (map[variantKey]string, bool, error) {
+	// The exact header pkg/bom's writeMarkdownDoc emits, lowercased.
+	wantHeader := []string{"component", "variant version", "declared by", "images"}
+	const (
+		nameCol = 0
+		verCol  = 1
+		srcCol  = 2
+	)
+
+	const sectionHeading = "## version variants"
+
+	out := map[variantKey]string{}
+	headerCols := 0
+	inTable := false
+	expectSeparator := false
+	// underHeading tracks whether the scanner is inside the "## Version
+	// variants" SECTION (between its heading and the next "## " heading):
+	// a matching table elsewhere in the doc must not count, and a variants
+	// heading whose own table is missing must fail the heading/table match.
+	underHeading := false
+	headings, tables := 0, 0
+
+	for _, line := range strings.Split(section, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.EqualFold(trimmed, sectionHeading) {
+			headings++
+			underHeading = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") {
+			underHeading = false
+		}
+		if !strings.HasPrefix(trimmed, "|") {
+			// A matched header MUST be immediately followed by its delimiter
+			// row; a blank line, prose, or a new heading here means the
+			// delimiter is missing, so fail closed rather than silently
+			// resetting state and counting the table as present-but-empty.
+			if expectSeparator {
+				return nil, headings > 0, fmt.Errorf("Version variants table header is not followed by " +
+					"a valid Markdown delimiter row — run `make bom-docs`")
+			}
+			// ANY non-table line (blank, prose, or a new heading) ends the
+			// current table: rows may not resume after an interruption, and
+			// a table state must never survive into a different section.
+			inTable = false
+			expectSeparator = false
+			continue
+		}
+
+		cells := splitMarkdownRow(trimmed)
+		if !inTable {
+			if !underHeading {
+				continue
+			}
+			match := len(cells) == len(wantHeader)
+			for i := 0; match && i < len(cells); i++ {
+				match = strings.ToLower(strings.TrimSpace(cells[i])) == wantHeader[i]
+			}
+			if match {
+				headerCols = len(cells)
+				inTable = true
+				expectSeparator = true
+				tables++
+			}
+			continue
+		}
+
+		// GFM requires the delimiter row for a table to exist at all, with
+		// one `---` cell per header column; a header followed by data rows,
+		// a bare "||||", or a one-cell delimiter renders as plain text (or a
+		// different table), so the gate must reject rather than parse it.
+		if expectSeparator {
+			if !isDelimiterRow(cells, headerCols) {
+				return nil, headings > 0, fmt.Errorf("Version variants table header is not followed by "+
+					"a valid Markdown delimiter row (got %q) — run `make bom-docs`", trimmed)
+			}
+			expectSeparator = false
+			continue
+		}
+		if len(cells) != headerCols {
+			return nil, headings > 0, fmt.Errorf("malformed Version variants row %q: %d cells, want the "+
+				"header's %d — run `make bom-docs`", trimmed, len(cells), headerCols)
+		}
+		name := strings.TrimSpace(cells[nameCol])
+		ver := strings.TrimSpace(cells[verCol])
+		src := strings.TrimSpace(cells[srcCol])
+		if name == "" || ver == "" {
+			return nil, headings > 0, fmt.Errorf("malformed Version variants row %q: empty component or "+
+				"version cell — run `make bom-docs`", trimmed)
+		}
+		k := variantKey{name: name, version: ver}
+		if _, dup := out[k]; dup {
+			return nil, headings > 0, fmt.Errorf("duplicate row for variant %s@%s in the Version variants "+
+				"table — run `make bom-docs`", name, ver)
+		}
+		out[k] = src
+	}
+
+	// Presence is anchored on the "## Version variants" HEADING, not merely a
+	// well-formed table header: a heading whose table is missing/malformed,
+	// a table without its heading, or duplicated sections are all stale or
+	// hand-mangled doc state.
+	present := headings > 0
+	// The header may be the last line of the section, so the loop can end
+	// while still awaiting the delimiter row: fail closed here too.
+	if expectSeparator {
+		return nil, present, fmt.Errorf("Version variants table header is not followed by a valid " +
+			"Markdown delimiter row — run `make bom-docs`")
+	}
+	if headings > 1 || tables > 1 {
+		return nil, present, fmt.Errorf("expected at most one Version variants section, found %d headings "+
+			"and %d tables — run `make bom-docs`", headings, tables)
+	}
+	if headings != tables {
+		return nil, present, fmt.Errorf("Version variants heading/table mismatch (%d headings, %d tables) — "+
+			"run `make bom-docs`", headings, tables)
+	}
+	return out, present, nil
 }

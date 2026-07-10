@@ -103,7 +103,7 @@ names are `dra`, `gang`, `secure`, `accelerator-metrics`, `service-metrics`,
 | **Speed** | ~3 minutes | ~5-10 minutes |
 | **Deploys workloads** | Yes (GPU allocation via DRA or device plugin, gang, HPA, secure access) | Yes (all + GPU stress test) |
 | **Output** | Pass/fail + diagnostic artifacts | Detailed behavioral evidence (command outputs, logs, metrics) |
-| **GPU allocation test** | secure-accelerator-access deploys a test pod via DRA or the device plugin (capability-driven) and verifies GPU access + isolation; dra-support's full-GPU DRA behavioral subtest is recorded N/A on ComputeDomain-only clusters | DRA-only evidence script + nvidia-smi output capture (mode-aware collection tracked in [#1629](https://github.com/NVIDIA/aicr/issues/1629)) |
+| **GPU allocation test** | secure-accelerator-access deploys a test pod via DRA or the device plugin (capability-driven) and verifies GPU access + isolation; dra-support's full-GPU DRA behavioral subtest is recorded N/A on ComputeDomain-only clusters | Mode-aware evidence script (recipe policy selects the mode, standalone runs detect capability): behavioral full-GPU ResourceClaim test under DRA, device-plugin two-container isolation test + ResourceSlice evidence otherwise; nvidia-smi output capture |
 | **Gang scheduling test** | Deploys PodGroup, verifies co-scheduling | Same + worker logs |
 | **HPA autoscaling** | Metrics API + scale-up validation | CUDA GPU stress test + scale-up |
 | **Metrics** | Custom metrics API data-path verification | DCGM exporter + Prometheus queries |

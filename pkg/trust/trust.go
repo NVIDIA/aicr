@@ -104,6 +104,135 @@ func GetTrustedMaterial() (root.TrustedMaterial, error) {
 	return trustedMaterialFromClient(client)
 }
 
+// signingConfigTarget is the TUF target name for the Sigstore signing config
+// that routes signing to Rekor v2. AICR signs to Rekor v2 by default, so this is
+// the config the signer resolves unless the caller opts out to a Rekor v1 URL.
+// Sigstore distributes it alongside the default (v1) signing config; the
+// public-good default still points *other* clients at Rekor v1, so we consume
+// this v2 target explicitly. When Sigstore makes v2 the ecosystem default this
+// can move to the default "signing_config.v0.2.json" target. See NVIDIA/aicr#1650.
+const signingConfigTarget = "signing_config_rekor_v2.v0.2.json"
+
+// GetSigningConfig returns the Sigstore signing config that targets Rekor v2,
+// read from the local TUF cache (ForceCache, no network). The cache is populated
+// by Update ("aicr trust update"). It is the sign-side counterpart to
+// GetTrustedMaterial: the trusted root answers "is this signature valid?", the
+// signing config answers "which Rekor/TSA endpoints do I sign to?". Both are
+// resolved offline and refreshed only on explicit update.
+func GetSigningConfig() (*root.SigningConfig, error) {
+	client, err := newCacheTUFClient()
+	if err != nil {
+		return nil, err
+	}
+	return signingConfigFromClient(client)
+}
+
+// newCacheTUFClient builds a ForceCache (offline) TUF client. Shared by the
+// signing-config cache readers so the construction and its error classification
+// stay in one place.
+func newCacheTUFClient() (*tuf.Client, error) {
+	client, err := tuf.New(tuf.DefaultOptions().WithForceCache())
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to initialize TUF client", err)
+	}
+	return client, nil
+}
+
+// ResolveSigningConfig returns the Rekor v2 signing config, preferring the local
+// TUF cache (offline) and falling back to a bounded network TUF fetch when the
+// cache is cold. Because AICR signs to Rekor v2 by default, signers must succeed
+// without a prior explicit "aicr trust update"; signing is already an online
+// operation, so a one-time fetch of the endpoint config is acceptable and it
+// also warms the cache for next time. Bounded by defaults.TUFUpdateTimeout.
+func ResolveSigningConfig(ctx context.Context) (*root.SigningConfig, error) {
+	if sc, err := GetSigningConfig(); err == nil {
+		return sc, nil
+	}
+	// Cold cache: fetch from the TUF CDN. Mirrors Update's bounded-goroutine
+	// pattern because the underlying tuf.New / Refresh calls do not take context.
+	ctx, cancel := context.WithTimeout(ctx, defaults.TUFUpdateTimeout)
+	defer cancel()
+
+	slog.Info("signing config not cached; fetching via TUF...")
+
+	type result struct {
+		sc  *root.SigningConfig
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		client, err := tuf.New(tuf.DefaultOptions())
+		if err != nil {
+			ch <- result{err: errors.Wrap(errors.ErrCodeInternal, "failed to initialize TUF client for signing config fetch", err)}
+			return
+		}
+		if refreshErr := client.Refresh(); refreshErr != nil {
+			code := classifyTUFError(refreshErr)
+			ch <- result{err: errors.Wrap(code, "TUF refresh failed while fetching signing config", refreshErr)}
+			return
+		}
+		sc, err := signingConfigFromClient(client)
+		ch <- result{sc: sc, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "signing config fetch timed out", ctx.Err())
+	case r := <-ch:
+		return r.sc, r.err
+	}
+}
+
+// SigningConfigJSON returns the raw, TUF-verified bytes of the Rekor v2 signing
+// config from the local cache (ForceCache, no network). Use this to materialize
+// the config to a file for tools that take a signing-config path (e.g. `cosign
+// attest-blob --signing-config`); GetSigningConfig returns the parsed form for
+// in-process signing. The cache is populated by Update.
+func SigningConfigJSON() ([]byte, error) {
+	client, err := newCacheTUFClient()
+	if err != nil {
+		return nil, err
+	}
+	return signingConfigTargetBytes(client)
+}
+
+// signingConfigTargetBytes fetches the raw signing-config target from a TUF
+// client (cache read on ForceCache, download-and-cache on a network client) and
+// classifies the error consistently. Shared by SigningConfigJSON (raw bytes) and
+// signingConfigFromClient (parsed).
+func signingConfigTargetBytes(client *tuf.Client) ([]byte, error) {
+	scJSON, err := client.GetTarget(signingConfigTarget)
+	if err != nil {
+		code := classifyTUFError(err)
+		msg := "failed to get signing config from TUF"
+		switch code { //nolint:exhaustive // only the three codes classifyTUFError can return are interesting
+		case errors.ErrCodeUnavailable:
+			msg = "failed to get signing config from TUF (transport error)"
+		case errors.ErrCodeUnauthorized:
+			msg = "failed to get signing config from TUF (signature or verification error)"
+		}
+		return nil, errors.Wrap(code, msg, err)
+	}
+	return scJSON, nil
+}
+
+// signingConfigFromClient loads and parses the signing config target from a TUF
+// client.
+func signingConfigFromClient(client *tuf.Client) (*root.SigningConfig, error) {
+	scJSON, err := signingConfigTargetBytes(client)
+	if err != nil {
+		return nil, err
+	}
+
+	sc, err := root.NewSigningConfigFromJSON(scJSON)
+	if err != nil {
+		// Bytes came from the verified TUF target / cache, not user input — a
+		// parse failure means the cache is corrupt or the payload changed shape.
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse signing config", err)
+	}
+	return sc, nil
+}
+
 // Update fetches the latest Sigstore trusted root via TUF CDN
 // and updates the local cache. Bounded by defaults.TUFUpdateTimeout
 // (longer than a single-request HTTPClientTimeout because TUF refreshes
@@ -160,6 +289,18 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 		}
 
 		material, err := trustedMaterialFromClient(client)
+		if err == nil {
+			// Warm the Rekor v2 signing config target into the same TUF cache so
+			// signers can read it offline via GetSigningConfig. Best-effort: this
+			// is additive to trust update's primary job (the trusted root), so a
+			// fetch failure (e.g. a target-name change) warns rather than fails
+			// the whole update — a signer that needs it gets a clear error from
+			// GetSigningConfig at sign time.
+			if _, scErr := signingConfigFromClient(client); scErr != nil {
+				slog.Warn("signing config not refreshed during trust update",
+					"error", scErr, "target", signingConfigTarget)
+			}
+		}
 		ch <- updateResult{material: material, err: err}
 	}()
 

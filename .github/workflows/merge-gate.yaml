@@ -368,23 +368,27 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
-      - name: Verify committed BOM versions match the registry
+      - name: Verify committed BOM versions and variants match the recipes
         env:
           GOFLAGS: -mod=vendor
-        # `go test -run <name>` exits 0 with "no tests to run" if the test is
+        # `go test -run <name>` exits 0 with "no tests to run" if a test is
         # renamed or removed, which would let this gate silently no-op. Assert
-        # the named test actually executed by requiring its PASS line.
+        # each named test actually executed by requiring its PASS line — a
+        # docs-only PR must not be able to forge either the Components table
+        # or the Version variants table.
         run: |
           set -uo pipefail
-          out=$(go test ./tools/bom/... -run '^TestCommittedBOMVersionsMatchRegistry$' -v -count=1 2>&1) && rc=0 || rc=$?
+          out=$(go test ./tools/bom/... -run '^(TestCommittedBOMVersionsMatchRegistry|TestCommittedBOMVariantsMatchRecipePins)$' -v -count=1 2>&1) && rc=0 || rc=$?
           echo "$out"
           if [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi
-          if ! grep -q '^--- PASS: TestCommittedBOMVersionsMatchRegistry' <<<"$out"; then
-            echo "::error::TestCommittedBOMVersionsMatchRegistry did not execute (renamed or removed?); the BOM freshness gate would silently pass. Update this job to run the freshness check."
-            exit 1
-          fi
+          for t in TestCommittedBOMVersionsMatchRegistry TestCommittedBOMVariantsMatchRecipePins; do
+            if ! grep -q "^--- PASS: $t" <<<"$out"; then
+              echo "::error::$t did not execute (renamed or removed?); the BOM freshness gate would silently pass. Update this job to run the freshness check."
+              exit 1
+            fi
+          done
 
   bom-freshness-skip:
     needs: [check-paths]
