@@ -266,6 +266,9 @@ func (v *Validator) ValidatePhase(
 	}
 
 	if v.NoCluster {
+		// Warn on unmatched check names even in no-cluster mode so typos are
+		// caught during offline recipe validation, not just live runs.
+		warnUnmatchedChecks(cat, phase, validationInput)
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
 	}
 
@@ -277,6 +280,23 @@ func (v *Validator) ValidatePhase(
 	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
 	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
+}
+
+// warnUnmatchedChecks emits a structured warning for every declared check name
+// that matched no catalog entry in its phase. A name that exists under a
+// different phase is called out as a likely misplacement; anything else is a
+// probable typo or a check missing from the loaded (possibly --data) catalog.
+// Advisory only — it never fails the run.
+func warnUnmatchedChecks(cat *catalog.ValidatorCatalog, phase Phase, validationInput *v1.ValidationInput) {
+	for _, u := range cat.UnmatchedChecks(phase, validationInput) {
+		if u.OtherPhase != "" {
+			slog.Warn("declared check matches no validator in this phase; it exists under a different phase",
+				"check", u.Name, "phase", u.Phase, "foundInPhase", u.OtherPhase)
+			continue
+		}
+		slog.Warn("declared check matches no validator in the catalog; it will not run",
+			"check", u.Name, "phase", u.Phase)
+	}
 }
 
 // runPhase executes all validators for a single phase sequentially.
@@ -299,6 +319,12 @@ func (v *Validator) runPhase(
 	entries := v1.FilterEntriesByValidation(allEntries, phase, validationInput)
 	slog.Info("running validation phase", "phase", phase,
 		"catalog", len(allEntries), "selected", len(entries))
+
+	// Surface declared check names that matched no catalog entry for this
+	// phase. Silently dropping them lets a typo'd or misplaced check name
+	// (e.g. a performance check declared under deployment) produce an empty,
+	// spuriously-passing phase — the fail-open direction for a gate.
+	warnUnmatchedChecks(cat, phase, validationInput)
 
 	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
 
