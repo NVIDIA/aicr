@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,7 +23,81 @@ import (
 	"testing"
 
 	"github.com/urfave/cli/v3"
+
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
+
+// TestResolveCNCFAllocationPolicy exercises the #1629 policy threading for
+// --cncf-submission runs: no recipe context resolves to an empty policy
+// (standalone runs keep the evidence script's capability detection), a
+// recipe-backed run resolves the policy from the hydrated recipe, and a
+// broken recipe path fails closed instead of silently collecting without a
+// policy. The validate Action is overridden so only the resolution flow runs
+// — never the collector (which would contact a live cluster).
+func TestResolveCNCFAllocationPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		recipeYAML string // written to a temp recipe file when non-empty
+		recipePath string // used verbatim when non-empty (overrides recipeYAML)
+		wantPolicy string
+		wantErr    bool
+	}{
+		{
+			name:       "no recipe context resolves empty policy",
+			wantPolicy: "",
+		},
+		{
+			name: "recipe context resolves the hydrated policy",
+			// Auto-hydrates from the embedded catalog; stock recipes default
+			// to device-plugin allocation since the #1327/#1671 flip.
+			recipeYAML: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n",
+			wantPolicy: v1.GPUAllocationPolicyDevicePluginExtendedResource,
+		},
+		{
+			name:       "unreadable recipe fails closed",
+			recipePath: filepath.Join(t.TempDir(), "does-not-exist.yaml"),
+			wantErr:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"validate", "--no-cluster"}
+			recipePath := tt.recipePath
+			if tt.recipeYAML != "" {
+				recipePath = filepath.Join(t.TempDir(), "recipe.yaml")
+				if err := os.WriteFile(recipePath, []byte(tt.recipeYAML), 0o600); err != nil {
+					t.Fatalf("failed to write test recipe file: %v", err)
+				}
+			}
+			if recipePath != "" {
+				args = append(args, "--recipe", recipePath)
+			}
+
+			var gotPolicy string
+			cmd := validateCmd()
+			cmd.Action = func(ctx context.Context, c *cli.Command) error {
+				cfg, err := loadCmdConfig(ctx, c)
+				if err != nil {
+					return err
+				}
+				resolved, err := cfg.Validation().Resolve()
+				if err != nil {
+					return err
+				}
+				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, resolved)
+				return err
+			}
+			err := cmd.Run(t.Context(), args)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && gotPolicy != tt.wantPolicy {
+				t.Errorf("policy = %q, want %q", gotPolicy, tt.wantPolicy)
+			}
+		})
+	}
+}
 
 func TestValidateCmd_CommandStructure(t *testing.T) {
 	cmd := validateCmd()
