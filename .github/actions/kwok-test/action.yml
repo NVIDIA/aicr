@@ -71,10 +71,42 @@ inputs:
     description: 'Number of days to retain debug artifacts'
     required: false
     default: '7'
+  job_timeout_minutes:
+    description: >-
+      The calling job's timeout-minutes. Used to derive
+      KWOK_SYNC_DEADLINE_EPOCH (deadline = step start + this budget - 240s
+      diagnostics margin) so the chainsaw sync gates always finish - and
+      print their catch-block diagnostics - before GitHub kills the job.
+      Keep in sync with the calling job's timeout-minutes.
+    required: false
+    default: '18'
 
 runs:
   using: 'composite'
   steps:
+    - name: Derive sync-gate deadline
+      shell: bash
+      env:
+        JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
+      run: |
+        # Anchor the sync-gate deadline as early as possible in the job:
+        # only checkout + load-versions run before this step, so the
+        # unaccounted job-start drift stays inside the 240s margin's 60s
+        # allowance (the other 180s is reserved for post-gate work:
+        # chainsaw catch diagnostics, verify_pods, debug-artifact upload).
+        # Anchoring later (at the test step, after setup-go + tool installs
+        # + make build) lets the deadline land past GitHub's job kill and
+        # silently re-creates the CANCELLED-without-diagnostics failure
+        # this mechanism exists to prevent.
+        # See kwok/scripts/lib/sync-budget.sh for the consuming side.
+        if ! [[ "${JOB_TIMEOUT_MINUTES}" =~ ^[0-9]+$ ]]; then
+          echo "::error::job_timeout_minutes must be an integer, got '${JOB_TIMEOUT_MINUTES}'"
+          exit 1
+        fi
+        KWOK_SYNC_DEADLINE_EPOCH=$(( $(date +%s) + JOB_TIMEOUT_MINUTES * 60 - 240 ))
+        echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH}" >> "$GITHUB_ENV"
+        echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH} (job_timeout_minutes=${JOB_TIMEOUT_MINUTES}, margin=240s)"
+
     - name: Set up Go
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
