@@ -146,17 +146,25 @@ az_federated_relogin() {
     || -z "${AZURE_TENANT_ID:-}" || -z "${AZURE_SUBSCRIPTION_ID:-}" ]]; then
     return 0
   fi
+  # Explicit `|| return 1` on every step: the caller invokes this inside an
+  # `if` condition, which suspends errexit for the whole function body — a
+  # failed mint/login/warm-up would otherwise fall through to the success
+  # echo and return 0, silently advancing the caller's re-login timer.
   local oidc_token
   oidc_token="$(curl -fsSL --retry 3 \
     -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" | jq -r .value)"
+    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" | jq -r .value)" || return 1
+  if [[ -z "${oidc_token}" || "${oidc_token}" == "null" ]]; then
+    echo "federated re-login: token endpoint returned no value" >&2
+    return 1
+  fi
   az login --service-principal \
     --username "${AZURE_CLIENT_ID}" \
     --tenant "${AZURE_TENANT_ID}" \
     --federated-token "${oidc_token}" \
-    --output none
-  az account set --subscription "${AZURE_SUBSCRIPTION_ID}" --output none
-  az account get-access-token --resource "${AKS_SERVER_APP_ID}" --output none
+    --output none || return 1
+  az account set --subscription "${AZURE_SUBSCRIPTION_ID}" --output none || return 1
+  az account get-access-token --resource "${AKS_SERVER_APP_ID}" --output none || return 1
   echo "federated az session refreshed (ARM + AKS audiences)"
 }
 
