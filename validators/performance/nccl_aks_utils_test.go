@@ -15,104 +15,73 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-func TestDiscoverAKSRdmaCount(t *testing.T) {
-	tests := []struct {
-		name string
-		node v1.Node
-		want int
-	}{
-		{
-			// Standard_ND96isr_H100_v5 with the network-operator
-			// rdma-shared-device-plugin: allocatable is advertised as "1k"
-			// (the shared pool size), which resource.Quantity parses as 1000.
-			name: "ND96isr_H100_v5 with shared RDMA pool",
-			node: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"node.kubernetes.io/instance-type": "Standard_ND96isr_H100_v5",
-					},
-				},
-				Status: v1.NodeStatus{
-					Allocatable: v1.ResourceList{
-						v1.ResourceName("nvidia.com/gpu"):      resource.MustParse("8"),
-						v1.ResourceName(aksRdmaSharedResource): resource.MustParse("1k"),
-					},
-				},
-			},
-			want: 1000,
-		},
-		{
-			name: "no RDMA shared device plugin (falls back to TCP)",
-			node: v1.Node{
-				Status: v1.NodeStatus{
-					Allocatable: v1.ResourceList{
-						v1.ResourceName("nvidia.com/gpu"): resource.MustParse("8"),
-					},
-				},
-			},
-			want: 0,
-		},
-		{
-			name: "no allocatable at all",
-			node: v1.Node{},
-			want: 0,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := discoverAKSRdmaCount(tt.node); got != tt.want {
-				t.Errorf("discoverAKSRdmaCount() = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestApplyAKSTemplateData(t *testing.T) {
 	const rdmaLine = `                      rdma/hca_shared_devices_a: "1"`
+	// aksNode builds a GPU node whose shared RDMA pool allocatable is the given
+	// Quantity string, or omits the resource entirely when rdma is empty.
+	aksNode := func(rdma string) v1.Node {
+		alloc := v1.ResourceList{v1.ResourceName("nvidia.com/gpu"): resource.MustParse("8")}
+		if rdma != "" {
+			alloc[v1.ResourceName(aksRdmaSharedResource)] = resource.MustParse(rdma)
+		}
+		return v1.Node{Status: v1.NodeStatus{Allocatable: alloc}}
+	}
 	tests := []struct {
 		name           string
-		allocatable    v1.ResourceList
+		nodes          []v1.Node
+		wantErr        bool
+		wantErrMsg     string
 		wantLine       string
 		wantMaxMsgSize string
 	}{
 		{
-			name: "shared RDMA pool present keeps IB message size",
-			allocatable: v1.ResourceList{
-				v1.ResourceName("nvidia.com/gpu"):      resource.MustParse("8"),
-				v1.ResourceName(aksRdmaSharedResource): resource.MustParse("1k"),
-			},
+			// Standard_ND96isr_H100_v5 advertises the shared pool as "1k" (1000);
+			// a worker still requests exactly one unit.
+			name:           "uniform shared RDMA pool keeps IB message size",
+			nodes:          []v1.Node{aksNode("1k"), aksNode("1k")},
 			wantLine:       rdmaLine,
 			wantMaxMsgSize: maxMessageSize,
 		},
 		{
-			name: "no RDMA pool falls back to TCP with reduced message size",
-			allocatable: v1.ResourceList{
-				v1.ResourceName("nvidia.com/gpu"): resource.MustParse("8"),
-			},
+			name:           "uniform absent RDMA falls back to TCP",
+			nodes:          []v1.Node{aksNode(""), aksNode("")},
 			wantLine:       "",
 			wantMaxMsgSize: maxMessageSizeTCP,
+		},
+		{
+			name:       "mixed RDMA rollout fails closed",
+			nodes:      []v1.Node{aksNode("1k"), aksNode("")},
+			wantErr:    true,
+			wantErrMsg: "present on 1 of 2 target GPU nodes",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &gpuConfiguration{
-				WorkerCount:     2,
+				WorkerCount:     len(tt.nodes),
 				GPUCountPerNode: 8,
-				TotalGPUCount:   16,
-				Nodes: []v1.Node{
-					{Status: v1.NodeStatus{Allocatable: tt.allocatable}},
-					{Status: v1.NodeStatus{Allocatable: tt.allocatable}},
-				},
+				TotalGPUCount:   8 * len(tt.nodes),
+				Nodes:           tt.nodes,
 			}
 			templateData := map[string]string{"MAX_MESSAGE_SIZE": maxMessageSize}
-			applyAKSTemplateData(config, templateData)
+			err := applyAKSTemplateData(config, templateData)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("applyAKSTemplateData() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+					t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErrMsg)
+				}
+				return
+			}
 			if got := templateData["RDMA_RESOURCE_LIMITS"]; got != tt.wantLine {
 				t.Errorf("RDMA_RESOURCE_LIMITS = %q, want %q", got, tt.wantLine)
 			}
