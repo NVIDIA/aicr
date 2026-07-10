@@ -49,6 +49,3 @@ master:
   enable: true
 gc:
   enable: true
-
-# ── NodeFeature API must be enabled (the NRT publication path) ──────
-enableNodeFeatureApi: true

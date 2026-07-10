@@ -50,7 +50,7 @@ components:
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultChart: node-feature-discovery
-      defaultVersion: "0.18.3"
+      defaultVersion: "0.19.0"
       defaultNamespace: node-feature-discovery
     nodeScheduling:
       system:
