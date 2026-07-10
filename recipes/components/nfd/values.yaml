@@ -13,10 +13,11 @@
 # limitations under the License.
 
 # Node Feature Discovery standalone deployment
-# NFD v0.18.3 — shared by gpu-operator and network-operator
-
-# Enable NodeFeature API (CRD-based feature publishing)
-enableNodeFeatureApi: true
+# NFD v0.19.0 — shared by gpu-operator and network-operator
+#
+# The v0.19.0 chart carries the topology-updater pods list/watch RBAC
+# required by its node-scoped Pod informer (upstream action-required
+# item) — no AICR-side RBAC configuration is needed.
 
 # Explicitly pin master/worker enable so behavior doesn't drift with
 # upstream chart defaults on future chart upgrades.

@@ -52,7 +52,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
-| nfd | helm | node-feature-discovery | 0.18.3 | 1 |
+| nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 5 |
@@ -204,7 +204,7 @@ _No images extracted._
 
 ### nfd
 
-- `registry.k8s.io/nfd/node-feature-discovery:v0.18.3`
+- `registry.k8s.io/nfd/node-feature-discovery:v0.19.0`
 
 ### nfd-ocp
 
