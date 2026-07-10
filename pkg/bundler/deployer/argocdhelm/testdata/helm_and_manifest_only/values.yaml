@@ -18,6 +18,11 @@
 #   deployer.destinationServer   Target cluster API URL for child
 #                                Applications (default in-cluster).
 #   deployer.project             Argo CD project for child Applications.
+#   deployer.includeRootApp      Render the parent app-of-apps Application
+#                                (default true). Set false when an external
+#                                root Application already points at this
+#                                chart, so only children render and the two
+#                                roots do not fight over the same apps.
 #
 #   deployer.cascadeDelete is intentionally NOT an install-time value —
 #   it is bundle-time only (aicr bundle --set deployer:cascadeDelete=true);
@@ -28,6 +33,7 @@ certmanager:
   replicaCount: 1
 deployer:
   destinationServer: https://kubernetes.default.svc
+  includeRootApp: true
   namePrefix: ""
   project: default
 repoURL: ""
