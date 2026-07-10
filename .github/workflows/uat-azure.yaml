@@ -71,14 +71,14 @@ jobs:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     # Budget = uncapped non-UAT steps (build, validator image push, AKS
-    # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 60
+    # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 90
     # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
-    # = up to 160) + the always()-run Destroy Cluster teardown (3 retries, ~10m
+    # = up to 190) + the always()-run Destroy Cluster teardown (3 retries, ~10m
     # each = up to ~40m). Only one of train/serve runs per intent, so the budget
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
     # timeout cancels pending always() steps, so an undersized cap would skip
-    # teardown and leak the GPU node. 160 UAT + ~30 setup + ~40 teardown = ~230,
-    # so 270 leaves the teardown ample headroom even on a worst-case phase run.
+    # teardown and leak the GPU node. 190 UAT + ~30 setup + ~40 teardown = ~260,
+    # so 270 leaves the teardown headroom even on a worst-case phase run.
     timeout-minutes: 270
     permissions:
       contents: read
@@ -418,6 +418,25 @@ jobs:
             -v "$AZ_MOUNT:/home/builder/.azure" \
             "${AKS_ACTUATOR_IMAGE}" apply
 
+      # Fresh federated login before grant + connect. azure/login stores the
+      # GitHub OIDC token as the session's client assertion, and that
+      # assertion is valid for only ~5 MINUTES: minting a token for a NEW
+      # audience — kubelogin's AKS server app (6dae42f8…), which has no
+      # cached token yet — requires redeeming it, so the first kubectl after
+      # bringup fails with AADSTS700024 no matter how long we retry (run
+      # 29120867385). The cached ARM token is unaffected (which is why the
+      # role-assignment grant works without this), but connect needs a fresh
+      # assertion; once kubelogin obtains the AKS-audience token it is
+      # cached in ~/.azure like any other, and the existing per-phase
+      # re-logins keep the chain alive.
+      - name: Refresh Azure credentials before cluster connect
+        if: steps.infra.outcome == 'success'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43  # v3.0.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
       # Data-plane kubectl access, scoped to THIS run's cluster. The actuator
       # provisions AKS with Entra RBAC and local accounts disabled, so the
       # pipeline identity needs a Kubernetes data-plane role. Granting
@@ -532,20 +551,22 @@ jobs:
       - name: UAT - install (helmfile apply)
         id: install
         if: steps.prep.outcome == 'success'
-        # Capped at 60m — the federated az session CANNOT self-refresh
-        # (client-credentials grant, no refresh token), and its access token
-        # lives ~60-75m. kubelogin's azurecli mode pulls tokens from that
-        # session on every kubectl call, so a step longer than one token
-        # lifetime starts failing auth mid-phase with no way to re-mint
-        # (azure/login only runs between steps). Matches the AWS/GCP install
-        # caps. The helmfile apply (HELMFILE_TIMEOUT_SECONDS, 20m) and the
-        # readiness gate budget inside tests/uat/azure/run must together fit
-        # under this cap; widening it for slow cold-GPU bring-up requires the
-        # readiness loop to re-login mid-phase first (az login
-        # --federated-token with a freshly minted ACTIONS_ID_TOKEN — planned
-        # alongside the run script in PR 2/2). Do NOT copy a >60m phase
-        # budget to future clouds without that mid-phase re-auth.
-        timeout-minutes: 60
+        # helmfile apply (up to HELMFILE_TIMEOUT_SECONDS, 20m) + the post-install
+        # readiness gate, which runs `aicr validate --phase deployment` until it
+        # passes READINESS_CONSECUTIVE_PASSES times (up to READINESS_TIMEOUT_SECONDS,
+        # 60m, spanning nodewright tuning + reboots, which can run past 30m on a
+        # cold GPU node). Sized to exceed one helmfile attempt + the full gate
+        # window (20 + 60 = 80, + margin) so the gate's own fail-closed path runs
+        # before GitHub Actions kills the step.
+        #
+        # This exceeds one federated access-token lifetime (~60-75m) ON
+        # PURPOSE: a federated az session cannot self-refresh, so the
+        # readiness gate in tests/uat/azure/run re-logins IN-LOOP every
+        # AZ_RELOGIN_INTERVAL_SECONDS (az login --federated-token with a
+        # freshly minted ACTIONS_ID_TOKEN, then an eager AKS-audience token
+        # mint — see az_federated_relogin). Do NOT copy a >60m phase budget
+        # to future clouds without that mid-phase re-auth.
+        timeout-minutes: 90
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr

@@ -130,3 +130,108 @@ func TestParseBOMVersionTable(t *testing.T) {
 		})
 	}
 }
+
+// TestParseBOMVariantsTable pins the parser's shape guarantees directly:
+// presence anchored on the heading, tables outside the section ignored,
+// heading/table mismatch and malformed or duplicate rows rejected.
+func TestParseBOMVariantsTable(t *testing.T) {
+	const goodTable = `## Version variants
+
+| Component | Variant Version | Declared By | Images |
+|-----------|-----------------|-------------|--------|
+| kps | 83.7.0 | aks | 8 |
+`
+	tests := []struct {
+		name        string
+		section     string
+		wantPresent bool
+		wantRows    int
+		wantErr     bool
+	}{
+		{"absent entirely", "## Components\n\n| Component | Pinned Version |\n|--|--|\n| a | 1 |\n", false, 0, false},
+		{"well-formed", goodTable, true, 1, false},
+		{
+			// A matching table under a DIFFERENT section must not count as
+			// the variants table: no heading, no table, cleanly absent.
+			"table outside the section ignored",
+			"## Other\n\n| Component | Variant Version | Declared By | Images |\n|--|--|--|--|\n| kps | 83.7.0 | aks | 8 |\n",
+			false, 0, false,
+		},
+		{
+			"heading without its table",
+			"## Version variants\n\nno table here\n",
+			true, 0, true,
+		},
+		{
+			"duplicate row",
+			goodTable + "| kps | 83.7.0 | aks | 8 |\n",
+			true, 0, true,
+		},
+		{
+			"malformed row",
+			"## Version variants\n\n| Component | Variant Version | Declared By | Images |\n|--|--|--|--|\n| kps | | aks | 8 |\n",
+			true, 0, true,
+		},
+		{
+			// Without the |---| delimiter GFM renders no table at all; the
+			// gate must reject rather than silently parse the pseudo-rows.
+			"missing delimiter row",
+			"## Version variants\n\n| Component | Variant Version | Declared By | Images |\n| kps | 83.7.0 | aks | 8 |\n",
+			true, 0, true,
+		},
+		{
+			// A header followed by a blank line and prose (instead of the
+			// delimiter row) must fail closed, not silently reset table
+			// state and count as a present-but-empty table.
+			"header followed by blank line and prose",
+			"## Version variants\n\n| Component | Variant Version | Declared By | Images |\n\nno delimiter here\n",
+			true, 0, true,
+		},
+		{
+			// A header that is the last line of the section (loop ends while
+			// still awaiting the delimiter row) must also fail closed.
+			"header is the last line",
+			"## Version variants\n\n| Component | Variant Version | Declared By | Images |\n",
+			true, 0, true,
+		},
+		{
+			// The header must be the generator's exact four columns: a hand
+			// edit that drops Images is an unrecognized table, and the
+			// heading-without-table mismatch fails the gate loudly.
+			"header missing the Images column",
+			"## Version variants\n\n| Component | Variant Version | Declared By |\n|--|--|--|\n| kps | 83.7.0 | aks |\n",
+			true, 0, true,
+		},
+		{
+			"header with a renamed column",
+			"## Version variants\n\n| Component | Variant Version | Declared By | Pictures |\n|--|--|--|--|\n| kps | 83.7.0 | aks | 8 |\n",
+			true, 0, true,
+		},
+		{
+			"row wider than the header",
+			goodTable + "| kps2 | 82.0.0 | aks | 8 | extra |\n",
+			true, 0, true,
+		},
+		{
+			// An all-blank data row must be rejected, not silently skipped:
+			// a mangled doc row like `| | | | |` is malformed table state.
+			"all-blank data row",
+			goodTable + "| | | | |\n",
+			true, 0, true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, present, err := parseBOMVariantsTable(tt.section)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if present != tt.wantPresent {
+				t.Errorf("present = %v, want %v", present, tt.wantPresent)
+			}
+			if err == nil && len(rows) != tt.wantRows {
+				t.Errorf("rows = %d, want %d", len(rows), tt.wantRows)
+			}
+		})
+	}
+}

@@ -1,0 +1,103 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICRConfig consumed by `aicr {snapshot,recipe,bundle,validate} --config`.
+#
+# Drives the AKS H100 training UAT — codifies the workflow demonstrated in
+# `demos/cuj1-training.md` against the cluster provisioned by
+# `../cluster-config.yaml`. Scheduling fields match that cluster's node
+# labels/taints.
+#
+# Scheduling note: the AKS actuator taints GPU pools with
+# `nvidia.com/gpu=present:NoSchedule` (the only taint on the pool — no
+# `dedicated=*` values like AWS/GKE), and the AKS SYSTEM pool carries
+# `CriticalAddonsOnly=true:NoSchedule` so only cluster addons land there;
+# AICR system components therefore target the dedicated CPU worker pool
+# (`nodeGroup: cpu-worker`), not the system pool.
+#
+# `spec.validate.evidence.attestation.push` carries the stable per-recipe
+# repo only; `../run` appends a `:run-${RUN_ID}` tag at runtime so each UAT
+# execution publishes a uniquely traceable, digest-addressed point under one
+# stable repo (`oras repo tags` lists run history). Consumers pin immutably
+# via `@sha256:…`.
+kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: aks-h100-training-uat
+
+spec:
+  snapshot:
+    output:
+      path: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      nodeSelector:
+        nodeGroup: gpu-worker
+      tolerations:
+        - nvidia.com/gpu=present:NoSchedule
+
+  recipe:
+    criteria:
+      service: aks
+      accelerator: h100
+      os: ubuntu
+      intent: training
+      platform: kubeflow
+    output:
+      path: recipe.yaml
+
+  bundle:
+    input:
+      recipe: recipe.yaml
+    output:
+      target: ./bundle
+    deployment:
+      deployer: helmfile
+    scheduling:
+      acceleratedNodeSelector:
+        nodeGroup: gpu-worker
+      acceleratedNodeTolerations:
+        - nvidia.com/gpu=present:NoSchedule
+      systemNodeSelector:
+        nodeGroup: cpu-worker
+      # Consume the cluster's default StorageClass rather than hardcoding a
+      # name: AKS always ships `managed-csi` annotated as the default, so an
+      # empty value binds PVCs to it automatically on any AKS cluster.
+      storageClass: ""
+
+  validate:
+    execution:
+      # The deployment phase is the readiness barrier (gpu-operator ClusterPolicy
+      # reaches state=ready, the DRA kubelet-plugin DaemonSet rolls out, nodewright
+      # node tuning completes). failFast stops the run if that phase fails, so the
+      # conformance/performance phases are not evaluated against a not-yet-converged
+      # cluster — which previously surfaced as misleading accelerator-metrics /
+      # ai-service-metrics / pod-autoscaling failures. The `../run` readiness gate
+      # gives the operator-driven stack time to converge before validate, so on a
+      # healthy cluster the deployment phase passes and all phases still run.
+      failFast: true
+    input:
+      recipe: recipe.yaml
+      snapshot: snapshot.yaml
+    agent:
+      namespace: aicr-validation
+      tolerations:
+        - nvidia.com/gpu=present:NoSchedule
+    evidence:
+      attestation:
+        # Setting `out` enables emit. The push target below is the stable
+        # per-recipe repo; ../run appends a `:run-${RUN_ID}` tag for per-run
+        # isolation. Consumers pin immutably via the artifact digest.
+        out: ./evidence
+        push: ghcr.io/nvidia/aicr-evidence/h100-aks-ubuntu-training-kubeflow
