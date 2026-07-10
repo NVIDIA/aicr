@@ -118,7 +118,10 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:d3831f21c397b0a03a281e7d55e39e6c9535ba7e099c11dba5c9c0c28cb13c4a"
+      # v0.1.7 — carries the 60m worker-pool create/update timeouts
+      # (mchmarny/cluster#31); the prior pin's 30m cap killed H100 pool
+      # provisioning mid-allocation (run 29116054044).
+      AKS_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/aks@sha256:70f049e45cd0025e0d2172503f9d0569baeabff27080919e2fa04f3339b9f9ee"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
