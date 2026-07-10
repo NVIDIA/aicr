@@ -77,9 +77,11 @@ inputs:
       KWOK_SYNC_DEADLINE_EPOCH (deadline = step start + this budget - 240s
       diagnostics margin) so the chainsaw sync gates always finish - and
       print their catch-block diagnostics - before GitHub kills the job.
-      Keep in sync with the calling job's timeout-minutes.
-    required: false
-    default: '18'
+      Required with no default: every caller must wire its own
+      timeout-minutes here, so a job that changes its timeout cannot
+      silently drift from a stale default (a missing value fails the
+      integer validation below loudly).
+    required: true
 
 runs:
   using: 'composite'
