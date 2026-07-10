@@ -50,6 +50,12 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 
+The NCCL checks derive applicability from the recipe's `criteria` by default;
+a recipe outside the embedded service + accelerator matrix (e.g. registered
+via `--data`) opts in with the `nccl-benchmark-profile` performance
+constraint — see
+[Opting external recipes into a benchmark profile](../../docs/user/validation.md#opting-external-recipes-into-a-benchmark-profile).
+
 ### Conformance Phase
 
 | Name | Description | Timeout |
