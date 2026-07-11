@@ -432,7 +432,7 @@ add a new value:
    as `argocd-git` and `flux-git` do).
 4. Extend the `deployer:` input description in
    `.github/actions/kwok-test/action.yml`.
-5. Add the value to the `deployer:` matrix in Tier 1 and Tier 3 of
+5. Add the value to the `DEPLOYERS` array in the `discover` classify step of
    `.github/workflows/kwok-recipes.yaml`. Leave Tier 2 alone — the
    orthogonality rationale above still applies.
 6. Add a row to the [Deployer Coverage Matrix](#deployer-coverage-matrix)

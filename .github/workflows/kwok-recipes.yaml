@@ -251,15 +251,10 @@ jobs:
           # --- Tier 3: full matrix (all testable overlays) ---
           tier3="$all"
 
-          # Local alias so jq --argjson calls below can use $deployers
-          # (DEPLOYERS is readonly; this assignment is intentional).
-          # shellcheck disable=SC2034
-          deployers="${DEPLOYERS}"
-
           # --- Pre-build Tier 1 pairs: generic recipes × all deployers ---
           tier1_pairs=$(jq -cn \
             --argjson recipes "$tier1" \
-            --argjson deployers "$deployers" '
+            --argjson deployers "${DEPLOYERS}" '
               [ $recipes[] as $r | $deployers[] as $d | {recipe: $r, deployer: $d} ]
             ')
 
@@ -315,7 +310,7 @@ jobs:
           echo "tier1_pairs=${tier1_pairs}"     >> "$GITHUB_OUTPUT"
           echo "tier2_pairs=${tier2_pairs}"     >> "$GITHUB_OUTPUT"
 
-          deployer_count=$(echo "$deployers" | jq 'length')
+          deployer_count=$(echo "${DEPLOYERS}" | jq 'length')
           tier3_pairs=$(echo "$tier3_batches" | jq '[.[].pairs[]] | length')
           tier3_batch_count=$(echo "$tier3_batches" | jq 'length')
           echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s) × ${deployer_count} deployer(s) = ${tier1_pair_count} pair(s)"
@@ -418,4 +413,3 @@ jobs:
           fi
 
           echo "All recipe validations passed" >> $GITHUB_STEP_SUMMARY
-          

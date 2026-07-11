@@ -243,7 +243,7 @@ deployer values back-to-back in local development.
 | `kwok/scripts/validate-scheduling.sh` | Add `--deployer <name>` flag; branch on deployer |
 | `kwok/scripts/run-all-recipes.sh` | Accept deployer arg; allowlist `aicr-registry` / `argocd` in cleanup |
 | `.github/actions/kwok-test/action.yml` | New input `deployer`; pass through to `run-all-recipes.sh` |
-| `.github/workflows/kwok-recipes.yaml` | Add `deployer: [helm, argocd-oci, argocd-helm-oci, flux-oci]` to Tier 1 and Tier 3 matrices |
+| `.github/workflows/kwok-recipes.yaml` | Add the value to `DEPLOYERS` in the `discover` classify step (Tier 1 and Tier 3 derive from it) |
 | `Makefile` | New `kwok-test-deployer RECIPE=... DEPLOYER=...` target |
 | `docs/contributor/<area>.md` (KWOK testing page) | Document the matrix and local repro |
 

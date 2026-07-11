@@ -2,16 +2,12 @@
 
 ## Status
 
-<<<<<<< Updated upstream
 **Accepted, implemented** — 2026-03-18
 
 The tiered KWOK scaling strategy has shipped: tier discovery and per-overlay
 parallel jobs run in `.github/workflows/kwok-recipes.yaml`, with the Tier 3
 shard lane in `.github/workflows/kwok-tier3-shard.yaml`, backed by the
 `kwok/scripts/` and `kwok/profiles/` machinery.
-=======
-Accepted | Updated (workflow consolidation, #1172)
->>>>>>> Stashed changes
 
 ## Scope
 
