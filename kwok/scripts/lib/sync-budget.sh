@@ -14,9 +14,10 @@
 # KWOK_SYNC_DEADLINE_EPOCH — the absolute epoch after which the job has no
 # time left for sync-gate work (job timeout minus a diagnostics margin).
 # Each chainsaw sync gate derives its budget as min(<gate default>,
-# deadline − now) so chainsaw always times out — and prints its catch-block
-# diagnostics — BEFORE GitHub's job timeout kills the runner with a silent
-# CANCELLED and zero error report.
+# deadline − now), bounding that gate's assert/error operation so it
+# finishes — and prints its catch-block diagnostics — before GitHub's
+# job timeout kills the runner in the expected single-gate-dominates
+# case (this bounds each gate operation, not the job's whole wall time).
 #
 # Source guard: constants and functions only, no side effects at source
 # time (same contract as lib/cleanup.sh).

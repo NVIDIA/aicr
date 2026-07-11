@@ -383,11 +383,12 @@ independent.
 In CI, the `kwok-test` action derives `KWOK_SYNC_DEADLINE_EPOCH` in its
 first step — before toolchain setup and the `aicr` build, so the anchor
 sits within ~60 s of job start — from its `job_timeout_minutes` input
-(default `18`, kept in sync with the calling job's `timeout-minutes`)
-minus a 240 s margin reserved for chainsaw catch-block diagnostics,
-pod verification, and debug-artifact upload. The input must be an
-integer; the step fails fast otherwise. Local runs leave it unset and
-keep the fixed defaults above.
+(required, no default — every caller must wire its own value, which
+must equal that caller's `timeout-minutes`; currently `18` for the
+KWOK jobs) minus a 240 s margin reserved for chainsaw catch-block
+diagnostics, pod verification, and debug-artifact upload. The input
+must be a positive integer with no leading zeros; the step fails fast
+otherwise. Local runs leave it unset and keep the fixed defaults above.
 
 The Git-source lanes (`flux-git`, `argocd-git`) additionally honor
 `KWOK_GITEA_HOST_PORT` (default `3300`), `KWOK_GITEA_USER` (default

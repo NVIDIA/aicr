@@ -75,12 +75,14 @@ inputs:
     description: >-
       The calling job's timeout-minutes. Used to derive
       KWOK_SYNC_DEADLINE_EPOCH (deadline = step start + this budget - 240s
-      diagnostics margin) so the chainsaw sync gates always finish - and
-      print their catch-block diagnostics - before GitHub kills the job.
-      Required with no default: every caller must wire its own
-      timeout-minutes here, so a job that changes its timeout cannot
-      silently drift from a stale default (a missing value fails the
-      integer validation below loudly).
+      diagnostics margin) so each chainsaw sync gate's budget stays within
+      that margin, letting the gate finish - and print its catch-block
+      diagnostics - before GitHub kills the job in the expected
+      single-gate-dominates case (this bounds each gate operation, not the
+      job's overall wall time). Required with no default: every caller
+      must wire its own timeout-minutes here, so a job that changes its
+      timeout cannot silently drift from a stale default (a missing value
+      fails the integer validation below loudly).
     required: true
 
 runs:
@@ -101,13 +103,13 @@ runs:
         # silently re-creates the CANCELLED-without-diagnostics failure
         # this mechanism exists to prevent.
         # See kwok/scripts/lib/sync-budget.sh for the consuming side.
-        if ! [[ "${JOB_TIMEOUT_MINUTES}" =~ ^[0-9]+$ ]]; then
-          echo "::error::job_timeout_minutes must be an integer, got '${JOB_TIMEOUT_MINUTES}'"
+        if ! [[ "${JOB_TIMEOUT_MINUTES}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::job_timeout_minutes must be a positive integer, no leading zeros, got '${JOB_TIMEOUT_MINUTES}'"
           exit 1
         fi
-        KWOK_SYNC_DEADLINE_EPOCH=$(( $(date +%s) + JOB_TIMEOUT_MINUTES * 60 - 240 ))
+        KWOK_SYNC_DEADLINE_EPOCH=$(( $(date +%s) + 10#${JOB_TIMEOUT_MINUTES} * 60 - 240 ))
         echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH}" >> "$GITHUB_ENV"
-        echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH} (job_timeout_minutes=${JOB_TIMEOUT_MINUTES}, margin=240s)"
+        echo "KWOK_SYNC_DEADLINE_EPOCH=${KWOK_SYNC_DEADLINE_EPOCH} (job_timeout_minutes=${JOB_TIMEOUT_MINUTES}, margin=240s, job kill in ~$(( 10#${JOB_TIMEOUT_MINUTES} * 60 ))s)"
 
     - name: Set up Go
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
